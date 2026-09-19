@@ -29,7 +29,7 @@ export default async function DocPage({ params }: Props) {
   if (!doc) notFound();
   const { title, content } = await renderDoc(doc, mdxComponents);
   const { prev, next } = neighbours(slug);
-  const editUrl = `${REPO_URL}/edit/main/docs/${slug}.${doc.format}`;
+  const editUrl = `${REPO_URL}/edit/main/docs/${doc.path}.${doc.format}`;
 
   return (
     <article className="min-w-0 max-w-[760px]">

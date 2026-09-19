@@ -22,13 +22,13 @@ From the repository root: `just site-dev`, `just site-build`, `just site-check`.
 
 Nothing about the product is written twice. At build time the site reads:
 
-| On the site         | Source                                                                       |
-| ------------------- | ---------------------------------------------------------------------------- |
-| `/docs/…`           | `../docs/quick-start.md` and `../docs/guide/*` — the same files GitHub shows |
-| `/changelog/`       | `../CHANGELOG.md`; the landing page shows its newest four entries            |
-| Version in the hero | `../src-tauri/tauri.conf.json`                                               |
-| Screenshots         | `../docs/images/`, copied to `public/docs-images/` before dev and build      |
-| GitHub stars        | The GitHub API, at build time; left out if the request fails or it is 0      |
+| On the site         | Source                                                                                    |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| `/docs/…`           | `../docs/quick-start.md`, `../docs/guide/*` and the roadmap — the same files GitHub shows |
+| `/changelog/`       | `../CHANGELOG.md`; the landing page shows its newest four entries                         |
+| Version in the hero | `../src-tauri/tauri.conf.json`                                                            |
+| Screenshots         | `../docs/images/`, copied to `public/docs-images/` before dev and build                   |
+| GitHub stars        | The GitHub API, at build time; left out if the request fails or it is 0                   |
 
 Only the landing page's own copy lives here, in `src/components/landing/`. It came from the README;
 when the README's claims change (platforms, install methods, what is pending), change it too.
@@ -43,7 +43,8 @@ A page is a file under `../docs/`:
   as source, so keep pages that people read there as `.md`.
 
 To add a page: create the file, then add one line to `DOCS_NAV` in `src/lib/docs.ts` (the sidebar
-and the order of the previous/next links). Write links the way they work on GitHub
+and the order of the previous/next links). An entry can give a `path` when the file should not
+decide the address: the roadmap is `docs/design/05-roadmap.md`, shown at `/docs/roadmap/`. Write links the way they work on GitHub
 (`workspaces.md#anchor`, `../images/x.png`, `../CONTRIBUTING.md`); the site rewrites them, and
 sends anything outside the docs to GitHub.
 

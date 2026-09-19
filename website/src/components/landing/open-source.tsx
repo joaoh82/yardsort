@@ -70,6 +70,7 @@ export async function OpenSource() {
             </li>
             <li>
               <Doc slug="guide/troubleshooting">Troubleshooting</Doc> ·{" "}
+              <Doc slug="roadmap">Roadmap</Doc> ·{" "}
               <a href={repoFile("docs/design/README.md")}>Design docs</a>
             </li>
           </ul>
