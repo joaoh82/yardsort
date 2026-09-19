@@ -79,6 +79,9 @@ Download the latest build from the [**Releases page**](https://github.com/joaoh8
 | **macOS**   | `.dmg` — universal (Apple Silicon and Intel), signed and notarized — or `brew install --cask joaoh82/yardsort/yardsort`                            |
 | **Windows** | `-setup.exe` or `.msi` — not code-signed yet: choose _More info → Run anyway_. (`winget install joaoh82.Yardsort` is awaiting Microsoft's review.) |
 
+On Linux, the quick start shows how to
+[add the AppImage to your app menu](docs/quick-start.md#linux-add-the-appimage-to-your-app-menu).
+
 You also need **git** and at least one agent CLI that already works in your terminal (for
 example [Claude Code](https://claude.com/claude-code)). Yardsort does not bundle agents and
 never sees their credentials.

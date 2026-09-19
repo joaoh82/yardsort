@@ -6,6 +6,7 @@ has the downloads and the full commit lists.
 ## Unreleased
 
 - Install with Homebrew on macOS: `brew install --cask joaoh82/yardsort/yardsort`.
+- Linux: the quick start shows how to give the AppImage a launcher entry and icon.
 - Submitted to winget (`joaoh82.Yardsort`), pending Microsoft's review.
 
 ## 0.3.1

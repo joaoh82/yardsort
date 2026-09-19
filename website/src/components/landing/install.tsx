@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { CopyCommand } from "@/components/copy-command";
 import { Detected, type Platform } from "@/components/platform";
@@ -77,7 +78,11 @@ export function Install() {
           </Formats>
           <p className="text-sm text-muted">
             AppImage: <code className={mono}>chmod +x Yardsort_*.AppImage</code> and run it. The
-            AppImage updates itself; .deb and .rpm are told when a new version exists.
+            AppImage updates itself; .deb and .rpm are told when a new version exists.{" "}
+            <Link href="/docs/#linux-add-the-appimage-to-your-app-menu" className="link">
+              Add it to your app menu
+            </Link>
+            .
           </p>
           <Pending>
             <code className={mono}>yardsort-bin</code> on the AUR — on its way. Until then the

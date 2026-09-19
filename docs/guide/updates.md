@@ -43,4 +43,6 @@ installs it and starts the new version.
 - **The install fails** — nothing has been changed; your current version keeps working. Try again,
   or download the release by hand from the link in the dialog.
 - **On Linux, the AppImage cannot be replaced** — it must be somewhere you can write to. If it
-  lives in a system folder, move it to your home directory.
+  lives in a system folder, move it to your home directory. The quick start's
+  [app menu setup](../quick-start.md#linux-add-the-appimage-to-your-app-menu) puts it in
+  `~/Applications` under a fixed name, which also keeps its menu entry working across updates.
