@@ -7,6 +7,7 @@
     own terminal, running the coding agent of your choice.
   </p>
   <p>
+    <a href="https://yardsort.sh">yardsort.sh</a> ·
     <a href="https://github.com/joaoh82/yardsort/releases/latest">Download</a> ·
     <a href="docs/quick-start.md">Quick start</a> ·
     <a href="docs/README.md">Documentation</a> ·
@@ -90,7 +91,8 @@ never sees their credentials.
 4. The result is an ordinary git branch — review it, push it, open a PR.
 
 The [quick start guide](docs/quick-start.md) walks through it with pictures, and the
-[documentation](docs/README.md) covers every part of the app.
+[documentation](docs/README.md) covers every part of the app. Both are also on the website, at
+[yardsort.sh/docs](https://yardsort.sh/docs/).
 
 ## Documentation
 

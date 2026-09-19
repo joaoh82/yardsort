@@ -57,7 +57,8 @@ and the copy buttons.
 
 ## Deploying
 
-Any static host works. On Vercel: import the repository, set **Root Directory** to `website`, and
+Deployed on Vercel at [yardsort.sh](https://yardsort.sh); every push to `main` redeploys. Any static
+host works. To set it up on Vercel: import the repository, set **Root Directory** to `website`, and
 leave "Include files outside the root directory" on (the default) — the build reads `../docs`,
 `../CHANGELOG.md` and `../src-tauri/tauri.conf.json`. Framework, install and build commands are
 detected. The site shows the version and changelog as of its last build, so redeploy after a
