@@ -176,6 +176,14 @@ To do:
 
 _Exit:_ v0.1.0 public release.
 
+_Found after release (dogfooding the AppImage on Hyprland):_ the AppImage's GTK launch hook forces
+`GDK_BACKEND=x11`, so the released app ran under XWayland. Typing lagged, and text typed by
+`wtype` (Omarchy's dictation) arrived garbled. The M1 benchmarks never saw this because they ran a
+dev build on native Wayland. Yardsort now switches the AppImage back to Wayland, with an automatic
+X11 fallback if a Wayland start never shows its window. The same hook and the AppImage runtime
+also leaked their variables (`LD_LIBRARY_PATH`, `PYTHONHOME`, …) into every session; the launch
+environment now drops them.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

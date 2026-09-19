@@ -503,7 +503,7 @@ fn launch_plan(
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
         // The resolved environment is complete; nothing from the GUI process should leak in.
-        clear_env: env.source == EnvSource::LoginShell,
+        clear_env: env.replaces_inherited(),
         size,
         labels: Default::default(),
     })
@@ -559,9 +559,10 @@ mod tests {
         let plan = launch_plan(&process_env(), None, vec![], None, SIZE).unwrap();
         assert!(PathBuf::from(&plan.program).is_absolute() || plan.program == "cmd.exe");
         assert!(plan.cwd.unwrap().is_dir());
-        assert!(
-            !plan.clear_env,
-            "a process-sourced env is layered on top, not a replacement"
+        assert_eq!(
+            plan.clear_env,
+            cfg!(unix),
+            "a process-sourced env replaces the inherited one on Unix, and is layered on Windows"
         );
     }
 

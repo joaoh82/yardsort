@@ -55,11 +55,74 @@ fn without_foreign_sessions(mut vars: BTreeMap<String, String>) -> BTreeMap<Stri
     vars
 }
 
+/// Variables the AppImage runtime sets to describe itself.
+const APPIMAGE_RUNTIME_VARS: &[&str] = &["APPDIR", "APPIMAGE", "ARGV0", "OWD"];
+
+/// Variables the AppImage's GTK launch hook (`linuxdeploy-plugin-gtk`) sets outright, overwriting
+/// whatever the user had. Some carry no bundle path, so the path filter alone would miss them:
+/// `GDK_BACKEND=x11` in particular would push every GTK program started from a terminal onto
+/// XWayland.
+const APPIMAGE_GTK_HOOK_VARS: &[&str] = &[
+    "GDK_BACKEND",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GIO_EXTRA_MODULES",
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_DATA_PREFIX",
+    "GTK_EXE_PREFIX",
+    "GTK_IM_MODULE_FILE",
+    "GTK_PATH",
+    "GTK_THEME",
+];
+
+/// The environment the user launched us with, without what the AppImage added on the way in.
+///
+/// An AppImage starts us with its bundled libraries, Python, Perl, Qt and GTK modules on
+/// `LD_LIBRARY_PATH`, `PYTHONHOME`, `PATH` and a dozen more, all pointing into its mount. Our
+/// sessions must not inherit them: the user's own `python3` dies looking for its standard library
+/// in the bundle, and every program linked against a library we ship picks up our copy. Outside
+/// an AppImage this changes nothing.
+fn without_appimage(mut vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let Some(appdir) = vars
+        .get("APPDIR")
+        .filter(|_| vars.contains_key("APPIMAGE"))
+        .map(|dir| dir.trim_end_matches('/').to_owned())
+        .filter(|dir| !dir.is_empty())
+    else {
+        return vars;
+    };
+    let inside = |entry: &str| entry == appdir || entry.starts_with(&format!("{appdir}/"));
+
+    vars.retain(|name, value| {
+        if APPIMAGE_RUNTIME_VARS.contains(&name.as_str())
+            || APPIMAGE_GTK_HOOK_VARS.contains(&name.as_str())
+        {
+            return false;
+        }
+        if !value.contains(&appdir) {
+            return true;
+        }
+        // A search path the bundle prepended to: keep the user's part. Empty entries are what the
+        // launcher's `"$APPDIR/…:$VAR"` leaves behind when `VAR` was unset.
+        let rest: Vec<&str> = value
+            .split(':')
+            .filter(|entry| !entry.is_empty() && !inside(entry))
+            .collect();
+        *value = rest.join(":");
+        !value.is_empty()
+    });
+    vars
+}
+
+/// What every environment we hand out goes through.
+fn cleaned(vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    without_foreign_sessions(without_appimage(vars))
+}
+
 impl ShellEnv {
     pub fn resolve() -> Self {
         match platform::from_login_shell() {
             Ok(Some(vars)) => Self {
-                vars: without_foreign_sessions(vars),
+                vars: cleaned(vars),
                 source: EnvSource::LoginShell,
                 warning: None,
             },
@@ -70,10 +133,18 @@ impl ShellEnv {
 
     fn from_process(warning: Option<String>) -> Self {
         Self {
-            vars: without_foreign_sessions(std::env::vars().collect()),
+            vars: cleaned(std::env::vars().collect()),
             source: EnvSource::Process,
             warning,
         }
+    }
+
+    /// Whether a child should get exactly [`Self::vars`] instead of inheriting our environment
+    /// with them layered on top. On Unix `vars` is always complete, and inheriting would bring
+    /// back what [`cleaned`] took out (an AppImage's `LD_LIBRARY_PATH`, say). Windows keeps
+    /// layering its process environment, as it always has.
+    pub fn replaces_inherited(&self) -> bool {
+        cfg!(unix) || self.source == EnvSource::LoginShell
     }
 
     pub fn get(&self, key: &str) -> Option<&str> {
@@ -161,7 +232,7 @@ mod platform {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    use super::{parse_dump, ShellEnv, PRINT_ENV_FLAG};
+    use super::{cleaned, parse_dump, ShellEnv, PRINT_ENV_FLAG};
 
     /// Slow shell startup files are common; a hung one must not hang the app.
     const TIMEOUT: Duration = Duration::from_secs(8);
@@ -174,7 +245,26 @@ mod platform {
         // Single-quote the path; this quoting is understood by sh, bash, zsh and fish alike.
         let script = format!("'{}' {PRINT_ENV_FLAG}", exe.replace('\'', r"'\''"));
 
-        let mut child = Command::new(&shell)
+        let mut command = Command::new(&shell);
+        // The shell's startup files run in what we hand it, and version managers record what
+        // they found there, so it starts from the cleaned environment too — not just its output.
+        let original: BTreeMap<String, String> = std::env::vars_os()
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+            .collect();
+        let kept = cleaned(original.clone());
+        for (key, value) in &original {
+            match kept.get(key) {
+                None => {
+                    command.env_remove(key);
+                }
+                Some(new) if new != value => {
+                    command.env(key, new);
+                }
+                Some(_) => {}
+            }
+        }
+
+        let mut child = command
             // Interactive + login, so both profile and rc files run — version managers hook
             // into either.
             .args(["-i", "-l", "-c", &script])
@@ -311,6 +401,72 @@ mod tests {
             kept,
             ["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "PATH"]
         );
+    }
+
+    fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    /// Values as a released AppImage leaves them, taken from a running one.
+    #[test]
+    fn what_an_appimage_adds_does_not_reach_our_sessions() {
+        let m = "/tmp/.mount_YardsoJEfjME";
+        let launched = vars(&[
+            ("APPDIR", m),
+            ("APPIMAGE", "/home/u/Applications/Yardsort.AppImage"),
+            ("ARGV0", "Yardsort.AppImage"),
+            ("OWD", "/home/u"),
+            ("GDK_BACKEND", "x11"),
+            ("GTK_THEME", "Adwaita:dark"),
+            (
+                "GTK_PATH",
+                &format!("{m}//usr/lib/x86_64-linux-gnu/gtk-3.0:/usr/lib64/gtk-3.0"),
+            ),
+            ("PYTHONHOME", &format!("{m}/usr/")),
+            ("PYTHONPATH", &format!("{m}/usr/share/pyshared/:")),
+            (
+                "LD_LIBRARY_PATH",
+                &format!("{m}/usr/lib/:{m}/usr/lib/x86_64-linux-gnu/:/opt/mine/lib"),
+            ),
+            (
+                "PATH",
+                &format!("{m}/usr/bin/:{m}/usr/sbin/:/home/u/bin:/usr/bin"),
+            ),
+            (
+                "XDG_DATA_DIRS",
+                &format!("{m}/usr/share/:{m}/usr/share:/usr/local/share:/usr/share"),
+            ),
+            // The user's own, and a variable that merely mentions a similar path.
+            ("EDITOR", "nvim"),
+            ("NOTES", "/tmp/.mount_YardsoJEfjMEother/x"),
+        ]);
+
+        let env = without_appimage(launched);
+
+        assert_eq!(
+            env,
+            vars(&[
+                ("EDITOR", "nvim"),
+                ("LD_LIBRARY_PATH", "/opt/mine/lib"),
+                ("NOTES", "/tmp/.mount_YardsoJEfjMEother/x"),
+                ("PATH", "/home/u/bin:/usr/bin"),
+                ("XDG_DATA_DIRS", "/usr/local/share:/usr/share"),
+            ])
+        );
+    }
+
+    #[test]
+    fn without_an_appimage_the_environment_is_untouched() {
+        let own = vars(&[
+            ("GDK_BACKEND", "x11"),
+            ("GTK_THEME", "Adwaita:dark"),
+            ("APPDIR", "/home/u/some-project"),
+            ("PATH", "/home/u/some-project/bin:/usr/bin"),
+        ]);
+        assert_eq!(without_appimage(own.clone()), own);
     }
 
     #[test]

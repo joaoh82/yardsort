@@ -173,7 +173,11 @@ pub async fn open_in_editor(
                 "No editor found. Set one in Settings → General (for example \"code\" or \"zed\").",
             ));
         };
-        std::process::Command::new(program)
+        let mut command = std::process::Command::new(program);
+        if env.replaces_inherited() {
+            command.env_clear();
+        }
+        command
             .args(args)
             // Editors take the folder first so the file opens in that project's window.
             .arg(&root)
