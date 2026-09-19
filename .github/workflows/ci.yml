@@ -69,6 +69,24 @@ jobs:
 
   # Installers for all three platforms. Only on main (and on demand): these are the slow,
   # expensive jobs — macOS minutes are billed at 10x on private repos.
+  website:
+    name: Website
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      # The build renders every page in docs/ and the changelog, so a doc that breaks the site
+      # fails here.
+      - run: bun run build
+
   bundle:
     name: Bundle (${{ matrix.os }})
     if: github.event_name != 'pull_request'

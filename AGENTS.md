@@ -18,6 +18,11 @@ the documentation says so, in the same commit or pull request.**
 - `CHANGELOG.md` — add a line for anything a user would notice, under the next version.
 - `docs/design/` — architecture, the harness model, the roadmap (tick milestones, record what was
   found) and open questions (strike the ones that get settled).
+- `website/` is the project site. It renders `docs/quick-start.md`, `docs/guide/` and
+  `CHANGELOG.md` directly, so those need no second edit — but a new guide page needs a line in
+  `website/src/lib/docs.ts`, and the landing page's own copy (`website/src/components/landing/`)
+  repeats the README's claims: platforms, install methods, what is pending. Change them together.
+  `just site-check` builds every page.
 - Screenshots live in `docs/images/`. Retake them when the UI they show changes noticeably. They
   must never show a real user's name, paths, projects or account details — use a throwaway
   profile (`YARDSORT_DATA_DIR`, `YARDSORT_WORKTREE_ROOT`) and demo repositories.

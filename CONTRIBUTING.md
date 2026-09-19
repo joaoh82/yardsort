@@ -57,6 +57,8 @@ src/                 The React + TypeScript frontend.
   lib/ipc.ts         The only module that talks to the core.
   lib/bindings.ts    GENERATED from the Rust commands by tauri-specta. Never edit by hand.
 docs/                User documentation; docs/design/ holds architecture and planning.
+website/             The project website: its own Next.js app. It renders docs/ and
+                     CHANGELOG.md, so it has no copy of them. See website/README.md.
 ```
 
 Two principles explain most design decisions — more in [architecture](docs/design/03-architecture.md):

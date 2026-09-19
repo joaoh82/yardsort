@@ -116,6 +116,18 @@ ci-watch:
 ci-artifacts:
     gh run download "$(gh run list --branch main --status success --limit 1 --json databaseId -q '.[0].databaseId')" --dir artifacts
 
+# Run the website (website/) with hot reload
+site-dev:
+    cd website && bun install && bun run dev
+
+# Build the website as static files in website/out
+site-build:
+    cd website && bun install && bun run build
+
+# Lint, typecheck and build the website, as CI does
+site-check:
+    cd website && bun install --frozen-lockfile && bun run lint && bun run typecheck && bun run build
+
 # Remove build output (Rust target, frontend dist, downloaded artifacts)
 [unix]
 clean:

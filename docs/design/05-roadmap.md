@@ -170,7 +170,9 @@ To do:
 - [ ] Windows code signing, if funding appears.
 - [x] First-run check: the welcome screen reports whether git and at least one agent were found,
       with install commands and a "Check again" that re-reads the environment without a restart.
-- [ ] Project website.
+- [ ] Project website. Built in `website/` from a Claude Design landing page: a static Next.js
+      app that renders `docs/` (Markdown or MDX) and `CHANGELOG.md` directly, checked in CI.
+      Left: deploy it and point `yardsort.sh` at it, then link it from the README.
 
 _Exit:_ v0.1.0 public release.
 

@@ -5,3 +5,8 @@ src-tauri/icons
 src/lib/bindings.ts
 bun.lock
 Cargo.lock
+website/.next
+website/out
+website/next-env.d.ts
+website/public/docs-images
+website/bun.lock
