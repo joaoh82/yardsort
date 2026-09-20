@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## 0.3.3
+## 0.4.0
 
 - **Assist (optional).** With a TypeSafe API key of your own, Yardsort can check a workspace's
   changed files against what the agent was asked to do — badging files that look off-task, or that

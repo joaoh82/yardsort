@@ -182,7 +182,7 @@ _Found after release (dogfooding the AppImage on Hyprland):_ the AppImage's GTK 
 dev build on native Wayland. Yardsort now switches the AppImage back to Wayland, with an automatic
 X11 fallback if a Wayland start never shows its window. The same hook and the AppImage runtime
 also leaked their variables (`LD_LIBRARY_PATH`, `PYTHONHOME`, …) into every session; the launch
-environment now drops them. A second pass (0.3.3) found the same leak surviving an in-app update:
+environment now drops them. A second pass (0.4.0) found the same leak surviving an in-app update:
 the updater starts the new AppImage from the old process, so the replaced version's mount — still
 mounted — came through in the appended path variables. Any AppImage mount now counts as ours to
 drop.
