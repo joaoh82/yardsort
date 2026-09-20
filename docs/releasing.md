@@ -9,6 +9,24 @@ re-run.
 
 ## Cutting a release
 
+### First, the changelog
+
+`just release` never reads `CHANGELOG.md`. Renaming `## Unreleased` to the version you are cutting
+is a manual step — and it is where entries go astray.
+
+A branch opened before that rename writes its bullets under `## Unreleased`. By the time it merges,
+that heading has become a version, so git files the new bullet under a section that has **already
+shipped**. Nothing conflicts and nothing warns. It has happened; check before tagging, not after.
+
+```sh
+git log --oneline v0.3.2..HEAD          # what this release actually contains
+git diff v0.3.2 HEAD -- CHANGELOG.md    # bullets added under an already-released heading
+```
+
+The second command is the one that catches it: an added line inside a section at or below the last
+tag belongs further up. Move it first. Once the tag is pushed the notes are wrong in two places at
+once — the new release omits the entry, and a published one claims something it never contained.
+
 ```sh
 just release 0.2.0
 ```
