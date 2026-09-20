@@ -8,6 +8,7 @@ import {
   events,
   type AddedProject,
   type AppInfo,
+  type AssistStatus,
   type AvailableUpdate,
   type BranchList,
   type ChangeSet,
@@ -19,6 +20,7 @@ import {
   type FileChange,
   type FileDiff,
   type FileEntry,
+  type FileReview,
   type HarnessDef,
   type HarnessInfo,
   type HarnessPreview,
@@ -28,13 +30,18 @@ import {
   type NewWorkspace,
   type Preflight,
   type Project,
+  type Relevance,
+  type Review,
+  type ReviewFlag,
   type Scope,
   type SessionId,
   type SessionInfo,
   type SessionRecord,
   type SettingsInfo,
   type SpawnRequest,
+  type Suggestion,
   type TermSize,
+  type ThresholdsDto,
   type UpdateStatus,
   type Workspace,
   type WorkspaceSettingsDto,
@@ -43,6 +50,7 @@ import {
 export type {
   AddedProject,
   AppInfo,
+  AssistStatus,
   AvailableUpdate,
   BranchList,
   ChangeSet,
@@ -54,6 +62,7 @@ export type {
   FileChange,
   FileDiff,
   FileEntry,
+  FileReview,
   HarnessDef,
   HarnessInfo,
   HarnessPreview,
@@ -63,13 +72,18 @@ export type {
   NewWorkspace,
   Preflight,
   Project,
+  Relevance,
+  Review,
+  ReviewFlag,
   Scope,
   SessionId,
   SessionInfo,
   SessionRecord,
   SettingsInfo,
   SpawnRequest,
+  Suggestion,
   TermSize,
+  ThresholdsDto,
   UpdateStatus,
   Workspace,
   WorkspaceSettingsDto,
@@ -201,6 +215,23 @@ export const ipc = {
   /** Open a file — or the workspace folder, for `null` — in the user's editor. */
   openInEditor: (workspaceId: string, path: string | null) =>
     done(commands.openInEditor(workspaceId, path)),
+
+  /** Assist: whether a TypeSafe key is in force and which features are on. */
+  assistStatus: () => unwrap(commands.assistStatus()),
+  /** Check a key with TypeSafe, then keep it in the OS credential store. Never read back. */
+  assistSaveKey: (key: string) => unwrap(commands.assistSaveKey(key)),
+  assistForgetKey: () => unwrap(commands.assistForgetKey()),
+  /** Ask TypeSafe whether the key in force still works. */
+  assistTestKey: () => done(commands.assistTestKey()),
+  assistSaveSettings: (
+    reviewChanges: boolean,
+    suggestInComposer: boolean,
+    thresholds: ThresholdsDto,
+  ) => unwrap(commands.assistSaveSettings(reviewChanges, suggestInComposer, thresholds)),
+  /** Judge a workspace.s changed files against its task. Sends those diffs to TypeSafe. */
+  assistReview: (workspaceId: string) => unwrap(commands.assistReview(workspaceId)),
+  /** A harness and an effort for a message being typed; empty fields mean "nothing to offer". */
+  assistSuggest: (message: string) => unwrap(commands.assistSuggest(message)),
 
   ptySpawn: (request: SpawnRequest) => unwrap(commands.ptySpawn(request)),
   ptyList: () => unwrap(commands.ptyList()),

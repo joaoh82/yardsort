@@ -199,6 +199,18 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
         />
       </Field>
 
+      <Field
+        label="Good at"
+        hint="Optional, and only used by Assist: when you describe two or more harnesses here, the composer can suggest which one suits the message you are typing. Yardsort never guesses this for you."
+      >
+        <input
+          value={draft.strengths ?? ""}
+          placeholder="e.g. long refactors and tricky debugging"
+          onChange={(e) => set({ strengths: e.target.value })}
+          className={inputClass}
+        />
+      </Field>
+
       <fieldset className="grid gap-3">
         <legend className="mb-2 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
           Arguments

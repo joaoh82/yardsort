@@ -53,9 +53,17 @@ pub struct HarnessDef {
     pub stdin_ready_ms: u32,
     /// Disabled harnesses stay configured but are not offered.
     pub enabled: bool,
+    /// In the user's words, what this harness is good at. Assist uses it to suggest a harness
+    /// for a task; harnesses without one are never suggested. Empty for every built-in: which
+    /// agent suits which work is the user's call, not ours.
+    #[serde(default)]
+    pub strengths: String,
 }
 
 pub const DEFAULT_STDIN_READY_MS: u32 = 1500;
+
+/// A sentence or two is plenty for Assist to tell harnesses apart.
+pub const MAX_STRENGTHS_CHARS: usize = 400;
 
 /// Values for the placeholders. `None` means "not given": the arg group using it is dropped.
 #[derive(Debug, Clone, Default)]
@@ -129,6 +137,7 @@ impl HarnessDef {
             session_id_mode: SessionIdMode::LatestInCwd,
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
+            strengths: String::new(),
         }
     }
 }
@@ -210,6 +219,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_id_mode: SessionIdMode::Assigned,
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
+            strengths: String::new(),
         },
         HarnessDef {
             id: "codex".into(),
@@ -228,6 +238,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_id_mode: SessionIdMode::LatestInCwd,
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
+            strengths: String::new(),
         },
         HarnessDef {
             id: "grok".into(),
@@ -252,6 +263,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_id_mode: SessionIdMode::Assigned,
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
+            strengths: String::new(),
         },
         HarnessDef {
             id: "opencode".into(),
@@ -270,6 +282,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_id_mode: SessionIdMode::LatestInCwd,
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
+            strengths: String::new(),
         },
     ]
 }
@@ -312,6 +325,8 @@ pub struct HarnessOverride {
     pub stdin_ready_ms: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strengths: Option<String>,
 }
 
 macro_rules! each_field {
@@ -331,7 +346,8 @@ macro_rules! each_field {
             prompt_transport,
             session_id_mode,
             stdin_ready_ms,
-            enabled
+            enabled,
+            strengths
         )
     };
 }
@@ -441,6 +457,11 @@ pub fn validate(def: &HarnessDef) -> Result<(), String> {
         && !def.prompt_args.iter().any(|arg| arg.contains("{prompt}"))
     {
         return Err("With the argv transport, the prompt args must use {prompt}.".into());
+    }
+    if def.strengths.chars().count() > MAX_STRENGTHS_CHARS {
+        return Err(format!(
+            "Keep \"Good at\" under {MAX_STRENGTHS_CHARS} characters."
+        ));
     }
     Ok(())
 }

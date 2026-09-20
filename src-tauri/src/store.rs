@@ -13,6 +13,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_unique_workspace_path.sql"),
     include_str!("../migrations/0003_sessions.sql"),
+    include_str!("../migrations/0004_session_prompt.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -82,6 +83,8 @@ pub struct NewSession<'a> {
     pub title: &'a str,
     pub forked_from: Option<&'a str>,
     pub pty_session_id: &'a str,
+    /// The whole first message, when this conversation started with one.
+    pub prompt: Option<&'a str>,
 }
 
 pub struct Store {
@@ -292,8 +295,8 @@ impl Store {
     pub fn add_session(&self, new: &NewSession<'_>) -> StoreResult<()> {
         self.conn().execute(
             "INSERT INTO sessions (id, workspace_id, harness_id, model, effort, harness_session_id,
-                                   title, forked_from, state, pty_session_id, started_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)",
+                                   title, forked_from, state, pty_session_id, started_at, prompt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)",
             params![
                 new.id,
                 new.workspace_id,
@@ -304,7 +307,8 @@ impl Store {
                 new.title,
                 new.forked_from,
                 new.pty_session_id,
-                now_ms()
+                now_ms(),
+                new.prompt
             ],
         )?;
         Ok(())
@@ -329,6 +333,18 @@ impl Store {
              ORDER BY started_at DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map([workspace_id], session_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// What the user asked for in a workspace: the first message of each of its conversations
+    /// that had one, oldest first.
+    pub fn session_prompts(&self, workspace_id: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT prompt FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL
+             ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([workspace_id], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -671,6 +687,33 @@ mod tests {
             pty_session_id: pty,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_workspace_remembers_what_was_asked_in_order() {
+        let store = Store::in_memory();
+        let ws = worktree(&store);
+        let with_prompt = |id, pty, prompt| NewSession {
+            prompt,
+            ..new_session(id, &ws.id, pty)
+        };
+        store
+            .add_session(&with_prompt(
+                "a",
+                "p1",
+                Some("Fix the login bug\nand add a test"),
+            ))
+            .unwrap();
+        store.add_session(&with_prompt("b", "p2", None)).unwrap();
+        store
+            .add_session(&with_prompt("c", "p3", Some("Also update the docs")))
+            .unwrap();
+        // Resuming the first conversation must not reorder what was asked.
+        store.mark_session_running("a", "p4").unwrap();
+        assert_eq!(
+            store.session_prompts(&ws.id).unwrap(),
+            ["Fix the login bug\nand add a test", "Also update the docs"]
+        );
     }
 
     #[test]

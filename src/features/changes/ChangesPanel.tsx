@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { hasCore, ipc } from "@/lib/ipc";
+import { useAssistStore } from "@/stores/assist";
 import { useChangesStore } from "@/stores/changes";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { ChangeList } from "./ChangeList";
@@ -30,13 +31,19 @@ export function ChangesPanel() {
   /** Bumped on every file-system signal; open folders in the tree reload when it changes. */
   const [revision, setRevision] = useState(0);
 
-  useEffect(() => void useChangesStore.getState().follow(workspaceId), [workspaceId]);
+  useEffect(() => {
+    void useChangesStore.getState().follow(workspaceId);
+    // Assist, when it is on, checks the same workspace shortly after the writing stops.
+    void useAssistStore.getState().load();
+    useAssistStore.getState().follow(workspaceId);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (!hasCore()) return;
     const refresh = () => {
       setRevision((value) => value + 1);
       void useChangesStore.getState().refresh();
+      useAssistStore.getState().reviewSoon();
     };
     const unlisten = ipc.onWorkspaceFilesChanged((changedId) => {
       if (changedId === useChangesStore.getState().workspaceId) refresh();

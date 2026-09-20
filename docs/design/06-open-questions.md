@@ -51,3 +51,18 @@ settled.
     yard is where cars are sorted onto parallel tracks. App id `dev.yardsort.app`, branch prefix
     `ys`. `legacy.rs` carries data over from the old app id and keeps `SWITCHYARD_*` working.
 15. **Distribution.** Open source from the start? Flatpak/Snap in addition to AppImage/deb/rpm/AUR?
+
+## Assist
+
+16. **May Assist read an agent's screen?** Assist (2026-09-20) deliberately stays away from the
+    terminal: it judges git diffs and the composer's text only. The tempting next step is to send
+    the last screen from the headless VT when an agent goes quiet, and have Jev say _why_ —
+    waiting for permission, asking a question, finished, or failed — so the notification can say
+    it. That is worth real money to someone running five agents, and it is a deliberate exception
+    to "the terminal is the truth, we never parse agent output", with a screen that may hold
+    secrets. _Deferred on purpose; decide after living with the first two features._
+17. **Assist threshold defaults.** The defaults (flag at 70%, off-task at 60%, suggest at 50%) were
+    chosen by reading TypeSafe's guidance, not measured against real workspaces. They are settings
+    now, so one machine can be tuned — but the defaults, and the wording of the questions
+    themselves, still need a pass over real diffs. The right values may differ per repository,
+    which the settings cannot express.

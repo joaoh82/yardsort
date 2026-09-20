@@ -58,6 +58,26 @@ export const commands = {
 	workspaceWatch: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_watch", { workspaceId })),
 	/**  Open a file (or the workspace folder, when `path` is `None`) in the user's editor. */
 	openInEditor: (workspaceId: string, path: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("open_in_editor", { workspaceId, path })),
+	assistStatus: () => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_status")),
+	/**
+	 *  Save an API key, once TypeSafe confirms it works. It goes to the OS credential store and is
+	 *  never sent back to the webview.
+	 */
+	assistSaveKey: (key: string) => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_save_key", { key })),
+	assistForgetKey: () => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_forget_key")),
+	/**  Ask TypeSafe whether the key in force still works. */
+	assistTestKey: () => typedError<null, IpcError>(__TAURI_INVOKE("assist_test_key")),
+	assistSaveSettings: (reviewChanges: boolean, suggestInComposer: boolean, thresholds: ThresholdsDto) => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_save_settings", { reviewChanges, suggestInComposer, thresholds })),
+	/**
+	 *  Check a workspace's changed files against what was asked, and for risky edits. Sends the
+	 *  diffs of those files to TypeSafe.
+	 */
+	assistReview: (workspaceId: string) => typedError<Review, IpcError>(__TAURI_INVOKE("assist_review", { workspaceId })),
+	/**
+	 *  Suggest a harness and an effort for the message being typed. Sends the message and the
+	 *  harnesses' "Good at" descriptions.
+	 */
+	assistSuggest: (message: string) => typedError<Suggestion, IpcError>(__TAURI_INVOKE("assist_suggest", { message })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
 	sessionResume: (id: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("session_resume", { id, size })),
@@ -119,6 +139,20 @@ export type AppInfo = {
 	arch: string,
 	debug: boolean,
 	dev: DevFlags,
+};
+
+export type AssistStatus = {
+	keySource: KeySource,
+	/**  The end of the key in force, so it can be told apart without being shown. */
+	keyHint: string | null,
+	/**  Why the credential store could not be used, if it could not. */
+	problem: string | null,
+	reviewChanges: boolean,
+	suggestInComposer: boolean,
+	/**  How sure Jev must be before an answer becomes a badge or a suggestion. */
+	thresholds: ThresholdsDto,
+	/**  The model every request names. */
+	model: string,
 };
 
 export type AvailableUpdate = {
@@ -229,6 +263,16 @@ export type FileEntry = {
 	ignored: boolean,
 };
 
+export type FileReview = {
+	path: string,
+	scope: Scope,
+	/**  `None` when the workspace's task is not known, or the file was not checked. */
+	relevance: Relevance | null,
+	flags: ReviewFlag[],
+	/**  Why this file was not looked at, if it was not. */
+	notChecked: string | null,
+};
+
 export type GitStatus = {
 	path: string | null,
 	/**  As `git --version` prints it, e.g. `git version 2.55.0`. */
@@ -261,6 +305,12 @@ export type HarnessDef = {
 	stdinReadyMs: number,
 	/**  Disabled harnesses stay configured but are not offered. */
 	enabled: boolean,
+	/**
+	 *  In the user's words, what this harness is good at. Assist uses it to suggest a harness
+	 *  for a task; harnesses without one are never suggested. Empty for every built-in: which
+	 *  agent suits which work is the user's call, not ours.
+	 */
+	strengths?: string,
 };
 
 /**  A harness definition plus whether its command can be found on this machine. */
@@ -350,6 +400,12 @@ export type IpcError = {
 	message: string,
 };
 
+export type KeySource = "none" | 
+/**  Saved from Settings, in the OS credential store. */
+"keychain" | 
+/**  `TYPESAFE_API_KEY`, from the environment Yardsort runs in. */
+"environment";
+
 export type NewWorkspace = {
 	projectId: string,
 	/**  `None` starts from the project's default branch. */
@@ -402,6 +458,38 @@ export type PtyHostEvent = HostEvent;
  *  `src/lib/ipc.ts` corrects that in one place.
  */
 export type RawBytes = number[];
+
+export type Relevance = 
+/**  Does what the task asks for. */
+"direct" | 
+/**  Not the task itself, but plausibly needed for it. */
+"supporting" | 
+/**  Nothing to do with the task. */
+"unrelated" | 
+/**  The model had no clear read. */
+"unsure";
+
+export type Review = {
+	files: FileReview[],
+	/**
+	 *  What the workspace was asked to do, as far as Yardsort knows: the first message of each
+	 *  of its conversations. Without it, only the risk checks run.
+	 */
+	task: string | null,
+	model: string,
+	/**  A failure that left part of the review undone. */
+	problem: string | null,
+};
+
+export type ReviewFlag = 
+/**  A file whose name says it holds credentials. Decided here; its contents are never sent. */
+"credentialsFile" | 
+/**  The change adds a literal secret. */
+"secret" | 
+/**  Tests were removed, skipped, or made weaker. */
+"weakensTests" | 
+/**  A lint, type check or CI step was switched off. */
+"disablesChecks";
 
 export type Scope = "uncommitted" | "committed";
 
@@ -497,9 +585,30 @@ export type SpawnRequest = {
 	size: TermSize,
 };
 
+export type Suggestion = {
+	/**  The harness whose "Good at" fits best, when one clearly does. */
+	harnessId: string | null,
+	/**  The effort to offer, per harness id — the level depends on what each harness offers. */
+	effortByHarness: { [key in string]: string },
+};
+
 export type TermSize = {
 	cols: number,
 	rows: number,
+};
+
+/**
+ *  [`Thresholds`] as the webview sees them. The settings file keeps snake_case names people can
+ *  read and edit; IPC is camelCase like everything else.
+ */
+export type ThresholdsDto = {
+	flagAtPercent: number,
+	offTaskAtPercent: number,
+	suggestAtPercent: number,
+	/**  What "Restore defaults" goes back to, so the form need not repeat them. */
+	defaults: [number, number, number],
+	/**  The lowest and highest either end may be. */
+	range: [number, number],
 };
 
 export type UpdateStatus = {

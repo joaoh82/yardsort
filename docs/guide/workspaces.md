@@ -22,7 +22,11 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 | **Effort**  | Offered only for agents that have the concept.                                                                                                                    |
 | **Branch**  | Under _New branch from_, pick the branch to start from. Under _Open existing branch_, pick a branch to check out in a workspace as it is — no new branch is made. |
 
-Your last choices are remembered per project. **Nothing is created until you press Start** —
+Your last choices are remembered per project. With [Assist](assist.md) switched on, a line under
+the pickers may offer a harness and an effort for what you are typing; **Use** applies it, and
+ignoring it does nothing.
+
+**Nothing is created until you press Start** —
 cancelling (`Esc`) leaves no trace.
 
 On Start, Yardsort:

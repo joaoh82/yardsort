@@ -1,7 +1,7 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { HarnessInfo } from "@/lib/ipc";
+import type { AssistStatus, HarnessInfo } from "@/lib/ipc";
 import { project, worktree } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
@@ -9,12 +9,14 @@ const core = vi.hoisted(() => ({
   projectBranches: vi.fn(),
   workspaceCreate: vi.fn(),
   uiStateSave: vi.fn(),
+  assistSuggest: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
   ipc: core,
 }));
 
+import { useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
@@ -40,6 +42,23 @@ const harness = (id: string, extra: Partial<HarnessInfo> = {}): HarnessInfo => (
   builtin: true,
   modified: false,
   resolvedPath: `/usr/bin/${id}`,
+  ...extra,
+});
+
+const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
+  keySource: "keychain",
+  keyHint: "…1234",
+  problem: null,
+  reviewChanges: true,
+  suggestInComposer: true,
+  thresholds: {
+    flagAtPercent: 70,
+    offTaskAtPercent: 60,
+    suggestAtPercent: 50,
+    defaults: [70, 60, 50],
+    range: [5, 95],
+  },
+  model: "jev-1.13.0",
   ...extra,
 });
 
@@ -228,5 +247,84 @@ describe("Composer", () => {
     const user = await renderComposer();
     await user.type(screen.getByRole("textbox", { name: /work on/ }), "{Escape}");
     expect(useProjectsStore.getState().composingProjectId).toBeNull();
+  });
+});
+
+describe("Composer with Assist", () => {
+  const suggestion = (harnessId: string | null, efforts: Record<string, string> = {}) => ({
+    harnessId,
+    effortByHarness: efforts,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    core.uiStateSave.mockResolvedValue(undefined);
+    core.projectBranches.mockResolvedValue({ branches: ["main"], default: "main", checkedOut: [] });
+    core.harnessesList.mockResolvedValue([
+      harness("claude", { efforts: ["low", "medium", "high"] }),
+      harness("codex", { efforts: ["low", "medium", "high"] }),
+    ]);
+    core.assistSuggest.mockResolvedValue(suggestion("codex", { codex: "high", claude: "high" }));
+    useHarnessStore.setState({ harnesses: [], loaded: false });
+    useAssistStore.setState({ status: assistStatus(), review: null, workspaceId: null });
+    useProjectsStore.setState({
+      projects: [app],
+      selectedWorkspaceId: "w-app",
+      composingProjectId: "p-app",
+      ui: {},
+    });
+    useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
+  });
+
+  it("offers a harness and an effort for the message, and applies them only when asked", async () => {
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Track down the flaky test");
+
+    const offer = await screen.findByText(/Assist suggests/);
+    expect(offer).toHaveTextContent("CODEX");
+    expect(offer).toHaveTextContent("effort high");
+    expect(core.assistSuggest).toHaveBeenLastCalledWith("Track down the flaky test");
+    // Nothing is picked until the offer is taken.
+    expect(screen.getByRole("combobox", { name: "Harness" })).toHaveValue("claude");
+
+    await user.click(screen.getByRole("button", { name: "Use" }));
+    expect(screen.getByRole("combobox", { name: "Harness" })).toHaveValue("codex");
+    expect(screen.getByRole("combobox", { name: "Effort" })).toHaveValue("high");
+    expect(screen.queryByText(/Assist suggests/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing when Assist is off, has no key, has nothing to offer, or the message is short", async () => {
+    const cases = [
+      { status: assistStatus({ suggestInComposer: false }), message: "Track down the flaky test" },
+      {
+        status: assistStatus({ keySource: "none" as const }),
+        message: "Track down the flaky test",
+      },
+      { status: assistStatus(), message: "fix tests" },
+    ];
+    for (const { status, message } of cases) {
+      useAssistStore.setState({ status });
+      const user = await renderComposer();
+      await user.type(screen.getByRole("textbox", { name: /work on/ }), message);
+      expect(core.assistSuggest).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Assist suggests/)).not.toBeInTheDocument();
+      cleanup();
+    }
+
+    core.assistSuggest.mockResolvedValue(suggestion(null));
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Track down the flaky test");
+    await waitFor(() => expect(core.assistSuggest).toHaveBeenCalled());
+    expect(screen.queryByText(/Assist suggests/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer what is already chosen", async () => {
+    core.assistSuggest.mockResolvedValue(suggestion("claude", { claude: "low" }));
+    const user = await renderComposer();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Effort" }), "low");
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Rename the status field");
+
+    await waitFor(() => expect(core.assistSuggest).toHaveBeenCalled());
+    expect(screen.queryByText(/Assist suggests/)).not.toBeInTheDocument();
   });
 });

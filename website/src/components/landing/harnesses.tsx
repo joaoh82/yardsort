@@ -3,7 +3,11 @@ import { Shot } from "@/components/shot";
 const POINTS = [
   {
     title: "Private by construction",
-    body: "No account, no telemetry, no keys. Agents use their own logins; Yardsort just starts them. Its one network request is a check for new versions, which you can switch off.",
+    body: "No account, no telemetry, no keys of ours. Agents use their own logins; Yardsort just starts them. It checks for new versions, which you can switch off — and nothing else leaves your machine unless you switch Assist on and bring your own API key.",
+  },
+  {
+    title: "A second pair of eyes, if you want one",
+    body: "Assist can badge changed files that look unrelated to the task, or that add a secret, weaken a test or switch a check off, and suggest a harness for what you are typing. Off by default, and it never reads your terminals.",
   },
   {
     title: "Careful with your work",

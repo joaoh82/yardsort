@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useModalFocus } from "@/lib/useModalFocus";
 import { buttonClass } from "./fields";
+import { AssistSettings } from "./AssistSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { HarnessSettings } from "./HarnessSettings";
 import { WorkspaceSettings } from "./WorkspaceSettings";
@@ -8,6 +9,7 @@ import { WorkspaceSettings } from "./WorkspaceSettings";
 const SECTIONS = [
   ["harnesses", "Harnesses"],
   ["workspaces", "Workspaces"],
+  ["assist", "Assist"],
   ["general", "General"],
 ] as const;
 type Section = (typeof SECTIONS)[number][0];
@@ -64,6 +66,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <HarnessSettings />
           ) : section === "workspaces" ? (
             <WorkspaceSettings />
+          ) : section === "assist" ? (
+            <AssistSettings />
           ) : (
             <GeneralSettings />
           )}

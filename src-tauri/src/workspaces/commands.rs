@@ -101,7 +101,7 @@ pub async fn harnesses_list(app: AppHandle) -> IpcResult<Vec<HarnessInfo>> {
     blocking(app, |state| Ok(list_harnesses(state))).await
 }
 
-fn list_harnesses(state: &AppState) -> Vec<HarnessInfo> {
+pub(crate) fn list_harnesses(state: &AppState) -> Vec<HarnessInfo> {
     let env = state.env();
     let cwd = std::env::current_dir().unwrap_or_default();
     harness::resolve_all(&state.settings.get().harnesses)

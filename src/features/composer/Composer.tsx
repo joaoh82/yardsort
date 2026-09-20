@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ipc, type BranchList, type HarnessInfo, type Project } from "@/lib/ipc";
+import { ipc, type BranchList, type HarnessInfo, type Project, type Suggestion } from "@/lib/ipc";
 import { formatShortcut } from "@/lib/platform";
+import { assistOn, useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
@@ -15,6 +16,11 @@ const picksKey = (projectId: string) => `composer.last.${projectId}`;
 
 const control =
   "h-8 rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
+
+/** How long typing must pause before Assist is asked about the message. */
+const SUGGEST_DELAY_MS = 800;
+/** Shorter than this there is nothing to judge, and the core refuses to ask anyway. */
+const SUGGEST_FROM_CHARS = 15;
 
 /**
  * The start of every workspace: say what you want, pick who does it, press Enter. Nothing exists
@@ -38,9 +44,32 @@ export function Composer({ project }: { project: Project }) {
   const [error, setError] = useState<string | null>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const modelsId = useId();
+  const assist = useAssistStore((s) => s.status);
+  // Kept together with the message it was asked about, so an answer for older text is ignored.
+  const [suggested, setSuggested] = useState<{ forMessage: string; suggestion: Suggestion } | null>(
+    null,
+  );
 
   useEffect(() => void useHarnessStore.getState().load(), []);
+  useEffect(() => void useAssistStore.getState().load(), []);
   useEffect(() => messageRef.current?.focus(), [project.id]);
+
+  // Ask Assist what suits the message, once typing pauses. A failure simply offers nothing.
+  useEffect(() => {
+    const text = message.trim();
+    if (!assist?.suggestInComposer || !assistOn(assist) || text.length < SUGGEST_FROM_CHARS) return;
+    let stale = false;
+    const timer = setTimeout(() => {
+      ipc.assistSuggest(text).then(
+        (suggestion) => !stale && setSuggested({ forMessage: text, suggestion }),
+        () => {},
+      );
+    }, SUGGEST_DELAY_MS);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [message, assist]);
 
   useEffect(() => {
     let stale = false;
@@ -71,6 +100,21 @@ export function Composer({ project }: { project: Project }) {
     setHarnessId(id);
     // A model name means nothing to a different harness.
     if (id !== harness?.id) setModel("");
+  };
+
+  // Only ever offered, and only the parts that differ from what is picked right now.
+  const suggestion = suggested?.forMessage === message.trim() ? suggested.suggestion : null;
+  const suggestedHarness = harnesses.find(
+    (h) => h.id === suggestion?.harnessId && h.id !== harness?.id && !!h.resolvedPath,
+  );
+  const forHarness = (suggestedHarness ?? harness)?.id ?? "";
+  const suggestedEffort = suggestion?.effortByHarness[forHarness];
+  const offeredEffort = suggestedEffort === effortChoice ? undefined : suggestedEffort;
+  const offering = suggestedHarness ?? offeredEffort;
+  const takeSuggestion = () => {
+    if (suggestedHarness) chooseHarness(suggestedHarness.id);
+    if (offeredEffort) setEffort(offeredEffort);
+    setSuggested(null);
   };
 
   const ready = !busy && !!harness?.resolvedPath && base !== "";
@@ -222,6 +266,24 @@ export function Composer({ project }: { project: Project }) {
             {busy ? "Starting…" : "Start"}
           </button>
         </div>
+
+        {offering && !busy && (
+          <p className="mt-2 flex items-center justify-end gap-2 text-[11px] text-ink-faint">
+            <span>
+              Assist suggests{" "}
+              {suggestedHarness && <span className="text-ink-muted">{suggestedHarness.label}</span>}
+              {suggestedHarness && offeredEffort ? " · " : ""}
+              {offeredEffort && <span className="text-ink-muted">effort {offeredEffort}</span>}
+            </span>
+            <button
+              type="button"
+              onClick={takeSuggestion}
+              className="rounded border border-line px-2 py-0.5 hover:border-accent hover:text-ink"
+            >
+              Use
+            </button>
+          </p>
+        )}
 
         <div className="mt-3 min-h-10 text-center">
           {error ? (
