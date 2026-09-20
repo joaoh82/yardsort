@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.4.0
 
 - **Assist (optional).** With a TypeSafe API key of your own, Yardsort can check a workspace's
   changed files against what the agent was asked to do — badging files that look off-task, or that
@@ -15,6 +15,10 @@ has the downloads and the full commit lists.
   by Assist's composer suggestion.
 - Assist's thresholds — how sure Jev must be before a badge or a suggestion appears — are settings,
   with **Restore defaults**. Changing one re-reads answers already given instead of asking again.
+- **Linux AppImage: nothing from the replaced version follows an update.** After updating in place,
+  terminals still carried the previous AppImage's `LD_LIBRARY_PATH` and friends — the new app is
+  started by the old one, so it inherits them — and git kept loading libraries out of the version
+  that had just been replaced. Paths into any AppImage's mount are now dropped, not only our own.
 
 ## 0.3.2
 

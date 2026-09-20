@@ -74,38 +74,58 @@ const APPIMAGE_GTK_HOOK_VARS: &[&str] = &[
     "GTK_THEME",
 ];
 
+/// Whether a path leads into *some* AppImage's mount. An AppImage mounts itself at
+/// `<temp>/.mount_<name><random>` for as long as it runs, so nothing under there is worth passing
+/// to a child: at best it is our own bundle, at worst a dead mount from the version we replaced.
+fn in_an_appimage_mount(entry: &str) -> bool {
+    let tmpdir = std::env::var("TMPDIR").unwrap_or_default();
+    [tmpdir.trim_end_matches('/'), "/tmp"]
+        .iter()
+        .any(|dir| !dir.is_empty() && entry.starts_with(&format!("{dir}/.mount_")))
+}
+
 /// The environment the user launched us with, without what the AppImage added on the way in.
 ///
 /// An AppImage starts us with its bundled libraries, Python, Perl, Qt and GTK modules on
 /// `LD_LIBRARY_PATH`, `PYTHONHOME`, `PATH` and a dozen more, all pointing into its mount. Our
 /// sessions must not inherit them: the user's own `python3` dies looking for its standard library
-/// in the bundle, and every program linked against a library we ship picks up our copy. Outside
-/// an AppImage this changes nothing.
+/// in the bundle, and every program linked against a library we ship picks up our copy.
+///
+/// The mount we are running from is not the only one to watch for. An in-app update relaunches
+/// the new AppImage from the old process, so we inherit the *previous* version's variables and
+/// the new launcher prepends its own; the old mount is still there, and a `git` started with that
+/// `LD_LIBRARY_PATH` loads its libraries out of the version we just replaced. Outside an AppImage,
+/// and for paths that lead anywhere else, this changes nothing.
 fn without_appimage(mut vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
-    let Some(appdir) = vars
+    let appdir = vars
         .get("APPDIR")
         .filter(|_| vars.contains_key("APPIMAGE"))
         .map(|dir| dir.trim_end_matches('/').to_owned())
-        .filter(|dir| !dir.is_empty())
-    else {
-        return vars;
+        .filter(|dir| !dir.is_empty());
+    let in_a_bundle = |entry: &str| {
+        in_an_appimage_mount(entry)
+            || appdir
+                .as_deref()
+                .is_some_and(|dir| entry == dir || entry.starts_with(&format!("{dir}/")))
     };
-    let inside = |entry: &str| entry == appdir || entry.starts_with(&format!("{appdir}/"));
 
     vars.retain(|name, value| {
-        if APPIMAGE_RUNTIME_VARS.contains(&name.as_str())
-            || APPIMAGE_GTK_HOOK_VARS.contains(&name.as_str())
+        if appdir.is_some()
+            && (APPIMAGE_RUNTIME_VARS.contains(&name.as_str())
+                || APPIMAGE_GTK_HOOK_VARS.contains(&name.as_str()))
         {
             return false;
         }
-        if !value.contains(&appdir) {
+        // Values that lead nowhere near a bundle are left exactly as they are — including ones
+        // that merely contain a colon, which is not always a path separator.
+        if !value.split(':').any(in_a_bundle) {
             return true;
         }
         // A search path the bundle prepended to: keep the user's part. Empty entries are what the
         // launcher's `"$APPDIR/…:$VAR"` leaves behind when `VAR` was unset.
         let rest: Vec<&str> = value
             .split(':')
-            .filter(|entry| !entry.is_empty() && !inside(entry))
+            .filter(|entry| !entry.is_empty() && !in_a_bundle(entry))
             .collect();
         *value = rest.join(":");
         !value.is_empty()
@@ -439,9 +459,9 @@ mod tests {
                 "XDG_DATA_DIRS",
                 &format!("{m}/usr/share/:{m}/usr/share:/usr/local/share:/usr/share"),
             ),
-            // The user's own, and a variable that merely mentions a similar path.
+            // The user's own, including a temporary directory that is nobody's mount.
             ("EDITOR", "nvim"),
-            ("NOTES", "/tmp/.mount_YardsoJEfjMEother/x"),
+            ("NOTES", "/tmp/notes/x"),
         ]);
 
         let env = without_appimage(launched);
@@ -451,11 +471,49 @@ mod tests {
             vars(&[
                 ("EDITOR", "nvim"),
                 ("LD_LIBRARY_PATH", "/opt/mine/lib"),
-                ("NOTES", "/tmp/.mount_YardsoJEfjMEother/x"),
+                ("NOTES", "/tmp/notes/x"),
                 ("PATH", "/home/u/bin:/usr/bin"),
                 ("XDG_DATA_DIRS", "/usr/local/share:/usr/share"),
             ])
         );
+    }
+
+    /// After an in-app update the new AppImage is started by the old one, so its environment
+    /// carries both mounts: the launcher overwrites some variables and prepends to others.
+    #[test]
+    fn the_replaced_versions_mount_goes_too() {
+        let new = "/tmp/.mount_YardsobDGBCD";
+        let old = "/tmp/.mount_YardsoJEfjME";
+        let updated = vars(&[
+            ("APPDIR", new),
+            ("APPIMAGE", "/home/u/Applications/Yardsort.AppImage"),
+            ("PYTHONHOME", &format!("{new}/usr/")),
+            (
+                "LD_LIBRARY_PATH",
+                &format!("{new}/usr/lib/:{old}/usr/lib/:{old}/usr/lib64/"),
+            ),
+            ("PATH", &format!("{new}/usr/bin/:{old}/usr/bin/:/usr/bin")),
+            ("XDG_DATA_DIRS", &format!("{old}/usr/share:/usr/share")),
+            ("EDITOR", "nvim"),
+        ]);
+
+        let env = without_appimage(updated);
+
+        assert_eq!(
+            env,
+            vars(&[
+                ("EDITOR", "nvim"),
+                ("PATH", "/usr/bin"),
+                ("XDG_DATA_DIRS", "/usr/share"),
+            ]),
+            "nothing may point into either mount"
+        );
+    }
+
+    #[test]
+    fn a_value_that_is_not_a_path_list_survives_a_bundle_free_environment() {
+        let own = vars(&[("GTK_THEME", "Adwaita:dark"), ("TIME", "10:30")]);
+        assert_eq!(without_appimage(own.clone()), own);
     }
 
     #[test]
