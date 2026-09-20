@@ -15,6 +15,9 @@ has the downloads and the full commit lists.
   by Assist's composer suggestion.
 - Assist's thresholds — how sure Jev must be before a badge or a suggestion appears — are settings,
   with **Restore defaults**. Changing one re-reads answers already given instead of asking again.
+- **Worktrees removed with git are noticed.** Delete a workspace's worktree _and_ its branch
+  yourself, and Yardsort marks the workspace **gone** and asks whether to delete it from the app
+  too — a "keep" is remembered. See [Workspaces](docs/guide/workspaces.md#when-the-branch-goes-too).
 - **Linux AppImage: nothing from the replaced version follows an update.** After updating in place,
   terminals still carried the previous AppImage's `LD_LIBRARY_PATH` and friends — the new app is
   started by the old one, so it inherits them — and git kept loading libraries out of the version
@@ -22,9 +25,6 @@ has the downloads and the full commit lists.
 
 ## 0.3.2
 
-- **Worktrees removed with git are noticed.** Delete a workspace's worktree _and_ its branch
-  yourself, and Yardsort marks the workspace **gone** and asks whether to delete it from the app
-  too — a "keep" is remembered. See [Workspaces](docs/guide/workspaces.md#when-the-branch-goes-too).
 - Install with Homebrew on macOS: `brew install --cask joaoh82/yardsort/yardsort`.
 - Linux: the quick start shows how to give the AppImage a launcher entry and icon.
 - Submitted to winget (`joaoh82.Yardsort`), pending Microsoft's review.
