@@ -84,6 +84,10 @@ impl Drop for Daemon {
 }
 
 /// Run `script` with the platform's shell.
+///
+/// A script that has to run on Windows too is written for `cmd.exe` as well as `sh`: `&&`
+/// separates commands in both, `;` in neither — cmd would echo it as part of the text and go on
+/// to exit 0. Tests needing real shell syntax are `#[cfg(unix)]`.
 fn shell(script: &str) -> LaunchPlan {
     let (program, flag) = if cfg!(windows) {
         ("cmd.exe", "/C")
@@ -185,7 +189,7 @@ fn a_session_runs_over_the_socket_and_reports_its_exit() {
     assert!(client.speaks_our_protocol());
     assert!(client.daemon_info().pid > 0);
 
-    let session = client.spawn(shell("echo over-the-wire; exit 3")).unwrap();
+    let session = client.spawn(shell("echo over-the-wire&& exit 3")).unwrap();
     let capture = Capture::default();
     attach_terminal(&client, &session.id, &capture);
 
