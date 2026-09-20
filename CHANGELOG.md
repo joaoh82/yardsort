@@ -8,6 +8,13 @@ has the downloads and the full commit lists.
 - Install with Homebrew on macOS: `brew install --cask joaoh82/yardsort/yardsort`.
 - Linux: the quick start shows how to give the AppImage a launcher entry and icon.
 - Submitted to winget (`joaoh82.Yardsort`), pending Microsoft's review.
+- **Linux AppImage: native Wayland.** The AppImage used to run under XWayland, where typing lagged
+  and dictation (Omarchy's voice input, anything built on `wtype`) dropped or garbled characters.
+  It now opens a Wayland window, and falls back to X11 by itself if that ever fails.
+  `YARDSORT_GDK_BACKEND` picks one explicitly.
+- **Linux AppImage: terminals get your own environment.** Shells and agents no longer inherit the
+  AppImage's private variables (`LD_LIBRARY_PATH`, `PYTHONHOME`, `GDK_BACKEND`, …), which broke
+  `python3` and made git print library warnings.
 
 ## 0.3.1
 

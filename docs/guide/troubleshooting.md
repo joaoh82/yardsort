@@ -43,6 +43,11 @@ section above. Agents you have switched off in Settings → Harnesses do not cou
   renderer automatically if the GPU context is lost. The status bar shows which is active
   (`webgl` or `dom`).
 - **No notifications** — you need a notification daemon (mako, dunst, or your desktop's own).
+- **Wayland or X11.** Yardsort runs as a native Wayland window on a Wayland desktop. (The AppImage's
+  launcher asks for X11. Yardsort overrides that, because under XWayland typing lags and dictation
+  tools that type for you, such as Omarchy's, drop or garble characters.) If a Wayland start of
+  the AppImage ever fails before the window appears, the next start uses X11 for that version by
+  itself. To choose, set `YARDSORT_GDK_BACKEND=wayland` or `YARDSORT_GDK_BACKEND=x11`.
 
 ## macOS
 

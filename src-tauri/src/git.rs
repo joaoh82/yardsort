@@ -44,6 +44,7 @@ pub enum Head {
 pub struct Git {
     program: PathBuf,
     env: Vec<(String, String)>,
+    clear_env: bool,
 }
 
 impl Git {
@@ -60,6 +61,7 @@ impl Git {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            clear_env: env.replaces_inherited(),
         })
     }
 
@@ -71,6 +73,9 @@ impl Git {
     /// Like [`Self::run`], with stdout exactly as git wrote it: file contents, `-z` lists.
     pub(crate) fn run_bytes(&self, cwd: &Path, args: &[&str]) -> GitResult<Vec<u8>> {
         let mut command = Command::new(&self.program);
+        if self.clear_env {
+            command.env_clear();
+        }
         command
             .args(args)
             .current_dir(cwd)

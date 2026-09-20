@@ -5,6 +5,8 @@
 
 mod changes;
 mod commands;
+#[cfg(target_os = "linux")]
+mod display;
 mod env;
 mod error;
 mod git;
@@ -97,6 +99,10 @@ fn export_bindings(builder: &Builder<tauri::Wry>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything starts GTK or a thread: the backend is read once, when GTK initialises.
+    #[cfg(target_os = "linux")]
+    display::choose_backend();
+
     let builder = ipc_builder();
 
     // Keep the checked-in bindings fresh while developing. CI verifies they are not stale.
@@ -111,6 +117,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::PendingUpdate::default())
         .invoke_handler(builder.invoke_handler())
+        .on_page_load(|_, payload| {
+            #[cfg(target_os = "linux")]
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                display::window_is_up();
+            }
+            #[cfg(not(target_os = "linux"))]
+            let _ = payload;
+        })
         .setup(move |app| {
             builder.mount_events(app);
 
