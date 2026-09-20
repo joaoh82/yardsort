@@ -40,16 +40,19 @@ Useful while developing:
 | `just test-rust` / `just test-web`   | One side's tests; both take extra arguments.                                      |
 | `just fmt`                           | Format Rust and TypeScript.                                                       |
 | `just bindings-check`                | Fail if the generated TypeScript bindings are stale. Run before pushing.          |
-| `just lint-windows`                  | Clippy the PTY crate for Windows from any OS.                                     |
+| `just lint-windows`                  | Clippy the PTY crates for Windows from any OS.                                    |
 | `YARDSORT_DATA_DIR=/tmp/ys just dev` | Run against a throwaway database and settings file, leaving your real ones alone. |
 
 ## How the code is laid out
 
 ```
-crates/pty-host/     Owns pseudo-terminals and the processes in them. No Tauri, no UI:
-                     runs in-process today, as a daemon later. Tested against real processes.
+crates/pty-host/     Owns pseudo-terminals and the processes in them. No Tauri, no UI.
+                     Tested against real processes in real PTYs.
+crates/pty-ipc/      The wire between the app and the daemon that runs that host: framing,
+                     the server loop, and a client that is itself a TerminalHost.
 src-tauri/           The Tauri app (Rust core): projects, workspaces, git, harnesses,
   src/               sessions, changes, settings, the SQLite store, and thin IPC commands.
+                     The same binary is the daemon, run with --yardsort-daemon.
   migrations/        Numbered SQL files. Never edit a shipped one — add a new one.
 src/                 The React + TypeScript frontend.
   features/          One folder per area of the UI.
@@ -67,6 +70,8 @@ Two principles explain most design decisions — more in [architecture](docs/des
    intents. Paths, for instance, never come from the webview.
 2. **The terminal is the truth.** Agents run in a real PTY and their output is never parsed.
    Status, readiness and notifications all derive from _activity_, not content.
+3. **The app is a client.** The terminals belong to the daemon, not the window, so closing the
+   window is a disconnect — never a kill.
 
 ## Making a change
 

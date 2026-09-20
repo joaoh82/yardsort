@@ -44,7 +44,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   can do in your terminal, they can do here — and Yardsort never parses their output.
 - **Plain git, no lock-in.** Workspaces are ordinary worktrees and branches. Inspect or undo
   anything with `git`. Worktrees made elsewhere are picked up automatically.
-- **Pick up where you left off.** Quit mid-task, come back, press **Resume** — the conversation is
+- **Closing the window doesn't stop them.** Terminals live in a small background process, so
+  agents keep working while Yardsort is closed — or after it crashes. Open it again and every
+  screen is repainted where it got to. Closing with work in flight asks first.
+- **Pick up where you left off.** For conversations that really did end, press **Resume** — it is
   intact. **Fork** one to try a different approach without losing the first.
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
   one click into your editor.

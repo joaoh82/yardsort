@@ -10,6 +10,10 @@ const POINTS = [
     body: "Assist can badge changed files that look unrelated to the task, or that add a secret, weaken a test or switch a check off, and suggest a harness for what you are typing. Off by default, and it never reads your terminals.",
   },
   {
+    title: "Closing the window doesn't stop them",
+    body: "Terminals live in a small background process, so agents keep working while Yardsort is closed — or after it crashes. Open it again and every screen is repainted where it got to.",
+  },
+  {
     title: "Careful with your work",
     body: "Deleting or archiving a workspace always keeps the branch, and never discards uncommitted changes without a second, explicit confirmation.",
   },

@@ -67,6 +67,34 @@ out again. Delete the workspace when asked, or **Keep** the entry — Yardsort w
 that workspace again. If you deleted the branch by mistake, `git reflog` can still point you at the
 commit it was on; recreate the branch, and **Restore from its branch** comes back by itself.
 
+## Agents stopped when I closed Yardsort
+
+They should not: they run in a background process that outlives the window (see
+[Terminals & sessions](terminals-and-sessions.md#agents-keep-working-when-you-close-the-window)).
+If they do, the status bar at the bottom right says **no daemon** — hover it for the reason.
+
+- Started with `YARDSORT_NO_DAEMON=1`? That is what it does. Drop it.
+- Otherwise Yardsort could not start or reach one, and fell back to running terminals inside
+  itself so the app still works. `daemon.log`, next to the database (below), says why.
+
+Two things that cause it: the socket's folder is not writable, or the path to it is too long.
+Unix socket paths are limited to about a hundred characters — much shorter than any other path
+limit — so a very deep `YARDSORT_DATA_DIR` can be the problem. Yardsort tries
+`$XDG_RUNTIME_DIR/yardsort/` first, then the folder holding the database, then the temp folder,
+taking the first one short enough; the log names what it settled on.
+
+To look at the daemon yourself: the status bar shows its process id, and you can start one by
+hand with `yardsort --yardsort-daemon <socket path>`, which logs to the terminal.
+
+## "Agents are still running under a previous version"
+
+An update replaced Yardsort while agents were working in the daemon the old version started.
+Rather than kill work you did not agree to lose, Yardsort leaves that daemon alone and runs new
+terminals inside itself until you are done with the old ones.
+
+Finish or stop those agents, then restart Yardsort and everything is back to normal. This can
+only happen when a release changes how the app and the daemon talk to each other, which is rare.
+
 ## Resume says the conversation was not found
 
 The agent no longer has that conversation on disk — it was cleaned up, or it never saved one
@@ -95,6 +123,9 @@ app keeps working; once you are happy, uninstall Switchyard and delete its folde
 | Database (projects, workspaces, session records) | `~/.local/share/dev.yardsort.app/`         | `~/Library/Application Support/dev.yardsort.app/` | `%APPDATA%\dev.yardsort.app\` |
 | Settings                                         | `~/.config/dev.yardsort.app/settings.toml` | same folder as above                              | same folder as above          |
 | Worktrees                                        | `~/yardsort/` (configurable)               |                                                   |                               |
+
+`daemon.log` sits beside the database and holds the last run of the background process that owns
+your terminals. It is replaced each time one starts.
 
 Yardsort stores no credentials and sends nothing anywhere: no telemetry, no account. Agents use
 their own logins and talk to their own services.

@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Agents keep working when you close Yardsort.** Terminals moved out of the app into a small
+  background process (`yardsortd`) that owns them, so closing the window — or Yardsort crashing —
+  no longer stops anything. Open it again and every terminal is repainted where it got to, and
+  conversations that never stopped are no longer listed as _interrupted_.
+- Closing Yardsort with agents still running now asks, naming them: leave them running, stop
+  them, or cancel. Leaving them running is the default, and shells are never counted as work.
+- The status bar shows the background process, and `YARDSORT_NO_DAEMON=1` turns it off.
 - A contact address for questions and support, `hello@yardsort.sh`, on the website and in
   the docs.
 

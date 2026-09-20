@@ -120,13 +120,14 @@ export function Ideas() {
           shot={<Shot name="sessions" alt="Previous sessions with Resume and Fork" />}
         >
           <p>
-            Quit mid-task, come back, press <strong className={strong}>Resume</strong> — the
-            conversation is intact. <strong className={strong}>Fork</strong> one to try a different
-            approach without losing the first.
+            Close Yardsort and your agents carry on: the terminals belong to a small background
+            process, not to the window. Open it again and every screen is repainted where it got to.
+            Closing with work in flight asks first.
           </p>
           <p>
-            Sessions that were running when Yardsort closed are labelled interrupted; they resume
-            like any other.
+            For a conversation that really did end, press <strong className={strong}>Resume</strong>{" "}
+            — it is intact. <strong className={strong}>Fork</strong> one to try a different approach
+            without losing the first.
           </p>
         </Idea>
       </div>

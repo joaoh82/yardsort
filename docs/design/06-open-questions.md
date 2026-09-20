@@ -20,11 +20,15 @@ settled.
 
 ## Technical
 
-6. **When to ship the terminal daemon.** _Direction settled:_ the PTY host is built behind a
-   message-shaped boundary from M1 (see [03-architecture](03-architecture.md)), in-process for v1,
-   with harness resume args covering restarts. _Still open:_ when to move it out of process, and
-   the daemon's lifecycle — who starts/stops it, upgrades while sessions are live, one daemon per
-   user vs per app instance, and what "background" means on Windows.
+6. ~~**When to ship the terminal daemon.**~~ **Settled in M9: shipped**, right after v0.4. The
+   PTY host moved out of process into `yardsortd` — which is the app's own binary re-run with
+   `--yardsort-daemon`, so there is nothing extra to bundle or sign. The lifecycle questions
+   resolved as: **one daemon per data directory**; the app starts it when nobody answers, under a
+   lock file; it stops itself once no client is connected and no session is running, or when the
+   app's quit dialog says to; an **update** that changes the protocol replaces an idle daemon
+   silently and leaves a busy one alone rather than kill work. "Background" on Windows is a
+   `DETACHED_PROCESS` in its own process group behind a named pipe. See
+   [03-architecture](03-architecture.md#the-daemon-yardsortd).
 7. **Windows harness support.** Several harnesses officially target WSL rather than native Windows.
    Do we support launching harnesses _inside WSL_ (`wsl.exe -d <distro> -- claude …`, worktree on
    the WSL filesystem)? Lean: native first; treat WSL as a per-harness command prefix + path
