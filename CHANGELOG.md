@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.3.3
+
+- **Linux AppImage: nothing from the replaced version follows an update.** After updating in place,
+  terminals still carried the previous AppImage's `LD_LIBRARY_PATH` and friends — the new app is
+  started by the old one, so it inherits them — and git kept loading libraries out of the version
+  that had just been replaced. Paths into any AppImage's mount are now dropped, not only our own.
+
 ## 0.3.2
 
 - Install with Homebrew on macOS: `brew install --cask joaoh82/yardsort/yardsort`.
