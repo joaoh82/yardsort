@@ -3290,7 +3290,7 @@ dependencies = [
 
 [[package]]
 name = "pty-host"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "portable-pty",
  "serde",
@@ -6268,7 +6268,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "dunce",
  "ignore",
