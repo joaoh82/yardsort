@@ -383,13 +383,28 @@ impl Store {
         Ok(id)
     }
 
-    /// At startup nothing is running yet, so every row that claims to be was cut short when the
-    /// previous run ended. Returns how many there were.
-    pub fn end_interrupted_sessions(&self) -> StoreResult<usize> {
-        Ok(self.conn().execute(
-            "UPDATE sessions SET state = 'ended', exit_code = NULL, pty_session_id = NULL,
-                                 ended_at = COALESCE(ended_at, ?)
-             WHERE state = 'running'",
+    /// Settle the rows that only *claim* to be running.
+    ///
+    /// `alive` is the PTY sessions the daemon is actually running — before the daemon, that was
+    /// always empty and every row was cut short at startup. Now a conversation whose process is
+    /// still there stays `running`, and comes back with its terminal when the app reopens.
+    /// Returns how many rows were ended.
+    pub fn end_interrupted_sessions(&self, alive: &[String]) -> StoreResult<usize> {
+        let conn = self.conn();
+        // Built rather than bound as a list: rusqlite has no array binding, and these ids are
+        // ours (UUIDs from the host), never user input.
+        let keep = alive
+            .iter()
+            .map(|id| format!("'{}'", id.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(",");
+        Ok(conn.execute(
+            &format!(
+                "UPDATE sessions SET state = 'ended', exit_code = NULL, pty_session_id = NULL,
+                                     ended_at = COALESCE(ended_at, ?)
+                 WHERE state = 'running'
+                   AND (pty_session_id IS NULL OR pty_session_id NOT IN ({keep}))"
+            ),
             [now_ms()],
         )?)
     }
@@ -767,7 +782,7 @@ mod tests {
             .unwrap();
         store.end_session_by_pty("pty-2", Some(1)).unwrap();
 
-        assert_eq!(store.end_interrupted_sessions().unwrap(), 1);
+        assert_eq!(store.end_interrupted_sessions(&[]).unwrap(), 1);
         let s1 = store.session("s1").unwrap().unwrap();
         assert!(!s1.running && s1.exit_code.is_none());
         assert_eq!(
@@ -775,6 +790,29 @@ mod tests {
             Some(1),
             "left alone"
         );
+    }
+
+    /// With the daemon, "the app restarted" no longer means "the conversation is over": a row
+    /// whose process is still running must be left alone, or the app would offer to resume a
+    /// conversation that never stopped.
+    #[test]
+    fn a_session_whose_process_outlived_the_app_is_left_running() {
+        let store = Store::in_memory();
+        let ws = worktree(&store);
+        store
+            .add_session(&new_session("still-going", &ws.id, "pty-1"))
+            .unwrap();
+        store
+            .add_session(&new_session("really-gone", &ws.id, "pty-2"))
+            .unwrap();
+
+        let alive = vec!["pty-1".to_owned()];
+        assert_eq!(store.end_interrupted_sessions(&alive).unwrap(), 1);
+
+        let kept = store.session("still-going").unwrap().unwrap();
+        assert!(kept.running, "its agent is still working");
+        assert_eq!(kept.pty_session_id.as_deref(), Some("pty-1"));
+        assert!(!store.session("really-gone").unwrap().unwrap().running);
     }
 
     #[test]

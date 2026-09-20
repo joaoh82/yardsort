@@ -14,6 +14,7 @@ import {
   type ChangeSet,
   type Content,
   type CreatedWorkspace,
+  type DaemonStatus,
   type DownloadProgress,
   type EnvInfo,
   type ExitInfo,
@@ -56,6 +57,7 @@ export type {
   ChangeSet,
   Content,
   CreatedWorkspace,
+  DaemonStatus,
   DownloadProgress,
   EnvInfo,
   ExitInfo,
@@ -256,4 +258,17 @@ export const ipc = {
 
   onHostEvent: (handler: (event: HostEvent) => void) =>
     events.ptyHostEvent.listen((event) => handler(event.payload)),
+
+  /** Where this app's terminals actually live: the daemon, or this process. */
+  daemonStatus: () => unwrap(commands.daemonStatus()),
+  /**
+   * Closing the window asks the core first, which answers with this when agents are still
+   * working. The ids are PTY sessions, matching the terminal tabs.
+   */
+  onQuitRequested: (handler: (agents: string[]) => void) =>
+    events.quitRequested.listen((event) => handler(event.payload.agents)),
+  /** Quit for real. `stopAgents` stops everything the daemon runs; otherwise it carries on. */
+  appQuit: (stopAgents: boolean) => done(commands.appQuit(stopAgents)),
+  /** The user changed their mind, so the next close should ask again. */
+  quitCancelled: () => done(commands.quitCancelled()),
 };

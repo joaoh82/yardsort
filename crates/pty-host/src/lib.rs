@@ -2,8 +2,9 @@
 //!
 //! This crate deliberately knows nothing about Tauri, windows or the UI. Its API is shaped like
 //! messages — serialisable requests in, byte streams and events out, sessions addressed by id —
-//! so the same host can run in-process (today) or as a background daemon that the app attaches
-//! to (later) without anything above this boundary changing.
+//! which is what lets the very same host run in-process or, as it does in the shipping app, in
+//! the `yardsortd` background process with the app as a client of it. See `pty-ipc`; nothing on
+//! this side of the boundary knows the difference.
 //!
 //! ```text
 //! spawn(LaunchPlan) -> SessionInfo        list() -> [SessionInfo]
@@ -13,11 +14,14 @@
 //! events: HostEvent::{Exited, Busy, Quiet}
 //! ```
 //!
+//! [`TerminalHost`] is that API as a trait, implemented here and by the daemon's client.
+//!
 //! Each session keeps a headless terminal (`vt100`) fed with everything the process prints. A
 //! viewer that attaches — for the first time or the tenth — first receives a snapshot that
 //! repaints scrollback and screen, then the live stream, with nothing lost or duplicated between
 //! the two.
 
+mod prompt;
 mod session;
 mod snapshot;
 mod types;
@@ -28,8 +32,8 @@ use std::time::Duration;
 
 use session::Session;
 pub use types::{
-    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Result, SessionId, SessionInfo,
-    SessionState, TermSize,
+    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, PendingPrompt, Result, SessionId,
+    SessionInfo, SessionState, TermSize,
 };
 
 /// Receives a session's output: first one snapshot, then live batches. Return `false` to detach.
@@ -69,9 +73,15 @@ impl PtyHost {
 
     /// Start `plan.program` in a new PTY.
     pub fn spawn(&self, plan: LaunchPlan) -> Result<SessionInfo> {
+        let pending = plan.prompt.clone();
         let session = Session::spawn(plan, Arc::clone(&self.events), self.quiet_after)?;
         let info = session.info();
-        self.lock().insert(info.id.clone(), session);
+        self.lock().insert(info.id.clone(), Arc::clone(&session));
+        // Delivery runs here rather than in the client, so the message still arrives if whoever
+        // asked for the session goes away while the program is still starting up.
+        if let Some(pending) = pending {
+            prompt::deliver(session, pending);
+        }
         Ok(info)
     }
 
@@ -136,6 +146,63 @@ impl PtyHost {
 
     fn lock(&self) -> MutexGuard<'_, HashMap<SessionId, Arc<Session>>> {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// What a client of the PTY host can ask for, whether the host is in this process or in the
+/// daemon at the other end of a socket. The app holds one of these and never knows which.
+pub trait TerminalHost: Send + Sync {
+    fn spawn(&self, plan: LaunchPlan) -> Result<SessionInfo>;
+    fn attach(&self, id: &SessionId, sink: OutputSink) -> Result<AttachmentId>;
+    fn detach(&self, id: &SessionId, attachment: AttachmentId) -> Result<()>;
+    fn write(&self, id: &SessionId, data: &[u8]) -> Result<()>;
+    fn paste(&self, id: &SessionId, text: &str) -> Result<()>;
+    fn resize(&self, id: &SessionId, size: TermSize) -> Result<()>;
+    fn kill(&self, id: &SessionId) -> Result<()>;
+    fn remove(&self, id: &SessionId) -> Result<()>;
+    fn info(&self, id: &SessionId) -> Result<SessionInfo>;
+    fn list(&self) -> Vec<SessionInfo>;
+}
+
+impl TerminalHost for PtyHost {
+    fn spawn(&self, plan: LaunchPlan) -> Result<SessionInfo> {
+        PtyHost::spawn(self, plan)
+    }
+
+    fn attach(&self, id: &SessionId, sink: OutputSink) -> Result<AttachmentId> {
+        PtyHost::attach(self, id, sink)
+    }
+
+    fn detach(&self, id: &SessionId, attachment: AttachmentId) -> Result<()> {
+        PtyHost::detach(self, id, attachment)
+    }
+
+    fn write(&self, id: &SessionId, data: &[u8]) -> Result<()> {
+        PtyHost::write(self, id, data)
+    }
+
+    fn paste(&self, id: &SessionId, text: &str) -> Result<()> {
+        PtyHost::paste(self, id, text)
+    }
+
+    fn resize(&self, id: &SessionId, size: TermSize) -> Result<()> {
+        PtyHost::resize(self, id, size)
+    }
+
+    fn kill(&self, id: &SessionId) -> Result<()> {
+        PtyHost::kill(self, id)
+    }
+
+    fn remove(&self, id: &SessionId) -> Result<()> {
+        PtyHost::remove(self, id)
+    }
+
+    fn info(&self, id: &SessionId) -> Result<SessionInfo> {
+        PtyHost::info(self, id)
+    }
+
+    fn list(&self) -> Vec<SessionInfo> {
+        PtyHost::list(self)
     }
 }
 

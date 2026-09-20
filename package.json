@@ -20,7 +20,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint:windows": "cargo clippy -p pty-host --all-targets --target x86_64-pc-windows-msvc -- -D warnings",
+    "lint:windows": "cargo clippy -p pty-host -p pty-ipc --all-targets --target x86_64-pc-windows-msvc -- -D warnings",
     "bindings": "cargo test -p yardsort export_bindings",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test"
   },

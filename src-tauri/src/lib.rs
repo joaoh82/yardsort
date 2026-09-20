@@ -6,6 +6,7 @@
 mod assist;
 mod changes;
 mod commands;
+mod daemon;
 #[cfg(target_os = "linux")]
 mod display;
 mod env;
@@ -15,6 +16,7 @@ mod harness;
 mod legacy;
 mod preflight;
 mod projects;
+mod quit;
 mod sessions;
 mod settings;
 mod state;
@@ -23,6 +25,7 @@ mod terminal;
 mod updates;
 mod workspaces;
 
+pub use daemon::run_daemon_and_exit_if_asked;
 pub use env::print_env_and_exit_if_asked;
 
 use tauri::Manager;
@@ -79,6 +82,9 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             updates::update_check,
             updates::update_install,
             terminal::env_info,
+            daemon::daemon_status,
+            quit::app_quit,
+            quit::quit_cancelled,
             terminal::pty_spawn,
             terminal::pty_attach,
             terminal::pty_detach,
@@ -90,7 +96,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             terminal::PtyHostEvent,
-            changes::commands::WorkspaceFilesChanged
+            changes::commands::WorkspaceFilesChanged,
+            quit::QuitRequested
         ])
 }
 
@@ -133,21 +140,17 @@ pub fn run() {
             #[cfg(not(target_os = "linux"))]
             let _ = payload;
         })
+        // Agents outlive the window now, so closing it is a decision, not a side effect.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if !quit::may_close_now(window.app_handle()) {
+                    api.prevent_close();
+                }
+            }
+        })
         .setup(move |app| {
             builder.mount_events(app);
 
-            let handle = app.handle().clone();
-            let host = pty_host::PtyHost::new(std::sync::Arc::new(move |event| {
-                // Settle the record first, so a client reacting to the event reads the truth.
-                if let pty_host::HostEvent::Exited { id, exit } = &event {
-                    if let Some(state) = handle.try_state::<state::AppState>() {
-                        let _ = state
-                            .store
-                            .end_session_by_pty(&id.0, Some(i64::from(exit.code)));
-                    }
-                }
-                let _ = terminal::PtyHostEvent(event).emit(&handle);
-            }));
             // `YARDSORT_DATA_DIR` keeps experiments and tests away from the real database (and
             // settings, which then sit next to it instead of in the OS config directory).
             let profile = legacy::env_var_os("DATA_DIR").map(std::path::PathBuf::from);
@@ -171,12 +174,38 @@ pub fn run() {
             let database = data_dir.join("yardsort.db");
             let store = store::Store::open(&database)
                 .map_err(|e| format!("cannot open {}: {e}", database.display()))?;
-            // Nothing is running yet: sessions that claim to be died with the previous run.
-            store
-                .end_interrupted_sessions()
-                .map_err(|e| format!("cannot tidy session records: {e}"))?;
             let settings = settings::SettingsFile::load(config_dir.join("settings.toml"));
-            app.manage(state::AppState::new(host, store, settings));
+
+            // Find the daemon for this profile, or start one. Agents from a previous run of the
+            // app are still in it, which is why this comes before the records are settled.
+            let handle = app.handle().clone();
+            let connected = daemon::connect(
+                &data_dir,
+                std::sync::Arc::new(move |event| {
+                    // Settle the record first, so a client reacting to the event reads the truth.
+                    if let pty_host::HostEvent::Exited { id, exit } = &event {
+                        if let Some(state) = handle.try_state::<state::AppState>() {
+                            let _ = state
+                                .store
+                                .end_session_by_pty(&id.0, Some(i64::from(exit.code)));
+                        }
+                    }
+                    let _ = terminal::PtyHostEvent(event).emit(&handle);
+                }),
+            );
+            // Rows still marked running whose process is *not* among these died with the
+            // previous run; the rest are conversations that never stopped.
+            let alive: Vec<String> = connected
+                .host
+                .list()
+                .into_iter()
+                .map(|session| session.id.0)
+                .collect();
+            store
+                .end_interrupted_sessions(&alive)
+                .map_err(|e| format!("cannot tidy session records: {e}"))?;
+
+            app.manage(state::AppState::new(connected, store, settings));
 
             // Warm the login-shell environment now, so the first terminal doesn't wait for it.
             let handle = app.handle().clone();

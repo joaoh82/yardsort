@@ -2,9 +2,10 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use pty_host::{AttachmentId, HostError, HostEvent, LaunchPlan, SessionId, SessionInfo, TermSize};
+use pty_host::{
+    AttachmentId, HostError, HostEvent, LaunchPlan, PendingPrompt, SessionId, SessionInfo, TermSize,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
@@ -195,7 +196,8 @@ pub fn settle_record(state: &AppState, session: &SessionInfo) {
     }
 }
 
-/// Spawn a resolved launch and, if its prompt travels over stdin, arrange for the delivery.
+/// Spawn a resolved launch. A prompt that travels over stdin rides along in the plan, and the
+/// host types it in once the program is ready — nothing here has to stay alive to see it land.
 pub fn start(
     state: &AppState,
     resolved: ResolvedLaunch,
@@ -204,11 +206,8 @@ pub fn start(
 ) -> IpcResult<SessionInfo> {
     let mut plan = launch_plan(&state.env(), resolved.program, resolved.args, cwd, size)?;
     plan.labels = resolved.labels;
-    let session = state.host.spawn(plan)?;
-    if let Some(prompt) = resolved.paste_when_ready {
-        deliver_prompt(Arc::clone(&state.host), session.id.clone(), prompt);
-    }
-    Ok(session)
+    plan.prompt = resolved.paste_when_ready;
+    Ok(state.host.spawn(plan)?)
 }
 
 type Labels = std::collections::BTreeMap<String, String>;
@@ -248,11 +247,6 @@ pub fn title_from_prompt(prompt: Option<&str>) -> String {
         title.push('…');
     }
     title
-}
-
-pub struct PendingPrompt {
-    pub text: String,
-    pub quiet_ms: u32,
 }
 
 /// The longest prompt we will put on a command line. Beyond this the OS may refuse to start the
@@ -324,66 +318,6 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
             }
         }
     })
-}
-
-/// How long to wait for a harness to become ready before pasting anyway.
-const READY_TIMEOUT: Duration = Duration::from_secs(20);
-const READY_POLL: Duration = Duration::from_millis(100);
-/// Pause between pasting and pressing Enter; some TUIs drop an Enter that arrives with the paste.
-const SUBMIT_DELAY: Duration = Duration::from_millis(150);
-
-#[derive(Debug, PartialEq, Eq)]
-enum Readiness {
-    Ready,
-    /// Still running at the timeout; we paste anyway rather than lose the prompt.
-    TimedOut,
-    Gone,
-}
-
-/// Wait until the program has printed something and then stayed quiet for `quiet` — a TUI that
-/// has finished drawing itself and is waiting for input. We never parse what it printed.
-/// `observe` reports `(has_output, idle)` or `None` once the session is over.
-fn wait_until_ready(
-    quiet: Duration,
-    timeout: Duration,
-    poll: Duration,
-    mut observe: impl FnMut() -> Option<(bool, Duration)>,
-) -> Readiness {
-    let started = Instant::now();
-    loop {
-        match observe() {
-            None => return Readiness::Gone,
-            Some((true, idle)) if idle >= quiet => return Readiness::Ready,
-            Some(_) if started.elapsed() >= timeout => return Readiness::TimedOut,
-            Some(_) => std::thread::sleep(poll),
-        }
-    }
-}
-
-/// Paste `prompt` into a session once it is ready, then submit it. Runs on its own thread.
-fn deliver_prompt(host: Arc<pty_host::PtyHost>, id: SessionId, prompt: PendingPrompt) {
-    let spawned = std::thread::Builder::new()
-        .name("prompt-delivery".into())
-        .spawn(move || {
-            let quiet = Duration::from_millis(u64::from(prompt.quiet_ms));
-            let readiness = wait_until_ready(quiet, READY_TIMEOUT, READY_POLL, || {
-                let info = host.info(&id).ok()?;
-                matches!(info.state, pty_host::SessionState::Running).then(|| {
-                    (
-                        info.has_output,
-                        Duration::from_millis(u64::from(info.idle_ms)),
-                    )
-                })
-            });
-            if readiness == Readiness::Gone || host.paste(&id, &prompt.text).is_err() {
-                return;
-            }
-            std::thread::sleep(SUBMIT_DELAY);
-            let _ = host.write(&id, b"\r");
-        });
-    if let Err(error) = spawned {
-        eprintln!("could not start prompt delivery: {error}");
-    }
 }
 
 /// Stream a session into `output`: first a snapshot that repaints the terminal, then live bytes.
@@ -510,6 +444,7 @@ fn launch_plan(
         clear_env: env.replaces_inherited(),
         size,
         labels: Default::default(),
+        prompt: None,
     })
 }
 
@@ -643,85 +578,6 @@ mod tests {
             blank.paste_when_ready.is_none(),
             "nothing to say means nothing to paste"
         );
-    }
-
-    /// The whole path, against a real program in a real PTY: a "harness" that draws a prompt,
-    /// then reads a line. The message must arrive only after it has gone quiet, and be submitted.
-    #[cfg(unix)]
-    #[test]
-    fn a_pasted_prompt_reaches_the_program_and_is_submitted() {
-        use std::sync::Mutex;
-        let host = Arc::new(pty_host::PtyHost::new(Arc::new(|_| {})));
-        let session = host
-            .spawn(LaunchPlan {
-                program: "/bin/sh".into(),
-                args: vec![
-                    "-c".into(),
-                    "printf 'starting'; sleep 0.3; printf ' > '; read line; echo \"got:[$line]\""
-                        .into(),
-                ],
-                cwd: None,
-                env: vec![],
-                clear_env: false,
-                size: SIZE,
-                labels: Default::default(),
-            })
-            .unwrap();
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let sink = Arc::clone(&seen);
-        host.attach(
-            &session.id,
-            Box::new(move |bytes| {
-                sink.lock().unwrap().extend_from_slice(bytes);
-                true
-            }),
-        )
-        .unwrap();
-
-        let prompt = PendingPrompt {
-            text: "fix the bug".into(),
-            quiet_ms: 600,
-        };
-        deliver_prompt(Arc::clone(&host), session.id.clone(), prompt);
-
-        let deadline = Instant::now() + Duration::from_secs(15);
-        loop {
-            let text = String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
-            if text.contains("got:[fix the bug]") {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "the prompt never arrived: {text:?}"
-            );
-            std::thread::sleep(Duration::from_millis(30));
-        }
-    }
-
-    #[test]
-    fn readiness_is_output_followed_by_quiet() {
-        let ms = Duration::from_millis;
-        let run = |script: Vec<Option<(bool, u64)>>, timeout: u64| {
-            let mut steps = script.into_iter();
-            let mut last = None;
-            wait_until_ready(ms(500), ms(timeout), ms(1), move || {
-                last = steps.next().or(last);
-                last.flatten().map(|(out, idle)| (out, ms(idle)))
-            })
-        };
-        // Silent at first, then drawing (idle resets), then quiet long enough.
-        let drawing = vec![
-            Some((false, 900)),
-            Some((true, 10)),
-            Some((true, 200)),
-            Some((true, 600)),
-        ];
-        assert_eq!(run(drawing, 5_000), Readiness::Ready);
-        // Quiet from the start does not count: nothing was ever printed.
-        assert_eq!(run(vec![Some((false, 10_000))], 30), Readiness::TimedOut);
-        // Never settles: give up waiting rather than lose the prompt.
-        assert_eq!(run(vec![Some((true, 5))], 30), Readiness::TimedOut);
-        assert_eq!(run(vec![Some((true, 5)), None], 5_000), Readiness::Gone);
     }
 
     #[cfg(not(windows))]

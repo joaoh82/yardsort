@@ -24,6 +24,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 pty-host = { path = "../crates/pty-host", features = ["specta"] }
+pty-ipc = { path = "../crates/pty-ipc" }
 which = "8"
 rusqlite = { version = "0.40", features = ["bundled"] }
 dunce = "1"
@@ -47,6 +48,10 @@ serde_json = "1"
 specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+
+# `setsid` and `flock`, for putting the daemon out of reach of signals meant for the app.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

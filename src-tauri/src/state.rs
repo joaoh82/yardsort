@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use pty_host::PtyHost;
+use pty_host::TerminalHost;
 use tauri::{AppHandle, Manager};
 
 use crate::assist::Assist;
@@ -12,8 +12,12 @@ use crate::store::Store;
 
 /// Everything the commands share. Managed by Tauri, created in `setup`.
 pub struct AppState {
-    /// Shared with the threads that deliver prompts over stdin.
-    pub host: Arc<PtyHost>,
+    /// The PTY host: the daemon over a local socket, or an in-process host under
+    /// `YARDSORT_NO_DAEMON`. Nothing here knows or cares which.
+    pub host: Arc<dyn TerminalHost>,
+    /// The same object as `host` when there is a daemon, for what only a daemon can be asked.
+    pub daemon_client: Option<Arc<pty_ipc::DaemonClient>>,
+    pub daemon: crate::daemon::DaemonStatus,
     pub store: Store,
     pub settings: SettingsFile,
     /// Assist: the API key store and the answers already given. See `crate::assist`.
@@ -26,9 +30,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(host: PtyHost, store: Store, settings: SettingsFile) -> Self {
+    pub fn new(connected: crate::daemon::Connected, store: Store, settings: SettingsFile) -> Self {
         Self {
-            host: Arc::new(host),
+            host: connected.host,
+            daemon_client: connected.client,
+            daemon: connected.status,
             store,
             settings,
             assist: Assist::default(),
