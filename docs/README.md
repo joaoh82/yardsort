@@ -18,6 +18,14 @@ few minutes.
 | [Keyboard shortcuts](guide/shortcuts.md)                | Every shortcut, and why they look the way they do                         |
 | [Troubleshooting](guide/troubleshooting.md)             | "Command not found", blank windows, where your data lives                 |
 
+## Getting help
+
+- Something broken or missing? [Open an issue](https://github.com/joaoh82/yardsort/issues/new/choose) —
+  see [Troubleshooting](guide/troubleshooting.md) first for the common ones.
+- Anything else — a question, help getting started, a word about what you are building — write to
+  **[hello@yardsort.sh](mailto:hello@yardsort.sh)**.
+- Found a vulnerability? Report it privately: [SECURITY.md](../SECURITY.md).
+
 ## Building and contributing
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — set up a dev environment, run the checks, send a change

@@ -3,6 +3,11 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- A contact address for questions and support, `hello@yardsort.sh`, on the website and in
+  the docs.
+
 ## 0.4.0
 
 - **Assist (optional).** With a TypeSafe API key of your own, Yardsort can check a workspace's

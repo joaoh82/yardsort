@@ -107,3 +107,13 @@ branches and worktrees are not touched.
 [Open an issue](https://github.com/joaoh82/yardsort/issues/new/choose) with your OS, the
 Yardsort version (status bar, bottom right), the agent and its version, and what you did. If
 the app misbehaves at startup, running it from a terminal shows its log.
+
+Please report a security problem privately instead — GitHub's
+[Report a vulnerability](https://github.com/joaoh82/yardsort/security/advisories/new) form, as
+described in [SECURITY.md](../../SECURITY.md).
+
+## Still stuck
+
+If none of this helped, or your question is not a bug, write to
+**[hello@yardsort.sh](mailto:hello@yardsort.sh)**. Say which OS and Yardsort version you are on,
+and what you were trying to do.
