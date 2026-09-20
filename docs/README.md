@@ -13,6 +13,7 @@ few minutes.
 | [Terminals & sessions](guide/terminals-and-sessions.md) | Tabs, shells, status dots, notifications, resume and fork                 |
 | [Changes & files](guide/changes-and-files.md)           | Reviewing what an agent did: changed files, diffs, the file tree          |
 | [Settings & harnesses](guide/settings.md)               | Configuring agents, adding your own, worktree folder, editor              |
+| [Assist](guide/assist.md)                               | Optional AI checks on changed files and suggestions in the composer       |
 | [Updates](guide/updates.md)                             | How Yardsort finds and installs new versions, and which copies can        |
 | [Keyboard shortcuts](guide/shortcuts.md)                | Every shortcut, and why they look the way they do                         |
 | [Troubleshooting](guide/troubleshooting.md)             | "Command not found", blank windows, where your data lives                 |

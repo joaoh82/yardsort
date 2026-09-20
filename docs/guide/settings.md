@@ -40,6 +40,7 @@ its command was found on your `PATH`.
 | **Models / Efforts** | Suggestions for the composer's pickers. Models accept free text regardless. Leave efforts empty to hide that picker.                                                                                                                                     |
 | **Prompt transport** | **argv** passes the prompt as an argument — simple and reliable. **stdin** starts the agent first and pastes the prompt once it has been quiet for the given time — for agents with no prompt argument. Very long prompts switch to stdin automatically. |
 | **Session id**       | **assigned**: Yardsort chooses the id, so any session can be resumed. **latest in folder**: the agent chooses, and only its most recent conversation in a workspace can be continued.                                                                    |
+| **Good at**          | Optional, in your words: what this harness suits. Used only by [Assist](assist.md), to suggest a harness for the message you are typing. Yardsort never fills this in for you.                                                                           |
 | **Enabled**          | Disabled harnesses stay configured but are not offered.                                                                                                                                                                                                  |
 
 ### How arguments work
@@ -66,6 +67,14 @@ still reach every field you left alone. **Restore defaults** discards your chang
 first message, set _Prompt args_ (or the stdin transport); fill _Resume args_ / _Fork args_ if it
 can continue conversations. Custom harnesses appear in the composer and the tab bar like the
 built-in ones. **Delete** removes one.
+
+## Assist
+
+Optional AI help from TypeSafe's Jev model: badges on changed files, and suggestions in the
+composer. It is off until you enter your own API key and tick a feature, and each feature says
+exactly what it sends. The key is kept in your system credential store, never in this file.
+
+See [Assist](assist.md) for the whole feature, including what happens when it is unavailable.
 
 ## Workspaces
 

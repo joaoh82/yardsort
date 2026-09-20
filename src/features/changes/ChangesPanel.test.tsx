@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChangeSet, FileChange } from "@/lib/ipc";
+import type { AssistStatus, ChangeSet, FileChange, FileReview } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   uiStateSave: vi.fn(),
@@ -12,6 +12,8 @@ const core = vi.hoisted(() => ({
   workspaceWatch: vi.fn(),
   openInEditor: vi.fn(),
   onWorkspaceFilesChanged: vi.fn(),
+  assistStatus: vi.fn(),
+  assistReview: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -25,6 +27,7 @@ vi.mock("./CodeView", () => ({
   ),
 }));
 
+import { useAssistStore } from "@/stores/assist";
 import { useChangesStore } from "@/stores/changes";
 import { useProjectsStore } from "@/stores/projects";
 import { ChangesPanel } from "./ChangesPanel";
@@ -265,5 +268,94 @@ describe("ChangesPanel", () => {
     render(<ChangesPanel />);
     expect(await screen.findByText("Select a workspace to see its changes.")).toBeInTheDocument();
     expect(core.workspaceChanges).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChangesPanel with Assist", () => {
+  const status = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
+    keySource: "keychain",
+    keyHint: "…1234",
+    problem: null,
+    reviewChanges: true,
+    suggestInComposer: false,
+    thresholds: {
+      flagAtPercent: 70,
+      offTaskAtPercent: 60,
+      suggestAtPercent: 50,
+      defaults: [70, 60, 50],
+      range: [5, 95],
+    },
+    model: "jev-1.13.0",
+    ...extra,
+  });
+  const reviewed = (extra: Partial<FileReview>): FileReview => ({
+    path: "src/app.ts",
+    scope: "uncommitted",
+    relevance: "direct",
+    flags: [],
+    notChecked: null,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    core.workspaceWatch.mockResolvedValue(undefined);
+    core.onWorkspaceFilesChanged.mockImplementation(() => Promise.resolve(() => {}));
+    core.assistStatus.mockResolvedValue(status());
+    setChanges({
+      uncommitted: [change("src/app.ts"), change("ci.yml"), change(".env")],
+    });
+    useProjectsStore.setState({ selectedWorkspaceId: "w1", composingProjectId: null, ui: {} });
+    useChangesStore.setState({ workspaceId: null, changes: null, viewing: null, error: null });
+    useAssistStore.setState({
+      status: status(),
+      workspaceId: "w1",
+      reviewing: false,
+      error: null,
+      review: {
+        task: "Fix the login redirect",
+        model: "jev-1.13.0",
+        problem: null,
+        files: [
+          reviewed({ path: "src/app.ts" }),
+          reviewed({ path: "ci.yml", relevance: "unrelated", flags: ["disablesChecks"] }),
+          reviewed({ path: ".env", relevance: null, flags: ["credentialsFile"] }),
+        ],
+      },
+    });
+  });
+
+  it("badges the files Assist flagged and leaves the others alone", async () => {
+    await renderPanel();
+    const row = (path: string) => screen.getByTitle(path).textContent;
+
+    expect(row("ci.yml")).toContain("off-task");
+    expect(row("ci.yml")).toContain("checks");
+    expect(row(".env")).toContain("credentials");
+    expect(row("src/app.ts")).not.toContain("off-task");
+    expect(screen.getByText(/Assist flagged 2 of 3 files/)).toBeInTheDocument();
+  });
+
+  it("checks again on demand, and says what stopped it", async () => {
+    core.assistReview.mockResolvedValue({
+      files: [],
+      task: null,
+      model: "jev-1.13.0",
+      problem: null,
+    });
+    const user = await renderPanel();
+    await user.click(screen.getByRole("button", { name: "Check now" }));
+    expect(core.assistReview).toHaveBeenCalledWith("w1");
+
+    useAssistStore.setState({ error: "TypeSafe is rate limiting this API key." });
+    expect(await screen.findByRole("alert")).toHaveTextContent("rate limiting");
+  });
+
+  it("shows nothing at all while the check is switched off", async () => {
+    core.assistStatus.mockResolvedValue(status({ reviewChanges: false }));
+    useAssistStore.setState({ status: status({ reviewChanges: false }), review: null });
+    await renderPanel();
+    expect(screen.queryByRole("button", { name: "Check now" })).not.toBeInTheDocument();
+    expect(screen.getByTitle("ci.yml").textContent).not.toContain("off-task");
   });
 });

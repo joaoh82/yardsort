@@ -3,6 +3,7 @@
 //! The frontend holds no truth: state lives here and the webview renders it. `commands` is the
 //! whole IPC surface and stays thin — real work belongs in the domain modules.
 
+mod assist;
 mod changes;
 mod commands;
 #[cfg(target_os = "linux")]
@@ -60,6 +61,13 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             changes::commands::workspace_file,
             changes::commands::workspace_watch,
             changes::commands::open_in_editor,
+            assist::commands::assist_status,
+            assist::commands::assist_save_key,
+            assist::commands::assist_forget_key,
+            assist::commands::assist_test_key,
+            assist::commands::assist_save_settings,
+            assist::commands::assist_review,
+            assist::commands::assist_suggest,
             sessions::sessions_list,
             sessions::session_resume,
             sessions::session_fork,

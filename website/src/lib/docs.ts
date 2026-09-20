@@ -26,6 +26,7 @@ export const DOCS_NAV: DocSection[] = [
       { slug: "guide/terminals-and-sessions", title: "Terminals & sessions" },
       { slug: "guide/changes-and-files", title: "Changes & files" },
       { slug: "guide/settings", title: "Settings & harnesses" },
+      { slug: "guide/assist", title: "Assist" },
       { slug: "guide/updates", title: "Updates" },
       { slug: "guide/shortcuts", title: "Shortcuts" },
       { slug: "guide/troubleshooting", title: "Troubleshooting" },

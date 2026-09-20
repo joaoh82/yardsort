@@ -23,7 +23,7 @@ pub struct WorkspaceFilesChanged {
     pub workspace_id: String,
 }
 
-fn workspace(state: &AppState, id: &str) -> IpcResult<(WorkspaceRow, PathBuf)> {
+pub(crate) fn workspace(state: &AppState, id: &str) -> IpcResult<(WorkspaceRow, PathBuf)> {
     let row = state
         .store
         .workspace(id)?
