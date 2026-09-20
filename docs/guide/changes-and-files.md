@@ -28,6 +28,13 @@ lines in green, and the exact characters that changed highlighted within them.
 
 Binary files and very large files are listed but not rendered.
 
+### Assist badges
+
+With [Assist](assist.md) switched on, files carry small badges — **off-task**, **secret**,
+**tests**, **checks**, **credentials** — shortly after an agent stops writing, and a line above
+the list says when they were last checked. Assist is off by default and needs an API key of your
+own.
+
 ## Files
 
 The workspace's folder as a tree. Click a folder to open it, a file to read it (with syntax

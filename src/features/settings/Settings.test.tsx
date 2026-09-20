@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { HarnessDef, HarnessInfo, SettingsInfo } from "@/lib/ipc";
+import type { AssistStatus, HarnessDef, HarnessInfo, SettingsInfo } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   harnessesList: vi.fn(),
@@ -12,6 +12,12 @@ const core = vi.hoisted(() => ({
   settingsGet: vi.fn(),
   settingsSaveWorkspaces: vi.fn(),
   settingsSaveGeneral: vi.fn(),
+  assistStatus: vi.fn(),
+  assistSaveKey: vi.fn(),
+  assistForgetKey: vi.fn(),
+  assistTestKey: vi.fn(),
+  assistSaveSettings: vi.fn(),
+  assistReview: vi.fn(),
   ptyClose: vi.fn(),
 }));
 const native = vi.hoisted(() => ({ pickFolder: vi.fn() }));
@@ -24,6 +30,7 @@ vi.mock("@/features/terminal/TerminalView", () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => <div>terminal for {sessionId}</div>,
 }));
 
+import { useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
 import { SettingsDialog } from "./SettingsDialog";
 import { useAppStore } from "@/stores/app";
@@ -71,6 +78,27 @@ const settings: SettingsInfo = {
   problem: null,
 };
 
+const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
+  keySource: "none",
+  keyHint: null,
+  problem: null,
+  reviewChanges: false,
+  suggestInComposer: false,
+  thresholds: {
+    flagAtPercent: 70,
+    offTaskAtPercent: 60,
+    suggestAtPercent: 50,
+    defaults: [70, 60, 50],
+    range: [5, 95],
+  },
+  model: "jev-1.13.0",
+  ...extra,
+});
+
+/** A key already saved in the credential store. */
+const withKey = (extra: Partial<AssistStatus> = {}): AssistStatus =>
+  assistStatus({ keySource: "keychain", keyHint: "…1234", ...extra });
+
 const savedDef = () => core.harnessSave.mock.calls.at(-1)![0] as HarnessDef;
 
 async function openSettings() {
@@ -92,6 +120,8 @@ describe("Settings", () => {
       problem: null,
     }));
     core.settingsGet.mockResolvedValue(settings);
+    core.assistStatus.mockResolvedValue(assistStatus());
+    useAssistStore.setState({ status: null });
     core.ptyClose.mockResolvedValue(undefined);
     useHarnessStore.setState({ harnesses: [], loaded: false });
   });
@@ -374,6 +404,107 @@ describe("Settings", () => {
     cleanup(); // closing unmounts the dialog
     expect(terminal).toHaveFocus();
     terminal.remove();
+  });
+
+  describe("assist", () => {
+    const openAssist = async () => {
+      const opened = await openSettings();
+      await opened.user.click(screen.getByRole("tab", { name: "Assist" }));
+      await screen.findByLabelText("TypeSafe API key");
+      return opened;
+    };
+
+    it("takes a key, checks it with TypeSafe, and never shows it again", async () => {
+      core.assistSaveKey.mockResolvedValue(withKey());
+      const { user } = await openAssist();
+      expect(screen.getByRole("checkbox", { name: /Check changed files/ })).toBeDisabled();
+
+      const field = screen.getByLabelText("TypeSafe API key");
+      await user.type(field, "ts-live-abcd1234");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(core.assistSaveKey).toHaveBeenCalledWith("ts-live-abcd1234");
+      expect(field).toHaveValue("");
+      expect(await screen.findByText(/Saved in your system credential store/)).toHaveTextContent(
+        "…1234",
+      );
+      expect(screen.getByRole("checkbox", { name: /Check changed files/ })).toBeEnabled();
+    });
+
+    it("explains a key TypeSafe will not take, and keeps the features off", async () => {
+      core.assistSaveKey.mockRejectedValue({
+        code: "assist_bad_key",
+        message: "TypeSafe did not accept the API key.",
+      });
+      const { user } = await openAssist();
+      await user.type(screen.getByLabelText("TypeSafe API key"), "nope");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("did not accept the API key");
+      expect(screen.getByRole("checkbox", { name: /Check changed files/ })).toBeDisabled();
+    });
+
+    it("switches each feature on by itself, and says what each one sends", async () => {
+      core.assistStatus.mockResolvedValue(withKey());
+      core.assistSaveSettings.mockResolvedValue(withKey({ reviewChanges: true }));
+      const { user } = await openAssist();
+
+      await user.click(screen.getByRole("checkbox", { name: /Check changed files/ }));
+      expect(core.assistSaveSettings).toHaveBeenCalledWith(true, false, withKey().thresholds);
+      expect(screen.getByText(/Sends the diff of each changed file/)).toBeInTheDocument();
+      expect(screen.getByText(/Sends the message you are typing/)).toBeInTheDocument();
+    });
+
+    it("saves the thresholds and re-reads what Jev already answered", async () => {
+      core.assistStatus.mockResolvedValue(withKey({ reviewChanges: true }));
+      core.assistSaveSettings.mockResolvedValue(withKey({ reviewChanges: true }));
+      core.assistReview.mockResolvedValue({
+        files: [],
+        task: null,
+        model: "jev-1.13.0",
+        problem: null,
+      });
+      useAssistStore.setState({ workspaceId: "w1", reviewing: false });
+      const { user } = await openAssist();
+
+      const field = screen.getByLabelText("Flag a risky change at (%)");
+      expect(field).toHaveValue(70);
+      await user.clear(field);
+      await user.type(field, "40");
+      await user.click(screen.getByRole("button", { name: "Save thresholds" }));
+
+      expect(core.assistSaveSettings).toHaveBeenCalledWith(
+        true,
+        false,
+        expect.objectContaining({ flagAtPercent: 40, offTaskAtPercent: 60 }),
+      );
+      // Re-reading is free: the badges are recomputed from answers already given.
+      await waitFor(() => expect(core.assistReview).toHaveBeenCalledWith("w1"));
+    });
+
+    it("refuses a threshold the core will not take, and can go back to the defaults", async () => {
+      core.assistStatus.mockResolvedValue(withKey({}));
+      core.assistSaveSettings.mockRejectedValue({
+        code: "invalid_thresholds",
+        message: "Thresholds must be between 5% and 95%.",
+      });
+      const { user } = await openAssist();
+      expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
+
+      const field = screen.getByLabelText("Call a file off-task at (%)");
+      await user.clear(field);
+      await user.type(field, "99");
+      await user.click(screen.getByRole("button", { name: "Save thresholds" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("between 5% and 95%");
+      expect(screen.getByRole("button", { name: "Restore defaults" })).toBeEnabled();
+    });
+
+    it("says when the credential store cannot be used", async () => {
+      const problem = "The system credential store is not available. Set TYPESAFE_API_KEY.";
+      core.assistStatus.mockResolvedValue(assistStatus({ keySource: "none", problem }));
+      await openAssist();
+      expect(await screen.findByRole("alert")).toHaveTextContent(problem);
+    });
   });
 
   it("closes on Escape and on Done", async () => {

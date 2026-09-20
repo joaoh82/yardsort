@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use pty_host::PtyHost;
 use tauri::{AppHandle, Manager};
 
+use crate::assist::Assist;
 use crate::env::ShellEnv;
 use crate::error::{IpcError, IpcResult};
 use crate::settings::SettingsFile;
@@ -15,6 +16,8 @@ pub struct AppState {
     pub host: Arc<PtyHost>,
     pub store: Store,
     pub settings: SettingsFile,
+    /// Assist: the API key store and the answers already given. See `crate::assist`.
+    pub assist: Assist,
     /// Held while catching up with git, so overlapping project listings reconcile one at a time.
     pub reconciling: Mutex<()>,
     /// The file watcher of the workspace on screen, if any.
@@ -28,6 +31,7 @@ impl AppState {
             host: Arc::new(host),
             store,
             settings,
+            assist: Assist::default(),
             reconciling: Mutex::new(()),
             watcher: Mutex::new(None),
             env: Mutex::new(None),

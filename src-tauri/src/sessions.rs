@@ -218,6 +218,8 @@ fn continue_session(
             title: &row.title,
             forked_from: Some(&row.id),
             pty_session_id: &session.id.0,
+            // A fork continues a conversation; nothing new was asked.
+            prompt: None,
         })?;
     } else {
         state.store.mark_session_running(&row.id, &session.id.0)?;

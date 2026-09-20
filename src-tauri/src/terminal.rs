@@ -174,6 +174,7 @@ pub fn spawn_in_workspace(
             title: &draft.title,
             forked_from: draft.forked_from.as_deref(),
             pty_session_id: &session.id.0,
+            prompt: draft.prompt.as_deref(),
         })?;
         settle_record(state, &session);
     }
@@ -233,6 +234,8 @@ pub struct RecordDraft {
     pub harness_session_id: Option<String>,
     pub title: String,
     pub forked_from: Option<String>,
+    /// The whole first message, if there was one.
+    pub prompt: Option<String>,
 }
 
 /// The start of the first message, as a one-line title.
@@ -305,6 +308,7 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
                 harness_session_id: session_id,
                 title: title_from_prompt(prompt.as_deref()),
                 forked_from: None,
+                prompt: prompt.clone(),
             };
             ResolvedLaunch {
                 program: Some(def.command.clone()),

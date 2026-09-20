@@ -35,6 +35,13 @@ thiserror = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
+# Assist talks to TypeSafe over the TLS stack the updater already brings.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Backoff between retries, and a few files reviewed at once.
+tokio = { version = "1", features = ["time", "rt"] }
+# The Assist API key lives in the OS credential store, never in settings.toml.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 specta = "=2.0.0-rc.25"

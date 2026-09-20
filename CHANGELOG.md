@@ -5,6 +5,16 @@ has the downloads and the full commit lists.
 
 ## 0.3.3
 
+- **Assist (optional).** With a TypeSafe API key of your own, Yardsort can check a workspace's
+  changed files against what the agent was asked to do — badging files that look off-task, or that
+  add a secret, weaken a test or switch a check off — and suggest a harness and an effort for the
+  message you are typing. Off until you enter a key and tick a feature; the key is kept in your
+  system credential store, never in `settings.toml`. Agent output is still never read. See
+  [Assist](docs/guide/assist.md).
+- Settings → Harnesses gains **Good at**: your own description of what a harness suits, used only
+  by Assist's composer suggestion.
+- Assist's thresholds — how sure Jev must be before a badge or a suggestion appears — are settings,
+  with **Restore defaults**. Changing one re-reads answers already given instead of asking again.
 - **Linux AppImage: nothing from the replaced version follows an update.** After updating in place,
   terminals still carried the previous AppImage's `LD_LIBRARY_PATH` and friends — the new app is
   started by the old one, so it inherits them — and git kept loading libraries out of the version

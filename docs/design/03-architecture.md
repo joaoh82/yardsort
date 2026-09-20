@@ -17,6 +17,7 @@
 │   ├─ pty          PTY host: sessions, I/O pump, snapshots (→daemon)│
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
+│   ├─ assist       optional Jev judgments: diffs, composer hints    │
 │   └─ store        SQLite (state) + settings file                   │
 └────────────────────────────────────────────────────────────────────┘
         │ spawns                      │ shells out
@@ -43,6 +44,7 @@ UI renders it and sends intents. This keeps the door open for a headless core la
 | Paths       | `directories` crate                                                                                                             | Correct config/data dirs per OS.                                                                                                                |
 | FS watching | `notify` + debouncer                                                                                                            | Cross-platform; honour `.gitignore` via the `ignore` crate.                                                                                     |
 | Diff view   | CodeMirror 6 merge view _(tentative)_                                                                                           | Much lighter than Monaco. See open questions.                                                                                                   |
+| Assist      | TypeSafe **Jev** over HTTP (`reqwest`, the updater's TLS stack); key in the OS credential store (`keyring`)                     | A judgment model answers typed questions, so there is no generated text to parse. The key must never reach `settings.toml`.                     |
 
 ## PTY & terminal data path
 
@@ -213,6 +215,40 @@ are looking at the terminal. Nothing is ever parsed out of the output.
 
 Live sessions themselves are not in the database — the PTY host owns them. Each carries a `workspace`
 label, which is how terminal tabs find their workspace after a webview reload.
+
+## Assist (optional, off by default)
+
+Where ordinary code cannot tell what a change _means_, Assist asks TypeSafe's **Jev** — a model
+that answers typed questions (a yes/no probability, one option out of a set, a level on a scale)
+and never generates text. Two features use it: badges on the change list, and composer
+suggestions. See [the guide](../guide/assist.md) for the user's view.
+
+Shape of it, and the reasons:
+
+- **Code owns the workflow.** git produces the diffs, `assist::review` asks one narrow question
+  per property, and the thresholds that turn a probability into a badge live in Rust. The model
+  decides nothing.
+- **It never touches the terminal.** Only git diffs, file paths, the workspace's first messages
+  and the composer's text are ever sent. Status, readiness and notifications still come from PTY
+  activity alone — see the principle in [01-vision](01-vision.md). Whether Jev may ever read a
+  screen to explain _why_ an agent went quiet is open question 16.
+- **Consent per feature.** `[assist]` in `settings.toml` holds one switch per feature, both
+  default false, and each switch names in the UI what it sends. No key, no requests.
+- **The key is not settings.** It lives in the OS credential store (`keyring`), with
+  `TYPESAFE_API_KEY` as the fallback for systems with no Secret Service. It crosses IPC inwards
+  only: the webview can set or forget it, never read it.
+- **Nothing is load-bearing.** Every failure degrades to "no badges": a bad key stops a review,
+  anything else leaves the files already judged in place. Answers are cached per file content, so
+  watching an agent work re-asks only about what changed.
+- **A file whose name says "credentials"** (`.env`, `*.pem`, `id_*`…) is flagged by ordinary code
+  and its contents are never sent. That check is a plain function with a plain test.
+- One request per file, six at a time, diffs truncated: Jev reads 32k tokens of state, and
+  [its documented weak spots](https://docs.typesafe.ai/model-jaggedness/jev-1.13) include large
+  states full of irrelevant detail.
+
+The model id is pinned (`jev-1.13.0`) rather than `jev-latest`, because the thresholds were chosen
+against a specific version. The wording of the questions carries a version too, so cached answers
+from older wording are not reused.
 
 ## Cross-platform notes & risks
 

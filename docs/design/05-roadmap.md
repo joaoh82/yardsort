@@ -187,6 +187,25 @@ the updater starts the new AppImage from the old process, so the replaced versio
 mounted — came through in the appended path variables. Any AppImage mount now counts as ours to
 drop.
 
+## M8 — Assist (optional AI judgments)
+
+Done, off by default, behind the user's own TypeSafe API key:
+
+- [x] `assist` module: a Jev client (retries, pinned model), the key in the OS credential store
+      with `TYPESAFE_API_KEY` as the fallback, and a per-feature switch in `settings.toml`.
+- [x] Changed files checked against the workspace's task, and for secrets, weakened tests and
+      disabled checks; badges on the change list, cached per diff.
+- [x] Composer suggestions: a harness (from the user's own "Good at" descriptions) and an effort
+      level, offered and never applied by themselves.
+- [x] Thresholds are settings (whole percentages, with "Restore defaults"); raw answers are
+      cached, so moving one re-reads instead of re-asking.
+- [ ] Threshold _defaults_ and question wording measured against real workspaces — see open
+      question 17.
+- [ ] Whether Assist may ever look at a terminal screen — see open question 16.
+
+_Exit:_ with no key, Yardsort behaves exactly as it did before; with one, a workspace that wrote
+to `ci.yml` while asked to fix a login bug says so before you read the diff.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

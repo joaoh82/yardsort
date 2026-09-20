@@ -51,9 +51,14 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
   never discards uncommitted changes without a second, explicit confirmation.
-- **Private by construction.** No account, no telemetry, no keys. Agents use their own logins;
-  Yardsort just starts them. Its one network request is a check for new versions, which you can
-  switch off.
+- **A second pair of eyes, if you want one.** [Assist](docs/guide/assist.md) can badge changed
+  files that look unrelated to the task, or that add a secret, weaken a test or switch a check
+  off, and suggest a harness for what you are typing. Off unless you bring your own TypeSafe API
+  key.
+- **Private by construction.** No account, no telemetry, no keys of ours. Agents use their own
+  logins; Yardsort just starts them. It talks to the network to check for new versions, which you
+  can switch off — and, only if you switch Assist on and add your own key, to ask TypeSafe about
+  your diffs.
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.

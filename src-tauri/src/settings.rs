@@ -8,6 +8,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
+use crate::assist::Thresholds;
 use crate::harness::HarnessOverride;
 
 pub const DEFAULT_BRANCH_PREFIX: &str = "ys";
@@ -18,6 +19,8 @@ pub struct Settings {
     #[serde(skip_serializing_if = "GeneralSettings::is_default")]
     pub general: GeneralSettings,
     pub workspaces: WorkspaceSettings,
+    #[serde(skip_serializing_if = "AssistSettings::is_default")]
+    pub assist: AssistSettings,
     /// Overrides of built-in harnesses, and whole custom ones. See [`HarnessOverride`].
     #[serde(rename = "harness", skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessOverride>,
@@ -49,6 +52,28 @@ impl Default for GeneralSettings {
 }
 
 impl GeneralSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Assist: small judgments by TypeSafe's Jev model. Each feature sends something off the machine,
+/// so each is off until the user turns it on. The API key is not here: it lives in the OS
+/// credential store (see `assist::key`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssistSettings {
+    /// Check each changed file against the workspace's task and for risky edits. Sends diffs.
+    pub review_changes: bool,
+    /// Suggest a harness and an effort in the composer. Sends the message being typed, and the
+    /// harnesses' "Good at" descriptions.
+    pub suggest_in_composer: bool,
+    /// How sure the model must be before Yardsort acts on an answer. See [`Thresholds`].
+    #[serde(flatten)]
+    pub thresholds: Thresholds,
+}
+
+impl AssistSettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -258,6 +283,32 @@ mod tests {
         assert_eq!(
             reloaded.harnesses[0].command.as_deref(),
             Some("/opt/claude")
+        );
+    }
+
+    #[test]
+    fn assist_switches_and_thresholds_round_trip_and_stay_out_of_the_file_until_changed() {
+        let (_dir, path) = file();
+        let settings = SettingsFile::load(path.clone());
+        assert_eq!(settings.get().assist.thresholds, Thresholds::default());
+
+        settings
+            .update(|s| {
+                s.assist.review_changes = true;
+                s.assist.thresholds.flag_at_percent = 80;
+            })
+            .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("review_changes = true"), "{text}");
+        assert!(text.contains("flag_at_percent = 80"), "{text}");
+
+        let reloaded = SettingsFile::load(path).get().assist;
+        assert!(reloaded.review_changes && !reloaded.suggest_in_composer);
+        assert_eq!(reloaded.thresholds.flag_at_percent, 80);
+        assert_eq!(
+            reloaded.thresholds.off_task_at_percent,
+            Thresholds::default().off_task_at_percent,
+            "a threshold nobody touched keeps the default"
         );
     }
 

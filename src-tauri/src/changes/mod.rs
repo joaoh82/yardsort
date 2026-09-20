@@ -157,6 +157,41 @@ impl Changes<'_> {
         }
     }
 
+    /// One file's change in `scope` as a unified diff, the way git prints it — or, for a file git
+    /// does not know yet, its whole text with every line added. `None` for binary files and
+    /// diffs too large to be worth reading.
+    pub fn patch(&self, change: &FileChange, scope: Scope) -> IpcResult<Option<String>> {
+        let path = safe_relative(&change.path)?;
+        let brand_new = change.kind == ChangeKind::Untracked
+            || (scope == Scope::Uncommitted && !self.git.has_commits(self.root)?);
+        if brand_new {
+            return Ok(match read_working_file(self.root, &path)? {
+                Content::Text { text } => {
+                    Some(text.lines().map(|line| format!("+{line}\n")).collect())
+                }
+                _ => None,
+            });
+        }
+        let range = match scope {
+            Scope::Uncommitted => "HEAD".to_owned(),
+            Scope::Committed => match self.fork_point()?.1 {
+                Some(fork) => format!("{fork}..HEAD"),
+                None => return Ok(None),
+            },
+        };
+        let old_path = change.old_path.as_deref().map(safe_relative).transpose()?;
+        let mut args = vec!["diff", "--no-color", "--no-ext-diff", "-M", &range, "--"];
+        args.extend(old_path.as_deref());
+        args.push(&path);
+        let bytes = self.git.run_bytes(self.root, &args)?;
+        if bytes.len() > MAX_VIEW_BYTES {
+            return Ok(None);
+        }
+        let patch = text(&bytes);
+        let binary = !patch.contains("\n@@") && patch.contains("Binary files");
+        Ok((!binary && !patch.trim().is_empty()).then_some(patch))
+    }
+
     /// The base branch and the commit where this branch left it.
     fn fork_point(&self) -> IpcResult<(Option<String>, Option<String>)> {
         let current = match self.git.head(self.root)? {
@@ -541,6 +576,56 @@ mod tests {
             fallback.base.as_deref(),
             None,
             "no remote and not on it: nothing to guess from"
+        );
+    }
+
+    #[test]
+    fn patches_are_unified_diffs_per_file_and_scope() {
+        let repo = Repo::new();
+        repo.run(&["checkout", "-q", "-b", "ys/work"]);
+        repo.write("README.md", "# project\n\ncommitted edit\n");
+        repo.write("logo.png", "\0\x01binary");
+        repo.commit("edit");
+        repo.write("README.md", "# project\n\nuncommitted edit\n");
+        repo.write("notes/new.txt", "hello\nworld\n");
+        let changes = Changes {
+            git: &repo.git,
+            root: repo.path(),
+            base_branch: Some("main"),
+        };
+        let set = changes.list().unwrap();
+        let find =
+            |list: &[FileChange], path: &str| list.iter().find(|c| c.path == path).unwrap().clone();
+
+        let committed = changes
+            .patch(&find(&set.committed, "README.md"), Scope::Committed)
+            .unwrap()
+            .unwrap();
+        assert!(
+            committed.contains("-line two\n+committed edit\n"),
+            "{committed}"
+        );
+        let uncommitted = changes
+            .patch(&find(&set.uncommitted, "README.md"), Scope::Uncommitted)
+            .unwrap()
+            .unwrap();
+        assert!(
+            uncommitted.contains("-committed edit\n+uncommitted edit\n"),
+            "{uncommitted}"
+        );
+        assert_eq!(
+            changes
+                .patch(&find(&set.uncommitted, "notes/new.txt"), Scope::Uncommitted)
+                .unwrap()
+                .as_deref(),
+            Some("+hello\n+world\n")
+        );
+        assert_eq!(
+            changes
+                .patch(&find(&set.committed, "logo.png"), Scope::Committed)
+                .unwrap(),
+            None,
+            "binary files have no patch"
         );
     }
 
