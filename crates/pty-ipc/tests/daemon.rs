@@ -54,7 +54,7 @@ impl Daemon {
         panic!("the daemon never started listening on {}", self.endpoint);
     }
 
-    fn try_connect(&self) -> std::io::Result<(DaemonClient, Receiver<HostEvent>)> {
+    fn try_connect(&self) -> std::io::Result<(Arc<DaemonClient>, Receiver<HostEvent>)> {
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
         let client = DaemonClient::connect(
@@ -64,10 +64,10 @@ impl Daemon {
                 let _ = tx.lock().unwrap().send(event);
             }),
         )?;
-        Ok((client, rx))
+        Ok((Arc::new(client), rx))
     }
 
-    fn connect(&self) -> (DaemonClient, Receiver<HostEvent>) {
+    fn connect(&self) -> (Arc<DaemonClient>, Receiver<HostEvent>) {
         self.try_connect().expect("could not connect")
     }
 
@@ -100,6 +100,40 @@ fn shell(script: &str) -> LaunchPlan {
         labels: Default::default(),
         prompt: None,
     }
+}
+
+/// Attach `capture` the way a terminal emulator attaches: it records output **and** answers
+/// cursor-position queries, as xterm.js does in the app. A viewer that stays silent is not a
+/// terminal — and ConPTY will not let the program start until a terminal has answered.
+///
+/// The reply cannot be written from the sink: sinks run on the client's reader thread, and a
+/// request made from there would be waiting on the very thread that has to deliver its answer.
+/// So the query is passed to a thread of its own, exactly as `pty-host`'s tests do.
+fn attach_terminal(client: &Arc<DaemonClient>, id: &pty_host::SessionId, capture: &Capture) -> u32 {
+    let (query_tx, query_rx) = mpsc::channel::<()>();
+    let mut record = capture.sink();
+    let attachment = client
+        .attach(
+            id,
+            Box::new(move |bytes| {
+                for _ in bytes.windows(4).filter(|w| *w == b"\x1b[6n") {
+                    let _ = query_tx.send(());
+                }
+                record(bytes)
+            }),
+        )
+        .unwrap();
+
+    let (client, id) = (Arc::downgrade(client), id.clone());
+    std::thread::spawn(move || {
+        while query_rx.recv().is_ok() {
+            let Some(client) = client.upgrade() else {
+                break;
+            };
+            let _ = client.write(&id, b"\x1b[1;1R");
+        }
+    });
+    attachment
 }
 
 /// Collects everything one attached viewer is sent.
@@ -153,7 +187,7 @@ fn a_session_runs_over_the_socket_and_reports_its_exit() {
 
     let session = client.spawn(shell("echo over-the-wire; exit 3")).unwrap();
     let capture = Capture::default();
-    client.attach(&session.id, capture.sink()).unwrap();
+    attach_terminal(&client, &session.id, &capture);
 
     capture.wait_for("over-the-wire");
     let exit = wait_for_exit(&events, &session.id);
@@ -171,7 +205,7 @@ fn input_typed_on_one_side_reaches_the_program_on_the_other() {
         .spawn(shell("read line; echo \"got:[$line]\""))
         .unwrap();
     let capture = Capture::default();
-    client.attach(&session.id, capture.sink()).unwrap();
+    attach_terminal(&client, &session.id, &capture);
 
     client.write(&session.id, b"hello\r").unwrap();
     capture.wait_for("got:[hello]");
@@ -186,7 +220,7 @@ fn sessions_outlive_the_client_that_started_them() {
 
     let session = client.spawn(shell("echo still-here; sleep 60")).unwrap();
     let capture = Capture::default();
-    client.attach(&session.id, capture.sink()).unwrap();
+    attach_terminal(&client, &session.id, &capture);
     capture.wait_for("still-here");
 
     // The window closes.
@@ -211,7 +245,7 @@ fn sessions_outlive_the_client_that_started_them() {
 
     // Attaching afresh repaints what happened before anyone was watching.
     let again = Capture::default();
-    returning.attach(&session.id, again.sink()).unwrap();
+    attach_terminal(&returning, &session.id, &again);
     again.wait_for("still-here");
 
     returning.kill(&session.id).unwrap();
@@ -245,7 +279,7 @@ fn a_shutdown_that_is_asked_to_stops_the_agents_and_the_daemon() {
 fn asking_about_a_session_nobody_has_heard_of_says_so() {
     let daemon = Daemon::start();
     let (client, _events) = daemon.connect();
-    let error = TerminalHost::info(&client, &pty_host::SessionId("nope".into())).unwrap_err();
+    let error = TerminalHost::info(&*client, &pty_host::SessionId("nope".into())).unwrap_err();
     assert!(
         matches!(error, pty_host::HostError::UnknownSession(id) if id.0 == "nope"),
         "the error should survive the trip as itself"

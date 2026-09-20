@@ -31,6 +31,11 @@ pub const IDLE_GRACE: Duration = Duration::from_secs(10);
 /// attach always starts with a snapshot.
 const MAX_QUEUED_BYTES: usize = 32 * 1024 * 1024;
 
+/// How long a shutdown waits for the sessions it killed to actually go.
+const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+/// The gap between a session's state changing and its `Exited` event being broadcast.
+const EXIT_ANNOUNCE_GRACE: Duration = Duration::from_millis(200);
+
 /// Run the daemon until it is told to stop, or until `idle_grace` has passed with nothing to
 /// look after — no client connected and no session running.
 pub fn serve(endpoint: &Endpoint, version: &str, idle_grace: Duration) -> std::io::Result<()> {
@@ -234,6 +239,18 @@ impl Daemon {
                     for session in self.host.list() {
                         let _ = self.host.kill(&session.id);
                     }
+                    // "Stop them" has to mean stopped by the time this answers. Killing only
+                    // asks; the processes go at their own pace, and on Windows tearing a
+                    // pseudo-console down is not quick. Without this wait the daemon could exit
+                    // before the exits were announced, and the app would quit with its session
+                    // records still claiming to be running.
+                    let deadline = Instant::now() + STOP_TIMEOUT;
+                    while running(&self.host) > 0 && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                    // A session's state flips to exited just *before* its `Exited` event goes
+                    // out, so give the last ones a moment to reach the queue that `flush` drains.
+                    std::thread::sleep(EXIT_ANNOUNCE_GRACE);
                 }
                 // The process ends once the answer is out; see `serve_connection`.
                 std::thread::Builder::new()

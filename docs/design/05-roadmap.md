@@ -244,7 +244,18 @@ _Notes:_
   to its owner.
 - Found while writing the protocol: serde's internal tagging cannot encode a newtype variant
   wrapping a sequence, so `list` silently returned nothing. Every result is a struct variant now.
-- Still to prove on macOS and Windows hardware, with the hands-on pass M7 already owes.
+- Found by Windows CI: `Shutdown { stop_sessions }` killed the sessions and answered without
+  waiting for them, so on Windows — where tearing a pseudo-console down is not quick — the
+  daemon could exit before the exits were announced, and the app would quit with its records
+  still claiming to be running. It now waits for them to go. Because everything shares one
+  ordered stream, the exits are delivered, and the records settled, before the reply is.
+- Also from Windows CI, in the tests rather than the product: a viewer that records output but
+  never answers `ESC [ 6 n` is not a terminal, and ConPTY will not start the program until one
+  has answered. `pty-host`'s tests knew this; `pty-ipc`'s now do too. Its reply has to come from
+  a thread of its own — a client's output sink runs on the reader thread, and a request made
+  from there would be waiting on the thread that has to deliver its answer.
+- CI is green on all three platforms; the hands-on pass M7 owes on macOS and Windows is still
+  outstanding.
 
 ## Later (unordered)
 
