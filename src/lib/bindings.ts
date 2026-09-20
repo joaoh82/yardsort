@@ -633,6 +633,12 @@ export type Workspace = {
 	missing: boolean,
 	/**  Put away on purpose: no folder, but the branch and session history are kept. */
 	archived: boolean,
+	/**
+	 *  There is no branch left to bring this workspace back from: its folder is not on disk and
+	 *  its branch was deleted too (or it never had one). Only asked of git when the folder is
+	 *  already gone, and a git that will not answer counts as "the branch is still there".
+	 */
+	branchGone: boolean,
 };
 
 /**  Something changed on disk in the watched workspace; ask again. */

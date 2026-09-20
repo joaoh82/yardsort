@@ -169,7 +169,10 @@ Decisions:
   260-char limit bites deep `node_modules` trees (also recommend `core.longpaths=true` there).
 - **Branch naming**: `<prefix>/<workspace-slug>`, prefix default `ys`, configurable.
 - **Reconciliation**: on startup and on focus, compare the DB with `git worktree list`. Worktrees
-  deleted behind our back are marked _missing_, not silently dropped.
+  deleted behind our back are marked _missing_, not silently dropped. A worktree whose _branch_
+  was deleted too has nothing to restore from: it is marked _gone_, and Yardsort asks once whether
+  to forget the workspace. Only the vanished case asks git about branches, so the usual listing
+  costs no extra process.
 - **Deleting** a workspace with uncommitted or unmerged work requires explicit confirmation that
   names what will be lost.
 - Untracked-but-needed files (`.env`, etc.) don't exist in a fresh worktree. v1: document it.

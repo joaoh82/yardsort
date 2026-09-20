@@ -1,6 +1,6 @@
 import { native } from "@/lib/native";
 import { errorMessage, type Project, type Workspace } from "@/lib/ipc";
-import { useProjectsStore } from "@/stores/projects";
+import { recall, useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
 
@@ -79,6 +79,82 @@ async function removeProjectUnguarded(project: Project) {
   if (!agreed) return;
   await useTerminalStore.getState().closeWorkspaces(project.workspaces.map((w) => w.id));
   await useProjectsStore.getState().remove(project.id);
+}
+
+/** Workspaces the user chose to keep after being told there is nothing left to restore them from. */
+const KEPT_KEY = "workspaces.keptVanished";
+
+/** One question at a time: the dialog blurs the window, and regaining focus is what asks again. */
+let asking = false;
+
+/**
+ * Notice worktrees the user removed with git — folder *and* branch — and offer to forget the
+ * workspaces they leave behind. Those have nothing to restore from and nothing to open; letting
+ * them go is all Yardsort can still do with them, and it never does that uninvited.
+ *
+ * Runs after every project refresh, so the answer is remembered: a workspace the user kept is
+ * not raised again, and that answer is dropped once it is no longer in question.
+ */
+export const reviewVanishedWorkspaces = (): Promise<void> =>
+  visibly(reviewVanishedWorkspacesUnguarded, undefined);
+
+async function reviewVanishedWorkspacesUnguarded() {
+  if (asking) return;
+  const store = useProjectsStore.getState();
+  if (!store.loaded) return;
+
+  const vanished = store.projects
+    .flatMap((project) => project.workspaces)
+    .filter((workspace) => workspace.missing && workspace.branchGone);
+  const inQuestion = new Set(vanished.map((workspace) => workspace.id));
+
+  // Forget answers about workspaces that are settled — deleted since, or checked out again with
+  // their branch — so that a folder which disappears a second time is asked about a second time.
+  const kept = recall<string[]>(store.ui, KEPT_KEY, []);
+  const answered = kept.filter((id) => inQuestion.has(id));
+  const unasked = vanished.filter((workspace) => !answered.includes(workspace.id));
+  if (unasked.length === 0) {
+    if (answered.length !== kept.length) store.remember(KEPT_KEY, answered);
+    return;
+  }
+
+  asking = true;
+  try {
+    const agreed = await native.confirm(vanishedMessage(unasked), {
+      title: unasked.length === 1 ? "Workspace gone" : "Workspaces gone",
+      okLabel: unasked.length === 1 ? "Delete workspace" : "Delete them",
+      cancelLabel: "Keep",
+    });
+    if (!agreed) {
+      store.remember(KEPT_KEY, [...answered, ...unasked.map((workspace) => workspace.id)]);
+      return;
+    }
+    await useTerminalStore.getState().closeWorkspaces(unasked.map((workspace) => workspace.id));
+    for (const workspace of unasked) {
+      await useProjectsStore.getState().deleteWorkspace(workspace.id);
+    }
+    if (answered.length !== kept.length) store.remember(KEPT_KEY, answered);
+  } finally {
+    asking = false;
+  }
+}
+
+function vanishedMessage(workspaces: Workspace[]): string {
+  const [only] = workspaces;
+  if (workspaces.length === 1 && only) {
+    return (
+      `"${only.name}" is gone. Its folder was removed outside Yardsort, and there is no branch ` +
+      "left to check out in its place.\n\nDelete the workspace and its session history from " +
+      "Yardsort too? Nothing on disk is touched — it is already gone."
+    );
+  }
+  return (
+    `${workspaces.length} workspaces are gone. Their folders were removed outside Yardsort, and ` +
+    `there are no branches left to check out in their place:\n\n` +
+    `${workspaces.map((workspace) => `  \u2022 ${workspace.name}`).join("\n")}\n\n` +
+    "Delete these workspaces and their session history from Yardsort too? Nothing on disk is " +
+    "touched — they are already gone."
+  );
 }
 
 /** Open the composer for a new workspace in the project the user is currently looking at. */

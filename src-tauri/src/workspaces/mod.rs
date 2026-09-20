@@ -846,6 +846,76 @@ mod tests {
     }
 
     #[test]
+    fn a_worktree_and_branch_removed_by_hand_leave_nothing_to_restore_from() {
+        let fx = Fixture::new();
+        let ws = fx
+            .workspaces()
+            .create(&fx.project_id, None, "by hand")
+            .unwrap();
+        let branch = ws.branch.clone().unwrap();
+        let described = |id: &str| {
+            Projects {
+                store: &fx.store,
+                git: &fx.git,
+            }
+            .list()
+            .unwrap()
+            .remove(0)
+            .workspaces
+            .into_iter()
+            .find(|w| w.id == id)
+            .unwrap()
+        };
+
+        let healthy = described(&ws.id);
+        assert!(!healthy.missing && !healthy.branch_gone);
+
+        // `git worktree remove` on its own: the branch is still there to come back from.
+        fx.git
+            .worktree_remove(&fx.repo, Path::new(&ws.path), false)
+            .unwrap();
+        let orphan = described(&ws.id);
+        assert!(orphan.missing && !orphan.branch_gone);
+
+        // `git branch -D` as well, and there is no way back.
+        fx.git.branch_delete(&fx.repo, &branch).unwrap();
+        let orphan = described(&ws.id);
+        assert!(orphan.missing && orphan.branch_gone);
+
+        // The project's own checkout never claims a branch it does not have.
+        let local = described(&fx.store.workspaces().unwrap()[0].id);
+        assert!(!local.branch_gone);
+    }
+
+    #[test]
+    fn an_archived_workspace_notices_its_branch_being_deleted() {
+        let fx = Fixture::new();
+        let ws = fx
+            .workspaces()
+            .create(&fx.project_id, None, "shelved")
+            .unwrap();
+        fx.workspaces().archive(&ws.id, false).unwrap();
+        let projects = Projects {
+            store: &fx.store,
+            git: &fx.git,
+        };
+        let described =
+            || projects.describe_workspace(fx.store.workspace(&ws.id).unwrap().unwrap());
+
+        let shelved = described();
+        assert!(shelved.archived && !shelved.missing && !shelved.branch_gone);
+
+        fx.git
+            .branch_delete(&fx.repo, ws.branch.as_deref().unwrap())
+            .unwrap();
+        let shelved = described();
+        assert!(
+            shelved.branch_gone,
+            "restoring it would now fail; the UI has to say so"
+        );
+    }
+
+    #[test]
     fn local_cannot_be_deleted() {
         let fx = Fixture::new();
         let local = fx.store.workspaces().unwrap().remove(0);

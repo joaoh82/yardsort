@@ -18,6 +18,7 @@ export function project(name: string, overrides: Partial<Project> = {}): Project
         head: { label: "main", detached: false, unborn: false },
         missing: false,
         archived: false,
+        branchGone: false,
       },
     ],
     ...overrides,
@@ -45,6 +46,7 @@ export const worktree = (
   head: { label: `ys/${name}`, detached: false, unborn: false },
   missing: false,
   archived: false,
+  branchGone: false,
   ...overrides,
 });
 

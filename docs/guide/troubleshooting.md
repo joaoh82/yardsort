@@ -60,6 +60,13 @@ section above. Agents you have switched off in Settings → Harnesses do not cou
 Its folder is gone. Use **Restore from its branch** or **Delete** from the workspace's menu — see
 [Workspaces](workspaces.md#when-a-workspaces-folder-disappears).
 
+## A workspace says "gone", and Yardsort offers to delete it
+
+Its folder _and_ its branch were both removed outside Yardsort, so there is nothing left to check
+out again. Delete the workspace when asked, or **Keep** the entry — Yardsort will not ask about
+that workspace again. If you deleted the branch by mistake, `git reflog` can still point you at the
+commit it was on; recreate the branch, and **Restore from its branch** comes back by itself.
+
 ## Resume says the conversation was not found
 
 The agent no longer has that conversation on disk — it was cleaned up, or it never saved one

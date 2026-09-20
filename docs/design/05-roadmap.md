@@ -112,7 +112,8 @@ part of this milestone.
 - Shell tabs alongside harness tabs. Rename / archive / restore / delete workspace with safety
   prompts.
 - Worktree reconciliation: unknown worktrees are adopted (M3); a workspace whose folder vanished is
-  flagged and can be restored from its branch or deleted.
+  flagged and can be restored from its branch or deleted. If the branch went with the folder there
+  is nothing to restore from, and Yardsort offers — once — to forget the workspace.
 
 _Exit:_ quit mid-task, relaunch, and be back in the same conversations within a couple of clicks.
 

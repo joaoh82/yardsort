@@ -14,8 +14,10 @@ export const native = {
     return typeof picked === "string" ? picked : null;
   },
 
-  confirm: (message: string, options: { title: string; okLabel: string }): Promise<boolean> =>
-    ask(message, { ...options, kind: "warning", cancelLabel: "Cancel" }),
+  confirm: (
+    message: string,
+    options: { title: string; okLabel: string; cancelLabel?: string },
+  ): Promise<boolean> => ask(message, { cancelLabel: "Cancel", ...options, kind: "warning" }),
 
   revealInFileManager: (path: string): Promise<void> => revealItemInDir(path),
 
