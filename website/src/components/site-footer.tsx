@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { REPO_URL, repoFile } from "@/lib/site";
+import { CONTACT_EMAIL, REPO_URL, repoFile } from "@/lib/site";
 
 export function SiteFooter() {
   return (
@@ -13,6 +13,7 @@ export function SiteFooter() {
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-[18px]">
           <a href={REPO_URL}>GitHub</a>
+          <a href={`mailto:${CONTACT_EMAIL}`}>Contact</a>
           <Link href="/docs/">Docs</Link>
           <Link href="/changelog/">Changelog</Link>
           <a href={repoFile("CONTRIBUTING.md")}>Contributing</a>
@@ -20,7 +21,14 @@ export function SiteFooter() {
           <a href={repoFile("LICENSE")}>GPL-3.0</a>
         </nav>
       </div>
-      <p className="mt-6 max-w-[720px] text-[13px] text-faint">
+      <p className="mt-6 text-[13px] text-muted">
+        Questions, support or anything else —{" "}
+        <a href={`mailto:${CONTACT_EMAIL}`} className="link">
+          {CONTACT_EMAIL}
+        </a>
+        .
+      </p>
+      <p className="mt-3 max-w-[720px] text-[13px] text-faint">
         Yardsort is an independent project, not affiliated with Anthropic, OpenAI, xAI or any other
         maker of the agents it can launch. Product names belong to their owners.
       </p>

@@ -11,7 +11,8 @@
     <a href="https://github.com/joaoh82/yardsort/releases/latest">Download</a> ·
     <a href="docs/quick-start.md">Quick start</a> ·
     <a href="docs/README.md">Documentation</a> ·
-    <a href="CONTRIBUTING.md">Contributing</a>
+    <a href="CONTRIBUTING.md">Contributing</a> ·
+    <a href="mailto:hello@yardsort.sh">Contact</a>
   </p>
   <p>
     <a href="https://github.com/joaoh82/yardsort/actions/workflows/ci.yml"><img src="https://github.com/joaoh82/yardsort/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
@@ -144,6 +145,17 @@ what is next.
 
 Issues, ideas and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+## Get in touch
+
+Bugs and feature requests belong in the
+[issue tracker](https://github.com/joaoh82/yardsort/issues/new/choose), where everyone can find
+them. For anything else — a question, help getting started, or just to say what you are building
+with it — write to **[hello@yardsort.sh](mailto:hello@yardsort.sh)**.
+
+## Team
+
+[![João on X](https://img.shields.io/badge/Jo%C3%A3o-@codepolyglot-555?logo=x)](https://x.com/codepolyglot)
 
 ## License
 

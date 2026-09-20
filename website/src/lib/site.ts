@@ -6,6 +6,9 @@ export const REPO_URL = `https://github.com/${REPO}`;
 export const RELEASES_URL = `${REPO_URL}/releases/latest`;
 export const BREW_COMMAND = "brew install --cask joaoh82/yardsort/yardsort";
 
+// The project mailbox: questions, support, anything that is not an issue or a vulnerability.
+export const CONTACT_EMAIL = "hello@yardsort.sh";
+
 const REPO_ROOT = path.resolve(process.cwd(), "..");
 
 export function repoFile(relative: string): string {
