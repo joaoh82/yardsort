@@ -5,6 +5,9 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Worktrees removed with git are noticed.** Delete a workspace's worktree _and_ its branch
+  yourself, and Yardsort marks the workspace **gone** and asks whether to delete it from the app
+  too — a "keep" is remembered. See [Workspaces](docs/guide/workspaces.md#when-the-branch-goes-too).
 - Install with Homebrew on macOS: `brew install --cask joaoh82/yardsort/yardsort`.
 - Linux: the quick start shows how to give the AppImage a launcher entry and icon.
 - Submitted to winget (`joaoh82.Yardsort`), pending Microsoft's review.

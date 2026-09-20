@@ -161,19 +161,26 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
   const isWorktree = workspace.kind === "worktree";
   const gone = workspace.missing || workspace.archived;
   const unusable = disabled || gone;
+  // Its folder went and its branch with it: restoring is off the table, deleting is all there is.
+  const unrestorable = gone && workspace.branchGone;
 
   const items: MenuItem[] = [
-    gone
-      ? {
-          label: workspace.archived ? "Restore workspace" : "Restore from its branch",
-          disabled: disabled || !isWorktree,
-          onSelect: () => void restoreWorkspace(workspace),
-        }
-      : {
-          label: "Reveal in file manager",
-          disabled,
-          onSelect: () => void native.revealInFileManager(workspace.path).catch(console.error),
-        },
+    ...(unrestorable
+      ? []
+      : [
+          gone
+            ? {
+                label: workspace.archived ? "Restore workspace" : "Restore from its branch",
+                disabled: disabled || !isWorktree,
+                onSelect: () => void restoreWorkspace(workspace),
+              }
+            : {
+                label: "Reveal in file manager",
+                disabled,
+                onSelect: () =>
+                  void native.revealInFileManager(workspace.path).catch(console.error),
+              },
+        ]),
     ...(isWorktree
       ? [
           { label: "Rename…", onSelect: () => setRenaming(true) },
@@ -213,8 +220,17 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
           <span className={`truncate ${workspace.missing ? "line-through" : ""}`}>
             {workspace.name}
           </span>
-          {workspace.missing && !disabled && (
-            <span className="text-[11px] text-red-400">missing</span>
+          {(workspace.missing || unrestorable) && !disabled && (
+            <span
+              className="text-[11px] text-red-400"
+              title={
+                unrestorable
+                  ? "Its folder and its branch were both removed. There is nothing left to restore it from."
+                  : "Its folder was removed. Restore it from its branch, or delete it."
+              }
+            >
+              {unrestorable ? "gone" : "missing"}
+            </span>
           )}
           {/* A worktree's branch is its name with a prefix; only `local` has news to tell. */}
           {head && !isWorktree && (

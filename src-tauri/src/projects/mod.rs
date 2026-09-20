@@ -47,6 +47,10 @@ pub struct Workspace {
     pub missing: bool,
     /// Put away on purpose: no folder, but the branch and session history are kept.
     pub archived: bool,
+    /// There is no branch left to bring this workspace back from: its folder is not on disk and
+    /// its branch was deleted too (or it never had one). Only asked of git when the folder is
+    /// already gone, and a git that will not answer counts as "the branch is still there".
+    pub branch_gone: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -188,11 +192,18 @@ impl Projects<'_> {
     }
 
     fn describe(&self, row: ProjectRow, workspaces: Vec<WorkspaceRow>) -> Project {
-        let missing = !Path::new(&row.root_path).is_dir();
+        let root = PathBuf::from(&row.root_path);
+        let missing = !root.is_dir();
+        // Asking git for the branches costs a process, so only pay it when a workspace has lost
+        // its folder and the answer decides what the UI can still offer. One list serves them
+        // all; the repository we cannot reach tells us nothing.
+        let branches = (!missing && workspaces.iter().any(|w| !Path::new(&w.path).is_dir()))
+            .then(|| self.git.branches(&root).ok())
+            .flatten();
         Project {
             workspaces: workspaces
                 .into_iter()
-                .map(|w| self.describe_workspace(w))
+                .map(|w| self.workspace(w, &root, branches.as_deref()))
                 .collect(),
             id: row.id,
             name: row.name,
@@ -201,11 +212,24 @@ impl Projects<'_> {
         }
     }
 
+    /// Describe a single workspace, looking its project up to answer for its branch.
     pub fn describe_workspace(&self, row: WorkspaceRow) -> Workspace {
+        let root = self
+            .store
+            .project(&row.project_id)
+            .ok()
+            .flatten()
+            .map(|project| PathBuf::from(project.root_path))
+            .unwrap_or_default();
+        self.workspace(row, &root, None)
+    }
+
+    /// `branches` is the project's branch list when the caller already has it; without it we ask
+    /// git ourselves, and only if we have to.
+    fn workspace(&self, row: WorkspaceRow, root: &Path, branches: Option<&[String]>) -> Workspace {
         let path = PathBuf::from(&row.path);
-        let missing = !row.archived && !path.is_dir();
-        let head = path
-            .is_dir()
+        let on_disk = path.is_dir();
+        let head = on_disk
             .then(|| self.git.head(&path).ok())
             .flatten()
             .map(HeadInfo::from);
@@ -215,13 +239,30 @@ impl Projects<'_> {
             } else {
                 WorkspaceKind::Worktree
             },
+            missing: !row.archived && !on_disk,
+            // `local` is the project's own checkout: it has no branch of its own to lose.
+            branch_gone: row.kind != "local" && !on_disk && self.branch_gone(&row, root, branches),
             id: row.id,
             project_id: row.project_id,
             name: row.name,
             path: row.path,
             head,
-            missing,
             archived: row.archived,
+        }
+    }
+
+    /// Has the branch a vanished workspace would be restored from gone as well? A repository we
+    /// cannot reach or a git that fails both answer "no": Yardsort never offers to forget a
+    /// workspace because a command misbehaved.
+    fn branch_gone(&self, row: &WorkspaceRow, root: &Path, branches: Option<&[String]>) -> bool {
+        let Some(branch) = row.branch.as_deref() else {
+            // An adopted detached worktree: nothing named it, so nothing can bring it back.
+            return true;
+        };
+        match branches {
+            Some(known) => !known.iter().any(|name| name == branch),
+            None if root.is_dir() => !self.git.branch_exists(root, branch).unwrap_or(true),
+            None => false,
         }
     }
 }

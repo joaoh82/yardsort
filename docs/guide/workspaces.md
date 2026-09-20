@@ -85,3 +85,15 @@ Nothing is destroyed on the first click.
 
 If the folder is deleted behind Yardsort's back, the workspace is marked **missing**. Its menu
 offers **Restore from its branch** (check it out again in the same place) or **Delete**.
+
+### When the branch goes too
+
+Removing a worktree _and_ its branch with git — `git worktree remove` followed by `git branch -D`,
+say — leaves a workspace with nothing behind it: no folder to open, no branch to restore from. It
+is marked **gone**, and its menu offers only **Rename…** and **Delete workspace…**.
+
+Yardsort notices this the next time it reads the project — at startup, and whenever its window
+comes back into focus — and asks whether to delete the workspace from the app as well. Saying
+**Delete workspace** forgets the workspace and its session history; nothing on disk is touched,
+because there is nothing left there. Saying **Keep** leaves the entry alone and is remembered, so
+you are not asked about the same workspace twice.

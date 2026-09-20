@@ -401,6 +401,83 @@ describe("Sidebar", () => {
     });
   });
 
+  describe("a worktree removed with git", () => {
+    const vanished = (name = "fix-login") =>
+      worktree("app", name, { missing: true, branchGone: true, head: null });
+
+    async function withVanished(...extra: ReturnType<typeof worktree>[]) {
+      const user = userEvent.setup();
+      const app = project("app");
+      app.workspaces.push(...extra);
+      core.projectsList.mockResolvedValue([app]);
+      core.workspaceDelete.mockResolvedValue(undefined);
+      render(<Sidebar />);
+      await screen.findByRole("treeitem", { name: "app" });
+      return user;
+    }
+
+    it("offers to delete the workspace its worktree and branch left behind", async () => {
+      native.confirm.mockResolvedValue(true);
+      await withVanished(vanished());
+
+      await vi.waitFor(() => expect(native.confirm).toHaveBeenCalledTimes(1));
+      expect(native.confirm).toHaveBeenCalledWith(
+        expect.stringMatching(/"fix-login" is gone[\s\S]*no branch left to check out/),
+        expect.objectContaining({ okLabel: "Delete workspace", cancelLabel: "Keep" }),
+      );
+      expect(core.workspaceDelete).toHaveBeenCalledWith("w-app-fix-login", false);
+      await vi.waitFor(() =>
+        expect(screen.queryByRole("treeitem", { name: "fix-login" })).not.toBeInTheDocument(),
+      );
+    });
+
+    it("keeps the workspace on a no, and does not ask a second time", async () => {
+      native.confirm.mockResolvedValue(false);
+      await withVanished(vanished());
+      await vi.waitFor(() => expect(native.confirm).toHaveBeenCalledTimes(1));
+      expect(core.workspaceDelete).not.toHaveBeenCalled();
+      expect(core.uiStateSave).toHaveBeenCalledWith(
+        "workspaces.keptVanished",
+        JSON.stringify(["w-app-fix-login"]),
+      );
+
+      // Coming back to the window asks again about everything still in question — but not this.
+      window.dispatchEvent(new Event("focus"));
+      await vi.waitFor(() => expect(core.projectsList).toHaveBeenCalledTimes(2));
+      expect(native.confirm).toHaveBeenCalledTimes(1);
+      const row = screen.getByRole("treeitem", { name: "fix-login" });
+      expect(row).toHaveTextContent("gone");
+    });
+
+    it("names every workspace it is about to forget", async () => {
+      native.confirm.mockResolvedValue(true);
+      await withVanished(vanished(), vanished("add-tests"));
+
+      await vi.waitFor(() => expect(native.confirm).toHaveBeenCalledTimes(1));
+      expect(native.confirm.mock.calls[0]![0]).toMatch(/fix-login[\s\S]*add-tests/);
+      await vi.waitFor(() => expect(core.workspaceDelete).toHaveBeenCalledTimes(2));
+    });
+
+    it("says nothing while the branch is still there to restore from", async () => {
+      const user = await withVanished(worktree("app", "fix-login", { missing: true, head: null }));
+      await vi.waitFor(() => expect(useProjectsStore.getState().loaded).toBe(true));
+      expect(native.confirm).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "More actions for fix-login" }));
+      expect(screen.getByRole("menuitem", { name: "Restore from its branch" })).toBeInTheDocument();
+    });
+
+    it("drops the restore option once there is nothing left to restore from", async () => {
+      native.confirm.mockResolvedValue(false);
+      const user = await withVanished(vanished());
+      await vi.waitFor(() => expect(native.confirm).toHaveBeenCalledTimes(1));
+
+      await user.click(screen.getByRole("button", { name: "More actions for fix-login" }));
+      expect(screen.queryByRole("menuitem", { name: /^Restore/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Delete workspace…" })).toBeInTheDocument();
+    });
+  });
+
   it("a project whose folder vanished is marked and cannot be entered", async () => {
     core.projectsList.mockResolvedValue([project("ghost", { missing: true })]);
     render(<Sidebar />);

@@ -4,6 +4,7 @@ import { hasCore } from "@/lib/ipc";
 import { formatShortcut } from "@/lib/platform";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
+import { reviewVanishedWorkspaces } from "./actions";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
 
@@ -19,9 +20,11 @@ export function Sidebar() {
   useEffect(() => {
     if (!hasCore()) return;
     const { load, refresh } = useProjectsStore.getState();
-    void load();
+    // Coming back is also when a worktree someone removed with git is noticed, so every catch-up
+    // ends by asking about the workspaces that were left with nothing behind them.
+    void load().then(reviewVanishedWorkspaces);
     // Branches get switched in other tools; catch up whenever the window comes back.
-    const onFocus = () => void refresh();
+    const onFocus = () => void refresh().then(reviewVanishedWorkspaces);
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
