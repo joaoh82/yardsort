@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.3.2
 
 - Install with Homebrew on macOS: `brew install --cask joaoh82/yardsort/yardsort`.
 - Linux: the quick start shows how to give the AppImage a launcher entry and icon.
