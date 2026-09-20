@@ -103,6 +103,11 @@ jobs:
       - name: Render, install-test and publish the cask
         env:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          # `brew audit --online` asks the GitHub API about the homepage, the repository and the
+          # release. Unauthenticated that is 60 requests an hour *per runner IP*, shared with every
+          # other job on it, so a release fails whenever the pool happens to be dry. The built-in
+          # token needs no secret and raises the limit to 1000.
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
