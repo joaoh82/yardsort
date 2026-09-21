@@ -8,6 +8,7 @@ import { useUpdatesStore } from "@/stores/updates";
 export function StatusBar() {
   const info = useAppStore((s) => s.info);
   const env = useAppStore((s) => s.env);
+  const daemon = useAppStore((s) => s.daemon);
   const renderer = useTerminalStore((s) => s.renderer);
   const checking = usePreflightStore((s) => s.checking);
   const update = useUpdatesStore((s) => s.status?.available);
@@ -41,6 +42,20 @@ export function StatusBar() {
             Update to {update.version}
           </button>
         )}
+        {daemon && !daemon.running && (
+          <span
+            className={daemon.strandedSessions ? "text-amber-400" : "text-ink-faint"}
+            title={
+              daemon.problem
+                ? `${daemon.problem}. Terminals started now run inside Yardsort and stop when it closes. Log: ${daemon.logPath}`
+                : "Terminals run inside Yardsort and stop when it closes (YARDSORT_NO_DAEMON)."
+            }
+          >
+            {daemon.strandedSessions
+              ? `${daemon.strandedSessions} agent${daemon.strandedSessions === 1 ? "" : "s"} in the previous version`
+              : "no daemon"}
+          </span>
+        )}
         {env?.warning && (
           <span className="text-red-400" title={env.warning}>
             shell environment unavailable
@@ -58,6 +73,13 @@ export function StatusBar() {
               ? "reading environment…"
               : `env: ${env.source === "loginShell" ? "login shell" : "process"} · ${env.pathEntries} PATH`}
           </button>
+        )}
+        {daemon?.running && (
+          <span
+            title={`Agents run in yardsortd ${daemon.version} (pid ${daemon.pid}) on ${daemon.endpoint}, and keep working when you close Yardsort. Log: ${daemon.logPath}`}
+          >
+            daemon {daemon.pid}
+          </span>
         )}
         {renderer && <span title="Terminal renderer">{renderer}</span>}
         <span>

@@ -73,10 +73,25 @@ pub struct LaunchPlan {
     #[serde(default)]
     pub size: TermSize,
     /// Opaque metadata the host stores and reports back in [`SessionInfo`], never interpreting
-    /// it. Lets a client that reconnects — a reloaded webview today, the app attaching to a
-    /// daemon later — work out what each session belongs to.
+    /// it. Lets a client that reconnects — a reloaded webview, or the app attaching to the
+    /// daemon after a restart — work out what each session belongs to.
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
+    /// A first message to type into the program once it is up, for programs that will not take
+    /// one on their command line. The host delivers it, so it still arrives if the client that
+    /// asked for it goes away in the meantime.
+    #[serde(default)]
+    pub prompt: Option<PendingPrompt>,
+}
+
+/// Text to deliver to a program once it has finished starting up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct PendingPrompt {
+    pub text: String,
+    /// How long the program must stay quiet, after printing something, to count as ready.
+    pub quiet_ms: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

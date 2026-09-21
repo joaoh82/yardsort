@@ -14,16 +14,24 @@
 │   ├─ workspaces   lifecycle, naming, worktree paths                │
 │   ├─ git          GitBackend trait → git CLI                       │
 │   ├─ harness      definitions, arg templating, launch plans        │
-│   ├─ pty          PTY host: sessions, I/O pump, snapshots (→daemon)│
+│   ├─ daemon       finds/starts yardsortd; TerminalHost client      │
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
 │   ├─ assist       optional Jev judgments: diffs, composer hints    │
 │   └─ store        SQLite (state) + settings file                   │
-└────────────────────────────────────────────────────────────────────┘
-        │ spawns                      │ shells out
-        ▼                             ▼
-   claude / codex / grok / …         git
+└──────────────────────────────┬──────────────────┬──────────────────┘
+                               │ local socket     │ shells out
+                               ▼                  ▼
+        ┌─── yardsortd (the same binary, --yardsort-daemon) ───┐   git
+        │  PTY host: sessions, I/O pump, headless VT, snapshots│
+        └──────────────────────────┬───────────────────────────┘
+                                   │ spawns
+                                   ▼
+                          claude / codex / grok / …
 ```
+
+The daemon is what makes closing the window harmless: it owns the pseudo-terminals, so the app
+is a client that can come and go.
 
 Rule of thumb: **the frontend holds no truth.** All state lives in the Rust core and the store; the
 UI renders it and sends intents. This keeps the door open for a headless core later (see
@@ -31,20 +39,21 @@ UI renders it and sends intents. This keeps the door open for a headless core la
 
 ## Stack choices
 
-| Concern     | Choice                                                                                                                          | Why                                                                                                                                             |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Shell       | **Tauri 2**                                                                                                                     | Small, Rust core, all three OSes, good updater/bundler story.                                                                                   |
-| Frontend    | **React + TypeScript + Vite**, Tailwind, Zustand                                                                                | Boring and well-trodden; biggest component ecosystem for trees, panels, diff views.                                                             |
-| JS tooling  | **bun**                                                                                                                         | Already installed; fast. Plain `package.json`, so npm/pnpm still work for contributors.                                                         |
-| Terminal    | **xterm.js** + fit, webgl (with DOM-renderer fallback; the canvas addon was dropped in xterm.js 6), web-links, unicode11 addons | The standard; what VS Code uses.                                                                                                                |
-| PTY         | **`portable-pty`** (wezterm)                                                                                                    | One API over Unix PTYs and Windows ConPTY.                                                                                                      |
-| Git         | **`git` CLI** behind a `GitBackend` trait                                                                                       | Worktree support in libgit2/gitoxide is partial; the CLI is the reference implementation and respects the user's config, hooks and credentials. |
-| State       | **SQLite** via `rusqlite` (bundled)                                                                                             | Projects/workspaces/sessions are relational; bundled build avoids system-lib differences.                                                       |
-| Settings    | TOML file in the OS config dir                                                                                                  | Human-editable, easy to back up and diff. Harness definitions live here.                                                                        |
-| Paths       | `directories` crate                                                                                                             | Correct config/data dirs per OS.                                                                                                                |
-| FS watching | `notify` + debouncer                                                                                                            | Cross-platform; honour `.gitignore` via the `ignore` crate.                                                                                     |
-| Diff view   | CodeMirror 6 merge view _(tentative)_                                                                                           | Much lighter than Monaco. See open questions.                                                                                                   |
-| Assist      | TypeSafe **Jev** over HTTP (`reqwest`, the updater's TLS stack); key in the OS credential store (`keyring`)                     | A judgment model answers typed questions, so there is no generated text to parse. The key must never reach `settings.toml`.                     |
+| Concern      | Choice                                                                                                                          | Why                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shell        | **Tauri 2**                                                                                                                     | Small, Rust core, all three OSes, good updater/bundler story.                                                                                   |
+| Frontend     | **React + TypeScript + Vite**, Tailwind, Zustand                                                                                | Boring and well-trodden; biggest component ecosystem for trees, panels, diff views.                                                             |
+| JS tooling   | **bun**                                                                                                                         | Already installed; fast. Plain `package.json`, so npm/pnpm still work for contributors.                                                         |
+| Terminal     | **xterm.js** + fit, webgl (with DOM-renderer fallback; the canvas addon was dropped in xterm.js 6), web-links, unicode11 addons | The standard; what VS Code uses.                                                                                                                |
+| PTY          | **`portable-pty`** (wezterm)                                                                                                    | One API over Unix PTYs and Windows ConPTY.                                                                                                      |
+| App ↔ daemon | **`interprocess`** local sockets                                                                                                | One blocking API over Unix domain sockets and Windows named pipes; no async runtime needed for a handful of connections.                        |
+| Git          | **`git` CLI** behind a `GitBackend` trait                                                                                       | Worktree support in libgit2/gitoxide is partial; the CLI is the reference implementation and respects the user's config, hooks and credentials. |
+| State        | **SQLite** via `rusqlite` (bundled)                                                                                             | Projects/workspaces/sessions are relational; bundled build avoids system-lib differences.                                                       |
+| Settings     | TOML file in the OS config dir                                                                                                  | Human-editable, easy to back up and diff. Harness definitions live here.                                                                        |
+| Paths        | `directories` crate                                                                                                             | Correct config/data dirs per OS.                                                                                                                |
+| FS watching  | `notify` + debouncer                                                                                                            | Cross-platform; honour `.gitignore` via the `ignore` crate.                                                                                     |
+| Diff view    | CodeMirror 6 merge view _(tentative)_                                                                                           | Much lighter than Monaco. See open questions.                                                                                                   |
+| Assist       | TypeSafe **Jev** over HTTP (`reqwest`, the updater's TLS stack); key in the OS credential store (`keyring`)                     | A judgment model answers typed questions, so there is no generated text to parse. The key must never reach `settings.toml`.                     |
 
 ## PTY & terminal data path
 
@@ -90,8 +99,9 @@ Hyprland) is exactly the hard case, so M1 is a meaningful test.
 
 Reference apps in this space run a **terminal daemon**: a background process owns the PTYs and the
 window is just a client, tmux-style. That is not about rendering speed — it is what lets agents keep
-working when the window closes, crashes or updates. We want that eventually, so the `pty` module is
-written as a **PTY host** with a message-shaped API from day one:
+working when the window closes, crashes or updates. The `pty` module was written as a **PTY host**
+with a message-shaped API from day one, so that the move could be made without anything above it
+changing:
 
 ```
 spawn(LaunchPlan) -> SessionId          list() -> [SessionInfo]
@@ -100,13 +110,13 @@ write(SessionId, bytes)                 resize(SessionId, cols, rows)
 kill(SessionId, signal)                 events: output, exit, activity
 ```
 
-- **v1:** the host runs in-process; "transport" is a function call plus a Tauri channel.
-- **Later:** the same host runs as a separate process (`yardsortd`), the transport becomes a
-  local socket (Unix domain socket / Windows named pipe), and the app becomes one client of it.
-  Nothing above the boundary changes.
-- Rules that keep this cheap: the host depends on nothing from Tauri or the UI; every request and
-  event is a serialisable type; sessions are addressed by id, never by handle; the host — not the
-  frontend — is the owner of scrollback and terminal state.
+- **v1:** the host ran in-process; "transport" was a function call plus a Tauri channel.
+- **Since M9:** the same host runs in a separate process, the transport is a local socket, and the
+  app is one client of it. Nothing above the boundary changed — `terminal.rs` and `sessions.rs`
+  hold an `Arc<dyn TerminalHost>` and cannot tell which they have.
+- Rules that made this cheap, and still hold: the host depends on nothing from Tauri or the UI;
+  every request and event is a serialisable type; sessions are addressed by id, never by handle;
+  the host — not the frontend — is the owner of scrollback and terminal state.
 
 **Headless terminal state.** To restore a screen on (re)attach, raw byte replay is not enough for
 alt-screen TUIs. The host feeds output through a headless VT parser in Rust (`vt100`, 10 000 lines
@@ -121,10 +131,41 @@ same lock that delivers output, so exactly one reply is ever sent. This is load-
 `portable-pty` creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY
 ask that question at startup and run nothing until it is answered.
 
-- **Re-attach (v1)**: switching workspaces detaches the view; the session keeps running in the
-  host. On re-mount: `attach` → write snapshot → stream live.
-- **App quit (v1)**: the host dies with the app. Sessions are restored through each harness's
-  resume args — see [04-harnesses](04-harnesses.md). With the daemon, quit merely detaches.
+- **Re-attach**: switching workspaces detaches the view; the session keeps running in the host.
+  On re-mount: `attach` → write snapshot → stream live.
+- **App quit**: merely a disconnect. The conversation is still running when the app comes back,
+  and its record is left `running` rather than settled as _interrupted_. Resume args are still
+  what brings back a conversation whose **process** is gone — see [04-harnesses](04-harnesses.md).
+
+### The daemon (`yardsortd`)
+
+The daemon is **the app's own executable, re-run with `--yardsort-daemon <socket>`** — the same
+trick `--yardsort-print-env` uses. No second binary means nothing extra to bundle, sign or
+notarize on three platforms, and the daemon can never be a different build from the app that
+started it. The flag is handled in `main` before Tauri is touched, so a daemon never creates a
+window or a webview.
+
+| Concern         | Decision                                                                                                                                                                                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport       | `interprocess` local sockets: a **socket file** on Unix, a **named pipe** on Windows.                                                                                                                                                                                                     |
+| Who may connect | The socket's directory is `0700`; a named pipe's default descriptor is already limited to the user's session. Linux abstract sockets are deliberately _not_ used — they have no filesystem permissions, and anything that can connect can type into an agent.                             |
+| How many        | **One per data directory**, addressed by an FNV-1a tag of its path. `YARDSORT_DATA_DIR` therefore isolates a throwaway profile's agents as well as its database.                                                                                                                          |
+| Who starts it   | Whichever app finds nobody listening, under a lock file so two starting at once produce one daemon. A socket left by a killed daemon is cleared first.                                                                                                                                    |
+| Who stops it    | `Shutdown` from the app (the quit dialog's "Stop them"), or itself once no client is connected **and** no session is running, after a 10 s grace so a restarting app does not take it down.                                                                                               |
+| Upgrades        | A protocol number, separate from the app version. Same number → just talk. Different, and the daemon is idle → replace it silently. Different, with agents running → leave it alone, run terminals in-process, and tell the user. Killing work nobody agreed to lose is never the answer. |
+| Wire format     | `[u32 len][u8 kind][payload]`. Requests, responses and events are JSON, reusing the host types' `serde` impls; **output has a frame kind of its own and stays raw bytes**, so a repainting TUI never pays for JSON.                                                                       |
+| Back-pressure   | Each connection has a writer thread and a queue; a client that stops reading is dropped at 32 MiB rather than allowed to block the session's pump thread. Dropping it is safe — reattaching starts from a snapshot.                                                                       |
+| Logs            | The app hands the child `daemon.log` in the data directory, replaced on each start. Started by hand, it keeps its terminal.                                                                                                                                                               |
+
+`attach` needed one adjustment to cross a socket. In-process, the snapshot is handed to the sink
+_before_ `attach` returns, under the lock that delivers output, so no byte is lost or doubled.
+Over a socket the response would race those bytes — so the **client** picks the stream id and
+registers its sink before sending the request. The daemon's own attach stays atomic and tags that
+session's output with the id the client chose.
+
+Prompt delivery over `stdin` moved into the host for the same reason: it waits for the program to
+settle, which can take seconds, and it must still land if the window closes meanwhile. It rides
+along in the `LaunchPlan`.
 
 ## Environment resolution (important)
 
@@ -282,7 +323,8 @@ yardsort/
 │  ├─ migrations/
 │  └─ tauri.conf.json
 ├─ crates/
-│  └─ pty-host/              # no Tauri deps; in-process now, `yardsortd` later (M1)
+│  ├─ pty-host/              # owns the sessions; no Tauri deps (M1)
+│  └─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 

@@ -30,18 +30,47 @@ back the screen is repainted exactly as it was, scrollback included.
 Plain `Ctrl+C`, `Ctrl+V` and a plain click belong to the program in the terminal. See
 [Keyboard shortcuts](shortcuts.md) for why.
 
+## Agents keep working when you close the window
+
+Terminals do not belong to the window. They belong to a small background process — the
+**daemon** — that Yardsort starts the first time it needs one and talks to over a private local
+socket. Closing Yardsort is a disconnect, not a kill: whatever your agents were doing, they carry
+on doing. So is Yardsort crashing, or being killed.
+
+Open it again and it finds that daemon, reattaches, and repaints every terminal from where it got
+to. Conversations that never stopped are still _running_ — they are not listed as
+[interrupted](#resume), because nothing interrupted them. Any agent that is waiting for you wears
+the **ringed** dot, so you can see at a glance what wants reading.
+
+Because leaving processes behind is not something to discover by accident, **closing with agents
+still working asks first**. The dialog names them and offers three answers:
+
+- **Leave them running** — close; they carry on and are waiting next time. This is the default.
+- **Stop them** — stop every agent, and the daemon with them.
+- **Cancel** — stay where you are.
+
+Nothing is stopped unless you say so. A shell sitting at a prompt is not counted as work, so a
+window with only shells in it simply closes.
+
+The daemon shuts itself down once there is nothing left to look after: no window open and no
+agent running. There is one per profile (see `YARDSORT_DATA_DIR` in
+[Settings](settings.md#environment-variables)), and the status bar shows its process id.
+
+To go back to the old behaviour — terminals inside Yardsort, stopping when it does — start it
+with `YARDSORT_NO_DAEMON=1`.
+
 ## Status dots
 
 The dot on a tab, and the one on each workspace in the sidebar, tell you what is going on without
 opening anything:
 
-| Dot            | Meaning                                                                  |
-| -------------- | ------------------------------------------------------------------------ |
-| **pulsing**    | printing right now — an agent at work                                    |
-| **solid**      | running but quiet for a few seconds — most likely waiting for you        |
-| **ringed**     | an agent finished a long stretch of work that you have not looked at yet |
-| **grey**       | nothing running                                                          |
-| **red** (tabs) | the program exited with an error                                         |
+| Dot            | Meaning                                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **pulsing**    | printing right now — an agent at work                                                                                                          |
+| **solid**      | running but quiet for a few seconds — most likely waiting for you                                                                              |
+| **ringed**     | an agent is waiting and you have not looked at it yet — it finished a long stretch of work, or it was already waiting when you opened Yardsort |
+| **grey**       | nothing running                                                                                                                                |
+| **red** (tabs) | the program exited with an error                                                                                                               |
 
 This comes purely from terminal activity. Agents animate a spinner while they think, so for them
 silence really does mean "your turn".
@@ -58,7 +87,7 @@ Turn it off in [Settings → General](settings.md#general).
 
 Agents save their conversations on disk. Yardsort keeps a **record** of each one — which agent,
 which conversation, your first message as its title — so you can return to it after the process
-is gone: because you closed the tab, the agent exited, or you quit Yardsort.
+is gone: because you closed the tab, the agent exited, or you chose to stop it on quitting.
 
 ### Resume
 
@@ -69,8 +98,10 @@ Same conversation, new process.
 
 ![Previous sessions](../images/sessions.png)
 
-After restarting Yardsort nothing is started for you — you choose what to bring back. Sessions
-that were running when Yardsort closed are labelled _interrupted_; they resume like any other.
+Sessions labelled _interrupted_ ended without saying so — Yardsort was killed, or the machine
+went down. They resume like any other. An agent that simply kept working while Yardsort was
+closed is not interrupted and needs no resuming: it is
+[still running](#agents-keep-working-when-you-close-the-window), and comes back by itself.
 
 ### Fork
 

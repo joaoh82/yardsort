@@ -103,6 +103,21 @@ export const commands = {
 	 */
 	updateInstall: (progress: Channel<DownloadProgress>) => typedError<null, IpcError>(__TAURI_INVOKE("update_install", { progress })),
 	envInfo: (reload: boolean) => typedError<EnvInfo, IpcError>(__TAURI_INVOKE("env_info", { reload })),
+	/**
+	 *  What the app is talking to. Shown in the status bar, and the first thing worth knowing when
+	 *  a terminal misbehaves.
+	 */
+	daemonStatus: () => typedError<DaemonStatus, IpcError>(__TAURI_INVOKE("daemon_status")),
+	/**
+	 *  The user's answer. `stop_agents` kills everything the daemon runs and stops it; otherwise the
+	 *  agents are left to carry on and the app simply lets go of them.
+	 */
+	appQuit: (stopAgents: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("app_quit", { stopAgents })),
+	/**
+	 *  Let the next close request ask again. Called when the user cancels, so that closing the
+	 *  window later still puts the question.
+	 */
+	quitCancelled: () => typedError<null, IpcError>(__TAURI_INVOKE("quit_cancelled")),
 	ptySpawn: (request: SpawnRequest) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("pty_spawn", { request })),
 	/**  Stream a session into `output`: first a snapshot that repaints the terminal, then live bytes. */
 	ptyAttach: (id: SessionId, output: Channel<RawBytes>) => typedError<number, IpcError>(__TAURI_INVOKE("pty_attach", { id, output })),
@@ -118,6 +133,7 @@ export const commands = {
 /** Events */
 export const events = {
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
+	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
 };
 
@@ -195,6 +211,28 @@ export type Content =
 export type CreatedWorkspace = {
 	workspace: Workspace,
 	session: SessionInfo,
+};
+
+/**  What the app ended up talking to, as the status bar and a bug report want it. */
+export type DaemonStatus = {
+	/**
+	 *  False when terminals are running inside the app instead — `YARDSORT_NO_DAEMON`, or a
+	 *  daemon that could not be reached. They then die with the app, as they did before.
+	 */
+	running: boolean,
+	version: string | null,
+	pid: number | null,
+	/**  Where the daemon listens, and where it writes when something goes wrong. */
+	endpoint: string,
+	logPath: string,
+	/**  Why there is no daemon, when there should have been one. */
+	problem: string | null,
+	/**
+	 *  Set when a daemon is running that this build cannot talk to — the app was updated
+	 *  underneath agents that are still working. It says how many, so they can be asked about
+	 *  rather than stopped behind the user's back.
+	 */
+	strandedSessions: number | null,
 };
 
 /**
@@ -449,6 +487,12 @@ export type PromptTransport =
 
 /**  Emitted for every [`HostEvent`]. */
 export type PtyHostEvent = HostEvent;
+
+/**  Asks the webview to put the question to the user. It answers with [`app_quit`]. */
+export type QuitRequested = {
+	/**  The harness sessions still running, as ids the frontend can match to its tabs. */
+	agents: string[],
+};
 
 /**
  *  Terminal output, sent over the channel as raw bytes rather than JSON: the webview receives

@@ -155,6 +155,10 @@ impl Session {
         Ok(session)
     }
 
+    pub(crate) fn id(&self) -> &SessionId {
+        &self.id
+    }
+
     pub(crate) fn info(&self) -> SessionInfo {
         let view = self.view();
         SessionInfo {

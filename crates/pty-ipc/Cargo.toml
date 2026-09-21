@@ -1,0 +1,21 @@
+[package]
+name = "pty-ipc"
+description = "The wire between Yardsort and the daemon that owns its terminals: framing, a blocking server loop and a client that is a TerminalHost."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pty-host = { path = "../pty-host" }
+interprocess = "2.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

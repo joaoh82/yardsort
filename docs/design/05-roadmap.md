@@ -207,12 +207,60 @@ Done, off by default, behind the user's own TypeSafe API key:
 _Exit:_ with no key, Yardsort behaves exactly as it did before; with one, a workspace that wrote
 to `ci.yml` while asked to fix a login bug says so before you read the diff.
 
+## M9 — The daemon ✅
+
+Agents no longer die with the window.
+
+- `crates/pty-ipc`: the wire (length-prefixed frames, JSON control traffic, **raw** output), a
+  blocking server loop around one `PtyHost`, and a client that is itself a `TerminalHost`.
+- `yardsortd` is the app's own binary re-run with `--yardsort-daemon <socket>` — no second
+  artifact to bundle, sign or notarize, and no way for the two to be different builds.
+- One daemon per data directory. The app starts one when nobody answers (under a lock file, so
+  two copies starting at once produce one daemon) and it stops itself once no client is
+  connected and no session is running.
+- Quitting with agents running asks: leave them, stop them, or cancel. Closing the window on its
+  own leaves them be.
+- Session records stop lying: a conversation whose process is still alive stays `running` instead
+  of being settled as _interrupted_ at startup.
+- Prompt delivery over `stdin` moved into the host, so a first message still lands if the window
+  closes while the harness is starting.
+- `YARDSORT_NO_DAEMON=1` keeps the old in-process behaviour, for debugging.
+
+_Exit:_ start an agent on a long task, close Yardsort, reopen it — the agent is still working and
+its terminal is repainted where it got to. Killing the app with `SIGKILL` is the same.
+
+_Result:_ verified by hand on Linux — the app binary runs as a daemon with no window, survives
+`kill -9` of the app, and the reopened app reattaches to the _same_ daemon rather than starting a
+second one. The `sessions_outlive_the_client_that_started_them` test in `crates/pty-ipc` covers
+the same ground against a real daemon process, on all three OSes in CI.
+
+_Notes:_
+
+- `attach` hands the snapshot to the sink _before returning_, under the lock that delivers
+  output, so nothing is lost or doubled. Over a socket the response would race those bytes, so
+  the **client** picks the stream id and registers its sink before asking.
+- Linux abstract-namespace sockets were deliberately passed over for socket _files_: anything
+  that can connect can type into an agent's terminal, and a `0700` directory is what keeps that
+  to its owner.
+- Found while writing the protocol: serde's internal tagging cannot encode a newtype variant
+  wrapping a sequence, so `list` silently returned nothing. Every result is a struct variant now.
+- Found by Windows CI: `Shutdown { stop_sessions }` killed the sessions and answered without
+  waiting for them, so on Windows — where tearing a pseudo-console down is not quick — the
+  daemon could exit before the exits were announced, and the app would quit with its records
+  still claiming to be running. It now waits for them to go. Because everything shares one
+  ordered stream, the exits are delivered, and the records settled, before the reply is.
+- Also from Windows CI, in the tests rather than the product: a viewer that records output but
+  never answers `ESC [ 6 n` is not a terminal, and ConPTY will not start the program until one
+  has answered. `pty-host`'s tests knew this; `pty-ipc`'s now do too. Its reply has to come from
+  a thread of its own — a client's output sink runs on the reader thread, and a request made
+  from there would be waiting on the thread that has to deliver its answer.
+- CI is green on all three platforms; the hands-on pass M7 owes on macOS and Windows is still
+  outstanding.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
 - Per-project setup script and "files to copy into new worktrees" (`.env` etc.); run/dev-server button.
-- `yardsortd`: move the PTY host out of process so agents survive closing the window
-  (boundary already in place from M1; see open questions for lifecycle).
 - Merge / rebase helpers; "apply this workspace onto local".
 - Diff comments sent back to the agent as a prompt.
 - Multi-repo projects; remote/SSH workspaces.

@@ -6,6 +6,7 @@ import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { UpdateDialog } from "@/features/updates/UpdateDialog";
 import { useUpdateChecks } from "@/features/updates/useUpdateChecks";
 import { Sidebar } from "@/features/sidebar/Sidebar";
+import { QuitDialog } from "@/features/shell/QuitDialog";
 import { WorkspacePanel } from "@/features/workspace/WorkspacePanel";
 import { hasCore } from "@/lib/ipc";
 import { isModKey, shortcutKey } from "@/lib/platform";
@@ -13,6 +14,7 @@ import { useAppStore } from "@/stores/app";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useLayoutStore, type SidePanel } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
+import { listenForQuitRequests } from "@/stores/quit";
 import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
 import { StatusBar } from "./StatusBar";
@@ -59,6 +61,8 @@ export function AppShell() {
   useEffect(() => {
     void useAppStore.getState().load().catch(console.error);
     if (hasCore()) void useHarnessStore.getState().load();
+    const listening = listenForQuitRequests();
+    return () => void listening.then((stop) => stop());
   }, []);
 
   // Mod+B / Mod+Alt+B toggle the side panels, Mod+O opens a project, Mod+N composes a new
@@ -128,6 +132,7 @@ export function AppShell() {
       <StatusBar />
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {updateOpen && <UpdateDialog />}
+      <QuitDialog />
     </div>
   );
 }

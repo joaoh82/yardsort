@@ -67,6 +67,7 @@ fn shell(script: &str) -> LaunchPlan {
         clear_env: false,
         size: TermSize { cols: 80, rows: 24 },
         labels: Default::default(),
+        prompt: None,
     }
 }
 
@@ -451,4 +452,26 @@ fn the_plan_controls_the_environment() {
         "{:?}",
         capture.text()
     );
+}
+
+/// A plan's prompt, against a real program in a real PTY: a "harness" that draws a prompt, then
+/// reads a line. The message must arrive only once the program has gone quiet, and be submitted.
+///
+/// The host does this itself, so it still lands when whoever asked for the session has gone —
+/// the window closed while the harness was starting up.
+#[cfg(unix)]
+#[test]
+fn a_plans_prompt_is_typed_in_once_the_program_is_ready() {
+    let (host, _events) = host();
+    let mut plan =
+        shell("printf 'starting'; sleep 0.3; printf ' > '; read line; echo \"got:[$line]\"");
+    plan.prompt = Some(pty_host::PendingPrompt {
+        text: "fix the bug".into(),
+        quiet_ms: 600,
+    });
+    let session = host.spawn(plan).unwrap();
+
+    let capture = Capture::default();
+    attach_terminal(&host, &session.id, &capture);
+    capture.wait_for("got:[fix the bug]");
 }

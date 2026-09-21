@@ -69,7 +69,7 @@ interface TerminalState {
  */
 const earlyExits = new Map<SessionId, ExitInfo>();
 
-function tabFor(session: SessionInfo): TerminalTab | null {
+function tabFor(session: SessionInfo, adopting = false): TerminalTab | null {
   const workspaceId = session.labels[WORKSPACE_LABEL];
   if (!workspaceId) return null;
   const name = session.program.split(/[\\/]/).pop() ?? session.program;
@@ -81,8 +81,21 @@ function tabFor(session: SessionInfo): TerminalTab | null {
       session.state.status === "exited" ? session.state.exit : (earlyExits.get(session.id) ?? null),
     recordId: session.labels[RECORD_LABEL] ?? null,
     busy: session.busy && session.state.status === "running",
-    attention: false,
+    // A session adopted rather than started by us has been running unwatched — since a webview
+    // reload, or since the last time the app was open. If it is an agent that has printed
+    // something and is now quiet, that is work waiting to be looked at.
+    attention: adopting && isWaitingAgent(session),
   };
+}
+
+/** A harness that has said something and then fallen silent: it is waiting for a person. */
+function isWaitingAgent(session: SessionInfo): boolean {
+  return (
+    session.labels[HARNESS_LABEL] !== undefined &&
+    session.state.status === "running" &&
+    session.hasOutput &&
+    !session.busy
+  );
 }
 
 const update = (tabs: TerminalTab[], id: SessionId, patch: Partial<TerminalTab>) =>
@@ -100,7 +113,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const known = new Set(get().tabs.map((tab) => tab.id));
     const adopted = sessions
       .filter((session) => !known.has(session.id))
-      .map(tabFor)
+      .map((session) => tabFor(session, true))
       .filter((tab) => tab !== null);
     if (adopted.length === 0) return;
     set((state) => {

@@ -97,7 +97,8 @@ Both apply to workspaces created from now on; existing ones stay where they are.
 
 For testing and unusual setups:
 
-| Variable                 | Effect                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------- |
-| `YARDSORT_DATA_DIR`      | Keep the database **and** `settings.toml` in this folder — a throwaway profile. |
-| `YARDSORT_WORKTREE_ROOT` | Override the worktree folder.                                                   |
+| Variable                 | Effect                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `YARDSORT_DATA_DIR`      | Keep the database **and** `settings.toml` in this folder — a throwaway profile. Each one gets its own [background process](terminals-and-sessions.md#agents-keep-working-when-you-close-the-window), so its agents are separate too. |
+| `YARDSORT_WORKTREE_ROOT` | Override the worktree folder.                                                                                                                                                                                                        |
+| `YARDSORT_NO_DAEMON`     | Run terminals inside Yardsort, as it did before v0.4: they stop when it closes.                                                                                                                                                      |
