@@ -220,7 +220,20 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
             const ask = () => setLaunchAt({ x: box.left + 24, y: box.bottom });
             enterWorkspace(workspace.id, isWorktree ? undefined : ask);
           }}
-          title={workspace.archived ? `Archived — was at ${workspace.path}` : workspace.path}
+          // No tooltip for a row you can open. It said the path, which the bottom bar already
+          // shows for the workspace in view, and a native tooltip appears wherever the pointer
+          // is — including straight over the menu the click just opened. A row that *cannot* be
+          // opened keeps it: it cannot be selected either, so this is the only place its path
+          // and its state are written down.
+          title={
+            !unusable
+              ? undefined
+              : workspace.archived
+                ? `Archived — was at ${workspace.path}`
+                : workspace.missing
+                  ? `Missing — was at ${workspace.path}`
+                  : workspace.path
+          }
           className={`flex h-full min-w-0 flex-1 items-center gap-2 pr-1 text-left disabled:opacity-40 ${
             workspace.archived ? "pl-11" : "pl-7"
           }`}

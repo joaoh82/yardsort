@@ -122,6 +122,14 @@ describe("Sidebar", () => {
 
   // `local` is the project's own checkout: a shell to work by hand and an agent on the branch as
   // it stands are both reasonable, so it asks instead of picking one.
+  // A native tooltip appears wherever the pointer is, which after a click is straight over the
+  // menu that click opened. An openable row says its path in the bottom bar instead.
+  it("a row you can open carries no path tooltip", async () => {
+    await renderWithWorktree();
+    expect(rowButton("feature")).not.toHaveAttribute("title");
+    expect(rowButton("local")).not.toHaveAttribute("title");
+  });
+
   it("local asks what to open rather than opening a shell by itself", async () => {
     const user = userEvent.setup();
     await renderSidebar("alpha");
@@ -433,7 +441,10 @@ describe("Sidebar", () => {
 
       await user.click(screen.getByRole("button", { name: /archived \(1\)/ }));
       const archived = screen.getByRole("treeitem", { name: "fix-login" });
-      expect(within(archived).getAllByRole("button")[0]).toBeDisabled();
+      const row = within(archived).getAllByRole("button")[0]!;
+      expect(row).toBeDisabled();
+      // It cannot be selected, so its own tooltip is the only place its path is written down.
+      expect(row.getAttribute("title")).toContain("Archived — was at");
 
       await openMenu(user);
       expect(screen.queryByRole("menuitem", { name: "Archive…" })).not.toBeInTheDocument();

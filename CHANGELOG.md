@@ -10,6 +10,9 @@ has the downloads and the full commit lists.
   checkout on the branch you have out — no branch and no worktree are created. It only asks when
   there is nothing running there and nothing to resume. See
   [Projects](docs/guide/projects.md#the-local-workspace).
+- Hovering a workspace no longer shows its path in a tooltip: the bottom bar already says it for
+  the workspace you are in, and the tooltip landed on top of the menu above. Archived and missing
+  workspaces keep theirs — they cannot be opened, so it is the only place their path is written.
 
 ## 0.5.0
 
