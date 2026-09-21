@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.5.0
 
 - **Agents keep working when you close Yardsort.** Terminals moved out of the app into a small
   background process (`yardsortd`) that owns them, so closing the window — or Yardsort crashing —
