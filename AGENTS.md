@@ -25,7 +25,16 @@ the documentation says so, in the same commit or pull request.**
   `just site-check` builds every page.
 - Screenshots live in `docs/images/`. Retake them when the UI they show changes noticeably. They
   must never show a real user's name, paths, projects or account details — use a throwaway
-  profile (`YARDSORT_DATA_DIR`, `YARDSORT_WORKTREE_ROOT`) and demo repositories.
+  profile (`YARDSORT_DATA_DIR`, `YARDSORT_WORKTREE_ROOT`) and demo repositories. Two things a
+  throwaway profile does **not** isolate, and both have leaked into a shot already:
+  - **Agent paths.** Settings → Harnesses prints "Found at …", which is a real install path under
+    your home. Put shims on `PATH` — `/tmp/agents/claude` exec'ing the real one — and point the
+    profile's environment probe at them (`SHELL` matters: the probe runs your login shell).
+  - **The TypeSafe key.** It lives in the OS credential store, which is per _user_, not per
+    profile, so Settings → Assist shows the configured state and the key's last characters. Never
+    press Forget to clear it. Make the store unreachable for that one process instead — on Linux,
+    `DBUS_SESSION_BUS_ADDRESS` pointed at a path that does not exist. Leave `XDG_RUNTIME_DIR`
+    alone; the Wayland socket is under it and the app will not open a window without it.
 - Before finishing, reread the docs you touched against the code. Do not document behaviour you
   have not verified.
 
