@@ -3,7 +3,11 @@ name: Package managers
 # Publishes an existing GitHub release to the package managers. Called by the Release workflow
 # after a release goes public; run it by hand (Actions -> Package managers -> Run workflow) to
 # publish or re-publish any release, for example once a missing credential has been added.
-# Every job skips itself, with a warning, when its credential is not configured.
+# A job that cannot publish FAILS, so the run is red and says so. It used to warn and exit 0,
+# on the grounds that an unregistered key is a setup step rather than a broken release — but a
+# green run that published nothing is worse than a red one, and it has misled a reader already.
+# The release itself is unaffected: this workflow runs after the release is public, and nothing
+# waits on it. "Already at this version" is still a success.
 # See docs/releasing.md.
 on:
   workflow_call:
@@ -44,8 +48,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
-            echo "::warning::No AUR_SSH_PRIVATE_KEY secret: the AUR package was not updated. See docs/releasing.md."
-            exit 0
+            echo "::error::No AUR_SSH_PRIVATE_KEY secret, so the AUR package was NOT updated. The release itself is published. Set the secret (docs/releasing.md), then re-run this workflow with the same tag."
+            exit 1
           fi
           version="${TAG#v}"
 
@@ -67,8 +71,8 @@ jobs:
           # A key that no AUR account knows yet is a setup step still to do, not a broken release.
           if ! run env GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git ls-remote ssh://aur@aur.archlinux.org/yardsort-bin.git >/dev/null 2>/tmp/aur-auth; then
             if grep -q "Permission denied" /tmp/aur-auth; then
-              echo "::warning::The AUR does not accept the deploy key yet — register its public half on the AUR account (docs/releasing.md). The AUR package was not updated."
-              exit 0
+              echo "::error::The AUR rejected the deploy key, so the AUR package was NOT updated. The release itself is published. Register the key's public half on the AUR account (docs/releasing.md), then re-run this workflow with the same tag."
+              exit 1
             fi
             cat /tmp/aur-auth; exit 1
           fi
@@ -83,6 +87,7 @@ jobs:
           cd /work/aur
           run git add PKGBUILD .SRCINFO
           if run git diff --cached --quiet; then
+            # Nothing to push is a success, unlike nothing being able to push.
             echo "The AUR package is already at $version."
             exit 0
           fi
@@ -113,8 +118,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$HOMEBREW_TAP_DEPLOY_KEY" ]; then
-            echo "::warning::No HOMEBREW_TAP_DEPLOY_KEY secret: the Homebrew tap was not updated. See docs/releasing.md."
-            exit 0
+            echo "::error::No HOMEBREW_TAP_DEPLOY_KEY secret, so the tap was NOT updated. The release itself is published. Set the secret (docs/releasing.md), then re-run this workflow with the same tag."
+            exit 1
           fi
           version="${TAG#v}"
 
@@ -130,6 +135,7 @@ jobs:
           cd "$RUNNER_TEMP/tap"
           git add Casks/yardsort.rb
           if git diff --cached --quiet; then
+            # Nothing to push is a success, unlike nothing being able to push.
             echo "The tap is already at $version."
             exit 0
           fi
@@ -161,7 +167,7 @@ jobs:
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::No WINGET_TOKEN secret: nothing was submitted to winget. See docs/releasing.md."
-            exit 0
+            echo "::error::No WINGET_TOKEN secret, so nothing was submitted to winget. The release itself is published. Set the secret (docs/releasing.md), then re-run this workflow with the same tag."
+            exit 1
           fi
           scripts/winget-submit.sh "${TAG#v}"
