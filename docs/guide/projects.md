@@ -33,8 +33,23 @@ removed again.
 ## The `local` workspace
 
 Every project has a **local** entry, always first. It is your repository's own checkout — not a
-worktree — and the branch checked out there is shown next to it. Use it for a shell in the project
-or to run an agent directly on your working copy. It cannot be renamed, archived or deleted.
+worktree — and the branch checked out there is shown next to it. It cannot be renamed, archived or
+deleted.
+
+Clicking it **asks what to open**, because both answers are reasonable in your own checkout:
+
+- **Open Terminal** — a shell in the project root, on the branch you have out.
+- **Open Composer** — the composer, but running the agent **in this checkout**: no new branch, no
+  new worktree. Everything else is the same — harness, model, effort, your first message — and the
+  conversation is recorded so it can be resumed and forked like any other.
+
+It only asks when there is nothing running there and no earlier conversation to come back to;
+otherwise clicking brings what is already there into view. That is the same rule a worktree
+workspace follows, except a worktree opens a shell instead of asking.
+
+An agent in `local` has no isolation: it edits the branch you have checked out, like you would.
+That is the point of it — for a quick fix, or work you intend to commit where you are — but it is
+why workspaces exist, and why they are the default.
 
 The branch label follows reality: switch branches in another tool and it updates the next time
 Yardsort's window gets focus.

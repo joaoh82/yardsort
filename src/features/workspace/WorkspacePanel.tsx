@@ -23,6 +23,11 @@ export function WorkspacePanel() {
   const composingFor = useProjectsStore((s) =>
     s.projects.find((project) => project.id === s.composingProjectId),
   );
+  // Composing a run inside a workspace that already exists — `local`. Selection is what holds it,
+  // so the panel needs both the workspace and the project it belongs to.
+  const composingWorkspaceId = useProjectsStore((s) => s.composingWorkspaceId);
+  const runIn =
+    selection && selection.workspace.id === composingWorkspaceId ? selection : undefined;
 
   if (dev?.bench) {
     return (
@@ -35,6 +40,8 @@ export function WorkspacePanel() {
     <main aria-label="Workspace" className="flex h-full flex-col bg-canvas">
       {composingFor ? (
         <Composer key={composingFor.id} project={composingFor} />
+      ) : runIn ? (
+        <Composer key={runIn.workspace.id} project={runIn.project} runIn={runIn.workspace} />
       ) : selection ? (
         <WorkspaceTerminals {...selection} rendererOverride={dev?.renderer} />
       ) : (

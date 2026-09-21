@@ -26,6 +26,9 @@ interface ProjectsState {
   selectedWorkspaceId: string | null;
   /** The project a new workspace is being composed for; takes over the center panel. */
   composingProjectId: string | null;
+  /** Composing to run in a workspace that already exists — `local`, whose checkout is the repo
+   *  itself, so there is no worktree or branch to create. */
+  composingWorkspaceId: string | null;
   /** Raw persisted UI state, for features that remember small things (see `remember`). */
   ui: Record<string, string>;
   /** Projects are expanded unless listed here, so new ones start open. */
@@ -44,6 +47,8 @@ interface ProjectsState {
   move: (id: string, by: -1 | 1) => Promise<void>;
   select: (workspaceId: string | null) => void;
   compose: (projectId: string | null) => void;
+  /** Compose a run inside a workspace that already exists, rather than a new one. */
+  composeIn: (workspace: Workspace) => void;
   /**
    * Create a worktree workspace and start its harness. Resolves to the new session, or to an
    * error message — returned rather than stored, because the composer shows it inline.
@@ -109,6 +114,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     loaded: false,
     selectedWorkspaceId: null,
     composingProjectId: null,
+    composingWorkspaceId: null,
     ui: {},
     collapsed: [],
     lastParentDir: null,
@@ -202,17 +208,33 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     },
 
     select(workspaceId) {
-      if (get().selectedWorkspaceId === workspaceId) return set({ composingProjectId: null });
-      set({ selectedWorkspaceId: workspaceId, composingProjectId: null });
+      if (get().selectedWorkspaceId === workspaceId) {
+        return set({ composingProjectId: null, composingWorkspaceId: null });
+      }
+      set({
+        selectedWorkspaceId: workspaceId,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+      });
       save(KEYS.selected, workspaceId);
     },
 
     compose(projectId) {
       set((state) => ({
         composingProjectId: projectId,
+        composingWorkspaceId: null,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
+    },
+
+    composeIn(workspace) {
+      set({
+        selectedWorkspaceId: workspace.id,
+        composingProjectId: null,
+        composingWorkspaceId: workspace.id,
+      });
+      save(KEYS.selected, workspace.id);
     },
 
     async createWorkspace(request) {
