@@ -234,6 +234,17 @@ _Result:_ verified by hand on Linux — the app binary runs as a daemon with no 
 second one. The `sessions_outlive_the_client_that_started_them` test in `crates/pty-ipc` covers
 the same ground against a real daemon process, on all three OSes in CI.
 
+Re-verified against the **published 0.5.0 AppImage**, because the daemon and the AppImage have a
+lifetime problem waiting to happen: the app spawns it with `current_exe()`, which inside an
+AppImage is a path in that run's own mount (`/tmp/.mount_<name><random>/usr/bin/yardsort`) — and
+`env.rs` already treats such a mount as lasting only as long as the run that made it. It holds
+up. Quitting the app did not take the mount away: the AppImage runtime stayed alive alongside the
+daemon it had started, and the daemon went on working — a fresh client connected, listed the
+surviving session and spawned another. When the daemon later exited on its idle grace, the
+runtime exited with it and the mount went too, leaving nothing behind. So an AppImage user has
+one lingering runtime process for as long as their agents run, which is the daemon doing its job
+rather than a leak. (Why the runtime waits rather than unmounting was not investigated.)
+
 _Notes:_
 
 - `attach` hands the snapshot to the sink _before returning_, under the lock that delivers
