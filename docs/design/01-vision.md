@@ -38,11 +38,11 @@ In:
 - Default harnesses: **Claude Code, Codex, Grok, OpenCode**.
 - Resume a workspace's session after app restart. Archive / delete a workspace.
 
-Out (for now, see [roadmap](05-roadmap.md) "Later"):
+Out (for now, see [roadmap](05-roadmap.md) "Later"). Keeping agents alive while the app is
+closed was on this list and has since shipped — see M9:
 
 - PR creation / GitHub integration, review comments
 - Per-project setup/run scripts
-- Keeping agents alive while the app is closed (background daemon)
 - Remote / SSH / cloud workspaces
 - Our own chat UI over agent protocols (ACP etc.)
 - Team features, accounts, telemetry

@@ -289,3 +289,38 @@ _Notes:_
 - Multi-repo projects; remote/SSH workspaces.
 - Usage / cost view per workspace. MCP config management per harness.
 - Command palette; themes; Omarchy theme integration.
+
+### Measured against Superset
+
+[Superset](https://superset.sh) is the app Yardsort is modelled on and cannot run on Linux or
+Windows — which is [why this exists](01-vision.md). Going through what it offers, most of the
+gaps were already in the list above. These four were not, and are worth naming rather than
+rediscovering later. None of them is committed to; the point is to know what is missing.
+
+- **Side-by-side diffs.** Superset offers "Side by Side" or "Inline"; the right panel only has
+  inline, from CodeMirror's `unifiedMergeView`. The same dependency already exports `MergeView`,
+  the two-pane one, so this is a setting and a branch in `CodeView`, not a new library. Cheapest
+  item here and the most often missed, since a wide diff in a narrow panel is what the unified
+  view is worst at.
+- **Automations — agents on a schedule.** Superset turns chores into recurring agents: issue
+  triage, changelog drafts, dependency bumps, with last-run and current status. Yardsort has no
+  notion of time at all. M9 is what makes it plausible: something has to be running when nobody
+  is looking, and now something is — the daemon already outlives the window and already owns
+  session lifetime. The hard parts are not the timer but the answers: what a run does when the
+  previous one is still going, what happens to a worktree per run, and how a scheduled agent
+  asks for permission when there is no one to ask.
+- **A `yardsort` CLI.** Superset has a CLI and an SDK for scripting and CI. This is less work
+  than it sounds: since M9 the sessions live behind a socket with a documented protocol, and
+  `pty_ipc::DaemonClient` is already a complete client of it. A CLI would be a second client
+  next to the app — list workspaces, start one, attach to a session — with no new core. What it
+  does need is a decision about what is a stable interface: the protocol is versioned for the
+  app's own use and is free to change between releases today.
+- **Mobile.** Superset has an iOS app for steering agents from a phone. This one is not a small
+  feature but a different product shape: it needs remote workspaces first (already in the list
+  above), and then something to connect to from outside the machine — which runs into "team
+  features, accounts" that [01-vision](01-vision.md) puts out of scope. Listed for honesty, not
+  as a plan.
+
+Two further Superset ideas are already covered elsewhere: richer per-workspace status ("running",
+"blocked", "ready for review") is what [open question 16](06-open-questions.md) decided to build
+with Assist, and its PR view is the first item in the list above.
