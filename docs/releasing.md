@@ -164,6 +164,13 @@ request, and the answer is a comment saying `@microsoft-github-policy-service ag
 
 ## Publishing to package managers by hand
 
+**A green release run does not mean the package managers were updated.** A job whose credential
+is missing says so with a `::warning::` and exits 0 on purpose — a key nobody has registered yet
+is a setup step still to do, not a broken release — and a warning does not colour the run. The
+tick is about the installers. To know what actually shipped, open the _Package managers_ jobs and
+look for warnings, or check the package itself: the tap's `Casks/yardsort.rb`, `yardsort-bin` on
+the AUR, the pull request against `winget-pkgs`.
+
 All three jobs live in `.github/workflows/packages.yml`, which the Release workflow calls once a
 release is public. It can also be run alone — _Actions → Package managers → Run workflow_, or
 `gh workflow run packages.yml -f tag=v0.3.1` — to publish or re-publish an existing release
