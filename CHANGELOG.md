@@ -3,6 +3,14 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **`local` asks what to open.** Clicking a project's own checkout used to open a shell by itself.
+  It now offers **Open Terminal** or **Open Composer**, and the composer runs the agent in that
+  checkout on the branch you have out — no branch and no worktree are created. It only asks when
+  there is nothing running there and nothing to resume. See
+  [Projects](docs/guide/projects.md#the-local-workspace).
+
 ## 0.5.0
 
 - **Agents keep working when you close Yardsort.** Terminals moved out of the app into a small

@@ -5,9 +5,14 @@ settled.
 
 ## Product
 
-1. **What exactly does `local` run?** Lean: same as a workspace (harness or shell tabs), rooted at
-   the repo's own checkout, on whatever branch is checked out. Should its row offer the composer too,
-   or open straight to a shell?
+1. ~~**What exactly does `local` run?**~~ **Settled 2026-09-21: it asks.** Clicking `local` offers
+   **Open Terminal** or **Open Composer** — the lean was right that it should run the same things
+   as a workspace, and the answer to "composer or straight to a shell" is neither by default. The
+   composer for `local` starts the agent in the checkout on the branch it has out, creating no
+   branch and no worktree; it is an ordinary `pty_spawn` into an existing workspace, so the
+   conversation is recorded and can be resumed or forked like any other. It only asks when there
+   is nothing running and nothing to resume, which is exactly when a worktree would have opened a
+   shell by itself.
 2. ~~**Workspace naming.**~~ **Settled in M3:** a slug of the first message (filler words dropped,
    four words, 32 characters), numbered when taken; a railway station when the message yields
    nothing. Renaming arrives in M6.

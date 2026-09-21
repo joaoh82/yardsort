@@ -57,6 +57,25 @@ async function renderSidebar(...names: string[]) {
   else await screen.findByText("No projects yet.");
 }
 
+/** One project whose `local` sits beside a worktree workspace called `feature`. */
+async function renderWithWorktree() {
+  const alpha = project("alpha");
+  core.projectsList.mockResolvedValue([
+    { ...alpha, workspaces: [...alpha.workspaces, worktree("alpha", "feature")] },
+  ]);
+  render(<Sidebar />);
+  await screen.findByRole("treeitem", { name: "feature" });
+}
+
+const rowButton = (name: string) =>
+  within(screen.getByRole("treeitem", { name })).getAllByRole("button")[0]!;
+
+/** Clicking `local` asks what to open; this takes one of the answers. */
+async function openFromLocalMenu(user: ReturnType<typeof userEvent.setup>, item: RegExp) {
+  await user.click(rowButton("local"));
+  await user.click(screen.getByRole("menuitem", { name: item }));
+}
+
 describe("Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,14 +108,51 @@ describe("Sidebar", () => {
 
   it("entering a workspace selects it and opens a shell there — once", async () => {
     const user = userEvent.setup();
+    await renderWithWorktree();
+
+    await user.click(rowButton("feature"));
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha-feature");
+    expect(core.ptySpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "w-alpha-feature" }),
+    );
+
+    await user.click(rowButton("feature"));
+    expect(core.ptySpawn).toHaveBeenCalledTimes(1);
+  });
+
+  // `local` is the project's own checkout: a shell to work by hand and an agent on the branch as
+  // it stands are both reasonable, so it asks instead of picking one.
+  it("local asks what to open rather than opening a shell by itself", async () => {
+    const user = userEvent.setup();
     await renderSidebar("alpha");
-    const local = () => within(screen.getByRole("treeitem", { name: "local" })).getByRole("button");
 
-    await user.click(local());
+    await user.click(rowButton("local"));
     expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
-    expect(core.ptySpawn).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w-alpha" }));
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+    expect(screen.getByRole("menuitem", { name: "Open Terminal" })).toBeInTheDocument();
 
-    await user.click(local());
+    await user.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    expect(core.ptySpawn).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w-alpha" }));
+  });
+
+  it("local's other answer composes a run in the checkout, creating nothing", async () => {
+    const user = userEvent.setup();
+    await renderSidebar("alpha");
+
+    await openFromLocalMenu(user, /Open Composer/);
+    expect(useProjectsStore.getState().composingWorkspaceId).toBe("w-alpha");
+    // The composer for an existing workspace must not go near workspace creation.
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+  });
+
+  it("clicking local again just brings its terminal back, with no menu", async () => {
+    const user = userEvent.setup();
+    await renderSidebar("alpha");
+    await openFromLocalMenu(user, /Open Terminal/);
+    expect(core.ptySpawn).toHaveBeenCalledTimes(1);
+
+    await user.click(rowButton("local"));
+    expect(screen.queryByRole("menuitem", { name: "Open Terminal" })).not.toBeInTheDocument();
     expect(core.ptySpawn).toHaveBeenCalledTimes(1);
   });
 
@@ -176,6 +232,7 @@ describe("Sidebar", () => {
     await user.click(
       within(within(alpha).getByRole("treeitem", { name: "local" })).getByRole("button"),
     );
+    await user.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
     expect(core.ptySpawn).toHaveBeenCalledTimes(1);
 
     native.confirm.mockResolvedValue(false);

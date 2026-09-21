@@ -1,5 +1,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ipc, type BranchList, type HarnessInfo, type Project, type Suggestion } from "@/lib/ipc";
+import {
+  ipc,
+  type BranchList,
+  type HarnessInfo,
+  type Project,
+  type Suggestion,
+  type Workspace,
+} from "@/lib/ipc";
 import { formatShortcut } from "@/lib/platform";
 import { assistOn, useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
@@ -25,8 +32,12 @@ const SUGGEST_FROM_CHARS = 15;
 /**
  * The start of every workspace: say what you want, pick who does it, press Enter. Nothing exists
  * until then — and if any part of starting fails, nothing is left behind and the message stays.
+ *
+ * With `runIn`, it starts the agent in a workspace that already exists instead of creating one.
+ * That is how `local` takes a message: its checkout is the repository itself, on whatever branch
+ * is checked out, so there is no branch to pick and no worktree to make.
  */
-export function Composer({ project }: { project: Project }) {
+export function Composer({ project, runIn }: { project: Project; runIn?: Workspace }) {
   const allHarnesses = useHarnessStore((s) => s.harnesses);
   const harnesses = useMemo(() => allHarnesses.filter((h) => h.enabled), [allHarnesses]);
   const harnessesLoaded = useHarnessStore((s) => s.loaded);
@@ -117,7 +128,7 @@ export function Composer({ project }: { project: Project }) {
     setSuggested(null);
   };
 
-  const ready = !busy && !!harness?.resolvedPath && base !== "";
+  const ready = !busy && !!harness?.resolvedPath && (!!runIn || base !== "");
   const [mode, branch] = [base.slice(0, base.indexOf(":")), base.slice(base.indexOf(":") + 1)];
   // A branch lives in one worktree at a time, so only branches nobody has checked out can open.
   const openable = branches?.branches.filter((name) => !branches.checkedOut.includes(name)) ?? [];
@@ -127,32 +138,59 @@ export function Composer({ project }: { project: Project }) {
     setBusy(true);
     setError(null);
     const projects = useProjectsStore.getState();
+    const request = {
+      id: harness.id,
+      model: model.trim() || null,
+      effort: effortChoice || null,
+      prompt: message.trim() || null,
+    };
+    const remember = () =>
+      projects.remember(picksKey(project.id), {
+        harness: harness.id,
+        model: model.trim(),
+        effort: effortChoice,
+      } satisfies LastPicks);
+
+    // Running in a workspace that already exists is an ordinary spawn: the core labels the
+    // session with the workspace and writes its record, exactly as it does for a new one.
+    if (runIn) {
+      try {
+        const session = await ipc.ptySpawn({
+          program: null,
+          args: [],
+          cwd: null,
+          workspaceId: runIn.id,
+          harness: request,
+          size: useTerminalStore.getState().lastSize,
+        });
+        setBusy(false);
+        remember();
+        projects.select(runIn.id);
+        useTerminalStore.getState().adopt(session);
+      } catch (error) {
+        setBusy(false);
+        setError(error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
+
     const result = await projects.createWorkspace({
       projectId: project.id,
       baseBranch: mode === "new" ? branch : null,
       existingBranch: mode === "open" ? branch : null,
-      harness: {
-        id: harness.id,
-        model: model.trim() || null,
-        effort: effortChoice || null,
-        prompt: message.trim() || null,
-      },
+      harness: request,
       size: useTerminalStore.getState().lastSize,
     });
     setBusy(false);
     if ("error" in result) return setError(result.error);
-    projects.remember(picksKey(project.id), {
-      harness: harness.id,
-      model: model.trim(),
-      effort: effortChoice,
-    } satisfies LastPicks);
+    remember();
     useTerminalStore.getState().adopt(result);
   };
 
   return (
     <div className="flex h-full items-center justify-center overflow-y-auto p-6">
       <form
-        aria-label="New workspace"
+        aria-label={runIn ? `Run in ${runIn.name}` : "New workspace"}
         className="w-full max-w-2xl"
         onSubmit={(event) => {
           event.preventDefault();
@@ -160,7 +198,21 @@ export function Composer({ project }: { project: Project }) {
         }}
       >
         <h1 className="mb-3 text-center text-ink-muted">
-          New workspace in <span className="font-medium text-ink">{project.name}</span>
+          {runIn ? (
+            <>
+              Run in <span className="font-medium text-ink">{project.name}</span>
+              {runIn.head && (
+                <>
+                  {" on "}
+                  <span className="font-mono text-[12px] text-ink">{runIn.head.label}</span>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              New workspace in <span className="font-medium text-ink">{project.name}</span>
+            </>
+          )}
         </h1>
         <textarea
           ref={messageRef}
@@ -176,7 +228,9 @@ export function Composer({ project }: { project: Project }) {
               event.preventDefault();
               void start();
             } else if (event.key === "Escape") {
-              useProjectsStore.getState().compose(null);
+              const projects = useProjectsStore.getState();
+              if (runIn) projects.select(runIn.id);
+              else projects.compose(null);
             }
           }}
           className="w-full resize-none rounded-lg border border-line bg-surface p-3 text-[14px] leading-relaxed outline-none select-text focus:border-accent disabled:opacity-60"
@@ -232,31 +286,35 @@ export function Composer({ project }: { project: Project }) {
             </select>
           )}
 
-          <select
-            aria-label="Branch"
-            title="Start a new branch from one of these, or open a branch that already exists"
-            value={base}
-            disabled={busy || !branches}
-            onChange={(event) => setBase(event.target.value)}
-            className={`${control} ml-auto max-w-56 font-mono text-[12px]`}
-          >
-            <optgroup label="New branch from">
-              {branches?.branches.map((name) => (
-                <option key={name} value={`new:${name}`}>
-                  {name}
-                </option>
-              ))}
-            </optgroup>
-            {openable.length > 0 && (
-              <optgroup label="Open existing branch">
-                {openable.map((name) => (
-                  <option key={name} value={`open:${name}`}>
+          {runIn ? (
+            <span className="ml-auto text-[12px] text-ink-faint">no new branch or worktree</span>
+          ) : (
+            <select
+              aria-label="Branch"
+              title="Start a new branch from one of these, or open a branch that already exists"
+              value={base}
+              disabled={busy || !branches}
+              onChange={(event) => setBase(event.target.value)}
+              className={`${control} ml-auto max-w-56 font-mono text-[12px]`}
+            >
+              <optgroup label="New branch from">
+                {branches?.branches.map((name) => (
+                  <option key={name} value={`new:${name}`}>
                     {name}
                   </option>
                 ))}
               </optgroup>
-            )}
-          </select>
+              {openable.length > 0 && (
+                <optgroup label="Open existing branch">
+                  {openable.map((name) => (
+                    <option key={name} value={`open:${name}`}>
+                      {name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          )}
 
           <button
             type="submit"
@@ -298,9 +356,11 @@ export function Composer({ project }: { project: Project }) {
             <p className="text-ink-faint">
               Enter to start · Shift+Enter for a new line · Esc to cancel · {formatShortcut("N")}{" "}
               opens this again.{" "}
-              {mode === "open"
-                ? `Opens the existing branch "${branch}" in a new git worktree.`
-                : "A new branch and git worktree are created when you start."}
+              {runIn
+                ? "Runs in the project's own checkout, on the branch it has out. Nothing is created."
+                : mode === "open"
+                  ? `Opens the existing branch "${branch}" in a new git worktree.`
+                  : "A new branch and git worktree are created when you start."}
             </p>
           )}
         </div>
