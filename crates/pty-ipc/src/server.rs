@@ -41,7 +41,10 @@ const EXIT_ANNOUNCE_GRACE: Duration = Duration::from_millis(200);
 pub fn serve(endpoint: &Endpoint, version: &str, idle_grace: Duration) -> std::io::Result<()> {
     if let Some(dir) = endpoint.parent_dir() {
         std::fs::create_dir_all(dir)?;
-        private(dir)?;
+        // Best effort: the socket may sit in a directory that is not ours to tighten — `/tmp`,
+        // which is the last fallback, belongs to root. Refusing to start over that would be
+        // absurd, and the socket file's own mode below is what actually keeps others out.
+        let _ = private_dir(dir);
     }
     let listener = ListenerOptions::new()
         .name(endpoint.to_name()?)
@@ -49,6 +52,11 @@ pub fn serve(endpoint: &Endpoint, version: &str, idle_grace: Duration) -> std::i
         // only reaches this point after failing to connect, so taking it over is right.
         .try_overwrite(true)
         .create_sync()?;
+    // Anything that can connect here can type into an agent's terminal. Linux checks write
+    // permission on the socket file itself, so this is the lock, not the directory's mode.
+    if let Endpoint::Path(path) = endpoint {
+        private_socket(path)?;
+    }
 
     let conns: Conns = Arc::new(Mutex::new(Vec::new()));
     let broadcasting = Arc::clone(&conns);
@@ -413,12 +421,25 @@ fn epoch_ms() -> u64 {
 /// Keep the socket's directory to its owner. On Windows the pipe's default security descriptor
 /// already limits it to the creating user's session.
 #[cfg(unix)]
-fn private(dir: &std::path::Path) -> std::io::Result<()> {
+fn private_dir(dir: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
+/// The socket itself, which we have just created and therefore own.
+#[cfg(unix)]
+fn private_socket(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
 #[cfg(not(unix))]
-fn private(_dir: &std::path::Path) -> std::io::Result<()> {
+fn private_dir(_dir: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// A named pipe's default security descriptor already limits it to this logon session.
+#[cfg(not(unix))]
+fn private_socket(_path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }

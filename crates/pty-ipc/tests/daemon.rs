@@ -330,3 +330,38 @@ fn a_daemon_with_an_agent_still_running_stays_put() {
     let (returning, _events) = daemon.connect();
     assert_eq!(returning.list()[0].id, session.id);
 }
+
+/// A daemon must start even when its socket lands somewhere it cannot tighten: `/tmp` belongs to
+/// root, and it is both the last fallback for an over-long data directory and where somebody
+/// starting a daemon by hand is likely to put one. What keeps others out is the socket's own
+/// mode, which we do own.
+#[cfg(unix)]
+#[test]
+fn a_socket_in_a_directory_we_do_not_own_still_works_and_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let endpoint = Endpoint::Path(
+        std::env::temp_dir().join(format!("yardsort-test-{}.sock", std::process::id())),
+    );
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_pty-daemon"))
+        .arg(endpoint.as_os_str())
+        .env("PTY_DAEMON_IDLE_GRACE_MS", "60000")
+        .spawn()
+        .expect("could not start the daemon");
+    let mut daemon = Daemon {
+        child,
+        endpoint,
+        _dir: tempfile::tempdir().unwrap(),
+    };
+    daemon.wait_until_listening();
+
+    let Endpoint::Path(path) = &daemon.endpoint else {
+        unreachable!("unix uses socket files")
+    };
+    let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "the socket is the lock, not the directory");
+
+    let (client, _events) = daemon.connect();
+    assert!(client.speaks_our_protocol());
+    assert!(daemon.is_running());
+}

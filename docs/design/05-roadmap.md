@@ -240,7 +240,7 @@ _Notes:_
   output, so nothing is lost or doubled. Over a socket the response would race those bytes, so
   the **client** picks the stream id and registers its sink before asking.
 - Linux abstract-namespace sockets were deliberately passed over for socket _files_: anything
-  that can connect can type into an agent's terminal, and a `0700` directory is what keeps that
+  that can connect can type into an agent's terminal, and a `0600` socket is what keeps that
   to its owner.
 - Found while writing the protocol: serde's internal tagging cannot encode a newtype variant
   wrapping a sequence, so `list` silently returned nothing. Every result is a struct variant now.
@@ -254,6 +254,10 @@ _Notes:_
   has answered. `pty-host`'s tests knew this; `pty-ipc`'s now do too. Its reply has to come from
   a thread of its own — a client's output sink runs on the reader thread, and a request made
   from there would be waiting on the thread that has to deliver its answer.
+- Found while taking the screenshots for 0.5.0: the daemon tightened its socket's _parent_
+  directory to `0700` and gave up if it could not — so a socket in `/tmp` (the last fallback for
+  an over-long data directory, and where you would put one starting a daemon by hand) stopped the
+  daemon dead. The socket file's own `0600` is the lock; the directory is now best effort.
 - CI is green on all three platforms; the hands-on pass M7 owes on macOS and Windows is still
   outstanding.
 
