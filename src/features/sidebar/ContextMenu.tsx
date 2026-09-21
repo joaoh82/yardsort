@@ -11,12 +11,10 @@ interface Props {
   /** Viewport coordinates to open at. */
   at: { x: number; y: number };
   items: MenuItem[];
-  /** Shown above the items, separated: `local`'s menu names the app it is about to start. */
-  header?: React.ReactNode;
   onClose: () => void;
 }
 
-export function ContextMenu({ at, items, header, onClose }: Props) {
+export function ContextMenu({ at, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(at);
 
@@ -67,11 +65,6 @@ export function ContextMenu({ at, items, header, onClose }: Props) {
       style={{ left: position.x, top: position.y }}
       className="fixed z-50 min-w-48 rounded-md border border-line bg-raised py-1 shadow-xl shadow-black/40"
     >
-      {header && (
-        <div className="mb-1 flex items-center gap-2 border-b border-line px-3 pt-1 pb-2">
-          {header}
-        </div>
-      )}
       {items.map((item) => (
         <button
           key={item.label}

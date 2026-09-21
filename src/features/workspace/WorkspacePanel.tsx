@@ -11,6 +11,7 @@ import { useTerminalSessions } from "@/features/terminal/useTerminalSessions";
 import type { HarnessRequest, Project, Workspace } from "@/lib/ipc";
 import { useAppStore } from "@/stores/app";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
+import { shortcutKeys } from "@/lib/platform";
 import { useProjectsStore, useSelectedWorkspace } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
@@ -119,8 +120,14 @@ function WorkspaceTerminals(props: {
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center overflow-y-auto p-6 text-center">
-            <p className="text-ink-muted">Nothing running in this workspace.</p>
-            <LaunchButtons onLaunch={(harness) => void open(workspace.id, harness)} />
+            {workspace.kind === "local" ? (
+              <LocalActions workspace={workspace} />
+            ) : (
+              <>
+                <p className="text-ink-muted">Nothing running in this workspace.</p>
+                <LaunchButtons onLaunch={(harness) => void open(workspace.id, harness)} />
+              </>
+            )}
             <SessionHistory workspaceId={workspace.id} />
           </div>
         )}
@@ -140,6 +147,56 @@ function WorkspaceTerminals(props: {
         </span>
       </footer>
     </>
+  );
+}
+
+/**
+ * What `local` offers when nothing is running in it: the project's own checkout is not a
+ * workspace you came to watch, it is a place you might do one of several things. Both answers
+ * open something here — a shell to work by hand, or an agent on the branch as it stands.
+ */
+function LocalActions({ workspace }: { workspace: Workspace }) {
+  const actions = [
+    {
+      label: "Open Terminal",
+      keys: shortcutKeys("T"),
+      onSelect: () => void useTerminalStore.getState().open(workspace.id),
+    },
+    {
+      label: "Open Composer",
+      keys: null,
+      onSelect: () => useProjectsStore.getState().composeIn(workspace),
+    },
+  ];
+  return (
+    <div className="flex flex-col items-center">
+      <img src="/icon.svg" alt="" className="mb-6 size-10 opacity-80" />
+      <ul className="w-72">
+        {actions.map((action) => (
+          <li key={action.label}>
+            <button
+              type="button"
+              onClick={action.onSelect}
+              className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-ink-muted hover:bg-raised hover:text-ink"
+            >
+              <span>{action.label}</span>
+              {action.keys && (
+                <span className="flex gap-1">
+                  {action.keys.map((cap) => (
+                    <kbd
+                      key={cap}
+                      className="rounded border border-line bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-ink-faint"
+                    >
+                      {cap}
+                    </kbd>
+                  ))}
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

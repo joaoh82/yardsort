@@ -36,7 +36,8 @@ Every project has a **local** entry, always first. It is your repository's own c
 worktree — and the branch checked out there is shown next to it. It cannot be renamed, archived or
 deleted.
 
-Clicking it **asks what to open**, because both answers are reasonable in your own checkout:
+Clicking it selects it, and the middle panel **asks what to open** rather than picking for you,
+because both answers are reasonable in your own checkout:
 
 - **Open Terminal** — a shell in the project root, on the branch you have out.
 - **Open Composer** — the composer, but running the agent **in this checkout**: no new branch, no
