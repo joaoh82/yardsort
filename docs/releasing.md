@@ -108,7 +108,7 @@ gh secret set AUR_SSH_PRIVATE_KEY < aur_deploy_key
 cat aur_deploy_key.pub          # paste this into your AUR account, then delete both files
 ```
 
-Without the secret the job says so and does nothing. To publish by hand instead:
+Without the secret the job fails, saying which secret is missing. To publish by hand instead:
 
 ```sh
 git clone ssh://aur@aur.archlinux.org/yardsort-bin.git /tmp/yardsort-bin
@@ -164,12 +164,18 @@ request, and the answer is a comment saying `@microsoft-github-policy-service ag
 
 ## Publishing to package managers by hand
 
-**A green release run does not mean the package managers were updated.** A job whose credential
-is missing says so with a `::warning::` and exits 0 on purpose — a key nobody has registered yet
-is a setup step still to do, not a broken release — and a warning does not colour the run. The
-tick is about the installers. To know what actually shipped, open the _Package managers_ jobs and
-look for warnings, or check the package itself: the tap's `Casks/yardsort.rb`, `yardsort-bin` on
-the AUR, the pull request against `winget-pkgs`.
+**A job that cannot publish fails.** Until a credential is in place, every release run ends red
+on that job — `Package managers / AUR`, `/ winget` — with an error saying which secret is
+missing and what to do. That is deliberate: these jobs used to warn and exit 0, on the grounds
+that a key nobody has registered yet is a setup step rather than a broken release, and the
+result was a green run that had published nothing. It misled a reader within a day of shipping.
+
+**A red package job does not mean the release failed.** This workflow runs _after_ the release is
+public and nothing waits on it, so the installers are out and the download links work. Fix the
+credential and re-run the workflow with the same tag, below.
+
+"Already at this version" is still a success: nothing to push is not the same as nothing being
+able to push.
 
 All three jobs live in `.github/workflows/packages.yml`, which the Release workflow calls once a
 release is public. It can also be run alone — _Actions → Package managers → Run workflow_, or
