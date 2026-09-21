@@ -98,7 +98,7 @@ export function Ideas() {
             <Shot
               name="overview"
               crop="100% 50%"
-              alt="The changes panel: modified files with line counts, and a diff of cli.js"
+              alt="The changes panel: modified files with line counts, and a diff of render.js"
             />
           }
         >
