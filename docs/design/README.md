@@ -12,6 +12,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 05  | [Roadmap](05-roadmap.md)                         | Milestones in build order, with exit criteria                   |
 | 06  | [Open questions](06-open-questions.md)           | Decisions still to make                                         |
 | 07  | [Terminal benchmarks](07-terminal-benchmarks.md) | M1 go/no-go on webview terminal rendering, with numbers         |
+| 08  | [Manual checklist](08-manual-checklist.md)       | The per-OS pass CI cannot do, and the record of having done it  |
 
 ## Vocabulary
 

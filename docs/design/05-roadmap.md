@@ -1,8 +1,8 @@
 # 05 — Roadmap
 
 Ordered by risk first, then by the shortest path to something usable daily. Every milestone must
-pass on **Linux, macOS and Windows** before it is done — CI enforces the build, a short manual
-checklist covers what CI can't see.
+pass on **Linux, macOS and Windows** before it is done — CI enforces the build, and
+[08-manual-checklist](08-manual-checklist.md) covers what CI can't see.
 
 ## M0 — Scaffold ✅
 
@@ -149,7 +149,9 @@ To do:
 
 - [x] **v0.1.0 released** (2026-09-19, under the project's first name, _Switchyard_): first public release, built by the release workflow on its
       first run. The macOS build is signed with a Developer ID certificate and notarized by Apple.
-- [ ] Hands-on pass and benchmark rows on macOS and Windows hardware.
+- [ ] Hands-on pass and benchmark rows on macOS and Windows hardware — the pass is
+      [08-manual-checklist](08-manual-checklist.md), the rows are `scripts/bench/run.sh`.
+      Reported as looking good on both (2026-09-21), but nothing is recorded yet.
 - [x] Auto-update: signed updates via the Tauri updater. The app checks `latest.json` on the GitHub
       release after start and daily, shows an "Update to x.y.z" button, and installs on request,
       warning about running terminals. AppImage, macOS and Windows copies update themselves;
