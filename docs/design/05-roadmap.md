@@ -57,7 +57,8 @@ them work in parallel. **This is the first version worth dogfooding.**
 
 _Notes:_ a basic "Delete workspace" came forward from M6, because a loop that can only create
 litters: the folder goes, the branch always stays, and uncommitted work needs a second explicit
-confirmation. Rename, archive and "delete the branch too" remain in M6. Harness sessions are
+confirmation. Rename and archive went to M6 and arrived; "delete the branch too" went to M6 and
+did not, and is open question 5. Harness sessions are
 labelled in the PTY host with their harness and (where we assign one) the harness's own session id,
 ready for M6's resume and fork.
 

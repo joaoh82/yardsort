@@ -11,12 +11,17 @@ settled.
 2. ~~**Workspace naming.**~~ **Settled in M3:** a slug of the first message (filler words dropped,
    four words, 32 characters), numbered when taken; a railway station when the message yields
    nothing. Renaming arrives in M6.
-3. **Multiple sessions per workspace?** Lean: yes, as tabs — the data model already allows it.
+3. ~~**Multiple sessions per workspace?**~~ **Settled by what shipped:** yes, as tabs, which was
+   the lean. The tab bar's harness buttons start another conversation whatever is already running
+   in that workspace, and Fork exists precisely to put a copy beside the original.
 4. **Do we ever want our own chat UI?** The brief says the centre is a terminal, and that is v1.
    OpenCode (`opencode acp`) and others expose agent protocols that would allow a native UI later.
    Lean: not before v1; keep the core free of terminal-only assumptions where that's cheap.
-5. **What happens to the branch when a workspace is deleted?** For now it is **always kept** —
-   deleting never throws commits away. M6 adds the choice to delete a fully merged branch as well.
+5. **What happens to the branch when a workspace is deleted?** It is **always kept** — deleting
+   never throws commits away, and the only `branch_delete` on a live path rolls back a creation
+   that failed, on a branch we had just made. Offering to delete a fully merged branch was meant
+   to arrive in M6 and did not, so the question is still open: what the offer should say, and how
+   "fully merged" is judged when the base branch has itself moved on.
 
 ## Technical
 
@@ -40,8 +45,15 @@ settled.
    from our CSS variables, and one component serves both the diff and the read-only file viewer.
 10. ~~**Frontend framework.**~~ **Settled 2026-09-17: React** (+ TypeScript, Vite, Tailwind,
     Zustand), for the component ecosystem.
-11. **`stdin` transport readiness detection.** Quiet-period heuristic vs per-harness ready regex vs
-    fixed delay. Needs the M4 experiments.
+11. **`stdin` transport readiness detection.** Quiet-period heuristic vs per-harness ready regex
+    vs fixed delay. The quiet-period heuristic is what shipped — wait for output, then
+    `stdin_ready_ms` of silence — and M9 moved it into `pty-host`, so delivery now outlives the
+    window. What it still cannot tell is _what_ the program fell quiet waiting for. Seen while
+    taking the 0.5.0 screenshots: Claude Code, on its first run in a new worktree, printed its
+    banner, went quiet, and only then asked "Quick safety check: is this a project you trust?" —
+    a paste would have landed in that dialog. The message survived only because Claude Code takes
+    it on argv. A ready regex would not have helped either; what the heuristic is missing is that
+    a prompt awaiting a _person_ looks exactly like a prompt awaiting a _message_.
 12. **Discovering harness-chosen session ids** (Codex, OpenCode) by reading their session stores —
     worth the coupling, or is `latest-in-cwd` enough?
 
@@ -54,7 +66,9 @@ settled.
     .net, GitHub, crates.io, npm, AUR, PyPI, RubyGems, Homebrew) and keeps the metaphor: a sorting
     yard is where cars are sorted onto parallel tracks. App id `dev.yardsort.app`, branch prefix
     `ys`. `legacy.rs` carries data over from the old app id and keeps `SWITCHYARD_*` working.
-15. **Distribution.** Open source from the start? Flatpak/Snap in addition to AppImage/deb/rpm/AUR?
+15. **Distribution.** Flatpak and/or Snap in addition to AppImage/deb/rpm/AUR? (Whether to be open
+    source at all was question 13, and is settled.) Tracked in M7 as "on request", so this waits
+    for someone to ask.
 
 ## Assist
 
