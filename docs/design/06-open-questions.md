@@ -19,9 +19,12 @@ settled.
 3. ~~**Multiple sessions per workspace?**~~ **Settled by what shipped:** yes, as tabs, which was
    the lean. The tab bar's harness buttons start another conversation whatever is already running
    in that workspace, and Fork exists precisely to put a copy beside the original.
-4. **Do we ever want our own chat UI?** The brief says the centre is a terminal, and that is v1.
-   OpenCode (`opencode acp`) and others expose agent protocols that would allow a native UI later.
-   Lean: not before v1; keep the core free of terminal-only assumptions where that's cheap.
+4. ~~**Do we ever want our own chat UI?**~~ **Settled 2026-09-21: no.** The centre stays a real
+   PTY running the real CLI, as principle 2 says. The effort goes into the UI _around_ the
+   terminal instead — the experience to match is [Superset](https://superset.sh), the app Yardsort
+   is modelled on (see [01-vision](01-vision.md)), which is macOS-only. Agent protocols
+   (`opencode acp` and friends) are not being taken up, but the core stays free of terminal-only
+   assumptions where that is cheap, so the door is not nailed shut.
 5. **What happens to the branch when a workspace is deleted?** It is **always kept** — deleting
    never throws commits away, and the only `branch_delete` on a live path rolls back a creation
    that failed, on a branch we had just made. Offering to delete a fully merged branch was meant
@@ -39,10 +42,10 @@ settled.
    silently and leaves a busy one alone rather than kill work. "Background" on Windows is a
    `DETACHED_PROCESS` in its own process group behind a named pipe. See
    [03-architecture](03-architecture.md#the-daemon-yardsortd).
-7. **Windows harness support.** Several harnesses officially target WSL rather than native Windows.
-   Do we support launching harnesses _inside WSL_ (`wsl.exe -d <distro> -- claude …`, worktree on
-   the WSL filesystem)? Lean: native first; treat WSL as a per-harness command prefix + path
-   translation, designed in M4, built when someone needs it.
+7. ~~**Windows harness support.**~~ **Settled 2026-09-21: the lean stands.** Native Windows
+   first. WSL is a per-harness command prefix plus path translation — `wsl.exe -d <distro> --
+claude …` with the worktree on the WSL filesystem — which M4's harness model already has the
+   shape for, and which gets built when somebody needs it rather than on spec.
 8. ~~**Worktree root default.**~~ **Settled in M3:** visible and short —
    `~/yardsort/<project>/<workspace>`; `YARDSORT_WORKTREE_ROOT` overrides it, and M4 makes it
    a setting.
@@ -77,13 +80,19 @@ settled.
 
 ## Assist
 
-16. **May Assist read an agent's screen?** Assist (2026-09-20) deliberately stays away from the
-    terminal: it judges git diffs and the composer's text only. The tempting next step is to send
-    the last screen from the headless VT when an agent goes quiet, and have Jev say _why_ —
-    waiting for permission, asking a question, finished, or failed — so the notification can say
-    it. That is worth real money to someone running five agents, and it is a deliberate exception
-    to "the terminal is the truth, we never parse agent output", with a screen that may hold
-    secrets. _Deferred on purpose; decide after living with the first two features._
+16. ~~**May Assist read an agent's screen?**~~ **Settled 2026-09-21: yes** — build it. Assist
+    stays away from the terminal today: it judges git diffs and the composer's text only. The
+    decision is that it may send the last screen from the headless VT when an agent goes quiet,
+    and have Jev say _why_ — waiting for permission, asking a question, finished, or failed — so
+    the notification can say it instead of "is waiting".
+
+    It is a deliberate exception to "the terminal is the truth, we never parse agent output", so
+    the exception is narrow and the design is the work, not the plumbing. What still has to be
+    decided before it ships: what exactly is sent (the visible screen, not scrollback), how a
+    secret on screen is kept out of it, whether it is opt-in per project or per workspace on top
+    of Assist's own switch, and what the notification is allowed to repeat. Never on a shell —
+    only a harness session, and only when it has fallen quiet.
+
 17. **Assist threshold defaults.** The defaults (flag at 70%, off-task at 60%, suggest at 50%) were
     chosen by reading TypeSafe's guidance, not measured against real workspaces. They are settings
     now, so one machine can be tuned — but the defaults, and the wording of the questions
