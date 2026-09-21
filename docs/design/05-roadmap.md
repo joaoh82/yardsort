@@ -203,7 +203,12 @@ Done, off by default, behind the user's own TypeSafe API key:
       cached, so moving one re-reads instead of re-asking.
 - [ ] Threshold _defaults_ and question wording measured against real workspaces — see open
       question 17.
-- [ ] Whether Assist may ever look at a terminal screen — see open question 16.
+- [ ] **Why an agent went quiet.** Decided 2026-09-21 (open question 16): Assist may send the
+      last screen from the headless VT when a harness session falls quiet, so Jev can say whether
+      it is waiting for permission, asking something, finished or failed — and the notification
+      can say that instead of "is waiting". Needs its own design pass first: what is sent, how a
+      secret on screen is kept out of it, what the opt-in looks like, and what the notification
+      may repeat. Never for a shell.
 
 _Exit:_ with no key, Yardsort behaves exactly as it did before; with one, a workspace that wrote
 to `ci.yml` while asked to fix a login bug says so before you read the diff.
