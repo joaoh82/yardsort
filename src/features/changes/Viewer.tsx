@@ -1,8 +1,12 @@
 import { lazy, Suspense } from "react";
 import { errorMessage, ipc, type Content } from "@/lib/ipc";
 import { useChangesStore, type Viewing } from "@/stores/changes";
-import { useProjectsStore } from "@/stores/projects";
+import { recall, useProjectsStore } from "@/stores/projects";
 import { titleOf } from "./viewing";
+
+/** Inline or two panes, remembered across restarts like the composer's last picks. */
+const DIFF_MODE_KEY = "changes.diffMode";
+type DiffMode = "inline" | "split";
 
 // CodeMirror is the heaviest thing in the app; load it when a file is first opened.
 const CodeView = lazy(() => import("./CodeView").then((module) => ({ default: module.CodeView })));
@@ -32,6 +36,8 @@ export function Viewer({
   const file = useChangesStore((s) => s.file);
   const viewError = useChangesStore((s) => s.viewError);
   const close = useChangesStore((s) => s.view);
+  const ui = useProjectsStore((s) => s.ui);
+  const mode = recall<DiffMode>(ui, DIFF_MODE_KEY, "inline");
   if (!viewing || !workspaceId) return null;
 
   const path = titleOf(viewing);
@@ -59,6 +65,24 @@ export function Viewer({
             {viewing.scope === "uncommitted" ? "uncommitted" : "on this branch"}
           </span>
         )}
+        {viewing.kind === "diff" && (
+          <button
+            type="button"
+            onClick={() =>
+              useProjectsStore
+                .getState()
+                .remember(DIFF_MODE_KEY, mode === "split" ? "inline" : "split")
+            }
+            className={headerButton}
+            title={
+              mode === "split"
+                ? "Show removals inline, in one pane"
+                : "Show the two versions side by side"
+            }
+          >
+            {mode === "split" ? "Inline" : "Side by side"}
+          </button>
+        )}
         <button
           type="button"
           onClick={openInEditor}
@@ -81,7 +105,7 @@ export function Viewer({
         </button>
       </header>
       <div className="min-h-0 flex-1 bg-canvas">
-        <Body viewing={viewing} diff={diff} file={file} error={viewError} />
+        <Body viewing={viewing} diff={diff} file={file} error={viewError} mode={mode} />
       </div>
     </section>
   );
@@ -92,8 +116,9 @@ function Body(props: {
   diff: ReturnType<typeof useChangesStore.getState>["diff"];
   file: Content | null;
   error: string | null;
+  mode: DiffMode;
 }) {
-  const { viewing, diff, file, error } = props;
+  const { viewing, diff, file, error, mode } = props;
   const note = (text: string, alert = false) => (
     <p
       role={alert ? "alert" : undefined}
@@ -121,7 +146,7 @@ function Body(props: {
   }
   return (
     <Suspense fallback={note("Loading…")}>
-      <CodeView path={path} text={view.text} original={view.original} />
+      <CodeView path={path} text={view.text} original={view.original} split={mode === "split"} />
     </Suspense>
   );
 }

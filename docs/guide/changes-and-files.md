@@ -17,14 +17,17 @@ Two groups:
 Each row shows the kind of change (**M** modified, **A** added, **D** deleted, **R** renamed,
 **U** untracked) and the lines added and removed. The tab shows the total count.
 
-Click a file to see its **diff** below the list: a unified view with removed lines in red, added
-lines in green, and the exact characters that changed highlighted within them.
+Click a file to see its **diff** below the list, with removed lines in red, added lines in green,
+and the exact characters that changed highlighted within them. It starts **inline** — removals
+folded into one pane — and **Side by side** puts the two versions in two panes instead, which is
+easier on a wide diff. The choice sticks until you change it back.
 
-| Button                  | Does                                                                          |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| **Expand** / **Shrink** | Give the viewer the whole panel, or go back to the split view.                |
-| **Edit ↗**              | Open the file in your editor — see [Settings → General](settings.md#general). |
-| **×**                   | Close the viewer.                                                             |
+| Button                        | Does                                                                          |
+| ----------------------------- | ----------------------------------------------------------------------------- |
+| **Side by side** / **Inline** | Two panes, or one with the removals folded in. Diffs only.                    |
+| **Expand** / **Shrink**       | Give the viewer the whole panel, or go back to the split view.                |
+| **Edit ↗**                    | Open the file in your editor — see [Settings → General](settings.md#general). |
+| **×**                         | Close the viewer.                                                             |
 
 Binary files and very large files are listed but not rendered.
 
