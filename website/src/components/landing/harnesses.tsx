@@ -3,11 +3,7 @@ import { Shot } from "@/components/shot";
 const POINTS = [
   {
     title: "Private by construction",
-    body: "No account, no telemetry, no keys of ours. Agents use their own logins; Yardsort just starts them. It checks for new versions, which you can switch off — and nothing else leaves your machine unless you switch Assist on and bring your own API key.",
-  },
-  {
-    title: "A second pair of eyes, if you want one",
-    body: "Assist can badge changed files that look unrelated to the task, or that add a secret, weaken a test or switch a check off, and suggest a harness for what you are typing. Off by default, and it never reads your terminals.",
+    body: "No account, no telemetry, no keys of ours. Agents use their own logins; Yardsort just starts them. It checks for new versions, which you can switch off — and nothing else leaves your machine unless you switch Assist on and bring your own TypeSafe key.",
   },
   {
     title: "Closing the window doesn't stop them",
@@ -32,7 +28,7 @@ export function Harnesses() {
     <section aria-labelledby="h-also" className="mx-auto max-w-[1120px] px-5 pt-[120px] md:px-8">
       <div className="grid items-start gap-12 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div>
-          <p className="mb-2.5 font-mono text-[12.5px] text-accent">05 · Harnesses</p>
+          <p className="mb-2.5 font-mono text-[12.5px] text-accent">07 · Harnesses</p>
           <h3 id="h-also" className="text-2xl leading-[1.2] font-medium tracking-[-0.015em]">
             Any terminal agent
           </h3>

@@ -55,19 +55,23 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
   never discards uncommitted changes without a second, explicit confirmation.
-- **A second pair of eyes, if you want one.** [Assist](docs/guide/assist.md) can badge changed
-  files that look unrelated to the task, or that add a secret, weaken a test or switch a check
-  off, and suggest a harness for what you are typing. Off unless you bring your own TypeSafe API
-  key.
+- **A second pair of eyes, if you want one.** [Assist](docs/guide/assist.md) asks
+  [Jev](https://docs.typesafe.ai), TypeSafe's judgment model, small typed questions about each
+  changed diff, and badges the files that look unrelated to the task, or that add a secret, weaken
+  a test or switch a check off. It can also suggest a harness and an effort for the message you
+  are typing. Off unless you bring your own TypeSafe API key — see
+  [below](#assist-judgment-from-jev-if-you-want-it).
 - **Private by construction.** No account, no telemetry, no keys of ours. Agents use their own
   logins; Yardsort just starts them. It talks to the network to check for new versions, which you
-  can switch off — and, only if you switch Assist on and add your own key, to ask TypeSafe about
-  your diffs.
+  can switch off — and, only if you switch Assist on and add your own key, to ask Jev about your
+  diffs.
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client, starts a workspace and
   an agent without opening the window: `ys workspace new <project> "<prompt>"`. The agent belongs
-  to the background process, so it carries on after the command returns.
+  to the background process, so it carries on after the command returns — and `ys attach` puts it
+  back on your terminal, `ys logs` prints what a session ended up with. Every command takes
+  `--json`.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>
@@ -109,6 +113,52 @@ The [quick start guide](docs/quick-start.md) walks through it with pictures, and
 [documentation](docs/README.md) covers every part of the app. Both are also on the website, at
 [yardsort.sh/docs](https://yardsort.sh/docs/).
 
+## Assist: judgment from Jev, if you want it
+
+Yardsort never parses what an agent prints — status, readiness and notifications come from
+terminal activity alone, and that does not change. A diff, though, is text a model can be asked
+about. **Assist** is the optional feature that does so, using [Jev](https://docs.typesafe.ai),
+TypeSafe's judgment model.
+
+Jev never generates text. It answers a _typed_ question about a piece of state — a yes/no
+probability, a choice among named options, or a position on ordered levels — and Yardsort decides
+what the number means. That keeps the interesting part in code: the questions are narrow (one
+property each), the thresholds live in your settings, and the model is pinned (`jev-1.13.0`) so a
+new version cannot quietly move under them.
+
+![Settings → Assist, with the API key, the two features and the three thresholds](docs/images/assist.png)
+
+**On the changes list**, shortly after an agent stops writing, each changed file is checked
+against what the workspace was asked to do, and flagged files get a badge:
+
+| Badge           | What it means                                                                       |
+| --------------- | ----------------------------------------------------------------------------------- |
+| **off-task**    | The change looks unrelated to what this workspace was asked to do.                  |
+| **secret**      | The change looks like it adds a literal key, token or password.                     |
+| **tests**       | The change looks like it deletes, skips or weakens a test.                          |
+| **checks**      | The change looks like it switches a lint, type check or CI step off.                |
+| **credentials** | The file's _name_ says it holds credentials — decided locally, contents never sent. |
+
+**In the composer**, while you type the first message, Assist can offer a harness and an effort
+level, built on **your** own "Good at" descriptions of your harnesses rather than on any opinion
+of ours. Press **Use** to apply it; ignore it and nothing happens.
+
+**You decide how sure is sure enough.** Three thresholds — flag a risky change at 70%, call a file
+off-task at 60%, offer a suggestion at 50% — are settings with **Restore defaults**. Yardsort
+caches Jev's answers rather than the badges, so moving a threshold re-reads what has already been
+said: no new requests, no waiting.
+
+**What it costs you:** Assist is off until you enter your own TypeSafe API key and tick a feature.
+The key goes to your system credential store (Keychain, Credential Manager, Secret Service), never
+into `settings.toml`, and requests are billed to your account. What leaves the machine is the diff
+and path of a changed file plus the task, or the message you are typing plus your "Good at" texts
+— nothing else, and never a terminal. Files whose names say they hold credentials are badged
+without their contents being read. Nothing here is load-bearing: with no key, switched off,
+offline or rate-limited, Yardsort behaves exactly as it does otherwise, minus a few badges.
+
+The [Assist guide](docs/guide/assist.md) covers all of it, including what to do when TypeSafe
+says no.
+
 ## Documentation
 
 |                                                                                                  |                                                      |
@@ -119,6 +169,8 @@ The [quick start guide](docs/quick-start.md) walks through it with pictures, and
 | [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                          |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                           |
 | [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                       |
+| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints    |
+| [The `ys` command line](docs/guide/cli.md)                                                       | Workspaces, agents, `attach` and `logs` from a shell |
 | [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                      |
 | [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions |
 
