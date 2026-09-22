@@ -16,6 +16,7 @@ few minutes.
 | [Assist](guide/assist.md)                               | Optional AI checks on changed files and suggestions in the composer       |
 | [Updates](guide/updates.md)                             | How Yardsort finds and installs new versions, and which copies can        |
 | [Keyboard shortcuts](guide/shortcuts.md)                | Every shortcut, and why they look the way they do                         |
+| [The `ys` command line](guide/cli.md)                   | Starting workspaces and agents from a terminal, and from scripts          |
 | [Troubleshooting](guide/troubleshooting.md)             | "Command not found", blank windows, where your data lives                 |
 
 ## Getting help

@@ -52,24 +52,13 @@ impl AppState {
         Arc::clone(slot.get_or_insert_with(|| Arc::new(ShellEnv::resolve())))
     }
 
-    /// Where worktrees go: the environment override (for tests and experiments), then the
-    /// setting, then `~/yardsort` — visible and short on purpose: people look into these
-    /// folders, and Windows paths are limited.
+    /// Where worktrees go. See [`yardsort_core::workspaces::worktree_root`].
     pub fn worktree_root(&self) -> IpcResult<PathBuf> {
-        if let Some(dir) = crate::legacy::env_var_os("WORKTREE_ROOT") {
-            return Ok(PathBuf::from(dir));
-        }
-        if let Some(root) = self.settings.get().workspaces.worktree_root {
-            return Ok(PathBuf::from(root));
-        }
-        self.default_worktree_root()
+        crate::workspaces::worktree_root(&self.settings.get().workspaces, &self.env())
     }
 
     pub fn default_worktree_root(&self) -> IpcResult<PathBuf> {
-        self.env()
-            .home_dir()
-            .map(|home| home.join("yardsort"))
-            .ok_or_else(|| IpcError::new("no_home", "Cannot determine your home directory."))
+        crate::workspaces::default_worktree_root(&self.env())
     }
 
     /// Re-run the login shell, e.g. after the user installed a harness.

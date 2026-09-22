@@ -177,6 +177,23 @@ pub fn run() {
                     Err(error) => eprintln!("could not carry Switchyard data over: {error}"),
                 }
             }
+            // The `ys` CLI has to find this same directory without Tauri to ask, so it works the
+            // rules out itself (`yardsort_core::paths`). If the two ever disagree the CLI would
+            // quietly look at the wrong database, so say so loudly here rather than there.
+            for (what, ours, theirs) in [
+                ("data", &data_dir, yardsort_core::paths::data_dir()),
+                ("config", &config_dir, yardsort_core::paths::config_dir()),
+            ] {
+                if theirs.as_ref() != Some(ours) {
+                    eprintln!(
+                        "warning: the {what} directory is {} but yardsort_core::paths says {:?} — \
+                         the ys CLI will need --data-dir",
+                        ours.display(),
+                        theirs,
+                    );
+                }
+            }
+
             let database = data_dir.join("yardsort.db");
             let store = store::Store::open(&database)
                 .map_err(|e| format!("cannot open {}: {e}", database.display()))?;

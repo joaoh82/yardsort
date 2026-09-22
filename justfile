@@ -25,6 +25,10 @@ dev-renderer $YARDSORT_RENDERER:
 web:
     bun run dev
 
+# The `ys` command-line client, against whatever profile the arguments name
+cli *args:
+    cargo run -q -p yardsort-cli -- {{args}}
+
 # --- check ----------------------------------------------------------------------------------
 
 # Formatting, lints, types and all tests. (CI additionally runs `bindings-check`.)

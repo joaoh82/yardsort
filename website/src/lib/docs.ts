@@ -29,6 +29,7 @@ export const DOCS_NAV: DocSection[] = [
       { slug: "guide/assist", title: "Assist" },
       { slug: "guide/updates", title: "Updates" },
       { slug: "guide/shortcuts", title: "Shortcuts" },
+      { slug: "guide/cli", title: "The ys command line" },
       { slug: "guide/troubleshooting", title: "Troubleshooting" },
     ],
   },

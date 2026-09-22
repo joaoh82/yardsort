@@ -18,6 +18,7 @@ pub mod git;
 pub mod harness;
 pub mod launch;
 pub mod legacy;
+pub mod paths;
 pub mod projects;
 pub mod settings;
 pub mod store;
