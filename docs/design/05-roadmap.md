@@ -163,14 +163,18 @@ To do:
 - [x] **Renamed to Yardsort** (v0.2.0): the Switchyard name was taken everywhere that matters — see
       open question 14. Existing users' data is carried over on first launch.
 - [x] AUR package `yardsort-bin`: rendered, test-built and published by the release workflow.
-- [ ] **First AUR publish — blocked upstream.** The AUR paused new account registration on
+- [ ] **First AUR publish — blocked upstream**, and its release job is switched off
+      (`PUBLISH_AUR`, see [releasing](../releasing.md)) so it does not fail every release. The AUR
+      paused new account registration on
       2026-09-19, and a maintainer account is needed to register the deploy key. Everything else
       is in place (the `AUR_SSH_PRIVATE_KEY` secret is set); once an account exists, register the
       public key and re-run the _Publish to the AUR_ job of the latest release.
 - [x] Homebrew: cask in the `joaoh82/homebrew-yardsort` tap, install-tested on macOS (Gatekeeper:
       _Notarized Developer ID_) by the release workflow before each push.
-- [ ] winget: `joaoh82.Yardsort` submitted (microsoft/winget-pkgs#437567); awaiting Microsoft's
-      review. Updates are submitted by the release workflow once `WINGET_TOKEN` is set.
+- [ ] winget: `joaoh82.Yardsort` submitted (microsoft/winget-pkgs#437567); validation passed and
+      the CLA is signed, so it waits on a community moderator. Its release job is switched off
+      (`PUBLISH_WINGET`) until the package is merged and `WINGET_TOKEN` is set, after which the
+      workflow submits each new version.
 - [ ] Flatpak, Scoop, Chocolatey — on request.
 - [ ] Windows code signing, if funding appears.
 - [x] First-run check: the welcome screen reports whether git and at least one agent were found,
