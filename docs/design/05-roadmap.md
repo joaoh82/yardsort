@@ -339,8 +339,20 @@ _Notes:_
   without notarization spares nobody the quarantine prompt — a bare executable cannot have a
   ticket stapled to it. Doing it properly means importing the certificate ourselves _and_
   notarizing, and even then Gatekeeper checks over the network.
-- Still open: `ys` is unsigned on macOS, no package manager ships it, and nothing attaches to a
-  running session from the terminal — `ys attach` is the obvious next one.
+- `ys attach` followed: raw mode, size matching and a `Ctrl-]` that detaches without stopping
+  anything. Input is forwarded as **raw bytes**, never as parsed key events, so mouse reporting,
+  bracketed paste and anything crossterm does not model survive the trip. Reading happens on a
+  thread of its own: a blocking read in the loop would hold on until the next keystroke, and an
+  agent finishing while nobody types is exactly what one attaches to see.
+- Found by attaching through a pty that had never been given a size (`script` with piped input
+  gives one, reporting 0×0): the size was passed straight through, and resizing a session to
+  zero columns throws away the screen the daemon holds — the screen that repaints the app's
+  window and the next attach. A degenerate size is now ignored rather than forwarded. The bug
+  destroyed something a _different_ client was relying on, which is the kind a single-client
+  design never shows you.
+- Still open: `ys` is unsigned on macOS, no package manager ships it, and a session that has
+  _finished_ cannot be looked at from the terminal — `attach` deliberately takes running
+  sessions only, so reading a final screen wants something like `ys logs`.
 
 ## Later (unordered)
 

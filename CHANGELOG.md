@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **`ys attach`.** Put a running agent on your terminal from the command line: the screen is
+  repainted where it got to, and what you type reaches it. `Ctrl-]` detaches and leaves it
+  running. The window can have the same session open at the same time. See
+  [The `ys` command line](docs/guide/cli.md).
+
 ## 0.7.0
 
 - **A command line: `ys`.** Start a workspace and put an agent in it without opening the window —

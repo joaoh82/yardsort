@@ -242,3 +242,23 @@ fn worktrees_in(listed: &serde_json::Value) -> Vec<&serde_json::Value> {
         .filter(|w| w["kind"] == "worktree")
         .collect()
 }
+
+/// `attach` takes over the terminal, so the interesting part cannot run under `cargo test` —
+/// there is no tty. What is testable is everything it refuses to do before touching one.
+#[test]
+fn attach_refuses_rather_than_writing_escape_sequences_into_a_pipe() {
+    let fx = Fixture::new();
+    // Captured output is a pipe, not a terminal, which is exactly the case this guards.
+    let error = fx.ys(&["attach"]).failed();
+    assert!(
+        error.contains("needs a terminal"),
+        "should refuse a pipe before attaching: {error}"
+    );
+}
+
+#[test]
+fn attach_says_json_makes_no_sense_before_it_says_anything_else() {
+    let fx = Fixture::new();
+    let error = fx.ys(&["attach", "--json"]).failed();
+    assert!(error.contains("--json"), "{error}");
+}
