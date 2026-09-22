@@ -2,6 +2,7 @@
 
 pub mod attach;
 pub mod doctor;
+pub mod logs;
 pub mod project;
 pub mod session;
 pub mod workspace;

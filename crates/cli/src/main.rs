@@ -79,6 +79,17 @@ enum Command {
         #[arg(long)]
         no_resize: bool,
     },
+    /// Print what a session has on its screen, finished ones included.
+    Logs {
+        /// Which one: a workspace name, or the start of an id from `ys session list`.
+        target: Option<String>,
+        /// Emit the screen exactly as the daemon holds it, escape sequences and colours and all.
+        #[arg(long)]
+        raw: bool,
+        /// Only the last so many lines.
+        #[arg(long, value_name = "N")]
+        lines: Option<usize>,
+    },
     /// Where everything is, and whether it can be reached.
     Doctor,
 }
@@ -95,6 +106,8 @@ fn main() {
             Command::Doctor => commands::doctor::run(cli.data_dir, &out),
             Command::Attach { target, no_resize } => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::attach::run(&ys, target, no_resize, &out)),
+            Command::Logs { target, raw, lines } => Yardsort::open(cli.data_dir)
+                .and_then(|ys| commands::logs::run(&ys, target, raw, lines, &out)),
             Command::Project(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::project::run(&ys, command, &out)),
             Command::Workspace(command) => Yardsort::open(cli.data_dir)
