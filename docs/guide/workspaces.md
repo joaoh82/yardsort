@@ -36,6 +36,13 @@ On Start, Yardsort:
 2. runs `git worktree add` with a new branch, `ys/add-units-flag` by default;
 3. starts the agent there with your message.
 
+Naming looks for an explicit task in the message, including after introductory background:
+`I've been looking at the settings screen. Could you please add dark mode?` becomes
+`add-dark-mode`. It skips fenced code and common request lead-ins, then keeps up to four words
+and 32 characters. This is local text extraction, not an AI summary; unrecognized wording falls
+back to the opening words. Empty or unusable messages get a railway station name. Names are
+chosen when the workspace is created; later messages do not rename it.
+
 If the agent cannot be started — not installed, say — the worktree and the new branch are taken
 back, so a failed attempt leaves nothing behind. A branch that existed before is never deleted.
 

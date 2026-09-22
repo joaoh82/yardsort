@@ -41,12 +41,96 @@ const STATIONS: &[&str] = &[
 /// Turn free text into a branch- and folder-safe slug: lowercase ASCII words joined by dashes.
 /// Returns `None` when nothing usable is left (empty prompt, only symbols, non-Latin script).
 pub fn slugify(text: &str) -> Option<String> {
-    slug(text, true)
+    slug(&task_text(text), true)
 }
 
 /// Like [`slugify`], for names rather than sentences: every word counts ("My App" → `my-app`).
 pub fn slugify_name(text: &str) -> Option<String> {
     slug(text, false)
+}
+
+/// Prefer an explicit request anywhere in the prose over introductory context. This is
+/// deliberately local extraction, not a semantic summary: unknown wording keeps the fallback.
+fn task_text(text: &str) -> String {
+    const ACTIONS: &[&str] = &[
+        "add",
+        "fix",
+        "implement",
+        "improve",
+        "refactor",
+        "remove",
+        "rename",
+        "update",
+        "support",
+        "create",
+        "replace",
+        "resolve",
+        "investigate",
+        "debug",
+        "optimize",
+        "migrate",
+        "document",
+        "write",
+        "test",
+        "enable",
+        "disable",
+        "simplify",
+    ];
+    let mut fenced = false;
+    let mut prose = Vec::new();
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+            fenced = !fenced;
+        } else if !fenced {
+            prose.push(line);
+        }
+    }
+    let prose = prose.join("\n");
+    for clause in prose
+        .split(['!', '?', '\n', ';'])
+        .flat_map(|line| line.split(". "))
+    {
+        let words: Vec<&str> = clause
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .collect();
+        for (index, word) in words.iter().enumerate() {
+            if !ACTIONS.contains(&word.to_ascii_lowercase().as_str()) {
+                continue;
+            }
+            let lead = words[..index].join(" ").to_ascii_lowercase();
+            // Do not mistake a verb mentioned in background prose (or a negative request)
+            // for the task. Only strip known conversational request prefixes.
+            if matches!(
+                lead.as_str(),
+                "" | "please"
+                    | "can you"
+                    | "can you please"
+                    | "could you"
+                    | "could you please"
+                    | "would you"
+                    | "would you please"
+                    | "i want to"
+                    | "i need to"
+                    | "we need to"
+                    | "we should"
+                    | "let s"
+                    | "help me"
+                    | "help me to"
+                    | "i would like to"
+                    | "i d like to"
+                    | "task"
+                    | "goal"
+                    | "request"
+            ) && words[index + 1..]
+                .iter()
+                .any(|word| !FILLER.contains(&word.to_ascii_lowercase().as_str()))
+            {
+                return words[index..].join(" ");
+            }
+        }
+    }
+    prose
 }
 
 fn slug(text: &str, drop_filler: bool) -> Option<String> {
@@ -116,6 +200,45 @@ mod tests {
         assert_eq!(
             slugify("Refactor: API v2 → v3").unwrap(),
             "refactor-api-v2-v3"
+        );
+    }
+
+    #[test]
+    fn task_requests_win_over_introductory_context_and_code() {
+        for prompt in [
+            "I've been looking at the settings screen. Could you please add dark mode?",
+            "Background: the app is too bright.\nTask: add dark mode",
+            "```text\nremove all settings\n```\nI would like to add dark mode.",
+            "Do not remove the theme picker. Add dark mode instead.",
+        ] {
+            assert_eq!(
+                slugify(prompt).unwrap(),
+                if prompt.contains("instead") {
+                    "add-dark-mode-instead"
+                } else {
+                    "add-dark-mode"
+                }
+            );
+        }
+        assert_eq!(
+            slugify("Please fix auth.ts crashes").unwrap(),
+            "fix-auth-ts-crashes"
+        );
+        assert_eq!(
+            slugify("I want to fix login crashes").unwrap(),
+            "fix-login-crashes"
+        );
+        assert_eq!(
+            slugify("The fix failed. Please investigate login crashes").unwrap(),
+            "investigate-login-crashes"
+        );
+        assert_eq!(
+            slugify("Login crashes after logout").unwrap(),
+            "login-crashes-after-logout"
+        );
+        assert_eq!(
+            slugify_name("I want to fix login").unwrap(),
+            "i-want-to-fix"
         );
     }
 

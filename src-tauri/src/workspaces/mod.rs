@@ -422,6 +422,29 @@ mod tests {
     }
 
     #[test]
+    fn workspace_branch_and_folder_use_the_task_after_background_context() {
+        let fx = Fixture::new();
+        let ws = fx
+            .workspaces()
+            .create(
+                &fx.project_id,
+                None,
+                "I have been looking at authentication. Could you please fix login crashes?",
+            )
+            .unwrap();
+        assert_eq!(ws.name, "fix-login-crashes");
+        assert_eq!(ws.branch.as_deref(), Some("ys/fix-login-crashes"));
+        assert_eq!(
+            PathBuf::from(&ws.path),
+            fx.worktrees.join("my-app/fix-login-crashes")
+        );
+        assert_eq!(
+            fx.git.head(Path::new(&ws.path)).unwrap(),
+            Head::Branch("ys/fix-login-crashes".into())
+        );
+    }
+
+    #[test]
     fn the_same_prompt_twice_gets_a_numbered_name_even_around_leftovers() {
         let fx = Fixture::new();
         fx.workspaces()
