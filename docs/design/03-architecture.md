@@ -208,7 +208,11 @@ Decisions:
   `<data-dir>/worktrees/<project-slug>/<workspace-slug>`; configurable. Keeping it outside avoids
   polluting the repo and confusing tools that walk the tree. Keep the path **short** — Windows'
   260-char limit bites deep `node_modules` trees (also recommend `core.longpaths=true` there).
-- **Branch naming**: `<prefix>/<workspace-slug>`, prefix default `ys`, configurable.
+- **Branch naming**: `<prefix>/<workspace-slug>`, prefix default `ys`, configurable. Local
+  extraction prefers an explicit task clause anywhere in the first message, skipping fenced code
+  and recognized request lead-ins. It falls back to the opening prose, removes filler words and
+  caps the slug at four words / 32 ASCII characters. This is a heuristic, not a model summary;
+  existing workspaces are not renamed automatically.
 - **Reconciliation**: on startup and on focus, compare the DB with `git worktree list`. Worktrees
   deleted behind our back are marked _missing_, not silently dropped. A worktree whose _branch_
   was deleted too has nothing to restore from: it is marked _gone_, and Yardsort asks once whether

@@ -15,7 +15,8 @@ settled.
    shell by itself.
 2. ~~**Workspace naming.**~~ **Settled in M3:** a slug of the first message (filler words dropped,
    four words, 32 characters), numbered when taken; a railway station when the message yields
-   nothing. Renaming arrives in M6.
+   nothing. Task clauses after background prose are preferred; fenced code and recognized
+   request lead-ins are skipped. Manual renaming changes the display label only.
 3. ~~**Multiple sessions per workspace?**~~ **Settled by what shipped:** yes, as tabs, which was
    the lean. The tab bar's harness buttons start another conversation whatever is already running
    in that workspace, and Fork exists precisely to put a copy beside the original.

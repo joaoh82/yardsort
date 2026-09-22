@@ -3,6 +3,11 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- Workspace and branch names look for the task after introductory context in the first message,
+  skipping common request lead-ins and fenced code instead of always taking the opening words.
+
 ## 0.6.0
 
 - **`local` asks what to open.** Clicking a project's own checkout used to open a shell by itself.
