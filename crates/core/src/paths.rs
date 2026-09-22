@@ -67,19 +67,13 @@ fn xdg(name: &str) -> Option<PathBuf> {
         .filter(|dir| dir.is_absolute())
 }
 
+/// Only Linux and macOS reach this: on Windows both directories come from `APPDATA`, and the
+/// home directory never enters into it.
+#[cfg(not(windows))]
 fn home() -> Option<PathBuf> {
-    #[cfg(unix)]
-    {
-        std::env::var_os("HOME")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    }
-    #[cfg(windows)]
-    {
-        std::env::var_os("USERPROFILE")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    }
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 #[cfg(test)]
