@@ -16,6 +16,8 @@ import { createInputWriter } from "./writer";
 export interface TerminalProbe {
   /** Called with every chunk of output, after it was handed to xterm. */
   onOutput?: (bytes: number) => void;
+  /** Called once for every frame xterm paints — the moment output reaches the screen. */
+  onPaint?: () => void;
   onRenderer?: (kind: RendererKind) => void;
 }
 
@@ -67,6 +69,9 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
       useTerminalStore.getState().setRenderer(kind);
       probeRef.current?.onRenderer?.(kind);
     });
+
+    // Only a benchmark listens; the call costs an optional chain per painted frame.
+    const onRender = term.onRender(() => probeRef.current?.onPaint?.());
 
     const onThemeChange = () => {
       term.options.theme = prefersLight.matches ? lightTheme : darkTheme;
@@ -136,6 +141,7 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
       prefersLight.removeEventListener("change", onThemeChange);
       onData.dispose();
       onResize.dispose();
+      onRender.dispose();
       if (attachment !== null) void ipc.ptyDetach(sessionId, attachment).catch(() => {});
       term.dispose();
     };

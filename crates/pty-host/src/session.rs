@@ -262,6 +262,8 @@ impl Session {
         let mut batch = Vec::new();
         // When the current burst of output began, while there is one.
         let mut busy_since: Option<Instant> = None;
+        // When output last went out, so the batch window can be measured from it.
+        let mut last_deliver: Option<Instant> = None;
 
         while !(eof && exit.is_some()) {
             // Once the child is gone, stop as soon as the PTY goes quiet.
@@ -300,9 +302,18 @@ impl Session {
             };
             absorb(first, &mut batch);
 
-            let deadline = Instant::now() + BATCH_WINDOW;
+            // Gather what follows into the same batch, but only until `BATCH_WINDOW` after the
+            // *previous* delivery — not after this chunk turned up. Output that arrives into a
+            // quiet terminal has nothing to be coalesced with, so it goes out at once; only a
+            // stream fast enough to keep refilling the window is held back, which is the case
+            // the window exists for. Timing from this chunk instead puts the whole window in
+            // front of every keystroke echo.
+            let deadline = last_deliver.map_or_else(Instant::now, |at| at + BATCH_WINDOW);
             while batch.len() < MAX_BATCH {
                 let wait = deadline.saturating_duration_since(Instant::now());
+                if wait.is_zero() {
+                    break;
+                }
                 match rx.recv_timeout(wait) {
                     Ok(msg) => absorb(msg, &mut batch),
                     Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
@@ -318,6 +329,7 @@ impl Session {
                     });
                 }
                 let replies = self.deliver(&batch);
+                last_deliver = Some(Instant::now());
                 batch.clear();
                 if !replies.is_empty() {
                     // Best effort: the process may already be gone.
@@ -368,10 +380,13 @@ impl Session {
     fn deliver(&self, batch: &[u8]) -> Vec<u8> {
         let mut view = self.view();
         let unattended = view.sinks.is_empty();
+        // Hand the bytes to the viewers before parsing them into the headless terminal. The
+        // parse is only there for snapshots, and nothing below needs it except the cursor
+        // reply, which is only reached when there is no viewer to have waited for it.
+        view.sinks.retain_mut(|(_, sink)| sink(batch));
         view.parser.process(batch);
         view.last_output = Instant::now();
         view.has_output = true;
-        view.sinks.retain_mut(|(_, sink)| sink(batch));
 
         let mut replies = Vec::new();
         if unattended {
