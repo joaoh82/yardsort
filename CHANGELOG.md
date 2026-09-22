@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.8.0
 
 - **`ys attach`.** Put a running agent on your terminal from the command line: the screen is
   repainted where it got to, and what you type reaches it. `Ctrl-]` detaches and leaves it
