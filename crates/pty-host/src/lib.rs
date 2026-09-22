@@ -23,7 +23,7 @@
 
 mod prompt;
 mod session;
-mod snapshot;
+pub mod snapshot;
 mod types;
 
 use std::collections::HashMap;

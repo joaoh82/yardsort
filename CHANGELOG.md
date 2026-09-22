@@ -9,6 +9,9 @@ has the downloads and the full commit lists.
   repainted where it got to, and what you type reaches it. `Ctrl-]` detaches and leaves it
   running. The window can have the same session open at the same time. See
   [The `ys` command line](docs/guide/cli.md).
+- **`ys logs`.** Print what a session has on its screen as plain text, finished ones included —
+  how an agent ended up, without opening the window. Screens are held by the background process
+  and never written to disk, so they last as long as it does.
 
 ## 0.7.0
 

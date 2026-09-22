@@ -262,3 +262,15 @@ fn attach_says_json_makes_no_sense_before_it_says_anything_else() {
     let error = fx.ys(&["attach", "--json"]).failed();
     assert!(error.contains("--json"), "{error}");
 }
+
+/// Screens are held by the daemon, not the database, so this is the answer whenever there is no
+/// daemon — and it has to say so, or it reads as "that session printed nothing".
+#[test]
+fn logs_says_where_screens_live_when_nothing_is_holding_them() {
+    let fx = Fixture::new();
+    let error = fx.ys(&["logs"]).failed();
+    assert!(
+        error.contains("daemon") && error.contains("their screens are gone"),
+        "should explain that screens live in the daemon: {error}"
+    );
+}

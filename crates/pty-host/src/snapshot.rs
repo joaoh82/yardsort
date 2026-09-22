@@ -34,6 +34,54 @@ pub(crate) fn render(parser: &mut vt100::Parser) -> Vec<u8> {
     out
 }
 
+/// Read a snapshot back as plain text: history first, then the screen, with the colours and
+/// cursor positioning dropped.
+///
+/// Replayed through a real terminal rather than stripped with a pattern, because a snapshot is a
+/// *state* — it positions the cursor and clears regions to rebuild a screen, so the bytes are not
+/// the text in order. `size` must be the session's own, or the replay wraps differently than the
+/// program drew.
+pub fn to_text(snapshot: &[u8], rows: u16, cols: u16) -> String {
+    let mut viewer = vt100::Parser::new(rows, cols, SCROLLBACK_FOR_READING);
+    viewer.process(snapshot);
+
+    // `render` pushes history off the screen with a run of newlines, so the blank lines that run
+    // creates land in the scrollback behind it. They are an artefact of the transport, not
+    // something the program printed.
+    let mut history = read_scrollback(&mut viewer, rows, cols);
+    while history.last().is_some_and(|line| line.trim().is_empty()) {
+        history.pop();
+    }
+
+    let mut lines = history;
+    lines.extend(viewer.screen().rows(0, cols));
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+/// Enough to hold anything a session is allowed to keep. See `session::SCROLLBACK_LINES`.
+const SCROLLBACK_FOR_READING: usize = 10_000;
+
+/// The replayed viewer's history as plain text, oldest first.
+fn read_scrollback(viewer: &mut vt100::Parser, rows: u16, cols: u16) -> Vec<String> {
+    let page = usize::from(rows);
+    viewer.screen_mut().set_scrollback(usize::MAX);
+    let total = viewer.screen().scrollback();
+
+    let mut lines = Vec::with_capacity(total);
+    let mut offset = total;
+    while offset > 0 {
+        viewer.screen_mut().set_scrollback(offset);
+        let take = offset.min(page);
+        lines.extend(viewer.screen().rows(0, cols).take(take));
+        offset -= take;
+    }
+    viewer.screen_mut().set_scrollback(0);
+    lines
+}
+
 /// Every scrollback line, oldest first, each as formatted bytes without a line terminator.
 fn scrollback_rows(parser: &mut vt100::Parser, rows: u16, cols: u16) -> Vec<Vec<u8>> {
     let page = usize::from(rows);
@@ -63,6 +111,46 @@ mod tests {
         let mut viewer = vt100::Parser::new(rows, cols, 1000);
         viewer.process(snapshot);
         viewer
+    }
+
+    #[test]
+    fn read_back_as_text_gives_the_lines_the_program_printed() {
+        let mut source = vt100::Parser::new(4, 20, 1000);
+        source.process(b"first\r\nsecond \x1b[31mred\x1b[m\r\nthird\r\n");
+
+        let text = to_text(&render(&mut source), 4, 20);
+
+        assert_eq!(text, "first\nsecond red\nthird");
+    }
+
+    /// The history a viewer would scroll back to is part of what was printed, so it comes out
+    /// too — and the blank run `render` uses to push it off the screen does not.
+    #[test]
+    fn read_back_as_text_includes_scrollback_and_not_the_gap_behind_it() {
+        let mut source = vt100::Parser::new(3, 20, 1000);
+        for n in 1..=8 {
+            source.process(format!("line {n}\r\n").as_bytes());
+        }
+
+        let text = to_text(&render(&mut source), 3, 20);
+
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            lines,
+            ["line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8"],
+            "every line should appear once, in order, with no blank gap"
+        );
+    }
+
+    /// A full-screen program's screen is what matters; its alternate screen has no scrollback.
+    #[test]
+    fn read_back_as_text_handles_a_full_screen_program() {
+        let mut source = vt100::Parser::new(3, 20, 1000);
+        source.process(b"scrolled away\r\n\x1b[?1049h\x1b[H\x1b[2Jmenu item\r\nchosen");
+
+        let text = to_text(&render(&mut source), 3, 20);
+
+        assert_eq!(text, "menu item\nchosen");
     }
 
     #[test]

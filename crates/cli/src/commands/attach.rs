@@ -69,11 +69,13 @@ pub fn run(
         )
     })?;
 
-    let candidates = target::candidates(
+    // Only a session with a process in it can be typed at. A finished one still has a last
+    // screen, which is `ys logs`, not this.
+    let candidates = target::running(&target::candidates(
         &client.list(),
         &ys.store.workspaces()?,
         &ys.store.all_sessions()?,
-    );
+    ));
     let target = target::resolve(&candidates, wanted.as_deref()).map_err(describe)?;
     *target_id
         .lock()

@@ -350,9 +350,18 @@ _Notes:_
   window and the next attach. A degenerate size is now ignored rather than forwarded. The bug
   destroyed something a _different_ client was relying on, which is the kind a single-client
   design never shows you.
-- Still open: `ys` is unsigned on macOS, no package manager ships it, and a session that has
-  _finished_ cannot be looked at from the terminal — `attach` deliberately takes running
-  sessions only, so reading a final screen wants something like `ys logs`.
+- `ys logs` reads a session's screen, finished ones included, by replaying the snapshot through
+  a headless terminal rather than stripping escapes out of it — a snapshot is _state_, not the
+  text in order, so a pattern would have been guesswork. `pty_host::snapshot::to_text` does it
+  where the VT knowledge already lives.
+- The limit that came with it, which is the daemon's design rather than a gap: screens are held
+  in the daemon and never written to disk, and the daemon stops once nothing is connected and
+  nothing is running. So a finished agent's last screen outlives the agent but not the daemon.
+  Keeping screens would mean writing whatever an agent printed to disk, which is a decision
+  about secrets rather than about storage — not taken here.
+- Still open: `ys` is unsigned on macOS, no package manager ships it, and none of the CLI's
+  terminal handling — raw mode, `Ctrl-]`, resize forwarding — has been exercised by a human on
+  macOS or Windows. That belongs in [08-manual-checklist](08-manual-checklist.md).
 
 ## Later (unordered)
 

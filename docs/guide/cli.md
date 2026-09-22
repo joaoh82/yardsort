@@ -127,6 +127,28 @@ leaves the size alone, at the cost of a program drawing to a width you cannot se
 You can attach to a session the app also has open; both see the same output, and either can type.
 Only sessions that are still running can be attached to.
 
+### `ys logs [target]`
+
+Prints what a session has on its screen, without taking the terminal over — including sessions
+that have **finished**, which is the one thing `attach` will not do.
+
+```sh
+ys logs                        # the only session, if there is one
+ys logs fix-the-flaky-login-test
+ys logs --lines 20             # just the end of it
+ys logs --json                 # the text as a JSON field, for scripts
+ys logs --raw                  # escape sequences and colours, exactly as the app would repaint
+```
+
+Without `--raw` the screen is replayed through a terminal emulator and handed back as plain text,
+so it can be read, grepped or piped. Scrollback comes too, as far back as the session kept it.
+
+**Screens live in the background process, not in the database.** It stops once nothing is
+connected and nothing is running — so a finished agent's last screen is readable while Yardsort
+is open, or while other agents are still working, and gone a short while after the last of them
+stops. `ys logs` says so rather than reporting an empty screen. Nothing is written to disk: a
+screen can hold anything the agent printed, and Yardsort does not keep a copy of that.
+
 ### `ys doctor`
 
 Where `ys` is looking and whether it can get there: the data directory, the database, the daemon,

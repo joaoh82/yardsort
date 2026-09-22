@@ -14,6 +14,9 @@ pub struct Candidate {
     pub pty: String,
     pub workspace: Option<String>,
     pub label: String,
+    /// The process is still there. `attach` wants only these; `logs` reads a finished one too.
+    pub running: bool,
+    pub size: pty_host::TermSize,
 }
 
 /// Why a name did not resolve to exactly one session.
@@ -27,14 +30,16 @@ pub enum NoMatch {
     Several { choices: Vec<String> },
 }
 
-/// Everything running, newest first, described for a person.
+/// Every session the daemon holds, finished ones included, described for a person.
+///
+/// The daemon keeps a session after its process ends so the last screen stays readable, which is
+/// what `logs` is for; callers that need a live process filter on [`Candidate::running`].
 pub fn candidates(
     live: &[SessionInfo],
     workspaces: &[WorkspaceRow],
     records: &[SessionRow],
 ) -> Vec<Candidate> {
     live.iter()
-        .filter(|s| s.state == pty_host::SessionState::Running)
         .map(|s| {
             let record = records
                 .iter()
@@ -56,9 +61,16 @@ pub fn candidates(
                 pty: s.id.0.clone(),
                 workspace,
                 label,
+                running: s.state == pty_host::SessionState::Running,
+                size: s.size,
             }
         })
         .collect()
+}
+
+/// Just the ones with a process still in them.
+pub fn running(candidates: &[Candidate]) -> Vec<Candidate> {
+    candidates.iter().filter(|c| c.running).cloned().collect()
 }
 
 /// Pick the one session `wanted` means, or say why not.
@@ -110,7 +122,37 @@ mod tests {
             pty: pty.to_owned(),
             workspace: workspace.map(str::to_owned),
             label: workspace.unwrap_or("bash").to_owned(),
+            running: true,
+            size: pty_host::TermSize { cols: 80, rows: 24 },
         }
+    }
+
+    fn finished(pty: &str, workspace: Option<&str>) -> Candidate {
+        Candidate {
+            running: false,
+            ..candidate(pty, workspace)
+        }
+    }
+
+    #[test]
+    fn running_keeps_only_the_live_ones() {
+        let mixed = [
+            candidate("abc123", Some("alive")),
+            finished("def456", Some("done")),
+        ];
+        let live = running(&mixed);
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].pty, "abc123");
+    }
+
+    /// `logs` resolves against everything, so a finished session is reachable by name.
+    #[test]
+    fn a_finished_session_still_resolves_when_it_is_offered() {
+        let both = [
+            candidate("abc123", Some("alive")),
+            finished("def456", Some("done")),
+        ];
+        assert_eq!(resolve(&both, Some("done")).unwrap().pty, "def456");
     }
 
     #[test]
