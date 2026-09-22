@@ -1,8 +1,8 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AssistStatus, HarnessInfo } from "@/lib/ipc";
-import { project, worktree } from "@/test/fixtures";
+import type { AssistStatus } from "@/lib/ipc";
+import { harness, project, worktree } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   harnessesList: vi.fn(),
@@ -21,29 +21,6 @@ import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
 import { Composer } from "./Composer";
-
-const harness = (id: string, extra: Partial<HarnessInfo> = {}): HarnessInfo => ({
-  id,
-  label: id.toUpperCase(),
-  command: id,
-  baseArgs: [],
-  modelArgs: [],
-  effortArgs: [],
-  sessionArgs: [],
-  promptArgs: [],
-  resumeArgs: [],
-  forkArgs: [],
-  efforts: [],
-  models: [],
-  promptTransport: "argv",
-  sessionIdMode: "assigned",
-  stdinReadyMs: 1500,
-  enabled: true,
-  builtin: true,
-  modified: false,
-  resolvedPath: `/usr/bin/${id}`,
-  ...extra,
-});
 
 const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
   keySource: "keychain",

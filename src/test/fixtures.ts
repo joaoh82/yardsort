@@ -1,4 +1,4 @@
-import type { SessionRecord, AddedProject, Project, Workspace } from "@/lib/ipc";
+import type { AddedProject, HarnessInfo, Project, SessionRecord, Workspace } from "@/lib/ipc";
 
 /** A project with its `local` workspace, as the core would describe it. */
 export function project(name: string, overrides: Partial<Project> = {}): Project {
@@ -70,4 +70,28 @@ export const record = (id: string, overrides: Partial<SessionRecord> = {}): Sess
   forkable: true,
   unavailableReason: null,
   ...overrides,
+});
+
+/** A harness as the core describes it, installed and with no model or effort choices. */
+export const harness = (id: string, extra: Partial<HarnessInfo> = {}): HarnessInfo => ({
+  id,
+  label: id.toUpperCase(),
+  command: id,
+  baseArgs: [],
+  modelArgs: [],
+  effortArgs: [],
+  sessionArgs: [],
+  promptArgs: [],
+  resumeArgs: [],
+  forkArgs: [],
+  efforts: [],
+  models: [],
+  promptTransport: "argv",
+  sessionIdMode: "assigned",
+  stdinReadyMs: 1500,
+  enabled: true,
+  builtin: true,
+  modified: false,
+  resolvedPath: `/usr/bin/${id}`,
+  ...extra,
 });

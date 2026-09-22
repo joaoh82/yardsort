@@ -27,11 +27,11 @@ async function visibly<T>(action: () => Promise<T>, fallback: T): Promise<T> {
 /**
  * Select a workspace and land somewhere useful in it.
  *
- * `whenEmpty` is what to do when there is nothing running and nothing to come back to. A
- * worktree opens a shell; `local` asks, because its checkout is the repository itself and a
- * shell and an agent are both reasonable things to want there.
+ * `openShellWhenEmpty` is for a worktree, where a shell is what you came for. `local` passes
+ * false: its checkout is the repository itself, a shell is only one of the things you might want
+ * there, and the panel offers the choice instead.
  */
-export function enterWorkspace(workspaceId: string, whenEmpty?: () => void) {
+export function enterWorkspace(workspaceId: string, openShellWhenEmpty = true) {
   useProjectsStore.getState().select(workspaceId);
   void visibly(async () => {
     const hasTabs = () =>
@@ -41,8 +41,7 @@ export function enterWorkspace(workspaceId: string, whenEmpty?: () => void) {
     // top — or asking — would bury the Resume button the user most likely came for.
     const past = await useSessionsStore.getState().load(workspaceId);
     if (past.length > 0 || hasTabs()) return;
-    if (whenEmpty) whenEmpty();
-    else await useTerminalStore.getState().open(workspaceId);
+    if (openShellWhenEmpty) await useTerminalStore.getState().open(workspaceId);
   }, undefined);
 }
 

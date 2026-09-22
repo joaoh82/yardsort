@@ -156,7 +156,6 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
   const allTabs = useTerminalStore((s) => s.tabs);
   const tabs = allTabs.filter((tab) => tab.workspaceId === workspace.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
-  const [launchAt, setLaunchAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const head = workspace.head;
   const isWorktree = workspace.kind === "worktree";
@@ -211,15 +210,10 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
         <button
           type="button"
           disabled={unusable}
-          onClick={(event) => {
-            // `local` is the project's own checkout, so there is no one obvious thing to open
-            // there: a shell to work by hand, or an agent on the branch as it stands. It asks —
-            // but only when there is nothing running and nothing to resume, which is exactly
-            // when a worktree would have opened a shell by itself.
-            const box = event.currentTarget.getBoundingClientRect();
-            const ask = () => setLaunchAt({ x: box.left + 24, y: box.bottom });
-            enterWorkspace(workspace.id, isWorktree ? undefined : ask);
-          }}
+          // A worktree with nothing running opens a shell, because that is what you came for.
+          // `local` is the project's own checkout and a shell is only one of the things you
+          // might want there, so it lands on the panel's own list of them instead.
+          onClick={() => enterWorkspace(workspace.id, isWorktree)}
           // No tooltip for a row you can open. It said the path, which the bottom bar already
           // shows for the workspace in view, and a native tooltip appears wherever the pointer
           // is — including straight over the menu the click just opened. A row that *cannot* be
@@ -277,28 +271,6 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
         )}
       </div>
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
-      {launchAt && (
-        <ContextMenu
-          at={launchAt}
-          header={
-            <>
-              <img src="/icon.svg" alt="" className="size-4" />
-              <span className="text-[12px] text-ink-muted">Yardsort</span>
-            </>
-          }
-          items={[
-            {
-              label: "Open Terminal",
-              onSelect: () => void useTerminalStore.getState().open(workspace.id),
-            },
-            {
-              label: "Open Composer",
-              onSelect: () => useProjectsStore.getState().composeIn(workspace),
-            },
-          ]}
-          onClose={() => setLaunchAt(null)}
-        />
-      )}
       {renaming && <RenameDialog workspace={workspace} onClose={() => setRenaming(false)} />}
     </li>
   );

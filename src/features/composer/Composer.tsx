@@ -83,6 +83,8 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   }, [message, assist]);
 
   useEffect(() => {
+    // Running in a workspace that already exists picks no branch, so there is no list to fetch.
+    if (runIn) return;
     let stale = false;
     ipc.projectBranches(project.id).then(
       (list) => {
@@ -96,7 +98,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     return () => {
       stale = true;
     };
-  }, [project.id]);
+  }, [project.id, runIn]);
 
   // Prefer what was used last here, then the first harness that is actually installed.
   const installed = harnesses.filter((h) => h.resolvedPath);

@@ -70,12 +70,6 @@ async function renderWithWorktree() {
 const rowButton = (name: string) =>
   within(screen.getByRole("treeitem", { name })).getAllByRole("button")[0]!;
 
-/** Clicking `local` asks what to open; this takes one of the answers. */
-async function openFromLocalMenu(user: ReturnType<typeof userEvent.setup>, item: RegExp) {
-  await user.click(rowButton("local"));
-  await user.click(screen.getByRole("menuitem", { name: item }));
-}
-
 describe("Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -120,48 +114,16 @@ describe("Sidebar", () => {
     expect(core.ptySpawn).toHaveBeenCalledTimes(1);
   });
 
-  // `local` is the project's own checkout: a shell to work by hand and an agent on the branch as
-  // it stands are both reasonable, so it asks instead of picking one.
-  // A native tooltip appears wherever the pointer is, which after a click is straight over the
-  // menu that click opened. An openable row says its path in the bottom bar instead.
-  it("a row you can open carries no path tooltip", async () => {
-    await renderWithWorktree();
-    expect(rowButton("feature")).not.toHaveAttribute("title");
-    expect(rowButton("local")).not.toHaveAttribute("title");
-  });
-
-  it("local asks what to open rather than opening a shell by itself", async () => {
+  // `local` is the project's own checkout, where a shell is only one of the things you might
+  // want. It selects, and the panel offers the choice; a worktree gets its shell as before.
+  it("selecting local opens nothing by itself", async () => {
     const user = userEvent.setup();
     await renderSidebar("alpha");
 
     await user.click(rowButton("local"));
+    await vi.waitFor(() => expect(core.sessionsList).toHaveBeenCalledWith("w-alpha"));
     expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
     expect(core.ptySpawn).not.toHaveBeenCalled();
-    expect(screen.getByRole("menuitem", { name: "Open Terminal" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
-    expect(core.ptySpawn).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w-alpha" }));
-  });
-
-  it("local's other answer composes a run in the checkout, creating nothing", async () => {
-    const user = userEvent.setup();
-    await renderSidebar("alpha");
-
-    await openFromLocalMenu(user, /Open Composer/);
-    expect(useProjectsStore.getState().composingWorkspaceId).toBe("w-alpha");
-    // The composer for an existing workspace must not go near workspace creation.
-    expect(core.ptySpawn).not.toHaveBeenCalled();
-  });
-
-  it("clicking local again just brings its terminal back, with no menu", async () => {
-    const user = userEvent.setup();
-    await renderSidebar("alpha");
-    await openFromLocalMenu(user, /Open Terminal/);
-    expect(core.ptySpawn).toHaveBeenCalledTimes(1);
-
-    await user.click(rowButton("local"));
-    expect(screen.queryByRole("menuitem", { name: "Open Terminal" })).not.toBeInTheDocument();
-    expect(core.ptySpawn).toHaveBeenCalledTimes(1);
   });
 
   it("collapses and expands a project", async () => {
@@ -236,12 +198,22 @@ describe("Sidebar", () => {
   it("removing a project confirms first, then closes its sessions and forgets it", async () => {
     const user = userEvent.setup();
     await renderSidebar("alpha", "beta");
-    const alpha = screen.getByRole("treeitem", { name: "alpha" });
-    await user.click(
-      within(within(alpha).getByRole("treeitem", { name: "local" })).getByRole("button"),
-    );
-    await user.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
-    expect(core.ptySpawn).toHaveBeenCalledTimes(1);
+    // A session has to exist for the confirmation to have something to count; a worktree opens
+    // one by itself, which `local` deliberately no longer does.
+    useTerminalStore.setState({
+      tabs: [
+        {
+          id: "s-w-alpha",
+          workspaceId: "w-alpha",
+          title: "bash",
+          exit: null,
+          recordId: null,
+          busy: false,
+          attention: false,
+        },
+      ],
+      active: { "w-alpha": "s-w-alpha" },
+    });
 
     native.confirm.mockResolvedValue(false);
     await user.click(screen.getByRole("button", { name: "More actions for alpha" }));

@@ -21,6 +21,15 @@ export function formatShortcut(key: string, { alt = false } = {}): string {
 }
 
 /**
+ * The same shortcut split into the keys it is made of, for drawing one cap each:
+ * `["⌘", "B"]` on macOS, `["Ctrl", "Shift", "B"]` elsewhere.
+ */
+export function shortcutKeys(key: string, { alt = false } = {}): string[] {
+  if (isMac) return [...(alt ? ["⌥"] : []), "⌘", key];
+  return ["Ctrl", "Shift", ...(alt ? ["Alt"] : []), key];
+}
+
+/**
  * The letter a shortcut event stands for, lower-cased ("b" for Ctrl+Shift+B). Uses the character
  * the layout produces rather than the physical key, so shortcuts follow the key caps on Dvorak,
  * AZERTY and friends.
