@@ -3,7 +3,6 @@
 //! Everything here is plain git underneath — `git worktree add -b` and `git worktree remove` —
 //! so a user can always inspect or undo what Yardsort did with their own tools.
 
-pub mod commands;
 mod naming;
 
 use std::path::{Path, PathBuf};

@@ -6614,6 +6614,25 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "uuid",
  "which",
+ "yardsort-core",
+]
+
+[[package]]
+name = "yardsort-core"
+version = "0.6.0"
+dependencies = [
+ "dunce",
+ "libc",
+ "pty-host",
+ "pty-ipc",
+ "rusqlite",
+ "serde",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 1.1.6+spec-1.1.0",
+ "uuid",
+ "which",
 ]
 
 [[package]]

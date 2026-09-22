@@ -50,10 +50,15 @@ crates/pty-host/     Owns pseudo-terminals and the processes in them. No Tauri, 
                      Tested against real processes in real PTYs.
 crates/pty-ipc/      The wire between the app and the daemon that runs that host: framing,
                      the server loop, and a client that is itself a TerminalHost.
-src-tauri/           The Tauri app (Rust core): projects, workspaces, git, harnesses,
-  src/               sessions, changes, settings, the SQLite store, and thin IPC commands.
-                     The same binary is the daemon, run with --yardsort-daemon.
+crates/core/         Everything both clients share and no UI belongs in: the SQLite store,
+  src/               git, projects, workspaces, settings, harnesses, the launch environment,
+                     and finding or starting the daemon. No Tauri — linking the app's lib
+                     would drag WebKitGTK into a command-line tool.
   migrations/        Numbered SQL files. Never edit a shipped one — add a new one.
+src-tauri/           The Tauri app: the webview, the IPC commands, the file watcher, Assist,
+  src/               updates, and the quit dialog. The core is re-exported under its own
+                     module names, so `crate::store` here is `yardsort_core::store`.
+                     The same binary is the daemon, run with --yardsort-daemon.
 src/                 The React + TypeScript frontend.
   features/          One folder per area of the UI.
   stores/            Zustand stores.

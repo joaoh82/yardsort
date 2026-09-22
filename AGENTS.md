@@ -64,7 +64,7 @@ it). Never edit it by hand; commit it when it changes.
   changes need a second, explicit confirmation, and a test that a "no" is respected.
 - **App shortcuts live behind Mod** (`⌘`, or `Ctrl+Shift` elsewhere). Plain `Ctrl`+letter
   belongs to the program in the terminal.
-- **Migrations are append-only.** Never edit a shipped file in `src-tauri/migrations/`.
+- **Migrations are append-only.** Never edit a shipped file in `crates/core/migrations/`.
 - **Tests exercise the real thing**: real git repositories in temp dirs, real processes in real
   PTYs, UI through Testing Library. A test should fail without the change it covers.
 - Zustand selectors must return stable values — select the array, derive (`filter`/`map`)

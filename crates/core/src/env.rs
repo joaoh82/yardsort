@@ -545,3 +545,30 @@ mod tests {
         assert!(env.find_program("sh", &cwd).is_none());
     }
 }
+
+// What the launch environment looks like, for the status bar and for bug reports. It lives
+// beside the environment it describes so every client can report the same thing.
+/// What the launch environment looks like, for the status bar and for bug reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvInfo {
+    pub source: EnvSource,
+    pub shell: String,
+    pub path_entries: u32,
+    pub warning: Option<String>,
+}
+
+impl From<&ShellEnv> for EnvInfo {
+    fn from(env: &ShellEnv) -> Self {
+        let entries = env
+            .get("PATH")
+            .map(|path| std::env::split_paths(path).count())
+            .unwrap_or(0);
+        Self {
+            source: env.source,
+            shell: env.default_shell().0,
+            path_entries: u32::try_from(entries).unwrap_or(u32::MAX),
+            warning: env.warning.clone(),
+        }
+    }
+}

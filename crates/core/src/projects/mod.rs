@@ -1,7 +1,5 @@
 //! Projects and their workspaces: the policy that sits between the store, git and the disk.
 
-pub mod commands;
-
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;

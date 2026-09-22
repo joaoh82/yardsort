@@ -1,0 +1,39 @@
+[package]
+name = "yardsort-core"
+description = "Yardsort's core: projects, workspaces, settings, harnesses and launching, with no UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "yardsort_core"
+
+# Deliberately no Tauri. This crate is what lets a command-line client exist at all: linking the
+# app's lib would drag in WebKitGTK, which a terminal or a CI runner has no reason to have.
+[dependencies]
+pty-host = { path = "../pty-host", features = ["specta"] }
+pty-ipc = { path = "../pty-ipc" }
+which = "8"
+rusqlite = { version = "0.40", features = ["bundled"] }
+dunce = "1"
+toml = "1"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+specta = "=2.0.0-rc.25"
+
+# `setsid` and `flock`, for putting the daemon out of reach of signals meant for the app.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Test fixtures (real git repositories in temp dirs) shared with the app's own tests.
+testing = []

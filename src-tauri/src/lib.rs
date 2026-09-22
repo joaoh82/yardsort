@@ -6,27 +6,33 @@
 mod assist;
 mod changes;
 mod commands;
-mod daemon;
 #[cfg(target_os = "linux")]
 mod display;
-mod env;
-mod error;
-mod git;
-mod harness;
-mod legacy;
 mod preflight;
-mod projects;
 mod quit;
 mod sessions;
-mod settings;
 mod state;
-mod store;
 mod terminal;
 mod updates;
-mod workspaces;
 
-pub use daemon::run_daemon_and_exit_if_asked;
-pub use env::print_env_and_exit_if_asked;
+// The core is its own crate, so the `ys` CLI can use it without linking a webview — see
+// `yardsort_core`. It is re-exported under the names this crate has always used, which is why
+// `crate::store`, `crate::git` and the rest still resolve everywhere below.
+pub use yardsort_core::{daemon, env, error, git, harness, legacy, settings, store};
+
+/// The domain modules whose commands live here but whose logic lives in the core.
+mod projects {
+    pub mod commands;
+    pub use yardsort_core::projects::*;
+}
+
+mod workspaces {
+    pub mod commands;
+    pub use yardsort_core::workspaces::*;
+}
+
+pub use yardsort_core::daemon::run_daemon_and_exit_if_asked;
+pub use yardsort_core::env::print_env_and_exit_if_asked;
 
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
@@ -82,7 +88,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             updates::update_check,
             updates::update_install,
             terminal::env_info,
-            daemon::daemon_status,
+            commands::daemon_status,
             quit::app_quit,
             quit::quit_cancelled,
             terminal::pty_spawn,

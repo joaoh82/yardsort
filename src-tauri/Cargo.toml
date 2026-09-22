@@ -23,6 +23,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
+yardsort-core = { path = "../crates/core" }
 pty-host = { path = "../crates/pty-host", features = ["specta"] }
 pty-ipc = { path = "../crates/pty-ipc" }
 which = "8"
@@ -55,3 +56,5 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# The core's git fixtures, for the tests of the modules that stayed here.
+yardsort-core = { path = "../crates/core", features = ["testing"] }

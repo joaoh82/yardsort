@@ -18,9 +18,6 @@ use pty_ipc::{DaemonClient, Endpoint, IDLE_GRACE};
 use serde::Serialize;
 use specta::Type;
 
-use crate::error::IpcResult;
-use crate::state::AppState;
-
 /// Makes this executable *be* the daemon. See [`run_daemon_and_exit_if_asked`].
 const DAEMON_FLAG: &str = "--yardsort-daemon";
 
@@ -432,12 +429,4 @@ mod tests {
         drop(handles);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     }
-}
-
-/// What the app is talking to. Shown in the status bar, and the first thing worth knowing when
-/// a terminal misbehaves.
-#[tauri::command]
-#[specta::specta]
-pub async fn daemon_status(state: tauri::State<'_, AppState>) -> IpcResult<DaemonStatus> {
-    Ok(state.daemon.clone())
 }
