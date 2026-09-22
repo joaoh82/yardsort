@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.8.1
 
 - **A first message starting with `-` no longer stops the agent.** Pasting a bullet out of a list
   — `- Commit / push / open PR from the UI` — put the agent's own argument parser in charge of it,
