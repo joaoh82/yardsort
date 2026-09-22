@@ -3601,7 +3601,7 @@ dependencies = [
 
 [[package]]
 name = "pty-host"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "portable-pty",
  "serde",
@@ -3613,7 +3613,7 @@ dependencies = [
 
 [[package]]
 name = "pty-ipc"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "interprocess",
  "pty-host",
@@ -6698,7 +6698,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "dunce",
  "ignore",
@@ -6733,7 +6733,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "pty-host",
@@ -6746,7 +6746,7 @@ dependencies = [
 
 [[package]]
 name = "yardsort-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "dunce",
  "libc",
