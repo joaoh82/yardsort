@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.6.0
 
 - **`local` asks what to open.** Clicking a project's own checkout used to open a shell by itself.
   It now offers **Open Terminal** or **Open Composer**, and the composer runs the agent in that
@@ -13,9 +13,9 @@ has the downloads and the full commit lists.
 - **Side-by-side diffs.** A diff opens inline as before; **Side by side** in the viewer's header
   puts the old and new versions in two panes, which is easier to read on a wide change. Your
   choice is remembered. See [Changes & files](docs/guide/changes-and-files.md).
-- Hovering a workspace no longer shows its path in a tooltip: the bottom bar already says it for
-  the workspace you are in, and the tooltip landed on top of the menu above. Archived and missing
-  workspaces keep theirs — they cannot be opened, so it is the only place their path is written.
+- Hovering a workspace no longer shows its path in a tooltip; the bottom bar already says it for
+  the workspace you are in. Archived and missing workspaces keep theirs — they cannot be opened,
+  so it is the only place their path is written.
 
 ## 0.5.0
 
