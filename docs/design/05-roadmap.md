@@ -152,7 +152,9 @@ To do:
       first run. The macOS build is signed with a Developer ID certificate and notarized by Apple.
 - [ ] Hands-on pass and benchmark rows on macOS and Windows hardware — the pass is
       [08-manual-checklist](08-manual-checklist.md), the rows are `scripts/bench/run.sh`.
-      Reported as looking good on both (2026-09-21), but nothing is recorded yet.
+      Reported as looking good on both (2026-09-21), but nothing is recorded yet. The checklist
+      has grown a section for the `ys` command line since, which no one has run anywhere but
+      Linux.
 - [x] Auto-update: signed updates via the Tauri updater. The app checks `latest.json` on the GitHub
       release after start and daily, shows an "Update to x.y.z" button, and installs on request,
       warning about running terminals. AppImage, macOS and Windows copies update themselves;
@@ -359,9 +361,10 @@ _Notes:_
   nothing is running. So a finished agent's last screen outlives the agent but not the daemon.
   Keeping screens would mean writing whatever an agent printed to disk, which is a decision
   about secrets rather than about storage — not taken here.
-- Still open: `ys` is unsigned on macOS, no package manager ships it, and none of the CLI's
-  terminal handling — raw mode, `Ctrl-]`, resize forwarding — has been exercised by a human on
-  macOS or Windows. That belongs in [08-manual-checklist](08-manual-checklist.md).
+- Still open: `ys` is unsigned on macOS and no package manager ships it. None of its terminal
+  handling — raw mode, `Ctrl-]`, resize forwarding — nor its idea of where the data directory is
+  has been exercised by a human on macOS or Windows; a test can check neither. Section 6 of
+  [08-manual-checklist](08-manual-checklist.md) is the pass, and it is owed alongside M7's.
 
 ## Later (unordered)
 

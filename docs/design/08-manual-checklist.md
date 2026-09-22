@@ -6,7 +6,7 @@ routing, a harness's first-run dialogs, or whether an agent is still working aft
 app. This is the pass that covers that, and the record of having done it.
 
 The roadmap owes it on **macOS and Windows** (M7; M1 wants the benchmark rows too, M4 wants the
-harnesses exercised, M9 the daemon). Linux is recorded in
+harnesses exercised, M9 the daemon, M10 the `ys` command line). Linux is recorded in
 [07-terminal-benchmarks](07-terminal-benchmarks.md).
 
 Work on a throwaway profile so nothing here touches real projects:
@@ -99,7 +99,82 @@ If the status bar says `no daemon`, the tooltip and `daemon.log` next to the dat
 A unix socket path is limited to about a hundred characters, so a deep `YARDSORT_DATA_DIR` on
 macOS is one plausible cause.
 
-## 6 · Changes, files and the editor
+## 6 · The `ys` command line
+
+Everything here has only ever been run by a human on Linux. It compiles and its tests pass on all
+three platforms, but raw mode, the detach key and resize forwarding are not things a test can
+check — and `ys` works out where your data lives by its own copy of Tauri's rules, which has
+never met a database that macOS or Windows created.
+
+`ys` is a separate download from the [releases](https://github.com/joaoh82/yardsort/releases), not
+part of the app bundle. Put it on your `PATH` first. On macOS it is **unsigned**, so a copy
+downloaded with a browser is quarantined — that is itself the first row.
+
+Run it against the same throwaway profile the app is using:
+
+```sh
+ys --data-dir /tmp/ys doctor        # or C:\ys on Windows
+```
+
+### It runs, and it is looking at the right place
+
+| ✓   | Check                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+|     | macOS, downloaded with a browser: it is refused on first run. `xattr -d com.apple.quarantine ys` fixes it. Downloaded with `curl`: it just runs. |
+|     | Windows: `ys --help` **prints something**. Silence means the console is missing, which is the bug a separate binary exists to avoid.             |
+|     | `ys doctor` with no `--data-dir`, while the app is closed: the data directory it names is the one the app really uses.                           |
+|     | That same `doctor` says `database … (found)` and a plausible project count — not `NOT FOUND`, and not zero when you have projects.               |
+|     | The app prints no `warning: the data directory is …` line at startup. If it does, `ys` and the app disagree and that warning is the finding.     |
+
+The third and fourth rows are the important ones on each platform. `ys` resolves the directory
+itself rather than asking Tauri, so a difference here is silent: it would report a Yardsort you
+have never used rather than an error.
+
+### It sees the same world the window does
+
+| ✓   | Check                                                                                                 |
+| --- | ----------------------------------------------------------------------------------------------------- |
+|     | `ys project list` and `ys workspace list` match what the sidebar shows, paths included.               |
+|     | `ys workspace new <project> "a small task"` creates a branch and worktree, and starts an agent.       |
+|     | That workspace appears in the app — immediately if it is open, on next launch if it is not.           |
+|     | The agent it started is still working after `ys` has returned: `ys session list` says `running`.      |
+|     | `ys workspace new --harness <something misspelt>` creates **nothing** — no branch, no folder, no row. |
+
+### Attaching
+
+| ✓   | Check                                                                                                                   |
+| --- | ----------------------------------------------------------------------------------------------------------------------- |
+|     | `ys attach` repaints the agent's screen where it got to, colours and all.                                               |
+|     | What you type reaches the agent, and its replies come back.                                                             |
+|     | A full-screen TUI draws correctly, and **resizing your terminal window** reflows it within a second.                    |
+|     | Plain `Ctrl+C` reaches the agent rather than killing `ys`.                                                              |
+|     | `Ctrl-]` detaches. The agent is **still running** afterwards (`ys session list`).                                       |
+|     | Your shell is normal again after detaching: echo works, arrow keys work, no stray escape sequences.                     |
+|     | Re-attach: the screen is repainted including what happened while you were away.                                         |
+|     | With the app open on the same session: both show the same output, and either can type.                                  |
+|     | Windows: all of the above in **Windows Terminal** and again in the old **conhost** window, which differ in VT handling. |
+
+Known and not a bug: attaching matches the session to your terminal, and the app treats that same
+size as its own setting, so the two can tug at each other while both are attached. The app sets it
+again when you next focus the tab.
+
+Known limitation worth confirming rather than discovering: if `ys` is killed from elsewhere
+(`kill` from another terminal, closing the window it runs in), the terminal is left in raw mode —
+`reset` restores it. Only a clean detach or exit puts it back.
+
+### Reading a screen
+
+| ✓   | Check                                                                                                                                   |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------- |
+|     | `ys logs` prints the session's output as plain text — readable, no escape sequences, scrollback included.                               |
+|     | `ys logs --lines 10` gives the last ten lines; `ys logs --raw \| cat` shows the escapes are really there.                               |
+|     | Let an agent finish, then `ys logs` it **while the app is open**: its last screen is still readable.                                    |
+|     | Close the app, wait ~15 s with nothing running, then `ys logs`: it says the daemon is gone and screens with it — not "printed nothing". |
+
+That last row is the design, not a failure: screens live in the background process and are never
+written to disk. It is on the list because the wrong message here would read as data loss.
+
+## 7 · Changes, files and the editor
 
 | ✓   | Check                                                                               |
 | --- | ----------------------------------------------------------------------------------- |
@@ -109,7 +184,7 @@ macOS is one plausible cause.
 |     | **Open in editor** opens the right file in your editor.                             |
 |     | A repository with a big `node_modules` stays responsive.                            |
 
-## 7 · Deleting nothing by accident
+## 8 · Deleting nothing by accident
 
 | ✓   | Check                                                                                                                                   |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -118,7 +193,7 @@ macOS is one plausible cause.
 |     | Delete one that is clean: the folder goes, **the branch stays**, and it can be opened again from the composer's _Open existing branch_. |
 |     | Archive and restore: the conversations come back with the workspace.                                                                    |
 
-## 8 · The numbers
+## 9 · The numbers
 
 ```sh
 scripts/bench/run.sh
@@ -134,7 +209,7 @@ Nothing recorded yet for macOS or Windows. Add a section per pass:
 
 ```
 ### macOS 15.6, M2 Pro, WKWebView, scale 2, 0.5.0 — 2026-09-21
-Sections 1–7 pass except …
+Sections 1–8 pass except …
 Benchmarks: see 07-terminal-benchmarks.
 Found: …
 ```
