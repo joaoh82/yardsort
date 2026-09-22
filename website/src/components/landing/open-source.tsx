@@ -62,7 +62,11 @@ export async function OpenSource() {
               <Doc slug="guide/changes-and-files">Changes &amp; files</Doc>
             </li>
             <li>
-              <Doc slug="guide/settings">Settings &amp; harnesses</Doc>
+              <Doc slug="guide/settings">Settings &amp; harnesses</Doc> ·{" "}
+              <Doc slug="guide/assist">Assist</Doc>
+            </li>
+            <li>
+              <Doc slug="guide/cli">The ys command line</Doc>
             </li>
             <li>
               <Doc slug="guide/updates">Updates</Doc> ·{" "}
