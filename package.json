@@ -1,6 +1,6 @@
 {
   "name": "yardsort",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Run AI coding agents in parallel, each in its own git worktree",
   "license": "GPL-3.0-only",
   "repository": {
