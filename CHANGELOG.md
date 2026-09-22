@@ -14,6 +14,17 @@ has the downloads and the full commit lists.
 - Workspace and branch names look for the task after introductory context in the first message,
   skipping common request lead-ins and fenced code instead of always taking the opening words.
 
+## Unreleased
+
+- **A command line: `ys`.** Start a workspace and put an agent in it without opening the window —
+  `ys workspace new <project> "<prompt>"` — plus `project list`, `workspace list`,
+  `session list` and `doctor`. It reads the same database as the app, so each sees the other's
+  work, and the agent it starts belongs to the background process, so it keeps going after the
+  command returns. A separate download in each release; `--json` on every command, for scripts.
+  See [The `ys` command line](docs/guide/cli.md).
+- Internally, the core is now its own crate with no Tauri in it, which is what lets a
+  command-line client exist without carrying a webview around.
+
 ## 0.6.0
 
 - **`local` asks what to open.** Clicking a project's own checkout used to open a shell by itself.

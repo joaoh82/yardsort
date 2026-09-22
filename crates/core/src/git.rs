@@ -65,13 +65,13 @@ impl Git {
         })
     }
 
-    pub(crate) fn run(&self, cwd: &Path, args: &[&str]) -> GitResult<String> {
+    pub fn run(&self, cwd: &Path, args: &[&str]) -> GitResult<String> {
         let bytes = self.run_bytes(cwd, args)?;
         Ok(String::from_utf8_lossy(&bytes).trim_end().to_owned())
     }
 
     /// Like [`Self::run`], with stdout exactly as git wrote it: file contents, `-z` lists.
-    pub(crate) fn run_bytes(&self, cwd: &Path, args: &[&str]) -> GitResult<Vec<u8>> {
+    pub fn run_bytes(&self, cwd: &Path, args: &[&str]) -> GitResult<Vec<u8>> {
         let mut command = Command::new(&self.program);
         if self.clear_env {
             command.env_clear();
@@ -275,8 +275,10 @@ pub fn normalize(path: &Path) -> PathBuf {
     dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-#[cfg(test)]
-pub(crate) mod testing {
+/// Helpers for tests, in this crate and in the app's. Behind a feature so they never reach a
+/// release build: `yardsort-core = { features = ["testing"] }` in dev-dependencies.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
     use super::*;
 
     /// A `Git` that ignores the developer's own configuration, with a fixed identity.

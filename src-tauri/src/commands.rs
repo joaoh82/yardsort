@@ -3,6 +3,8 @@
 use serde::Serialize;
 use specta::Type;
 
+use crate::error::IpcResult;
+
 /// Static facts about the running app, shown in the UI and useful in bug reports.
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -81,4 +83,14 @@ mod tests {
         assert!(["linux", "macos", "windows"].contains(&info.os.as_str()));
         assert!(!info.arch.is_empty());
     }
+}
+
+/// What the app is talking to. Shown in the status bar, and the first thing worth knowing when
+/// a terminal misbehaves.
+#[tauri::command]
+#[specta::specta]
+pub async fn daemon_status(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> IpcResult<crate::daemon::DaemonStatus> {
+    Ok(state.daemon.clone())
 }

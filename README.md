@@ -65,6 +65,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   your diffs.
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
+- **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client, starts a workspace and
+  an agent without opening the window: `ys workspace new <project> "<prompt>"`. The agent belongs
+  to the background process, so it carries on after the command returns.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>

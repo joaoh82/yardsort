@@ -1,0 +1,31 @@
+[package]
+name = "yardsort-cli"
+description = "Drive Yardsort from a terminal: list projects, start a workspace, put an agent in it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+# Not `yardsort`: that name belongs to the app's own binary, and two binaries of one name in a
+# cargo workspace collide in `target/`. `ys` is also what you want to type, and matches the
+# branch prefix.
+name = "ys"
+path = "src/main.rs"
+
+[dependencies]
+yardsort-core = { path = "../core" }
+pty-host = { path = "../pty-host", features = ["specta"] }
+pty-ipc = { path = "../pty-ipc" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+# Real git repositories in temp directories, shared with the core's own tests.
+yardsort-core = { path = "../core", features = ["testing"] }

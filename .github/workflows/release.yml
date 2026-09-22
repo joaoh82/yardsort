@@ -142,6 +142,52 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
+      # `ys`, the command-line client. A separate binary because the app's has no console on
+      # Windows, and because a CLI has no business carrying a webview. It is not self-updating
+      # and no package manager ships it yet: it is a plain archive people put on their PATH.
+      - name: Build the ys CLI
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # One binary for both architectures, as the app bundle is.
+            cargo build --release -p yardsort-cli --target aarch64-apple-darwin
+            cargo build --release -p yardsort-cli --target x86_64-apple-darwin
+            lipo -create -output ys \
+              target/aarch64-apple-darwin/release/ys \
+              target/x86_64-apple-darwin/release/ys
+            lipo -info ys
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            cargo build --release -p yardsort-cli
+            cp target/release/ys.exe ys.exe
+          else
+            cargo build --release -p yardsort-cli
+            cp target/release/ys ys
+          fi
+
+      # Signed when the certificate is there, so the binary carries a real identity. It is not
+      # notarized: a bare executable cannot have a ticket stapled to it, so a copy downloaded with
+      # a browser is still quarantined — `docs/guide/cli.md` says what to do about that.
+      - name: Sign the ys CLI
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_IDENTITY != ''
+        run: |
+          codesign --sign "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp --force ys
+          codesign --verify --verbose ys
+
+      - name: Attach the ys CLI to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#v}"
+          case "$RUNNER_OS" in
+            Linux)   name="ys-$version-linux-x86_64.tar.gz";   tar -czf "$name" ys ;;
+            macOS)   name="ys-$version-macos-universal.tar.gz"; tar -czf "$name" ys ;;
+            Windows) name="ys-$version-windows-x86_64.zip";     7z a "$name" ys.exe ;;
+          esac
+          gh release upload "$TAG" "$name" --clobber
+          echo "attached $name"
+
   publish:
     name: Publish release
     needs: [draft, build]

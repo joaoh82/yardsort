@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 /// Applied in order; a database's `user_version` is how many it has had. Never edit a shipped
 /// migration — add a new one.
@@ -91,6 +91,11 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
+/// How long to wait for another process to finish writing before giving up. Generous: the writes
+/// here are single statements or small transactions, so anything approaching this means something
+/// is wrong rather than merely busy.
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
         if let Some(dir) = path.parent() {
@@ -107,6 +112,16 @@ impl Store {
     fn prepare(mut conn: Connection) -> StoreResult<Self> {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // More than one process opens this database — the app and the `ys` CLI. WAL lets them
+        // read side by side, but only one may write at a time, so the loser of a race has to
+        // wait its turn. rusqlite already defaults to a five-second busy timeout; it is set
+        // here so the value is ours rather than a dependency's default.
+        conn.busy_timeout(BUSY_TIMEOUT)?;
+        // The timeout alone is not enough. A `BEGIN DEFERRED` that reads first and writes second
+        // — which is what every write in this file does — cannot wait for the write lock without
+        // risking deadlock, so SQLite refuses it outright rather than calling the busy handler.
+        // Taking the lock up front is what actually lets two processes write.
+        conn.set_transaction_behavior(TransactionBehavior::Immediate);
 
         let applied: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let applied = applied as usize;
@@ -899,5 +914,30 @@ mod tests {
             Store::open(&path),
             Err(StoreError::TooNew { found: 999, .. })
         ));
+    }
+
+    /// The CLI and the app are two processes on one database. Two `Store`s writing at once must
+    /// both get their rows in — which is what [`BUSY_TIMEOUT`] buys: without it the second
+    /// writer is told `SQLITE_BUSY` straight away instead of waiting for the first to finish.
+    #[test]
+    fn two_stores_on_one_file_can_both_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        let (app, cli) = (Store::open(&path).unwrap(), Store::open(&path).unwrap());
+
+        const EACH: usize = 25;
+        std::thread::scope(|scope| {
+            for (store, whose) in [(&app, "app"), (&cli, "cli")] {
+                scope.spawn(move || {
+                    for n in 0..EACH {
+                        store
+                            .add_project(&format!("{whose}-{n}"), &format!("/code/{whose}/{n}"))
+                            .unwrap_or_else(|e| panic!("{whose} could not write row {n}: {e}"));
+                    }
+                });
+            }
+        });
+
+        assert_eq!(app.projects().unwrap().len(), EACH * 2);
     }
 }

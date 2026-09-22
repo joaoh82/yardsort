@@ -18,9 +18,6 @@ use pty_ipc::{DaemonClient, Endpoint, IDLE_GRACE};
 use serde::Serialize;
 use specta::Type;
 
-use crate::error::IpcResult;
-use crate::state::AppState;
-
 /// Makes this executable *be* the daemon. See [`run_daemon_and_exit_if_asked`].
 const DAEMON_FLAG: &str = "--yardsort-daemon";
 
@@ -147,6 +144,20 @@ pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
         };
     }
     connected_to(client, endpoint, log_path)
+}
+
+/// Where this profile's daemon listens, as text. For diagnostics — `ys doctor` and bug reports.
+pub fn endpoint_for(data_dir: &Path) -> String {
+    Endpoint::for_data_dir(data_dir).to_string()
+}
+
+/// Attach to a daemon that is already running for `data_dir`, and never start one.
+///
+/// For clients that only want to report what is there — a listing that started a daemon would be
+/// answering its own question, and would leave a process behind on a machine that had none.
+pub fn connect_existing(data_dir: &Path) -> Option<DaemonClient> {
+    let endpoint = Endpoint::for_data_dir(data_dir);
+    attach(&endpoint, &(Arc::new(|_| {}) as EventSink)).ok()
 }
 
 fn connected_to(
@@ -432,12 +443,4 @@ mod tests {
         drop(handles);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     }
-}
-
-/// What the app is talking to. Shown in the status bar, and the first thing worth knowing when
-/// a terminal misbehaves.
-#[tauri::command]
-#[specta::specta]
-pub async fn daemon_status(state: tauri::State<'_, AppState>) -> IpcResult<DaemonStatus> {
-    Ok(state.daemon.clone())
 }

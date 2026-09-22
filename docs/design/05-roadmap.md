@@ -285,6 +285,58 @@ _Notes:_
 - CI is green on all three platforms; the hands-on pass M7 owes on macOS and Windows is still
   outstanding.
 
+## M10 — The `ys` command line ✅
+
+Yardsort without the window, for scripting and for asking an agent to start another one.
+
+- `crates/core`: the store, git, projects, workspaces, settings, harnesses, the launch
+  environment and the daemon client, with **no Tauri dependency**. The app re-exports it under
+  the module names it always used, so the change inside `src-tauri` is small and the generated
+  bindings came out byte-identical.
+- `crates/cli`: `ys`, a second client of that core. `project list`, `workspace list`,
+  `workspace new <project> "<prompt>"`, `session list`, `doctor`; `--json` on all of them.
+- `ys workspace new` creates the branch and worktree and starts the agent with the prompt as its
+  first message — the composer's job, from a terminal. The agent belongs to the daemon, so it
+  outlives the command.
+- Shipped as its own archive in each release, per platform. Not self-updating, and no package
+  manager carries it.
+
+_Exit:_ `ys workspace new` from a terminal leaves a working agent behind after the command
+returns, and the app shows it when it next looks.
+
+_Result:_ verified by hand on Linux against a throwaway profile with a stand-in agent: `ys`
+started the daemon from its own binary, the agent survived `ys` exiting, `ys session list`
+reported it running, and git had the branch and worktree. `ys doctor` against the real profile
+resolved the same directory Tauri does — the best evidence available that `paths.rs` matches,
+short of running it on the other two platforms.
+
+_Notes:_
+
+- **Why a separate binary and not a flag.** The app's binary is built with
+  `windows_subsystem = "windows"`, so in release it has no console and would print nothing on
+  Windows. `ys` is its own executable in its own crate for that reason. It is also why the
+  command is `ys` and not `yardsort`: two binaries of one name in a cargo workspace collide in
+  `target/`.
+- **Why the core had to move.** Linking the app's lib would have pulled in Tauri, and on Linux
+  that means a command-line tool that will not start without WebKitGTK. Almost all of it was
+  already Tauri-free — seven of the moved files had not one reference.
+- Found by the move: every write to the store was a `BEGIN DEFERRED` that reads before it
+  writes, which SQLite refuses outright when another connection holds the write lock rather than
+  waiting for it. Harmless while the app was the only writer. Write transactions are immediate
+  now.
+- Found while testing: the daemon keeps exited sessions in its list so their last screen can
+  still be read, so "is this session alive?" is a question about its _state_, not about whether
+  the daemon has heard of it. `ys session list` distinguishes `running`, `gone` (the record says
+  running but the process is not — nothing was connected to hear it exit) and `running?` (no
+  daemon to ask).
+- `ys` never creates a database. Working the data directory out without Tauri to ask is the one
+  thing that could quietly differ on a platform this has not been tried on, and a CLI that
+  created one would answer every question with a convincing, empty "no projects". The app warns
+  at startup if the two resolutions disagree.
+- Still open: the CLI is not notarized on macOS (a bare executable cannot have a ticket stapled
+  to it), no package manager ships it, and nothing attaches to a running session from the
+  terminal — `ys attach` is the obvious next one.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
@@ -313,12 +365,10 @@ rediscovering later. None of them is committed to; the point is to know what is 
   session lifetime. The hard parts are not the timer but the answers: what a run does when the
   previous one is still going, what happens to a worktree per run, and how a scheduled agent
   asks for permission when there is no one to ask.
-- **A `yardsort` CLI.** Superset has a CLI and an SDK for scripting and CI. This is less work
-  than it sounds: since M9 the sessions live behind a socket with a documented protocol, and
-  `pty_ipc::DaemonClient` is already a complete client of it. A CLI would be a second client
-  next to the app — list workspaces, start one, attach to a session — with no new core. What it
-  does need is a decision about what is a stable interface: the protocol is versioned for the
-  app's own use and is free to change between releases today.
+- ~~**A `yardsort` CLI.**~~ **Done, as `ys` — see M10.** The estimate above was wrong in an
+  instructive way: the daemon protocol carries _sessions_, not workspaces, and projects live in
+  the SQLite store the app owns. "A second client of the socket with no new core" needed the
+  core to be extracted first.
 - **Mobile.** Superset has an iOS app for steering agents from a phone. This one is not a small
   feature but a different product shape: it needs remote workspaces first (already in the list
   above), and then something to connect to from outside the machine — which runs into "team

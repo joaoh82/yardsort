@@ -57,6 +57,16 @@ workflow_) and give it an existing tag.
 | macOS (universal: Apple Silicon + Intel) | `.dmg`, `.app.tar.gz`                                  | Signed and notarized when the Apple secrets below are set; otherwise an unsigned build |
 | Windows (x86_64)                         | `-setup.exe` (NSIS), `.msi`                            | Not signed yet — users see a SmartScreen warning                                       |
 
+Each platform also builds and attaches **`ys`**, the [command-line client](guide/cli.md), as a
+plain archive: `ys-<version>-linux-x86_64.tar.gz`, `ys-<version>-macos-universal.tar.gz` and
+`ys-<version>-windows-x86_64.zip`. It is a separate binary from the app — the app's has no
+console on Windows — built from the same commit in the same job.
+
+The macOS one is `lipo`'d from both architectures and signed with the Developer ID when the
+certificate is set, but it is **not notarized**: a ticket cannot be stapled to a bare executable.
+A copy downloaded with a browser is therefore quarantined, which the guide explains. `ys` does
+not self-update and no package manager carries it.
+
 ## macOS signing and notarization
 
 Needs a paid Apple Developer account. Set these repository secrets

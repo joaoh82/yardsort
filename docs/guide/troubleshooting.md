@@ -116,6 +116,27 @@ app keeps working; once you are happy, uninstall Switchyard and delete its folde
 - `SWITCHYARD_DATA_DIR` and `SWITCHYARD_WORKTREE_ROOT` still work; prefer the `YARDSORT_` names.
 - Panel sizes are per app and start fresh.
 
+## `ys` says there is no database
+
+```
+No Yardsort database at /home/you/.local/share/dev.yardsort.app/yardsort.db.
+Open the app once to create one, or point at another profile with --data-dir.
+```
+
+`ys` works the location out from the rules in the table below rather than asking the app, so this
+means one of three things: Yardsort has never been run on this machine, you are in a different
+user account, or `ys` resolved a directory the app does not use.
+
+Run `ys doctor` — it prints the directory it tried. If that is not where your data actually is,
+point at it directly and please [report it](https://github.com/joaoh82/yardsort/issues):
+
+```sh
+ys --data-dir ~/.local/share/dev.yardsort.app project list
+```
+
+`ys` will not create a database, on purpose. If it did, a wrong directory would look exactly like
+a Yardsort you had never used.
+
 ## Where Yardsort keeps things
 
 |                                                  | Linux                                      | macOS                                             | Windows                       |
@@ -126,6 +147,8 @@ app keeps working; once you are happy, uninstall Switchyard and delete its folde
 
 `daemon.log` sits beside the database and holds the last run of the background process that owns
 your terminals. It is replaced each time one starts.
+
+`ys doctor` prints all of these for your machine, which is quicker than reading the table.
 
 Yardsort stores no credentials and sends nothing anywhere: no telemetry, no account. Agents use
 their own logins and talk to their own services.

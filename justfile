@@ -25,6 +25,10 @@ dev-renderer $YARDSORT_RENDERER:
 web:
     bun run dev
 
+# The `ys` command-line client, against whatever profile the arguments name
+cli *args:
+    cargo run -q -p yardsort-cli -- {{args}}
+
 # --- check ----------------------------------------------------------------------------------
 
 # Formatting, lints, types and all tests. (CI additionally runs `bindings-check`.)
@@ -50,7 +54,8 @@ lint:
     cargo clippy --workspace --all-targets -- -D warnings
     bun run lint
 
-# Clippy the PTY host for Windows from any OS (the app crate needs MSVC for SQLite; CI covers it)
+# Clippy the PTY crates for Windows from any OS (`yardsort-core` and the app bundle SQLite, which
+# needs the MSVC toolchain to compile; CI covers those on real Windows)
 lint-windows:
     bun run lint:windows
 

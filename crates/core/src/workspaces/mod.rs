@@ -3,7 +3,6 @@
 //! Everything here is plain git underneath — `git worktree add -b` and `git worktree remove` —
 //! so a user can always inspect or undo what Yardsort did with their own tools.
 
-pub mod commands;
 mod naming;
 
 use std::path::{Path, PathBuf};
@@ -305,6 +304,31 @@ impl Workspaces<'_> {
             let _ = self.git.branch_delete(root, branch);
         }
     }
+}
+
+/// Where worktrees go: the environment override (for tests and experiments), then the setting,
+/// then `~/yardsort` — visible and short on purpose, because people look into these folders and
+/// Windows paths are limited.
+///
+/// Every client has to agree on this, or one of them creates worktrees the other cannot find.
+pub fn worktree_root(
+    settings: &WorkspaceSettings,
+    env: &crate::env::ShellEnv,
+) -> IpcResult<PathBuf> {
+    if let Some(dir) = crate::legacy::env_var_os("WORKTREE_ROOT") {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(root) = &settings.worktree_root {
+        return Ok(PathBuf::from(root));
+    }
+    default_worktree_root(env)
+}
+
+/// The fallback, when nothing has been configured.
+pub fn default_worktree_root(env: &crate::env::ShellEnv) -> IpcResult<PathBuf> {
+    env.home_dir()
+        .map(|home| home.join("yardsort"))
+        .ok_or_else(|| IpcError::new("no_home", "Cannot determine your home directory."))
 }
 
 /// Adopt worktrees git knows about but Yardsort does not — made by hand, or orphaned when
