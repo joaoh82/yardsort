@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Composer } from "@/features/composer/Composer";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
+import { LatencyRunner } from "@/features/terminal/LatencyRunner";
 import { bareHarness } from "@/features/terminal/quickLaunch";
 import { EndedBar } from "@/features/terminal/EndedBar";
 import { SessionHistory } from "@/features/terminal/SessionHistory";
@@ -30,10 +31,16 @@ export function WorkspacePanel() {
   const runIn =
     selection && selection.workspace.id === composingWorkspaceId ? selection : undefined;
 
-  if (dev?.bench) {
+  // A benchmark run takes the panel over: it reports to the core, which prints and quits.
+  const bench = dev?.benchLatency ? (
+    <LatencyRunner renderer={dev.renderer} />
+  ) : dev?.bench ? (
+    <BenchRunner script={dev.bench} renderer={dev.renderer} />
+  ) : null;
+  if (bench) {
     return (
       <main aria-label="Workspace" className="h-full bg-canvas">
-        <BenchRunner script={dev.bench} renderer={dev.renderer} />
+        {bench}
       </main>
     );
   }

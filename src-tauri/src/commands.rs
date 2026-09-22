@@ -24,6 +24,9 @@ pub struct DevFlags {
     /// `YARDSORT_BENCH`: a shell script to run in a terminal while frame times are recorded;
     /// the app prints the result and exits. See `docs/design/07-terminal-benchmarks.md`.
     pub bench: Option<String>,
+    /// `YARDSORT_BENCH_LATENCY`: time keystroke round trips in a terminal instead of running a
+    /// script, then print the result and exit. Takes precedence over `bench`.
+    pub bench_latency: bool,
     /// `YARDSORT_RENDERER`: force the terminal renderer (`webgl` or `dom`).
     pub renderer: Option<String>,
 }
@@ -37,6 +40,7 @@ impl DevFlags {
             |suffix| crate::legacy::env_var_os(suffix).map(|v| v.to_string_lossy().into_owned());
         Self {
             bench: var("BENCH"),
+            bench_latency: var("BENCH_LATENCY").is_some_and(|value| !value.is_empty()),
             renderer: var("RENDERER"),
         }
     }

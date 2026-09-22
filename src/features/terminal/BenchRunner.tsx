@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ipc, type SessionId } from "@/lib/ipc";
 import { isMac } from "@/lib/platform";
+import { percentiles, round } from "./bench";
 import { TerminalView, type TerminalProbe } from "./TerminalView";
 
 /** How long output must stay quiet after the process exits before the run is considered over. */
@@ -96,10 +97,8 @@ export function BenchRunner({ script, renderer }: { script: string; renderer: st
 
 function summarise(s: BenchStats, script: string) {
   const seconds = Math.max(s.lastOutput - s.firstOutput, 1) / 1000;
-  const frames = [...s.frames].sort((a, b) => a - b);
-  const at = (q: number) =>
-    round(frames[Math.min(frames.length - 1, Math.floor(q * frames.length))] ?? 0);
   return {
+    workload: "throughput",
     script,
     renderer: s.renderer,
     platform: isMac ? "macos" : navigator.userAgent.includes("Windows") ? "windows" : "linux",
@@ -107,10 +106,10 @@ function summarise(s: BenchStats, script: string) {
     megabytes: round(s.bytes / 1_048_576),
     seconds: round(seconds),
     megabytesPerSecond: round(s.bytes / 1_048_576 / seconds),
-    frames: frames.length,
-    fps: round(frames.length / seconds),
-    frameMs: { p50: at(0.5), p95: at(0.95), p99: at(0.99), max: round(frames.at(-1) ?? 0) },
-    framesOver50ms: frames.filter((ms) => ms > 50).length,
+    frames: s.frames.length,
+    fps: round(s.frames.length / seconds),
+    frameMs: percentiles(s.frames),
+    framesOver50ms: s.frames.filter((ms) => ms > 50).length,
   };
 }
 
@@ -121,5 +120,3 @@ type BenchStats = {
   lastOutput: number;
   frames: number[];
 };
-
-const round = (value: number) => Math.round(value * 10) / 10;
