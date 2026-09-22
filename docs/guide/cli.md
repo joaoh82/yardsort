@@ -23,8 +23,9 @@ tar -xzf ys-*-macos-universal.tar.gz && sudo install ys /usr/local/bin/
 
 On Windows, unzip `ys-*-windows-x86_64.zip` and put `ys.exe` in a folder on your `PATH`.
 
-On macOS the binary is signed but not notarized, so a copy downloaded with a browser is
-quarantined and refused on first run. Either download it with `curl`, or clear the flag:
+On macOS `ys` is neither signed nor notarized — unlike the app, which is both. A copy downloaded
+with a browser is therefore quarantined and refused on first run. Either download it with `curl`,
+or clear the flag:
 
 ```sh
 xattr -d com.apple.quarantine ys

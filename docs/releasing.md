@@ -62,10 +62,12 @@ plain archive: `ys-<version>-linux-x86_64.tar.gz`, `ys-<version>-macos-universal
 `ys-<version>-windows-x86_64.zip`. It is a separate binary from the app — the app's has no
 console on Windows — built from the same commit in the same job.
 
-The macOS one is `lipo`'d from both architectures and signed with the Developer ID when the
-certificate is set, but it is **not notarized**: a ticket cannot be stapled to a bare executable.
-A copy downloaded with a browser is therefore quarantined, which the guide explains. `ys` does
-not self-update and no package manager carries it.
+The macOS one is `lipo`'d from both architectures but is **neither signed nor notarized**, unlike
+the app. Two reasons: `tauri-action` imports the certificate into a keychain of its own for its
+own run, so no identity is available to a later step; and a ticket cannot be stapled to a bare
+executable, so signing without notarization would not spare anyone the quarantine prompt anyway.
+The [guide](guide/cli.md) says how to clear it. `ys` does not self-update and no package manager
+carries it.
 
 ## macOS signing and notarization
 

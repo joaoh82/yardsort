@@ -333,9 +333,14 @@ _Notes:_
   thing that could quietly differ on a platform this has not been tried on, and a CLI that
   created one would answer every question with a convincing, empty "no projects". The app warns
   at startup if the two resolutions disagree.
-- Still open: the CLI is not notarized on macOS (a bare executable cannot have a ticket stapled
-  to it), no package manager ships it, and nothing attaches to a running session from the
-  terminal — `ys attach` is the obvious next one.
+- Found by the first release that carried it: `ys` cannot be signed in a later step of the macOS
+  job, because `tauri-action` imports the certificate into a keychain of its own and takes it
+  away again. The signing step was dropped rather than reimplementing the import, since signing
+  without notarization spares nobody the quarantine prompt — a bare executable cannot have a
+  ticket stapled to it. Doing it properly means importing the certificate ourselves _and_
+  notarizing, and even then Gatekeeper checks over the network.
+- Still open: `ys` is unsigned on macOS, no package manager ships it, and nothing attaches to a
+  running session from the terminal — `ys attach` is the obvious next one.
 
 ## Later (unordered)
 
