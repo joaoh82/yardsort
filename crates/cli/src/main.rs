@@ -6,6 +6,7 @@
 //! working after `ys` exits and appears in the app the next time it looks.
 
 mod commands;
+mod target;
 mod yardsort;
 
 use std::path::PathBuf;
@@ -69,6 +70,15 @@ enum Command {
     /// Agent conversations and the terminals running them.
     #[command(subcommand)]
     Session(commands::session::Command),
+    /// Put a running session on this terminal. Detaching leaves it running.
+    Attach {
+        /// Which one: a workspace name, or the start of an id from `ys session list`. With one
+        /// session running, it can be left out.
+        target: Option<String>,
+        /// Leave the session at the size it already has, instead of matching this terminal.
+        #[arg(long)]
+        no_resize: bool,
+    },
     /// Where everything is, and whether it can be reached.
     Doctor,
 }
@@ -83,6 +93,8 @@ fn main() {
     let result =
         match cli.command {
             Command::Doctor => commands::doctor::run(cli.data_dir, &out),
+            Command::Attach { target, no_resize } => Yardsort::open(cli.data_dir)
+                .and_then(|ys| commands::attach::run(&ys, target, no_resize, &out)),
             Command::Project(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::project::run(&ys, command, &out)),
             Command::Workspace(command) => Yardsort::open(cli.data_dir)

@@ -104,6 +104,29 @@ The state column compares two things, because they can disagree:
 | `running?` | The record says running and there is no daemon to ask.                                                                              |
 | `ended`    | The conversation finished, and the record says so.                                                                                  |
 
+### `ys attach [target]`
+
+Puts a running session on your terminal: the screen is repainted where it got to, and what you
+type goes to the agent. **`Ctrl-]` detaches**, and the agent carries on — detaching is not
+stopping, exactly as closing the Yardsort window is not stopping.
+
+```sh
+ys attach                      # when only one thing is running
+ys attach fix-the-flaky-login-test
+ys attach 6051993d             # the start of an id from `ys session list`
+```
+
+With nothing named it attaches to the only running session, and asks which one you meant if there
+is more than one. A shell has no workspace name, so reach it by id.
+
+Attaching matches the session to your terminal's size, and follows it if you resize the window.
+If the app has the same session open in a tab, that tab's size and yours are the same setting —
+whichever changed last wins, and the app sets it again when you next focus the tab. `--no-resize`
+leaves the size alone, at the cost of a program drawing to a width you cannot see.
+
+You can attach to a session the app also has open; both see the same output, and either can type.
+Only sessions that are still running can be attached to.
+
 ### `ys doctor`
 
 Where `ys` is looking and whether it can get there: the data directory, the database, the daemon,

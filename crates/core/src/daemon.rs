@@ -155,9 +155,9 @@ pub fn endpoint_for(data_dir: &Path) -> String {
 ///
 /// For clients that only want to report what is there — a listing that started a daemon would be
 /// answering its own question, and would leave a process behind on a machine that had none.
-pub fn connect_existing(data_dir: &Path) -> Option<DaemonClient> {
+pub fn connect_existing(data_dir: &Path, events: EventSink) -> Option<DaemonClient> {
     let endpoint = Endpoint::for_data_dir(data_dir);
-    attach(&endpoint, &(Arc::new(|_| {}) as EventSink)).ok()
+    attach(&endpoint, &events).ok()
 }
 
 fn connected_to(

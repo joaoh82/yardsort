@@ -22,6 +22,10 @@ yardsort-core = { path = "../core" }
 pty-host = { path = "../pty-host", features = ["specta"] }
 pty-ipc = { path = "../pty-ipc" }
 clap = { version = "4", features = ["derive"] }
+# Raw mode, terminal size and the Windows console's VT modes. Only those: input is forwarded to
+# the session as raw bytes, never as crossterm's parsed key events, which would lose mouse
+# reporting, bracketed paste and anything it does not model.
+crossterm = "0.29"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

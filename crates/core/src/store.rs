@@ -351,6 +351,19 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Every workspace's sessions at once, most recently started first.
+    ///
+    /// For asking "which record does this running process belong to?" without a workspace in
+    /// hand — which is where `ys attach` starts from, since it is given a process.
+    pub fn all_sessions(&self) -> StoreResult<Vec<SessionRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {SESSION_COLUMNS} FROM sessions ORDER BY started_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map([], session_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// What the user asked for in a workspace: the first message of each of its conversations
     /// that had one, oldest first.
     pub fn session_prompts(&self, workspace_id: &str) -> StoreResult<Vec<String>> {

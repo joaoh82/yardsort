@@ -85,7 +85,16 @@ impl Yardsort {
     /// For commands that only report: a `ys session list` that started a daemon would answer its
     /// own question, and would leave a process behind on a machine that had none.
     pub fn daemon(&self) -> Option<Arc<pty_ipc::DaemonClient>> {
-        daemon::connect_existing(&self.data_dir).map(Arc::new)
+        self.daemon_watching(Arc::new(|_| {}))
+    }
+
+    /// The same, but hearing the daemon's events — which is how `attach` learns that the session
+    /// it is showing has exited.
+    pub fn daemon_watching(
+        &self,
+        events: pty_host::EventSink,
+    ) -> Option<Arc<pty_ipc::DaemonClient>> {
+        daemon::connect_existing(&self.data_dir, events).map(Arc::new)
     }
 
     /// Attach to this profile's daemon, starting one if there is none.
