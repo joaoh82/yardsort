@@ -32,6 +32,10 @@ pub enum Command {
         /// The project to branch from, by name or id.
         project: String,
         /// The first message for the agent. Also names the branch.
+        ///
+        /// A message is free text, so it may start with `-` — a bullet pasted out of a list is
+        /// the usual way — and must not be read as an option.
+        #[arg(allow_hyphen_values = true)]
         prompt: String,
         /// Branch to start from. Defaults to the repository's default branch.
         #[arg(long, value_name = "BRANCH")]

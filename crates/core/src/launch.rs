@@ -383,7 +383,7 @@ mod tests {
         let session = &claude.labels[HARNESS_SESSION_LABEL];
         assert_eq!(
             claude.args,
-            ["--model", "opus", "--session-id", session, "fix it"]
+            ["--model", "opus", "--session-id", session, "--", "fix it"]
         );
         assert_eq!(claude.labels[HARNESS_LABEL], "claude");
         assert!(
@@ -392,7 +392,7 @@ mod tests {
         );
 
         let codex = resolve_launch(Launch::Harness(request("codex")), &[]).unwrap();
-        assert_eq!(codex.args, ["-m", "opus", "fix it"]);
+        assert_eq!(codex.args, ["-m", "opus", "--", "fix it"]);
         assert!(
             !codex.labels.contains_key(HARNESS_SESSION_LABEL),
             "codex picks its own id"
