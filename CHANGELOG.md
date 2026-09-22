@@ -3,6 +3,14 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **A first message starting with `-` no longer stops the agent.** Pasting a bullet out of a list
+  — `- Commit / push / open PR from the UI` — put the agent's own argument parser in charge of it,
+  and Claude Code, Codex and Grok each refused to start with `unknown option` or
+  `unexpected argument`. The prompt is now passed after `--`, which is how a parser is told the
+  options have ended. `ys workspace new` accepted no such message either, and does now.
+
 ## 0.8.0
 
 - **`ys attach`.** Put a running agent on your terminal from the command line: the screen is

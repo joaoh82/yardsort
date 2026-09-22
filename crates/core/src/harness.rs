@@ -128,7 +128,7 @@ impl HarnessDef {
             model_args: vec![],
             effort_args: vec![],
             session_args: vec![],
-            prompt_args: strings(&["{prompt}"]),
+            prompt_args: strings(&["--", "{prompt}"]),
             resume_args: vec![],
             fork_args: vec![],
             efforts: vec![],
@@ -204,7 +204,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             model_args: strings(&["--model", "{model}"]),
             effort_args: strings(&["--effort", "{effort}"]),
             session_args: strings(&["--session-id", "{session_id}"]),
-            prompt_args: strings(&["{prompt}"]),
+            prompt_args: strings(&["--", "{prompt}"]),
             resume_args: strings(&["--resume", "{session_id}"]),
             fork_args: strings(&[
                 "--resume",
@@ -229,7 +229,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             model_args: strings(&["-m", "{model}"]),
             effort_args: strings(&["-c", "model_reasoning_effort=\"{effort}\""]),
             session_args: vec![],
-            prompt_args: strings(&["{prompt}"]),
+            prompt_args: strings(&["--", "{prompt}"]),
             resume_args: strings(&["resume", "--last"]),
             fork_args: strings(&["fork", "--last"]),
             efforts: strings(&["low", "medium", "high"]),
@@ -248,7 +248,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             model_args: strings(&["-m", "{model}"]),
             effort_args: strings(&["--reasoning-effort", "{effort}"]),
             session_args: strings(&["--session-id", "{session_id}"]),
-            prompt_args: strings(&["{prompt}"]),
+            prompt_args: strings(&["--", "{prompt}"]),
             resume_args: strings(&["--resume", "{session_id}"]),
             fork_args: strings(&[
                 "--resume",
@@ -495,6 +495,7 @@ mod tests {
                 "high",
                 "--session-id",
                 "11111111-2222-3333-4444-555555555555",
+                "--",
                 "fix the bug",
             ]
         );
@@ -513,6 +514,33 @@ mod tests {
             .is_empty());
     }
 
+    /// A first message beginning with `-` is ordinary English — a bullet pasted from a list — but
+    /// to an argument parser it is a flag. Every harness that takes the prompt as a bare
+    /// positional argument must therefore have `--` in front of it, which is how every parser we
+    /// launch is told the options have ended. `claude`, `codex` and `grok` all refused such a
+    /// prompt outright before this; clap's own message suggests exactly this fix.
+    #[test]
+    fn a_prompt_that_starts_with_a_hyphen_is_not_read_as_an_option() {
+        let dashed = "- Commit / push / open PR from the UI";
+        for harness in builtin() {
+            let args = harness.start_args(&values(dashed, "", ""));
+            let at = args
+                .iter()
+                .position(|arg| arg == dashed)
+                .unwrap_or_else(|| panic!("{}: the prompt is not in {args:?}", harness.id));
+            let before = at
+                .checked_sub(1)
+                .map(|i| args[i].as_str())
+                .unwrap_or_else(|| panic!("{}: nothing shields {args:?}", harness.id));
+            assert!(
+                before == "--" || before.starts_with("--"),
+                "{}: the prompt is a bare positional after {before:?}, so a leading hyphen \
+                 reads as an option: {args:?}",
+                harness.id
+            );
+        }
+    }
+
     #[test]
     fn a_prompt_is_always_exactly_one_argument() {
         let nasty = "rename `foo` to \"bar\"; rm -rf $HOME\n--model evil 'quoted' {model}";
@@ -527,7 +555,10 @@ mod tests {
         let args = find("codex", &[])
             .unwrap()
             .start_args(&values("go", "", "medium"));
-        assert_eq!(args, ["-c", "model_reasoning_effort=\"medium\"", "go"]);
+        assert_eq!(
+            args,
+            ["-c", "model_reasoning_effort=\"medium\"", "--", "go"]
+        );
 
         let group = strings(&["--config", "{\"a\":{\"b\":1}}", "--tag={effort}"]);
         assert_eq!(
