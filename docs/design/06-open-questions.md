@@ -49,7 +49,7 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
 8. ~~**Worktree root default.**~~ **Settled in M3:** visible and short —
    `~/yardsort/<project>/<workspace>`; `YARDSORT_WORKTREE_ROOT` overrides it, and M4 makes it
    a setting.
-9. ~~**Diff viewer.**~~ **Settled in M5:** CodeMirror 6 with its unified merge view — light, themable
+9. ~~**Diff viewer.**~~ **Settled in M5:** CodeMirror 6's merge view — light, themable
    from our CSS variables, and one component serves both the diff and the read-only file viewer.
 10. ~~**Frontend framework.**~~ **Settled 2026-09-17: React** (+ TypeScript, Vite, Tailwind,
     Zustand), for the component ecosystem.

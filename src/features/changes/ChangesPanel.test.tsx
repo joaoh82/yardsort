@@ -41,7 +41,13 @@ const change = (path: string, extra: Partial<FileChange> = {}): FileChange => ({
   ...extra,
 });
 const text = (value: string) => ({ type: "text" as const, text: value });
-const shown = async () => JSON.parse((await screen.findByTestId("code")).textContent!);
+const shown = async () => {
+  const { split, ...rest } = JSON.parse((await screen.findByTestId("code")).textContent!);
+  return rest;
+};
+/** Whether the viewer is showing two panes; `split` is undefined for a plain file. */
+const isSplit = async () =>
+  JSON.parse((await screen.findByTestId("code")).textContent!).split === true;
 
 let fileSystemChanged: (workspaceId: string) => void;
 
@@ -122,6 +128,36 @@ describe("ChangesPanel", () => {
     await waitFor(async () =>
       expect(await shown()).toEqual({ path: "notes.md", text: "fresh", original: "" }),
     );
+  });
+
+  // A wide diff in a narrow panel is what an inline view is worst at, so the two versions can
+  // sit side by side instead — and the choice is remembered.
+  it("switches a diff between inline and side by side, and remembers which", async () => {
+    const user = await renderPanel();
+    await user.click(await screen.findByTitle("src/app.ts"));
+    expect(await isSplit()).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Side by side" }));
+    await waitFor(async () => expect(await isSplit()).toBe(true));
+    expect(core.uiStateSave).toHaveBeenCalledWith("changes.diffMode", JSON.stringify("split"));
+
+    await user.click(screen.getByRole("button", { name: "Inline" }));
+    await waitFor(async () => expect(await isSplit()).toBe(false));
+  });
+
+  it("offers no side-by-side for a plain file, which has nothing to compare", async () => {
+    core.workspaceFiles.mockResolvedValue([
+      { name: "README.md", path: "README.md", isDir: false, ignored: false },
+    ]);
+    core.workspaceFile.mockResolvedValue(text("hello"));
+    const user = await renderPanel();
+
+    await user.click(screen.getByRole("tab", { name: "Files" }));
+    await user.click(
+      within(await screen.findByRole("treeitem", { name: "README.md" })).getByRole("button"),
+    );
+    await shown();
+    expect(screen.queryByRole("button", { name: "Side by side" })).not.toBeInTheDocument();
   });
 
   it("updates the list and the open diff when the files change on disk", async () => {

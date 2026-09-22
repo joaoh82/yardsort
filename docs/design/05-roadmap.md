@@ -96,7 +96,8 @@ first — the paste would land in that dialog. WSL launch prefixes remain an ope
 _Exit:_ while an agent works, the changes list and open diff update live, and stay responsive in a
 large repo (test against one with a big `node_modules`).
 
-_Notes:_ the diff viewer is CodeMirror 6's unified merge view (settling open question 9), loaded
+_Notes:_ the diff viewer is CodeMirror 6's merge view (settling open question 9) — inline at
+first, with the two-pane view added later from the same package — loaded
 lazily with its grammars. Diffs cross IPC as the two versions of the file, not as a patch, so the
 viewer decides how much context to show. The watcher never interprets events: after a burst goes
 quiet it says "something changed" and the UI asks git again. On Linux it watches exactly the
@@ -297,11 +298,10 @@ Windows — which is [why this exists](01-vision.md). Going through what it offe
 gaps were already in the list above. These four were not, and are worth naming rather than
 rediscovering later. None of them is committed to; the point is to know what is missing.
 
-- **Side-by-side diffs.** Superset offers "Side by Side" or "Inline"; the right panel only has
-  inline, from CodeMirror's `unifiedMergeView`. The same dependency already exports `MergeView`,
-  the two-pane one, so this is a setting and a branch in `CodeView`, not a new library. Cheapest
-  item here and the most often missed, since a wide diff in a narrow panel is what the unified
-  view is worst at.
+- ~~**Side-by-side diffs.**~~ **Done.** `MergeView` came from the `@codemirror/merge` already
+  depended on, so it was a branch in `CodeView` and a toggle in the viewer's header, remembered
+  in `ui_state`. Inline stays the default: it is the better reading of a small change, and the
+  narrow panel is where most diffs are opened.
 - **Automations — agents on a schedule.** Superset turns chores into recurring agents: issue
   triage, changelog drafts, dependency bumps, with last-run and current status. Yardsort has no
   notion of time at all. M9 is what makes it plausible: something has to be running when nobody

@@ -54,3 +54,15 @@ body {
   user-select: none;
   overscroll-behavior: none;
 }
+
+/* CodeMirror's two-pane merge view wraps the editors in its own element, which an
+   `EditorView.theme` cannot reach — so its height and its divider are set here. */
+.cm-mergeView,
+.cm-mergeViewEditors {
+  height: 100%;
+}
+
+.cm-merge-revert {
+  background: var(--color-surface);
+  border-color: var(--color-line);
+}
