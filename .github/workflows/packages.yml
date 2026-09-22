@@ -8,6 +8,11 @@ name: Package managers
 # green run that published nothing is worse than a red one, and it has misled a reader already.
 # The release itself is unaffected: this workflow runs after the release is public, and nothing
 # waits on it. "Already at this version" is still a success.
+#
+# A channel that cannot possibly work yet — waiting on somebody else — is switched off with a
+# repository variable instead of being left to fail every release: `PUBLISH_AUR` and
+# `PUBLISH_WINGET`, each `true` to enable. The `channels` job below names whatever is switched
+# off on every run, so a green run still says what did not ship.
 # See docs/releasing.md.
 on:
   workflow_call:
@@ -28,10 +33,30 @@ env:
   TAG: ${{ inputs.tag }}
 
 jobs:
+  # Whatever is switched off is said out loud, so a green run is not a silent one.
+  channels:
+    name: Channels
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Say which channels are switched off
+        env:
+          PUBLISH_AUR: ${{ vars.PUBLISH_AUR }}
+          PUBLISH_WINGET: ${{ vars.PUBLISH_WINGET }}
+        run: |
+          off=""
+          [ "$PUBLISH_AUR" = "true" ] || off="$off AUR"
+          [ "$PUBLISH_WINGET" = "true" ] || off="$off winget"
+          if [ -n "$off" ]; then
+            echo "::notice::Not published to:$off. These channels are switched off (see docs/releasing.md); set the repository variable to enable one once it can work."
+          else
+            echo "Every channel is enabled."
+          fi
+
   # Arch User Repository: `yardsort-bin`, repackaging the release's .deb.
+  # Switched off until an AUR account exists to register the deploy key on.
   aur:
     name: AUR
-    if: ${{ !contains(inputs.tag, '-') }}
+    if: ${{ !contains(inputs.tag, '-') && vars.PUBLISH_AUR == 'true' }}
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     steps:
@@ -155,9 +180,10 @@ jobs:
           git push origin HEAD:main
 
   # winget: a pull request against microsoft/winget-pkgs, which Microsoft validates and merges.
+  # Switched off until microsoft/winget-pkgs has the package and `WINGET_TOKEN` is set.
   winget:
     name: winget
-    if: ${{ !contains(inputs.tag, '-') }}
+    if: ${{ !contains(inputs.tag, '-') && vars.PUBLISH_WINGET == 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

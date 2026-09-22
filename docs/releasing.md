@@ -164,11 +164,26 @@ request, and the answer is a comment saying `@microsoft-github-policy-service ag
 
 ## Publishing to package managers by hand
 
-**A job that cannot publish fails.** Until a credential is in place, every release run ends red
-on that job — `Package managers / AUR`, `/ winget` — with an error saying which secret is
-missing and what to do. That is deliberate: these jobs used to warn and exit 0, on the grounds
-that a key nobody has registered yet is a setup step rather than a broken release, and the
-result was a green run that had published nothing. It misled a reader within a day of shipping.
+**A job that cannot publish fails**, rather than warning and exiting 0 as these once did — the
+result of that was a green run that had published nothing, which misled a reader within a day of
+shipping.
+
+**A channel waiting on somebody else is switched off instead**, so it does not fail every release
+for weeks. Each is a repository variable, `true` to enable:
+
+| Variable         | Enable it when                                                              |
+| ---------------- | --------------------------------------------------------------------------- |
+| `PUBLISH_AUR`    | An AUR account exists and the deploy key's public half is registered on it. |
+| `PUBLISH_WINGET` | `microsoft/winget-pkgs` has the package merged, and `WINGET_TOKEN` is set.  |
+
+```sh
+gh variable set PUBLISH_AUR --body true
+```
+
+With one unset, that job does not run — and the **Channels** job says so on every release, as a
+notice naming what did not ship. A green run is therefore not a silent one. Switching a channel
+_on_ is the statement that it should work from now on: if it then cannot publish, the run is red,
+which is the whole point.
 
 **A red package job does not mean the release failed.** This workflow runs _after_ the release is
 public and nothing waits on it, so the installers are out and the download links work. Fix the
