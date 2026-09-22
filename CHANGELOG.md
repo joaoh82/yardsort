@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **The terminal responds faster.** Output was held for up to 8 ms before being sent to the
+  window, including a single keystroke echoing back into a terminal that was otherwise idle —
+  where there was nothing to batch it with and the delay bought nothing. It is now held only
+  while output is actually streaming, which is what the batching was for. Typing and
+  quick-responding prompts feel noticeably more immediate; agents flooding the screen are
+  batched exactly as before.
 - Workspace and branch names look for the task after introductory context in the first message,
   skipping common request lead-ins and fenced code instead of always taking the opening words.
 

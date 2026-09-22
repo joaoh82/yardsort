@@ -208,6 +208,54 @@ fn input_reaches_the_process() {
 
 #[cfg(unix)]
 #[test]
+fn output_into_a_quiet_session_is_not_held_for_the_batch_window() {
+    // Output is gathered for a few milliseconds so a repainting TUI cannot flood the IPC channel
+    // with hundreds of tiny messages. That window must not be charged to output arriving into a
+    // terminal that has been sitting still: there is nothing to gather it with, and the delay
+    // lands squarely on the echo of whatever the user just typed. Timing the window from the
+    // previous delivery rather than from the arriving chunk is what keeps both properties.
+    //
+    // Unix-only because it needs a program that echoes bytes straight back; the batching it
+    // covers has no platform-specific paths.
+    let (host, _events) = host();
+    let session = host.spawn(shell("cat")).unwrap();
+    let (tx, arrivals) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    host.attach(
+        &session.id,
+        Box::new(move |_| tx.lock().unwrap().send(std::time::Instant::now()).is_ok()),
+    )
+    .unwrap();
+
+    // Let the shell settle, and drop whatever it printed on the way up.
+    std::thread::sleep(Duration::from_millis(300));
+    while arrivals.try_recv().is_ok() {}
+
+    let mut round_trips = Vec::new();
+    for _ in 0..10 {
+        let sent = std::time::Instant::now();
+        host.write(&session.id, b"x").unwrap();
+        let arrived = arrivals
+            .recv_timeout(TIMEOUT)
+            .expect("the echo never came back");
+        round_trips.push(arrived.duration_since(sent));
+        // Stay quiet long enough that the next byte is a fresh burst, not a continuation.
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    round_trips.sort();
+
+    // The median, so one descheduled sample on a loaded CI runner cannot fail the run. Half the
+    // window is a deliberately loose bound: holding the byte gives ~8 ms, delivering it at once
+    // gives well under 1 ms.
+    let median = round_trips[round_trips.len() / 2];
+    assert!(
+        median < Duration::from_millis(4),
+        "a lone keystroke echo waited {median:?}; it is being held for the batch window"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn the_process_sees_the_terminal_size_and_resizes() {
     let (host, events) = host();
     let mut plan = shell("stty size; read _; stty size");
