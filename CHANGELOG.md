@@ -5,6 +5,11 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Every agent has a mark of its own.** Claude Code, Codex, Grok and OpenCode each get a small
+  icon, shown wherever an agent is named: the tab strip and its agent buttons, the composer's
+  picker, the session history and Settings → Harnesses. A harness you add yourself gets its
+  initial in the same frame. See [Harnesses](docs/guide/settings.md#harnesses).
+
 - **Workspace rows say what their agents are up to.** A number at the end of the row counts the
   agents waiting for you — filled in solid if they finished while you were elsewhere — a **✓**
   means they have all ended, and a **✗** that one exited with an error. Nothing to click. See

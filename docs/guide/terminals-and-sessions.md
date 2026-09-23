@@ -8,7 +8,8 @@ Yardsort does not re-implement their interface or read their output.
 Each workspace has its own row of tabs.
 
 - The agent buttons on the right of the tab bar start that agent in this workspace, with no
-  prompt. (To start one _with_ a prompt and a fresh branch, use the [composer](workspaces.md).)
+  prompt. Each carries that agent's mark, which a tab running a conversation wears too, so a row
+  of tabs says at a glance which agent is in which. (To start one _with_ a prompt and a fresh branch, use the [composer](workspaces.md).)
 - **+** or `Ctrl+Shift+T` / `⌘T` opens a **shell** in the workspace folder — for running tests, a
   dev server, or git by hand, next to the agent.
 - **×** or `Ctrl+Shift+W` / `⌘W` closes a tab and stops what runs in it.

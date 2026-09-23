@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import type { HarnessInfo } from "@/lib/ipc";
 import { useHarnessStore } from "@/stores/harnesses";
 import { buttonClass } from "./fields";
@@ -57,6 +58,11 @@ export function HarnessSettings() {
                   className={`size-1.5 shrink-0 rounded-full ${
                     !harness.resolvedPath ? "bg-red-400" : harness.enabled ? "bg-accent" : "bg-line"
                   }`}
+                />
+                <HarnessIcon
+                  id={harness.id}
+                  label={harness.label}
+                  className={harness.enabled ? "" : "opacity-40"}
                 />
                 <span
                   className={`truncate ${harness.enabled ? "" : "text-ink-faint line-through"}`}

@@ -1,3 +1,4 @@
+import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
 import { describeEnd, timeAgo } from "./sessionText";
@@ -29,6 +30,7 @@ export function SessionHistory({ workspaceId }: { workspaceId: string }) {
       <ul className="divide-y divide-line rounded-md border border-line">
         {past.map((record, index) => (
           <li key={record.id} className="flex items-center gap-3 px-3 py-2">
+            <HarnessIcon id={record.harnessId} label={record.harnessLabel} />
             <div className="min-w-0 flex-1">
               <div className="truncate">
                 <span className="font-medium">{record.harnessLabel}</span>

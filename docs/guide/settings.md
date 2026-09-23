@@ -22,7 +22,9 @@ waiting for a new release.
 ![Harness settings](../images/settings.png)
 
 Built in: **Claude Code**, **Codex**, **Grok**, **OpenCode**. The dot next to each shows whether
-its command was found on your `PATH`.
+its command was found on your `PATH`, and the mark beside it is the one that identifies that
+agent everywhere else in the app — the tab strip, the composer's picker, the session history. A
+harness you add yourself is drawn as its initial.
 
 ### Fields
 

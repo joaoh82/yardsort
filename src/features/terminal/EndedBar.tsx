@@ -1,3 +1,4 @@
+import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
 import { describeEnd } from "./sessionText";
@@ -19,6 +20,7 @@ export function EndedBar({ tab }: { tab: TerminalTab }) {
       role="status"
       className="flex shrink-0 items-center gap-2 border-b border-line bg-raised px-3 py-1.5"
     >
+      <HarnessIcon id={record.harnessId} label={record.harnessLabel} />
       <span className="min-w-0 flex-1 truncate text-ink-muted">
         {record.harnessLabel} {describeEnd(record)}.
         {record.unavailableReason ? ` ${record.unavailableReason}` : ""}
