@@ -30,6 +30,17 @@ back the screen is repainted exactly as it was, scrollback included.
 Plain `Ctrl+C`, `Ctrl+V` and a plain click belong to the program in the terminal. See
 [Keyboard shortcuts](shortcuts.md) for why.
 
+### Typing to an agent
+
+- **`Shift+Enter` adds a line** to the message you are writing, in Claude Code, Codex, Grok and
+  OpenCode alike — the same as in kitty, Ghostty or foot. The key is sent in the encoding those
+  terminals use, and only to a program that reads it: an agent, or anything else that asks the
+  terminal for it. A shell at its prompt gets a plain `Enter`, as before.
+- **Drop a file on the terminal** to give the agent its path. The terminal is outlined while you
+  hover; on release the path lands at the cursor, quoted for the shell if it needs it, with a
+  space after it so you can keep typing. Drop several and you get all of them. It is a paste, so
+  it goes to whatever program is in the tab — a shell gets an argument it can use as it is.
+
 ## Agents keep working when you close the window
 
 Terminals do not belong to the window. They belong to a small background process — the

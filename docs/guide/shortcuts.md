@@ -14,7 +14,8 @@
 | Mod+C / Mod+V | `Ctrl+Shift+C` / `V` | `⌘C` / `⌘V` | Copy the selection / paste, in a terminal |
 
 In the composer: `Enter` starts, `Shift+Enter` adds a line, `Esc` cancels. `Esc` also closes
-dialogs and menus.
+dialogs and menus. In an agent's terminal `Shift+Enter` adds a line too — see
+[Typing to an agent](terminals-and-sessions.md#typing-to-an-agent).
 
 ## Why Ctrl+Shift?
 
