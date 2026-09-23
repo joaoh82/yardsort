@@ -105,3 +105,18 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     would save. The known limit stands: the right values may differ per repository, which the
     settings cannot express. If that turns out to bite, the change is per-project thresholds, not
     a better global default.
+
+18. ~~**May a model write the words?**~~ **Settled 2026-09-23: yes, and not with Jev.** Assist
+    cannot do it — Jev answers typed questions and never writes text — so having a commit message
+    or a pull request written is its own feature with its own switch. The decision that shapes it:
+    **no new credential of ours by default.** The coding agent the user already has does the
+    writing through the non-interactive mode it already has, in the worktree, billed to the
+    account it already uses; a user's own Anthropic API key is the fallback for when no configured
+    agent can. Nothing is applied by itself — the answer lands in the box the user was already
+    looking at, and the commit confirmation still stands between it and git.
+
+    What is still open, and deliberately unanswered until there is use to learn from: whether the
+    prompts should learn a repository's own commit style (reading `git log` would be the obvious
+    way, and the obvious way to make every message sound the same); whether a failed agent should
+    fall through to the key silently, as it does now, or say which one answered; and whether the
+    120-second agent timeout is anywhere near right for a cold agent on a large repository.

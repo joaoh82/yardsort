@@ -2,8 +2,12 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import type { ChangeSet } from "@/lib/ipc";
 import { native } from "@/lib/native";
+import { useDraftStore, type Drafting } from "@/stores/draft";
 import { usePublishStore, type Busy } from "@/stores/publish";
 import { PullRequestDialog } from "./PullRequestDialog";
+
+/** Long enough for a subject and a paragraph, which is as much as a commit message should be. */
+const MAX_MESSAGE = 2000;
 
 /**
  * The foot of the changes panel: commit what the agent wrote, push it, open the pull request.
@@ -12,7 +16,13 @@ import { PullRequestDialog } from "./PullRequestDialog";
  * the diff, and until now you went to a terminal to send it anywhere. Three buttons in the order
  * the work goes, never more than one of them interesting at a time.
  */
-export function PublishBar({ changes }: { changes: ChangeSet | null }) {
+export function PublishBar({
+  changes,
+  workspaceId,
+}: {
+  changes: ChangeSet | null;
+  workspaceId: string;
+}) {
   const state = usePublishStore((s) => s.state);
   const busy = usePublishStore((s) => s.busy);
   const error = usePublishStore((s) => s.error);
@@ -36,6 +46,7 @@ export function PublishBar({ changes }: { changes: ChangeSet | null }) {
         identity={state.identity}
         branch={state.branch}
         busy={busy}
+        workspaceId={workspaceId}
       >
         {canPush && (
           <button
@@ -70,7 +81,7 @@ export function PublishBar({ changes }: { changes: ChangeSet | null }) {
           {error}
         </p>
       )}
-      {opening && <PullRequestDialog onClose={() => setOpening(false)} />}
+      {opening && <PullRequestDialog workspaceId={workspaceId} onClose={() => setOpening(false)} />}
     </div>
   );
 }
@@ -86,12 +97,14 @@ function CommitBox({
   identity,
   branch,
   busy,
+  workspaceId,
   children,
 }: {
   uncommitted: number;
   identity: string | null;
   branch: string;
   busy: Busy | null;
+  workspaceId: string;
   children: React.ReactNode;
 }) {
   const [message, setMessage] = useState("");
@@ -126,17 +139,34 @@ function CommitBox({
     >
       {uncommitted > 0 && (
         <>
-          <input
-            aria-label="Commit message"
-            value={message}
-            maxLength={200}
-            placeholder="Commit message"
-            spellCheck={false}
-            autoComplete="off"
-            disabled={busy !== null}
-            onChange={(event) => setMessage(event.target.value)}
-            className="w-full rounded border border-line bg-canvas px-2 py-1 outline-none select-text focus:border-accent disabled:opacity-50"
-          />
+          <div className="flex items-center gap-1">
+            {/* A textarea, not an input: a commit message has a body, and a model writing one
+                is the common case now. Enter makes a newline; Mod+Enter commits. */}
+            <textarea
+              aria-label="Commit message"
+              value={message}
+              rows={message.includes("\n") ? 4 : 1}
+              maxLength={MAX_MESSAGE}
+              placeholder="Commit message"
+              spellCheck={false}
+              autoComplete="off"
+              disabled={busy !== null}
+              onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && canCommit) {
+                  event.preventDefault();
+                  void commit();
+                }
+              }}
+              className="min-w-0 flex-1 resize-y rounded border border-line bg-canvas px-2 py-1 outline-none select-text focus:border-accent disabled:opacity-50"
+            />
+            <DraftButton
+              what="commitMessage"
+              label="Write the commit message"
+              onWrite={() => useDraftStore.getState().commitMessage(workspaceId)}
+              onWritten={setMessage}
+            />
+          </div>
           {identity === null && (
             <p className="mt-1 text-[11px] text-ink-faint">
               git has no name and email to commit with yet. Set them with{" "}
@@ -191,6 +221,49 @@ function PullRequestLink() {
       className="ml-auto truncate text-ink-faint hover:text-ink"
     >
       #{pr.number} · {said}
+    </button>
+  );
+}
+
+/**
+ * The button that has a model write the words.
+ *
+ * It appears only when something can actually write — an agent with non-interactive arguments,
+ * or an Anthropic API key — and never acts on its own: what comes back lands in the box for the
+ * user to read, edit and approve, exactly as if they had typed it. See `crate::draft`.
+ */
+export function DraftButton<T>({
+  what,
+  label,
+  onWrite,
+  onWritten,
+}: {
+  what: Drafting;
+  label: string;
+  onWrite: () => Promise<T | null>;
+  onWritten: (written: T) => void;
+}) {
+  const status = useDraftStore((s) => s.status);
+  const busy = useDraftStore((s) => s.busy);
+  if (!status?.available) return null;
+
+  const writing = busy === what;
+  const who = status.harness ?? status.model;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={writing ? `${who} is writing…` : `${label} with ${who}`}
+      disabled={busy !== null}
+      onClick={async () => {
+        const written = await onWrite();
+        if (written !== null) onWritten(written);
+      }}
+      className="shrink-0 rounded px-1.5 py-1 text-ink-faint hover:bg-raised hover:text-ink disabled:opacity-40"
+    >
+      <span aria-hidden className={writing ? "animate-pulse" : ""}>
+        ✦
+      </span>
     </button>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { errorMessage, ipc, type AssistStatus, type ThresholdsDto } from "@/lib/ipc";
 import { useAssistStore } from "@/stores/assist";
+import { DraftSettings } from "./DraftSettings";
 import { buttonClass, Field, inputClass } from "./fields";
 
 /** The three thresholds, in the order they are shown. */
@@ -307,6 +308,8 @@ export function AssistSettings() {
       </fieldset>
 
       <ThresholdFields status={status} busy={busy !== null} run={run} />
+
+      <DraftSettings />
 
       {status.problem && (
         <p role="alert" className="text-amber-400 select-text">

@@ -1,7 +1,9 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useId, useRef, useState } from "react";
 import { useModalFocus } from "@/lib/useModalFocus";
+import { useDraftStore } from "@/stores/draft";
 import { usePublishStore } from "@/stores/publish";
+import { DraftButton } from "./PublishBar";
 
 /**
  * What a pull request should say, out of the commits nobody has seen yet.
@@ -26,7 +28,13 @@ function describe(commits: { subject: string; body: string }[]): string {
  * Without `gh` — or logged out of it — nothing here is sent anywhere: the branch is pushed and
  * the browser opens the forge's own form, which is the same fields in the place that owns them.
  */
-export function PullRequestDialog({ onClose }: { onClose: () => void }) {
+export function PullRequestDialog({
+  workspaceId,
+  onClose,
+}: {
+  workspaceId: string;
+  onClose: () => void;
+}) {
   const state = usePublishStore((s) => s.state);
   const busy = usePublishStore((s) => s.busy);
   const error = usePublishStore((s) => s.error);
@@ -85,9 +93,23 @@ export function PullRequestDialog({ onClose }: { onClose: () => void }) {
           {state.repo && ` on ${state.repo.host}`}
         </p>
 
-        <label className="mt-4 block">
-          <span className="text-ink-muted">Title</span>
+        <div className="mt-4 flex items-end justify-between gap-2">
+          <span className="text-ink-muted">Title and description</span>
+          <DraftButton
+            what="pullRequest"
+            label="Write the title and description"
+            onWrite={() => useDraftStore.getState().pullRequest(workspaceId)}
+            onWritten={(written) => {
+              setTitle(written.title);
+              setBody(written.body);
+            }}
+          />
+        </div>
+
+        <label className="mt-1 block">
+          <span className="sr-only">Title</span>
           <input
+            aria-label="Title"
             ref={inputRef}
             value={title}
             maxLength={200}

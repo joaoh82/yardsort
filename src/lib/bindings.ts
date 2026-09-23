@@ -78,6 +78,15 @@ export const commands = {
 	workspaceOpenPullRequest: (workspaceId: string, title: string, body: string, draft: boolean) => typedError<PullRequestOpened, IpcError>(__TAURI_INVOKE("workspace_open_pull_request", { workspaceId, title, body, draft })),
 	/**  Every pull request `gh` knows for a project, so each workspace row can show its own. */
 	projectPullRequests: (projectId: string, refresh: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh })),
+	/**  Who would write, for this workspace. `harnessId` is the agent the workspace is using. */
+	draftStatus: (harnessId: string | null) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_status", { harnessId })),
+	/**  Write a commit message for what the workspace has not committed. */
+	draftCommitMessage: (workspaceId: string, harnessId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("draft_commit_message", { workspaceId, harnessId })),
+	draftPullRequest: (workspaceId: string, harnessId: string | null) => typedError<DraftedPullRequest, IpcError>(__TAURI_INVOKE("draft_pull_request", { workspaceId, harnessId })),
+	/**  Keep an Anthropic API key in the OS credential store. Never read back into the webview. */
+	draftSaveKey: (key: string) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_save_key", { key })),
+	draftForgetKey: () => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_forget_key")),
+	draftSaveSettings: (enabled: boolean, model: string) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_save_settings", { enabled, model })),
 	/**  Open a file (or the workspace folder, when `path` is `None`) in the user's editor. */
 	openInEditor: (workspaceId: string, path: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("open_in_editor", { workspaceId, path })),
 	assistStatus: () => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_status")),
@@ -294,6 +303,28 @@ export type DownloadProgress = {
 	total: number | null,
 };
 
+/**  Who would do the writing, and whether anyone can. */
+export type DraftStatus = {
+	/**  The setting: whether the user wants to be offered this at all. */
+	enabled: boolean,
+	/**  The button is actually shown — switched on *and* somebody able to answer. */
+	available: boolean,
+	/**  The harness that would write, when one can. */
+	harness: string | null,
+	/**  An Anthropic key is in force, so drafting works even with no agent able to write. */
+	key: boolean,
+	/**  The model that key would ask for. */
+	model: string,
+	/**  Why nothing can write, when nothing can. */
+	problem: string | null,
+};
+
+/**  A pull request's title and description, from the commits the branch has made. */
+export type DraftedPullRequest = {
+	title: string,
+	body: string,
+};
+
 /**  What the launch environment looks like, for the status bar and for bug reports. */
 export type EnvInfo = {
 	source: EnvSource,
@@ -375,6 +406,13 @@ export type HarnessDef = {
 	effortArgs: string[],
 	sessionArgs: string[],
 	promptArgs: string[],
+	/**
+	 *  How to run this agent **non-interactively**, with `{prompt}` for the question: the
+	 *  print / exec mode every agent has. Yardsort uses it to have the agent write a commit
+	 *  message or a pull request — see [`crate::draft`]. Empty means this harness cannot, which
+	 *  is the honest default for one we know nothing about.
+	 */
+	writeArgs?: string[],
 	resumeArgs: string[],
 	forkArgs: string[],
 	/**  Effort levels to offer. Empty hides the picker. */

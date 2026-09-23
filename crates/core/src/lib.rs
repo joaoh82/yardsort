@@ -12,6 +12,7 @@
 
 pub mod assist;
 pub mod daemon;
+pub mod draft;
 pub mod env;
 pub mod error;
 pub mod forge;

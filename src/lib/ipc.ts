@@ -16,6 +16,8 @@ import {
   type CreatedWorkspace,
   type DaemonStatus,
   type DownloadProgress,
+  type DraftedPullRequest,
+  type DraftStatus,
   type EnvInfo,
   type ExitInfo,
   type FileChange,
@@ -63,6 +65,8 @@ export type {
   CreatedWorkspace,
   DaemonStatus,
   DownloadProgress,
+  DraftedPullRequest,
+  DraftStatus,
   EnvInfo,
   ExitInfo,
   FileChange,
@@ -248,6 +252,23 @@ export const ipc = {
   /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
   projectPullRequests: (projectId: string, refresh = false) =>
     unwrap(commands.projectPullRequests(projectId, refresh)),
+
+  /**
+   * Whether a model can write a commit message or a pull request here, and which one would.
+   * `harnessId` is the agent the workspace is using, which gets first refusal.
+   */
+  draftStatus: (harnessId: string | null = null) => unwrap(commands.draftStatus(harnessId)),
+  /** Have a model write a commit message for what is uncommitted. Sends that diff. */
+  draftCommitMessage: (workspaceId: string, harnessId: string | null = null) =>
+    unwrap(commands.draftCommitMessage(workspaceId, harnessId)),
+  /** Have a model write the pull request. Sends the branch's diff against its base. */
+  draftPullRequest: (workspaceId: string, harnessId: string | null = null) =>
+    unwrap(commands.draftPullRequest(workspaceId, harnessId)),
+  /** Keep an Anthropic API key in the OS credential store. Never read back. */
+  draftSaveKey: (key: string) => unwrap(commands.draftSaveKey(key)),
+  draftForgetKey: () => unwrap(commands.draftForgetKey()),
+  draftSaveSettings: (enabled: boolean, model: string) =>
+    unwrap(commands.draftSaveSettings(enabled, model)),
 
   /** Assist: whether a TypeSafe key is in force and which features are on. */
   assistStatus: () => unwrap(commands.assistStatus()),

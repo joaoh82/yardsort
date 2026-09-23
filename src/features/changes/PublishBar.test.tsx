@@ -1,9 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChangeSet, FileChange, PublishState, PullRequest } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
+  draftStatus: vi.fn(),
+  draftCommitMessage: vi.fn(),
+  draftPullRequest: vi.fn(),
   workspacePublishState: vi.fn(),
   workspaceCommit: vi.fn(),
   workspacePush: vi.fn(),
@@ -20,6 +23,7 @@ vi.mock("@tauri-apps/plugin-opener", () => opener);
 const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 vi.mock("@/lib/native", () => ({ native }));
 
+import { useDraftStore } from "@/stores/draft";
 import { usePublishStore } from "@/stores/publish";
 import { PublishBar } from "./PublishBar";
 
@@ -80,11 +84,11 @@ function seed(publish: Partial<PublishState> | null = {}) {
 }
 
 function show(paths: string[] = ["src/login.rs"]) {
-  const { rerender } = render(<PublishBar changes={changes(paths)} />);
+  const { rerender } = render(<PublishBar changes={changes(paths)} workspaceId="w1" />);
   return {
     user: userEvent.setup(),
     /** What the changes panel does after a commit: ask git again and pass on the answer. */
-    showing: (next: string[]) => rerender(<PublishBar changes={changes(next)} />),
+    showing: (next: string[]) => rerender(<PublishBar changes={changes(next)} workspaceId="w1" />),
   };
 }
 
@@ -93,6 +97,8 @@ describe("PublishBar", () => {
     vi.clearAllMocks();
     opener.openUrl.mockResolvedValue(undefined);
     native.confirm.mockResolvedValue(true);
+    // Nothing can write unless a case says so, so the ✦ button stays out of the way.
+    useDraftStore.setState({ status: null, busy: null, error: null });
     core.workspacePublishState.mockResolvedValue(state());
     core.projectPullRequests.mockResolvedValue({
       gh: true,
@@ -140,7 +146,7 @@ describe("PublishBar", () => {
 
   it("offers a push only when the remote is behind, and counts the commits", async () => {
     seed({ ahead: 0 });
-    const { unmount } = render(<PublishBar changes={changes([])} />);
+    const { unmount } = render(<PublishBar changes={changes([])} workspaceId="w1" />);
     expect(screen.queryByRole("button", { name: /^Push/ })).not.toBeInTheDocument();
     unmount();
 
@@ -249,6 +255,112 @@ describe("PublishBar", () => {
     expect(screen.getByText(/no check results on the workspace rows/)).toHaveTextContent(
       "none of the git remotes point to a known GitHub host",
     );
+  });
+
+  describe("writing with a model", () => {
+    const canWrite = (extra = {}) =>
+      useDraftStore.setState({
+        status: {
+          enabled: true,
+          available: true,
+          harness: "Claude Code",
+          key: false,
+          model: "claude-opus-5",
+          problem: null,
+        },
+        busy: null,
+        error: null,
+        ...extra,
+      });
+
+    it("offers nothing when nothing can write", async () => {
+      show();
+      expect(
+        screen.queryByRole("button", { name: "Write the commit message" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("puts the written message in the box, for you to read before committing", async () => {
+      canWrite();
+      const { user } = show();
+      core.draftCommitMessage.mockResolvedValue("Fix the login redirect\n\nThe cookie was wrong.");
+
+      await user.click(screen.getByRole("button", { name: "Write the commit message" }));
+      expect(core.draftCommitMessage).toHaveBeenCalledWith("w1", null);
+      await waitFor(() =>
+        expect(screen.getByLabelText("Commit message")).toHaveValue(
+          "Fix the login redirect\n\nThe cookie was wrong.",
+        ),
+      );
+      // Written, not committed: the confirmation still stands between it and git.
+      expect(native.confirm).not.toHaveBeenCalled();
+      expect(core.workspaceCommit).not.toHaveBeenCalled();
+    });
+
+    it("leaves what you typed alone when the model cannot answer", async () => {
+      canWrite();
+      const { user } = show();
+      await user.type(screen.getByLabelText("Commit message"), "mine");
+      core.draftCommitMessage.mockRejectedValue({
+        code: "draft_agent_timeout",
+        message: "Claude Code took longer than 120 seconds to answer.",
+      });
+
+      await user.click(screen.getByRole("button", { name: "Write the commit message" }));
+      await waitFor(() =>
+        expect(useDraftStore.getState().error).toBe(
+          "Claude Code took longer than 120 seconds to answer.",
+        ),
+      );
+      expect(screen.getByLabelText("Commit message")).toHaveValue("mine");
+    });
+
+    it("fills both pull request fields from one press", async () => {
+      canWrite();
+      seed({ ahead: 1, unpushed: [commit("Fix it")] });
+      const { user } = show([]);
+      await user.click(screen.getByRole("button", { name: "Open pull request" }));
+
+      core.draftPullRequest.mockResolvedValue({
+        title: "Fix the login redirect",
+        body: "The cookie was set on the wrong domain.",
+      });
+      await user.click(screen.getByRole("button", { name: "Write the title and description" }));
+
+      await waitFor(() =>
+        expect(screen.getByLabelText("Title")).toHaveValue("Fix the login redirect"),
+      );
+      expect(screen.getByLabelText("Description")).toHaveValue(
+        "The cookie was set on the wrong domain.",
+      );
+      expect(core.workspaceOpenPullRequest).not.toHaveBeenCalled();
+    });
+
+    it("names whoever would do the writing", async () => {
+      canWrite();
+      show();
+      expect(screen.getByRole("button", { name: "Write the commit message" })).toHaveAttribute(
+        "title",
+        "Write the commit message with Claude Code",
+      );
+
+      act(() =>
+        useDraftStore.setState({
+          status: {
+            enabled: true,
+            available: true,
+            harness: null,
+            key: true,
+            model: "claude-opus-5",
+            problem: null,
+          },
+        }),
+      );
+      expect(screen.getByRole("button", { name: "Write the commit message" })).toHaveAttribute(
+        "title",
+        "Write the commit message with claude-opus-5",
+      );
+    });
   });
 
   it("calls it a merge request on GitLab", async () => {

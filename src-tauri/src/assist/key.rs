@@ -1,4 +1,4 @@
-//! Where the TypeSafe API key lives.
+//! Where API keys live.
 //!
 //! Never in `settings.toml`: that file is meant to be read, diffed, backed up and shared. The key
 //! goes into the OS credential store — the Keychain on macOS, Credential Manager on Windows, the
@@ -6,13 +6,20 @@
 //! the fallback for systems without one, and the variable TypeSafe's own tools read.
 //!
 //! The key goes one way only: the webview can set it or forget it, never read it back.
+//!
+//! Two keys use this now: TypeSafe's, for [Assist](crate::assist), and Anthropic's, for the
+//! [drafting](crate::draft) fallback. They are separate entries under the same service, so
+//! forgetting one leaves the other alone.
 
 use serde::Serialize;
 use specta::Type;
 
 const SERVICE: &str = "dev.yardsort.app";
-const ACCOUNT: &str = "typesafe-api-key";
-pub const ENV_VAR: &str = "TYPESAFE_API_KEY";
+/// The credential-store entry, and the environment variable that stands in for it.
+pub const TYPESAFE: (&str, &str) = ("typesafe-api-key", "TYPESAFE_API_KEY");
+/// Anthropic's own variable name, so a key already exported for the SDKs is found.
+pub const ANTHROPIC: (&str, &str) = ("anthropic-api-key", "ANTHROPIC_API_KEY");
+pub const ENV_VAR: &str = TYPESAFE.1;
 
 /// Somewhere a key can be kept. The real one is [`Keychain`]; tests use memory.
 pub trait KeyStore: Send + Sync {
@@ -21,17 +28,23 @@ pub trait KeyStore: Send + Sync {
     fn delete(&self) -> Result<(), String>;
 }
 
-pub struct Keychain;
+/// One entry in the OS credential store, named by its account.
+pub struct Keychain(pub &'static str);
 
 impl Keychain {
-    fn entry() -> Result<keyring::Entry, String> {
-        keyring::Entry::new(SERVICE, ACCOUNT).map_err(|error| error.to_string())
+    /// The TypeSafe key, which is what most of Assist means by "the key".
+    pub fn typesafe() -> Self {
+        Self(TYPESAFE.0)
+    }
+
+    fn entry(&self) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(SERVICE, self.0).map_err(|error| error.to_string())
     }
 }
 
 impl KeyStore for Keychain {
     fn get(&self) -> Result<Option<String>, String> {
-        match Self::entry()?.get_password() {
+        match self.entry()?.get_password() {
             Ok(key) => Ok(Some(key)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(error.to_string()),
@@ -39,13 +52,13 @@ impl KeyStore for Keychain {
     }
 
     fn set(&self, key: &str) -> Result<(), String> {
-        Self::entry()?
+        self.entry()?
             .set_password(key)
             .map_err(|error| error.to_string())
     }
 
     fn delete(&self) -> Result<(), String> {
-        match Self::entry()?.delete_credential() {
+        match self.entry()?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.to_string()),
         }
@@ -87,9 +100,13 @@ pub fn resolve(
 }
 
 pub fn unavailable(error: &str) -> String {
+    unavailable_for(error, ENV_VAR)
+}
+
+pub fn unavailable_for(error: &str, env_var: &str) -> String {
     format!(
         "The system credential store is not available ({error}). Start one (for example \
-         gnome-keyring), or set {ENV_VAR} in your environment instead."
+         gnome-keyring), or set {env_var} in your environment instead."
     )
 }
 

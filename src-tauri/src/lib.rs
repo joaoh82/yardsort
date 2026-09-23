@@ -8,6 +8,7 @@ mod changes;
 mod commands;
 #[cfg(target_os = "linux")]
 mod display;
+mod draft;
 mod preflight;
 mod publish;
 mod quit;
@@ -77,6 +78,12 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             publish::commands::workspace_push,
             publish::commands::workspace_open_pull_request,
             publish::commands::project_pull_requests,
+            draft::commands::draft_status,
+            draft::commands::draft_commit_message,
+            draft::commands::draft_pull_request,
+            draft::commands::draft_save_key,
+            draft::commands::draft_forget_key,
+            draft::commands::draft_save_settings,
             changes::commands::open_in_editor,
             assist::commands::assist_status,
             assist::commands::assist_save_key,

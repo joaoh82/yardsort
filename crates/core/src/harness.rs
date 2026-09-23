@@ -40,6 +40,12 @@ pub struct HarnessDef {
     pub effort_args: Vec<String>,
     pub session_args: Vec<String>,
     pub prompt_args: Vec<String>,
+    /// How to run this agent **non-interactively**, with `{prompt}` for the question: the
+    /// print / exec mode every agent has. Yardsort uses it to have the agent write a commit
+    /// message or a pull request — see [`crate::draft`]. Empty means this harness cannot, which
+    /// is the honest default for one we know nothing about.
+    #[serde(default)]
+    pub write_args: Vec<String>,
     pub resume_args: Vec<String>,
     pub fork_args: Vec<String>,
     /// Effort levels to offer. Empty hides the picker.
@@ -129,6 +135,7 @@ impl HarnessDef {
             effort_args: vec![],
             session_args: vec![],
             prompt_args: strings(&["--", "{prompt}"]),
+            write_args: vec![],
             resume_args: vec![],
             fork_args: vec![],
             efforts: vec![],
@@ -205,6 +212,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             effort_args: strings(&["--effort", "{effort}"]),
             session_args: strings(&["--session-id", "{session_id}"]),
             prompt_args: strings(&["--", "{prompt}"]),
+            write_args: strings(&["--print", "{prompt}"]),
             resume_args: strings(&["--resume", "{session_id}"]),
             fork_args: strings(&[
                 "--resume",
@@ -230,6 +238,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             effort_args: strings(&["-c", "model_reasoning_effort=\"{effort}\""]),
             session_args: vec![],
             prompt_args: strings(&["--", "{prompt}"]),
+            write_args: strings(&["exec", "{prompt}"]),
             resume_args: strings(&["resume", "--last"]),
             fork_args: strings(&["fork", "--last"]),
             efforts: strings(&["low", "medium", "high"]),
@@ -249,6 +258,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             effort_args: strings(&["--reasoning-effort", "{effort}"]),
             session_args: strings(&["--session-id", "{session_id}"]),
             prompt_args: strings(&["--", "{prompt}"]),
+            write_args: strings(&["--single", "{prompt}"]),
             resume_args: strings(&["--resume", "{session_id}"]),
             fork_args: strings(&[
                 "--resume",
@@ -274,6 +284,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             effort_args: vec![],
             session_args: vec![],
             prompt_args: strings(&["--prompt", "{prompt}"]),
+            write_args: strings(&["run", "{prompt}"]),
             resume_args: strings(&["--continue"]),
             fork_args: strings(&["--continue", "--fork"]),
             efforts: vec![],

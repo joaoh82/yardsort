@@ -325,6 +325,29 @@ The model id is pinned (`jev-1.13.0`) rather than `jev-latest`, because the thre
 against a specific version. The wording of the questions carries a version too, so cached answers
 from older wording are not reused.
 
+### Drafting (`crates/core/src/draft.rs`, `src-tauri/src/draft/`)
+
+The one place Yardsort asks a model to **produce** text rather than judge it. Assist cannot: Jev
+answers typed questions and never writes (`assist/jev.rs`), so this is its own module with its own
+switch rather than a third Assist feature.
+
+Two backends, agent first:
+
+1. **The workspace's own agent, non-interactively.** Every harness gained `write_args` — the
+   print/exec mode each agent already has, verified against its own `--help`
+   (`claude --print`, `codex exec`, `opencode run`, `grok --single`). It runs in the worktree, so
+   it can see what it is describing, and it is billed to the account the user already uses. No new
+   credential, and a custom harness opts in by filling one field.
+2. **The user's own Anthropic API key**, raw HTTP to `/v1/messages` (there is no official Rust
+   SDK), kept in the credential store beside the TypeSafe key as a second entry.
+
+This is **not** an exception to "never parse agent output". That rule is about deriving status and
+readiness from an interactive PTY; this is an ordinary subprocess read through an ordinary pipe,
+with the child's pipes drained on their own threads so a hung agent cannot wedge the button.
+
+Nothing is applied automatically: an answer lands in the text box the user was already looking at,
+and the commit confirmation still stands between it and git.
+
 ## Cross-platform notes & risks
 
 | Platform    | Watch out for                                                                                                                                                                                                                                                                                                                                                                                                                                                        |

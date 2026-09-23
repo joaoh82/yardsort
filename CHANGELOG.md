@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## 0.9.2
 
+- **Have a model write the commit message or the pull request.** A **✦** beside the commit box
+  and in the pull request dialog fills them in from the diff, and from what the workspace was
+  asked to do. What comes back goes in the box for you to read and edit — it is never committed
+  or opened for you. It uses the coding agent you already have, in its non-interactive mode, so
+  there is no new account and no new key; your own Anthropic API key is the fallback when no
+  configured agent can write. Off with one switch, and absent entirely when nothing can write.
+  See [Have it written for you](docs/guide/commits-and-pull-requests.md#have-it-written-for-you).
+
 - **Commit, push and open a pull request from the panel.** Under the changed-files list: a
   message box that commits everything the workspace has changed, a **Push** button once the
   branch is ahead of its remote, and **Open pull request** — which pushes first if it needs to,

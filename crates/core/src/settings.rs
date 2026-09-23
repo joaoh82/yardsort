@@ -21,6 +21,8 @@ pub struct Settings {
     pub workspaces: WorkspaceSettings,
     #[serde(skip_serializing_if = "AssistSettings::is_default")]
     pub assist: AssistSettings,
+    #[serde(skip_serializing_if = "DraftSettings::is_default")]
+    pub draft: DraftSettings,
     /// Overrides of built-in harnesses, and whole custom ones. See [`HarnessOverride`].
     #[serde(rename = "harness", skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessOverride>,
@@ -74,6 +76,33 @@ pub struct AssistSettings {
 }
 
 impl AssistSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Having a model write a commit message or a pull request. See [`crate::draft`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DraftSettings {
+    /// Offer the button at all. On, because it costs nothing until it is pressed; switching it
+    /// off is for people who would rather not be offered.
+    pub enabled: bool,
+    /// The model the API key path asks for. Ignored when an agent does the writing — that one
+    /// uses whatever the agent itself is configured to use.
+    pub model: String,
+}
+
+impl Default for DraftSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model: crate::draft::DEFAULT_MODEL.to_owned(),
+        }
+    }
+}
+
+impl DraftSettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }

@@ -33,6 +33,29 @@ git config --global user.name "Your Name"
 git config --global user.email "you@example.com"
 ```
 
+### Have it written for you
+
+A **✦** sits beside the message box. Press it and a model writes the message from the diff you
+are looking at — and from what the workspace was asked to do, which is what turns "describe this
+change" into "explain it".
+
+What comes back goes **in the box**, for you to read and edit. It is never committed for you; the
+confirmation still stands between it and git.
+
+The box takes a full message: Enter makes a new line, and `Ctrl+Enter` / `⌘Enter` commits.
+
+Two things can do the writing, tried in that order:
+
+1. **The agent you already have**, in its non-interactive mode — `claude --print`, `codex exec`,
+   `opencode run`, `grok --single`. It is installed, logged in and billed to the account it
+   already uses, and it is the agent this workspace has been working with. A harness you added
+   yourself needs its **Write** arguments filled in under Settings → Harnesses before it can.
+2. **Your own Anthropic API key**, when no configured agent can write. Add it under
+   Settings → Assist; `ANTHROPIC_API_KEY` from your environment works too.
+
+Switch the whole thing off under Settings → Assist if you would rather not be offered it. With no
+agent able to write and no key, the ✦ does not appear at all.
+
 ## Push
 
 **Push N commits** appears when the branch is ahead of the remote — of its upstream once it has
@@ -50,8 +73,12 @@ own message instead of hanging.
 **Open pull request** — **Open merge request** on GitLab — asks for a title, a description and
 whether it should be a draft, then opens it.
 
-The form starts filled in from the commits the remote has not got yet. The oldest becomes the
-title. For the description:
+The same **✦** is here, above the fields: it writes the title and the description together, from
+everything the branch has committed. As with a commit message, it fills the fields in and leaves
+them to you.
+
+Without pressing it, the form starts filled in from the commits the remote has not got yet. The
+oldest becomes the title. For the description:
 
 - **One commit** — its own message body, everything under the subject line. That commit _is_ the
   pull request, so a well-written one needs no second write-up. It is what `gh pr create --fill`

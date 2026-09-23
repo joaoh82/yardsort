@@ -4,6 +4,7 @@ import { hasCore, ipc } from "@/lib/ipc";
 import { useAssistStore } from "@/stores/assist";
 import { useChangesStore } from "@/stores/changes";
 import { recall, useProjectsStore } from "@/stores/projects";
+import { useDraftStore } from "@/stores/draft";
 import { usePublishStore } from "@/stores/publish";
 import { ChangeList } from "./ChangeList";
 import { FileTree } from "./FileTree";
@@ -39,6 +40,7 @@ export function ChangesPanel() {
     void useAssistStore.getState().load();
     useAssistStore.getState().follow(workspaceId);
     void usePublishStore.getState().follow(workspaceId);
+    void useDraftStore.getState().load();
   }, [workspaceId]);
 
   useEffect(() => {
@@ -81,7 +83,9 @@ export function ChangesPanel() {
       ) : (
         <p className="p-3 text-ink-faint">Loading…</p>
       )}
-      {tab === "changes" && workspaceId && !error && <PublishBar changes={changes} />}
+      {tab === "changes" && workspaceId && !error && (
+        <PublishBar changes={changes} workspaceId={workspaceId} />
+      )}
     </div>
   );
 

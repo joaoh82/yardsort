@@ -209,6 +209,18 @@ Needs a project with a real remote you may push to. Do the first half **without 
 |     | A project whose remote is a path on disk offers **Commit** and **Push** but no pull request button at all.                              |
 |     | On a machine with no `user.name` / `user.email`: the commit button is disabled and says which two commands to run, rather than failing. |
 
+### Writing with a model
+
+| ✓   | Check                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------- |
+|     | With an agent installed, **✦** beside the commit box writes a message into the box. Nothing is committed by it. |
+|     | The message box takes a body: Enter makes a newline, `Ctrl+Enter` / `⌘Enter` commits.                           |
+|     | **✦** in the pull request dialog fills the title _and_ the description, and opens nothing.                      |
+|     | Typing your own message, then pressing ✦ and having it fail (log the agent out): what you typed is still there. |
+|     | With no agent able to write and no Anthropic key, no ✦ appears anywhere and nothing complains.                  |
+|     | Settings → Assist: switching "Offer to write them for me" off removes both buttons.                             |
+|     | A custom harness with **Write args** filled in is used; one without falls through to the key, or to nothing.    |
+
 ## 9 · Deleting nothing by accident
 
 | ✓   | Check                                                                                                                                   |
