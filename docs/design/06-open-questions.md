@@ -94,8 +94,14 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     of Assist's own switch, and what the notification is allowed to repeat. Never on a shell —
     only a harness session, and only when it has fallen quiet.
 
-17. **Assist threshold defaults.** The defaults (flag at 70%, off-task at 60%, suggest at 50%) were
-    chosen by reading TypeSafe's guidance, not measured against real workspaces. They are settings
-    now, so one machine can be tuned — but the defaults, and the wording of the questions
-    themselves, still need a pass over real diffs. The right values may differ per repository,
-    which the settings cannot express.
+17. ~~**Assist threshold defaults.**~~ **Settled 2026-09-23: they stand as shipped.** The defaults
+    (flag at 70%, off-task at 60%, suggest at 50%) came from reading TypeSafe's guidance rather
+    than from a pass over real diffs, and that is accepted rather than fixed. They are settings:
+    a threshold is moved in Settings → Assist, and because the raw answers are cached, moving one
+    re-reads what Jev already said instead of asking again — so the cost of a default being a few
+    points off is a badge someone adjusts once, not a wrong answer. Building the labelled corpus
+    it would take to choose better numbers — and to re-measure every time a question's wording
+    changes, which moves the distribution under the thresholds — is more work than the noise it
+    would save. The known limit stands: the right values may differ per repository, which the
+    settings cannot express. If that turns out to bite, the change is per-project thresholds, not
+    a better global default.

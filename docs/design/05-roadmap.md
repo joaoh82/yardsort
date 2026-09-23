@@ -210,8 +210,10 @@ Done, off by default, behind the user's own TypeSafe API key:
       level, offered and never applied by themselves.
 - [x] Thresholds are settings (whole percentages, with "Restore defaults"); raw answers are
       cached, so moving one re-reads instead of re-asking.
-- [ ] Threshold _defaults_ and question wording measured against real workspaces — see open
-      question 17.
+- [x] Threshold _defaults_ and question wording: **left as shipped** (open question 17, settled
+      2026-09-23). They were never measured against a labelled corpus and will not be: they are
+      settings, moving one costs nothing because the raw answers are cached, and anyone who finds
+      a badge noisy turns it down where they meet it.
 - [ ] **Why an agent went quiet.** Decided 2026-09-21 (open question 16): Assist may send the
       last screen from the headless VT when a harness session falls quiet, so Jev can say whether
       it is waiting for permission, asking something, finished or failed — and the notification
