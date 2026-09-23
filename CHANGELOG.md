@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.9.1
 
 - **Drop a file on the composer to point the first message at it.** The same gesture that pastes
   a path into a running terminal now inserts the path into the message you start a workspace
