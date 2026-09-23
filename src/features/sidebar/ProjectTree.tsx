@@ -10,7 +10,8 @@ import {
   removeProject,
   restoreWorkspace,
 } from "./actions";
-import { summarise } from "@/features/terminal/activity";
+import { harnessState, summarise } from "@/features/terminal/activity";
+import { HarnessBadge } from "@/features/terminal/HarnessBadge";
 import { StatusDot } from "@/features/terminal/StatusDot";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { RenameDialog } from "./RenameDialog";
@@ -248,15 +249,21 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
               {unrestorable ? "gone" : "missing"}
             </span>
           )}
-          {/* A worktree's branch is its name with a prefix; only `local` has news to tell. */}
-          {head && !isWorktree && (
-            <span
-              className="ml-auto max-w-[55%] truncate font-mono text-[11px] text-ink-faint"
-              title={head.detached ? "Detached HEAD" : head.unborn ? "No commits yet" : "Branch"}
-            >
-              {head.detached ? `@${head.label}` : head.label}
-            </span>
-          )}
+          <span className="ml-auto flex min-w-0 items-center gap-1.5 pl-1">
+            {/* A worktree's branch is its name with a prefix; only `local` has news to tell. */}
+            {head && !isWorktree && (
+              <span
+                className="max-w-32 truncate font-mono text-[11px] text-ink-faint"
+                title={head.detached ? "Detached HEAD" : head.unborn ? "No commits yet" : "Branch"}
+              >
+                {head.detached ? `@${head.label}` : head.label}
+              </span>
+            )}
+            <HarnessBadge
+              state={harnessState(tabs)}
+              attention={tabs.some((tab) => tab.attention)}
+            />
+          </span>
         </button>
         {isWorktree && (
           <RowButton

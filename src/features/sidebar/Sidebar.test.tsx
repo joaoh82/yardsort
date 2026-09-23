@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { added, project, record, worktree } from "@/test/fixtures";
@@ -98,6 +98,42 @@ describe("Sidebar", () => {
     const local = within(alpha).getByRole("treeitem", { name: "local" });
     expect(local).toHaveTextContent("main");
     expect(local).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("says on the row whether an agent is waiting, working or done", async () => {
+    await renderWithWorktree();
+    const harness = {
+      id: "s1",
+      workspaceId: "w-alpha-feature",
+      title: "claude",
+      exit: null,
+      recordId: "r1",
+      busy: false,
+      attention: false,
+    };
+    const row = () => within(screen.getByRole("treeitem", { name: "feature" }));
+    const badge = (name: string) => row().queryByRole("img", { name });
+
+    act(() => useTerminalStore.setState({ tabs: [harness] }));
+    expect(badge("1 waiting for you")).toHaveTextContent("1");
+
+    // Working is the one state that says nothing: the dot is already pulsing.
+    act(() => useTerminalStore.setState({ tabs: [{ ...harness, busy: true }] }));
+    expect(badge("1 waiting for you")).toBeNull();
+
+    act(() =>
+      useTerminalStore.setState({
+        tabs: [{ ...harness, exit: { code: 0, success: true, signal: null } }],
+      }),
+    );
+    expect(badge("finished")).toHaveTextContent("✓");
+
+    act(() =>
+      useTerminalStore.setState({
+        tabs: [{ ...harness, exit: { code: 1, success: false, signal: null } }],
+      }),
+    );
+    expect(badge("exited with an error")).toHaveTextContent("✗");
   });
 
   it("entering a workspace selects it and opens a shell there — once", async () => {
