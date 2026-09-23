@@ -1,8 +1,22 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistStatus } from "@/lib/ipc";
 import { harness, project, worktree } from "@/test/fixtures";
+
+type DragHandler = (event: { payload: unknown }) => void;
+const drag = vi.hoisted(() => ({
+  handler: null as DragHandler | null,
+  unlisten: vi.fn(),
+}));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: (handler: DragHandler) => {
+      drag.handler = handler;
+      return Promise.resolve(drag.unlisten);
+    },
+  }),
+}));
 
 const core = vi.hoisted(() => ({
   harnessesList: vi.fn(),
@@ -63,6 +77,7 @@ async function renderComposer() {
 describe("Composer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    drag.handler = null;
     core.uiStateSave.mockResolvedValue(undefined);
     core.projectBranches.mockResolvedValue({
       branches: ["develop", "main", "ys/kept-earlier", "ys/in-use"],
@@ -224,6 +239,94 @@ describe("Composer", () => {
     const user = await renderComposer();
     await user.type(screen.getByRole("textbox", { name: /work on/ }), "{Escape}");
     expect(useProjectsStore.getState().composingProjectId).toBeNull();
+  });
+
+  it("drops a file into the message and starts the workspace with that path", async () => {
+    const created = worktree("app", "notes");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const { container } = render(<Composer project={app} />);
+    await screen.findAllByRole("option", { name: "main" });
+    await vi.waitFor(() => expect(drag.handler).not.toBeNull());
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 600,
+      width: 800,
+      height: 600,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    });
+    const panel = container.firstElementChild as HTMLElement;
+    const box = screen.getByRole("textbox", { name: /work on/ }) as HTMLTextAreaElement;
+
+    act(() => drag.handler!({ payload: { type: "over", position: { x: 100, y: 100 } } }));
+    expect(panel.dataset.drop).toBe("over");
+    act(() =>
+      drag.handler!({
+        payload: {
+          type: "drop",
+          paths: ["/home/me/My Docs/plan.md"],
+          position: { x: 100, y: 100 },
+        },
+      }),
+    );
+    expect(panel.dataset.drop).toBeUndefined();
+    expect(box).toHaveValue('"/home/me/My Docs/plan.md" ');
+    expect(box).toHaveFocus();
+    expect(box.selectionStart).toBe(box.value.length);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness: expect.objectContaining({ prompt: '"/home/me/My Docs/plan.md"' }),
+      }),
+    );
+  });
+
+  it("ignores a drop outside the composer and one that arrives while starting", async () => {
+    core.workspaceCreate.mockReturnValue(new Promise(() => {}));
+    render(<Composer project={app} />);
+    await screen.findAllByRole("option", { name: "main" });
+    await vi.waitFor(() => expect(drag.handler).not.toBeNull());
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 600,
+      width: 800,
+      height: 600,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    });
+    const box = screen.getByRole("textbox", { name: /work on/ });
+
+    act(() =>
+      drag.handler!({
+        payload: { type: "drop", paths: ["/tmp/elsewhere.md"], position: { x: 900, y: 100 } },
+      }),
+    );
+    expect(box).toHaveValue("");
+
+    const user = userEvent.setup();
+    await user.type(box, "keep this{Enter}");
+    await screen.findByRole("button", { name: "Starting…" });
+    act(() =>
+      drag.handler!({
+        payload: { type: "drop", paths: ["/tmp/too-late.md"], position: { x: 100, y: 100 } },
+      }),
+    );
+    expect(box).toHaveValue("keep this");
+  });
+
+  it("stops listening when unmounted", async () => {
+    const { unmount } = render(<Composer project={app} />);
+    await vi.waitFor(() => expect(drag.handler).not.toBeNull());
+    unmount();
+    expect(drag.unlisten).toHaveBeenCalled();
   });
 });
 

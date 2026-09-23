@@ -7,7 +7,9 @@ import {
   type Suggestion,
   type Workspace,
 } from "@/lib/ipc";
+import { useFileDrop } from "@/lib/useFileDrop";
 import { formatShortcut } from "@/lib/platform";
+import { insertDroppedPaths } from "./drop";
 import { assistOn, useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
 import { recall, useProjectsStore } from "@/stores/projects";
@@ -54,6 +56,15 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The message as last written, so a drop reads what is on screen even if state has not
+  // re-rendered yet. The effect keeps it aligned with typing; the drop handler advances it.
+  const messageValue = useRef(message);
+  useEffect(() => {
+    messageValue.current = message;
+  }, [message]);
+  // Where to put the caret after a drop has been written into `message`.
+  const caretAfterDrop = useRef<number | null>(null);
   const modelsId = useId();
   const assist = useAssistStore((s) => s.status);
   // Kept together with the message it was asked about, so an answer for older text is ignored.
@@ -64,6 +75,31 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   useEffect(() => void useHarnessStore.getState().load(), []);
   useEffect(() => void useAssistStore.getState().load(), []);
   useEffect(() => messageRef.current?.focus(), [project.id]);
+
+  // A file dropped on the composer goes into the message, at the cursor, so the agent starts
+  // already pointed at it. Ignored while a start is in flight: the message has already been sent.
+  useFileDrop(
+    panelRef,
+    (paths) => {
+      const field = messageRef.current;
+      const current = messageValue.current;
+      const start = field?.selectionStart ?? current.length;
+      const end = field?.selectionEnd ?? start;
+      const next = insertDroppedPaths(current, start, end, paths);
+      messageValue.current = next.message;
+      caretAfterDrop.current = next.caret;
+      setMessage(next.message);
+    },
+    !busy,
+  );
+  useEffect(() => {
+    const field = messageRef.current;
+    const caret = caretAfterDrop.current;
+    if (!field || caret === null) return;
+    caretAfterDrop.current = null;
+    field.focus();
+    field.setSelectionRange(caret, caret);
+  }, [message]);
 
   // Ask Assist what suits the message, once typing pauses. A failure simply offers nothing.
   useEffect(() => {
@@ -190,7 +226,10 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   };
 
   return (
-    <div className="flex h-full items-center justify-center overflow-y-auto p-6">
+    <div
+      ref={panelRef}
+      className="flex h-full items-center justify-center overflow-y-auto p-6 data-[drop=over]:outline-2 data-[drop=over]:-outline-offset-2 data-[drop=over]:outline-accent"
+    >
       <form
         aria-label={runIn ? `Run in ${runIn.name}` : "New workspace"}
         className="w-full max-w-2xl"

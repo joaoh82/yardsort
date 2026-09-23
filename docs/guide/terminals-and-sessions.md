@@ -39,7 +39,9 @@ Plain `Ctrl+C`, `Ctrl+V` and a plain click belong to the program in the terminal
 - **Drop a file on the terminal** to give the agent its path. The terminal is outlined while you
   hover; on release the path lands at the cursor, quoted for the shell if it needs it, with a
   space after it so you can keep typing. Drop several and you get all of them. It is a paste, so
-  it goes to whatever program is in the tab — a shell gets an argument it can use as it is.
+  it goes to whatever program is in the tab — a shell gets an argument it can use as it is. To
+  put a path in the first message, before anything is running, drop the file on the
+  [composer](workspaces.md#starting-one-the-composer) instead.
 
 ## Agents keep working when you close the window
 
