@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { Detected, type Platform } from "@/components/platform";
 import { docUrl } from "@/lib/docs";
+import { appVersion, RELEASES_URL } from "@/lib/site";
 
 // The commands the landing page shows off: one line each, in the order you would meet them.
 const LINES: { command: string; note: string }[] = [
@@ -16,6 +18,14 @@ const LINES: { command: string; note: string }[] = [
     note: "how it ended up, as plain text — finished ones too",
   },
   { command: "ys workspace list --json", note: "every command takes --json, for scripts" },
+];
+
+// `ys` is not in the app bundle — it is its own archive per platform, named after the release, so
+// the names are built from the version rather than written out and left to rot.
+const DOWNLOADS: { platform: Platform; name: string; file: (version: string) => string }[] = [
+  { platform: "linux", name: "Linux", file: (v) => `ys-${v}-linux-x86_64.tar.gz` },
+  { platform: "mac", name: "macOS", file: (v) => `ys-${v}-macos-universal.tar.gz` },
+  { platform: "win", name: "Windows", file: (v) => `ys-${v}-windows-x86_64.zip` },
 ];
 
 export function Cli() {
@@ -58,6 +68,30 @@ export function Cli() {
               </li>
             ))}
           </ul>
+          <div className="border-t border-line bg-raised px-4 py-3.5">
+            <p className="text-[12.5px] text-muted">
+              Not in the app bundle — its own download in{" "}
+              <a href={RELEASES_URL} className="link text-ink">
+                each release
+              </a>
+              . Unpack it and put it on your <code className="font-mono">PATH</code>.
+            </p>
+            <ul className="mt-2.5 space-y-1.5 font-mono text-[12.5px]">
+              {DOWNLOADS.map((download) => (
+                <li key={download.platform} className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="w-[62px] shrink-0 text-faint">{download.name}</span>
+                  <code className="break-all">{download.file(appVersion())}</code>
+                  <Detected platform={download.platform} />
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2.5 text-[12px] text-faint">
+              On macOS <code className="font-mono">ys</code> is unsigned, so a copy downloaded with
+              a browser is quarantined:{" "}
+              <code className="font-mono text-muted">xattr -d com.apple.quarantine ys</code>, or
+              fetch it with <code className="font-mono text-muted">curl</code>.
+            </p>
+          </div>
         </div>
       </div>
     </section>
