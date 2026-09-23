@@ -3,6 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+use specta::Type;
+
 use crate::env::ShellEnv;
 use crate::program::Program;
 
@@ -39,6 +42,26 @@ pub enum Head {
     Unborn(String),
     /// Not on a branch; the abbreviated commit id.
     Detached(String),
+}
+
+/// One commit, as much of it as a pull request needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    pub subject: String,
+    /// Everything under the subject, with the blank line between them dropped. Often empty.
+    pub body: String,
+}
+
+impl Commit {
+    /// Split a message the way git itself reads one: first line, then the rest.
+    fn from_message(message: &str) -> Self {
+        let (subject, body) = message.split_once('\n').unwrap_or((message, ""));
+        Self {
+            subject: subject.trim().to_owned(),
+            body: body.trim().to_owned(),
+        }
+    }
 }
 
 pub struct Git {
@@ -314,14 +337,24 @@ impl Git {
             .map(drop)
     }
 
-    /// The subject lines of `reference..HEAD`, newest first.
-    pub fn subjects(&self, root: &Path, reference: &str) -> GitResult<Vec<String>> {
+    /// The commits in `reference..HEAD`, newest first.
+    ///
+    /// `%B` is the message exactly as it was written, subject and body together, and the
+    /// commits are separated by NUL — a message may contain any line a friendlier separator
+    /// could have used.
+    pub fn commits_since(&self, root: &Path, reference: &str) -> GitResult<Vec<Commit>> {
         let range = format!("{reference}..HEAD");
-        match self.run(root, &["log", "--format=%s", &range]) {
-            Ok(out) => Ok(out.lines().map(str::to_owned).collect()),
-            Err(GitError::Failed { .. }) => Ok(vec![]),
-            Err(other) => Err(other),
-        }
+        let out = match self.run_bytes(root, &["log", "--format=%B%x00", &range]) {
+            Ok(out) => out,
+            Err(GitError::Failed { .. }) => return Ok(vec![]),
+            Err(other) => return Err(other),
+        };
+        Ok(String::from_utf8_lossy(&out)
+            .split('\0')
+            .map(str::trim)
+            .filter(|message| !message.is_empty())
+            .map(Commit::from_message)
+            .collect())
     }
 }
 
@@ -503,6 +536,43 @@ mod tests {
     }
 
     #[test]
+    fn a_commits_subject_and_body_come_back_apart() {
+        let (git, repo, _remote) = repo_with_remote();
+        git.push(repo.path(), "origin", "trunk").unwrap();
+        std::fs::write(repo.path().join("a.txt"), "x").unwrap();
+        git.commit_all(
+            repo.path(),
+            "Fix the login redirect\n\nThe cookie was set on the wrong domain,\nso the session never came back.\n",
+        )
+        .unwrap();
+        std::fs::write(repo.path().join("b.txt"), "y").unwrap();
+        git.commit_all(repo.path(), "Tidy up").unwrap();
+
+        let unpushed = git.commits_since(repo.path(), "origin/trunk").unwrap();
+        assert_eq!(unpushed.len(), 2);
+        // Newest first, as git prints them.
+        assert_eq!(unpushed[0].subject, "Tidy up");
+        assert_eq!(unpushed[1].subject, "Fix the login redirect");
+        assert_eq!(
+            unpushed[1].body,
+            "The cookie was set on the wrong domain,\nso the session never came back."
+        );
+    }
+
+    #[test]
+    fn a_message_containing_blank_lines_is_still_one_commit() {
+        let (git, repo, _remote) = repo_with_remote();
+        git.push(repo.path(), "origin", "trunk").unwrap();
+        std::fs::write(repo.path().join("a.txt"), "x").unwrap();
+        git.commit_all(repo.path(), "Subject\n\nOne paragraph.\n\nAnd another.")
+            .unwrap();
+
+        let unpushed = git.commits_since(repo.path(), "origin/trunk").unwrap();
+        assert_eq!(unpushed.len(), 1, "blank lines do not split commits");
+        assert_eq!(unpushed[0].body, "One paragraph.\n\nAnd another.");
+    }
+
+    #[test]
     fn an_identity_is_found_when_there_is_one() {
         let (git, repo) = repo_with_commit();
         let who = git.identity(repo.path()).unwrap().expect("an identity");
@@ -565,7 +635,10 @@ mod tests {
             Some((1, 0)),
             "one commit the remote has not seen"
         );
-        assert_eq!(git.subjects(repo.path(), "origin/trunk").unwrap(), ["More"]);
+        let unpushed = git.commits_since(repo.path(), "origin/trunk").unwrap();
+        assert_eq!(unpushed.len(), 1);
+        assert_eq!(unpushed[0].subject, "More");
+        assert_eq!(unpushed[0].body, "", "a one-line message has no body");
 
         git.push(repo.path(), "origin", "trunk").unwrap();
         assert_eq!(
@@ -573,7 +646,7 @@ mod tests {
             Some((0, 0))
         );
         assert!(git
-            .subjects(repo.path(), "origin/trunk")
+            .commits_since(repo.path(), "origin/trunk")
             .unwrap()
             .is_empty());
     }
@@ -587,7 +660,7 @@ mod tests {
             None
         );
         assert!(git
-            .subjects(repo.path(), "origin/never-fetched")
+            .commits_since(repo.path(), "origin/never-fetched")
             .unwrap()
             .is_empty());
     }

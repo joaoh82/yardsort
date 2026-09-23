@@ -231,6 +231,13 @@ export type Checks =
 /**  Nothing is configured, or nothing has reported yet. */
 "none" | "running" | "passing" | "failing";
 
+/**  One commit, as much of it as a pull request needs. */
+export type Commit = {
+	subject: string,
+	/**  Everything under the subject, with the blank line between them dropped. Often empty. */
+	body: string,
+};
+
 export type Content = 
 /**  The file does not exist on this side (added, or deleted). */
 { type: "absent" } | { type: "text"; text: string } | { type: "binary" } | { type: "tooLarge"; bytes: number };
@@ -567,8 +574,11 @@ export type PublishState = {
 	 */
 	ahead: number,
 	behind: number,
-	/**  Their subjects, newest first — what a pull request would be about. */
-	unpushed: string[],
+	/**
+	 *  Those commits, newest first — what a pull request would be about. Their bodies come
+	 *  too: a well-written commit is a well-written pull request, and the dialog uses it.
+	 */
+	unpushed: Commit[],
 	pullRequest: PullRequest | null,
 	/**
 	 *  Opening one makes sense: a branch that is not its own base, on a forge, without a pull

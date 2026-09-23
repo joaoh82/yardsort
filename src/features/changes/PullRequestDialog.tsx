@@ -4,23 +4,37 @@ import { useModalFocus } from "@/lib/useModalFocus";
 import { usePublishStore } from "@/stores/publish";
 
 /**
+ * What a pull request should say, out of the commits nobody has seen yet.
+ *
+ * One commit and it *is* the pull request, so its own message body is the description — the
+ * same thing `gh pr create --fill` does, and it means a well-written commit needs no second
+ * write-up. Several, and no one body speaks for them, so they are listed oldest first, in the
+ * order they happened.
+ */
+function describe(commits: { subject: string; body: string }[]): string {
+  if (commits.length === 0) return "";
+  if (commits.length === 1) return commits[0]!.body;
+  return commits
+    .map((commit) => `- ${commit.subject}`)
+    .reverse()
+    .join("\n");
+}
+
+/**
  * Title, description and draft, then hand it to `gh`.
  *
- * Prefilled from the commits the remote has not got: one commit means the title is already
- * written, and several mean a list nobody has to retype. Without `gh` — or logged out of it —
- * nothing here is sent anywhere: the branch is pushed and the browser opens the forge's own
- * form, which is the same fields in the place that owns them.
+ * Without `gh` — or logged out of it — nothing here is sent anywhere: the branch is pushed and
+ * the browser opens the forge's own form, which is the same fields in the place that owns them.
  */
 export function PullRequestDialog({ onClose }: { onClose: () => void }) {
   const state = usePublishStore((s) => s.state);
   const busy = usePublishStore((s) => s.busy);
   const error = usePublishStore((s) => s.error);
-  const subjects = state?.unpushed ?? [];
+  // Newest first, as git prints them; the oldest is the one the branch is about.
+  const commits = state?.unpushed ?? [];
 
-  const [title, setTitle] = useState(subjects.at(-1) ?? state?.branch ?? "");
-  const [body, setBody] = useState(() =>
-    subjects.length > 1 ? subjects.map((subject) => `- ${subject}`).join("\n") : "",
-  );
+  const [title, setTitle] = useState(commits.at(-1)?.subject ?? state?.branch ?? "");
+  const [body, setBody] = useState(() => describe(commits));
   const [draft, setDraft] = useState(false);
   const titleId = useId();
   const inputRef = useRef<HTMLInputElement>(null);

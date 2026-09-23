@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import type { ChangeSet } from "@/lib/ipc";
+import { native } from "@/lib/native";
 import { usePublishStore, type Busy } from "@/stores/publish";
 import { PullRequestDialog } from "./PullRequestDialog";
 
@@ -33,6 +34,7 @@ export function PublishBar({ changes }: { changes: ChangeSet | null }) {
         key={uncommitted > 0 ? "changed" : "clean"}
         uncommitted={uncommitted}
         identity={state.identity}
+        branch={state.branch}
         busy={busy}
       >
         {canPush && (
@@ -82,23 +84,44 @@ export function PublishBar({ changes }: { changes: ChangeSet | null }) {
 function CommitBox({
   uncommitted,
   identity,
+  branch,
   busy,
   children,
 }: {
   uncommitted: number;
   identity: string | null;
+  branch: string;
   busy: Busy | null;
   children: React.ReactNode;
 }) {
   const [message, setMessage] = useState("");
   const canCommit = uncommitted > 0 && message.trim() !== "" && identity !== null;
-  const commit = () => void usePublishStore.getState().commit(message.trim());
+
+  /**
+   * Every commit is confirmed, naming what it takes and where it lands.
+   *
+   * It takes *everything* uncommitted, and on a project's own checkout "everything" can land on
+   * the branch the rest of the work is measured against. One press is too few for that, and a
+   * rule with an exception is one the user has to learn.
+   */
+  const commit = async () => {
+    const agreed = await native.confirm(
+      `Commit ${uncommitted === 1 ? "1 file" : `all ${uncommitted} files`} to "${branch}"?` +
+        `\n\n${message.trim()}` +
+        "\n\nEverything uncommitted goes in, including files git has not seen before.",
+      {
+        title: uncommitted === 1 ? "Commit 1 file" : `Commit ${uncommitted} files`,
+        okLabel: "Commit",
+      },
+    );
+    if (agreed) await usePublishStore.getState().commit(message.trim());
+  };
 
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        if (canCommit) commit();
+        if (canCommit) void commit();
       }}
     >
       {uncommitted > 0 && (

@@ -21,7 +21,7 @@ use specta::Type;
 
 use crate::error::IpcResult;
 use crate::forge::{parse_remote, Gh, PullRequest, PullRequestState, Repo};
-use crate::git::{Git, Head};
+use crate::git::{Commit, Git, Head};
 use crate::store::WorkspaceRow;
 
 /// How long a project's pull requests are reused before `gh` is asked again. Long enough that
@@ -34,8 +34,8 @@ const FRESH_FOR: Duration = Duration::from_secs(30);
 /// answers nobody can use.
 const LIMIT: u32 = 50;
 
-/// Subjects offered as a starting point for a pull request's title and body.
-const MAX_SUBJECTS: usize = 20;
+/// Commits offered as a starting point for a pull request's title and body.
+const MAX_COMMITS: usize = 20;
 
 /// What `gh` says about one project's pull requests.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Type)]
@@ -74,8 +74,9 @@ pub struct PublishState {
     /// against the base branch before that.
     pub ahead: u32,
     pub behind: u32,
-    /// Their subjects, newest first — what a pull request would be about.
-    pub unpushed: Vec<String>,
+    /// Those commits, newest first — what a pull request would be about. Their bodies come
+    /// too: a well-written commit is a well-written pull request, and the dialog uses it.
+    pub unpushed: Vec<Commit>,
     pub pull_request: Option<PullRequest>,
     /// Opening one makes sense: a branch that is not its own base, on a forge, without a pull
     /// request already open. Decided here rather than in the webview, which holds no truth.
@@ -139,9 +140,9 @@ pub fn state(
     };
     let unpushed = match &reference {
         Some(reference) => {
-            let mut subjects = git.subjects(root, reference)?;
-            subjects.truncate(MAX_SUBJECTS);
-            subjects
+            let mut commits = git.commits_since(root, reference)?;
+            commits.truncate(MAX_COMMITS);
+            commits
         }
         None => vec![],
     };
@@ -302,7 +303,14 @@ mod tests {
         assert_eq!(state.base.as_deref(), Some("trunk"));
         assert_eq!(state.upstream, None, "nothing has been pushed yet");
         assert_eq!(state.ahead, 1, "counted against the base instead");
-        assert_eq!(state.unpushed, ["Add a"]);
+        assert_eq!(
+            state
+                .unpushed
+                .iter()
+                .map(|c| c.subject.as_str())
+                .collect::<Vec<_>>(),
+            ["Add a"]
+        );
         assert_eq!(state.remote.as_deref(), Some("origin"));
         assert!(state.identity.is_some());
     }

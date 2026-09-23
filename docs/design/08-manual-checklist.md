@@ -197,6 +197,7 @@ Needs a project with a real remote you may push to. Do the first half **without 
 | ✓   | Check                                                                                                                                   |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------- |
 |     | With uncommitted changes, the message box appears; **Commit N files** is dead until a message is typed.                                 |
+|     | Pressing it asks first, naming the files, the message and the branch. Answering no commits nothing and keeps the message.               |
 |     | Commit: the list empties, the message box goes, and `git log` in a shell tab shows the commit with every file, untracked ones too.      |
 |     | A message starting with `--` commits as that message rather than being read as an option.                                               |
 |     | **Push N commits** appears; pushing sets the upstream and the button goes. `git status` agrees.                                         |

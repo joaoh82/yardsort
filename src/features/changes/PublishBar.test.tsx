@@ -17,6 +17,8 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => opener);
+const native = vi.hoisted(() => ({ confirm: vi.fn() }));
+vi.mock("@/lib/native", () => ({ native }));
 
 import { usePublishStore } from "@/stores/publish";
 import { PublishBar } from "./PublishBar";
@@ -53,6 +55,9 @@ const state = (extra: Partial<PublishState> = {}): PublishState => ({
   ...extra,
 });
 
+/** A commit as `PublishState.unpushed` carries it. */
+const commit = (subject: string, body = "") => ({ subject, body });
+
 const pr = (extra: Partial<PullRequest> = {}): PullRequest => ({
   number: 42,
   url: "https://github.com/o/r/pull/42",
@@ -87,6 +92,7 @@ describe("PublishBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     opener.openUrl.mockResolvedValue(undefined);
+    native.confirm.mockResolvedValue(true);
     core.workspacePublishState.mockResolvedValue(state());
     core.projectPullRequests.mockResolvedValue({
       gh: true,
@@ -99,16 +105,16 @@ describe("PublishBar", () => {
 
   it("will not commit without a message, and says how many files it would take", async () => {
     const { user, showing } = show(["src/login.rs", "src/api.rs"]);
-    const commit = screen.getByRole("button", { name: "Commit 2 files" });
-    expect(commit).toBeDisabled();
+    const button = screen.getByRole("button", { name: "Commit 2 files" });
+    expect(button).toBeDisabled();
 
     await user.type(screen.getByLabelText("Commit message"), "Fix the login redirect");
-    expect(commit).toBeEnabled();
+    expect(button).toBeEnabled();
 
     core.workspaceCommit.mockResolvedValue(
-      state({ ahead: 1, unpushed: ["Fix the login redirect"] }),
+      state({ ahead: 1, unpushed: [commit("Fix the login redirect")] }),
     );
-    await user.click(commit);
+    await user.click(button);
     expect(core.workspaceCommit).toHaveBeenCalledWith("w1", "Fix the login redirect");
 
     // Once the files are committed the box goes, and comes back empty for the next batch.
@@ -138,7 +144,7 @@ describe("PublishBar", () => {
     expect(screen.queryByRole("button", { name: /^Push/ })).not.toBeInTheDocument();
     unmount();
 
-    seed({ ahead: 2, unpushed: ["Second", "First"] });
+    seed({ ahead: 2, unpushed: [commit("Second"), commit("First")] });
     const { user } = show([]);
     core.workspacePush.mockResolvedValue(state({ ahead: 0, upstream: "origin/ys/fix-login" }));
     await user.click(screen.getByRole("button", { name: "Push 2 commits" }));
@@ -149,14 +155,17 @@ describe("PublishBar", () => {
   });
 
   it("opens a pull request from the commits the remote has not got, and shows it afterwards", async () => {
-    seed({ ahead: 2, unpushed: ["Tidy the redirect", "Fix the login redirect"] });
+    seed({
+      ahead: 2,
+      unpushed: [commit("Tidy the redirect"), commit("Fix the login redirect")],
+    });
     const { user } = show([]);
     await user.click(screen.getByRole("button", { name: "Open pull request" }));
 
-    // The oldest commit is the one the branch is about; the rest become the description.
+    // The oldest commit is the one the branch is about; all of them are listed, as they happened.
     expect(screen.getByLabelText("Title")).toHaveValue("Fix the login redirect");
     expect(screen.getByLabelText("Description")).toHaveValue(
-      "- Tidy the redirect\n- Fix the login redirect",
+      "- Fix the login redirect\n- Tidy the redirect",
     );
     expect(screen.getByText(/2 commits will be pushed to/)).toBeInTheDocument();
 
@@ -166,15 +175,58 @@ describe("PublishBar", () => {
 
     expect(core.workspaceOpenPullRequest).toHaveBeenCalledWith("w1", {
       title: "Fix the login redirect",
-      body: "- Tidy the redirect\n- Fix the login redirect",
+      body: "- Fix the login redirect\n- Tidy the redirect",
       draft: false,
     });
     await waitFor(() => expect(opener.openUrl).toHaveBeenCalledWith(pr().url));
     expect(await screen.findByRole("button", { name: /#42 · checks passing/ })).toBeInTheDocument();
   });
 
+  it("uses a single commit's own body as the description", async () => {
+    seed({
+      ahead: 1,
+      unpushed: [
+        commit(
+          "Fix the login redirect",
+          "The cookie was set on the wrong domain,\nso the session never came back.",
+        ),
+      ],
+    });
+    const { user } = show([]);
+    await user.click(screen.getByRole("button", { name: "Open pull request" }));
+    expect(screen.getByLabelText("Title")).toHaveValue("Fix the login redirect");
+    expect(screen.getByLabelText("Description")).toHaveValue(
+      "The cookie was set on the wrong domain,\nso the session never came back.",
+    );
+  });
+
+  it("confirms every commit, naming the files and the branch", async () => {
+    const { user } = show(["src/login.rs", "src/api.rs"]);
+    await user.type(screen.getByLabelText("Commit message"), "Fix the login redirect");
+    core.workspaceCommit.mockResolvedValue(state());
+    await user.click(screen.getByRole("button", { name: "Commit 2 files" }));
+
+    expect(native.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('Commit all 2 files to "ys/fix-login"?'),
+      expect.objectContaining({ title: "Commit 2 files", okLabel: "Commit" }),
+    );
+    expect(native.confirm.mock.calls[0]![0]).toContain("Fix the login redirect");
+    expect(core.workspaceCommit).toHaveBeenCalledWith("w1", "Fix the login redirect");
+  });
+
+  it("commits nothing when the confirmation is declined", async () => {
+    native.confirm.mockResolvedValue(false);
+    const { user } = show();
+    await user.type(screen.getByLabelText("Commit message"), "Fix it");
+    await user.click(screen.getByRole("button", { name: "Commit 1 file" }));
+
+    expect(native.confirm).toHaveBeenCalled();
+    expect(core.workspaceCommit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Commit message")).toHaveValue("Fix it");
+  });
+
   it("says the browser will finish the job when gh is not installed", async () => {
-    seed({ gh: false, ahead: 1, unpushed: ["Fix the login redirect"] });
+    seed({ gh: false, ahead: 1, unpushed: [commit("Fix the login redirect")] });
     const { user } = show([]);
     await user.click(screen.getByRole("button", { name: "Open pull request" }));
     expect(screen.getByText(/is not installed, so the branch will be pushed/)).toBeInTheDocument();

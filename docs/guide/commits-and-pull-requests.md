@@ -13,6 +13,10 @@ never holds a credential of its own.
 When a workspace has uncommitted changes, a message box appears under the list with a
 **Commit N files** button beside it. Type a message and press it — or press Enter in the box.
 
+**Every commit is confirmed first**, naming how many files it takes, the message, and the branch
+they land on. There is no exception for a branch that looks safe: the project's own `local`
+checkout is usually sitting on `main`, and a rule with an exception is one you have to learn.
+
 **It commits everything**, including files git has not seen before. There is no way to leave one
 out, on purpose: a partial commit you did not ask for is a worse surprise than one more file than
 you expected. If you need to split a change, use a shell tab (`Ctrl+Shift+T`) or your git client;
@@ -46,9 +50,15 @@ own message instead of hanging.
 **Open pull request** — **Open merge request** on GitLab — asks for a title, a description and
 whether it should be a draft, then opens it.
 
-The form starts filled in from the commits the remote has not got yet: the oldest becomes the
-title, and when there are several they are listed in the description. One commit, and the title is
-already written.
+The form starts filled in from the commits the remote has not got yet. The oldest becomes the
+title. For the description:
+
+- **One commit** — its own message body, everything under the subject line. That commit _is_ the
+  pull request, so a well-written one needs no second write-up. It is what `gh pr create --fill`
+  does too.
+- **Several** — a list of their subjects, oldest first, in the order they happened.
+
+Both are a starting point; edit either before pressing the button.
 
 **It pushes first if it needs to.** A branch the forge has never seen cannot have a pull request,
 and a button that fails and tells you to press a different one is not worth having.

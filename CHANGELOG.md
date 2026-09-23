@@ -8,7 +8,9 @@ has the downloads and the full commit lists.
 - **Commit, push and open a pull request from the panel.** Under the changed-files list: a
   message box that commits everything the workspace has changed, a **Push** button once the
   branch is ahead of its remote, and **Open pull request** — which pushes first if it needs to,
-  and fills the title and description in from the commits the remote has not got yet. With the
+  and fills the title and description in from the commits the remote has not got yet: one
+  commit's own message body becomes the description, several become a list. Committing is
+  confirmed first, naming the files and the branch it lands on. With the
   [GitHub CLI](https://cli.github.com) it opens the pull request from here; without it the branch
   is pushed and your browser opens the forge's own form, which works for GitHub, GitLab,
   Bitbucket and the Gitea family alike. Yardsort holds no forge credentials of its own. See
