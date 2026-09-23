@@ -22,7 +22,9 @@ waiting for a new release.
 ![Harness settings](../images/settings.png)
 
 Built in: **Claude Code**, **Codex**, **Grok**, **OpenCode**. The dot next to each shows whether
-its command was found on your `PATH`.
+its command was found on your `PATH`, and the mark beside it is the one that identifies that
+agent everywhere else in the app — the tab strip, the composer's picker, the session history. A
+harness you add yourself is drawn as its initial.
 
 ### Fields
 
@@ -87,11 +89,11 @@ Both apply to workspaces created from now on; existing ones stay where they are.
 
 ## General
 
-| Setting                              | Meaning                                                                                                                                                                           |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Editor command**                   | What **Edit ↗** runs — `code`, `cursor`, `zed`, … It is given the workspace folder and then the file. Empty tries `cursor`, `code`, `zed`, `windsurf`, `subl` and `idea` in turn. |
-| **Check for updates automatically**  | Looks for a newer release shortly after starting and once a day. On by default. **Check now** looks immediately and shows the version you are running. See [Updates](updates.md). |
-| **Notify me when an agent finishes** | Desktop notifications when a busy agent goes quiet while you are in another window. On by default.                                                                                |
+| Setting                              | Meaning                                                                                                                                                                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Editor command**                   | What **Edit ↗** runs — `code`, `cursor`, `zed`, … It is given the workspace folder and then the file. Empty tries `cursor`, `code`, `zed`, `windsurf`, `subl` and `idea` in turn.                                                    |
+| **Check for updates automatically**  | Looks for a newer release shortly after starting, once a day, and when you return to the window if that is overdue. On by default. **Check now** looks immediately and shows the version you are running. See [Updates](updates.md). |
+| **Notify me when an agent finishes** | Desktop notifications when a busy agent goes quiet while you are in another window. On by default.                                                                                                                                   |
 
 ## Environment variables
 

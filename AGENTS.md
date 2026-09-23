@@ -25,7 +25,9 @@ the documentation says so, in the same commit or pull request.**
   `just site-check` builds every page.
 - Screenshots live in `docs/images/`. Retake them when the UI they show changes noticeably. They
   must never show a real user's name, paths, projects or account details — use a throwaway
-  profile (`YARDSORT_DATA_DIR`, `YARDSORT_WORKTREE_ROOT`) and demo repositories. Two things a
+  profile (`YARDSORT_DATA_DIR`, `YARDSORT_WORKTREE_ROOT`) and demo repositories.
+  `scripts/screenshots.sh` sets all of that up, prints the launch line, and captures the window
+  at the size the existing images use; it is the short way through everything below. Two things a
   throwaway profile does **not** isolate, and both have leaked into a shot already:
   - **Agent paths.** Settings → Harnesses prints "Found at …", which is a real install path under
     your home. Put shims on `PATH` — `/tmp/agents/claude` exec'ing the real one — and point the

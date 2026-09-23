@@ -34,6 +34,7 @@ vi.mock("@/lib/native", () => ({ native }));
 import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
+import { useUpdatesStore } from "@/stores/updates";
 import { Sidebar } from "./Sidebar";
 
 const shellIn = (workspace: string) => ({
@@ -90,6 +91,24 @@ describe("Sidebar", () => {
       notice: null,
     });
     useTerminalStore.setState({ tabs: [], active: {}, error: null });
+    useUpdatesStore.setState({ status: null, open: false });
+  });
+
+  it("shows a waiting update beside Settings, and opens the dialog when pressed", async () => {
+    await renderSidebar("alpha");
+    expect(screen.queryByRole("button", { name: /^Update to/ })).not.toBeInTheDocument();
+
+    act(() =>
+      useUpdatesStore.setState({
+        status: {
+          currentVersion: "0.9.1",
+          installKind: "selfUpdating",
+          available: { version: "0.9.2", notes: null, url: "https://example.invalid/v0.9.2" },
+        },
+      }),
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Update to 0.9.2" }));
+    expect(useUpdatesStore.getState().open).toBe(true);
   });
 
   it("shows each project with its local workspace and branch", async () => {

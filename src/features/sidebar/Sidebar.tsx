@@ -4,6 +4,7 @@ import { hasCore } from "@/lib/ipc";
 import { formatShortcut } from "@/lib/platform";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
+import { useUpdatesStore } from "@/stores/updates";
 import { reviewVanishedWorkspaces } from "./actions";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
@@ -79,17 +80,41 @@ export function Sidebar() {
           </button>
         </div>
       )}
-      <div className="border-t border-line p-1">
+      <div className="flex items-center gap-1 border-t border-line p-1">
         <button
           type="button"
           title={`Settings (${formatShortcut(",")})`}
           onClick={() => useLayoutStore.getState().setSettingsOpen(true)}
-          className="flex h-7 w-full items-center gap-2 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
+          className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
         >
           <span aria-hidden>⚙</span> Settings
         </button>
+        <UpdatePill />
       </div>
       {adding && <AddProjectDialog onClose={() => setAdding(false)} />}
     </aside>
+  );
+}
+
+/**
+ * Where a waiting update announces itself: beside Settings, the one control that is always on
+ * screen and never moves. It appears only once a check has found something, and pressing it
+ * opens the dialog that explains what the update costs before anything is downloaded.
+ */
+function UpdatePill() {
+  const update = useUpdatesStore((s) => s.status?.available);
+  if (!update) return null;
+
+  return (
+    <button
+      type="button"
+      aria-label={`Update to ${update.version}`}
+      title={`Yardsort ${update.version} is available`}
+      onClick={() => useUpdatesStore.getState().show(true)}
+      className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent/15 px-2.5 text-[11px] font-medium text-accent hover:bg-accent/25"
+    >
+      <span aria-hidden className="size-1.5 rounded-full bg-accent" />
+      update
+    </button>
   );
 }

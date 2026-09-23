@@ -1,6 +1,7 @@
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
+import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { openProjectFromDisk } from "@/features/sidebar/actions";
 import type { Preflight } from "@/lib/ipc";
 import { usePreflightStore } from "@/stores/preflight";
@@ -112,7 +113,10 @@ function Checklist({ report, hasProjects }: { report: Preflight; hasProjects: bo
                   .filter((harness) => harness.install)
                   .map((harness) => (
                     <li key={harness.id}>
-                      <div className="font-medium text-ink">{harness.label}</div>
+                      <div className="flex items-center gap-2 font-medium text-ink">
+                        <HarnessIcon id={harness.id} label={harness.label} />
+                        {harness.label}
+                      </div>
                       <Command text={harness.install!.command} />
                       <Link url={harness.install!.url}>Install instructions</Link>
                     </li>

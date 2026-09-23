@@ -7,6 +7,7 @@ import {
   type Suggestion,
   type Workspace,
 } from "@/lib/ipc";
+import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { useFileDrop } from "@/lib/useFileDrop";
 import { formatShortcut } from "@/lib/platform";
 import { insertDroppedPaths } from "./drop";
@@ -278,20 +279,29 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         />
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <select
-            aria-label="Harness"
-            value={harness?.id ?? ""}
-            disabled={busy || !harnessesLoaded}
-            onChange={(event) => chooseHarness(event.target.value)}
-            className={control}
-          >
-            {harnesses.map((h) => (
-              <option key={h.id} value={h.id} disabled={!h.resolvedPath}>
-                {h.label}
-                {h.resolvedPath ? "" : " — not installed"}
-              </option>
-            ))}
-          </select>
+          <span className="relative flex items-center">
+            {harness && (
+              <HarnessIcon
+                id={harness.id}
+                label={harness.label}
+                className="pointer-events-none absolute left-2"
+              />
+            )}
+            <select
+              aria-label="Harness"
+              value={harness?.id ?? ""}
+              disabled={busy || !harnessesLoaded}
+              onChange={(event) => chooseHarness(event.target.value)}
+              className={`${control} ${harness ? "pl-7" : ""}`}
+            >
+              {harnesses.map((h) => (
+                <option key={h.id} value={h.id} disabled={!h.resolvedPath}>
+                  {h.label}
+                  {h.resolvedPath ? "" : " — not installed"}
+                </option>
+              ))}
+            </select>
+          </span>
 
           <input
             aria-label="Model"
@@ -370,7 +380,12 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           <p className="mt-2 flex items-center justify-end gap-2 text-[11px] text-ink-faint">
             <span>
               Assist suggests{" "}
-              {suggestedHarness && <span className="text-ink-muted">{suggestedHarness.label}</span>}
+              {suggestedHarness && (
+                <span className="inline-flex items-center gap-1 align-middle text-ink-muted">
+                  <HarnessIcon id={suggestedHarness.id} label={suggestedHarness.label} size={12} />
+                  {suggestedHarness.label}
+                </span>
+              )}
               {suggestedHarness && offeredEffort ? " · " : ""}
               {offeredEffort && <span className="text-ink-muted">effort {offeredEffort}</span>}
             </span>

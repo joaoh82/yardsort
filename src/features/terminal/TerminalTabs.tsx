@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ContextMenu, type MenuItem } from "@/features/sidebar/ContextMenu";
 import { formatShortcut } from "@/lib/platform";
 import { useSessionsStore } from "@/stores/sessions";
@@ -37,8 +38,9 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
             type="button"
             title={`Start ${harness.label} here`}
             onClick={() => void open(workspaceId, bareHarness(harness.id))}
-            className="rounded px-2 py-0.5 text-[11px] text-ink-faint hover:bg-raised hover:text-ink"
+            className="flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] text-ink-faint hover:bg-raised hover:text-ink"
           >
+            <HarnessIcon id={harness.id} label={harness.label} size={12} />
             {harness.id}
           </button>
         ))}
@@ -96,6 +98,7 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
         className="flex h-full items-center gap-2 pr-1 pl-3"
       >
         <StatusDot activity={activity} attention={tab.attention} />
+        {record && <HarnessIcon id={record.harnessId} label={record.harnessLabel} size={12} />}
         <span className="max-w-40 truncate">{tab.title}</span>
         {status && <span className="text-[11px] text-ink-faint">{status}</span>}
       </button>

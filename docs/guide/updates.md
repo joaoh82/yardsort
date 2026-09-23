@@ -5,8 +5,10 @@ Yardsort tells you when a newer version exists, and — where it can — install
 ## How you find out
 
 Shortly after starting, and once a day, Yardsort reads a small file from its GitHub releases to
-see whether a newer version exists. If one does, an **Update to x.y.z** button appears in the
-status bar. Nothing is downloaded until you press it.
+see whether a newer version exists. Returning to the window looks again if the last check is a
+day old, which is how a machine that spent the night asleep finds out. If a newer version exists,
+an **update** pill appears beside **Settings** at the foot of the projects panel; press it to see
+what the update is. Nothing is downloaded until you ask for it.
 
 You can also look right now: **Settings → General → Check now**, which shows the version you are
 running too. To stop the automatic check, untick **Check for updates automatically** there.
@@ -16,7 +18,7 @@ about you or your work.
 
 ## Installing
 
-Press **Update to x.y.z**. The dialog shows the release notes and, if terminals are running, how
+Press the **update** pill. The dialog shows the release notes and, if terminals are running, how
 many will be stopped by the restart. **Install and restart** downloads the update, verifies it,
 installs it and starts the new version.
 
@@ -24,7 +26,7 @@ installs it and starts the new version.
   pick the workspace and press **Resume** — see [Terminals & sessions](terminals-and-sessions.md).
 - **Updates are verified.** Each one is cryptographically signed by the project, and Yardsort
   refuses anything whose signature does not match the key it was built with.
-- **Later** closes the dialog; the button stays in the status bar until you update.
+- **Later** closes the dialog; the pill stays beside **Settings** until you update.
 
 ## Which copies update themselves
 

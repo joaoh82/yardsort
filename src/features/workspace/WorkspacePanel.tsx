@@ -11,6 +11,7 @@ import { TerminalView } from "@/features/terminal/TerminalView";
 import { useTerminalSessions } from "@/features/terminal/useTerminalSessions";
 import type { HarnessRequest, Project, Workspace } from "@/lib/ipc";
 import { useAppStore } from "@/stores/app";
+import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
 import { shortcutKeys } from "@/lib/platform";
 import { useProjectsStore, useSelectedWorkspace } from "@/stores/projects";
@@ -216,8 +217,14 @@ function LaunchButtons({ onLaunch }: { onLaunch: (harness?: HarnessRequest) => v
       <button type="button" onClick={() => onLaunch()} className={button}>
         shell
       </button>
-      {harnesses.map(({ id }) => (
-        <button key={id} type="button" onClick={() => onLaunch(bareHarness(id))} className={button}>
+      {harnesses.map(({ id, label }) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onLaunch(bareHarness(id))}
+          className={`${button} inline-flex items-center gap-1.5`}
+        >
+          <HarnessIcon id={id} label={label} />
           {id}
         </button>
       ))}
