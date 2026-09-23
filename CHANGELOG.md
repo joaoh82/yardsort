@@ -3,6 +3,15 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **`Shift+Enter` adds a line in an agent's terminal.** It used to send the message, because the
+  terminal encoded it as a plain `Enter`. It is now sent the way kitty, Ghostty and foot send it,
+  which Claude Code, Codex, Grok and OpenCode all read as a new line. Shells still get `Enter`.
+- **Drop a file on a terminal to give the agent its path.** The terminal is outlined while you
+  hover, and the path — several, if you drop several — is pasted at the cursor, quoted for the
+  shell. See [Typing to an agent](docs/guide/terminals-and-sessions.md#typing-to-an-agent).
+
 ## 0.8.2
 
 - **Windows: an agent installed while Yardsort is running is now found by "Check again".** It

@@ -2,6 +2,9 @@
 export const isMac =
   typeof navigator !== "undefined" && /mac/i.test(navigator.platform || navigator.userAgent);
 
+/** True on Windows, where paths are quoted rather than escaped for the shell. */
+export const isWindows = typeof navigator !== "undefined" && /^win/i.test(navigator.platform);
+
 /**
  * Whether the app's primary modifier ("Mod") is held.
  *

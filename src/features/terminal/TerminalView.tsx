@@ -1,3 +1,4 @@
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { FitAddon } from "@xterm/addon-fit";
@@ -7,8 +8,9 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 import { ipc, type SessionId } from "@/lib/ipc";
-import { isMac, isModKey, shortcutKey } from "@/lib/platform";
+import { isMac, isModKey, isWindows, shortcutKey } from "@/lib/platform";
 import { useTerminalStore } from "@/stores/terminals";
+import { droppedPathsText, shiftEnterInput } from "./input";
 import { attachRenderer, rendererPreference, type RendererKind } from "./renderer";
 import { darkTheme, FONT_FAMILY, lightTheme } from "./theme";
 import { createInputWriter } from "./writer";
@@ -78,11 +80,33 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
     };
     prefersLight.addEventListener("change", onThemeChange);
 
+    let disposed = false;
+
     // --- input -------------------------------------------------------------------------------
     const write = createInputWriter((data) => ipc.ptyWrite(sessionId, data));
     const onData = term.onData(write);
 
+    // Shift+Enter has no encoding older than the kitty keyboard protocol. A program that queries
+    // (`CSI ? u`), pushes (`CSI > flags u`) or sets (`CSI = flags u`) the protocol reads it; so
+    // does every agent, whether or not it announces itself — Grok does not. Agent tabs are known
+    // by their conversation record; a shell has none until something in it speaks up.
+    let speaksCsiU = false;
+    const csiU = ["?", ">", "="].map((prefix) =>
+      term.parser.registerCsiHandler({ prefix, final: "u" }, () => {
+        speaksCsiU = true;
+        return false;
+      }),
+    );
+    const isAgent = () =>
+      useTerminalStore.getState().tabs.some((t) => t.id === sessionId && t.recordId !== null);
+
     term.attachCustomKeyEventHandler((event) => {
+      const newline = shiftEnterInput(event, speaksCsiU || isAgent());
+      if (newline !== null) {
+        write(newline);
+        event.preventDefault();
+        return false;
+      }
       if (event.type !== "keydown" || !isModKey(event)) return true;
       const key = shortcutKey(event);
       if (key === "c" && term.hasSelection()) {
@@ -98,6 +122,40 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
       event.preventDefault();
       return false;
     });
+
+    // --- drops -------------------------------------------------------------------------------
+    // The webview swallows native file drops and reports them as Tauri events instead of DOM
+    // ones. A drop over this view pastes the paths, as a terminal emulator would, so an agent
+    // gets the file to read and a shell gets an argument. The position is typed as physical
+    // pixels but is not on every platform: wry passes GTK widget coordinates on Linux and NSView
+    // points on macOS — logical, both — and `ScreenToClient` pixels on Windows, and Tauri wraps
+    // all three as they are (tauri-runtime-wry 2.11, wry 0.55).
+    const isOver = (position: { x: number; y: number }) => {
+      const scale = isWindows ? window.devicePixelRatio : 1;
+      const x = position.x / scale;
+      const y = position.y / scale;
+      const rect = container.getBoundingClientRect();
+      return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+    };
+    const setHover = (over: boolean) => {
+      if (over) container.dataset.drop = "over";
+      else delete container.dataset.drop;
+    };
+    let unlistenDrop: (() => void) | null = null;
+    void getCurrentWebview()
+      .onDragDropEvent(({ payload }) => {
+        if (disposed || payload.type === "leave") return setHover(false);
+        const over = isOver(payload.position);
+        if (payload.type !== "drop") return setHover(over);
+        setHover(false);
+        if (!over || payload.paths.length === 0) return;
+        term.paste(droppedPathsText(payload.paths, isWindows));
+        term.focus();
+      })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else unlistenDrop = unlisten;
+      }, console.error);
 
     // --- size --------------------------------------------------------------------------------
     const currentSize = () => ({ cols: term.cols, rows: term.rows });
@@ -116,7 +174,6 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
     });
 
     // --- attach ------------------------------------------------------------------------------
-    let disposed = false;
     let attachment: number | null = null;
     void (async () => {
       fit.fit();
@@ -139,6 +196,8 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
       cancelAnimationFrame(frame);
       observer.disconnect();
       prefersLight.removeEventListener("change", onThemeChange);
+      unlistenDrop?.();
+      for (const handler of csiU) handler.dispose();
       onData.dispose();
       onResize.dispose();
       onRender.dispose();
@@ -147,5 +206,10 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
     };
   }, [sessionId, rendererOverride]);
 
-  return <div ref={containerRef} className="h-full w-full overflow-hidden bg-canvas p-2" />;
+  return (
+    <div
+      ref={containerRef}
+      className="h-full w-full overflow-hidden bg-canvas p-2 data-[drop=over]:outline-2 data-[drop=over]:-outline-offset-2 data-[drop=over]:outline-accent"
+    />
+  );
 }
