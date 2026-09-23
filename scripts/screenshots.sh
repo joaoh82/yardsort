@@ -19,8 +19,9 @@
 #   Forget to clear it; the launch line below makes the store unreachable for that one process
 #   instead. XDG_RUNTIME_DIR is left alone — the Wayland socket is under it.
 #
-# See AGENTS.md. `shoot` needs Hyprland, grim and jq; on anything else, size the window to the
-# logical equivalent of 1875x1175 and capture it with whatever your desktop provides.
+# See AGENTS.md. `shoot` finds the window by the profile behind it, so an ordinary copy of
+# Yardsort left open cannot be captured by mistake. It needs Hyprland, grim and jq; on anything
+# else, size the window to the logical equivalent of 1875x1175 and capture it by hand.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo=$(pwd)
@@ -37,6 +38,18 @@ HEIGHT=1175
 # Commands the agents need on a PATH that holds nothing else. node and npm are here because the
 # demo project's tests are `node --test`, and an agent has nothing but this PATH to run them.
 SHIMMED=(claude codex grok opencode node npm npx git)
+
+# Hyprland 0.56 moved dispatchers to a Lua API and the old argv form stopped parsing, so each
+# call is made the new way and falls back to the old one. Omarchy's own scripts do the same.
+dispatch() {
+  local lua=$1
+  shift
+  hyprctl dispatch "$lua" >/dev/null 2>&1 && return 0
+  hyprctl dispatch "$@" >/dev/null 2>&1 && return 0
+  # Without this the script dies on `set -e` with nothing but hyprctl's exit code.
+  echo "hyprctl rejected both forms of this dispatch: $lua" >&2
+  return 1
+}
 
 usage() {
   sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
@@ -236,30 +249,47 @@ shoot() {
     exit 1
   fi
 
-  echo "Click the Yardsort window you are shooting…"
-  local n
-  for n in 3 2 1; do printf '\r  %d ' "$n"; sleep 1; done
-  printf '\r'
+  # Which window to shoot is decided by the profile behind it, never by the title or by which
+  # one happens to be focused: an ordinary copy of Yardsort is also called "Yardsort", and one
+  # was captured that way once — real projects, real paths and all.
+  local pid candidate
+  for candidate in $(hyprctl clients -j | jq -r '.[] | select(.title == "Yardsort") | .pid'); do
+    if tr '\0' '\n' <"/proc/$candidate/environ" 2>/dev/null |
+      grep -qxF "YARDSORT_DATA_DIR=$SHOT/data"; then
+      pid=$candidate
+      break
+    fi
+  done
+  if [ -z "${pid:-}" ]; then
+    echo "No Yardsort window is running on the throwaway profile ($SHOT/data)." >&2
+    echo "Run 'scripts/screenshots.sh setup' and start the app with the line it prints." >&2
+    exit 1
+  fi
 
-  # The focused window, so a second Yardsort — an installed copy you left open — cannot be
-  # caught by mistake.
-  local title
-  title=$(hyprctl activewindow -j | jq -r .title)
-  [ "$title" = Yardsort ] || { echo "The focused window is '$title', not Yardsort." >&2; exit 1; }
-
-  local scale logical_w logical_h
+  local scale logical_w logical_h window
   scale=$(hyprctl monitors -j | jq -r '[.[] | select(.focused)][0].scale')
   logical_w=$(awk -v w="$WIDTH" -v s="$scale" 'BEGIN { printf "%d", w / s }')
   logical_h=$(awk -v h="$HEIGHT" -v s="$scale" 'BEGIN { printf "%d", h / s }')
-  hyprctl dispatch resizeactive exact "$logical_w" "$logical_h" >/dev/null
+  window="address:$(hyprctl clients -j | jq -r ".[] | select(.pid == $pid) | .address")"
+
+  # grim captures a region of the screen, not a window, so whatever is on top is what lands in
+  # the file. Raise the target first.
+  dispatch "hl.dsp.focus({ window = \"$window\" })" focuswindow "$window"
+
+  # A tiled window cannot be given an exact size, so float it first.
+  dispatch "hl.dsp.window.float({ window = \"$window\", action = \"enable\" })" \
+    setfloating "$window"
+  dispatch "hl.dsp.window.resize({ window = \"$window\", x = $logical_w, y = $logical_h })" \
+    resizewindowpixel "exact $logical_w $logical_h,$window"
   sleep 0.5
 
   local x y w h
-  read -r x y w h < <(hyprctl activewindow -j |
-    jq -r '"\(.at[0]) \(.at[1]) \(.size[0]) \(.size[1])"')
+  read -r x y w h < <(hyprctl clients -j |
+    jq -r ".[] | select(.pid == $pid) | \"\(.at[0]) \(.at[1]) \(.size[0]) \(.size[1])\"")
   if [ "$w" != "$logical_w" ] || [ "$h" != "$logical_h" ]; then
     echo "Note: the window measures ${w}x${h}, not ${logical_w}x${logical_h}." >&2
-    echo "Tiled or maximised windows cannot be resized — float it first (Super+V on Omarchy)." >&2
+    echo "A maximised or fullscreen window cannot be given an exact size — leave it a normal" >&2
+    echo "window and run this again." >&2
   fi
 
   if [ "$name" = size ]; then
