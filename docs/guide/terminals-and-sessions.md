@@ -88,6 +88,21 @@ opening anything:
 This comes purely from terminal activity. Agents animate a spinner while they think, so for them
 silence really does mean "your turn".
 
+## The badge on a workspace row
+
+The dot says whether something is running; the badge at the right of a workspace row in the
+sidebar says what its **agents** have got to, so you do not have to open a workspace to find out:
+
+| Badge           | Meaning                                                                                                                                   |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **1**, **2**, … | that many agents are running but quiet — your turn. Filled in solid if they finished while you were elsewhere and you have not looked yet |
+| **✓**           | every agent here has ended, cleanly                                                                                                       |
+| **nothing**     | they are all working — the pulsing dot already says so, and a row that lights up only when it wants something is worth glancing at        |
+| **✗**           | one of them exited with an error                                                                                                          |
+
+Shells are not counted. A prompt sitting there is not news, and a workspace whose agent has
+finished should not look busy because a shell is still open beside it.
+
 ## Notifications
 
 When an agent has been busy for a while (eight seconds or more), goes quiet, and Yardsort is

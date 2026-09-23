@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Workspace rows say what their agents are up to.** A number at the end of the row counts the
+  agents waiting for you — filled in solid if they finished while you were elsewhere — a **✓**
+  means they have all ended, and a **✗** that one exited with an error. Nothing to click. See
+  [The badge on a workspace row](docs/guide/terminals-and-sessions.md#the-badge-on-a-workspace-row).
+
 ## 0.9.1
 
 - **Drop a file on the composer to point the first message at it.** The same gesture that pastes
