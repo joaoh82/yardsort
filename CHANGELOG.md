@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.8.2
 
 - **Windows: an agent installed while Yardsort is running is now found by "Check again".** It
   never was — a process's environment on Windows is fixed when it starts, and the installer
