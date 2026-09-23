@@ -12,7 +12,6 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 vi.mock("@tauri-apps/plugin-opener", () => opener);
 
-import { StatusBar } from "@/features/shell/StatusBar";
 import { useAppStore } from "@/stores/app";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
 import { CHECK_EVERY_MS, FIRST_CHECK_MS, useUpdatesStore } from "@/stores/updates";
@@ -46,6 +45,7 @@ beforeEach(() => {
   useUpdatesStore.setState({
     status: null,
     checking: false,
+    checkedAt: null,
     progress: null,
     installing: false,
     error: null,
@@ -104,14 +104,23 @@ describe("checking for updates", () => {
     warn.mockRestore();
   });
 
-  it("announces an update in the status bar, and the pill opens the dialog", async () => {
-    core.updateCheck.mockResolvedValue(status());
-    render(<StatusBar />);
-    expect(screen.queryByRole("button", { name: /Update to/ })).not.toBeInTheDocument();
+  it("looks again when the window comes back, but only once the last check is a day old", async () => {
+    vi.useFakeTimers();
+    core.updateCheck.mockResolvedValue(status({ available: null }));
+    useAppStore.setState(releaseBuild);
+    render(<Checks />);
+    await act(() => vi.advanceTimersByTimeAsync(FIRST_CHECK_MS));
+    expect(core.updateCheck).toHaveBeenCalledTimes(1);
 
-    await act(() => useUpdatesStore.getState().check());
-    await userEvent.setup().click(screen.getByRole("button", { name: "Update to 0.3.1" }));
-    expect(useUpdatesStore.getState().open).toBe(true);
+    // Back at the window a minute later: nothing worth a request can have changed.
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    expect(core.updateCheck).toHaveBeenCalledTimes(1);
+
+    // A day asleep leaves the interval pending, so coming back is when we find out.
+    act(() => useUpdatesStore.setState({ checkedAt: Date.now() - CHECK_EVERY_MS }));
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    expect(core.updateCheck).toHaveBeenCalledTimes(2);
   });
 });
 

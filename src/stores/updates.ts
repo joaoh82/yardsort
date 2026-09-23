@@ -4,6 +4,8 @@ import { errorMessage, hasCore, ipc, type DownloadProgress, type UpdateStatus } 
 interface UpdatesState {
   status: UpdateStatus | null;
   checking: boolean;
+  /** When the last check finished, successfully or not. `null` until one has. */
+  checkedAt: number | null;
   /** Set while an update downloads and installs. */
   progress: DownloadProgress | null;
   installing: boolean;
@@ -23,6 +25,7 @@ interface UpdatesState {
 export const useUpdatesStore = create<UpdatesState>((set, get) => ({
   status: null,
   checking: false,
+  checkedAt: null,
   progress: null,
   installing: false,
   error: null,
@@ -37,7 +40,7 @@ export const useUpdatesStore = create<UpdatesState>((set, get) => ({
       if (manual) set({ error: errorMessage(error) });
       else console.warn("Update check failed:", errorMessage(error));
     } finally {
-      set({ checking: false });
+      set({ checking: false, checkedAt: Date.now() });
     }
   },
 
@@ -58,3 +61,7 @@ export const useUpdatesStore = create<UpdatesState>((set, get) => ({
 /** Check a few seconds after start, then once a day. */
 export const FIRST_CHECK_MS = 8_000;
 export const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
+
+/** Whether the last check is old enough to be worth repeating — see `useUpdateChecks`. */
+export const checkIsStale = (checkedAt: number | null, now = Date.now()) =>
+  checkedAt === null || now - checkedAt >= CHECK_EVERY_MS;
