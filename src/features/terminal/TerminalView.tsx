@@ -7,6 +7,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
+import { isDragOver } from "@/lib/dragPosition";
 import { ipc, type SessionId } from "@/lib/ipc";
 import { isMac, isModKey, isWindows, shortcutKey } from "@/lib/platform";
 import { useTerminalStore } from "@/stores/terminals";
@@ -126,17 +127,10 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
     // --- drops -------------------------------------------------------------------------------
     // The webview swallows native file drops and reports them as Tauri events instead of DOM
     // ones. A drop over this view pastes the paths, as a terminal emulator would, so an agent
-    // gets the file to read and a shell gets an argument. The position is typed as physical
-    // pixels but is not on every platform: wry passes GTK widget coordinates on Linux and NSView
-    // points on macOS — logical, both — and `ScreenToClient` pixels on Windows, and Tauri wraps
-    // all three as they are (tauri-runtime-wry 2.11, wry 0.55).
-    const isOver = (position: { x: number; y: number }) => {
-      const scale = isWindows ? window.devicePixelRatio : 1;
-      const x = position.x / scale;
-      const y = position.y / scale;
-      const rect = container.getBoundingClientRect();
-      return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
-    };
+    // gets the file to read and a shell gets an argument. Position units differ by platform;
+    // `isDragOver` accounts for that.
+    const isOver = (position: { x: number; y: number }) =>
+      isDragOver(container, position, isWindows);
     const setHover = (over: boolean) => {
       if (over) container.dataset.drop = "over";
       else delete container.dataset.drop;

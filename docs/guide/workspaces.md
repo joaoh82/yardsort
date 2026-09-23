@@ -16,7 +16,7 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 
 | Field       | What it does                                                                                                                                                      |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Message** | The agent's first prompt. `Enter` starts, `Shift+Enter` makes a new line. Leave it empty to just open the agent.                                                  |
+| **Message** | The agent's first prompt. `Enter` starts, `Shift+Enter` makes a new line. Leave it empty to just open the agent. Drop a file here to insert its path — see below. |
 | **Harness** | Which agent to run. The list comes from [settings](settings.md).                                                                                                  |
 | **Model**   | Free text with suggestions. Empty means "let the agent use its default" — no flag is passed at all.                                                               |
 | **Effort**  | Offered only for agents that have the concept.                                                                                                                    |
@@ -25,6 +25,13 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 Your last choices are remembered per project. With [Assist](assist.md) switched on, a line under
 the pickers may offer a harness and an effort for what you are typing; **Use** applies it, and
 ignoring it does nothing.
+
+**Drop a file on the composer** to put its path in the message, at the cursor, so the agent starts
+already pointed at it. Drop several and each path is added, separated by spaces. The composer is
+outlined while the file is over it. The path is written as plain text in the prompt, and one that
+contains a space is quoted. The same gesture on a
+[terminal](terminals-and-sessions.md#typing-to-an-agent) pastes the path into a program that is
+already running, quoted for the shell.
 
 **Nothing is created until you press Start** —
 cancelling (`Esc`) leaves no trace.

@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Drop a file on the composer to point the first message at it.** The same gesture that pastes
+  a path into a running terminal now inserts the path into the message you start a workspace
+  with, at the cursor. Several files land as several paths. See
+  [Starting one: the composer](docs/guide/workspaces.md#starting-one-the-composer).
+
 ## 0.9.0
 
 - **`Shift+Enter` adds a line in an agent's terminal.** It used to send the message, because the
