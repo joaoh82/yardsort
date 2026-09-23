@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.9.0
 
 - **`Shift+Enter` adds a line in an agent's terminal.** It used to send the message, because the
   terminal encoded it as a plain `Enter`. It is now sent the way kitty, Ghostty and foot send it,
