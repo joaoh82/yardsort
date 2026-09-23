@@ -6834,6 +6834,7 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "uuid",
  "which",
+ "winreg 0.55.0",
 ]
 
 [[package]]

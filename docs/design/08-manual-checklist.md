@@ -28,6 +28,11 @@ that fails is worth more than a row that passes: say what happened.
 |     | The welcome screen lists git and at least one agent as found. **Check again** re-reads without a restart.                         |
 |     | Status bar, bottom right: `env: login shell` (macOS) or `env: process` (Windows), a plausible PATH count, and **`daemon <pid>`**. |
 |     | `daemon <pid>` is present, not `no daemon`. If it says `no daemon`, hover it — that tooltip is the finding.                       |
+|     | **Windows:** with Yardsort open, install an agent it did not find, then press **Check again**. It is found, without a restart.    |
+
+The Windows row is a bug that shipped: a process's environment there is fixed when it starts, so
+until 0.8.2 **Check again** re-read a stale copy and could never find something installed a
+moment ago. `PATH` now comes back from the registry as well, which is where an installer writes.
 
 `env: process` is correct on Windows and `env: login shell` on macOS; the reverse on either is a
 bug. If macOS says `process`, the login-shell probe failed and harnesses installed through
