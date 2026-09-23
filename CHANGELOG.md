@@ -5,6 +5,21 @@ has the downloads and the full commit lists.
 
 ## 0.9.2
 
+- **Commit, push and open a pull request from the panel.** Under the changed-files list: a
+  message box that commits everything the workspace has changed, a **Push** button once the
+  branch is ahead of its remote, and **Open pull request** — which pushes first if it needs to,
+  and fills the title and description in from the commits the remote has not got yet. With the
+  [GitHub CLI](https://cli.github.com) it opens the pull request from here; without it the branch
+  is pushed and your browser opens the forge's own form, which works for GitHub, GitLab,
+  Bitbucket and the Gitea family alike. Yardsort holds no forge credentials of its own. See
+  [Commits & pull requests](docs/guide/commits-and-pull-requests.md).
+
+- **A workspace's pull request and its checks, on its row.** The number appears in the sidebar
+  once there is one, coloured by CI — green when every check has finished and passed, amber while
+  one is running, red if one failed — and says **merged** or **closed** when it is over. One
+  request per project, not one per workspace. Needs `gh`; without it nothing shows and nothing
+  complains. See [On the workspace row](docs/guide/commits-and-pull-requests.md#on-the-workspace-row).
+
 - **A waiting update is announced beside Settings.** The **update** pill at the foot of the
   projects panel appears when the daily check finds a newer version, and opens the update dialog;
   it replaces the button that used to sit in the status bar. Coming back to the window also looks

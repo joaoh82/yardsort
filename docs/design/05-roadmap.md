@@ -408,4 +408,6 @@ rediscovering later. None of them is committed to; the point is to know what is 
 
 Two further Superset ideas are already covered elsewhere: richer per-workspace status ("running",
 "blocked", "ready for review") is what [open question 16](06-open-questions.md) decided to build
-with Assist, and its PR view is the first item in the list above.
+with Assist, and its PR view is the first item in the list above — now done, as far as a pull
+request's number and its checks go. What Superset still has and this does not is the review
+itself: comments, files reviewed, merging from the app.

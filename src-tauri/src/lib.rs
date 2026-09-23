@@ -9,6 +9,7 @@ mod commands;
 #[cfg(target_os = "linux")]
 mod display;
 mod preflight;
+mod publish;
 mod quit;
 mod sessions;
 mod state;
@@ -18,7 +19,9 @@ mod updates;
 // The core is its own crate, so the `ys` CLI can use it without linking a webview — see
 // `yardsort_core`. It is re-exported under the names this crate has always used, which is why
 // `crate::store`, `crate::git` and the rest still resolve everywhere below.
-pub use yardsort_core::{daemon, env, error, git, harness, legacy, settings, store};
+pub use yardsort_core::{
+    daemon, env, error, forge, git, harness, legacy, program, settings, store,
+};
 
 /// The domain modules whose commands live here but whose logic lives in the core.
 mod projects {
@@ -69,6 +72,11 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             changes::commands::workspace_files,
             changes::commands::workspace_file,
             changes::commands::workspace_watch,
+            publish::commands::workspace_publish_state,
+            publish::commands::workspace_commit,
+            publish::commands::workspace_push,
+            publish::commands::workspace_open_pull_request,
+            publish::commands::project_pull_requests,
             changes::commands::open_in_editor,
             assist::commands::assist_status,
             assist::commands::assist_save_key,

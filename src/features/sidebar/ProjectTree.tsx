@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Project, Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
+import { pullRequestFor, usePublishStore } from "@/stores/publish";
 import { useTerminalStore } from "@/stores/terminals";
 import {
   archiveWorkspace,
@@ -14,6 +15,7 @@ import { harnessState, summarise } from "@/features/terminal/activity";
 import { HarnessBadge } from "@/features/terminal/HarnessBadge";
 import { StatusDot } from "@/features/terminal/StatusDot";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { PullRequestBadge } from "./PullRequestBadge";
 import { RenameDialog } from "./RenameDialog";
 
 export function ProjectTree() {
@@ -104,7 +106,12 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
           {project.workspaces
             .filter((workspace) => !workspace.archived)
             .map((workspace) => (
-              <WorkspaceNode key={workspace.id} workspace={workspace} disabled={project.missing} />
+              <WorkspaceNode
+                key={workspace.id}
+                workspace={workspace}
+                projectId={project.id}
+                disabled={project.missing}
+              />
             ))}
           {composing && (
             <li className="flex h-7 items-center gap-2 bg-raised pr-2 pl-7 text-ink-muted italic">
@@ -142,7 +149,12 @@ function ArchivedGroup({ project }: { project: Project }) {
       {open && (
         <ul role="group">
           {archived.map((workspace) => (
-            <WorkspaceNode key={workspace.id} workspace={workspace} disabled={project.missing} />
+            <WorkspaceNode
+              key={workspace.id}
+              workspace={workspace}
+              projectId={project.id}
+              disabled={project.missing}
+            />
           ))}
         </ul>
       )}
@@ -150,15 +162,27 @@ function ArchivedGroup({ project }: { project: Project }) {
   );
 }
 
-function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled: boolean }) {
+function WorkspaceNode({
+  workspace,
+  projectId,
+  disabled,
+}: {
+  workspace: Workspace;
+  projectId: string;
+  disabled: boolean;
+}) {
   const selected = useProjectsStore(
     (s) => s.selectedWorkspaceId === workspace.id && s.composingProjectId === null,
   );
+  // Select the project's own entry, never a derived object: a selector that built one would
+  // hand back a new value on every render and re-render for ever.
+  const found = usePublishStore((s) => s.byProject[projectId]);
+  const head = workspace.head;
+  const pr = pullRequestFor(found, head && !head.detached ? head.label : undefined);
   const allTabs = useTerminalStore((s) => s.tabs);
   const tabs = allTabs.filter((tab) => tab.workspaceId === workspace.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
-  const head = workspace.head;
   const isWorktree = workspace.kind === "worktree";
   const gone = workspace.missing || workspace.archived;
   const unusable = disabled || gone;
@@ -259,6 +283,7 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
                 {head.detached ? `@${head.label}` : head.label}
               </span>
             )}
+            {pr && <PullRequestBadge pr={pr} />}
             <HarnessBadge
               state={harnessState(tabs)}
               attention={tabs.some((tab) => tab.attention)}

@@ -4,8 +4,10 @@ import { hasCore, ipc } from "@/lib/ipc";
 import { useAssistStore } from "@/stores/assist";
 import { useChangesStore } from "@/stores/changes";
 import { recall, useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { ChangeList } from "./ChangeList";
 import { FileTree } from "./FileTree";
+import { PublishBar } from "./PublishBar";
 import { Viewer } from "./Viewer";
 import { keyOf, titleOf } from "./viewing";
 
@@ -36,6 +38,7 @@ export function ChangesPanel() {
     // Assist, when it is on, checks the same workspace shortly after the writing stops.
     void useAssistStore.getState().load();
     useAssistStore.getState().follow(workspaceId);
+    void usePublishStore.getState().follow(workspaceId);
   }, [workspaceId]);
 
   useEffect(() => {
@@ -44,6 +47,9 @@ export function ChangesPanel() {
       setRevision((value) => value + 1);
       void useChangesStore.getState().refresh();
       useAssistStore.getState().reviewSoon();
+      // A commit or a checkout moves what there is to push; the forge has not changed, so its
+      // last answer is reused rather than asked for again.
+      void usePublishStore.getState().refresh();
     };
     const unlisten = ipc.onWorkspaceFilesChanged((changedId) => {
       if (changedId === useChangesStore.getState().workspaceId) refresh();
@@ -75,6 +81,7 @@ export function ChangesPanel() {
       ) : (
         <p className="p-3 text-ink-faint">Loading…</p>
       )}
+      {tab === "changes" && workspaceId && !error && <PublishBar changes={changes} />}
     </div>
   );
 

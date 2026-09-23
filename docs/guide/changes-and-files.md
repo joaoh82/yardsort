@@ -48,8 +48,11 @@ By default the tree shows what git would: `.git`, and everything ignored by `.gi
 browse. Press **ignored** at the right of the tab bar to show those too; they appear dimmed so you
 can tell them apart. The choice is remembered.
 
-## Reviewing is read-only
+## Sending the work on
 
-Yardsort shows you changes; it does not stage, commit or discard them. Do that the way you
-already do — ask the agent, use a shell tab (`Ctrl+Shift+T`), or open the folder in your editor
-or git client. The workspace is an ordinary git checkout at the path shown in the footer.
+Under the list are the three steps that get a workspace's work out: commit, push, and open the
+pull request. See [Commits & pull requests](commits-and-pull-requests.md).
+
+Reviewing itself stays read-only. Yardsort will not stage part of a change or discard one — do
+that the way you already do, with a shell tab (`Ctrl+Shift+T`), your editor or your git client.
+The workspace is an ordinary git checkout at the path shown in the footer.

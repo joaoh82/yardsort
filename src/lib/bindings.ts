@@ -56,6 +56,28 @@ export const commands = {
 	workspaceFile: (workspaceId: string, path: string) => typedError<Content, IpcError>(__TAURI_INVOKE("workspace_file", { workspaceId, path })),
 	/**  Watch this workspace's files (replacing any previous watch); `None` stops watching. */
 	workspaceWatch: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_watch", { workspaceId })),
+	/**  Where the selected workspace stands with its remote: what it can commit, push and open. */
+	workspacePublishState: (workspaceId: string, refresh: boolean) => typedError<PublishState, IpcError>(__TAURI_INVOKE("workspace_publish_state", { workspaceId, refresh })),
+	/**
+	 *  Commit everything the workspace has changed.
+	 * 
+	 *  Everything, because the panel offers no way to leave a file out — see
+	 *  [`Git::commit_all`](crate::git::Git::commit_all). Nothing is staged until git has an identity
+	 *  to commit with, so the common first failure does not leave a half-staged tree behind.
+	 */
+	workspaceCommit: (workspaceId: string, message: string) => typedError<PublishState, IpcError>(__TAURI_INVOKE("workspace_commit", { workspaceId, message })),
+	/**  Push the workspace's branch, setting its upstream the first time. */
+	workspacePush: (workspaceId: string) => typedError<PublishState, IpcError>(__TAURI_INVOKE("workspace_push", { workspaceId })),
+	/**
+	 *  Open a pull request for the workspace's branch, pushing first if it needs it.
+	 * 
+	 *  Pushing first because the alternative is a button that fails and tells you to press another
+	 *  one: a branch the forge has never seen cannot have a pull request. With `gh` this ends on the
+	 *  pull request; without it, on the forge's form with both branches already filled in.
+	 */
+	workspaceOpenPullRequest: (workspaceId: string, title: string, body: string, draft: boolean) => typedError<PullRequestOpened, IpcError>(__TAURI_INVOKE("workspace_open_pull_request", { workspaceId, title, body, draft })),
+	/**  Every pull request `gh` knows for a project, so each workspace row can show its own. */
+	projectPullRequests: (projectId: string, refresh: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh })),
 	/**  Open a file (or the workspace folder, when `path` is `None`) in the user's editor. */
 	openInEditor: (workspaceId: string, path: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("open_in_editor", { workspaceId, path })),
 	assistStatus: () => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_status")),
@@ -204,6 +226,11 @@ export type ChangeSet = {
 	base: string | null,
 };
 
+/**  What CI says about a pull request's head commit, rolled up into the one thing a row can show. */
+export type Checks = 
+/**  Nothing is configured, or nothing has reported yet. */
+"none" | "running" | "passing" | "failing";
+
 export type Content = 
 /**  The file does not exist on this side (added, or deleted). */
 { type: "absent" } | { type: "text"; text: string } | { type: "binary" } | { type: "tooLarge"; bytes: number };
@@ -315,6 +342,14 @@ export type FileReview = {
 	/**  Why this file was not looked at, if it was not. */
 	notChecked: string | null,
 };
+
+/**  Which forge a host is, as far as the shape of its URLs goes. */
+export type ForgeKind = "github" | "gitlab" | "bitbucket" | 
+/**
+ *  Gitea, Forgejo, and anything else self-hosted: assumed to speak GitHub's URL shapes,
+ *  which the Gitea family does. A wrong guess costs a link that 404s, not data.
+ */
+"unknown";
 
 export type GitStatus = {
 	path: string | null,
@@ -481,6 +516,20 @@ export type Project = {
 	workspaces: Workspace[],
 };
 
+/**  What `gh` says about one project's pull requests. */
+export type ProjectPullRequests = {
+	/**
+	 *  `gh` is installed. Without it there are no pull request numbers and no check results
+	 *  anywhere in the app — which is a supported state, not a fault.
+	 */
+	gh: boolean,
+	pullRequests: PullRequest[],
+	/**  Why the list is empty when it should not have been. */
+	problem: string | null,
+	/**  The problem is that nobody is logged in, which has its own one-line fix. */
+	loggedOut: boolean,
+};
+
 export type PromptTransport = 
 /**  The prompt is an argument. Simple and reliable. */
 "argv" | 
@@ -492,6 +541,71 @@ export type PromptTransport =
 
 /**  Emitted for every [`HostEvent`]. */
 export type PtyHostEvent = HostEvent;
+
+/**
+ *  Where a workspace stands: what it can commit, push and open, and what happened to it.
+ * 
+ *  Deliberately not the *count* of uncommitted files — the changes panel already has that list
+ *  and asking git twice for the same thing is how the two come to disagree.
+ */
+export type PublishState = {
+	/**  `None` when HEAD is detached or unborn: there is nothing to push or open. */
+	branch: string | null,
+	/**  What a pull request would merge into. */
+	base: string | null,
+	/**  Who commits would be by, or `None` when git has no identity configured. */
+	identity: string | null,
+	/**  The remote to push to, `origin` for choice. */
+	remote: string | null,
+	/**  The remote read as a repository on a forge; `None` for a remote that is a local path. */
+	repo: Repo | null,
+	/**  What the branch tracks, once it has been pushed. */
+	upstream: string | null,
+	/**
+	 *  Commits the remote does not have: measured against the upstream once there is one, and
+	 *  against the base branch before that.
+	 */
+	ahead: number,
+	behind: number,
+	/**  Their subjects, newest first — what a pull request would be about. */
+	unpushed: string[],
+	pullRequest: PullRequest | null,
+	/**
+	 *  Opening one makes sense: a branch that is not its own base, on a forge, without a pull
+	 *  request already open. Decided here rather than in the webview, which holds no truth.
+	 */
+	canOpen: boolean,
+	/**  `gh` is installed, so a pull request can be opened without leaving Yardsort. */
+	gh: boolean,
+	/**
+	 *  Why there is no forge answer, when there should have been one. Not a failure — it is why
+	 *  the row shows no number, which is worth saying somewhere the user is already looking.
+	 */
+	problem: string | null,
+	/**  That reason is "log in first", which has a one-line fix worth printing. */
+	loggedOut: boolean,
+};
+
+/**  A pull request, as much of it as a workspace row and the panel need. */
+export type PullRequest = {
+	number: number,
+	url: string,
+	title: string,
+	/**  The branch it would merge, which is how a workspace finds its own. */
+	branch: string,
+	state: PullRequestState,
+	draft: boolean,
+	checks: Checks,
+};
+
+/**  A pull request that now exists, or the form to fill in to make one. */
+export type PullRequestOpened = {
+	url: string,
+	/**  `gh` opened it. When false the URL is the forge's own form, to finish in a browser. */
+	created: boolean,
+};
+
+export type PullRequestState = "open" | "merged" | "closed";
 
 /**  Asks the webview to put the question to the user. It answers with [`app_quit`]. */
 export type QuitRequested = {
@@ -517,6 +631,15 @@ export type Relevance =
 "unrelated" | 
 /**  The model had no clear read. */
 "unsure";
+
+/**  A repository on a forge, as read out of a remote URL. */
+export type Repo = {
+	host: string,
+	/**  The owner, which on GitLab may itself contain `/` for subgroups. */
+	owner: string,
+	name: string,
+	kind: ForgeKind,
+};
 
 export type Review = {
 	files: FileReview[],

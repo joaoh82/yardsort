@@ -31,6 +31,10 @@ import {
   type NewWorkspace,
   type Preflight,
   type Project,
+  type ProjectPullRequests,
+  type PublishState,
+  type PullRequest,
+  type PullRequestOpened,
   type Relevance,
   type Review,
   type ReviewFlag,
@@ -74,6 +78,10 @@ export type {
   NewWorkspace,
   Preflight,
   Project,
+  ProjectPullRequests,
+  PublishState,
+  PullRequest,
+  PullRequestOpened,
   Relevance,
   Review,
   ReviewFlag,
@@ -217,6 +225,29 @@ export const ipc = {
   /** Open a file — or the workspace folder, for `null` — in the user's editor. */
   openInEditor: (workspaceId: string, path: string | null) =>
     done(commands.openInEditor(workspaceId, path)),
+
+  /**
+   * Where a workspace stands with its remote: branch, base, what is unpushed, and the pull
+   * request if there is one. `refresh` goes back to `gh` instead of reusing its last answer.
+   */
+  workspacePublishState: (workspaceId: string, refresh = false) =>
+    unwrap(commands.workspacePublishState(workspaceId, refresh)),
+  /** Commit everything the workspace has changed. Resolves to where it stands afterwards. */
+  workspaceCommit: (workspaceId: string, message: string) =>
+    unwrap(commands.workspaceCommit(workspaceId, message)),
+  /** Push the branch, setting its upstream the first time. */
+  workspacePush: (workspaceId: string) => unwrap(commands.workspacePush(workspaceId)),
+  /**
+   * Open a pull request, pushing first if it needs it. Without `gh` — or logged out of it — the
+   * URL that comes back is the forge's own form rather than a pull request that now exists.
+   */
+  workspaceOpenPullRequest: (
+    workspaceId: string,
+    pr: { title: string; body: string; draft: boolean },
+  ) => unwrap(commands.workspaceOpenPullRequest(workspaceId, pr.title, pr.body, pr.draft)),
+  /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
+  projectPullRequests: (projectId: string, refresh = false) =>
+    unwrap(commands.projectPullRequests(projectId, refresh)),
 
   /** Assist: whether a TypeSafe key is in force and which features are on. */
   assistStatus: () => unwrap(commands.assistStatus()),
