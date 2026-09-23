@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## 0.9.2
+## Unreleased
 
 - **A waiting update is announced beside Settings.** The **update** pill at the foot of the
   projects panel appears when the daily check finds a newer version, and opens the update dialog;
