@@ -152,8 +152,18 @@ impl ShellEnv {
     }
 
     fn from_process(warning: Option<String>) -> Self {
+        let mut vars = cleaned(std::env::vars().collect());
+        // A process's environment on Windows is a snapshot taken when it started. An installer
+        // writes the new `PATH` into the registry and broadcasts a change that only new processes
+        // see, so "Check again" would re-read the same stale copy and never find an agent
+        // installed a minute ago. Read `PATH` back from where the installer put it.
+        if let Some(fresh) = platform::path_from_registry() {
+            let key = name_of(&vars, "PATH").unwrap_or_else(|| "PATH".to_owned());
+            let merged = merge_path(vars.get(&key).map(String::as_str).unwrap_or(""), &fresh);
+            vars.insert(key, merged);
+        }
         Self {
-            vars: cleaned(std::env::vars().collect()),
+            vars,
             source: EnvSource::Process,
             warning,
         }
@@ -189,6 +199,43 @@ impl ShellEnv {
 
 /// Windows variable names are case-insensitive, and the ones that matter are not spelled the way
 /// everyone writes them: it is `Path` and `ComSpec` there, not `PATH` and `COMSPEC`.
+/// The key `vars` actually spells `key` with — Windows says `Path` about as often as `PATH`.
+fn name_of(vars: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    vars.keys()
+        .find(|name| name.eq_ignore_ascii_case(key))
+        .cloned()
+}
+
+/// The separator, always Windows's: this is only reached where the registry holds `PATH`, and
+/// pinning it keeps the function testable on the machines it does not run on.
+const SEP: char = ';';
+const SEP_STR: &str = ";";
+
+/// `PATH` as it was when we started, plus anything that has been added since.
+///
+/// A union rather than a replacement: starting Yardsort from a terminal that had added something
+/// to `PATH` is a real thing people do, and that entry is not in the registry. Order is kept —
+/// ours first, then whatever is new — so nothing that used to resolve one way now resolves
+/// another. Comparison ignores case and a trailing separator, as Windows does.
+fn merge_path(current: &str, fresh: &str) -> String {
+    let tidy = |entry: &str| entry.trim_end_matches(['\\', '/']).to_ascii_lowercase();
+
+    let mut out: Vec<&str> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for entry in current.split(SEP).chain(fresh.split(SEP)) {
+        if entry.is_empty() {
+            continue;
+        }
+        let key = tidy(entry);
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(entry);
+    }
+    out.join(SEP_STR)
+}
+
 fn lookup<'a>(vars: &'a BTreeMap<String, String>, key: &str, ignore_case: bool) -> Option<&'a str> {
     vars.get(key)
         .or_else(|| {
@@ -250,6 +297,11 @@ mod platform {
     use std::collections::BTreeMap;
     use std::io::Read;
     use std::process::{Command, Stdio};
+
+    /// Only Windows keeps `PATH` somewhere a running process cannot see change.
+    pub(super) fn path_from_registry() -> Option<String> {
+        None
+    }
     use std::time::{Duration, Instant};
 
     use super::{cleaned, parse_dump, ShellEnv, PRINT_ENV_FLAG};
@@ -339,9 +391,75 @@ mod platform {
 
     use super::ShellEnv;
 
-    /// Windows GUI apps get the full user environment already.
+    /// Windows GUI apps get the full user environment at launch — and only at launch, which is
+    /// what [`path_from_registry`] is for.
     pub(super) fn from_login_shell() -> Result<Option<BTreeMap<String, String>>, String> {
         Ok(None)
+    }
+
+    /// `PATH` as the registry has it now: the machine's, then the user's, which is the order
+    /// Windows composes them in.
+    ///
+    /// This is where an installer writes. It broadcasts `WM_SETTINGCHANGE` afterwards, but a
+    /// process that is already running keeps the copy it was given, so reading our own
+    /// environment again tells us nothing new. Failures are silent on purpose: a missing or
+    /// unreadable key just means there is nothing to add, and the launch environment still works.
+    pub(super) fn path_from_registry() -> Option<String> {
+        use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+        use winreg::RegKey;
+
+        let read = |root: winreg::HKEY, path: &str| -> Option<String> {
+            RegKey::predef(root)
+                .open_subkey(path)
+                .ok()?
+                .get_value::<String, _>("Path")
+                .ok()
+                .map(|value| expand(&value))
+                .filter(|value| !value.is_empty())
+        };
+        let machine = read(
+            HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        );
+        let user = read(HKEY_CURRENT_USER, "Environment");
+        match (machine, user) {
+            (Some(machine), Some(user)) => Some(format!("{machine};{user}")),
+            (Some(only), None) | (None, Some(only)) => Some(only),
+            (None, None) => None,
+        }
+    }
+
+    /// Expand `%VAR%` against our own environment, as the registry stores `Path` unexpanded.
+    ///
+    /// An unknown name is left as it was written: a literal `%…%` is a path that will not match
+    /// anything, which is better than silently turning it into an empty entry that would.
+    fn expand(value: &str) -> String {
+        let mut out = String::with_capacity(value.len());
+        let mut rest = value;
+        while let Some(start) = rest.find('%') {
+            out.push_str(&rest[..start]);
+            let after = &rest[start + 1..];
+            match after.find('%') {
+                Some(end) => {
+                    let name = &after[..end];
+                    match std::env::var(name) {
+                        Ok(found) => out.push_str(&found),
+                        Err(_) => {
+                            out.push('%');
+                            out.push_str(name);
+                            out.push('%');
+                        }
+                    }
+                    rest = &after[end + 1..];
+                }
+                None => {
+                    out.push('%');
+                    rest = after;
+                }
+            }
+        }
+        out.push_str(rest);
+        out
     }
 
     pub(super) fn default_shell(env: &ShellEnv) -> (String, Vec<String>) {
@@ -358,6 +476,65 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Windows bug this exists for: an agent installed while Yardsort was running is on the
+    /// registry's `PATH` and not on ours, and **Check again** has to find it.
+    #[test]
+    fn a_path_entry_added_since_we_started_is_picked_up() {
+        let ours = r"C:\Windows\system32;C:\Users\me\AppData\Local\nvm";
+        let registry =
+            r"C:\Windows\system32;C:\Users\me\AppData\Local\nvm;C:\Users\me\AppData\Roaming\npm";
+
+        let merged = merge_path(ours, registry);
+
+        assert!(
+            merged.contains(r"AppData\Roaming\npm"),
+            "the new entry should be there: {merged}"
+        );
+    }
+
+    /// Someone who started Yardsort from a terminal that had added something to `PATH` keeps it:
+    /// the registry has never heard of that entry, and replacing rather than merging would drop
+    /// it — so an agent that worked a moment ago would stop being found.
+    #[test]
+    fn what_we_were_launched_with_is_not_thrown_away() {
+        let merged = merge_path(
+            r"C:\my\toolchain;C:\Windows",
+            r"C:\Windows;C:\newly\installed",
+        );
+        let entries: Vec<&str> = merged.split(';').collect();
+        assert_eq!(
+            entries,
+            [r"C:\my\toolchain", r"C:\Windows", r"C:\newly\installed"],
+            "ours first, then what is new, each once"
+        );
+    }
+
+    #[test]
+    fn an_entry_in_both_is_not_repeated_however_it_is_spelt() {
+        let merged = merge_path(r"C:\Windows\System32\", r"c:\windows\system32;C:\extra");
+        let entries: Vec<&str> = merged.split(';').collect();
+        assert_eq!(
+            entries,
+            [r"C:\Windows\System32\", r"C:\extra"],
+            "case and a trailing separator do not make a second entry"
+        );
+    }
+
+    #[test]
+    fn empty_entries_are_dropped_rather_than_carried() {
+        assert_eq!(merge_path("", r"C:\only"), r"C:\only");
+        assert_eq!(merge_path(r"C:\only", ""), r"C:\only");
+        assert_eq!(merge_path("", ""), "");
+    }
+
+    #[test]
+    fn the_name_of_path_is_found_however_windows_spelt_it() {
+        let mut vars = BTreeMap::new();
+        vars.insert("Path".to_owned(), "x".to_owned());
+        assert_eq!(name_of(&vars, "PATH").as_deref(), Some("Path"));
+        assert_eq!(name_of(&BTreeMap::new(), "PATH"), None);
+    }
 
     #[test]
     fn parses_variables_between_markers_and_ignores_shell_noise() {

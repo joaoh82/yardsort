@@ -3,6 +3,14 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Windows: an agent installed while Yardsort is running is now found by "Check again".** It
+  never was — a process's environment on Windows is fixed when it starts, and the installer
+  writes the new `PATH` where only new processes look, so re-reading our own environment told us
+  nothing and a restart was the only cure. `PATH` is now read back from the registry and merged
+  with the one we were launched with, so nothing a terminal had added is lost.
+
 ## 0.8.1
 
 - **A first message starting with `-` no longer stops the agent.** Pasting a bullet out of a list
