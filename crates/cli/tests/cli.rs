@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use yardsort_core::env::{EnvSource, ShellEnv};
 use yardsort_core::git::testing::git;
 use yardsort_core::git::{normalize, Git};
 use yardsort_core::projects::Projects;
@@ -378,6 +379,11 @@ fn a_shared_name_is_refused_rather_than_guessed() {
     .unwrap();
     let settings = WorkspaceSettings::default();
     let second = Workspaces {
+        env: &ShellEnv {
+            vars: std::env::vars().collect(),
+            source: EnvSource::Process,
+            warning: None,
+        },
         store: &store,
         git: &git,
         worktree_root: &fx.worktree_root,

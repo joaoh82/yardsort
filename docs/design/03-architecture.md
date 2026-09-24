@@ -229,8 +229,15 @@ Decisions:
   costs no extra process.
 - **Deleting** a workspace with uncommitted or unmerged work requires explicit confirmation that
   names what will be lost.
-- Untracked-but-needed files (`.env`, etc.) don't exist in a fresh worktree. v1: document it.
-  Later: per-project "copy these files" list / setup script.
+- Project automation lives in SQLite's `project_automation` table (JSON configuration keyed by
+  project id), shared by the app and CLI. After recording a new/restored worktree, the core copies
+  explicitly configured regular files without overwriting, then runs a noninteractive executable
+  plus argv in the resolved environment. Failures retain the row, branch and files. Setup output
+  goes to an exclusive log in the private Git directory outside the checkout, with a ten-minute
+  process timeout. A `workspace_preparation` table records worktrees created here, including
+  existing-branch opens; imports and adopted worktrees remain opted out on restore. Git removes
+  logs with the worktree. Local workspaces are not prepared. The Run action launches a regular
+  daemon-owned PTY, tagged with `projectRun`, and reuses a running session for that workspace.
 
 ### The forge (`crates/core/src/forge.rs`, `src-tauri/src/publish/`)
 

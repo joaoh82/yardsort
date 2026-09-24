@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Composer } from "@/features/composer/Composer";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
@@ -9,7 +9,8 @@ import { SessionHistory } from "@/features/terminal/SessionHistory";
 import { TerminalTabs } from "@/features/terminal/TerminalTabs";
 import { TerminalView } from "@/features/terminal/TerminalView";
 import { useTerminalSessions } from "@/features/terminal/useTerminalSessions";
-import type { HarnessRequest, Project, Workspace } from "@/lib/ipc";
+import { ipc, errorMessage, type HarnessRequest, type Project, type Workspace } from "@/lib/ipc";
+import { ProjectSettingsDialog } from "@/features/sidebar/ProjectSettingsDialog";
 import { useAppStore } from "@/stores/app";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
@@ -89,6 +90,7 @@ function WorkspaceTerminals(props: {
 
   return (
     <>
+      <ProjectRun key={workspace.id} project={project} workspace={workspace} />
       <TerminalTabs workspaceId={workspace.id} />
       {error && (
         <div
@@ -229,5 +231,57 @@ function LaunchButtons({ onLaunch }: { onLaunch: (harness?: HarnessRequest) => v
         </button>
       ))}
     </div>
+  );
+}
+
+function ProjectRun({ project, workspace }: { project: Project; workspace: Workspace }) {
+  const [busy, setBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      const config = await ipc.projectAutomationGet(project.id);
+      if (!config.run) {
+        setSettingsOpen(true);
+        return;
+      }
+      const terminals = useTerminalStore.getState();
+      terminals.adopt(await ipc.workspaceRun(workspace.id, terminals.lastSize));
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <div className="flex items-center gap-3 border-b border-line px-3 py-1 text-ink-muted">
+        <button
+          type="button"
+          disabled={busy || workspace.missing || workspace.archived || project.missing}
+          onClick={() => void run()}
+          className="hover:text-ink disabled:opacity-40"
+        >
+          {busy ? "Starting…" : "▶ Run"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="ml-auto hover:text-ink"
+        >
+          Project settings
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="px-3 py-2 text-red-400">
+          {error}
+        </p>
+      )}
+      {settingsOpen && (
+        <ProjectSettingsDialog project={project} onClose={() => setSettingsOpen(false)} />
+      )}
+    </>
   );
 }

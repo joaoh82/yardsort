@@ -5,6 +5,8 @@ import { harness, project, worktree } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   ptySpawn: vi.fn(),
+  projectAutomationGet: vi.fn(),
+  workspaceRun: vi.fn(),
   ptyList: vi.fn(),
   sessionsList: vi.fn(),
   onHostEvent: vi.fn(),
@@ -109,4 +111,31 @@ describe("an empty workspace", () => {
     expect(screen.queryByRole("button", { name: /Open Composer/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Open Terminal/ })).not.toBeInTheDocument();
   });
+});
+
+it("Run adopts a dev-server terminal in the selected workspace", async () => {
+  core.projectAutomationGet.mockResolvedValue({
+    copyFiles: [],
+    setup: null,
+    run: { program: "bun", args: ["run", "dev"] },
+  });
+  core.workspaceRun.mockResolvedValue({
+    id: "server",
+    program: "bun",
+    labels: { workspace: feature.id, projectRun: feature.id },
+    state: { status: "running" },
+    busy: false,
+  });
+  show(feature.id);
+  await userEvent.click(screen.getByRole("button", { name: "▶ Run" }));
+  expect(core.workspaceRun).toHaveBeenCalledWith(feature.id, useTerminalStore.getState().lastSize);
+  expect(useTerminalStore.getState().active[feature.id]).toBe("server");
+  expect(screen.getByTestId("terminal")).toBeInTheDocument();
+});
+it("Run opens project settings when no command is configured", async () => {
+  core.projectAutomationGet.mockResolvedValue({ copyFiles: [], setup: null, run: null });
+  show(local.id);
+  await userEvent.click(screen.getByRole("button", { name: "▶ Run" }));
+  expect(await screen.findByRole("dialog")).toHaveAccessibleName("Project settings — alpha");
+  expect(core.workspaceRun).not.toHaveBeenCalled();
 });

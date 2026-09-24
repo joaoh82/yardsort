@@ -76,7 +76,9 @@ function tabFor(session: SessionInfo, adopting = false): TerminalTab | null {
   return {
     id: session.id,
     workspaceId,
-    title: session.labels[HARNESS_LABEL] ?? name.replace(/\.(exe|cmd|bat)$/i, ""),
+    title: session.labels["projectRun"]
+      ? "Run"
+      : (session.labels[HARNESS_LABEL] ?? name.replace(/\.(exe|cmd|bat)$/i, "")),
     exit:
       session.state.status === "exited" ? session.state.exit : (earlyExits.get(session.id) ?? null),
     recordId: session.labels[RECORD_LABEL] ?? null,

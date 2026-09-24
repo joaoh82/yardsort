@@ -13,6 +13,7 @@ import { ForgetDialog } from "./ForgetDialog";
 import { ImportWorktreesDialog } from "./ImportWorktreesDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
+import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
 
 export function ProjectTree() {
@@ -39,10 +40,12 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   const compose = useProjectsStore((s) => s.compose);
   const composing = useProjectsStore((s) => s.composingProjectId === project.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [removing, setRemoving] = useState(false);
 
   const items: MenuItem[] = [
+    { label: "Project settings…", onSelect: () => setSettingsOpen(true) },
     { label: "New workspace", disabled: project.missing, onSelect: () => compose(project.id) },
     {
       label: "Import worktrees…",
@@ -127,6 +130,9 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
         </ul>
       )}
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
+      {settingsOpen && (
+        <ProjectSettingsDialog project={project} onClose={() => setSettingsOpen(false)} />
+      )}
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
       {removing && <RemoveProjectDialog project={project} onClose={() => setRemoving(false)} />}
     </li>

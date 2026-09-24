@@ -85,7 +85,7 @@ pub async fn pty_spawn(app: AppHandle, request: SpawnRequest) -> IpcResult<Sessi
 /// The environment is resolved on first use and the settings are a snapshot, so both are
 /// temporaries — hence a closure rather than a returned value. Blocking: resolving the
 /// environment runs the user's login shell.
-fn with_launcher<T>(state: &AppState, f: impl FnOnce(&Launcher<'_>) -> T) -> T {
+pub(crate) fn with_launcher<T>(state: &AppState, f: impl FnOnce(&Launcher<'_>) -> T) -> T {
     let settings = state.settings.get();
     let env = state.env();
     f(&Launcher {

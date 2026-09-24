@@ -313,8 +313,8 @@ pub async fn project_branches(app: AppHandle, project_id: String) -> IpcResult<B
 }
 
 /// The core loop: make a worktree — on a new branch, or for an existing one — and start a harness in it with the user's
-/// first message. If the harness cannot start, the worktree and branch are taken back, so a
-/// failed attempt leaves no trace.
+/// first message. Once prepared, the worktree is retained if the harness cannot start.
+/// A script may have produced work, even if project settings change while it is running.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_create(
@@ -331,6 +331,7 @@ pub async fn workspace_create(
         let root = state.worktree_root()?;
         let settings = state.settings.get();
         let workspaces = Workspaces {
+            env: &state.env(),
             store: &state.store,
             git: &git,
             worktree_root: &root,
@@ -358,10 +359,13 @@ pub async fn workspace_create(
                 .describe_workspace(row),
                 session,
             }),
-            Err(error) => {
-                let _ = workspaces.discard(&row);
-                Err(error)
-            }
+            Err(error) => Err(IpcError::new(
+                &error.code,
+                format!(
+                    "Workspace kept at {}. Agent could not start: {}",
+                    row.path, error.message
+                ),
+            )),
         }
     })
     .await
@@ -376,6 +380,7 @@ pub async fn workspace_delete(app: AppHandle, id: String, force: bool) -> IpcRes
         let root = state.worktree_root()?;
         let settings = state.settings.get();
         Workspaces {
+            env: &state.env(),
             store: &state.store,
             git: &git,
             worktree_root: &root,
@@ -395,6 +400,7 @@ fn with_workspaces<T>(
     let settings = state.settings.get();
     f(
         &Workspaces {
+            env: &state.env(),
             store: &state.store,
             git: &git,
             worktree_root: &root,

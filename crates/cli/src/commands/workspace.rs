@@ -195,6 +195,7 @@ fn new(
     let git = ys.git()?;
     let worktree_root = ys.worktree_root()?;
     let workspace: WorkspaceRow = Workspaces {
+        env: ys.env(),
         store: &ys.store,
         git: &git,
         worktree_root: &worktree_root,
@@ -295,6 +296,7 @@ fn delete(ys: &Yardsort, wanted: &str, force: bool, out: &Output) -> Result<(), 
     let git = ys.git()?;
     let worktree_root = ys.worktree_root()?;
     let result = Workspaces {
+        env: ys.env(),
         store: &ys.store,
         git: &git,
         worktree_root: &worktree_root,

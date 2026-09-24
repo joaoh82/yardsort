@@ -62,6 +62,51 @@ pub struct Launcher<'a> {
 }
 
 impl Launcher<'_> {
+    /// Start or focus the project's run command. Caller serializes concurrent starts.
+    pub fn project_run(&self, workspace_id: &str, size: TermSize) -> IpcResult<SessionInfo> {
+        let workspace = self.store.workspace(workspace_id)?.ok_or_else(|| {
+            crate::error::IpcError::new("unknown_workspace", "That workspace no longer exists.")
+        })?;
+        if workspace.archived
+            || workspace.forgotten
+            || !std::path::Path::new(&workspace.path).is_dir()
+        {
+            return Err(IpcError::new(
+                "workspace_missing",
+                "Restore this workspace before running its command.",
+            ));
+        }
+        if let Some(session) = self.host.list().into_iter().find(|session| {
+            session.labels.get("projectRun").map(String::as_str) == Some(workspace_id)
+                && matches!(session.state, pty_host::SessionState::Running)
+        }) {
+            return Ok(session);
+        }
+        let command =
+            crate::project_automation::ProjectAutomation::load(self.store, &workspace.project_id)?
+                .run
+                .ok_or_else(|| {
+                    crate::error::IpcError::new(
+                        "no_run_command",
+                        "Configure a run command in Project settings first.",
+                    )
+                })?;
+        let mut resolved = resolve_launch(
+            Launch::Program {
+                program: command.program,
+                args: command.args,
+            },
+            &[],
+        )?;
+        resolved
+            .labels
+            .insert("projectRun".into(), workspace_id.to_owned());
+        resolved
+            .labels
+            .insert(WORKSPACE_LABEL.into(), workspace_id.to_owned());
+        self.start(resolved, Some(workspace.path), size)
+    }
+
     /// Start something in a workspace's folder, labelled so it can be matched back to it.
     pub fn in_workspace(
         &self,

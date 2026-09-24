@@ -5,6 +5,8 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Project setup and dev servers.** Project settings can copy files such as `.env` and run a setup script in new or restored worktrees before starting an agent. Failed preparation keeps the workspace and setup log. Logs stay outside the checkout, imported worktrees skip setup on restore, and blank argument lines are ignored. Configure a run command and use **▶ Run** to start or focus a dev-server terminal in any workspace. See [Project automation](docs/guide/projects.md#project-automation).
+
 - **`ys workspace delete`.** Remove a workspace from the command line: the folder and the record
   go, the branch stays. Uncommitted work is refused unless `--force` is given, and a harness can
   delete the workspace it is running in — the command does not stop that process. On Windows it

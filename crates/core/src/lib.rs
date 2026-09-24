@@ -22,6 +22,7 @@ pub mod launch;
 pub mod legacy;
 pub mod paths;
 pub mod program;
+pub mod project_automation;
 pub mod projects;
 pub mod settings;
 pub mod store;

@@ -109,3 +109,43 @@ pub async fn ui_state_save(app: AppHandle, key: String, value: String) -> IpcRes
     })
     .await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn project_automation_get(
+    app: AppHandle,
+    project_id: String,
+) -> IpcResult<yardsort_core::project_automation::ProjectAutomation> {
+    blocking(app, move |state| {
+        yardsort_core::project_automation::ProjectAutomation::load(&state.store, &project_id)
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn project_automation_save(
+    app: AppHandle,
+    project_id: String,
+    config: yardsort_core::project_automation::ProjectAutomation,
+) -> IpcResult<()> {
+    blocking(app, move |state| config.save(&state.store, &project_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_run(
+    app: AppHandle,
+    workspace_id: String,
+    size: pty_host::TermSize,
+) -> IpcResult<pty_host::SessionInfo> {
+    blocking(app, move |state| {
+        // Serialize the lookup/spawn pair so double clicks cannot start duplicate servers.
+        let _guard = state
+            .reconciling
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        crate::terminal::with_launcher(state, |launcher| launcher.project_run(&workspace_id, size))
+    })
+    .await
+}
