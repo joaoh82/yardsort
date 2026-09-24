@@ -219,6 +219,76 @@ fn deleting_works_from_inside_the_workspace() {
     assert!(fx.git().branch_exists(&fx.repo, &branch).unwrap());
 }
 
+/// Another program still has the folder as its current directory. `ys` itself is started from
+/// outside, which is the case the in-process step-out does not cover. Windows will not remove
+/// that folder, and the refusal has to come before git deletes anything inside it.
+#[cfg(windows)]
+#[test]
+fn a_folder_held_by_another_process_is_not_deleted() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "held open");
+    let name = made["name"].as_str().unwrap().to_owned();
+    let id = made["id"].as_str().unwrap().to_owned();
+    let branch = made["branch"].as_str().unwrap().to_owned();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+    std::fs::write(path.join("notes.txt"), "still here").unwrap();
+
+    // `ping` simply stays alive. `timeout` refuses to run without a console.
+    let holder = StopProcess(
+        Command::new("cmd")
+            .args(["/c", "ping", "-n", "60", "127.0.0.1"])
+            .current_dir(&path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("a process should be able to sit in the workspace"),
+    );
+    // CreateProcess has already set the current directory; give it a moment to be the cwd.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let error = fx.ys(&["workspace", "delete", &name]).failed();
+    assert!(
+        error.contains("Nothing was deleted"),
+        "the refusal should say nothing was removed: {error}"
+    );
+    assert!(
+        error.contains("current directory"),
+        "the refusal should say why, and how to retry: {error}"
+    );
+
+    assert!(path.is_dir(), "the folder should still be there");
+    assert_eq!(
+        std::fs::read_to_string(path.join("notes.txt")).unwrap(),
+        "still here",
+        "files inside the folder should be untouched"
+    );
+    assert!(
+        fx.git().branch_exists(&fx.repo, &branch).unwrap(),
+        "the branch is kept"
+    );
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workspace", "list", "--json"]).ok()).unwrap();
+    assert!(
+        worktrees_in(&listed)
+            .iter()
+            .any(|w| w["id"].as_str() == Some(id.as_str())),
+        "the record should still be there: {listed}"
+    );
+    drop(holder);
+}
+
+/// Kills the child however the test ends, including a failed assertion.
+#[cfg(windows)]
+struct StopProcess(std::process::Child);
+
+#[cfg(windows)]
+impl Drop for StopProcess {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// The refusal is the confirmation. `--force` is what "yes, destroy that work" looks like from a
 /// script, and leaving it off must leave the files, the folder and the record exactly as they were.
 #[test]
