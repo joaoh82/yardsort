@@ -737,8 +737,13 @@ mod tests {
         assert_eq!(var(activity::RUN_ENV), Some(run_id.clone()));
         assert_eq!(var(activity::WORKSPACE_ENV), Some(ws.clone()));
         assert_eq!(var(activity::RECORD_ENV), Some(record_id.clone()));
+        // `Path` on Windows, `PATH` elsewhere: the point is that it is there exactly once.
         assert!(
-            plan.env.iter().filter(|(k, _)| k == "PATH").count() == 1,
+            plan.env
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+                .count()
+                == 1,
             "appended to the user's environment, not replacing it"
         );
 
