@@ -404,8 +404,11 @@ hand, against a throwaway profile with a shell standing in for an agent: `ys wor
 started the daemon and the run, the process exited with 5 while nothing was connected, the daemon
 wrote the spool entry and then idled out ("nothing left to look after"), and the next `ys session
 list` drained it — record `ended`, `ys activity list` showing `exit 5, via spool`, `ys doctor`
-showing 0 waiting. macOS and Windows: CI runs every Rust test including the daemon spool test on
-both; the hands-on pass is owed, rows in [08 §11](08-manual-checklist.md#11--activity).
+showing 0 waiting. The same through the window, later that evening: Claude started from the
+composer, the window closed with **Leave them running**, the agent ended through `ys attach`, the
+app reopened and its timeline read `via spool`, the session listed as ended. macOS and Windows: CI
+runs every Rust test including the daemon spool test on both; the hands-on pass is owed, rows in
+[08 §11](08-manual-checklist.md#11--activity).
 
 _Notes:_
 
