@@ -7,8 +7,11 @@ mod naming;
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+use specta::Type;
+
 use crate::error::{IpcError, IpcResult};
-use crate::git::{normalize, Git, GitError};
+use crate::git::{normalize, Git, GitError, WorktreeEntry};
 use crate::settings::WorkspaceSettings;
 use crate::store::{ProjectRow, Store, WorkspaceRow};
 
@@ -250,6 +253,15 @@ impl Workspaces<'_> {
         })
     }
 
+    /// Stop showing a workspace without touching its folder or its branch: the worktree was made
+    /// elsewhere, or is wanted elsewhere, and Yardsort is simply not the place to see it. With
+    /// `keep_history` its conversations wait, hidden, for the worktree to be imported again.
+    pub fn forget(&self, workspace_id: &str, keep_history: bool) -> IpcResult<()> {
+        let workspace = self.deletable(workspace_id)?;
+        self.store.forget_workspace(&workspace.id, keep_history)?;
+        Ok(())
+    }
+
     /// A worktree workspace; `local` can be neither deleted, archived nor renamed.
     fn deletable(&self, workspace_id: &str) -> IpcResult<WorkspaceRow> {
         let workspace = self.store.workspace(workspace_id)?.ok_or_else(|| {
@@ -331,9 +343,26 @@ pub fn default_worktree_root(env: &crate::env::ShellEnv) -> IpcResult<PathBuf> {
         .ok_or_else(|| IpcError::new("no_home", "Cannot determine your home directory."))
 }
 
-/// Adopt worktrees git knows about but Yardsort does not — made by hand, or orphaned when
-/// their project was removed and added again. Returns how many were adopted.
-pub fn adopt_unknown(store: &Store, git: &Git, project_id: &str) -> IpcResult<usize> {
+/// A worktree git knows about that is not a workspace: made by hand, by another tool, or
+/// forgotten here. What the import dialog lists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UntrackedWorktree {
+    pub path: String,
+    /// `None` when detached.
+    pub branch: Option<String>,
+}
+
+/// Adopt worktrees git knows about but Yardsort does not, **when they sit under Yardsort's own
+/// worktree root** — ours, orphaned when their project was removed and added again. Worktrees
+/// anywhere else were made for some other purpose and stay out until they are imported. Returns
+/// how many were adopted.
+pub fn adopt_unknown(
+    store: &Store,
+    git: &Git,
+    project_id: &str,
+    worktree_root: &Path,
+) -> IpcResult<usize> {
     let Some(project) = store.project(project_id)? else {
         return Ok(0);
     };
@@ -341,31 +370,130 @@ pub fn adopt_unknown(store: &Store, git: &Git, project_id: &str) -> IpcResult<us
     if !root.is_dir() {
         return Ok(0);
     }
+    // Forgotten rows count as known: the user asked not to see those again.
     let known: Vec<PathBuf> = store
-        .workspaces()?
+        .workspace_paths()?
         .iter()
-        .map(|w| normalize(Path::new(&w.path)))
+        .map(|path| normalize(Path::new(path)))
         .collect();
+    let ours = normalize(worktree_root);
 
     let mut adopted = 0;
     for entry in git.worktrees(&root)? {
-        if entry.is_main || entry.bare || entry.prunable || known.contains(&entry.path) {
+        if !linked(&entry) || known.contains(&entry.path) || !entry.path.starts_with(&ours) {
             continue;
         }
-        let name = entry
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| entry.path.to_string_lossy().into_owned());
         let recorded = store.add_worktree_if_new(
             &project.id,
-            &name,
+            &folder_name(&entry.path),
             &entry.path.to_string_lossy(),
             entry.branch.as_deref(),
         )?;
         adopted += usize::from(recorded.is_some());
     }
     Ok(adopted)
+}
+
+/// The worktrees of a project that are not workspaces, forgotten ones included, in git's order.
+pub fn untracked_worktrees(
+    store: &Store,
+    git: &Git,
+    project_id: &str,
+) -> IpcResult<Vec<UntrackedWorktree>> {
+    Ok(untracked_entries(store, git, project_id)?
+        .into_iter()
+        .map(|entry| UntrackedWorktree {
+            path: entry.path.to_string_lossy().into_owned(),
+            branch: entry.branch,
+        })
+        .collect())
+}
+
+/// Make workspaces of untracked worktrees, chosen by path. Every path is checked first, so a
+/// wrong one — not a worktree of this project, or a workspace already — imports nothing. A
+/// forgotten workspace at that path comes back with its history; anything else is named after
+/// its folder. Nothing on disk is touched.
+pub fn import_worktrees(
+    store: &Store,
+    git: &Git,
+    project_id: &str,
+    paths: &[String],
+) -> IpcResult<Vec<WorkspaceRow>> {
+    let untracked = untracked_entries(store, git, project_id)?;
+    let chosen = paths
+        .iter()
+        .map(|path| {
+            let wanted = normalize(Path::new(path));
+            untracked
+                .iter()
+                .find(|entry| entry.path == wanted)
+                .ok_or_else(|| {
+                    IpcError::new(
+                        "not_importable",
+                        format!(
+                            "{path} is not a worktree of this project that Yardsort could import."
+                        ),
+                    )
+                })
+        })
+        .collect::<IpcResult<Vec<_>>>()?;
+
+    let mut imported = Vec::with_capacity(chosen.len());
+    for entry in chosen {
+        let path = entry.path.to_string_lossy();
+        let row = match store.forgotten_workspace_at(&path)? {
+            Some(forgotten) => {
+                store.revive_workspace(&forgotten.id, entry.branch.as_deref())?;
+                store.workspace(&forgotten.id)?.unwrap_or(forgotten)
+            }
+            None => match store.add_worktree_if_new(
+                project_id,
+                &folder_name(&entry.path),
+                &path,
+                entry.branch.as_deref(),
+            )? {
+                Some(row) => row,
+                // Adopted or imported from elsewhere a moment ago: the outcome is the same.
+                None => continue,
+            },
+        };
+        imported.push(row);
+    }
+    Ok(imported)
+}
+
+fn untracked_entries(store: &Store, git: &Git, project_id: &str) -> IpcResult<Vec<WorktreeEntry>> {
+    let Some(project) = store.project(project_id)? else {
+        return Err(IpcError::new(
+            "unknown_project",
+            "That project no longer exists.",
+        ));
+    };
+    let root = PathBuf::from(&project.root_path);
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let shown: Vec<PathBuf> = store
+        .workspaces()?
+        .iter()
+        .map(|w| normalize(Path::new(&w.path)))
+        .collect();
+    Ok(git
+        .worktrees(&root)?
+        .into_iter()
+        .filter(|entry| linked(entry) && !shown.contains(&entry.path))
+        .collect())
+}
+
+/// A worktree that could be a workspace: linked, and still on disk.
+fn linked(entry: &WorktreeEntry) -> bool {
+    !entry.is_main && !entry.bare && !entry.prunable
+}
+
+fn folder_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -658,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn worktrees_yardsort_does_not_know_are_adopted_once() {
+    fn worktrees_under_our_root_are_adopted_once_and_others_are_not() {
         let fx = Fixture::new();
         let ours = fx
             .workspaces()
@@ -673,19 +801,33 @@ mod tests {
             .worktree_add(&fx.repo, &stale, "old", "HEAD")
             .unwrap();
         std::fs::remove_dir_all(&stale).unwrap();
+        // Somebody's own worktree, nowhere near ours: not Yardsort's to show uninvited.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let theirs = normalize(elsewhere.path()).join("theirs");
+        fx.git
+            .worktree_add(&fx.repo, &theirs, "their-branch", "HEAD")
+            .unwrap();
 
         assert_eq!(
-            adopt_unknown(&fx.store, &fx.git, &fx.project_id).unwrap(),
+            adopt_unknown(&fx.store, &fx.git, &fx.project_id, &fx.worktrees).unwrap(),
             1
         );
         assert_eq!(fx.names(), ["local", "known", "made-by-hand"]);
+        assert_eq!(
+            untracked_worktrees(&fx.store, &fx.git, &fx.project_id).unwrap(),
+            [UntrackedWorktree {
+                path: theirs.to_string_lossy().into_owned(),
+                branch: Some("their-branch".into()),
+            }],
+            "listed for importing, prunable ones left out"
+        );
         let adopted = fx.store.workspaces().unwrap().pop().unwrap();
         assert_eq!(adopted.branch.as_deref(), Some("experiment"));
         assert_eq!(PathBuf::from(&adopted.path), by_hand);
         assert_eq!(adopted.base_branch, None);
 
         assert_eq!(
-            adopt_unknown(&fx.store, &fx.git, &fx.project_id).unwrap(),
+            adopt_unknown(&fx.store, &fx.git, &fx.project_id, &fx.worktrees).unwrap(),
             0,
             "idempotent"
         );
@@ -708,7 +850,11 @@ mod tests {
         // load adopts. Run many in parallel, as the app does.
         let adopted: usize = std::thread::scope(|scope| {
             let runs: Vec<_> = (0..8)
-                .map(|_| scope.spawn(|| adopt_unknown(&fx.store, &fx.git, &fx.project_id).unwrap()))
+                .map(|_| {
+                    scope.spawn(|| {
+                        adopt_unknown(&fx.store, &fx.git, &fx.project_id, &fx.worktrees).unwrap()
+                    })
+                })
                 .collect();
             runs.into_iter().map(|run| run.join().unwrap()).sum()
         });
@@ -723,7 +869,7 @@ mod tests {
         fx.workspaces()
             .create(&fx.project_id, None, "survivor")
             .unwrap();
-        fx.store.remove_project(&fx.project_id).unwrap();
+        fx.store.remove_project(&fx.project_id, false).unwrap();
 
         let again = Projects {
             store: &fx.store,
@@ -732,10 +878,98 @@ mod tests {
         .open(&fx.repo, false)
         .unwrap();
         assert_eq!(
-            adopt_unknown(&fx.store, &fx.git, &again.project.id).unwrap(),
+            adopt_unknown(&fx.store, &fx.git, &again.project.id, &fx.worktrees).unwrap(),
             1
         );
         assert_eq!(fx.names(), ["local", "survivor"]);
+    }
+
+    #[test]
+    fn importing_brings_chosen_worktrees_in_and_checks_every_path_first() {
+        let fx = Fixture::new();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let one = normalize(elsewhere.path()).join("one");
+        let two = normalize(elsewhere.path()).join("two");
+        fx.git.worktree_add(&fx.repo, &one, "one", "HEAD").unwrap();
+        fx.git.worktree_add(&fx.repo, &two, "two", "HEAD").unwrap();
+        let path = |p: &Path| p.to_string_lossy().into_owned();
+
+        let bogus = path(&fx.repo.join("src"));
+        let err =
+            import_worktrees(&fx.store, &fx.git, &fx.project_id, &[path(&one), bogus]).unwrap_err();
+        assert_eq!(err.code, "not_importable");
+        assert_eq!(fx.names(), ["local"], "one bad path imports nothing");
+
+        let imported = import_worktrees(&fx.store, &fx.git, &fx.project_id, &[path(&two)]).unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].name, "two");
+        assert_eq!(imported[0].branch.as_deref(), Some("two"));
+        assert_eq!(imported[0].base_branch, None, "not our branch to delete");
+        assert_eq!(fx.names(), ["local", "two"]);
+        assert_eq!(
+            untracked_worktrees(&fx.store, &fx.git, &fx.project_id)
+                .unwrap()
+                .iter()
+                .map(|w| w.path.clone())
+                .collect::<Vec<_>>(),
+            [path(&one)]
+        );
+        assert!(one.is_dir() && two.is_dir(), "nothing on disk moved");
+    }
+
+    #[test]
+    fn forgetting_hides_a_workspace_and_importing_it_again_finds_its_history() {
+        let fx = Fixture::new();
+        let ws = fx
+            .workspaces()
+            .create(&fx.project_id, None, "keep me")
+            .unwrap();
+        fx.store
+            .add_session(&crate::store::NewSession {
+                id: "s1",
+                workspace_id: &ws.id,
+                harness_id: "claude",
+                title: "keep me",
+                pty_session_id: "pty-1",
+                ..Default::default()
+            })
+            .unwrap();
+        let path = PathBuf::from(&ws.path);
+
+        fx.workspaces().forget(&ws.id, true).unwrap();
+        assert_eq!(fx.names(), ["local"]);
+        assert!(path.is_dir(), "the folder is not ours to remove");
+        assert!(fx
+            .git
+            .branch_exists(&fx.repo, ws.branch.as_deref().unwrap())
+            .unwrap());
+        assert_eq!(
+            adopt_unknown(&fx.store, &fx.git, &fx.project_id, &fx.worktrees).unwrap(),
+            0,
+            "forgotten means forgotten, even under our own root"
+        );
+        let listed = untracked_worktrees(&fx.store, &fx.git, &fx.project_id).unwrap();
+        assert_eq!(listed.len(), 1, "but it can be imported again");
+
+        let back = import_worktrees(
+            &fx.store,
+            &fx.git,
+            &fx.project_id,
+            &[listed[0].path.clone()],
+        )
+        .unwrap();
+        assert_eq!(back[0].id, ws.id, "the same workspace, history and all");
+        assert_eq!(fx.store.sessions(&ws.id).unwrap().len(), 1);
+        assert_eq!(fx.names(), ["local", ws.name.as_str()]);
+
+        fx.workspaces().forget(&ws.id, false).unwrap();
+        assert!(fx.store.workspace(&ws.id).unwrap().is_none());
+        assert!(path.is_dir());
+        let err = fx
+            .workspaces()
+            .forget(&fx.store.workspaces().unwrap()[0].id, true)
+            .unwrap_err();
+        assert_eq!(err.code, "not_deletable");
     }
 
     #[test]

@@ -264,6 +264,7 @@ mod tests {
             branch: Some("ys/feature".into()),
             base_branch: base.map(str::to_owned),
             archived: false,
+            forgotten: false,
         }
     }
 

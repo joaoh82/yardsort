@@ -15,6 +15,9 @@ const core = vi.hoisted(() => ({
   workspaceArchive: vi.fn(),
   workspaceRestore: vi.fn(),
   workspaceRename: vi.fn(),
+  workspaceForget: vi.fn(),
+  projectUntrackedWorktrees: vi.fn(),
+  workspacesImport: vi.fn(),
   sessionsList: vi.fn(),
   projectPullRequests: vi.fn(),
   ptySpawn: vi.fn(),
@@ -358,7 +361,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("removing a project confirms first, then closes its sessions and forgets it", async () => {
+  it("removing a project asks first, keeps its history by default, and closes its sessions", async () => {
     const user = userEvent.setup();
     await renderSidebar("alpha", "beta");
     // A session has to exist for the confirmation to have something to count; a worktree opens
@@ -378,20 +381,35 @@ describe("Sidebar", () => {
       active: { "w-alpha": "s-w-alpha" },
     });
 
-    native.confirm.mockResolvedValue(false);
     await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
     await user.click(screen.getByRole("menuitem", { name: /Remove from Yardsort/ }));
-    expect(native.confirm).toHaveBeenCalledWith(
-      expect.stringMatching(/Nothing on disk is deleted[\s\S]*1 running terminal session /),
-      expect.anything(),
-    );
+    let dialog = screen.getByRole("dialog", { name: /Remove “alpha”/ });
+    expect(dialog).toHaveTextContent("Nothing on disk is deleted");
+    expect(dialog).toHaveTextContent("1 running terminal session in this project will be closed");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(core.projectRemove).not.toHaveBeenCalled();
+    expect(screen.getByRole("treeitem", { name: "alpha" })).toBeInTheDocument();
 
-    native.confirm.mockResolvedValue(true);
     await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
     await user.click(screen.getByRole("menuitem", { name: /Remove from Yardsort/ }));
+    dialog = screen.getByRole("dialog", { name: /Remove “alpha”/ });
+    expect(within(dialog).getByRole("checkbox", { name: /Also delete/ })).not.toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
     expect(core.ptyClose).toHaveBeenCalledWith("s-w-alpha");
-    expect(core.projectRemove).toHaveBeenCalledWith("p-alpha");
+    expect(core.projectRemove).toHaveBeenCalledWith("p-alpha", true);
+    expect(screen.queryByRole("treeitem", { name: "alpha" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("removing a project drops its history only when the box is ticked", async () => {
+    const user = userEvent.setup();
+    await renderSidebar("alpha");
+    await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: /Remove from Yardsort/ }));
+    const dialog = screen.getByRole("dialog", { name: /Remove “alpha”/ });
+    await user.click(within(dialog).getByRole("checkbox", { name: /Also delete/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(core.projectRemove).toHaveBeenCalledWith("p-alpha", false);
     expect(screen.queryByRole("treeitem", { name: "alpha" })).not.toBeInTheDocument();
   });
 
@@ -601,6 +619,119 @@ describe("Sidebar", () => {
       await user.click(screen.getByRole("menuitem", { name: "Restore from its branch" }));
       expect(core.workspaceRestore).toHaveBeenCalledWith("w-app-fix-login");
       await vi.waitFor(() => expect(screen.queryByText("missing")).not.toBeInTheDocument());
+    });
+  });
+
+  describe("forgetting a workspace", () => {
+    async function openForget() {
+      const user = userEvent.setup();
+      const app = project("app");
+      app.workspaces.push(
+        worktree("app", "theirs", {
+          head: { label: "experiment", detached: false, unborn: false },
+        }),
+      );
+      core.projectsList.mockResolvedValue([app]);
+      core.workspaceForget.mockResolvedValue(undefined);
+      render(<Sidebar />);
+      await screen.findByRole("treeitem", { name: "theirs" });
+      await user.click(screen.getByRole("button", { name: "More actions for theirs" }));
+      await user.click(screen.getByRole("menuitem", { name: "Forget…" }));
+      return { user, dialog: await screen.findByRole("dialog", { name: /Forget workspace/ }) };
+    }
+
+    it("takes the workspace out of Yardsort and keeps its folder, branch and history", async () => {
+      core.sessionsList.mockResolvedValue([record("r1", { workspaceId: "w-app-theirs" })]);
+      const { user, dialog } = await openForget();
+
+      expect(dialog).toHaveTextContent("The folder stays where it is, and so does the branch");
+      expect(dialog).toHaveTextContent("experiment");
+      const box = await within(dialog).findByRole("checkbox", {
+        name: /Also delete its 1 saved conversation/,
+      });
+      expect(box).not.toBeChecked();
+      await user.click(within(dialog).getByRole("button", { name: "Forget" }));
+
+      expect(core.workspaceForget).toHaveBeenCalledWith("w-app-theirs", true);
+      expect(core.workspaceDelete).not.toHaveBeenCalled();
+      expect(screen.queryByRole("treeitem", { name: "theirs" })).not.toBeInTheDocument();
+    });
+
+    it("drops the history too only when the box is ticked", async () => {
+      core.sessionsList.mockResolvedValue([record("r1"), record("r2")]);
+      const { user, dialog } = await openForget();
+      await user.click(
+        await within(dialog).findByRole("checkbox", {
+          name: /Also delete its 2 saved conversations/,
+        }),
+      );
+      await user.click(within(dialog).getByRole("button", { name: "Forget" }));
+      expect(core.workspaceForget).toHaveBeenCalledWith("w-app-theirs", false);
+    });
+
+    it("leaves everything alone on Cancel", async () => {
+      const { user, dialog } = await openForget();
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(core.workspaceForget).not.toHaveBeenCalled();
+      expect(screen.getByRole("treeitem", { name: "theirs" })).toBeInTheDocument();
+    });
+  });
+
+  describe("importing worktrees", () => {
+    const found = [
+      { path: "/elsewhere/app/one", branch: "one" },
+      { path: "/elsewhere/app/two", branch: null },
+    ];
+
+    async function openImport() {
+      const user = userEvent.setup();
+      await renderSidebar("app");
+      await user.click(screen.getByRole("button", { name: "More actions for app" }));
+      await user.click(screen.getByRole("menuitem", { name: "Import worktrees…" }));
+      return { user, dialog: await screen.findByRole("dialog", { name: /Import worktrees/ }) };
+    }
+
+    it("lists what git has that Yardsort does not, all chosen, and imports the chosen ones", async () => {
+      core.projectUntrackedWorktrees.mockResolvedValue(found);
+      core.workspacesImport.mockResolvedValue([
+        worktree("app", "one", { path: "/elsewhere/app/one" }),
+      ]);
+      const { user, dialog } = await openImport();
+
+      const one = await within(dialog).findByRole("checkbox", { name: "one" });
+      const two = within(dialog).getByRole("checkbox", { name: "two" });
+      expect(one).toBeChecked();
+      expect(two).toBeChecked();
+      expect(dialog).toHaveTextContent("/elsewhere/app/one");
+      expect(dialog).toHaveTextContent("detached");
+      expect(core.projectUntrackedWorktrees).toHaveBeenCalledWith("p-app");
+
+      await user.click(two);
+      await user.click(within(dialog).getByRole("button", { name: "Import 1 worktree" }));
+
+      expect(core.workspacesImport).toHaveBeenCalledWith("p-app", ["/elsewhere/app/one"]);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(await screen.findByRole("treeitem", { name: "one" })).toBeInTheDocument();
+    });
+
+    it("says so when there is nothing to import", async () => {
+      core.projectUntrackedWorktrees.mockResolvedValue([]);
+      const { dialog } = await openImport();
+      expect(await within(dialog).findByText(/Nothing to import/)).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: /^Import/ })).not.toBeInTheDocument();
+    });
+
+    it("shows why an import failed and keeps the dialog open", async () => {
+      core.projectUntrackedWorktrees.mockResolvedValue([found[0]]);
+      core.workspacesImport.mockRejectedValue({
+        code: "not_importable",
+        message: "not a worktree",
+      });
+      const { user, dialog } = await openImport();
+      await within(dialog).findByRole("checkbox", { name: "one" });
+      await user.click(within(dialog).getByRole("button", { name: "Import 1 worktree" }));
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("not a worktree");
+      expect(screen.queryByRole("treeitem", { name: "one" })).not.toBeInTheDocument();
     });
   });
 

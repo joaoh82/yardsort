@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::AppHandle;
 
-use super::Workspaces;
+use super::{UntrackedWorktree, Workspaces};
 use crate::error::{IpcError, IpcResult};
 use crate::git::Git;
 use crate::harness::{self, HarnessDef};
@@ -428,6 +428,55 @@ pub async fn workspace_restore(app: AppHandle, id: String) -> IpcResult<Workspac
             }
             .describe_workspace(row))
         })
+    })
+    .await
+}
+
+/// Worktrees of the project that are not workspaces — made by hand, by another tool, or
+/// forgotten here — for the import dialog.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_untracked_worktrees(
+    app: AppHandle,
+    project_id: String,
+) -> IpcResult<Vec<UntrackedWorktree>> {
+    blocking(app, move |state| {
+        let git = Git::new(&state.env())?;
+        super::untracked_worktrees(&state.store, &git, &project_id)
+    })
+    .await
+}
+
+/// Make workspaces of the untracked worktrees at `paths`. Nothing on disk is touched.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspaces_import(
+    app: AppHandle,
+    project_id: String,
+    paths: Vec<String>,
+) -> IpcResult<Vec<Workspace>> {
+    blocking(app, move |state| {
+        let git = Git::new(&state.env())?;
+        let rows = super::import_worktrees(&state.store, &git, &project_id, &paths)?;
+        let projects = Projects {
+            store: &state.store,
+            git: &git,
+        };
+        Ok(rows
+            .into_iter()
+            .map(|row| projects.describe_workspace(row))
+            .collect())
+    })
+    .await
+}
+
+/// Stop showing a workspace. Its folder and branch stay; with `keep_history` its conversations
+/// do too, ready for the day it is imported again.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_forget(app: AppHandle, id: String, keep_history: bool) -> IpcResult<()> {
+    blocking(app, move |state| {
+        with_workspaces(state, |workspaces, _| workspaces.forget(&id, keep_history))
     })
     .await
 }

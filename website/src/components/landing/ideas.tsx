@@ -64,7 +64,8 @@ export function Ideas() {
           </p>
           <p>
             Workspaces are ordinary worktrees and branches. Inspect or undo anything with{" "}
-            <code className={code}>git</code>. Worktrees made elsewhere are picked up automatically.
+            <code className={code}>git</code>. Worktrees made elsewhere can be imported, and never
+            appear uninvited.
           </p>
         </Idea>
 

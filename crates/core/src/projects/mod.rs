@@ -84,6 +84,9 @@ pub struct AddedProject {
     pub already_known: bool,
     /// Set when the chosen folder was inside a repository and its root was added instead.
     pub opened_root_instead: bool,
+    /// Set when the folder was a project removed earlier with its history kept: it is back
+    /// with its workspaces and their conversations.
+    pub revived: bool,
 }
 
 pub struct Projects<'a> {
@@ -166,15 +169,21 @@ impl Projects<'_> {
 
     fn add(&self, root: &Path, opened_root_instead: bool) -> IpcResult<AddedProject> {
         let root_path = root.to_string_lossy().into_owned();
-        let (row, already_known) = match self.store.project_by_root(&root_path)? {
-            Some(existing) => (existing, true),
-            None => {
-                let name = root
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| root_path.clone());
-                (self.store.add_project(&name, &root_path)?, false)
-            }
+        let (row, already_known, revived) = match self.store.project_by_root(&root_path)? {
+            Some(existing) => (existing, true, false),
+            None => match self.store.removed_project_by_root(&root_path)? {
+                Some(removed) => {
+                    self.store.revive_project(&removed.id)?;
+                    (removed, false, true)
+                }
+                None => {
+                    let name = root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| root_path.clone());
+                    (self.store.add_project(&name, &root_path)?, false, false)
+                }
+            },
         };
         let workspaces = self
             .store
@@ -186,6 +195,7 @@ impl Projects<'_> {
             project: self.describe(row, workspaces),
             already_known,
             opened_root_instead,
+            revived,
         })
     }
 
@@ -451,12 +461,57 @@ mod tests {
             "it comes back by itself"
         );
 
-        fx.store.remove_project(&added.project.id).unwrap();
+        fx.store.remove_project(&added.project.id, false).unwrap();
         assert!(fx.projects().list().unwrap().is_empty());
         assert!(
             root.join(".git").exists(),
             "removing a project only forgets it"
         );
+    }
+
+    #[test]
+    fn a_project_removed_with_its_history_comes_back_with_every_workspace() {
+        let fx = Fixture::new();
+        let added = fx.projects().create("app", &fx.path()).unwrap();
+        let root = PathBuf::from(&added.project.root_path);
+        // A worktree far from Yardsort's own folder, imported by hand: adoption would never
+        // bring this one back on its own.
+        let elsewhere = fx.path().join("elsewhere");
+        fx.git
+            .worktree_add(&root, &elsewhere, "theirs", "HEAD")
+            .unwrap();
+        let imported = crate::workspaces::import_worktrees(
+            &fx.store,
+            &fx.git,
+            &added.project.id,
+            &[elsewhere.to_string_lossy().into_owned()],
+        )
+        .unwrap();
+        fx.store
+            .add_session(&crate::store::NewSession {
+                id: "s1",
+                workspace_id: &imported[0].id,
+                harness_id: "claude",
+                title: "their task",
+                pty_session_id: "pty-1",
+                ..Default::default()
+            })
+            .unwrap();
+
+        fx.store.remove_project(&added.project.id, true).unwrap();
+        assert!(fx.projects().list().unwrap().is_empty());
+
+        let back = fx.projects().open(&root, false).unwrap();
+        assert!(back.revived && !back.already_known);
+        assert_eq!(back.project.id, added.project.id, "the same project");
+        let names: Vec<_> = back.project.workspaces.iter().map(|w| &w.name).collect();
+        assert_eq!(names, ["local", "elsewhere"]);
+        assert_eq!(
+            fx.store.sessions(&imported[0].id).unwrap().len(),
+            1,
+            "with its history"
+        );
+        assert!(!fx.projects().open(&root, false).unwrap().revived, "once");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { native } from "@/lib/native";
-import { errorMessage, type Project, type Workspace } from "@/lib/ipc";
+import { errorMessage, type Workspace } from "@/lib/ipc";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
@@ -68,25 +68,6 @@ async function openProjectFromDiskUnguarded(): Promise<boolean> {
   const selected = useProjectsStore.getState().selectedWorkspaceId;
   if (selected) enterWorkspace(selected);
   return true;
-}
-
-export const removeProject = (project: Project): Promise<void> =>
-  visibly(() => removeProjectUnguarded(project), undefined);
-
-async function removeProjectUnguarded(project: Project) {
-  const running = useTerminalStore
-    .getState()
-    .tabs.filter((tab) => !tab.exit && project.workspaces.some((w) => w.id === tab.workspaceId));
-  const agreed = await native.confirm(
-    `Remove "${project.name}" from Yardsort?\n\nNothing on disk is deleted — the folder and its git history stay exactly as they are.` +
-      (running.length > 0
-        ? `\n\n${running.length} running terminal session${running.length === 1 ? "" : "s"} in this project will be closed.`
-        : ""),
-    { title: "Remove project", okLabel: "Remove" },
-  );
-  if (!agreed) return;
-  await useTerminalStore.getState().closeWorkspaces(project.workspaces.map((w) => w.id));
-  await useProjectsStore.getState().remove(project.id);
 }
 
 /** Workspaces the user chose to keep after being told there is nothing left to restore them from. */

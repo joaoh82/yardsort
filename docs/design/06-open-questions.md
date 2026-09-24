@@ -105,8 +105,22 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     would save. The known limit stands: the right values may differ per repository, which the
     settings cannot express. If that turns out to bite, the change is per-project thresholds, not
     a better global default.
+18. ~~**Which worktrees become workspaces by themselves?**~~ **Settled 2026-09-23: only ours.**
+    M3's adoption took _every_ linked worktree of a repository, which made a project that already
+    used worktrees for its own reasons open full of stale workspaces. The model now matches
+    Superset's: a workspace comes from the composer or from an explicit **Import** that shows
+    branch and path first. The one exception keeps a real behaviour: worktrees under Yardsort's
+    own worktree root are still adopted, so removing and re-adding a project brings its
+    workspaces back without a dialog. Pure Superset (no adoption at all) was considered and
+    rejected for that case. **Forget** is the reverse — the row is hidden, not deleted, so the
+    conversations are still there if the same worktree is imported later; the user can choose to
+    drop them. Workspaces adopted by earlier versions are not migrated: nothing distinguishes
+    them from ones Yardsort made, and Forget is one click. Removing a project got the same
+    treatment the next day (2026-09-24): it hides the project and its rows rather than deleting
+    them, so an imported worktree and its conversations survive a remove and re-add — which
+    adoption, now narrowed, could no longer promise.
 
-18. ~~**May a model write the words?**~~ **Settled 2026-09-23: yes, and not with Jev.** Assist
+19. ~~**May a model write the words?**~~ **Settled 2026-09-23: yes, and not with Jev.** Assist
     cannot do it — Jev answers typed questions and never writes text — so having a commit message
     or a pull request written is its own feature with its own switch. The decision that shapes it:
     **no new credential of ours by default.** The coding agent the user already has does the

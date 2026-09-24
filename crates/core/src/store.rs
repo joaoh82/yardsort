@@ -14,6 +14,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_unique_workspace_path.sql"),
     include_str!("../migrations/0003_sessions.sql"),
     include_str!("../migrations/0004_session_prompt.sql"),
+    include_str!("../migrations/0005_forgotten_workspaces.sql"),
+    include_str!("../migrations/0006_removed_projects.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +52,9 @@ pub struct WorkspaceRow {
     /// Archived: the worktree is gone from disk but the row, its branch and its session history
     /// are kept, so it can be restored.
     pub archived: bool,
+    /// Forgotten: hidden from every list, kept only so its session history survives until the
+    /// worktree is imported again. Folder and branch are untouched. Never set on `local`.
+    pub forgotten: bool,
 }
 
 /// One harness conversation. See `migrations/0003_sessions.sql`.
@@ -173,18 +178,38 @@ impl Store {
         Ok(project)
     }
 
+    /// The projects on show. A removed one is left out; see [`Self::removed_project_by_root`].
     pub fn projects(&self) -> StoreResult<Vec<ProjectRow>> {
         let conn = self.conn();
-        let mut stmt = conn
-            .prepare("SELECT id, name, root_path FROM projects ORDER BY sort_order, created_at")?;
-        let rows = stmt.query_map([], |row| {
-            Ok(ProjectRow {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                root_path: row.get(2)?,
-            })
-        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, root_path FROM projects WHERE removed = 0
+             ORDER BY sort_order, created_at",
+        )?;
+        let rows = stmt.query_map([], project_from_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// A project removed with its history kept, if that folder was one: opening it again is a
+    /// revival, not a fresh add.
+    pub fn removed_project_by_root(&self, root_path: &str) -> StoreResult<Option<ProjectRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT id, name, root_path FROM projects WHERE root_path = ? AND removed = 1",
+                [root_path],
+                project_from_row,
+            )
+            .optional()?)
+    }
+
+    /// Show a removed project again, at the end of the list like a project just added.
+    pub fn revive_project(&self, id: &str) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE projects SET removed = 0,
+                 sort_order = (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects)
+             WHERE id = ? AND removed = 1",
+            [id],
+        )? > 0)
     }
 
     pub fn project_by_root(&self, root_path: &str) -> StoreResult<Option<ProjectRow>> {
@@ -194,14 +219,25 @@ impl Store {
             .find(|project| project.root_path == root_path))
     }
 
-    /// Workspaces of every project: `local` first, then active ones, then archived ones.
+    /// Workspaces of every project on show: `local` first, then active ones, then archived ones.
+    /// Forgotten ones, and those of removed projects, are left out; [`Self::workspace`] still
+    /// finds them by id.
     pub fn workspaces(&self) -> StoreResult<Vec<WorkspaceRow>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, project_id, kind, name, path, branch, base_branch, status FROM workspaces
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {WORKSPACE_COLUMNS} FROM workspaces
+             WHERE forgotten = 0 AND project_id IN (SELECT id FROM projects WHERE removed = 0)
              ORDER BY project_id, kind = 'local' DESC, status = 'active' DESC, sort_order, created_at",
-        )?;
+        ))?;
         let rows = stmt.query_map([], workspace_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Every path Yardsort has a row for, forgotten ones included: what adoption must not touch.
+    pub fn workspace_paths(&self) -> StoreResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT path FROM workspaces")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -209,8 +245,22 @@ impl Store {
         Ok(self
             .conn()
             .query_row(
-                "SELECT id, project_id, kind, name, path, branch, base_branch, status FROM workspaces WHERE id = ?",
+                &format!("SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE id = ?"),
                 [id],
+                workspace_from_row,
+            )
+            .optional()?)
+    }
+
+    /// The forgotten row for a path, if there is one: importing that worktree again revives it.
+    pub fn forgotten_workspace_at(&self, path: &str) -> StoreResult<Option<WorkspaceRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE path = ? AND forgotten = 1"
+                ),
+                [path],
                 workspace_from_row,
             )
             .optional()?)
@@ -249,6 +299,7 @@ impl Store {
             branch: branch.map(str::to_owned),
             base_branch: base_branch.map(str::to_owned),
             archived: false,
+            forgotten: false,
         })
     }
 
@@ -302,6 +353,28 @@ impl Store {
         Ok(self.conn().execute(
             "UPDATE workspaces SET status = ? WHERE id = ? AND kind = 'worktree'",
             [status, id],
+        )? > 0)
+    }
+
+    /// Stop showing a worktree workspace. With `keep_history` the row stays, hidden, so its
+    /// conversations are still there when the worktree is imported again; without it the row
+    /// and its sessions go. `local` cannot be forgotten either way.
+    pub fn forget_workspace(&self, id: &str, keep_history: bool) -> StoreResult<bool> {
+        if !keep_history {
+            return self.remove_worktree(id);
+        }
+        Ok(self.conn().execute(
+            "UPDATE workspaces SET forgotten = 1 WHERE id = ? AND kind = 'worktree'",
+            [id],
+        )? > 0)
+    }
+
+    /// Show a forgotten workspace again, active and on whatever branch its worktree has now.
+    pub fn revive_workspace(&self, id: &str, branch: Option<&str>) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE workspaces SET forgotten = 0, status = 'active', branch = ?
+             WHERE id = ? AND kind = 'worktree' AND forgotten = 1",
+            params![branch, id],
         )? > 0)
     }
 
@@ -445,11 +518,20 @@ impl Store {
     }
 
     /// Forget a project and its workspaces. Returns whether it existed.
-    pub fn remove_project(&self, id: &str) -> StoreResult<bool> {
-        Ok(self
-            .conn()
-            .execute("DELETE FROM projects WHERE id = ?", [id])?
-            > 0)
+    /// Take a project off the list. With `keep_history` it is only hidden, workspaces and
+    /// sessions intact, until the same folder is opened again; without it the row goes, and
+    /// its workspaces and sessions with it. Files on disk are never touched either way.
+    pub fn remove_project(&self, id: &str, keep_history: bool) -> StoreResult<bool> {
+        let conn = self.conn();
+        let changed = if keep_history {
+            conn.execute(
+                "UPDATE projects SET removed = 1 WHERE id = ? AND removed = 0",
+                [id],
+            )?
+        } else {
+            conn.execute("DELETE FROM projects WHERE id = ?", [id])?
+        };
+        Ok(changed > 0)
     }
 
     /// Put projects in the given order. Ids not mentioned keep their relative order, after.
@@ -489,6 +571,17 @@ impl Store {
     }
 }
 
+fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
+    Ok(ProjectRow {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        root_path: row.get(2)?,
+    })
+}
+
+const WORKSPACE_COLUMNS: &str =
+    "id, project_id, kind, name, path, branch, base_branch, status, forgotten";
+
 fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRow> {
     Ok(WorkspaceRow {
         id: row.get(0)?,
@@ -499,6 +592,7 @@ fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRow>
         branch: row.get(5)?,
         base_branch: row.get(6)?,
         archived: row.get::<_, String>(7)? == "archived",
+        forgotten: row.get::<_, i64>(8)? != 0,
     })
 }
 
@@ -601,9 +695,74 @@ mod tests {
     fn removing_a_project_takes_its_workspaces_along() {
         let store = Store::in_memory();
         let project = store.add_project("app", "/code/app").unwrap();
-        assert!(store.remove_project(&project.id).unwrap());
+        assert!(store.remove_project(&project.id, false).unwrap());
         assert!(store.workspaces().unwrap().is_empty());
-        assert!(!store.remove_project(&project.id).unwrap());
+        assert!(!store.remove_project(&project.id, false).unwrap());
+    }
+
+    #[test]
+    fn a_project_removed_with_its_history_kept_is_hidden_and_comes_back_whole() {
+        let store = Store::in_memory();
+        let project = store.add_project("app", "/code/app").unwrap();
+        let ws = store
+            .add_worktree(
+                &project.id,
+                "fix",
+                "/wt/app/fix",
+                Some("ys/fix"),
+                Some("main"),
+            )
+            .unwrap();
+        store
+            .add_session(&new_session("s1", &ws.id, "pty-1"))
+            .unwrap();
+        store.add_project("other", "/code/other").unwrap();
+
+        assert!(store.remove_project(&project.id, true).unwrap());
+        assert_eq!(names(&store), ["other"]);
+        assert!(store
+            .workspaces()
+            .unwrap()
+            .iter()
+            .all(|w| w.project_id != project.id));
+        assert!(
+            store
+                .workspace_paths()
+                .unwrap()
+                .contains(&"/wt/app/fix".to_owned()),
+            "still ours"
+        );
+        assert!(store.project_by_root("/code/app").unwrap().is_none());
+        assert_eq!(
+            store
+                .removed_project_by_root("/code/app")
+                .unwrap()
+                .unwrap()
+                .id,
+            project.id
+        );
+        assert!(
+            !store.remove_project(&project.id, true).unwrap(),
+            "already hidden"
+        );
+
+        assert!(store.revive_project(&project.id).unwrap());
+        assert_eq!(
+            names(&store),
+            ["other", "app"],
+            "back at the end, like a new one"
+        );
+        assert_eq!(
+            store
+                .workspaces()
+                .unwrap()
+                .iter()
+                .filter(|w| w.project_id == project.id)
+                .count(),
+            2
+        );
+        assert_eq!(store.sessions(&ws.id).unwrap().len(), 1, "history intact");
+        assert!(!store.revive_project(&project.id).unwrap());
     }
 
     #[test]
@@ -889,6 +1048,48 @@ mod tests {
         let local = all.iter().find(|w| w.kind == "local").unwrap();
         assert!(!store.rename_workspace(&local.id, "x").unwrap());
         assert!(!store.set_workspace_archived(&local.id, true).unwrap());
+    }
+
+    #[test]
+    fn a_forgotten_workspace_is_hidden_and_its_history_waits_for_an_import() {
+        let store = Store::in_memory();
+        let ws = worktree(&store);
+        store
+            .add_session(&new_session("s1", &ws.id, "pty-1"))
+            .unwrap();
+
+        assert!(store.forget_workspace(&ws.id, true).unwrap());
+        assert!(store.workspaces().unwrap().iter().all(|w| w.id != ws.id));
+        assert!(
+            store.workspace_paths().unwrap().contains(&ws.path),
+            "still ours"
+        );
+        assert!(store.workspace(&ws.id).unwrap().unwrap().forgotten);
+        assert_eq!(store.sessions(&ws.id).unwrap().len(), 1, "history kept");
+        assert!(!store
+            .add_worktree_if_new("p", "x", &ws.path, None)
+            .unwrap()
+            .is_some());
+
+        let found = store.forgotten_workspace_at(&ws.path).unwrap().unwrap();
+        assert_eq!(found.id, ws.id);
+        assert!(store.revive_workspace(&ws.id, Some("other")).unwrap());
+        let back = store.workspace(&ws.id).unwrap().unwrap();
+        assert!(!back.forgotten && !back.archived);
+        assert_eq!(back.branch.as_deref(), Some("other"));
+        assert!(store.forgotten_workspace_at(&ws.path).unwrap().is_none());
+
+        assert!(store.forget_workspace(&ws.id, false).unwrap());
+        assert!(store.workspace(&ws.id).unwrap().is_none());
+        assert!(
+            store.sessions(&ws.id).unwrap().is_empty(),
+            "history dropped with it"
+        );
+
+        let local = store.workspaces().unwrap().remove(0);
+        assert_eq!(local.kind, "local");
+        assert!(!store.forget_workspace(&local.id, true).unwrap());
+        assert!(!store.forget_workspace(&local.id, false).unwrap());
     }
 
     #[test]
