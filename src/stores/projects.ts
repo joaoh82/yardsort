@@ -263,6 +263,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         save(KEYS.selected, workspace.id);
         return session;
       } catch (error) {
+        await get().refresh();
         return { error: errorMessage(error) };
       }
     },
@@ -318,6 +319,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         }));
         return true;
       } catch (error) {
+        await get().refresh();
         set({ error: errorMessage(error) });
         return false;
       }

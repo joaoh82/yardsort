@@ -16,6 +16,7 @@ use crate::settings::WorkspaceSettings;
 use crate::store::{ProjectRow, Store, WorkspaceRow};
 
 pub struct Workspaces<'a> {
+    pub env: &'a crate::env::ShellEnv,
     pub store: &'a Store,
     pub git: &'a Git,
     /// Worktrees live in `<root>/<project>/<workspace>`, outside the repositories themselves.
@@ -27,7 +28,7 @@ pub struct Workspaces<'a> {
 impl Workspaces<'_> {
     /// Create a branch from `base` and a worktree for it, named after `prompt`.
     ///
-    /// Either everything exists afterwards — branch, folder, database row — or nothing does.
+    /// Preparation failures retain the branch, folder and row for inspection.
     pub fn create(
         &self,
         project_id: &str,
@@ -68,7 +69,8 @@ impl Workspaces<'_> {
         let path = project_dir.join(&name);
         self.ensure_dir(&project_dir)?;
         self.git.worktree_add(&root, &path, &branch, &base)?;
-        self.record(&project, &root, &name, &path, &branch, Some(&base))
+        let row = self.record(&project, &root, &name, &path, &branch, Some(&base))?;
+        self.prepare(&root, row)
     }
 
     /// Open an *existing* branch as a workspace: a worktree for it, no new branch. This is how a
@@ -91,7 +93,23 @@ impl Workspaces<'_> {
         let path = project_dir.join(&name);
         self.ensure_dir(&project_dir)?;
         self.git.worktree_add_existing(&root, &path, branch)?;
-        self.record(&project, &root, &name, &path, branch, None)
+        let row = self.record(&project, &root, &name, &path, branch, None)?;
+        self.prepare(&root, row)
+    }
+
+    fn prepare(&self, root: &Path, row: WorkspaceRow) -> IpcResult<WorkspaceRow> {
+        crate::project_automation::ProjectAutomation::load(self.store, &row.project_id)?
+            .prepare(root, &row, self.env)
+            .map_err(|error| {
+                IpcError::new(
+                    "workspace_setup_failed",
+                    format!(
+                        "Workspace kept at {}. Preparation failed: {}",
+                        row.path, error.message
+                    ),
+                )
+            })?;
+        Ok(row)
     }
 
     fn usable_project(&self, project_id: &str) -> IpcResult<(ProjectRow, PathBuf)> {
@@ -229,10 +247,13 @@ impl Workspaces<'_> {
         }
         self.git.worktree_add_existing(&root, &path, branch)?;
         self.store.set_workspace_archived(&workspace.id, false)?;
-        Ok(WorkspaceRow {
-            archived: false,
-            ..workspace
-        })
+        self.prepare(
+            &root,
+            WorkspaceRow {
+                archived: false,
+                ..workspace
+            },
+        )
     }
 
     /// Change a workspace's display name. Folder and branch keep theirs: renaming those would
@@ -504,6 +525,7 @@ mod tests {
     use crate::projects::Projects;
 
     struct Fixture {
+        env: crate::env::ShellEnv,
         store: Store,
         git: Git,
         _dirs: (tempfile::TempDir, tempfile::TempDir),
@@ -524,6 +546,11 @@ mod tests {
             .create("My App", &normalize(code.path()))
             .unwrap();
             Self {
+                env: crate::env::ShellEnv {
+                    vars: std::env::vars().collect(),
+                    source: crate::env::EnvSource::Process,
+                    warning: None,
+                },
                 repo: PathBuf::from(&added.project.root_path),
                 worktrees: normalize(worktrees.path()),
                 project_id: added.project.id,
@@ -536,6 +563,7 @@ mod tests {
 
         fn workspaces(&self) -> Workspaces<'_> {
             Workspaces {
+                env: &self.env,
                 store: &self.store,
                 git: &self.git,
                 worktree_root: &self.worktrees,
@@ -551,6 +579,97 @@ mod tests {
                 .map(|w| w.name)
                 .collect()
         }
+    }
+
+    #[test]
+    fn preparation_copies_ignored_files_then_executes_setup_and_restores() {
+        use crate::project_automation::{ProjectAutomation, ProjectCommand};
+        let fx = Fixture::new();
+        std::fs::write(fx.repo.join(".git/info/exclude"), ".env\n").unwrap();
+        std::fs::write(fx.repo.join(".env"), "SECRET=demo").unwrap();
+        // Git reads the copied file, proving copy happens before setup. Arguments are literal.
+        std::fs::write(fx.repo.join("seed"), "[demo]\nvalue = copied\n").unwrap();
+        ProjectAutomation {
+            copy_files: vec![".env".into(), "seed".into()],
+            setup: Some(ProjectCommand {
+                program: "git".into(),
+                args: vec![
+                    "config".into(),
+                    "--file".into(),
+                    "seed".into(),
+                    "demo.value".into(),
+                ],
+            }),
+            run: None,
+        }
+        .save(&fx.store, &fx.project_id)
+        .unwrap();
+        let row = fx
+            .workspaces()
+            .create(&fx.project_id, None, "prepared")
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&row.path).join(".env")).unwrap(),
+            "SECRET=demo"
+        );
+        let logs: Vec<_> = std::fs::read_dir(&row.path)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".yardsort-setup-")
+            })
+            .collect();
+        assert_eq!(logs.len(), 1);
+        assert!(std::fs::read_to_string(logs[0].path())
+            .unwrap()
+            .contains("copied"));
+        // Refusing archive keeps copied, untracked work unless explicitly confirmed.
+        assert!(fx.workspaces().archive(&row.id, false).is_err());
+        assert!(Path::new(&row.path).join(".env").exists());
+        fx.workspaces().archive(&row.id, true).unwrap();
+        fx.workspaces().restore(&row.id).unwrap();
+        assert!(Path::new(&row.path).join(".env").exists());
+    }
+
+    #[test]
+    fn failed_preparation_preserves_workspace_and_never_overwrites_tracked_files() {
+        use crate::project_automation::{ProjectAutomation, ProjectCommand};
+        let fx = Fixture::new();
+        std::fs::write(fx.repo.join("tracked"), "committed").unwrap();
+        fx.git.run(&fx.repo, &["add", "tracked"]).unwrap();
+        fx.git.run(&fx.repo, &["commit", "-m", "tracked"]).unwrap();
+        std::fs::write(fx.repo.join("tracked"), "local secret").unwrap();
+        let mut config = ProjectAutomation {
+            copy_files: vec!["tracked".into()],
+            ..Default::default()
+        };
+        config.save(&fx.store, &fx.project_id).unwrap();
+        let error = fx
+            .workspaces()
+            .create(&fx.project_id, None, "collision")
+            .unwrap_err();
+        assert_eq!(error.code, "workspace_setup_failed");
+        let rows = fx.store.workspaces().unwrap();
+        let row = rows.iter().find(|row| row.kind == "worktree").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&row.path).join("tracked")).unwrap(),
+            "committed"
+        );
+        config.copy_files.clear();
+        config.setup = Some(ProjectCommand {
+            program: "git".into(),
+            args: vec!["not-a-real-subcommand".into()],
+        });
+        config.save(&fx.store, &fx.project_id).unwrap();
+        let error = fx
+            .workspaces()
+            .create(&fx.project_id, None, "setup failure")
+            .unwrap_err();
+        assert!(error.message.contains("Setup exited"));
+        assert_eq!(fx.store.workspaces().unwrap().len(), 3);
     }
 
     #[test]

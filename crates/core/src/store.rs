@@ -16,6 +16,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0004_session_prompt.sql"),
     include_str!("../migrations/0005_forgotten_workspaces.sql"),
     include_str!("../migrations/0006_removed_projects.sql"),
+    include_str!("../migrations/0007_project_automation.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -149,6 +150,25 @@ impl Store {
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    pub fn project_automation(&self, id: &str) -> StoreResult<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT config FROM project_automation WHERE project_id = ?",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn set_project_automation(&self, id: &str, config: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO project_automation (project_id, config) VALUES (?, ?) ON CONFLICT(project_id) DO UPDATE SET config = excluded.config",
+            params![id, config],
+        )?;
+        Ok(())
     }
 
     /// Insert a project together with its `local` workspace, at the end of the list.

@@ -5,6 +5,8 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Project setup and dev servers.** Project settings can copy files such as `.env` and run a setup script in new or restored worktrees before starting an agent. Failed preparation keeps the workspace and setup log. Configure a run command and use **▶ Run** to start or focus a dev-server terminal in any workspace. See [Project automation](docs/guide/projects.md#project-automation).
+
 - **Worktrees made elsewhere no longer appear by themselves.** Yardsort used to turn every
   worktree of a repository into a workspace the moment it looked; a project with worktrees of
   its own — from a script, another tool, or your own `git worktree add` — opened full of

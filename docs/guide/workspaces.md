@@ -53,8 +53,9 @@ and 32 characters. This is local text extraction, not an AI summary; unrecognize
 back to the opening words. Empty or unusable messages get a railway station name. Names are
 chosen when the workspace is created; later messages do not rename it.
 
-If the agent cannot be started — not installed, say — the worktree and the new branch are taken
-back, so a failed attempt leaves nothing behind. A branch that existed before is never deleted.
+If preparation or the agent launch fails, the worktree and its branch are kept, so script output
+and copied files remain available. The error names its folder. Fix the problem and open the
+workspace to start an agent, or delete it through the workspace menu if it is no longer needed.
 
 ### Where the folders go
 
@@ -64,8 +65,9 @@ back, so a failed attempt leaves nothing behind. A branch that existed before is
 ### Files git does not track
 
 A fresh worktree contains what is committed — so `.env` files, `node_modules` and other ignored
-or untracked things are **not** there. Ask the agent to install dependencies, or copy what you
-need in a shell tab.
+or untracked things are **not** there by default. Configure **Files to copy** and a setup command
+in [Project settings](projects.md#project-automation) to prepare each new or restored worktree
+automatically, or install dependencies and copy files yourself in a shell tab.
 
 ## Worktrees made elsewhere
 

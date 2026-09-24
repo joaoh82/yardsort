@@ -13,6 +13,9 @@ export const commands = {
 	projectsList: () => typedError<Project[], IpcError>(__TAURI_INVOKE("projects_list")),
 	/**  Add the repository containing `path`. Fails with `not_a_git_repo` unless `init_git` is set. */
 	projectOpen: (path: string, initGit: boolean) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_open", { path, initGit })),
+	projectAutomationGet: (projectId: string) => typedError<ProjectAutomation, IpcError>(__TAURI_INVOKE("project_automation_get", { projectId })),
+	projectAutomationSave: (projectId: string, config: ProjectAutomation) => typedError<null, IpcError>(__TAURI_INVOKE("project_automation_save", { projectId, config })),
+	workspaceRun: (workspaceId: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("workspace_run", { workspaceId, size })),
 	projectCreate: (name: string, parent: string) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_create", { name, parent })),
 	/**
 	 *  Take a project off the list. With `keep_history` its workspaces and their conversations
@@ -43,8 +46,8 @@ export const commands = {
 	projectBranches: (projectId: string) => typedError<BranchList, IpcError>(__TAURI_INVOKE("project_branches", { projectId })),
 	/**
 	 *  The core loop: make a worktree — on a new branch, or for an existing one — and start a harness in it with the user's
-	 *  first message. If the harness cannot start, the worktree and branch are taken back, so a
-	 *  failed attempt leaves no trace.
+	 *  first message. Once prepared, the worktree is retained if the harness cannot start.
+	 *  A script may have produced work, even if project settings change while it is running.
 	 */
 	workspaceCreate: (request: NewWorkspace) => typedError<CreatedWorkspace, IpcError>(__TAURI_INVOKE("workspace_create", { request })),
 	/**  Remove a workspace's worktree. The branch is kept. Fails with `worktree_dirty` unless `force`. */
@@ -579,6 +582,17 @@ export type Project = {
 	 */
 	missing: boolean,
 	workspaces: Workspace[],
+};
+
+export type ProjectAutomation = {
+	copyFiles: string[],
+	setup: ProjectCommand | null,
+	run: ProjectCommand | null,
+};
+
+export type ProjectCommand = {
+	program: string,
+	args: string[],
 };
 
 /**  What `gh` says about one project's pull requests. */

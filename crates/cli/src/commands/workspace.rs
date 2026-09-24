@@ -178,6 +178,7 @@ fn new(
     let git = ys.git()?;
     let worktree_root = ys.worktree_root()?;
     let workspace: WorkspaceRow = Workspaces {
+        env: ys.env(),
         store: &ys.store,
         git: &git,
         worktree_root: &worktree_root,
