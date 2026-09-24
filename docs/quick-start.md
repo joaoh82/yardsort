@@ -10,7 +10,9 @@ and it never sees your API keys — each agent uses its own login. You need:
 - **git**
 - at least one agent CLI that works in your terminal. Out of the box Yardsort knows
   [Claude Code](https://claude.com/claude-code) (`claude`), [Codex](https://github.com/openai/codex)
-  (`codex`), Grok (`grok`) and [OpenCode](https://opencode.ai) (`opencode`). Anything else that
+  (`codex`), Grok (`grok`), [OpenCode](https://opencode.ai) (`opencode`),
+  [OMP](https://omp.sh/) (`omp`), [Cursor](https://cursor.com/cli) (`cursor-agent`) and
+  [Pi](https://pi.dev/) (`pi`). Anything else that
   runs in a terminal can be [added in settings](guide/settings.md#adding-your-own-harness).
 
 Check that it works where Yardsort will look for it — a fresh terminal:

@@ -33,9 +33,10 @@ export function Harnesses() {
             Any terminal agent
           </h3>
           <p className="mt-3.5 text-muted">
-            Claude Code, Codex, Grok and OpenCode out of the box; add any other with a few lines of
-            configuration — no plugin, no release to wait for. To Yardsort a harness is a command
-            and some argument templates, kept in a plain TOML file you can read, back up and edit.
+            Claude Code, Codex, Grok, OpenCode, OMP, Cursor and Pi out of the box; add any other
+            with a few lines of configuration — no plugin, no release to wait for. To Yardsort a
+            harness is a command and some argument templates, kept in a plain TOML file you can
+            read, back up and edit.
           </p>
           <dl className="mt-8 grid gap-[18px] text-[15px]">
             {POINTS.map((point) => (

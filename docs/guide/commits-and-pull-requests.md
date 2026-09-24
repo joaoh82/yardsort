@@ -47,9 +47,12 @@ The box takes a full message: Enter makes a new line, and `Ctrl+Enter` / `⌘Ent
 Two things can do the writing, tried in that order:
 
 1. **The agent you already have**, in its non-interactive mode — `claude --print`, `codex exec`,
-   `opencode run`, `grok --single`. It is installed, logged in and billed to the account it
+   `opencode run`, `grok --single`, `omp --print`, `pi --print`. It is installed, logged in and billed to the account it
    already uses, and it is the agent this workspace has been working with. A harness you added
    yourself needs its **Write** arguments filled in under Settings → Harnesses before it can.
+   Cursor is excluded from drafting because its print mode has no verified way to avoid saving
+   a chat, which could replace the conversation opened by Resume. A Cursor workspace uses
+   another available writer, or the API-key fallback below.
 2. **Your own Anthropic API key**, when no configured agent can write. Add it under
    Settings → Assist; `ANTHROPIC_API_KEY` from your environment works too.
 

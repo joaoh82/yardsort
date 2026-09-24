@@ -222,6 +222,17 @@ mod tests {
     }
 
     #[test]
+    fn cursor_drafting_uses_a_different_writer_without_starting_a_cursor_chat() {
+        let cursor = crate::harness::find("cursor", &[]).unwrap();
+        assert_eq!(writer(std::slice::from_ref(&cursor), Some("cursor")), None);
+        let omp = crate::harness::find("omp", &[]).unwrap();
+        assert_eq!(
+            writer(&[cursor, omp], Some("cursor")).map(|d| d.id.as_str()),
+            Some("omp")
+        );
+    }
+
+    #[test]
     fn a_disabled_agent_is_never_asked() {
         let all = vec![def("claude", false, true), def("codex", true, true)];
         assert_eq!(
@@ -238,8 +249,12 @@ mod tests {
     }
 
     #[test]
-    fn the_built_in_agents_all_know_their_non_interactive_mode() {
+    fn built_in_writers_have_prompt_arguments() {
         for def in crate::harness::builtin() {
+            if def.id == "cursor" {
+                assert!(def.write_args.is_empty());
+                continue;
+            }
             assert!(
                 !def.write_args.is_empty(),
                 "{} should be able to write; its flags are verified against its own --help",

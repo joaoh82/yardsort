@@ -131,23 +131,9 @@ fn save_failed(error: std::io::Error) -> IpcError {
 pub async fn harness_save(app: AppHandle, def: HarnessDef) -> IpcResult<Vec<HarnessInfo>> {
     blocking(app, move |state| {
         harness::validate(&def).map_err(|why| IpcError::new("invalid_harness", why))?;
-        let base = harness::builtin()
-            .into_iter()
-            .find(|builtin| builtin.id == def.id)
-            .unwrap_or_else(|| HarnessDef::custom(&def.id));
-        let is_builtin = harness::builtin()
-            .iter()
-            .any(|builtin| builtin.id == def.id);
-        let entry = harness::HarnessOverride::between(&base, &def);
         state
             .settings
-            .update(|settings| {
-                settings.harnesses.retain(|existing| existing.id != def.id);
-                // A custom harness needs its entry to exist at all; a built-in only to differ.
-                if !is_builtin || !entry.is_empty() {
-                    settings.harnesses.push(entry);
-                }
-            })
+            .update(|settings| harness::save_override(&mut settings.harnesses, &def))
             .map_err(save_failed)?;
         Ok(list_harnesses(state))
     })

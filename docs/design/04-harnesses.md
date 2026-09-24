@@ -117,9 +117,42 @@ Notes:
 - Claude and Grok both have their own `--worktree` flag. We don't use it: Yardsort owns worktree
   creation so behaviour is identical across harnesses.
 - **Gemini CLI** (0.60.0) is also installed and fits the same shape — `-m`, `-i {prompt}` for
-  "prompt then stay interactive", `--session-id`, `--resume latest`. Cheap fifth default.
+  "prompt then stay interactive", `--session-id`, `--resume latest`. A possible future default.
 - Permission / approval modes (`--permission-mode`, `-a`, `--always-approve`, `--auto`) are
   deliberately **not** in the defaults. Users who want them add them to `base_args`.
+
+### OMP, Cursor and Pi
+
+Added on 2026-09-24, checked against OMP 18.1.19, Cursor Agent 2026.09.23-86fc751 and Pi
+0.87.1 `--help`, plus the official [OMP CLI reference](https://omp.sh/docs/cli),
+[Cursor parameters](https://cursor.com/docs/cli/reference/parameters) and
+[Pi CLI reference](https://pi.dev/docs/latest/cli). These checks verify the flags, not a
+provider-authenticated end-to-end conversation.
+
+|                   | OMP                                               | Cursor            | Pi                                                  |
+| ----------------- | ------------------------------------------------- | ----------------- | --------------------------------------------------- |
+| command           | `omp`                                             | `cursor-agent`    | `pi`                                                |
+| model             | `--model {model}`                                 | `--model {model}` | `--model {model}`                                   |
+| effort            | `--thinking {effort}`                             | —                 | `--thinking {effort}`                               |
+| effort values     | off, minimal, low, medium, high, xhigh, max, auto | —                 | off, minimal, low, medium, high, xhigh, max         |
+| prompt            | `-- " {prompt}"`                                  | `-- {prompt}`     | `-- " {prompt}"`                                    |
+| assign session id | —                                                 | —                 | `--session-id {session_id}`                         |
+| resume            | `--continue`                                      | `--continue`      | `--session {session_id}`                            |
+| fork              | —                                                 | —                 | `--fork {session_id} --session-id {new_session_id}` |
+| session_id_mode   | latest-in-cwd                                     | latest-in-cwd     | assigned                                            |
+| write             | `--print --no-session -- " {prompt}"`             | — (disabled)      | `--print --no-session -- " {prompt}"`               |
+
+Cursor's installer also exposes `agent`; the more specific `cursor-agent` avoids confusion
+with other tools and the `cursor` editor launcher. Users can override the command in settings.
+OMP's documented fork option requires an agent session id, which Yardsort does not have, and
+is absent from the checked version's help; its Fork template stays empty. Cursor has no
+verified fork flag. Pi can choose the new id on a fork, so the fork stays addressable.
+OMP and Pi drafting runs use `--no-session` to avoid replacing the latest interactive session.
+OMP and Pi treat an argument beginning with `@` as a file attachment even after `--`.
+Their prompt templates prefix a literal space (the quotes in the table denote one argv entry).
+Cursor drafting is disabled: there is no verified ephemeral print mode, and a saved draft chat
+could replace the `--continue` target. This also avoids headless trust failures in fresh worktrees.
+Model names are free text for all three; no provider-specific model suggestions are imposed.
 
 ## Settings
 
@@ -134,6 +167,16 @@ disabled / not found) and whether it is `modified` or `custom`. The form edits o
 - **Test launch** starts the unsaved definition, with no prompt, in the home directory.
 - **Restore defaults** (built-ins) deletes the override. **Delete harness** removes a custom one.
 - **Add custom harness** for anything else that runs in a terminal.
+
+### Preserving custom definitions across upgrades
+
+Saved entries now record `builtin = true` or `builtin = false`. Legacy entries without this
+marker are built-in overrides only for the four original IDs (`claude`, `codex`, `grok`,
+`opencode`). Other unmarked entries stay custom, including `omp`, `cursor` and `pi`; their
+missing fields are filled from the blank custom template. A custom entry shadows a built-in
+with the same ID, preserving the session references without renaming anything. Saving keeps
+this provenance; deleting the custom entry exposes the built-in. An unchanged built-in still
+needs no saved entry.
 
 ### The file
 

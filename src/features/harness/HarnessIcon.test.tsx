@@ -7,7 +7,7 @@ const draw = (props: Parameters<typeof HarnessIcon>[0]) =>
 
 describe("HarnessIcon", () => {
   it("gives every built-in a glyph of its own", () => {
-    for (const id of ["claude", "codex", "grok", "opencode"]) {
+    for (const id of ["claude", "codex", "grok", "opencode", "omp", "cursor", "pi"]) {
       const svg = draw({ id });
       // Drawn, not lettered: the fallback is the only glyph made of text.
       expect(svg.querySelector("text")).toBeNull();

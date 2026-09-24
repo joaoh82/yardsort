@@ -145,10 +145,13 @@ is not touched.
 
 ### What can be resumed
 
-| Agent             | Resume / fork                                                                                                                                                                                                                                      |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code, Grok | Any recorded session. Yardsort chooses the conversation's id up front, so it can always name it.                                                                                                                                                   |
-| Codex, OpenCode   | The **most recent** conversation in the workspace. These agents choose their own ids, and "continue the latest one here" is the only handle they offer. Older entries say so rather than offering a button that would open the wrong conversation. |
+| Agent                 | Resume / fork                                                                                                                                                                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code, Grok, Pi | Any recorded session. Yardsort chooses the conversation's id up front, so it can always name it.                                                                                                                                                   |
+| Codex, OpenCode       | The **most recent** conversation in the workspace. These agents choose their own ids, and "continue the latest one here" is the only handle they offer. Older entries say so rather than offering a button that would open the wrong conversation. |
+
+OMP and Cursor can **Resume** the most recent conversation in the workspace, but their
+built-in definitions do not offer **Fork**. Pi supports both actions by session id.
 
 If a session cannot be continued — its agent was disabled or removed in settings, for example —
 the list says why.

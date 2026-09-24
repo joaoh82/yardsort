@@ -522,7 +522,7 @@ export type HostEvent =
 { type: "quiet"; id: SessionId; busyMs: number };
 
 export type InstallHint = {
-	/**  One command that installs it on any OS with Node.js. */
+	/**  An install command for the current OS; shown for the user to copy, never executed. */
 	command: string,
 	/**  The project's own install instructions, for every other way. */
 	url: string,

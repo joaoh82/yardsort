@@ -21,10 +21,28 @@ waiting for a new release.
 
 ![Harness settings](../images/settings.png)
 
-Built in: **Claude Code**, **Codex**, **Grok**, **OpenCode**. The dot next to each shows whether
-its command was found on your `PATH`, and the mark beside it is the one that identifies that
+Built in: **Claude Code**, **Codex**, **Grok**, **OpenCode**, **OMP**, **Cursor**, **Pi**.
+The dot next to each shows whether its command was found on your `PATH`, and the mark beside it is the one that identifies that
 agent everywhere else in the app — the tab strip, the composer's picker, the session history. A
 harness you add yourself is drawn as its initial.
+
+OMP and Pi offer a thinking level through the effort picker and accept `provider/model`
+model names. Cursor runs `cursor-agent`, not the `cursor` editor command; if your installation
+only exposes `agent`, change its **Command** to `agent`. Install links on the welcome screen
+lead to each CLI's own setup instructions. Install and sign in before launching a workspace.
+
+Pi's built-in definition requires a version with `--session-id` and `--fork` (verified with
+0.87.1). OMP and Cursor resume only the latest conversation in a workspace and do not offer
+Fork. Pi supports resuming and forking individual conversations.
+
+Opening messages for OMP and Pi are prefixed with a space so an initial `@` is treated as
+text, not a file attachment. Keep that space in their **Prompt args** templates. Cursor's
+**Write args** are empty: drafting uses another available writer or your API-key fallback.
+
+If you already had a custom harness with id `omp`, `cursor` or `pi`, it stays custom and
+keeps its command, argument templates and session identity. It takes precedence over the
+built-in with that id. Deleting the custom entry reveals the built-in; keep the custom entry
+if you still need it to resume older conversations.
 
 ### Fields
 

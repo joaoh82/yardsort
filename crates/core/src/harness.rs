@@ -295,6 +295,69 @@ pub fn builtin() -> Vec<HarnessDef> {
             enabled: true,
             strengths: String::new(),
         },
+        HarnessDef {
+            id: "omp".into(),
+            label: "OMP".into(),
+            command: "omp".into(),
+            base_args: vec![],
+            model_args: strings(&["--model", "{model}"]),
+            effort_args: strings(&["--thinking", "{effort}"]),
+            session_args: vec![],
+            prompt_args: strings(&["--", " {prompt}"]),
+            write_args: strings(&["--print", "--no-session", "--", " {prompt}"]),
+            resume_args: strings(&["--continue"]),
+            fork_args: vec![],
+            efforts: strings(&[
+                "off", "minimal", "low", "medium", "high", "xhigh", "max", "auto",
+            ]),
+            models: vec![],
+            prompt_transport: PromptTransport::Argv,
+            session_id_mode: SessionIdMode::LatestInCwd,
+            stdin_ready_ms: DEFAULT_STDIN_READY_MS,
+            enabled: true,
+            strengths: String::new(),
+        },
+        HarnessDef {
+            id: "cursor".into(),
+            label: "Cursor".into(),
+            command: "cursor-agent".into(),
+            base_args: vec![],
+            model_args: strings(&["--model", "{model}"]),
+            effort_args: vec![],
+            session_args: vec![],
+            prompt_args: strings(&["--", "{prompt}"]),
+            // No verified ephemeral print mode: protect the interactive --continue target.
+            write_args: vec![],
+            resume_args: strings(&["--continue"]),
+            fork_args: vec![],
+            efforts: vec![],
+            models: vec![],
+            prompt_transport: PromptTransport::Argv,
+            session_id_mode: SessionIdMode::LatestInCwd,
+            stdin_ready_ms: DEFAULT_STDIN_READY_MS,
+            enabled: true,
+            strengths: String::new(),
+        },
+        HarnessDef {
+            id: "pi".into(),
+            label: "Pi".into(),
+            command: "pi".into(),
+            base_args: vec![],
+            model_args: strings(&["--model", "{model}"]),
+            effort_args: strings(&["--thinking", "{effort}"]),
+            session_args: strings(&["--session-id", "{session_id}"]),
+            prompt_args: strings(&["--", " {prompt}"]),
+            write_args: strings(&["--print", "--no-session", "--", " {prompt}"]),
+            resume_args: strings(&["--session", "{session_id}"]),
+            fork_args: strings(&["--fork", "{session_id}", "--session-id", "{new_session_id}"]),
+            efforts: strings(&["off", "minimal", "low", "medium", "high", "xhigh", "max"]),
+            models: vec![],
+            prompt_transport: PromptTransport::Argv,
+            session_id_mode: SessionIdMode::Assigned,
+            stdin_ready_ms: DEFAULT_STDIN_READY_MS,
+            enabled: true,
+            strengths: String::new(),
+        },
     ]
 }
 
@@ -306,6 +369,9 @@ pub fn builtin() -> Vec<HarnessDef> {
 #[serde(default)]
 pub struct HarnessOverride {
     pub id: String,
+    /// Explicit provenance for new entries. Unmarked entries predate the new built-ins.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builtin: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -364,6 +430,15 @@ macro_rules! each_field {
 }
 
 impl HarnessOverride {
+    /// Before provenance was recorded, only these four IDs were built-ins. Keep every other
+    /// unmarked entry custom, even when a later release adds a built-in with the same ID.
+    fn is_builtin(&self) -> bool {
+        self.builtin.unwrap_or(matches!(
+            self.id.as_str(),
+            "claude" | "codex" | "grok" | "opencode"
+        ))
+    }
+
     /// `base` with every field this override sets.
     pub fn apply(&self, mut base: HarnessDef) -> HarnessDef {
         macro_rules! set {
@@ -391,6 +466,7 @@ impl HarnessOverride {
         *self
             == Self {
                 id: self.id.clone(),
+                builtin: self.builtin,
                 ..Self::default()
             }
     }
@@ -412,6 +488,13 @@ pub fn resolve_all(overrides: &[HarnessOverride]) -> Vec<Resolved> {
         .iter()
         .map(|base| {
             let custom = overrides.iter().find(|o| o.id == base.id);
+            if let Some(custom) = custom.filter(|o| !o.is_builtin()) {
+                return Resolved {
+                    def: custom.apply(HarnessDef::custom(&custom.id)),
+                    builtin: false,
+                    modified: false,
+                };
+            }
             Resolved {
                 def: custom.map_or_else(|| base.clone(), |o| o.apply(base.clone())),
                 builtin: true,
@@ -430,6 +513,25 @@ pub fn resolve_all(overrides: &[HarnessOverride]) -> Vec<Resolved> {
             }),
     );
     all
+}
+
+/// Save against the definition's original kind, including custom entries shadowing built-ins.
+/// Explicit provenance prevents future built-in additions from changing custom definitions.
+pub fn save_override(overrides: &mut Vec<HarnessOverride>, def: &HarnessDef) {
+    let is_builtin = resolve_all(overrides)
+        .iter()
+        .any(|h| h.def.id == def.id && h.builtin);
+    let base = if is_builtin {
+        builtin().into_iter().find(|h| h.id == def.id).unwrap()
+    } else {
+        HarnessDef::custom(&def.id)
+    };
+    let mut entry = HarnessOverride::between(&base, def);
+    entry.builtin = Some(is_builtin);
+    overrides.retain(|o| o.id != def.id);
+    if !is_builtin || !entry.is_empty() {
+        overrides.push(entry);
+    }
 }
 
 pub fn find(id: &str, overrides: &[HarnessOverride]) -> Option<HarnessDef> {
@@ -513,6 +615,133 @@ mod tests {
     }
 
     #[test]
+    fn omp_and_cursor_start_and_resume_without_claiming_fork_support() {
+        let prompt = "- Fix `quotes`, \"spaces\" and\nnewlines";
+        for (id, command, effort) in [("omp", "omp", "high"), ("cursor", "cursor-agent", "")] {
+            let def = find(id, &[]).unwrap();
+            assert_eq!(def.command, command);
+            assert!(def.enabled);
+            assert_eq!(def.session_id_mode, SessionIdMode::LatestInCwd);
+            let mut options = strings(&["--model", "provider/model"]);
+            if !effort.is_empty() {
+                options.extend(strings(&["--thinking", effort]));
+            }
+            let mut expected = options.clone();
+            expected.extend(strings(&[
+                "--",
+                &if id == "omp" {
+                    format!(" {prompt}")
+                } else {
+                    prompt.into()
+                },
+            ]));
+            assert_eq!(
+                def.start_args(&values(prompt, "provider/model", effort)),
+                expected
+            );
+            options.push("--continue".into());
+            assert_eq!(
+                def.continue_args(&values("", "provider/model", effort), false),
+                options
+            );
+            assert!(def.start_args(&LaunchValues::default()).is_empty());
+            assert!(def.fork_args.is_empty());
+            assert!(!def.fork_assigns_id());
+        }
+    }
+
+    #[test]
+    fn omp_and_pi_prompts_cannot_be_interpreted_as_file_attachments() {
+        for id in ["omp", "pi"] {
+            let def = find(id, &[]).unwrap();
+            for prompt in [
+                "@README.md summarize this",
+                "@missing",
+                "- list",
+                "quotes \" and\nnewlines",
+            ] {
+                let v = values(prompt, "", "");
+                let args = def.start_args(&v);
+                assert_eq!(args.last(), Some(&format!(" {prompt}")));
+                assert_eq!(
+                    expand(&def.write_args, &v).last(),
+                    Some(&format!(" {prompt}"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pi_assigns_ids_for_start_resume_and_fork() {
+        let def = find("pi", &[]).unwrap();
+        let v = values("- fix the bug", "provider/model", "high");
+        assert_eq!(def.command, "pi");
+        assert_eq!(def.session_id_mode, SessionIdMode::Assigned);
+        assert_eq!(
+            def.start_args(&v),
+            [
+                "--model",
+                "provider/model",
+                "--thinking",
+                "high",
+                "--session-id",
+                v.session_id.as_deref().unwrap(),
+                "--",
+                " - fix the bug",
+            ]
+        );
+        assert_eq!(
+            def.continue_args(&v, false),
+            [
+                "--model",
+                "provider/model",
+                "--thinking",
+                "high",
+                "--session",
+                v.session_id.as_deref().unwrap(),
+            ]
+        );
+        assert_eq!(
+            def.continue_args(&v, true),
+            [
+                "--model",
+                "provider/model",
+                "--thinking",
+                "high",
+                "--fork",
+                v.session_id.as_deref().unwrap(),
+                "--session-id",
+                v.new_session_id.as_deref().unwrap(),
+            ]
+        );
+        assert!(def.fork_assigns_id());
+        assert_eq!(
+            def.start_args(&values("", "", "")),
+            ["--session-id", v.session_id.as_deref().unwrap(),]
+        );
+    }
+
+    #[test]
+    fn new_harnesses_can_draft_without_changing_the_latest_omp_or_pi_session() {
+        for id in ["omp", "pi"] {
+            let def = find(id, &[]).unwrap();
+            let expected = strings(&[
+                "--print",
+                "--no-session",
+                "--",
+                " - draft this\nwith spaces",
+            ]);
+            assert_eq!(
+                expand(
+                    &def.write_args,
+                    &values("- draft this\nwith spaces", "", "")
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn groups_without_a_value_vanish_whole() {
         let args = find("claude", &[]).unwrap().start_args(&values("", "", ""));
         assert_eq!(
@@ -537,7 +766,7 @@ mod tests {
             let args = harness.start_args(&values(dashed, "", ""));
             let at = args
                 .iter()
-                .position(|arg| arg == dashed)
+                .position(|arg| arg.trim_start() == dashed)
                 .unwrap_or_else(|| panic!("{}: the prompt is not in {args:?}", harness.id));
             let before = at
                 .checked_sub(1)

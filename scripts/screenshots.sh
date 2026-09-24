@@ -37,7 +37,7 @@ HEIGHT=1175
 
 # Commands the agents need on a PATH that holds nothing else. node and npm are here because the
 # demo project's tests are `node --test`, and an agent has nothing but this PATH to run them.
-SHIMMED=(claude codex grok opencode node npm npx git)
+SHIMMED=(claude codex grok opencode omp cursor-agent pi node npm npx git)
 
 # Hyprland 0.56 moved dispatchers to a Lua API and the old argv form stopped parsing, so each
 # call is made the new way and falls back to the old one. Omarchy's own scripts do the same.

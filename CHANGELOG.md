@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **OMP, Cursor and Pi are built-in harnesses.** Pick them in the composer and configure them
+  in Settings → Harnesses, with install links on the welcome screen. OMP and Pi can write commit
+  messages and pull request descriptions; Cursor drafting stays disabled to protect Resume. OMP and Pi expose thinking levels; Pi supports
+  resuming and forking by session id, while OMP and Cursor resume the latest conversation in
+  the workspace. Existing custom harnesses with these IDs keep their definitions and session
+  identity. OMP and Pi accept opening messages starting with `@` as text. See [Harness settings](docs/guide/settings.md#harnesses).
+
 - **Project setup and dev servers.** Project settings can copy files such as `.env` and run a setup script in new or restored worktrees before starting an agent. Failed preparation keeps the workspace and setup log. Logs stay outside the checkout, imported worktrees skip setup on restore, and blank argument lines are ignored. Configure a run command and use **▶ Run** to start or focus a dev-server terminal in any workspace. See [Project automation](docs/guide/projects.md#project-automation).
 
 - **`ys workspace delete`.** Remove a workspace from the command line: the folder and the record
