@@ -1,7 +1,10 @@
 //! `ys workspace …`
 
+use std::path::{Component, Path, PathBuf};
+
 use pty_host::TermSize;
 use serde::Serialize;
+use yardsort_core::git::normalize;
 use yardsort_core::launch::{HarnessRequest, Launch, Launcher};
 use yardsort_core::store::WorkspaceRow;
 use yardsort_core::workspaces::Workspaces;
@@ -282,6 +285,13 @@ fn delete(ys: &Yardsort, wanted: &str, force: bool, out: &Output) -> Result<(), 
         ));
     }
 
+    let path = PathBuf::from(&workspace.path);
+    // Windows refuses to delete a directory that is some process's current directory, and git
+    // deletes the contents before that refusal — so a failure would still have destroyed the
+    // folder. Step out first, and on Windows make sure nobody else is holding it either.
+    step_out_of(&path)?;
+    ensure_folder_can_be_removed(&path)?;
+
     let git = ys.git()?;
     let worktree_root = ys.worktree_root()?;
     let result = Workspaces {
@@ -325,6 +335,106 @@ fn delete(ys: &Yardsort, wanted: &str, force: bool, out: &Output) -> Result<(), 
         }
         println!("  path   {}", deleted.path);
     })
+}
+
+/// Leave `workspace` when this process is standing in it. Otherwise removing the folder fails on
+/// Windows, because a current directory cannot be deleted there.
+fn step_out_of(workspace: &Path) -> Result<(), Failure> {
+    let Ok(cwd) = std::env::current_dir() else {
+        return Ok(());
+    };
+    if !is_within(&cwd, workspace) {
+        return Ok(());
+    }
+    std::env::set_current_dir(std::env::temp_dir()).map_err(|error| {
+        Failure::new(format!(
+            "Cannot leave {} in order to remove it: {error}",
+            workspace.display()
+        ))
+    })
+}
+
+/// On Windows, prove the folder can be renamed aside and straight back. A program that still has
+/// it as its current directory — the shell or agent that launched `ys` — makes the rename fail,
+/// and then nothing has been deleted. Other platforms can remove a current directory outright.
+fn ensure_folder_can_be_removed(path: &Path) -> Result<(), Failure> {
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        if !path.is_dir() {
+            return Ok(());
+        }
+        let Some(aside) = aside_path(path) else {
+            return Ok(());
+        };
+        if let Err(error) = std::fs::rename(path, &aside) {
+            if is_in_use(&error) {
+                return Err(Failure::new(format!(
+                    "{} is still the current directory of another program, so Windows will not \
+                     remove it. Nothing was deleted.\n\
+                     Run the command from outside that folder.",
+                    path.display()
+                )));
+            }
+            // Not the lock this is looking for. Let git try, and report whatever it hits.
+            return Ok(());
+        }
+        if let Err(error) = std::fs::rename(&aside, path) {
+            return Err(Failure::new(format!(
+                "Moved {} to {} and could not move it back: {error}",
+                path.display(),
+                aside.display()
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// A sibling name that does not exist yet, so the probe never lands on a real workspace.
+#[cfg(windows)]
+fn aside_path(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let name = path.file_name()?.to_string_lossy();
+    let mut candidate = parent.join(format!(".{name}.ys-removing"));
+    let mut n = 2u32;
+    while candidate.exists() {
+        candidate = parent.join(format!(".{name}.ys-removing-{n}"));
+        n += 1;
+    }
+    Some(candidate)
+}
+
+#[cfg(windows)]
+fn is_in_use(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied
+        || matches!(error.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// `path` is `root` or something inside it. Compared by components, so `demo-2` is not inside
+/// `demo`, and on Windows the case of the path does not matter.
+fn is_within(path: &Path, root: &Path) -> bool {
+    let path = normalize(path);
+    let root = normalize(root);
+    let mut rest = path.components();
+    for component in root.components() {
+        match rest.next() {
+            Some(next) if same_component(&next, &component) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn same_component(left: &Component<'_>, right: &Component<'_>) -> bool {
+    if cfg!(windows) {
+        left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
+    } else {
+        left == right
+    }
 }
 
 /// A workspace by id, or by name when that is unambiguous. Archived ones are included: deleting
@@ -427,4 +537,18 @@ fn choose_harness(ys: &Yardsort, wanted: Option<&str>) -> Result<String, Failure
 /// Session ids are uuids; the first characters are enough to tell them apart when reading.
 pub fn short(id: &str) -> String {
     id.chars().take(8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_contains_itself_and_its_children_but_not_a_sibling() {
+        let root = Path::new("/tmp/ys-delete-probe/demo");
+        assert!(is_within(root, root));
+        assert!(is_within(Path::new("/tmp/ys-delete-probe/demo/src"), root));
+        assert!(!is_within(Path::new("/tmp/ys-delete-probe/demo-2"), root));
+        assert!(!is_within(Path::new("/tmp/ys-delete-probe"), root));
+    }
 }

@@ -115,7 +115,9 @@ ys workspace delete fix-the-flaky-login-test --force
 
 A process that is already running in the workspace is not stopped. That is what lets a harness
 delete the workspace it is standing in and still finish; the folder disappears underneath it and
-the command returns. The branch is there either way.
+the command returns. The branch is there either way. `ys` steps out of the folder before removing
+it. On Windows a folder that is still some other program's current directory — the agent or shell
+that launched the command — cannot be removed, and nothing is deleted.
 
 ### `ys session list`
 
