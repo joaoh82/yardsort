@@ -17,6 +17,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005_forgotten_workspaces.sql"),
     include_str!("../migrations/0006_removed_projects.sql"),
     include_str!("../migrations/0007_project_automation.sql"),
+    include_str!("../migrations/0008_workspace_preparation.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -150,6 +151,22 @@ impl Store {
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    pub fn mark_workspace_preparation(&self, id: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT OR IGNORE INTO workspace_preparation (workspace_id) VALUES (?)",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    pub fn prepares_workspace(&self, id: &str) -> StoreResult<bool> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspace_preparation WHERE workspace_id = ?)",
+            [id],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn project_automation(&self, id: &str) -> StoreResult<Option<String>> {

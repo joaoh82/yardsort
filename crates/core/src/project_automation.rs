@@ -173,8 +173,10 @@ fn run_setup(
     let program = env
         .find_program(&command.program, cwd)
         .ok_or_else(|| invalid(format!("Setup executable not found: {}", command.program)))?;
-    // Random, exclusive log name avoids overwriting either tracked files or earlier output.
-    let log_path = cwd.join(format!(".yardsort-setup-{}.log", uuid::Uuid::new_v4()));
+    // Linked worktrees have a private Git directory outside the checkout. Logs cannot be
+    // staged with `git add -A`, and git removes them when the worktree is archived/deleted.
+    let git_dir = crate::git::Git::new(env)?.run(cwd, &["rev-parse", "--absolute-git-dir"])?;
+    let log_path = Path::new(&git_dir).join(format!("yardsort-setup-{}.log", uuid::Uuid::new_v4()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]

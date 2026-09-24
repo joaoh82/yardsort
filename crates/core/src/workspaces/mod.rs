@@ -163,7 +163,10 @@ impl Workspaces<'_> {
             Some(branch),
             base,
         ) {
-            Ok(row) => Ok(row),
+            Ok(row) => {
+                self.store.mark_workspace_preparation(&row.id)?;
+                Ok(row)
+            }
             Err(error) => {
                 self.undo(root, path, base.is_some().then_some(branch));
                 Err(error.into())
@@ -247,13 +250,15 @@ impl Workspaces<'_> {
         }
         self.git.worktree_add_existing(&root, &path, branch)?;
         self.store.set_workspace_archived(&workspace.id, false)?;
-        self.prepare(
-            &root,
-            WorkspaceRow {
-                archived: false,
-                ..workspace
-            },
-        )
+        let restored = WorkspaceRow {
+            archived: false,
+            ..workspace
+        };
+        if self.store.prepares_workspace(&restored.id)? {
+            self.prepare(&root, restored)
+        } else {
+            Ok(restored)
+        }
     }
 
     /// Change a workspace's display name. Folder and branch keep theirs: renaming those would
@@ -612,14 +617,18 @@ mod tests {
             std::fs::read_to_string(Path::new(&row.path).join(".env")).unwrap(),
             "SECRET=demo"
         );
-        let logs: Vec<_> = std::fs::read_dir(&row.path)
+        let git_dir = fx
+            .git
+            .run(Path::new(&row.path), &["rev-parse", "--absolute-git-dir"])
+            .unwrap();
+        let logs: Vec<_> = std::fs::read_dir(&git_dir)
             .unwrap()
             .flatten()
             .filter(|entry| {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .starts_with(".yardsort-setup-")
+                    .starts_with("yardsort-setup-")
             })
             .collect();
         assert_eq!(logs.len(), 1);
@@ -632,6 +641,111 @@ mod tests {
         fx.workspaces().archive(&row.id, true).unwrap();
         fx.workspaces().restore(&row.id).unwrap();
         assert!(Path::new(&row.path).join(".env").exists());
+    }
+
+    #[test]
+    fn setup_logs_cannot_be_staged_and_do_not_make_worktrees_dirty() {
+        use crate::project_automation::{ProjectAutomation, ProjectCommand};
+        let fx = Fixture::new();
+        ProjectAutomation {
+            setup: Some(ProjectCommand {
+                program: "git".into(),
+                args: vec!["status".into()],
+            }),
+            ..Default::default()
+        }
+        .save(&fx.store, &fx.project_id)
+        .unwrap();
+        let row = fx
+            .workspaces()
+            .create(&fx.project_id, None, "clean setup")
+            .unwrap();
+        let path = Path::new(&row.path);
+        fx.git.run(path, &["add", "-A"]).unwrap();
+        assert!(fx
+            .git
+            .run(path, &["status", "--porcelain"])
+            .unwrap()
+            .is_empty());
+        let git_dir = PathBuf::from(
+            fx.git
+                .run(path, &["rev-parse", "--absolute-git-dir"])
+                .unwrap(),
+        );
+        assert!(std::fs::read_dir(&git_dir)
+            .unwrap()
+            .flatten()
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("yardsort-setup-")));
+        fx.workspaces().archive(&row.id, false).unwrap();
+        assert!(!git_dir.exists());
+        fx.workspaces().restore(&row.id).unwrap();
+        assert!(fx
+            .git
+            .run(path, &["status", "--porcelain"])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn imported_worktrees_skip_preparation_on_restore_but_opened_branches_do_not() {
+        use crate::project_automation::{ProjectAutomation, ProjectCommand};
+        let fx = Fixture::new();
+        let external = fx.worktrees.join("external");
+        fx.git
+            .worktree_add(&fx.repo, &external, "external", "HEAD")
+            .unwrap();
+        let imported = import_worktrees(
+            &fx.store,
+            &fx.git,
+            &fx.project_id,
+            &[external.to_string_lossy().into_owned()],
+        )
+        .unwrap()
+        .remove(0);
+        fx.workspaces().archive(&imported.id, false).unwrap();
+        // Neither copying a missing file nor the failing script should be attempted on restore.
+        ProjectAutomation {
+            copy_files: vec!["missing.env".into()],
+            setup: Some(ProjectCommand {
+                program: "git".into(),
+                args: vec!["not-a-real-command".into()],
+            }),
+            run: None,
+        }
+        .save(&fx.store, &fx.project_id)
+        .unwrap();
+        fx.workspaces().restore(&imported.id).unwrap();
+        assert!(!fx.store.prepares_workspace(&imported.id).unwrap());
+        assert!(fx
+            .git
+            .run(&external, &["status", "--porcelain"])
+            .unwrap()
+            .is_empty());
+
+        ProjectAutomation::default()
+            .save(&fx.store, &fx.project_id)
+            .unwrap();
+        fx.git.run(&fx.repo, &["branch", "existing"]).unwrap();
+        let opened = fx
+            .workspaces()
+            .open_branch(&fx.project_id, "existing")
+            .unwrap();
+        assert!(opened.base_branch.is_none());
+        assert!(fx.store.prepares_workspace(&opened.id).unwrap());
+        fx.workspaces().archive(&opened.id, false).unwrap();
+        ProjectAutomation {
+            copy_files: vec!["missing.env".into()],
+            ..Default::default()
+        }
+        .save(&fx.store, &fx.project_id)
+        .unwrap();
+        assert_eq!(
+            fx.workspaces().restore(&opened.id).unwrap_err().code,
+            "workspace_setup_failed"
+        );
     }
 
     #[test]

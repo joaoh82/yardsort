@@ -97,19 +97,23 @@ Use `/` separators on all platforms. Directories, symlinks, absolute paths, pare
 or conflicting destination stops preparation and leaves the worktree available for inspection.
 
 **Setup executable** and **Setup arguments** run after copying, in the new worktree, before the
-agent starts. Enter one argument per line without shell quotes. For example, use executable
-`bun` and argument `install`. For a script, use `bash` with `scripts/setup.sh`, or `pwsh` with
+agent starts. Enter one argument per line without shell quotes; blank lines are ignored. For
+example, use executable `bun` and argument `install`. For a script, use `bash` with `scripts/setup.sh`, or `pwsh` with
 `-File` and `scripts/setup.ps1` on separate lines. Arguments are passed directly; shell operators
 and environment-variable expansion are not interpreted. Leave the executable empty to disable it.
 
-Preparation also runs when opening an existing branch in a new worktree, or restoring a removed
-worktree. It does not run on `local`, import, adoption, or merely selecting an existing workspace.
+Preparation also runs when opening an existing branch in a new worktree, or restoring a worktree
+created by Yardsort. Imported and adopted worktrees do not run preparation, including on restore.
+It does not run on `local` or merely selecting an existing workspace.
 The CLI's `ys workspace new`, including `--no-agent`, uses the same preparation.
 
 Setup uses the resolved launch environment, with `YARDSORT_PROJECT` set to the original checkout
 and `YARDSORT_WORKSPACE` to the new worktree. It is noninteractive and has a ten-minute limit.
-Output is saved in a uniquely named `.yardsort-setup-….log` in the worktree; the log may contain
-secrets, so inspect it before sharing or committing files. If preparation fails, the agent is not
+Output is saved as `yardsort-setup-….log` in the worktree’s private Git directory, outside the
+checkout. It cannot be staged by `git add -A` and does not make the worktree dirty. Git removes
+the log when the worktree is archived or deleted; inspect or save it first if needed. To locate
+that directory from the worktree, run `git rev-parse --absolute-git-dir`. Logs may contain secrets,
+so inspect them before sharing. If preparation fails, the agent is not
 started and the error names the retained worktree (and the log for an unsuccessful setup process).
 Open a shell there to inspect the log, fix the problem and rerun your setup command manually.
 A timeout stops the setup process; check for any child processes it started before retrying.

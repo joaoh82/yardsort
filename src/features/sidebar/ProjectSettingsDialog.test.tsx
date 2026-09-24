@@ -21,9 +21,9 @@ it("saves per-project files and literal command arguments", async () => {
   await waitFor(() => expect(screen.getByLabelText("Setup executable")).toBeEnabled());
   await user.type(screen.getByLabelText("Files to copy"), ".env\nconfig/local.json");
   await user.type(screen.getByLabelText("Setup executable"), "bash");
-  await user.type(screen.getByLabelText("Setup arguments"), "scripts/setup file.sh\n$literal");
+  await user.type(screen.getByLabelText("Setup arguments"), "scripts/setup file.sh\n\n$literal\n");
   await user.type(screen.getByLabelText("Run executable"), "bun");
-  await user.type(screen.getByLabelText("Run arguments"), "run\ndev");
+  await user.type(screen.getByLabelText("Run arguments"), "run\n  \ndev\n");
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(core.projectAutomationSave).toHaveBeenCalledWith("p-demo", {
     copyFiles: [".env", "config/local.json"],

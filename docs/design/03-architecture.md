@@ -233,9 +233,11 @@ Decisions:
   project id), shared by the app and CLI. After recording a new/restored worktree, the core copies
   explicitly configured regular files without overwriting, then runs a noninteractive executable
   plus argv in the resolved environment. Failures retain the row, branch and files. Setup output
-  goes to an exclusive log in the worktree, with a ten-minute process timeout. Imports and local
-  workspaces are not prepared. The Run action launches a regular daemon-owned PTY, tagged with
-  `projectRun`, and reuses a running session for that workspace.
+  goes to an exclusive log in the private Git directory outside the checkout, with a ten-minute
+  process timeout. A `workspace_preparation` table records worktrees created here, including
+  existing-branch opens; imports and adopted worktrees remain opted out on restore. Git removes
+  logs with the worktree. Local workspaces are not prepared. The Run action launches a regular
+  daemon-owned PTY, tagged with `projectRun`, and reuses a running session for that workspace.
 
 ### The forge (`crates/core/src/forge.rs`, `src-tauri/src/publish/`)
 

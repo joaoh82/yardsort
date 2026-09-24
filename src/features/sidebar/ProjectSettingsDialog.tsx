@@ -42,7 +42,7 @@ export function ProjectSettingsDialog({
   }, [project.id]);
   const input =
     "mt-1 w-full rounded border border-line bg-canvas px-2 py-1.5 font-mono outline-none select-text focus:border-accent";
-  const args = (text: string) => (text === "" ? [] : text.split("\n"));
+  const args = (text: string) => text.split("\n").filter((line) => line.trim() !== "");
   async function save(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -139,9 +139,10 @@ export function ProjectSettingsDialog({
             />
           </label>
           <p className="text-ink-faint">
-            One argument per line, without shell quotes. For a script, enter its interpreter (such
-            as bash or pwsh) and its path as an argument. Leave an executable blank to disable it.
-            Setup has a 10-minute limit and writes a log in the worktree.
+            One argument per line, without shell quotes. Blank lines are ignored. For a script,
+            enter its interpreter (such as bash or pwsh) and its path as an argument. Leave an
+            executable blank to disable it. Setup has a 10-minute limit and writes a log in the
+            worktree’s private Git directory.
           </p>
         </fieldset>
         {error && (
