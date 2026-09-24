@@ -8,6 +8,7 @@ import {
   type Workspace,
 } from "@/lib/ipc";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
+import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
 import { useFileDrop } from "@/lib/useFileDrop";
 import { formatShortcut } from "@/lib/platform";
 import { insertDroppedPaths } from "./drop";
@@ -56,6 +57,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const [base, setBase] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // The message as last written, so a drop reads what is on screen even if state has not
@@ -399,6 +401,20 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           </p>
         )}
 
+        {!runIn && (
+          <p className="mt-2 text-right text-[11px] text-ink-faint">
+            Have worktrees already?{" "}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setImporting(true)}
+              className="text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+            >
+              Import worktrees…
+            </button>
+          </p>
+        )}
+
         <div className="mt-3 min-h-10 text-center">
           {error ? (
             <p role="alert" className="text-red-400 select-text">
@@ -421,6 +437,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           )}
         </div>
       </form>
+      {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
     </div>
   );
 }

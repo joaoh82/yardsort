@@ -24,6 +24,8 @@ const core = vi.hoisted(() => ({
   workspaceCreate: vi.fn(),
   uiStateSave: vi.fn(),
   assistSuggest: vi.fn(),
+  projectUntrackedWorktrees: vi.fn(),
+  workspacesImport: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -406,5 +408,32 @@ describe("Composer with Assist", () => {
 
     await waitFor(() => expect(core.assistSuggest).toHaveBeenCalled());
     expect(screen.queryByText(/Assist suggests/)).not.toBeInTheDocument();
+  });
+
+  it("offers to import worktrees that already exist, and adds what was imported", async () => {
+    core.projectUntrackedWorktrees.mockResolvedValue([
+      { path: "/elsewhere/app/old", branch: "old" },
+    ]);
+    const imported = worktree("app", "old", { path: "/elsewhere/app/old" });
+    core.workspacesImport.mockResolvedValue([imported]);
+    const user = await renderComposer();
+
+    await user.click(screen.getByRole("button", { name: "Import worktrees…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Import worktrees into app" });
+    await within(dialog).findByRole("checkbox", { name: "old" });
+    await user.click(within(dialog).getByRole("button", { name: "Import 1 worktree" }));
+
+    expect(core.workspacesImport).toHaveBeenCalledWith("p-app", ["/elsewhere/app/old"]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useProjectsStore.getState().projects[0]!.workspaces.map((w) => w.name)).toEqual([
+      "local",
+      "old",
+    ]);
+  });
+
+  it("does not offer importing when running in an existing workspace", async () => {
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    await screen.findByRole("form", { name: "Run in local" });
+    expect(screen.queryByRole("button", { name: "Import worktrees…" })).not.toBeInTheDocument();
   });
 });

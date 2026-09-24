@@ -105,3 +105,14 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     would save. The known limit stands: the right values may differ per repository, which the
     settings cannot express. If that turns out to bite, the change is per-project thresholds, not
     a better global default.
+18. ~~**Which worktrees become workspaces by themselves?**~~ **Settled 2026-09-23: only ours.**
+    M3's adoption took _every_ linked worktree of a repository, which made a project that already
+    used worktrees for its own reasons open full of stale workspaces. The model now matches
+    Superset's: a workspace comes from the composer or from an explicit **Import** that shows
+    branch and path first. The one exception keeps a real behaviour: worktrees under Yardsort's
+    own worktree root are still adopted, so removing and re-adding a project brings its
+    workspaces back without a dialog. Pure Superset (no adoption at all) was considered and
+    rejected for that case. **Forget** is the reverse — the row is hidden, not deleted, so the
+    conversations are still there if the same worktree is imported later; the user can choose to
+    drop them. Workspaces adopted by earlier versions are not migrated: nothing distinguishes
+    them from ones Yardsort made, and Forget is one click.

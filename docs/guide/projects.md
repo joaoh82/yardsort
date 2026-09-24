@@ -60,6 +60,9 @@ Yardsort's window gets focus.
 Hover a project and press **⋯**, or right-click it:
 
 - **New workspace** — same as the **+** on the row. See [Workspaces](workspaces.md).
+- **Import worktrees…** — make workspaces of worktrees that already exist in the repository, made
+  by hand or by another tool. See
+  [Worktrees made elsewhere](workspaces.md#worktrees-made-elsewhere).
 - **Reveal in file manager**
 - **Move up / Move down** — the order is remembered.
 - **Remove from Yardsort…** — forgets the project and closes its terminals. **Nothing on disk is

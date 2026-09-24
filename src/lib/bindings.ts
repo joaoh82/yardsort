@@ -93,6 +93,18 @@ export const commands = {
 	/**  Bring back an archived workspace, or one whose folder disappeared, at its old path. */
 	workspaceRestore: (id: string) => typedError<Workspace, IpcError>(__TAURI_INVOKE("workspace_restore", { id })),
 	workspaceRename: (id: string, name: string) => typedError<Workspace, IpcError>(__TAURI_INVOKE("workspace_rename", { id, name })),
+	/**
+	 *  Worktrees of the project that are not workspaces — made by hand, by another tool, or
+	 *  forgotten here — for the import dialog.
+	 */
+	projectUntrackedWorktrees: (projectId: string) => typedError<UntrackedWorktree[], IpcError>(__TAURI_INVOKE("project_untracked_worktrees", { projectId })),
+	/**  Make workspaces of the untracked worktrees at `paths`. Nothing on disk is touched. */
+	workspacesImport: (projectId: string, paths: string[]) => typedError<Workspace[], IpcError>(__TAURI_INVOKE("workspaces_import", { projectId, paths })),
+	/**
+	 *  Stop showing a workspace. Its folder and branch stay; with `keep_history` its conversations
+	 *  do too, ready for the day it is imported again.
+	 */
+	workspaceForget: (id: string, keepHistory: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_forget", { id, keepHistory })),
 	/**  With `reload`, the login shell is asked again first — for "I just installed it, look again". */
 	preflight: (reload: boolean) => typedError<Preflight, IpcError>(__TAURI_INVOKE("preflight", { reload })),
 	/**  Ask whether a newer release exists. Touches nothing on disk. */
@@ -658,6 +670,16 @@ export type ThresholdsDto = {
 	defaults: [number, number, number],
 	/**  The lowest and highest either end may be. */
 	range: [number, number],
+};
+
+/**
+ *  A worktree git knows about that is not a workspace: made by hand, by another tool, or
+ *  forgotten here. What the import dialog lists.
+ */
+export type UntrackedWorktree = {
+	path: string,
+	/**  `None` when detached. */
+	branch: string | null,
 };
 
 export type UpdateStatus = {

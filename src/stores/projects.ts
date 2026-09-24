@@ -67,6 +67,11 @@ interface ProjectsState {
   /** Bring back an archived or vanished workspace. */
   restoreWorkspace: (workspaceId: string) => Promise<boolean>;
   renameWorkspace: (workspaceId: string, name: string) => Promise<boolean>;
+  /** Make workspaces of worktrees git already has. Resolves to what was imported, or `null`
+   *  with the reason in `error`. */
+  importWorktrees: (projectId: string, paths: string[]) => Promise<Workspace[] | null>;
+  /** Stop showing a workspace. Its folder and branch stay; its history too unless told not to. */
+  forgetWorkspace: (workspaceId: string, keepHistory: boolean) => Promise<boolean>;
   remember: (key: string, value: unknown) => void;
   toggleCollapsed: (projectId: string) => void;
   dismiss: () => void;
@@ -324,6 +329,43 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         set({ error: errorMessage(error) });
         return false;
       }
+    },
+
+    async importWorktrees(projectId, paths) {
+      try {
+        const imported = await ipc.workspacesImport(projectId, paths);
+        set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? { ...project, workspaces: [...project.workspaces, ...imported] }
+              : project,
+          ),
+          error: null,
+        }));
+        return imported;
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return null;
+      }
+    },
+
+    async forgetWorkspace(workspaceId, keepHistory) {
+      try {
+        await ipc.workspaceForget(workspaceId, keepHistory);
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return false;
+      }
+      set((state) => ({
+        projects: state.projects.map((project) => ({
+          ...project,
+          workspaces: project.workspaces.filter((workspace) => workspace.id !== workspaceId),
+        })),
+        selectedWorkspaceId:
+          state.selectedWorkspaceId === workspaceId ? null : state.selectedWorkspaceId,
+      }));
+      save(KEYS.selected, get().selectedWorkspaceId);
+      return true;
     },
 
     remember(key, value) {

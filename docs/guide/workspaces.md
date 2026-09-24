@@ -22,6 +22,9 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 | **Effort**  | Offered only for agents that have the concept.                                                                                                                    |
 | **Branch**  | Under _New branch from_, pick the branch to start from. Under _Open existing branch_, pick a branch to check out in a workspace as it is — no new branch is made. |
 
+Under the pickers, **Import worktrees…** opens the same dialog as the project menu, for worktrees
+that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere).
+
 Your last choices are remembered per project. With [Assist](assist.md) switched on, a line under
 the pickers may offer a harness and an effort for what you are typing; **Use** applies it, and
 ignoring it does nothing.
@@ -66,8 +69,20 @@ need in a shell tab.
 
 ## Worktrees made elsewhere
 
-Worktrees you created by hand, or with another tool, show up as workspaces automatically the next
-time the project is listed. Nothing is moved or changed; Yardsort just learns about them.
+Not every worktree of a repository is a workspace. Yardsort shows the ones it made, and picks up
+on its own only worktrees under its own folder (`~/yardsort` by default, see
+[Settings → Workspaces](settings.md#workspaces)) — which is how a project's workspaces come back
+when the project is removed and added again. A worktree anywhere else — made by hand, by another
+tool, or by a script — is left alone until you ask for it.
+
+To bring those in, choose **Import worktrees…** from the [project menu](projects.md#the-project-menu)
+or from the composer. The dialog lists every worktree git knows about that is not a workspace,
+with its branch and its path, all ticked; untick what you do not want and press **Import**.
+Nothing is moved or changed: the folder stays where it is, on the branch it has, and Yardsort just
+learns about it. An imported workspace is named after its folder; rename it if you like.
+
+To go the other way, **Forget…** in the workspace menu takes a workspace out of Yardsort without
+touching its folder or its branch.
 
 ## The workspace menu
 
@@ -87,6 +102,15 @@ the bottom of its project.
 
 **Restore workspace**, from the archived entry's menu, checks the branch out again _at the same
 path_ — which is what makes its old conversations resumable.
+
+### Forget…
+
+For a worktree that is not Yardsort's to remove — one you imported, or one another tool owns.
+The workspace leaves the list and **nothing on disk is touched**: the folder and the branch stay
+exactly as they are. Terminals running in it are closed.
+
+Its saved conversations are kept by default, so if the worktree is ever imported again they are
+back with it. Tick **Also delete its saved conversations** in the dialog to drop them instead.
 
 ### Delete workspace…
 

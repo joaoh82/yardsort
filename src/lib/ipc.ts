@@ -43,6 +43,7 @@ import {
   type Suggestion,
   type TermSize,
   type ThresholdsDto,
+  type UntrackedWorktree,
   type UpdateStatus,
   type Workspace,
   type WorkspaceSettingsDto,
@@ -86,6 +87,7 @@ export type {
   Suggestion,
   TermSize,
   ThresholdsDto,
+  UntrackedWorktree,
   UpdateStatus,
   Workspace,
   WorkspaceSettingsDto,
@@ -197,6 +199,15 @@ export const ipc = {
   /** Bring back an archived or vanished workspace at its old path. */
   workspaceRestore: (id: string) => unwrap(commands.workspaceRestore(id)),
   workspaceRename: (id: string, name: string) => unwrap(commands.workspaceRename(id, name)),
+  /** Worktrees git knows about in a project that are not workspaces: what Import offers. */
+  projectUntrackedWorktrees: (projectId: string) =>
+    unwrap(commands.projectUntrackedWorktrees(projectId)),
+  /** Make workspaces of those worktrees, by path. Nothing on disk is touched. */
+  workspacesImport: (projectId: string, paths: string[]) =>
+    unwrap(commands.workspacesImport(projectId, paths)),
+  /** Stop showing a workspace; folder and branch stay, and so does its history when asked. */
+  workspaceForget: (id: string, keepHistory: boolean) =>
+    done(commands.workspaceForget(id, keepHistory)),
 
   workspaceChanges: (workspaceId: string) => unwrap(commands.workspaceChanges(workspaceId)),
   /** Both versions of a file; the viewer computes the diff. */

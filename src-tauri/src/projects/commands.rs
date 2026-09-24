@@ -15,14 +15,18 @@ fn with_projects<T>(
     f: impl FnOnce(&Projects<'_>) -> IpcResult<T>,
 ) -> IpcResult<T> {
     let git = Git::new(&state.env())?;
-    // Catch up with git first: worktrees made by hand, or orphaned when their project was
-    // removed and added again, become workspaces. Failing to look must not block the list.
+    // Catch up with git first: worktrees of ours that Yardsort lost track of — orphaned when
+    // their project was removed and added again — become workspaces once more. Worktrees made
+    // elsewhere wait to be imported. Failing to look must not block the list.
+    let worktree_root = state.worktree_root()?;
     let _one_at_a_time = state
         .reconciling
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     for project in state.store.projects()? {
-        if let Err(error) = crate::workspaces::adopt_unknown(&state.store, &git, &project.id) {
+        if let Err(error) =
+            crate::workspaces::adopt_unknown(&state.store, &git, &project.id, &worktree_root)
+        {
             eprintln!(
                 "could not reconcile worktrees of {}: {}",
                 project.name, error.message
