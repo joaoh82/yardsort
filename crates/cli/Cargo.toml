@@ -1,6 +1,6 @@
 [package]
 name = "yardsort-cli"
-description = "Drive Yardsort from a terminal: list projects, start a workspace, put an agent in it"
+description = "Drive Yardsort from a terminal: list projects, start or delete a workspace, put an agent in it"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

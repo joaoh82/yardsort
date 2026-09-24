@@ -18,6 +18,10 @@ const LINES: { command: string; note: string }[] = [
     note: "how it ended up, as plain text — finished ones too",
   },
   { command: "ys workspace list --json", note: "every command takes --json, for scripts" },
+  {
+    command: "ys workspace delete fix-the-flaky-login-test",
+    note: "the folder goes; the branch stays",
+  },
 ];
 
 // `ys` is not in the app bundle — it is its own archive per platform, named after the release, so

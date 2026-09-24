@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **`ys workspace delete`.** Remove a workspace from the command line: the folder and the record
+  go, the branch stays. Uncommitted work is refused unless `--force` is given, and a harness can
+  delete the workspace it is running in — the command does not stop that process. On Windows it
+  steps out of the folder first, and deletes nothing if another program still has that folder as
+  its current directory. See [The `ys` command line](docs/guide/cli.md).
+
 - **Worktrees made elsewhere no longer appear by themselves.** Yardsort used to turn every
   worktree of a repository into a workspace the moment it looked; a project with worktrees of
   its own — from a script, another tool, or your own `git worktree add` — opened full of
