@@ -85,6 +85,40 @@ It keeps working after this command returns. Open Yardsort to watch.
 The project can be named or given by id. If the harness you asked for is not configured or not
 installed, nothing is created at all — no branch, no folder, no record.
 
+### `ys workspace delete <workspace>`
+
+Removes the folder and forgets the workspace, including its session history. **The branch is
+kept** — commits are never thrown away, same as [Delete workspace](workspaces.md#delete-workspace)
+in the app. Delete the branch yourself with git if you want it gone. A project's own `local`
+checkout cannot be deleted.
+
+```sh
+ys workspace delete fix-the-flaky-login-test
+```
+
+```
+deleted  fix-the-flaky-login-test
+  branch ys/fix-the-flaky-login-test (kept)
+  path   /home/you/yardsort/yardsort/fix-the-flaky-login-test
+```
+
+The workspace can be a name or an id from `ys workspace list --json`. A name that matches more
+than one workspace is refused, and the ids are printed so you can say which one. Archived
+workspaces are included: deleting one removes it for good.
+
+Uncommitted changes and untracked files are refused, and nothing is removed. They live only in
+the folder, so there is no way back to them. `--force` is the confirmation that they should go:
+
+```sh
+ys workspace delete fix-the-flaky-login-test --force
+```
+
+A process that is already running in the workspace is not stopped. That is what lets a harness
+delete the workspace it is standing in and still finish; the folder disappears underneath it and
+the command returns. The branch is there either way. `ys` steps out of the folder before removing
+it. On Windows a folder that is still some other program's current directory — the agent or shell
+that launched the command — cannot be removed, and nothing is deleted.
+
 ### `ys session list`
 
 Agent conversations. Running ones by default; `--all` includes those that have ended, and

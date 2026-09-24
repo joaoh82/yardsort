@@ -1,7 +1,10 @@
 //! `ys workspace …`
 
+use std::path::{Component, Path, PathBuf};
+
 use pty_host::TermSize;
 use serde::Serialize;
+use yardsort_core::git::normalize;
 use yardsort_core::launch::{HarnessRequest, Launch, Launcher};
 use yardsort_core::store::WorkspaceRow;
 use yardsort_core::workspaces::Workspaces;
@@ -53,6 +56,19 @@ pub enum Command {
         #[arg(long)]
         no_agent: bool,
     },
+    /// Remove a workspace's folder and forget it. The branch, and its commits, are kept.
+    ///
+    /// Uncommitted changes and untracked files are refused unless `--force` is given: they live
+    /// only in the folder this removes, so there is no way back to them.
+    Delete {
+        /// Which one: a workspace name, or its id from `ys workspace list --json`.
+        workspace: String,
+        /// Delete even when the folder holds work that is not committed.
+        ///
+        /// That work cannot be recovered. The branch is still kept.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Serialize)]
@@ -95,6 +111,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
         } => new(
             ys, project, prompt, base, harness, model, effort, no_agent, out,
         ),
+        Command::Delete { workspace, force } => delete(ys, &workspace, force, out),
     }
 }
 
@@ -248,6 +265,238 @@ fn new(
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Deleted {
+    id: String,
+    name: String,
+    project: String,
+    /// Kept on purpose. Commits are never thrown away by deleting a workspace.
+    branch: Option<String>,
+    path: String,
+}
+
+/// Remove the worktree and the record. A running process is left running: a harness deletes the
+/// workspace it is standing in by calling this, and has to be able to finish afterwards.
+fn delete(ys: &Yardsort, wanted: &str, force: bool, out: &Output) -> Result<(), Failure> {
+    let workspace = find_workspace(ys, wanted)?;
+    if workspace.kind != "worktree" {
+        return Err(Failure::new(
+            "The local workspace is the project's own checkout and cannot be deleted.".to_owned(),
+        ));
+    }
+
+    let path = PathBuf::from(&workspace.path);
+    // Windows refuses to delete a directory that is some process's current directory, and git
+    // deletes the contents before that refusal — so a failure would still have destroyed the
+    // folder. Step out first, and on Windows make sure nobody else is holding it either.
+    step_out_of(&path)?;
+    ensure_folder_can_be_removed(&path)?;
+
+    let git = ys.git()?;
+    let worktree_root = ys.worktree_root()?;
+    let result = Workspaces {
+        env: ys.env(),
+        store: &ys.store,
+        git: &git,
+        worktree_root: &worktree_root,
+        settings: &ys.settings.workspaces,
+    }
+    .delete(&workspace.id, force);
+
+    if let Err(error) = result {
+        if error.code == "worktree_dirty" {
+            return Err(Failure::new(format!(
+                "{} has uncommitted changes or untracked files, so it was not deleted.\n\
+                 Pass --force to delete it anyway. That work is in no commit and cannot be \
+                 recovered.\n\
+                 The branch is kept either way.",
+                workspace.name
+            )));
+        }
+        return Err(error.into());
+    }
+
+    let projects = ys.store.projects()?;
+    let project = projects
+        .iter()
+        .find(|p| p.id == workspace.project_id)
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "?".to_owned());
+    let deleted = Deleted {
+        id: workspace.id,
+        name: workspace.name,
+        project,
+        branch: workspace.branch,
+        path: workspace.path,
+    };
+    out.emit(&deleted, || {
+        println!("deleted  {}", deleted.name);
+        if let Some(branch) = &deleted.branch {
+            println!("  branch {branch} (kept)");
+        }
+        println!("  path   {}", deleted.path);
+    })
+}
+
+/// Leave `workspace` when this process is standing in it. Otherwise removing the folder fails on
+/// Windows, because a current directory cannot be deleted there.
+fn step_out_of(workspace: &Path) -> Result<(), Failure> {
+    let Ok(cwd) = std::env::current_dir() else {
+        return Ok(());
+    };
+    if !is_within(&cwd, workspace) {
+        return Ok(());
+    }
+    std::env::set_current_dir(std::env::temp_dir()).map_err(|error| {
+        Failure::new(format!(
+            "Cannot leave {} in order to remove it: {error}",
+            workspace.display()
+        ))
+    })
+}
+
+/// On Windows, prove the folder can be renamed aside and straight back. A program that still has
+/// it as its current directory — the shell or agent that launched `ys` — makes the rename fail,
+/// and then nothing has been deleted. Other platforms can remove a current directory outright.
+fn ensure_folder_can_be_removed(path: &Path) -> Result<(), Failure> {
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        if !path.is_dir() {
+            return Ok(());
+        }
+        let Some(aside) = aside_path(path) else {
+            return Ok(());
+        };
+        if let Err(error) = std::fs::rename(path, &aside) {
+            if is_in_use(&error) {
+                return Err(Failure::new(format!(
+                    "{} is still the current directory of another program, so Windows will not \
+                     remove it. Nothing was deleted.\n\
+                     Run the command from outside that folder.",
+                    path.display()
+                )));
+            }
+            // Not the lock this is looking for. Let git try, and report whatever it hits.
+            return Ok(());
+        }
+        if let Err(error) = std::fs::rename(&aside, path) {
+            return Err(Failure::new(format!(
+                "Moved {} to {} and could not move it back: {error}",
+                path.display(),
+                aside.display()
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// A sibling name that does not exist yet, so the probe never lands on a real workspace.
+#[cfg(windows)]
+fn aside_path(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let name = path.file_name()?.to_string_lossy();
+    let mut candidate = parent.join(format!(".{name}.ys-removing"));
+    let mut n = 2u32;
+    while candidate.exists() {
+        candidate = parent.join(format!(".{name}.ys-removing-{n}"));
+        n += 1;
+    }
+    Some(candidate)
+}
+
+#[cfg(windows)]
+fn is_in_use(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied
+        || matches!(error.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// `path` is `root` or something inside it. Compared by components, so `demo-2` is not inside
+/// `demo`, and on Windows the case of the path does not matter.
+fn is_within(path: &Path, root: &Path) -> bool {
+    let path = normalize(path);
+    let root = normalize(root);
+    let mut rest = path.components();
+    for component in root.components() {
+        match rest.next() {
+            Some(next) if same_component(&next, &component) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn same_component(left: &Component<'_>, right: &Component<'_>) -> bool {
+    if cfg!(windows) {
+        left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
+    } else {
+        left == right
+    }
+}
+
+/// A workspace by id, or by name when that is unambiguous. Archived ones are included: deleting
+/// is how an archived workspace is removed for good.
+fn find_workspace(ys: &Yardsort, wanted: &str) -> Result<WorkspaceRow, Failure> {
+    let workspaces = ys.store.workspaces()?;
+    if let Some(exact) = workspaces.iter().find(|w| w.id == wanted) {
+        return Ok(exact.clone());
+    }
+    let matches: Vec<_> = workspaces
+        .iter()
+        .filter(|w| w.name.eq_ignore_ascii_case(wanted))
+        .collect();
+    match matches.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => Err(Failure::new(format!(
+            "No workspace called {wanted:?}.{}",
+            known_workspaces(ys, &workspaces)?
+        ))),
+        many => {
+            let projects = ys.store.projects()?;
+            let named = |id: &str| {
+                projects
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map_or("?", |p| p.name.as_str())
+            };
+            Err(Failure::new(format!(
+                "{} workspaces are called {wanted:?}. Use the id instead: {}.",
+                many.len(),
+                many.iter()
+                    .map(|w| format!("{} ({})", w.id, named(&w.project_id)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )))
+        }
+    }
+}
+
+fn known_workspaces(ys: &Yardsort, workspaces: &[WorkspaceRow]) -> Result<String, Failure> {
+    if workspaces.is_empty() {
+        return Ok(" There are no workspaces yet.".to_owned());
+    }
+    let projects = ys.store.projects()?;
+    let named = |id: &str| {
+        projects
+            .iter()
+            .find(|p| p.id == id)
+            .map_or("?", |p| p.name.as_str())
+    };
+    Ok(format!(
+        " Known: {}.",
+        workspaces
+            .iter()
+            .map(|w| format!("{} ({})", w.name, named(&w.project_id)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
 /// The harness to run: the one asked for, or the first that is actually installed.
 fn choose_harness(ys: &Yardsort, wanted: Option<&str>) -> Result<String, Failure> {
     let all = yardsort_core::harness::resolve_all(&ys.settings.harnesses);
@@ -290,4 +539,18 @@ fn choose_harness(ys: &Yardsort, wanted: Option<&str>) -> Result<String, Failure
 /// Session ids are uuids; the first characters are enough to tell them apart when reading.
 pub fn short(id: &str) -> String {
     id.chars().take(8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_contains_itself_and_its_children_but_not_a_sibling() {
+        let root = Path::new("/tmp/ys-delete-probe/demo");
+        assert!(is_within(root, root));
+        assert!(is_within(Path::new("/tmp/ys-delete-probe/demo/src"), root));
+        assert!(!is_within(Path::new("/tmp/ys-delete-probe/demo-2"), root));
+        assert!(!is_within(Path::new("/tmp/ys-delete-probe"), root));
+    }
 }
