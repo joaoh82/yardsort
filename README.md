@@ -38,8 +38,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 
 ## Highlights
 
-- **Any terminal agent.** Claude Code, Codex, Grok, OpenCode, OMP, Cursor and Pi out of the box;
-  add any other with a few lines of configuration — no plugin, no release to wait for.
+- **Any terminal agent.** Claude Code, Codex, Grok, OpenCode, OMP, Cursor and Pi
+  [out of the box](#supported-agents); add any other with a few lines of configuration — no
+  plugin, no release to wait for.
 - **The terminal is the truth.** Agents run in a real PTY with their own interface. Whatever they
   can do in your terminal, they can do here — and Yardsort never parses their output.
 - **Plain git, no lock-in.** Workspaces are ordinary worktrees and branches. Inspect or undo
@@ -90,6 +91,35 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
     <td align="center"><sub>Come back later: Resume or Fork any conversation</sub></td>
   </tr>
 </table>
+
+## Supported agents
+
+Yardsort starts any coding agent that runs in a terminal. These work out of the box:
+
+| Agent                                                                                                                                                                                                                                       | Command        | Resume              | Fork         | Writes commit messages |
+| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :------------- | :------------------ | :----------- | :--------------------- |
+| <img height="16" align="top" alt="" src="docs/images/harnesses/claude.svg" /> &nbsp;[Claude Code](https://claude.com/claude-code)                                                                                                           | `claude`       | Any conversation    | Yes          | Yes                    |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/harnesses/codex-dark.svg" /><img height="16" align="top" alt="" src="docs/images/harnesses/codex.svg" /></picture> &nbsp;[Codex](https://github.com/openai/codex) | `codex`        | Latest in workspace | Latest       | Yes                    |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/harnesses/grok-dark.svg" /><img height="16" align="top" alt="" src="docs/images/harnesses/grok.svg" /></picture> &nbsp;Grok                                       | `grok`         | Any conversation    | Yes          | Yes                    |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/harnesses/opencode-dark.svg" /><img height="16" align="top" alt="" src="docs/images/harnesses/opencode.svg" /></picture> &nbsp;[OpenCode](https://opencode.ai)    | `opencode`     | Latest in workspace | Latest       | Yes                    |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/harnesses/omp-dark.svg" /><img height="16" align="top" alt="" src="docs/images/harnesses/omp.svg" /></picture> &nbsp;[OMP](https://omp.sh/)                       | `omp`          | Latest in workspace | —            | Yes                    |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/harnesses/cursor-dark.svg" /><img height="16" align="top" alt="" src="docs/images/harnesses/cursor.svg" /></picture> &nbsp;[Cursor](https://cursor.com/cli)       | `cursor-agent` | Latest in workspace | —            | —                      |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/harnesses/pi-dark.svg" /><img height="16" align="top" alt="" src="docs/images/harnesses/pi.svg" /></picture> &nbsp;[Pi](https://pi.dev/)                          | `pi`           | Any conversation    | Yes          | Yes                    |
+| Any other terminal agent                                                                                                                                                                                                                    | yours          | Configurable        | Configurable | Configurable           |
+
+Anything else is [a few lines in `settings.toml`](docs/guide/settings.md#adding-your-own-harness) —
+a command and some argument templates, no plugin and no release to wait for:
+
+```toml
+[[harness]]
+id = "aider"
+label = "Aider"
+command = "aider"
+prompt_transport = "stdin"
+```
+
+Each agent uses its own login; Yardsort only starts it. Install and sign in to an agent before
+launching a workspace with it.
 
 ## Install
 

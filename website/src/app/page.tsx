@@ -1,3 +1,4 @@
+import { Also } from "@/components/landing/also";
 import { Assist } from "@/components/landing/assist";
 import { Cli } from "@/components/landing/cli";
 import { Harnesses } from "@/components/landing/harnesses";
@@ -15,6 +16,7 @@ export default function Home() {
       <Cli />
       <Assist />
       <Harnesses />
+      <Also />
       <OpenSource />
     </>
   );
