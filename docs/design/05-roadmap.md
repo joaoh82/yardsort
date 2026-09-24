@@ -71,6 +71,9 @@ Two follow-ups landed right after M3, from dogfooding:
 - **Adoption.** Whenever projects are listed, worktrees git knows about but Yardsort does not
   become workspaces — ones made by hand, and ones orphaned when their project was removed and added
   again. Stale ("prunable") entries are skipped. This brought forward part of M6's reconciliation.
+  _Narrowed 2026-09-23_ (open question 18): only worktrees under Yardsort's own worktree root are
+  adopted by themselves; the rest are listed by **Import worktrees…** and recorded only when
+  chosen, and **Forget…** takes a workspace out again without touching the disk.
 
 ## M4 — Harness settings ✅
 
@@ -113,7 +116,8 @@ part of this milestone.
 - Status dots from PTY activity; desktop notification when a busy agent goes quiet.
 - Shell tabs alongside harness tabs. Rename / archive / restore / delete workspace with safety
   prompts.
-- Worktree reconciliation: unknown worktrees are adopted (M3); a workspace whose folder vanished is
+- Worktree reconciliation: unknown worktrees under our root are adopted, the rest imported on
+  request (M3, narrowed after 0.9.2); a workspace whose folder vanished is
   flagged and can be restored from its branch or deleted. If the branch went with the folder there
   is nothing to restore from, and Yardsort offers — once — to forget the workspace.
 

@@ -14,8 +14,11 @@ export const commands = {
 	/**  Add the repository containing `path`. Fails with `not_a_git_repo` unless `init_git` is set. */
 	projectOpen: (path: string, initGit: boolean) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_open", { path, initGit })),
 	projectCreate: (name: string, parent: string) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_create", { name, parent })),
-	/**  Forget a project. Files on disk are never touched. */
-	projectRemove: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("project_remove", { id })),
+	/**
+	 *  Take a project off the list. With `keep_history` its workspaces and their conversations
+	 *  wait for the folder to be opened again. Files on disk are never touched.
+	 */
+	projectRemove: (id: string, keepHistory: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("project_remove", { id, keepHistory })),
 	projectsReorder: (orderedIds: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("projects_reorder", { orderedIds })),
 	uiStateLoad: () => typedError<{ [key in string]: string }, IpcError>(__TAURI_INVOKE("ui_state_load")),
 	uiStateSave: (key: string, value: string) => typedError<null, IpcError>(__TAURI_INVOKE("ui_state_save", { key, value })),
@@ -93,6 +96,18 @@ export const commands = {
 	/**  Bring back an archived workspace, or one whose folder disappeared, at its old path. */
 	workspaceRestore: (id: string) => typedError<Workspace, IpcError>(__TAURI_INVOKE("workspace_restore", { id })),
 	workspaceRename: (id: string, name: string) => typedError<Workspace, IpcError>(__TAURI_INVOKE("workspace_rename", { id, name })),
+	/**
+	 *  Worktrees of the project that are not workspaces — made by hand, by another tool, or
+	 *  forgotten here — for the import dialog.
+	 */
+	projectUntrackedWorktrees: (projectId: string) => typedError<UntrackedWorktree[], IpcError>(__TAURI_INVOKE("project_untracked_worktrees", { projectId })),
+	/**  Make workspaces of the untracked worktrees at `paths`. Nothing on disk is touched. */
+	workspacesImport: (projectId: string, paths: string[]) => typedError<Workspace[], IpcError>(__TAURI_INVOKE("workspaces_import", { projectId, paths })),
+	/**
+	 *  Stop showing a workspace. Its folder and branch stay; with `keep_history` its conversations
+	 *  do too, ready for the day it is imported again.
+	 */
+	workspaceForget: (id: string, keepHistory: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_forget", { id, keepHistory })),
 	/**  With `reload`, the login shell is asked again first — for "I just installed it, look again". */
 	preflight: (reload: boolean) => typedError<Preflight, IpcError>(__TAURI_INVOKE("preflight", { reload })),
 	/**  Ask whether a newer release exists. Touches nothing on disk. */
@@ -144,6 +159,11 @@ export type AddedProject = {
 	alreadyKnown: boolean,
 	/**  Set when the chosen folder was inside a repository and its root was added instead. */
 	openedRootInstead: boolean,
+	/**
+	 *  Set when the folder was a project removed earlier with its history kept: it is back
+	 *  with its workspaces and their conversations.
+	 */
+	revived: boolean,
 };
 
 /**  Static facts about the running app, shown in the UI and useful in bug reports. */
@@ -658,6 +678,16 @@ export type ThresholdsDto = {
 	defaults: [number, number, number],
 	/**  The lowest and highest either end may be. */
 	range: [number, number],
+};
+
+/**
+ *  A worktree git knows about that is not a workspace: made by hand, by another tool, or
+ *  forgotten here. What the import dialog lists.
+ */
+export type UntrackedWorktree = {
+	path: string,
+	/**  `None` when detached. */
+	branch: string | null,
 };
 
 export type UpdateStatus = {

@@ -43,7 +43,7 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **The terminal is the truth.** Agents run in a real PTY with their own interface. Whatever they
   can do in your terminal, they can do here — and Yardsort never parses their output.
 - **Plain git, no lock-in.** Workspaces are ordinary worktrees and branches. Inspect or undo
-  anything with `git`. Worktrees made elsewhere are picked up automatically.
+  anything with `git`. Worktrees made elsewhere can be imported, and never appear uninvited.
 - **Closing the window doesn't stop them.** Terminals live in a small background process, so
   agents keep working while Yardsort is closed — or after it crashes. Open it again and every
   screen is repainted where it got to. Closing with work in flight asks first.

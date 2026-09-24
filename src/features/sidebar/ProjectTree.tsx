@@ -3,17 +3,14 @@ import type { Project, Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
-import {
-  archiveWorkspace,
-  deleteWorkspace,
-  enterWorkspace,
-  removeProject,
-  restoreWorkspace,
-} from "./actions";
+import { archiveWorkspace, deleteWorkspace, enterWorkspace, restoreWorkspace } from "./actions";
 import { harnessState, summarise } from "@/features/terminal/activity";
 import { HarnessBadge } from "@/features/terminal/HarnessBadge";
 import { StatusDot } from "@/features/terminal/StatusDot";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { ForgetDialog } from "./ForgetDialog";
+import { ImportWorktreesDialog } from "./ImportWorktreesDialog";
+import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { RenameDialog } from "./RenameDialog";
 
 export function ProjectTree() {
@@ -40,9 +37,16 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   const compose = useProjectsStore((s) => s.compose);
   const composing = useProjectsStore((s) => s.composingProjectId === project.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const items: MenuItem[] = [
     { label: "New workspace", disabled: project.missing, onSelect: () => compose(project.id) },
+    {
+      label: "Import worktrees…",
+      disabled: project.missing,
+      onSelect: () => setImporting(true),
+    },
     {
       label: "Reveal in file manager",
       disabled: project.missing,
@@ -50,7 +54,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
     },
     { label: "Move up", disabled: props.isFirst, onSelect: () => void move(project.id, -1) },
     { label: "Move down", disabled: props.isLast, onSelect: () => void move(project.id, 1) },
-    { label: "Remove from Yardsort…", danger: true, onSelect: () => void removeProject(project) },
+    { label: "Remove from Yardsort…", danger: true, onSelect: () => setRemoving(true) },
   ];
 
   return (
@@ -116,6 +120,8 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
         </ul>
       )}
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
+      {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
+      {removing && <RemoveProjectDialog project={project} onClose={() => setRemoving(false)} />}
     </li>
   );
 }
@@ -158,6 +164,7 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
   const tabs = allTabs.filter((tab) => tab.workspaceId === workspace.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
   const head = workspace.head;
   const isWorktree = workspace.kind === "worktree";
   const gone = workspace.missing || workspace.archived;
@@ -188,6 +195,7 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
           ...(gone
             ? []
             : [{ label: "Archive…", onSelect: () => void archiveWorkspace(workspace) }]),
+          { label: "Forget…", onSelect: () => setForgetting(true) },
           {
             label: workspace.archived ? "Delete for good…" : "Delete workspace…",
             danger: true,
@@ -279,6 +287,7 @@ function WorkspaceNode({ workspace, disabled }: { workspace: Workspace; disabled
       </div>
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
       {renaming && <RenameDialog workspace={workspace} onClose={() => setRenaming(false)} />}
+      {forgetting && <ForgetDialog workspace={workspace} onClose={() => setForgetting(false)} />}
     </li>
   );
 }

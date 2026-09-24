@@ -43,7 +43,9 @@ interface ProjectsState {
   refresh: () => Promise<void>;
   openFolder: (path: string, initGit?: boolean) => Promise<OpenResult>;
   createProject: (name: string, parent: string) => Promise<boolean>;
-  remove: (id: string) => Promise<void>;
+  /** Take a project off the list. Nothing on disk changes; with `keepHistory` its workspaces
+   *  and conversations come back when the same folder is opened again. */
+  remove: (id: string, keepHistory: boolean) => Promise<boolean>;
   move: (id: string, by: -1 | 1) => Promise<void>;
   select: (workspaceId: string | null) => void;
   compose: (projectId: string | null) => void;
@@ -67,6 +69,11 @@ interface ProjectsState {
   /** Bring back an archived or vanished workspace. */
   restoreWorkspace: (workspaceId: string) => Promise<boolean>;
   renameWorkspace: (workspaceId: string, name: string) => Promise<boolean>;
+  /** Make workspaces of worktrees git already has. Resolves to what was imported, or `null`
+   *  with the reason in `error`. */
+  importWorktrees: (projectId: string, paths: string[]) => Promise<Workspace[] | null>;
+  /** Stop showing a workspace. Its folder and branch stay; its history too unless told not to. */
+  forgetWorkspace: (workspaceId: string, keepHistory: boolean) => Promise<boolean>;
   remember: (key: string, value: unknown) => void;
   toggleCollapsed: (projectId: string) => void;
   dismiss: () => void;
@@ -101,9 +108,11 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       error: null,
       notice: added.alreadyKnown
         ? `${project.name} was already in your projects.`
-        : added.openedRootInstead
-          ? `That folder is inside a repository, so its root was added: ${project.rootPath}`
-          : null,
+        : added.revived
+          ? `${project.name} is back, with its workspaces and their conversations.`
+          : added.openedRootInstead
+            ? `That folder is inside a repository, so its root was added: ${project.rootPath}`
+            : null,
     }));
     save(KEYS.selected, local);
     save(KEYS.collapsed, get().collapsed);
@@ -170,13 +179,14 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       }
     },
 
-    async remove(id) {
+    async remove(id, keepHistory) {
       const project = get().projects.find((p) => p.id === id);
-      if (!project) return;
+      if (!project) return false;
       try {
-        await ipc.projectRemove(id);
+        await ipc.projectRemove(id, keepHistory);
       } catch (error) {
-        return set({ error: errorMessage(error) });
+        set({ error: errorMessage(error) });
+        return false;
       }
       const gone = new Set(project.workspaces.map((workspace) => workspace.id));
       set((state) => ({
@@ -190,6 +200,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       }));
       save(KEYS.selected, get().selectedWorkspaceId);
       save(KEYS.collapsed, get().collapsed);
+      return true;
     },
 
     async move(id, by) {
@@ -324,6 +335,43 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         set({ error: errorMessage(error) });
         return false;
       }
+    },
+
+    async importWorktrees(projectId, paths) {
+      try {
+        const imported = await ipc.workspacesImport(projectId, paths);
+        set((state) => ({
+          projects: state.projects.map((project) =>
+            project.id === projectId
+              ? { ...project, workspaces: [...project.workspaces, ...imported] }
+              : project,
+          ),
+          error: null,
+        }));
+        return imported;
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return null;
+      }
+    },
+
+    async forgetWorkspace(workspaceId, keepHistory) {
+      try {
+        await ipc.workspaceForget(workspaceId, keepHistory);
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return false;
+      }
+      set((state) => ({
+        projects: state.projects.map((project) => ({
+          ...project,
+          workspaces: project.workspaces.filter((workspace) => workspace.id !== workspaceId),
+        })),
+        selectedWorkspaceId:
+          state.selectedWorkspaceId === workspaceId ? null : state.selectedWorkspaceId,
+      }));
+      save(KEYS.selected, get().selectedWorkspaceId);
+      return true;
     },
 
     remember(key, value) {

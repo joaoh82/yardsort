@@ -3,6 +3,27 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Worktrees made elsewhere no longer appear by themselves.** Yardsort used to turn every
+  worktree of a repository into a workspace the moment it looked; a project with worktrees of
+  its own — from a script, another tool, or your own `git worktree add` — opened full of
+  workspaces nobody asked for. Now only worktrees under Yardsort's own folder are picked up (so a
+  removed and re-added project still gets its workspaces back), and the rest wait for
+  **Import worktrees…** in the project menu or the composer, which lists them with branch and
+  path before anything is recorded. Workspaces adopted by earlier versions are still there: use
+  the new **Forget…** in the workspace menu to take one out of Yardsort without touching its
+  folder or branch. Its saved conversations are kept unless you tick the box to delete them. See
+  [Worktrees made elsewhere](docs/guide/workspaces.md#worktrees-made-elsewhere).
+
+- **Removing a project keeps its workspaces and conversations for when it comes back.** The
+  guide always said a removed project's workspaces return when the folder is added again; in
+  fact only the worktrees did, as empty workspaces, and the saved conversations were gone. Now
+  the project is hidden rather than deleted, so adding the same folder brings back every
+  workspace — imported worktrees included — with its history. The remove dialog has a box to
+  delete Yardsort's record instead. Nothing on disk is touched either way. See
+  [The project menu](docs/guide/projects.md#the-project-menu).
+
 ## 0.9.2
 
 - **A waiting update is announced beside Settings.** The **update** pill at the foot of the
