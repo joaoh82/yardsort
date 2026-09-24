@@ -33,6 +33,7 @@ import {
   type NewWorkspace,
   type Preflight,
   type Project,
+  type ProjectAutomation,
   type ProjectPullRequests,
   type PublishState,
   type PullRequest,
@@ -56,6 +57,7 @@ import {
 } from "./bindings";
 
 export type {
+  ProjectAutomation,
   AddedProject,
   AppInfo,
   AssistStatus,
@@ -214,6 +216,11 @@ export const ipc = {
   workspaceRestore: (id: string) => unwrap(commands.workspaceRestore(id)),
   workspaceRename: (id: string, name: string) => unwrap(commands.workspaceRename(id, name)),
   /** Worktrees git knows about in a project that are not workspaces: what Import offers. */
+  projectAutomationGet: (projectId: string) => unwrap(commands.projectAutomationGet(projectId)),
+  projectAutomationSave: (projectId: string, config: ProjectAutomation) =>
+    done(commands.projectAutomationSave(projectId, config)),
+  workspaceRun: (workspaceId: string, size: TermSize) =>
+    unwrap(commands.workspaceRun(workspaceId, size)),
   projectUntrackedWorktrees: (projectId: string) =>
     unwrap(commands.projectUntrackedWorktrees(projectId)),
   /** Make workspaces of those worktrees, by path. Nothing on disk is touched. */

@@ -12,6 +12,14 @@ has the downloads and the full commit lists.
   the workspace. Existing custom harnesses with these IDs keep their definitions and session
   identity. OMP and Pi accept opening messages starting with `@` as text. See [Harness settings](docs/guide/settings.md#harnesses).
 
+- **Project setup and dev servers.** Project settings can copy files such as `.env` and run a setup script in new or restored worktrees before starting an agent. Failed preparation keeps the workspace and setup log. Logs stay outside the checkout, imported worktrees skip setup on restore, and blank argument lines are ignored. Configure a run command and use **▶ Run** to start or focus a dev-server terminal in any workspace. See [Project automation](docs/guide/projects.md#project-automation).
+
+- **`ys workspace delete`.** Remove a workspace from the command line: the folder and the record
+  go, the branch stays. Uncommitted work is refused unless `--force` is given, and a harness can
+  delete the workspace it is running in — the command does not stop that process. On Windows it
+  steps out of the folder first, and deletes nothing if another program still has that folder as
+  its current directory. See [The `ys` command line](docs/guide/cli.md).
+
 - **Worktrees made elsewhere no longer appear by themselves.** Yardsort used to turn every
   worktree of a repository into a workspace the moment it looked; a project with worktrees of
   its own — from a script, another tool, or your own `git worktree add` — opened full of

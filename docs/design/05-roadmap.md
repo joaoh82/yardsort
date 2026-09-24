@@ -382,7 +382,7 @@ _Notes:_
   has a non-interactive mode, so the writer is the agent the user already installed, logged into
   and pays for — one new harness field, no new credential. An Anthropic API key is the fallback.
   See [open question 19](06-open-questions.md).
-- Per-project setup script and "files to copy into new worktrees" (`.env` etc.); run/dev-server button.
+- [x] Per-project setup script and "files to copy into new worktrees" (`.env` etc.); run/dev-server button. Local SQLite configuration; preparation shared with the CLI, failed preparation retained for inspection, run output in daemon terminal tabs.
 - Merge / rebase helpers; "apply this workspace onto local".
 - Diff comments sent back to the agent as a prompt.
 - Multi-repo projects; remote/SSH workspaces.

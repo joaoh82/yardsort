@@ -76,8 +76,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client, starts a workspace and
   an agent without opening the window: `ys workspace new <project> "<prompt>"`. The agent belongs
   to the background process, so it carries on after the command returns — and `ys attach` puts it
-  back on your terminal, `ys logs` prints what a session ended up with. Every command takes
-  `--json`.
+  back on your terminal, `ys logs` prints what a session ended up with. `ys workspace delete`
+  removes one when the work is done, keeping the branch. Every command takes `--json`.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>

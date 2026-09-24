@@ -137,13 +137,14 @@ have never used rather than an error.
 
 ### It sees the same world the window does
 
-| ✓   | Check                                                                                                 |
-| --- | ----------------------------------------------------------------------------------------------------- |
-|     | `ys project list` and `ys workspace list` match what the sidebar shows, paths included.               |
-|     | `ys workspace new <project> "a small task"` creates a branch and worktree, and starts an agent.       |
-|     | That workspace appears in the app — immediately if it is open, on next launch if it is not.           |
-|     | The agent it started is still working after `ys` has returned: `ys session list` says `running`.      |
-|     | `ys workspace new --harness <something misspelt>` creates **nothing** — no branch, no folder, no row. |
+| ✓   | Check                                                                                                                                    |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+|     | `ys project list` and `ys workspace list` match what the sidebar shows, paths included.                                                  |
+|     | `ys workspace new <project> "a small task"` creates a branch and worktree, and starts an agent.                                          |
+|     | That workspace appears in the app — immediately if it is open, on next launch if it is not.                                              |
+|     | The agent it started is still working after `ys` has returned: `ys session list` says `running`.                                         |
+|     | `ys workspace new --harness <something misspelt>` creates **nothing** — no branch, no folder, no row.                                    |
+|     | `ys workspace delete <name>` removes the folder and the row, and the branch is still there. A dirty worktree is refused until `--force`. |
 
 ### Attaching
 
