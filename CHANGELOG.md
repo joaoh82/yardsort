@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.10.0
 
 - **OMP, Cursor and Pi are built-in harnesses.** Pick them in the composer and configure them
   in Settings → Harnesses, with install links on the welcome screen. OMP and Pi can write commit
