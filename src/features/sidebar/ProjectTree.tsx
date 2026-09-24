@@ -3,19 +3,14 @@ import type { Project, Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
-import {
-  archiveWorkspace,
-  deleteWorkspace,
-  enterWorkspace,
-  removeProject,
-  restoreWorkspace,
-} from "./actions";
+import { archiveWorkspace, deleteWorkspace, enterWorkspace, restoreWorkspace } from "./actions";
 import { harnessState, summarise } from "@/features/terminal/activity";
 import { HarnessBadge } from "@/features/terminal/HarnessBadge";
 import { StatusDot } from "@/features/terminal/StatusDot";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { ForgetDialog } from "./ForgetDialog";
 import { ImportWorktreesDialog } from "./ImportWorktreesDialog";
+import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { RenameDialog } from "./RenameDialog";
 
 export function ProjectTree() {
@@ -43,6 +38,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   const composing = useProjectsStore((s) => s.composingProjectId === project.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const items: MenuItem[] = [
     { label: "New workspace", disabled: project.missing, onSelect: () => compose(project.id) },
@@ -58,7 +54,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
     },
     { label: "Move up", disabled: props.isFirst, onSelect: () => void move(project.id, -1) },
     { label: "Move down", disabled: props.isLast, onSelect: () => void move(project.id, 1) },
-    { label: "Remove from Yardsort…", danger: true, onSelect: () => void removeProject(project) },
+    { label: "Remove from Yardsort…", danger: true, onSelect: () => setRemoving(true) },
   ];
 
   return (
@@ -125,6 +121,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
       )}
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
+      {removing && <RemoveProjectDialog project={project} onClose={() => setRemoving(false)} />}
     </li>
   );
 }

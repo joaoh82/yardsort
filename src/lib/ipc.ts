@@ -142,7 +142,9 @@ export const ipc = {
   /** Rejects with code `not_a_git_repo` unless `initGit` is set. */
   projectOpen: (path: string, initGit = false) => unwrap(commands.projectOpen(path, initGit)),
   projectCreate: (name: string, parent: string) => unwrap(commands.projectCreate(name, parent)),
-  projectRemove: (id: string) => done(commands.projectRemove(id)),
+  /** Take a project off the list. With `keepHistory` it comes back whole when opened again. */
+  projectRemove: (id: string, keepHistory: boolean) =>
+    done(commands.projectRemove(id, keepHistory)),
   projectsReorder: (orderedIds: string[]) => done(commands.projectsReorder(orderedIds)),
   uiStateLoad: () => unwrap(commands.uiStateLoad()),
   uiStateSave: (key: string, value: string) => done(commands.uiStateSave(key, value)),

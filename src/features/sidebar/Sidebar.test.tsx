@@ -253,7 +253,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("removing a project confirms first, then closes its sessions and forgets it", async () => {
+  it("removing a project asks first, keeps its history by default, and closes its sessions", async () => {
     const user = userEvent.setup();
     await renderSidebar("alpha", "beta");
     // A session has to exist for the confirmation to have something to count; a worktree opens
@@ -273,20 +273,35 @@ describe("Sidebar", () => {
       active: { "w-alpha": "s-w-alpha" },
     });
 
-    native.confirm.mockResolvedValue(false);
     await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
     await user.click(screen.getByRole("menuitem", { name: /Remove from Yardsort/ }));
-    expect(native.confirm).toHaveBeenCalledWith(
-      expect.stringMatching(/Nothing on disk is deleted[\s\S]*1 running terminal session /),
-      expect.anything(),
-    );
+    let dialog = screen.getByRole("dialog", { name: /Remove “alpha”/ });
+    expect(dialog).toHaveTextContent("Nothing on disk is deleted");
+    expect(dialog).toHaveTextContent("1 running terminal session in this project will be closed");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(core.projectRemove).not.toHaveBeenCalled();
+    expect(screen.getByRole("treeitem", { name: "alpha" })).toBeInTheDocument();
 
-    native.confirm.mockResolvedValue(true);
     await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
     await user.click(screen.getByRole("menuitem", { name: /Remove from Yardsort/ }));
+    dialog = screen.getByRole("dialog", { name: /Remove “alpha”/ });
+    expect(within(dialog).getByRole("checkbox", { name: /Also delete/ })).not.toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
     expect(core.ptyClose).toHaveBeenCalledWith("s-w-alpha");
-    expect(core.projectRemove).toHaveBeenCalledWith("p-alpha");
+    expect(core.projectRemove).toHaveBeenCalledWith("p-alpha", true);
+    expect(screen.queryByRole("treeitem", { name: "alpha" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("removing a project drops its history only when the box is ticked", async () => {
+    const user = userEvent.setup();
+    await renderSidebar("alpha");
+    await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: /Remove from Yardsort/ }));
+    const dialog = screen.getByRole("dialog", { name: /Remove “alpha”/ });
+    await user.click(within(dialog).getByRole("checkbox", { name: /Also delete/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(core.projectRemove).toHaveBeenCalledWith("p-alpha", false);
     expect(screen.queryByRole("treeitem", { name: "alpha" })).not.toBeInTheDocument();
   });
 

@@ -217,7 +217,9 @@ Decisions:
   git has that the DB does not are adopted only when they sit under Yardsort's worktree root —
   ours, lost when a project was removed and re-added; any other worktree is the user's business
   until they import it, and a forgotten one is hidden (its row and sessions kept) rather than
-  deleted, so importing it again finds its history. Worktrees
+  deleted, so importing it again finds its history. A removed project is hidden the same way,
+  and opening its folder again revives it with every workspace and session, unless the user
+  chose to delete the record. Worktrees
   deleted behind our back are marked _missing_, not silently dropped. A worktree whose _branch_
   was deleted too has nothing to restore from: it is marked _gone_, and Yardsort asks once whether
   to forget the workspace. Only the vanished case asks git about branches, so the usual listing

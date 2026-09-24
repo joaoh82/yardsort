@@ -29,6 +29,7 @@ export const added = (name: string, flags: Partial<AddedProject> = {}): AddedPro
   project: project(name),
   alreadyKnown: false,
   openedRootInstead: false,
+  revived: false,
   ...flags,
 });
 

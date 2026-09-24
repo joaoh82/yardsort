@@ -105,6 +105,10 @@ describe("projects store", () => {
     core.projectOpen.mockResolvedValue(added("mono", { openedRootInstead: true }));
     await store().openFolder("/code/mono/packages/web");
     expect(store().notice).toMatch(/its root was added/);
+
+    core.projectOpen.mockResolvedValue(added("back", { revived: true }));
+    await store().openFolder("/code/back");
+    expect(store().notice).toMatch(/back is back, with its workspaces and their conversations/);
   });
 
   it("remembers where a project was created, and keeps the error when it fails", async () => {
@@ -127,8 +131,8 @@ describe("projects store", () => {
       selectedWorkspaceId: "w-a",
       collapsed: ["p-a"],
     });
-    await store().remove("p-a");
-    expect(core.projectRemove).toHaveBeenCalledWith("p-a");
+    await store().remove("p-a", true);
+    expect(core.projectRemove).toHaveBeenCalledWith("p-a", true);
     expect(store().projects.map((p) => p.name)).toEqual(["b"]);
     expect(store().selectedWorkspaceId).toBeNull();
     expect(store().collapsed).toEqual([]);

@@ -75,12 +75,13 @@ pub async fn project_create(
     .await
 }
 
-/// Forget a project. Files on disk are never touched.
+/// Take a project off the list. With `keep_history` its workspaces and their conversations
+/// wait for the folder to be opened again. Files on disk are never touched.
 #[tauri::command]
 #[specta::specta]
-pub async fn project_remove(app: AppHandle, id: String) -> IpcResult<()> {
+pub async fn project_remove(app: AppHandle, id: String, keep_history: bool) -> IpcResult<()> {
     blocking(app, move |state| {
-        Ok(state.store.remove_project(&id).map(drop)?)
+        Ok(state.store.remove_project(&id, keep_history).map(drop)?)
     })
     .await
 }

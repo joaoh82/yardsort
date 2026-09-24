@@ -115,4 +115,7 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     rejected for that case. **Forget** is the reverse — the row is hidden, not deleted, so the
     conversations are still there if the same worktree is imported later; the user can choose to
     drop them. Workspaces adopted by earlier versions are not migrated: nothing distinguishes
-    them from ones Yardsort made, and Forget is one click.
+    them from ones Yardsort made, and Forget is one click. Removing a project got the same
+    treatment the next day (2026-09-24): it hides the project and its rows rather than deleting
+    them, so an imported worktree and its conversations survive a remove and re-add — which
+    adoption, now narrowed, could no longer promise.

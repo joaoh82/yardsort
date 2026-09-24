@@ -869,7 +869,7 @@ mod tests {
         fx.workspaces()
             .create(&fx.project_id, None, "survivor")
             .unwrap();
-        fx.store.remove_project(&fx.project_id).unwrap();
+        fx.store.remove_project(&fx.project_id, false).unwrap();
 
         let again = Projects {
             store: &fx.store,

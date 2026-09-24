@@ -65,9 +65,13 @@ Hover a project and press **⋯**, or right-click it:
   [Worktrees made elsewhere](workspaces.md#worktrees-made-elsewhere).
 - **Reveal in file manager**
 - **Move up / Move down** — the order is remembered.
-- **Remove from Yardsort…** — forgets the project and closes its terminals. **Nothing on disk is
-  deleted**: the folder, its branches and its worktrees all stay. Add the folder again and its
-  workspaces come back.
+- **Remove from Yardsort…** — takes the project off the list and closes its terminals.
+  **Nothing on disk is deleted**: the folder, its branches and its worktrees all stay. By
+  default Yardsort also keeps its own record — the workspaces, imported ones included, and their
+  saved conversations — so adding the same folder again brings everything back as it was. Tick
+  **Also delete its workspaces and their saved conversations** in the dialog to start over
+  instead; the next time the folder is added, only worktrees under Yardsort's own folder are
+  picked up (see [Worktrees made elsewhere](workspaces.md#worktrees-made-elsewhere)).
 
 Click a project's arrow to collapse it. Collapsed projects, your selection and the panel sizes are
 all restored the next time you start Yardsort.

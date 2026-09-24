@@ -14,8 +14,11 @@ export const commands = {
 	/**  Add the repository containing `path`. Fails with `not_a_git_repo` unless `init_git` is set. */
 	projectOpen: (path: string, initGit: boolean) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_open", { path, initGit })),
 	projectCreate: (name: string, parent: string) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_create", { name, parent })),
-	/**  Forget a project. Files on disk are never touched. */
-	projectRemove: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("project_remove", { id })),
+	/**
+	 *  Take a project off the list. With `keep_history` its workspaces and their conversations
+	 *  wait for the folder to be opened again. Files on disk are never touched.
+	 */
+	projectRemove: (id: string, keepHistory: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("project_remove", { id, keepHistory })),
 	projectsReorder: (orderedIds: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("projects_reorder", { orderedIds })),
 	uiStateLoad: () => typedError<{ [key in string]: string }, IpcError>(__TAURI_INVOKE("ui_state_load")),
 	uiStateSave: (key: string, value: string) => typedError<null, IpcError>(__TAURI_INVOKE("ui_state_save", { key, value })),
@@ -156,6 +159,11 @@ export type AddedProject = {
 	alreadyKnown: boolean,
 	/**  Set when the chosen folder was inside a repository and its root was added instead. */
 	openedRootInstead: boolean,
+	/**
+	 *  Set when the folder was a project removed earlier with its history kept: it is back
+	 *  with its workspaces and their conversations.
+	 */
+	revived: boolean,
 };
 
 /**  Static facts about the running app, shown in the UI and useful in bug reports. */
