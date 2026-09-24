@@ -274,6 +274,76 @@ mod tests {
     }
 
     #[test]
+    fn legacy_custom_harnesses_keep_their_identity_and_blank_fields_after_an_upgrade() {
+        use crate::harness::{self, HarnessDef, LaunchValues};
+        let (dir, _) = file();
+        let path = dir.path().join("settings.toml");
+        // This is what the old save path wrote: only differences from HarnessDef::custom.
+        std::fs::write(&path, "[[harness]]\nid = \"omp\"\n[[harness]]\nid = \"cursor\"\n[[harness]]\nid = \"pi\"\nresume_args = [\"--continue\"]\n").unwrap();
+        let file = SettingsFile::load(path.clone());
+        assert!(file.problem().is_none());
+        for id in ["omp", "cursor", "pi"] {
+            let resolved = harness::resolve_all(&file.get().harnesses)
+                .into_iter()
+                .find(|h| h.def.id == id)
+                .unwrap();
+            assert!(!resolved.builtin && !resolved.modified);
+            let mut expected = HarnessDef::custom(id);
+            if id == "pi" {
+                expected.resume_args = vec!["--continue".into()];
+            }
+            assert_eq!(resolved.def, expected);
+            assert_eq!(
+                resolved.def.continue_args(&LaunchValues::default(), false),
+                expected.resume_args
+            );
+            expected.label = format!("My {id}");
+            file.update(|s| harness::save_override(&mut s.harnesses, &expected))
+                .unwrap();
+            let reloaded = SettingsFile::load(path.clone());
+            assert_eq!(harness::find(id, &reloaded.get().harnesses), Some(expected));
+            assert_eq!(
+                reloaded
+                    .get()
+                    .harnesses
+                    .iter()
+                    .find(|h| h.id == id)
+                    .unwrap()
+                    .builtin,
+                Some(false)
+            );
+        }
+    }
+
+    #[test]
+    fn new_builtin_overrides_follow_builtin_defaults_after_saving_and_reloading() {
+        use crate::harness;
+        let (_dir, path) = file();
+        let file = SettingsFile::load(path.clone());
+        for id in ["omp", "cursor", "pi"] {
+            let base = harness::find(id, &[]).unwrap();
+            let mut wanted = base.clone();
+            wanted.label = format!("My {id}");
+            file.update(|s| harness::save_override(&mut s.harnesses, &wanted))
+                .unwrap();
+            let loaded = SettingsFile::load(path.clone());
+            let settings = loaded.get();
+            let resolved = harness::resolve_all(&settings.harnesses)
+                .into_iter()
+                .find(|h| h.def.id == id)
+                .unwrap();
+            assert!(resolved.builtin && resolved.modified);
+            assert_eq!(resolved.def, wanted);
+            let entry = settings.harnesses.iter().find(|h| h.id == id).unwrap();
+            assert_eq!(entry.builtin, Some(true));
+            assert_eq!(entry.session_args, None);
+            file.update(|s| harness::save_override(&mut s.harnesses, &base))
+                .unwrap();
+            assert!(!file.get().harnesses.iter().any(|h| h.id == id));
+        }
+    }
+
+    #[test]
     fn a_missing_file_means_defaults_and_is_not_created_by_reading() {
         let (_dir, path) = file();
         let settings = SettingsFile::load(path.clone());

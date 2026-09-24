@@ -4,7 +4,7 @@
 //! cannot do it — Jev answers typed questions and never writes (see `assist::jev`) — so drafting
 //! is its own thing, with its own switch and its own two ways of getting an answer:
 //!
-//! 1. **The agent the user already has.** Every built-in harness has a non-interactive mode
+//! 1. **The agent the user already has.** Most built-in harnesses have a safe non-interactive mode
 //!    (`claude --print`, `codex exec`, `opencode run`, `grok --single`), so the diff can go to
 //!    agent already installed, already logged in and already paid for. No new credential.
 //! 2. **The user's own Anthropic API key**, for when no configured harness can write — a custom

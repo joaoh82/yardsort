@@ -35,6 +35,15 @@ Pi's built-in definition requires a version with `--session-id` and `--fork` (ve
 0.87.1). OMP and Cursor resume only the latest conversation in a workspace and do not offer
 Fork. Pi supports resuming and forking individual conversations.
 
+Opening messages for OMP and Pi are prefixed with a space so an initial `@` is treated as
+text, not a file attachment. Keep that space in their **Prompt args** templates. Cursor's
+**Write args** are empty: drafting uses another available writer or your API-key fallback.
+
+If you already had a custom harness with id `omp`, `cursor` or `pi`, it stays custom and
+keeps its command, argument templates and session identity. It takes precedence over the
+built-in with that id. Deleting the custom entry reveals the built-in; keep the custom entry
+if you still need it to resume older conversations.
+
 ### Fields
 
 | Field                | Meaning                                                                                                                                                                                                                                                                                                                                         |
