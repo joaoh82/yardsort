@@ -263,4 +263,31 @@ mod tests {
     fn export_bindings() {
         super::export_bindings(&super::ipc_builder());
     }
+
+    /// Opening a link in the browser needs a URL **scope**, not just the command.
+    ///
+    /// `opener:allow-open-url` on its own enables the command with an empty scope, which denies
+    /// every URL — and denies it silently, in the webview console, where nothing in CI looks.
+    /// That shipped: release notes, the welcome screen's install links and Ctrl+clicking a URL
+    /// in a terminal were all dead. This is the guard, because the failure has no other alarm.
+    #[test]
+    fn opening_a_url_is_allowed_for_http_and_https() {
+        let capabilities = include_str!("../capabilities/default.json");
+        let parsed: serde_json::Value = serde_json::from_str(capabilities).expect("valid JSON");
+        let opener = parsed["permissions"]
+            .as_array()
+            .expect("permissions is a list")
+            .iter()
+            .find(|entry| entry["identifier"] == "opener:allow-open-url")
+            .expect("opener:allow-open-url must carry a scope, not be a bare string");
+
+        let allowed: Vec<&str> = opener["allow"]
+            .as_array()
+            .expect("an allow list")
+            .iter()
+            .filter_map(|entry| entry["url"].as_str())
+            .collect();
+        assert!(allowed.contains(&"https://*"), "got {allowed:?}");
+        assert!(allowed.contains(&"http://*"), "got {allowed:?}");
+    }
 }

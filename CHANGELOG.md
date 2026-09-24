@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## 0.9.2
 
+- **Links open in your browser again.** Opening a URL from the app — the release notes on an
+  update, the agent install links on the welcome screen, and `Ctrl`/`⌘`-clicking a URL in a
+  terminal — was refused with nothing shown but a line in a console nobody sees. The permission
+  granted the command but carried no URL scope, which denies everything. Found by pressing a
+  pull request badge that had just been made clickable.
+
 - **Have a model write the commit message or the pull request.** A **✦** beside the commit box
   and in the pull request dialog fills them in from the diff, and from what the workspace was
   asked to do. What comes back goes in the box for you to read and edit — it is never committed
