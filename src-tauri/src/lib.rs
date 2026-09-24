@@ -8,7 +8,9 @@ mod changes;
 mod commands;
 #[cfg(target_os = "linux")]
 mod display;
+mod draft;
 mod preflight;
+mod publish;
 mod quit;
 mod sessions;
 mod state;
@@ -18,7 +20,9 @@ mod updates;
 // The core is its own crate, so the `ys` CLI can use it without linking a webview — see
 // `yardsort_core`. It is re-exported under the names this crate has always used, which is why
 // `crate::store`, `crate::git` and the rest still resolve everywhere below.
-pub use yardsort_core::{daemon, env, error, git, harness, legacy, settings, store};
+pub use yardsort_core::{
+    daemon, env, error, forge, git, harness, legacy, program, settings, store,
+};
 
 /// The domain modules whose commands live here but whose logic lives in the core.
 mod projects {
@@ -69,6 +73,17 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             changes::commands::workspace_files,
             changes::commands::workspace_file,
             changes::commands::workspace_watch,
+            publish::commands::workspace_publish_state,
+            publish::commands::workspace_commit,
+            publish::commands::workspace_push,
+            publish::commands::workspace_open_pull_request,
+            publish::commands::project_pull_requests,
+            draft::commands::draft_status,
+            draft::commands::draft_commit_message,
+            draft::commands::draft_pull_request,
+            draft::commands::draft_save_key,
+            draft::commands::draft_forget_key,
+            draft::commands::draft_save_settings,
             changes::commands::open_in_editor,
             assist::commands::assist_status,
             assist::commands::assist_save_key,
@@ -250,5 +265,32 @@ mod tests {
     #[test]
     fn export_bindings() {
         super::export_bindings(&super::ipc_builder());
+    }
+
+    /// Opening a link in the browser needs a URL **scope**, not just the command.
+    ///
+    /// `opener:allow-open-url` on its own enables the command with an empty scope, which denies
+    /// every URL — and denies it silently, in the webview console, where nothing in CI looks.
+    /// That shipped: release notes, the welcome screen's install links and Ctrl+clicking a URL
+    /// in a terminal were all dead. This is the guard, because the failure has no other alarm.
+    #[test]
+    fn opening_a_url_is_allowed_for_http_and_https() {
+        let capabilities = include_str!("../capabilities/default.json");
+        let parsed: serde_json::Value = serde_json::from_str(capabilities).expect("valid JSON");
+        let opener = parsed["permissions"]
+            .as_array()
+            .expect("permissions is a list")
+            .iter()
+            .find(|entry| entry["identifier"] == "opener:allow-open-url")
+            .expect("opener:allow-open-url must carry a scope, not be a bare string");
+
+        let allowed: Vec<&str> = opener["allow"]
+            .as_array()
+            .expect("an allow list")
+            .iter()
+            .filter_map(|entry| entry["url"].as_str())
+            .collect();
+        assert!(allowed.contains(&"https://*"), "got {allowed:?}");
+        assert!(allowed.contains(&"http://*"), "got {allowed:?}");
     }
 }

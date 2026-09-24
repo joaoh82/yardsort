@@ -4,10 +4,50 @@ import { hasCore } from "@/lib/ipc";
 import { formatShortcut } from "@/lib/platform";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useUpdatesStore } from "@/stores/updates";
 import { reviewVanishedWorkspaces } from "./actions";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
+
+/**
+ * How often the forge is asked again what became of each project's pull requests, while the
+ * window is open. A check finishing is the thing worth noticing, and it takes minutes, not
+ * seconds; the core also holds each answer briefly, so switching workspaces costs nothing.
+ */
+const POLL_MS = 60_000;
+
+/**
+ * Keep every project's pull requests loaded, so each workspace row can show its own.
+ *
+ * One request per project rather than one per workspace — see `crate::publish`. Coming back to
+ * the window asks again, because that is when something has usually moved.
+ */
+function usePullRequests() {
+  // A joined string, not an array: a selector that built an array would be a new value on every
+  // render and would re-render for ever.
+  const ids = useProjectsStore((s) =>
+    s.projects
+      .filter((project) => !project.missing)
+      .map((project) => project.id)
+      .join(" "),
+  );
+
+  useEffect(() => {
+    if (!hasCore() || ids === "") return;
+    const load = (refresh: boolean) => {
+      for (const id of ids.split(" ")) void usePublishStore.getState().loadProject(id, refresh);
+    };
+    load(false);
+    const onFocus = () => load(true);
+    window.addEventListener("focus", onFocus);
+    const timer = window.setInterval(() => load(true), POLL_MS);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(timer);
+    };
+  }, [ids]);
+}
 
 /** Left panel: projects and their workspaces. */
 export function Sidebar() {
@@ -17,6 +57,7 @@ export function Sidebar() {
   const notice = useProjectsStore((s) => s.notice);
   const dismiss = useProjectsStore((s) => s.dismiss);
   const [adding, setAdding] = useState(false);
+  usePullRequests();
 
   useEffect(() => {
     if (!hasCore()) return;

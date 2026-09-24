@@ -24,6 +24,37 @@ has the downloads and the full commit lists.
   delete Yardsort's record instead. Nothing on disk is touched either way. See
   [The project menu](docs/guide/projects.md#the-project-menu).
 
+- **Links open in your browser again.** Opening a URL from the app — the release notes on an
+  update, the agent install links on the welcome screen, and `Ctrl`/`⌘`-clicking a URL in a
+  terminal — was refused with nothing shown but a line in a console nobody sees. The permission
+  granted the command but carried no URL scope, which denies everything. Found by pressing a
+  pull request badge that had just been made clickable.
+
+- **Have a model write the commit message or the pull request.** A **✦** beside the commit box
+  and in the pull request dialog fills them in from the diff, and from what the workspace was
+  asked to do. What comes back goes in the box for you to read and edit — it is never committed
+  or opened for you. It uses the coding agent you already have, in its non-interactive mode, so
+  there is no new account and no new key; your own Anthropic API key is the fallback when no
+  configured agent can write. Off with one switch, and absent entirely when nothing can write.
+  See [Have it written for you](docs/guide/commits-and-pull-requests.md#have-it-written-for-you).
+
+- **Commit, push and open a pull request from the panel.** Under the changed-files list: a
+  message box that commits everything the workspace has changed, a **Push** button once the
+  branch is ahead of its remote, and **Open pull request** — which pushes first if it needs to,
+  and fills the title and description in from the commits the remote has not got yet: one
+  commit's own message body becomes the description, several become a list. Committing is
+  confirmed first, naming the files and the branch it lands on. With the
+  [GitHub CLI](https://cli.github.com) it opens the pull request from here; without it the branch
+  is pushed and your browser opens the forge's own form, which works for GitHub, GitLab,
+  Bitbucket and the Gitea family alike. Yardsort holds no forge credentials of its own. See
+  [Commits & pull requests](docs/guide/commits-and-pull-requests.md).
+
+- **A workspace's pull request and its checks, on its row.** The number appears in the sidebar
+  once there is one, coloured by CI — green when every check has finished and passed, amber while
+  one is running, red if one failed — and says **merged** or **closed** when it is over. One
+  request per project, not one per workspace. Press it to open the pull request in your browser.
+  Needs `gh`; without it nothing shows and nothing complains. See [On the workspace row](docs/guide/commits-and-pull-requests.md#on-the-workspace-row).
+
 ## 0.9.2
 
 - **A waiting update is announced beside Settings.** The **update** pill at the foot of the

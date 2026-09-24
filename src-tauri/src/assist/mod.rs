@@ -65,7 +65,7 @@ pub struct Assist {
 
 impl Default for Assist {
     fn default() -> Self {
-        Self::with_store(Box::new(key::Keychain))
+        Self::with_store(Box::new(key::Keychain::typesafe()))
     }
 }
 

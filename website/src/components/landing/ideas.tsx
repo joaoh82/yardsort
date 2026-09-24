@@ -105,12 +105,14 @@ export function Ideas() {
         >
           <p>
             A live list of changed files, character-level diffs, a file tree, and one click into
-            your editor. Reviewing is read-only: Yardsort shows you changes; it does not stage,
-            commit or discard them.
+            your editor.
           </p>
           <p>
-            When the work is done, it is an ordinary git branch — review it, push it, open a pull
-            request.
+            When it looks right, the foot of the same panel commits it, pushes it and opens the pull
+            request — whose number and check results then sit on the workspace row. It stays an
+            ordinary git branch throughout, and Yardsort holds no forge credentials: the{" "}
+            <code className={code}>gh</code> you already use opens the pull request, or your browser
+            does.
           </p>
         </Idea>
 

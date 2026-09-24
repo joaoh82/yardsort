@@ -2,9 +2,12 @@
 //! the user's config, hooks and credentials. Everything goes through [`Git::run`].
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+
+use serde::Serialize;
+use specta::Type;
 
 use crate::env::ShellEnv;
+use crate::program::Program;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GitError {
@@ -41,28 +44,35 @@ pub enum Head {
     Detached(String),
 }
 
+/// One commit, as much of it as a pull request needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    pub subject: String,
+    /// Everything under the subject, with the blank line between them dropped. Often empty.
+    pub body: String,
+}
+
+impl Commit {
+    /// Split a message the way git itself reads one: first line, then the rest.
+    fn from_message(message: &str) -> Self {
+        let (subject, body) = message.split_once('\n').unwrap_or((message, ""));
+        Self {
+            subject: subject.trim().to_owned(),
+            body: body.trim().to_owned(),
+        }
+    }
+}
+
 pub struct Git {
-    program: PathBuf,
-    env: Vec<(String, String)>,
-    clear_env: bool,
+    program: Program,
 }
 
 impl Git {
     /// Find git on the *user's* `PATH` and run it with the user's environment.
     pub fn new(env: &ShellEnv) -> GitResult<Self> {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let program = env
-            .find_program("git", &cwd)
-            .ok_or(GitError::NotInstalled)?;
-        Ok(Self {
-            program,
-            env: env
-                .vars
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            clear_env: env.replaces_inherited(),
-        })
+        let program = Program::find(env, "git").ok_or(GitError::NotInstalled)?;
+        Ok(Self { program })
     }
 
     pub fn run(&self, cwd: &Path, args: &[&str]) -> GitResult<String> {
@@ -72,27 +82,15 @@ impl Git {
 
     /// Like [`Self::run`], with stdout exactly as git wrote it: file contents, `-z` lists.
     pub fn run_bytes(&self, cwd: &Path, args: &[&str]) -> GitResult<Vec<u8>> {
-        let mut command = Command::new(&self.program);
-        if self.clear_env {
-            command.env_clear();
-        }
-        command
+        let output = self
+            .program
+            .command(cwd)
             .args(args)
-            .current_dir(cwd)
-            .envs(self.env.iter().map(|(k, v)| (k, v)))
             // Never block on a credential or passphrase prompt nobody can see.
             .env("GIT_TERMINAL_PROMPT", "0")
             // Keep messages in English: a few callers have to recognise them.
             .env("LC_ALL", "C")
-            .stdin(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        let output = command.output()?;
+            .output()?;
         if output.status.success() {
             Ok(output.stdout)
         } else {
@@ -241,6 +239,125 @@ impl Git {
     }
 }
 
+/// Sending work outwards: a commit, a remote, a push.
+impl Git {
+    /// Stage everything git is willing to track and commit it, returning the new short id.
+    ///
+    /// Everything, because the panel offers no way to leave a file out: a partial commit the
+    /// user did not ask for is worse than one more file than they expected. The message crosses
+    /// as one argument, so nothing in it is ever read as a flag or by a shell.
+    pub fn commit_all(&self, root: &Path, message: &str) -> GitResult<String> {
+        self.run(root, &["add", "--all"])?;
+        self.run(root, &["commit", "--message", message])?;
+        self.run(root, &["rev-parse", "--short", "HEAD"])
+    }
+
+    /// The identity a commit would be signed with — `Ada Lovelace <ada@example.com>` — or
+    /// `None` when git cannot work one out.
+    ///
+    /// `git var` rather than `git config user.name`, because the environment can supply an
+    /// identity that the config does not: asking the config would report "no identity" for a
+    /// repository that commits perfectly well. This is the one failure worth catching before
+    /// anything is staged, since it is the only one the user fixes outside Yardsort.
+    pub fn identity(&self, root: &Path) -> GitResult<Option<String>> {
+        match self.run(root, &["var", "GIT_COMMITTER_IDENT"]) {
+            // `Name <email> 1727090000 +0000` — the timestamp is git's, not the identity.
+            Ok(ident) => Ok(ident
+                .rsplit_once('>')
+                .map(|(who, _)| format!("{who}>"))
+                .filter(|who| !who.starts_with('<'))),
+            Err(GitError::Failed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Remote names, in git's own order.
+    pub fn remotes(&self, root: &Path) -> GitResult<Vec<String>> {
+        Ok(self
+            .run(root, &["remote"])?
+            .lines()
+            .map(str::to_owned)
+            .collect())
+    }
+
+    /// The remote to push to: `origin` when it exists, otherwise the only one, otherwise none.
+    pub fn push_remote(&self, root: &Path) -> GitResult<Option<String>> {
+        let remotes = self.remotes(root)?;
+        Ok(remotes
+            .iter()
+            .find(|name| *name == "origin")
+            .or_else(|| remotes.first())
+            .cloned())
+    }
+
+    /// Where a remote points. `None` if there is no such remote.
+    pub fn remote_url(&self, root: &Path, remote: &str) -> GitResult<Option<String>> {
+        match self.run(root, &["remote", "get-url", remote]) {
+            Ok(url) => Ok(Some(url)),
+            Err(GitError::Failed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// What `HEAD` tracks, e.g. `origin/main`, or `None` when it tracks nothing yet.
+    pub fn upstream(&self, root: &Path) -> GitResult<Option<String>> {
+        match self.run(
+            root,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        ) {
+            Ok(name) if !name.is_empty() => Ok(Some(name)),
+            Ok(_) => Ok(None),
+            Err(GitError::Failed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// How far `HEAD` is ahead of and behind `reference`. `None` when the two have no common
+    /// history to count across — a remote branch we have never fetched, most often.
+    pub fn ahead_behind(&self, root: &Path, reference: &str) -> GitResult<Option<(u32, u32)>> {
+        let range = format!("{reference}...HEAD");
+        let out = match self.run(root, &["rev-list", "--left-right", "--count", &range]) {
+            Ok(out) => out,
+            Err(GitError::Failed { .. }) => return Ok(None),
+            Err(other) => return Err(other),
+        };
+        let mut counts = out.split_whitespace().map(|n| n.parse::<u32>().ok());
+        match (counts.next().flatten(), counts.next().flatten()) {
+            // git counts the left side first, and the left side is the reference.
+            (Some(behind), Some(ahead)) => Ok(Some((ahead, behind))),
+            _ => Ok(None),
+        }
+    }
+
+    /// Push `branch` to `remote` and make it the branch's upstream.
+    ///
+    /// Never forced: a push Yardsort makes can only ever add to what the remote has.
+    pub fn push(&self, root: &Path, remote: &str, branch: &str) -> GitResult<()> {
+        self.run(root, &["push", "--set-upstream", remote, branch])
+            .map(drop)
+    }
+
+    /// The commits in `reference..HEAD`, newest first.
+    ///
+    /// `%B` is the message exactly as it was written, subject and body together, and the
+    /// commits are separated by NUL — a message may contain any line a friendlier separator
+    /// could have used.
+    pub fn commits_since(&self, root: &Path, reference: &str) -> GitResult<Vec<Commit>> {
+        let range = format!("{reference}..HEAD");
+        let out = match self.run_bytes(root, &["log", "--format=%B%x00", &range]) {
+            Ok(out) => out,
+            Err(GitError::Failed { .. }) => return Ok(vec![]),
+            Err(other) => return Err(other),
+        };
+        Ok(String::from_utf8_lossy(&out)
+            .split('\0')
+            .map(str::trim)
+            .filter(|message| !message.is_empty())
+            .map(Commit::from_message)
+            .collect())
+    }
+}
+
 fn parse_worktrees(porcelain: &str) -> Vec<WorktreeEntry> {
     let mut entries: Vec<WorktreeEntry> = Vec::new();
     for line in porcelain.lines() {
@@ -351,6 +468,201 @@ mod tests {
         git.run(dir.path(), &["checkout", "-b", "trunk"]).unwrap();
         git.initial_commit(dir.path()).unwrap();
         (git, dir)
+    }
+
+    /// A repository with a real remote: a bare one next door, so pushes go somewhere and
+    /// `@{u}` means what it means anywhere else.
+    fn repo_with_remote() -> (Git, tempfile::TempDir, tempfile::TempDir) {
+        let (git, repo) = repo_with_commit();
+        let remote = tempfile::tempdir().unwrap();
+        git.run(remote.path(), &["init", "--bare"]).unwrap();
+        let url = remote.path().to_string_lossy().to_string();
+        git.run(repo.path(), &["remote", "add", "origin", &url])
+            .unwrap();
+        (git, repo, remote)
+    }
+
+    #[test]
+    fn committing_takes_everything_including_untracked_files() {
+        let (git, repo) = repo_with_commit();
+        std::fs::write(repo.path().join("tracked.txt"), "one").unwrap();
+        git.run(repo.path(), &["add", "tracked.txt"]).unwrap();
+        git.run(repo.path(), &["commit", "-m", "first"]).unwrap();
+        std::fs::write(repo.path().join("tracked.txt"), "two").unwrap();
+        std::fs::write(repo.path().join("brand-new.txt"), "hello").unwrap();
+
+        let id = git.commit_all(repo.path(), "Do the thing").unwrap();
+        assert!(id.len() >= 7, "a short id, got {id:?}");
+        assert_eq!(
+            git.run(repo.path(), &["status", "--porcelain"]).unwrap(),
+            "",
+            "nothing is left uncommitted"
+        );
+        let files = git
+            .run(repo.path(), &["show", "--name-only", "--format=%s", "HEAD"])
+            .unwrap();
+        assert!(files.contains("Do the thing"));
+        assert!(files.contains("brand-new.txt"));
+    }
+
+    #[test]
+    fn a_message_is_never_read_as_a_flag() {
+        let (git, repo) = repo_with_commit();
+        std::fs::write(repo.path().join("a.txt"), "x").unwrap();
+        // Passed as argv, so a message that looks like an option is just a message.
+        git.commit_all(repo.path(), "--amend is not an option here")
+            .unwrap();
+        assert_eq!(
+            git.run(repo.path(), &["log", "--format=%s", "-1"]).unwrap(),
+            "--amend is not an option here"
+        );
+        assert_eq!(
+            git.run(repo.path(), &["rev-list", "--count", "HEAD"])
+                .unwrap(),
+            "2",
+            "it is a new commit, not an amended one"
+        );
+    }
+
+    #[test]
+    fn committing_nothing_fails_and_leaves_the_history_alone() {
+        let (git, repo) = repo_with_commit();
+        let before = git.run(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        assert!(git.commit_all(repo.path(), "nothing to say").is_err());
+        assert_eq!(
+            git.run(repo.path(), &["rev-parse", "HEAD"]).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn a_commits_subject_and_body_come_back_apart() {
+        let (git, repo, _remote) = repo_with_remote();
+        git.push(repo.path(), "origin", "trunk").unwrap();
+        std::fs::write(repo.path().join("a.txt"), "x").unwrap();
+        git.commit_all(
+            repo.path(),
+            "Fix the login redirect\n\nThe cookie was set on the wrong domain,\nso the session never came back.\n",
+        )
+        .unwrap();
+        std::fs::write(repo.path().join("b.txt"), "y").unwrap();
+        git.commit_all(repo.path(), "Tidy up").unwrap();
+
+        let unpushed = git.commits_since(repo.path(), "origin/trunk").unwrap();
+        assert_eq!(unpushed.len(), 2);
+        // Newest first, as git prints them.
+        assert_eq!(unpushed[0].subject, "Tidy up");
+        assert_eq!(unpushed[1].subject, "Fix the login redirect");
+        assert_eq!(
+            unpushed[1].body,
+            "The cookie was set on the wrong domain,\nso the session never came back."
+        );
+    }
+
+    #[test]
+    fn a_message_containing_blank_lines_is_still_one_commit() {
+        let (git, repo, _remote) = repo_with_remote();
+        git.push(repo.path(), "origin", "trunk").unwrap();
+        std::fs::write(repo.path().join("a.txt"), "x").unwrap();
+        git.commit_all(repo.path(), "Subject\n\nOne paragraph.\n\nAnd another.")
+            .unwrap();
+
+        let unpushed = git.commits_since(repo.path(), "origin/trunk").unwrap();
+        assert_eq!(unpushed.len(), 1, "blank lines do not split commits");
+        assert_eq!(unpushed[0].body, "One paragraph.\n\nAnd another.");
+    }
+
+    #[test]
+    fn an_identity_is_found_when_there_is_one() {
+        let (git, repo) = repo_with_commit();
+        let who = git.identity(repo.path()).unwrap().expect("an identity");
+        assert_eq!(who, "Test <test@example.com>");
+    }
+
+    #[test]
+    fn the_push_remote_is_origin_when_there_is_one() {
+        let (git, repo) = repo_with_commit();
+        assert_eq!(git.remotes(repo.path()).unwrap(), Vec::<String>::new());
+        assert_eq!(git.push_remote(repo.path()).unwrap(), None);
+
+        git.run(
+            repo.path(),
+            &["remote", "add", "upstream", "https://example.com/a/b.git"],
+        )
+        .unwrap();
+        assert_eq!(
+            git.push_remote(repo.path()).unwrap().as_deref(),
+            Some("upstream"),
+            "the only remote will do"
+        );
+
+        git.run(
+            repo.path(),
+            &["remote", "add", "origin", "https://example.com/c/d.git"],
+        )
+        .unwrap();
+        assert_eq!(
+            git.push_remote(repo.path()).unwrap().as_deref(),
+            Some("origin"),
+            "but origin wins"
+        );
+        assert_eq!(
+            git.remote_url(repo.path(), "origin").unwrap().as_deref(),
+            Some("https://example.com/c/d.git")
+        );
+        assert_eq!(git.remote_url(repo.path(), "nope").unwrap(), None);
+    }
+
+    #[test]
+    fn pushing_sets_the_upstream_and_the_counts_follow_it() {
+        let (git, repo, _remote) = repo_with_remote();
+        assert_eq!(git.upstream(repo.path()).unwrap(), None);
+
+        git.push(repo.path(), "origin", "trunk").unwrap();
+        assert_eq!(
+            git.upstream(repo.path()).unwrap().as_deref(),
+            Some("origin/trunk")
+        );
+        assert_eq!(
+            git.ahead_behind(repo.path(), "origin/trunk").unwrap(),
+            Some((0, 0))
+        );
+
+        std::fs::write(repo.path().join("after.txt"), "more").unwrap();
+        git.commit_all(repo.path(), "More").unwrap();
+        assert_eq!(
+            git.ahead_behind(repo.path(), "origin/trunk").unwrap(),
+            Some((1, 0)),
+            "one commit the remote has not seen"
+        );
+        let unpushed = git.commits_since(repo.path(), "origin/trunk").unwrap();
+        assert_eq!(unpushed.len(), 1);
+        assert_eq!(unpushed[0].subject, "More");
+        assert_eq!(unpushed[0].body, "", "a one-line message has no body");
+
+        git.push(repo.path(), "origin", "trunk").unwrap();
+        assert_eq!(
+            git.ahead_behind(repo.path(), "origin/trunk").unwrap(),
+            Some((0, 0))
+        );
+        assert!(git
+            .commits_since(repo.path(), "origin/trunk")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn counting_against_a_reference_we_do_not_have_says_so() {
+        let (git, repo) = repo_with_commit();
+        assert_eq!(
+            git.ahead_behind(repo.path(), "origin/never-fetched")
+                .unwrap(),
+            None
+        );
+        assert!(git
+            .commits_since(repo.path(), "origin/never-fetched")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

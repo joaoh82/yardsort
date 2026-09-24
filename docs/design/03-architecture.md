@@ -201,6 +201,9 @@ Operations needed for v1, all via the CLI with `--porcelain` / `-z` output where
 | Remove workspace    | `git worktree remove [--force] <path>` (+ optional `git branch -D`)                                 |
 | Changes             | `git status --porcelain=v2 -z`, `git diff --name-status -z <merge-base>`                            |
 | Diff content        | `git diff <merge-base> -- <file>`, `git show <rev>:<file>`                                          |
+| Commit              | `git add --all` then `git commit --message <message>`                                               |
+| Push                | `git push --set-upstream <remote> <branch>`, never forced                                           |
+| Where it stands     | `git rev-parse --abbrev-ref @{u}`, `git rev-list --left-right --count <ref>...HEAD`, `git var`      |
 
 Decisions:
 
@@ -228,6 +231,30 @@ Decisions:
   names what will be lost.
 - Untracked-but-needed files (`.env`, etc.) don't exist in a fresh worktree. v1: document it.
   Later: per-project "copy these files" list / setup script.
+
+### The forge (`crates/core/src/forge.rs`, `src-tauri/src/publish/`)
+
+Sending a workspace's work out is two layers, because only one of them can be relied on.
+
+The **remote URL** is always there. Parsed into host / owner / repository it yields a _compare_
+page — the forge's own "open a pull request" form with both branches filled in. No account, no
+token, no extra program, and the same three lines of code serve GitHub, GitLab, Bitbucket and the
+Gitea family. This is the floor, and it is why there is no per-forge integration to write.
+
+**`gh`**, when the user has it and is logged in, does the rest: opens the pull request without
+leaving the app, and reports what the pull request and its checks are doing. It is found on the
+user's `PATH` and spawned with an argv array, exactly as git and the harnesses are — the shared
+mechanics live in `program.rs`, which `Git` and `Gh` both sit on.
+
+**No forge credentials of our own.** `gh` already keeps the user's, somewhere they expect and can
+revoke; a second copy in our credential store would be one more secret to leak. Everything
+therefore degrades to the link when `gh` is missing or logged out, and that is a supported state
+rather than an error to report.
+
+**Pull requests are fetched per _project_, not per workspace.** One `gh pr list` answers for every
+row, cached for 30 seconds in `publish::Forge`, and a workspace finds its own by head branch. The
+obvious shape — ask about this branch — costs one network round trip per workspace every time the
+window regains focus.
 
 ## Data model (SQLite)
 
@@ -303,6 +330,29 @@ Shape of it, and the reasons:
 The model id is pinned (`jev-1.13.0`) rather than `jev-latest`, because the thresholds were chosen
 against a specific version. The wording of the questions carries a version too, so cached answers
 from older wording are not reused.
+
+### Drafting (`crates/core/src/draft.rs`, `src-tauri/src/draft/`)
+
+The one place Yardsort asks a model to **produce** text rather than judge it. Assist cannot: Jev
+answers typed questions and never writes (`assist/jev.rs`), so this is its own module with its own
+switch rather than a third Assist feature.
+
+Two backends, agent first:
+
+1. **The workspace's own agent, non-interactively.** Every harness gained `write_args` — the
+   print/exec mode each agent already has, verified against its own `--help`
+   (`claude --print`, `codex exec`, `opencode run`, `grok --single`). It runs in the worktree, so
+   it can see what it is describing, and it is billed to the account the user already uses. No new
+   credential, and a custom harness opts in by filling one field.
+2. **The user's own Anthropic API key**, raw HTTP to `/v1/messages` (there is no official Rust
+   SDK), kept in the credential store beside the TypeSafe key as a second entry.
+
+This is **not** an exception to "never parse agent output". That rule is about deriving status and
+readiness from an interactive PTY; this is an ordinary subprocess read through an ordinary pipe,
+with the child's pipes drained on their own threads so a hung agent cannot wedge the button.
+
+Nothing is applied automatically: an answer lands in the text box the user was already looking at,
+and the commit confirmation still stands between it and git.
 
 ## Cross-platform notes & risks
 

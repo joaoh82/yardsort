@@ -20,6 +20,11 @@ const ARG_FIELDS = [
   ["promptArgs", "Prompt", "Used when there is an opening message (argv transport). {prompt}"],
   ["resumeArgs", "Resume", "Replace the session and prompt args when resuming. {session_id}"],
   ["forkArgs", "Fork", "Replace them when forking a session. {session_id}"],
+  [
+    "writeArgs",
+    "Write",
+    "This agent's non-interactive mode, for having it write a commit message or a pull request. Its whole command line, with {prompt} for the question. Empty means it cannot.",
+  ],
 ] as const;
 type ArgField = (typeof ARG_FIELDS)[number][0];
 
@@ -32,7 +37,7 @@ const LIST_FIELDS = [
 function toDraft(def: HarnessDef) {
   return {
     ...def,
-    args: Object.fromEntries(ARG_FIELDS.map(([key]) => [key, joinWords(def[key])])) as Record<
+    args: Object.fromEntries(ARG_FIELDS.map(([key]) => [key, joinWords(def[key] ?? [])])) as Record<
       ArgField,
       string
     >,

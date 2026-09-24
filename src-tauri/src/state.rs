@@ -22,6 +22,8 @@ pub struct AppState {
     pub settings: SettingsFile,
     /// Assist: the API key store and the answers already given. See `crate::assist`.
     pub assist: Assist,
+    /// What the forge last said about each project's pull requests. See `crate::publish`.
+    pub forge: crate::publish::Forge,
     /// Held while catching up with git, so overlapping project listings reconcile one at a time.
     pub reconciling: Mutex<()>,
     /// The file watcher of the workspace on screen, if any.
@@ -38,6 +40,7 @@ impl AppState {
             store,
             settings,
             assist: Assist::default(),
+            forge: crate::publish::Forge::default(),
             reconciling: Mutex::new(()),
             watcher: Mutex::new(None),
             env: Mutex::new(None),

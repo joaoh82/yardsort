@@ -124,3 +124,13 @@ suggest_at_percent = 50
 
 Only what differs from the defaults is written, so a value you never touched keeps following
 Yardsort's default if that ever changes.
+
+## Writing commit messages and pull requests
+
+Assist does not write text. Jev answers typed questions — a probability, a choice, a score — and
+that is all it does; there is no wording anywhere in this page that came from a model.
+
+Having a model _write_ a commit message or a pull request is a separate thing with its own switch,
+settled at the foot of this settings page because that is where optional AI lives. It uses the
+coding agent you already have, or your own Anthropic API key. See
+[Commits & pull requests](commits-and-pull-requests.md#have-it-written-for-you).

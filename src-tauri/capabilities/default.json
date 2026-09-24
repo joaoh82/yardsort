@@ -7,7 +7,17 @@
     "core:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
-    "opener:allow-open-url",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        }
+      ]
+    },
     "opener:allow-reveal-item-in-dir",
     "notification:default",
     "dialog:allow-open",

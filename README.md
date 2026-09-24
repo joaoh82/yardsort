@@ -51,6 +51,12 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   intact. **Fork** one to try a different approach without losing the first.
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
   one click into your editor.
+- **Send it on without leaving.** Commit what an agent wrote, push it, and open the pull request
+  from the panel you reviewed it in — the title written from the commits. With the
+  [GitHub CLI](https://cli.github.com) the pull request opens from here and its number and check
+  results appear on the workspace row; without it, your browser opens the forge's own form, on
+  GitHub, GitLab, Bitbucket or Gitea alike. See
+  [Commits & pull requests](docs/guide/commits-and-pull-requests.md).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and

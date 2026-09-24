@@ -19,6 +19,7 @@ const core = vi.hoisted(() => ({
   projectUntrackedWorktrees: vi.fn(),
   workspacesImport: vi.fn(),
   sessionsList: vi.fn(),
+  projectPullRequests: vi.fn(),
   ptySpawn: vi.fn(),
   ptyClose: vi.fn(),
 }));
@@ -33,8 +34,11 @@ vi.mock("@/lib/ipc", async (original) => ({
   ipc: core,
 }));
 vi.mock("@/lib/native", () => ({ native }));
+const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => opener);
 
 import { useProjectsStore } from "@/stores/projects";
+import { usePublishStore } from "@/stores/publish";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
@@ -83,7 +87,15 @@ describe("Sidebar", () => {
     }
     core.ptySpawn.mockImplementation(async ({ workspaceId }) => shellIn(workspaceId));
     core.sessionsList.mockResolvedValue([]);
+    opener.openUrl.mockResolvedValue(undefined);
+    core.projectPullRequests.mockResolvedValue({
+      gh: true,
+      pullRequests: [],
+      problem: null,
+      loggedOut: false,
+    });
     useSessionsStore.setState({ byWorkspace: {}, error: null });
+    usePublishStore.setState({ byProject: {}, workspaceId: null, state: null, busy: null });
     useProjectsStore.setState({
       projects: [],
       loaded: false,
@@ -112,6 +124,102 @@ describe("Sidebar", () => {
     );
     await userEvent.setup().click(screen.getByRole("button", { name: "Update to 0.9.2" }));
     expect(useUpdatesStore.getState().open).toBe(true);
+  });
+
+  it("puts a workspace's pull request on its row, coloured by its checks", async () => {
+    core.projectPullRequests.mockResolvedValue({
+      gh: true,
+      pullRequests: [
+        {
+          number: 42,
+          url: "https://github.com/o/alpha/pull/42",
+          title: "Fix the login redirect",
+          branch: "ys/feature",
+          state: "open",
+          draft: false,
+          checks: "failing",
+        },
+      ],
+      problem: null,
+      loggedOut: false,
+    });
+    await renderWithWorktree();
+
+    const row = await screen.findByRole("treeitem", { name: "feature" });
+    const badge = await within(row).findByRole("button", { name: /Pull request #42/ });
+    expect(badge).toHaveTextContent("#42");
+    expect(badge).toHaveAccessibleName(
+      "Open Pull request #42 — checks failing — Fix the login redirect",
+    );
+    // `local` is on `main`, which no pull request has as its head.
+    expect(
+      within(screen.getByRole("treeitem", { name: "local" })).queryByRole("button", {
+        name: /Pull request/,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the pull request in a browser, without opening the workspace", async () => {
+    core.projectPullRequests.mockResolvedValue({
+      gh: true,
+      pullRequests: [
+        {
+          number: 42,
+          url: "https://github.com/o/alpha/pull/42",
+          title: "Fix the login redirect",
+          branch: "ys/feature",
+          state: "open",
+          draft: false,
+          checks: "passing",
+        },
+      ],
+      problem: null,
+      loggedOut: false,
+    });
+    await renderWithWorktree();
+
+    const row = await screen.findByRole("treeitem", { name: "feature" });
+    const badge = await within(row).findByRole("button", { name: /Pull request #42/ });
+    await userEvent.setup().click(badge);
+
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/o/alpha/pull/42");
+    // The row's own button opens the workspace; this one must not.
+    expect(useProjectsStore.getState().selectedWorkspaceId).not.toBe("w-alpha-feature");
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+  });
+
+  it("says a pull request was merged instead of showing its number", async () => {
+    core.projectPullRequests.mockResolvedValue({
+      gh: true,
+      pullRequests: [
+        {
+          number: 42,
+          url: "https://github.com/o/alpha/pull/42",
+          title: "Fix the login redirect",
+          branch: "ys/feature",
+          state: "merged",
+          draft: false,
+          checks: "passing",
+        },
+      ],
+      problem: null,
+      loggedOut: false,
+    });
+    await renderWithWorktree();
+    const row = await screen.findByRole("treeitem", { name: "feature" });
+    expect(await within(row).findByRole("button", { name: /merged/ })).toHaveTextContent("merged");
+  });
+
+  it("shows no pull requests at all without gh, and does not complain about it", async () => {
+    core.projectPullRequests.mockResolvedValue({
+      gh: false,
+      pullRequests: [],
+      problem: null,
+      loggedOut: false,
+    });
+    await renderWithWorktree();
+    expect(screen.queryByRole("button", { name: /Pull request/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("shows each project with its local workspace and branch", async () => {

@@ -192,6 +192,41 @@ impl Changes<'_> {
         Ok((!binary && !patch.trim().is_empty()).then_some(patch))
     }
 
+    /// Every changed file's patch in one string, for handing a whole change to a model.
+    ///
+    /// Built from the per-file patches rather than one `git diff`, so that untracked files —
+    /// which `git diff` cannot see and which are often the whole point of a new workspace —
+    /// are in it. Each is headed by its path, because a patch with no `diff --git` line above
+    /// it is a patch nobody can place.
+    pub fn combined_patch(&self, scope: Scope) -> IpcResult<String> {
+        let changes = self.list()?;
+        let files = match scope {
+            Scope::Uncommitted => changes.uncommitted,
+            Scope::Committed => changes.committed,
+        };
+        let mut combined = String::new();
+        for change in &files {
+            if combined.len() >= yardsort_core::draft::MAX_DIFF_CHARS {
+                combined.push_str("\n… more files changed than fit here.\n");
+                break;
+            }
+            let Some(patch) = self.patch(change, scope)? else {
+                // Binary, too large, or nothing to show: name it so the model knows it happened.
+                combined.push_str(&format!(
+                    "--- {} ({:?}, not shown)\n",
+                    change.path, change.kind
+                ));
+                continue;
+            };
+            combined.push_str(&format!("--- {}\n", change.path));
+            combined.push_str(&patch);
+            if !patch.ends_with('\n') {
+                combined.push('\n');
+            }
+        }
+        Ok(combined)
+    }
+
     /// The base branch and the commit where this branch left it.
     fn fork_point(&self) -> IpcResult<(Option<String>, Option<String>)> {
         let current = match self.git.head(self.root)? {

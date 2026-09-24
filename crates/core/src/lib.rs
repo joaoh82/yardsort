@@ -12,13 +12,16 @@
 
 pub mod assist;
 pub mod daemon;
+pub mod draft;
 pub mod env;
 pub mod error;
+pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod launch;
 pub mod legacy;
 pub mod paths;
+pub mod program;
 pub mod projects;
 pub mod settings;
 pub mod store;

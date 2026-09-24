@@ -85,6 +85,7 @@ export const harness = (id: string, extra: Partial<HarnessInfo> = {}): HarnessIn
   promptArgs: [],
   resumeArgs: [],
   forkArgs: [],
+  writeArgs: [],
   efforts: [],
   models: [],
   promptTransport: "argv",

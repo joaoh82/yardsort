@@ -375,6 +375,13 @@ _Notes:_
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
+- ~~**Have a model write the commit message and the pull request.**~~ **Done**, though it was
+  never on this list — it came out of dogfooding the item above. The finding worth keeping: Assist
+  could not do it. Jev answers typed questions and never writes text, so this needed a generative
+  model, which Yardsort had never called. What made it cheap anyway is that every agent already
+  has a non-interactive mode, so the writer is the agent the user already installed, logged into
+  and pays for — one new harness field, no new credential. An Anthropic API key is the fallback.
+  See [open question 19](06-open-questions.md).
 - Per-project setup script and "files to copy into new worktrees" (`.env` etc.); run/dev-server button.
 - Merge / rebase helpers; "apply this workspace onto local".
 - Diff comments sent back to the agent as a prompt.
@@ -412,4 +419,6 @@ rediscovering later. None of them is committed to; the point is to know what is 
 
 Two further Superset ideas are already covered elsewhere: richer per-workspace status ("running",
 "blocked", "ready for review") is what [open question 16](06-open-questions.md) decided to build
-with Assist, and its PR view is the first item in the list above.
+with Assist, and its PR view is the first item in the list above — now done, as far as a pull
+request's number and its checks go. What Superset still has and this does not is the review
+itself: comments, files reviewed, merging from the app.

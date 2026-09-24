@@ -189,7 +189,40 @@ written to disk. It is on the list because the wrong message here would read as 
 |     | **Open in editor** opens the right file in your editor.                             |
 |     | A repository with a big `node_modules` stays responsive.                            |
 
-## 8 · Deleting nothing by accident
+## 8 · Committing, pushing, opening a pull request
+
+Needs a project with a real remote you may push to. Do the first half **without `gh` on `PATH`**
+(or logged out of it) and the second half with it: the two paths are different code.
+
+| ✓   | Check                                                                                                                                   |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------- |
+|     | With uncommitted changes, the message box appears; **Commit N files** is dead until a message is typed.                                 |
+|     | Pressing it asks first, naming the files, the message and the branch. Answering no commits nothing and keeps the message.               |
+|     | Commit: the list empties, the message box goes, and `git log` in a shell tab shows the commit with every file, untracked ones too.      |
+|     | A message starting with `--` commits as that message rather than being read as an option.                                               |
+|     | **Push N commits** appears; pushing sets the upstream and the button goes. `git status` agrees.                                         |
+|     | Without `gh`: **Open pull request** pushes and opens the forge's form in a browser, both branches filled in.                            |
+|     | With `gh`: the dialog's title is the oldest unpushed commit; opening lands the browser on the real pull request.                        |
+|     | Its number then appears on the workspace's row in the sidebar, and at the right of the panel foot.                                      |
+|     | Pressing the badge opens the pull request in a browser; pressing the row still opens the workspace.                                     |
+|     | Let CI run: the row goes amber while checks run, then green or red. Coming back to the window catches up within a minute.               |
+|     | Merge the pull request on the forge: the row says **merged**.                                                                           |
+|     | A project whose remote is a path on disk offers **Commit** and **Push** but no pull request button at all.                              |
+|     | On a machine with no `user.name` / `user.email`: the commit button is disabled and says which two commands to run, rather than failing. |
+
+### Writing with a model
+
+| ✓   | Check                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------- |
+|     | With an agent installed, **✦** beside the commit box writes a message into the box. Nothing is committed by it. |
+|     | The message box takes a body: Enter makes a newline, `Ctrl+Enter` / `⌘Enter` commits.                           |
+|     | **✦** in the pull request dialog fills the title _and_ the description, and opens nothing.                      |
+|     | Typing your own message, then pressing ✦ and having it fail (log the agent out): what you typed is still there. |
+|     | With no agent able to write and no Anthropic key, no ✦ appears anywhere and nothing complains.                  |
+|     | Settings → Assist: switching "Offer to write them for me" off removes both buttons.                             |
+|     | A custom harness with **Write args** filled in is used; one without falls through to the key, or to nothing.    |
+
+## 9 · Deleting nothing by accident
 
 | ✓   | Check                                                                                                                                   |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -198,7 +231,7 @@ written to disk. It is on the list because the wrong message here would read as 
 |     | Delete one that is clean: the folder goes, **the branch stays**, and it can be opened again from the composer's _Open existing branch_. |
 |     | Archive and restore: the conversations come back with the workspace.                                                                    |
 
-## 9 · The numbers
+## 10 · The numbers
 
 ```sh
 scripts/bench/run.sh
