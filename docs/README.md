@@ -5,20 +5,20 @@ few minutes.
 
 ## Using Yardsort
 
-| Guide                                                         | What it covers                                                            |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                        |
-| [Projects](guide/projects.md)                                 | Adding, creating, reordering and removing projects; the `local` workspace |
-| [Workspaces](guide/workspaces.md)                             | The composer, branches and worktrees, rename / archive / restore / delete |
-| [Terminals & sessions](guide/terminals-and-sessions.md)       | Tabs, shells, status dots, notifications, resume and fork                 |
-| [Changes & files](guide/changes-and-files.md)                 | Reviewing what an agent did: changed files, diffs, the file tree          |
-| [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row    |
-| [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor              |
-| [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer       |
-| [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can        |
-| [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                         |
-| [The `ys` command line](guide/cli.md)                         | Starting workspaces and agents from a terminal, and from scripts          |
-| [Troubleshooting](guide/troubleshooting.md)                   | "Command not found", blank windows, where your data lives                 |
+| Guide                                                         | What it covers                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                             |
+| [Projects](guide/projects.md)                                 | Adding, creating, reordering and removing projects; the `local` workspace      |
+| [Workspaces](guide/workspaces.md)                             | The composer, branches and worktrees, rename / archive / restore / delete      |
+| [Terminals & sessions](guide/terminals-and-sessions.md)       | Tabs, shells, status dots, notifications, resume and fork                      |
+| [Changes & files](guide/changes-and-files.md)                 | Reviewing what an agent did: changed files, diffs, the file tree               |
+| [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row         |
+| [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor                   |
+| [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer            |
+| [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can             |
+| [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                              |
+| [The `ys` command line](guide/cli.md)                         | Starting and deleting workspaces, and agents, from a terminal and from scripts |
+| [Troubleshooting](guide/troubleshooting.md)                   | "Command not found", blank windows, where your data lives                      |
 
 ## Getting help
 

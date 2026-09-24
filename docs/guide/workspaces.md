@@ -117,11 +117,15 @@ back with it. Tick **Also delete its saved conversations** in the dialog to drop
 Removes the folder and forgets the workspace. **The branch is always kept** — deleting a workspace
 never throws away commits. Delete the branch yourself with git if you want it gone.
 
+`ys workspace delete <name>` does the same thing from a terminal, which is how a harness can
+remove a workspace it is finished with. See [the command line](cli.md#ys-workspace-delete-workspace).
+
 ### Uncommitted work is protected
 
 Archiving and deleting both remove a folder, and uncommitted changes live only there. If there
 are any, Yardsort stops and asks again, saying plainly that the work will be lost for good.
-Nothing is destroyed on the first click.
+Nothing is destroyed on the first click. On the command line the same refusal is the default:
+`ys workspace delete` removes nothing until `--force` is passed.
 
 ## When a workspace's folder disappears
 

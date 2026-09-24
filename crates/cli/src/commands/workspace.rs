@@ -53,6 +53,19 @@ pub enum Command {
         #[arg(long)]
         no_agent: bool,
     },
+    /// Remove a workspace's folder and forget it. The branch, and its commits, are kept.
+    ///
+    /// Uncommitted changes and untracked files are refused unless `--force` is given: they live
+    /// only in the folder this removes, so there is no way back to them.
+    Delete {
+        /// Which one: a workspace name, or its id from `ys workspace list --json`.
+        workspace: String,
+        /// Delete even when the folder holds work that is not committed.
+        ///
+        /// That work cannot be recovered. The branch is still kept.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Serialize)]
@@ -95,6 +108,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
         } => new(
             ys, project, prompt, base, harness, model, effort, no_agent, out,
         ),
+        Command::Delete { workspace, force } => delete(ys, &workspace, force, out),
     }
 }
 
@@ -245,6 +259,130 @@ fn new(
             _ => println!("\nNothing started. Open it in Yardsort to start an agent."),
         }
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Deleted {
+    id: String,
+    name: String,
+    project: String,
+    /// Kept on purpose. Commits are never thrown away by deleting a workspace.
+    branch: Option<String>,
+    path: String,
+}
+
+/// Remove the worktree and the record. A running process is left running: a harness deletes the
+/// workspace it is standing in by calling this, and has to be able to finish afterwards.
+fn delete(ys: &Yardsort, wanted: &str, force: bool, out: &Output) -> Result<(), Failure> {
+    let workspace = find_workspace(ys, wanted)?;
+    if workspace.kind != "worktree" {
+        return Err(Failure::new(
+            "The local workspace is the project's own checkout and cannot be deleted.".to_owned(),
+        ));
+    }
+
+    let git = ys.git()?;
+    let worktree_root = ys.worktree_root()?;
+    let result = Workspaces {
+        store: &ys.store,
+        git: &git,
+        worktree_root: &worktree_root,
+        settings: &ys.settings.workspaces,
+    }
+    .delete(&workspace.id, force);
+
+    if let Err(error) = result {
+        if error.code == "worktree_dirty" {
+            return Err(Failure::new(format!(
+                "{} has uncommitted changes or untracked files, so it was not deleted.\n\
+                 Pass --force to delete it anyway. That work is in no commit and cannot be \
+                 recovered.\n\
+                 The branch is kept either way.",
+                workspace.name
+            )));
+        }
+        return Err(error.into());
+    }
+
+    let projects = ys.store.projects()?;
+    let project = projects
+        .iter()
+        .find(|p| p.id == workspace.project_id)
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "?".to_owned());
+    let deleted = Deleted {
+        id: workspace.id,
+        name: workspace.name,
+        project,
+        branch: workspace.branch,
+        path: workspace.path,
+    };
+    out.emit(&deleted, || {
+        println!("deleted  {}", deleted.name);
+        if let Some(branch) = &deleted.branch {
+            println!("  branch {branch} (kept)");
+        }
+        println!("  path   {}", deleted.path);
+    })
+}
+
+/// A workspace by id, or by name when that is unambiguous. Archived ones are included: deleting
+/// is how an archived workspace is removed for good.
+fn find_workspace(ys: &Yardsort, wanted: &str) -> Result<WorkspaceRow, Failure> {
+    let workspaces = ys.store.workspaces()?;
+    if let Some(exact) = workspaces.iter().find(|w| w.id == wanted) {
+        return Ok(exact.clone());
+    }
+    let matches: Vec<_> = workspaces
+        .iter()
+        .filter(|w| w.name.eq_ignore_ascii_case(wanted))
+        .collect();
+    match matches.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => Err(Failure::new(format!(
+            "No workspace called {wanted:?}.{}",
+            known_workspaces(ys, &workspaces)?
+        ))),
+        many => {
+            let projects = ys.store.projects()?;
+            let named = |id: &str| {
+                projects
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map_or("?", |p| p.name.as_str())
+            };
+            Err(Failure::new(format!(
+                "{} workspaces are called {wanted:?}. Use the id instead: {}.",
+                many.len(),
+                many.iter()
+                    .map(|w| format!("{} ({})", w.id, named(&w.project_id)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )))
+        }
+    }
+}
+
+fn known_workspaces(ys: &Yardsort, workspaces: &[WorkspaceRow]) -> Result<String, Failure> {
+    if workspaces.is_empty() {
+        return Ok(" There are no workspaces yet.".to_owned());
+    }
+    let projects = ys.store.projects()?;
+    let named = |id: &str| {
+        projects
+            .iter()
+            .find(|p| p.id == id)
+            .map_or("?", |p| p.name.as_str())
+    };
+    Ok(format!(
+        " Known: {}.",
+        workspaces
+            .iter()
+            .map(|w| format!("{} ({})", w.name, named(&w.project_id)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 /// The harness to run: the one asked for, or the first that is actually installed.
