@@ -861,19 +861,33 @@ mod tests {
         (Arc::new(host), rx)
     }
 
+    /// The exits of every session in `ids`, however they are ordered: two processes started
+    /// together end in whichever order the platform pleases, and an exit that arrives while
+    /// another is being waited for must not be thrown away.
+    fn wait_for_exits(
+        events: &std::sync::mpsc::Receiver<pty_host::HostEvent>,
+        ids: &[&pty_host::SessionId],
+    ) -> std::collections::HashMap<pty_host::SessionId, pty_host::ExitInfo> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut seen = std::collections::HashMap::new();
+        while seen.len() < ids.len() {
+            match events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            {
+                Ok(pty_host::HostEvent::Exited { id, exit }) if ids.contains(&&id) => {
+                    seen.insert(id, exit);
+                }
+                Ok(_) => {}
+                Err(_) => panic!("no exit for {ids:?}"),
+            }
+        }
+        seen
+    }
+
     fn wait_for_exit(
         events: &std::sync::mpsc::Receiver<pty_host::HostEvent>,
         id: &pty_host::SessionId,
     ) -> pty_host::ExitInfo {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            match events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
-            {
-                Ok(pty_host::HostEvent::Exited { id: seen, exit }) if &seen == id => return exit,
-                Ok(_) => {}
-                Err(_) => panic!("no exit for {id}"),
-            }
-        }
+        wait_for_exits(events, &[id]).remove(id).unwrap()
     }
 
     #[test]
@@ -950,11 +964,10 @@ mod tests {
         let in_b = launcher
             .in_workspace(&ws_b, script("exit 2"), SIZE)
             .unwrap();
-        for session in [&in_a, &in_b] {
-            let exit = wait_for_exit(&events, &session.id);
+        for (id, exit) in wait_for_exits(&events, &[&in_a.id, &in_b.id]) {
             activity::record_exit(
                 &store,
-                &session.id.0,
+                &id.0,
                 &activity::ExitFacts::from(&exit),
                 activity::Via::Live,
             );
