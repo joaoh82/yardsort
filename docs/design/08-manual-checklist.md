@@ -6,7 +6,7 @@ routing, a harness's first-run dialogs, or whether an agent is still working aft
 app. This is the pass that covers that, and the record of having done it.
 
 The roadmap owes it on **macOS and Windows** (M7; M1 wants the benchmark rows too, M4 wants the
-harnesses exercised, M9 the daemon, M10 the `ys` command line). Linux is recorded in
+harnesses exercised, M9 the daemon, M10 the `ys` command line, M11 the activity record). Linux is recorded in
 [07-terminal-benchmarks](07-terminal-benchmarks.md).
 
 Work on a throwaway profile so nothing here touches real projects:
@@ -241,6 +241,23 @@ scripts/bench/run.sh
 Add the rows to [07-terminal-benchmarks](07-terminal-benchmarks.md) in the shape the Linux section
 uses — both workloads, both renderers — with the machine, OS, webview version and display scaling.
 This is the half of M7's box that is not a judgement call.
+
+## 11 · Activity
+
+What CI cannot see here is a window closing and reopening, and the daemon on a platform's own
+process model. Switch **Show the activity timeline** on in Settings → General first.
+
+| ✓   | Check                                                                                                                                                                                                                                                      |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | Start an agent from the composer. **Activity** in the footer shows `<agent> started` with the model, source `yardsort/lifecycle`.                                                                                                                          |
+|     | Quit the agent (`/exit` or `Ctrl+D`). The timeline gains `exited` with _seen as it happened_; the Previous sessions entry shows a clean end, not interrupted.                                                                                              |
+|     | Start an agent, close the window with **Leave them running**, end the agent from another terminal (`ys attach`, then quit it), reopen. It is listed ended with its exit code; the timeline says `via spool` or _found already ended_, never _interrupted_. |
+|     | The same, but wait more than ten seconds after the agent ends before reopening, so the daemon has exited. Same result.                                                                                                                                     |
+|     | `ys workspace new … --harness <one that exits>` then `ys activity list`: `process.started` and `process.exited`, workspace named, exit code right.                                                                                                         |
+|     | Resume a conversation: `resumed` on the timeline; Fork one: `forked`, with the source's id.                                                                                                                                                                |
+|     | Settings → General: the counts match `ys doctor`; **Clear all recorded activity** empties both; a run still going survives the clear.                                                                                                                      |
+|     | Switch **Record when agents start and exit** off, start a shell: nothing new on the timeline, and `YARDSORT_RUN_ID` is unset in it while `YARDSORT_WORKSPACE_ID` is set.                                                                                   |
+|     | **Windows:** the spool directory is under `%APPDATA%\dev.yardsort.app\activity\spool`, entries appear there while the window is closed, and are gone after reopening.                                                                                      |
 
 ## Results
 

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { hasCore, ipc, type HostEvent } from "@/lib/ipc";
 import { native } from "@/lib/native";
+import { useActivityStore } from "@/stores/activity";
 import { useAppStore } from "@/stores/app";
 import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
@@ -48,6 +49,8 @@ export function handleHostEvent(event: HostEvent) {
           : []
         : Object.keys(sessions.byWorkspace);
       for (const workspaceId of stale) void sessions.load(workspaceId);
+      // An exit is an event on the timeline, if one is open for that workspace.
+      if (tab) void useActivityStore.getState().refresh(tab.workspaceId);
     }
   }
 }

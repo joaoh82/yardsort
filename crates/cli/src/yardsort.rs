@@ -88,17 +88,26 @@ impl Yardsort {
         self.daemon_watching(Arc::new(|_| {}))
     }
 
+    /// Take the exits the daemon kept while nobody was connected into the database, so what
+    /// the records say and what happened agree. Cheap when there is nothing there, which is
+    /// nearly always; done whenever a command is about to ask the daemon anything.
+    pub fn drain_spool(&self) -> yardsort_core::activity::ImportReport {
+        yardsort_core::activity::import_spool(&self.store, &self.data_dir)
+    }
+
     /// The same, but hearing the daemon's events — which is how `attach` learns that the session
     /// it is showing has exited.
     pub fn daemon_watching(
         &self,
         events: pty_host::EventSink,
     ) -> Option<Arc<pty_ipc::DaemonClient>> {
+        self.drain_spool();
         daemon::connect_existing(&self.data_dir, events).map(Arc::new)
     }
 
     /// Attach to this profile's daemon, starting one if there is none.
     pub fn daemon_or_start(&self) -> daemon::Connected {
+        self.drain_spool();
         daemon::connect(&self.data_dir, Arc::new(|_| {}))
     }
 

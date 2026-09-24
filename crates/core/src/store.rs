@@ -18,6 +18,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0006_removed_projects.sql"),
     include_str!("../migrations/0007_project_automation.sql"),
     include_str!("../migrations/0008_workspace_preparation.sql"),
+    include_str!("../migrations/0009_agent_runs_and_events.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -92,6 +93,88 @@ pub struct NewSession<'a> {
     pub pty_session_id: &'a str,
     /// The whole first message, when this conversation started with one.
     pub prompt: Option<&'a str>,
+}
+
+/// One process in a workspace. See `migrations/0009_agent_runs_and_events.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunRow {
+    pub id: String,
+    pub workspace_id: String,
+    pub session_id: Option<String>,
+    /// `harness`, `shell` or `program`.
+    pub kind: String,
+    pub harness_id: Option<String>,
+    pub harness_session_id: Option<String>,
+    /// `None` until the process was spawned, and for ever if it never was.
+    pub pty_session_id: Option<String>,
+    /// `app` or `cli`.
+    pub launched_by: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub exit_code: Option<i64>,
+    /// `exited`, `interrupted` or `spawn_failed`, once ended.
+    pub end_reason: Option<String>,
+    pub collection: String,
+}
+
+/// What is known about a run before its process exists.
+#[derive(Debug, Clone, Default)]
+pub struct NewRun<'a> {
+    pub id: &'a str,
+    pub workspace_id: &'a str,
+    pub session_id: Option<&'a str>,
+    pub kind: &'a str,
+    pub harness_id: Option<&'a str>,
+    pub harness_session_id: Option<&'a str>,
+    pub launched_by: &'a str,
+}
+
+/// One recorded fact. See `migrations/0009_agent_runs_and_events.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventRow {
+    pub seq: i64,
+    pub id: String,
+    pub schema_version: i64,
+    pub workspace_id: String,
+    pub session_id: Option<String>,
+    pub run_id: Option<String>,
+    pub occurred_at: i64,
+    pub received_at: i64,
+    pub kind: String,
+    pub producer: String,
+    pub method: String,
+    pub fidelity: String,
+    pub source_key: Option<String>,
+    pub privacy_class: String,
+    /// JSON, whose shape depends on `kind` and `schema_version`.
+    pub payload: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NewEvent<'a> {
+    pub id: &'a str,
+    pub schema_version: u16,
+    pub workspace_id: &'a str,
+    pub session_id: Option<&'a str>,
+    pub run_id: Option<&'a str>,
+    pub occurred_at: i64,
+    pub kind: &'a str,
+    pub producer: &'a str,
+    pub method: &'a str,
+    pub fidelity: &'a str,
+    /// What makes a second delivery of the same fact a no-op. `None` never deduplicates.
+    pub source_key: Option<&'a str>,
+    pub privacy_class: &'a str,
+    pub payload: &'a str,
+}
+
+/// A counter of something that went wrong, or was merely noticed, while recording activity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticRow {
+    pub name: String,
+    pub count: i64,
+    pub last_at: i64,
+    pub last_detail: Option<String>,
 }
 
 pub struct Store {
@@ -603,9 +686,361 @@ impl Store {
         Ok(())
     }
 
+    // --- activity: runs, events, diagnostics --------------------------------------------------
+
+    /// Record a run that is about to be spawned. Its PTY id arrives with [`Self::run_spawned`].
+    pub fn add_run(&self, new: &NewRun<'_>) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO agent_runs (id, workspace_id, session_id, kind, harness_id,
+                                     harness_session_id, launched_by, started_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                new.id,
+                new.workspace_id,
+                new.session_id,
+                new.kind,
+                new.harness_id,
+                new.harness_session_id,
+                new.launched_by,
+                now_ms()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn run(&self, id: &str) -> StoreResult<Option<RunRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!("SELECT {RUN_COLUMNS} FROM agent_runs WHERE id = ?"),
+                [id],
+                run_from_row,
+            )
+            .optional()?)
+    }
+
+    pub fn run_by_pty(&self, pty_session_id: &str) -> StoreResult<Option<RunRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!("SELECT {RUN_COLUMNS} FROM agent_runs WHERE pty_session_id = ?"),
+                [pty_session_id],
+                run_from_row,
+            )
+            .optional()?)
+    }
+
+    /// A workspace's runs, most recently started first.
+    pub fn runs(&self, workspace_id: &str) -> StoreResult<Vec<RunRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM agent_runs WHERE workspace_id = ?
+             ORDER BY started_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map([workspace_id], run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The host has spawned the run's process.
+    pub fn run_spawned(&self, id: &str, pty_session_id: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "UPDATE agent_runs SET pty_session_id = ? WHERE id = ?",
+            params![pty_session_id, id],
+        )?;
+        Ok(())
+    }
+
+    /// The run now has a session record: a harness conversation's row is written after its
+    /// process is up, so the link is made afterwards. Events already written for the run are
+    /// linked too.
+    pub fn link_run_session(&self, run_id: &str, session_id: &str) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE agent_runs SET session_id = ? WHERE id = ?",
+            params![session_id, run_id],
+        )?;
+        tx.execute(
+            "UPDATE agent_events SET session_id = ? WHERE run_id = ? AND session_id IS NULL",
+            params![session_id, run_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// End a run, once. Returns false when it had already ended (or does not exist).
+    pub fn end_run(&self, id: &str, exit_code: Option<i64>, end_reason: &str) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE agent_runs SET ended_at = ?, exit_code = ?, end_reason = ?
+             WHERE id = ? AND ended_at IS NULL",
+            params![now_ms(), exit_code, end_reason, id],
+        )? > 0)
+    }
+
+    /// End the run behind a PTY session, once. Returns the run it was, if it was still open.
+    pub fn end_run_by_pty(
+        &self,
+        pty_session_id: &str,
+        exit_code: Option<i64>,
+        end_reason: &str,
+    ) -> StoreResult<Option<RunRow>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let open = tx
+            .query_row(
+                &format!(
+                    "SELECT {RUN_COLUMNS} FROM agent_runs
+                     WHERE pty_session_id = ? AND ended_at IS NULL"
+                ),
+                [pty_session_id],
+                run_from_row,
+            )
+            .optional()?;
+        if let Some(run) = &open {
+            tx.execute(
+                "UPDATE agent_runs SET ended_at = ?, exit_code = ?, end_reason = ? WHERE id = ?",
+                params![now_ms(), exit_code, end_reason, run.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(open)
+    }
+
+    /// End the runs whose process is not among `alive` — the PTY sessions the daemon is
+    /// actually running — as interrupted, and return them so their exits can be recorded.
+    ///
+    /// A run that never got a PTY id is only counted once it is older than `pending_grace_ms`:
+    /// another client may be between writing the row and spawning right now.
+    pub fn end_interrupted_runs(
+        &self,
+        alive: &[String],
+        pending_grace_ms: i64,
+    ) -> StoreResult<Vec<RunRow>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let keep = alive
+            .iter()
+            .map(|id| format!("'{}'", id.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(",");
+        let now = now_ms();
+        let gone: Vec<RunRow> = {
+            let mut stmt = tx.prepare(&format!(
+                "SELECT {RUN_COLUMNS} FROM agent_runs
+                 WHERE ended_at IS NULL
+                   AND ((pty_session_id IS NULL AND started_at < ?)
+                        OR (pty_session_id IS NOT NULL AND pty_session_id NOT IN ({keep})))"
+            ))?;
+            let rows = stmt.query_map([now - pending_grace_ms], run_from_row)?;
+            rows.collect::<Result<_, _>>()?
+        };
+        for run in &gone {
+            tx.execute(
+                "UPDATE agent_runs SET ended_at = ?, exit_code = NULL, end_reason = 'interrupted'
+                 WHERE id = ?",
+                params![now, run.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(gone)
+    }
+
+    /// Record an event. Returns false when its source key had been seen before: the same fact
+    /// delivered twice is one row.
+    pub fn add_event(&self, new: &NewEvent<'_>) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "INSERT OR IGNORE INTO agent_events
+                 (id, schema_version, workspace_id, session_id, run_id, occurred_at, received_at,
+                  kind, producer, method, fidelity, source_key, privacy_class, payload)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                new.id,
+                i64::from(new.schema_version),
+                new.workspace_id,
+                new.session_id,
+                new.run_id,
+                new.occurred_at,
+                now_ms(),
+                new.kind,
+                new.producer,
+                new.method,
+                new.fidelity,
+                new.source_key,
+                new.privacy_class,
+                new.payload
+            ],
+        )? > 0)
+    }
+
+    /// A page of a workspace's events, newest first: those with a sequence number below
+    /// `before`, at most `limit` of them. `None` starts from the newest.
+    pub fn events(
+        &self,
+        workspace_id: &str,
+        before: Option<i64>,
+        limit: usize,
+    ) -> StoreResult<Vec<EventRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM agent_events
+             WHERE workspace_id = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(
+            params![
+                workspace_id,
+                before.unwrap_or(i64::MAX),
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            event_from_row,
+        )?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Every event, oldest first — one workspace's, or all of them. For export.
+    pub fn all_events(&self, workspace_id: Option<&str>) -> StoreResult<Vec<EventRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM agent_events
+             WHERE ?1 IS NULL OR workspace_id = ?1 ORDER BY seq"
+        ))?;
+        let rows = stmt.query_map([workspace_id], event_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// How many events and runs there are.
+    pub fn activity_counts(&self) -> StoreResult<(i64, i64)> {
+        let conn = self.conn();
+        let events = conn.query_row("SELECT COUNT(*) FROM agent_events", [], |r| r.get(0))?;
+        let runs = conn.query_row("SELECT COUNT(*) FROM agent_runs", [], |r| r.get(0))?;
+        Ok((events, runs))
+    }
+
+    /// Keep activity bounded: drop events older than `older_than_ms`, then the oldest beyond
+    /// `max_rows`. Runs left without events go too, unless they are still open. Returns how
+    /// many events went.
+    pub fn prune_activity(&self, max_rows: usize, older_than_ms: i64) -> StoreResult<usize> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let mut removed = tx.execute(
+            "DELETE FROM agent_events WHERE received_at < ?",
+            [now_ms() - older_than_ms],
+        )?;
+        removed += tx.execute(
+            "DELETE FROM agent_events WHERE seq <= (
+                 SELECT seq FROM agent_events ORDER BY seq DESC LIMIT 1 OFFSET ?)",
+            [i64::try_from(max_rows).unwrap_or(i64::MAX)],
+        )?;
+        tx.execute(
+            "DELETE FROM agent_runs WHERE ended_at IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM agent_events WHERE run_id = agent_runs.id)",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Forget recorded activity — one workspace's, or everything. Runs still open keep their
+    /// row so their exit can still be matched; everything else goes.
+    pub fn clear_activity(&self, workspace_id: Option<&str>) -> StoreResult<usize> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let removed = tx.execute(
+            "DELETE FROM agent_events WHERE ?1 IS NULL OR workspace_id = ?1",
+            [workspace_id],
+        )?;
+        tx.execute(
+            "DELETE FROM agent_runs WHERE ended_at IS NOT NULL
+               AND (?1 IS NULL OR workspace_id = ?1)",
+            [workspace_id],
+        )?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Count one more occurrence of `name`, keeping the latest detail.
+    pub fn bump_diagnostic(&self, name: &str, detail: Option<&str>) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO agent_event_diagnostics (name, count, last_at, last_detail)
+             VALUES (?1, 1, ?2, ?3)
+             ON CONFLICT(name) DO UPDATE SET count = count + 1, last_at = excluded.last_at,
+                 last_detail = COALESCE(excluded.last_detail, last_detail)",
+            params![name, now_ms(), detail],
+        )?;
+        Ok(())
+    }
+
+    pub fn diagnostics(&self) -> StoreResult<Vec<DiagnosticRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT name, count, last_at, last_detail FROM agent_event_diagnostics ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DiagnosticRow {
+                name: row.get(0)?,
+                count: row.get(1)?,
+                last_at: row.get(2)?,
+                last_detail: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Make every activity write fail from here on, for tests of what happens then. The
+    /// diagnostics table stays, so the failure can still be counted.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn break_activity_tables(&self) {
+        self.conn()
+            .execute_batch("DROP TABLE agent_events; DROP TABLE agent_runs;")
+            .unwrap();
+    }
+
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+const RUN_COLUMNS: &str = "id, workspace_id, session_id, kind, harness_id, harness_session_id, \
+     pty_session_id, launched_by, started_at, ended_at, exit_code, end_reason, collection";
+
+fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRow> {
+    Ok(RunRow {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        session_id: row.get(2)?,
+        kind: row.get(3)?,
+        harness_id: row.get(4)?,
+        harness_session_id: row.get(5)?,
+        pty_session_id: row.get(6)?,
+        launched_by: row.get(7)?,
+        started_at: row.get(8)?,
+        ended_at: row.get(9)?,
+        exit_code: row.get(10)?,
+        end_reason: row.get(11)?,
+        collection: row.get(12)?,
+    })
+}
+
+const EVENT_COLUMNS: &str = "seq, id, schema_version, workspace_id, session_id, run_id, \
+     occurred_at, received_at, kind, producer, method, fidelity, source_key, privacy_class, payload";
+
+fn event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
+    Ok(EventRow {
+        seq: row.get(0)?,
+        id: row.get(1)?,
+        schema_version: row.get(2)?,
+        workspace_id: row.get(3)?,
+        session_id: row.get(4)?,
+        run_id: row.get(5)?,
+        occurred_at: row.get(6)?,
+        received_at: row.get(7)?,
+        kind: row.get(8)?,
+        producer: row.get(9)?,
+        method: row.get(10)?,
+        fidelity: row.get(11)?,
+        source_key: row.get(12)?,
+        privacy_class: row.get(13)?,
+        payload: row.get(14)?,
+    })
 }
 
 fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
@@ -658,7 +1093,7 @@ fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))

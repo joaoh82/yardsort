@@ -3,6 +3,20 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Activity: a local record of what ran.** Yardsort now notes when each agent, shell or run
+  command starts in a workspace — fresh, resumed or forked, from the app or from `ys` — and how
+  it ended, without reading anything the agent prints. An agent that finishes while the window
+  is closed is no longer listed as _interrupted_ the next time Yardsort starts: the background
+  process keeps its exit and the record gets the real exit code. **Show the activity timeline**
+  in Settings → General (experimental) adds an **Activity** button to each workspace's footer;
+  **Record when agents start and exit** switches the recording off. `ys activity list` and
+  `ys activity export` (NDJSON) read it from a terminal, and `ys doctor` reports how much there
+  is. Programs started in a workspace are given `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` and
+  `YARDSORT_SESSION_RECORD_ID`. Nothing leaves the machine. See [Activity](docs/guide/activity.md)
+  and the [design note](docs/design/10-agent-events-stage-1.md).
+
 ## 0.10.0
 
 - **OMP, Cursor and Pi are built-in harnesses.** Pick them in the composer and configure them

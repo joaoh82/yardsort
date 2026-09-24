@@ -30,6 +30,7 @@ impl Daemon {
         let endpoint = Endpoint::for_data_dir(dir.path());
         let child = std::process::Command::new(env!("CARGO_BIN_EXE_pty-daemon"))
             .arg(endpoint.as_os_str())
+            .arg(dir.path().join("spool"))
             .env("PTY_DAEMON_IDLE_GRACE_MS", ms.to_string())
             .spawn()
             .expect("could not start the daemon");
@@ -73,6 +74,10 @@ impl Daemon {
 
     fn is_running(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
+    }
+
+    fn spool(&self) -> pty_ipc::spool::Spool {
+        pty_ipc::spool::Spool::new(self._dir.path().join("spool"))
     }
 }
 
@@ -364,4 +369,69 @@ fn a_socket_in_a_directory_we_do_not_own_still_works_and_is_private() {
     let (client, _events) = daemon.connect();
     assert!(client.speaks_our_protocol());
     assert!(daemon.is_running());
+}
+
+/// The reason the spool exists: an agent finishes while nothing is connected to hear it. The
+/// exit must be waiting on disk for the next client, with the session's labels, and a client
+/// that *was* connected finds the same exit there too — a duplicate it can recognise.
+#[test]
+fn an_exit_nobody_heard_is_waiting_in_the_spool_with_its_labels() {
+    let daemon = Daemon::start();
+    let (client, _events) = daemon.connect();
+    let mut plan = shell(if cfg!(windows) {
+        "ping -n 2 127.0.0.1 >NUL && exit 7"
+    } else {
+        "sleep 1 && exit 7"
+    });
+    plan.labels.insert("workspace".into(), "ws-1".into());
+    plan.labels.insert("run".into(), "run-1".into());
+    let session = client.spawn(plan).unwrap();
+    // Gone before the process is: exactly the closed-window case.
+    client.disconnect();
+    drop(client);
+
+    let spool = daemon.spool();
+    let deadline = Instant::now() + TIMEOUT;
+    let entry = loop {
+        let waiting = spool.entries().unwrap();
+        if let Some(path) = waiting.first() {
+            break pty_ipc::spool::Spool::read(path).unwrap();
+        }
+        assert!(Instant::now() < deadline, "the exit was never spooled");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(entry.session, session.id);
+    assert_eq!(entry.exit.code, 7);
+    assert_eq!(entry.labels["workspace"], "ws-1");
+    assert_eq!(entry.labels["run"], "run-1");
+    assert_eq!(entry.version, pty_ipc::spool::SPOOL_VERSION);
+    assert!(entry.at_ms > 0);
+
+    // A second exit, heard live this time, is spooled all the same: the client decides what
+    // is a duplicate, and a daemon cannot know whether the client that heard it kept it.
+    let (client, events) = daemon.connect();
+    let heard = client.spawn(shell("exit 3")).unwrap();
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        match events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(HostEvent::Exited { id, exit }) if id == heard.id => {
+                assert_eq!(exit.code, 3);
+                break;
+            }
+            Ok(_) => {}
+            Err(_) => panic!("no live exit"),
+        }
+    }
+    let deadline = Instant::now() + TIMEOUT;
+    while spool.entries().unwrap().len() < 2 {
+        assert!(Instant::now() < deadline, "the live exit was not spooled");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let codes: Vec<u32> = spool
+        .entries()
+        .unwrap()
+        .iter()
+        .map(|path| pty_ipc::spool::Spool::read(path).unwrap().exit.code)
+        .collect();
+    assert_eq!(codes, [7, 3], "oldest first");
 }

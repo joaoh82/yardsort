@@ -372,6 +372,54 @@ _Notes:_
   has been exercised by a human on macOS or Windows; a test can check neither. Section 6 of
   [08-manual-checklist](08-manual-checklist.md) is the pass, and it is owed alongside M7's.
 
+## M11 — Agent events, stage 0–1 ✅
+
+The first slice of [09-agent-events-and-memory](09-agent-events-and-memory.md), built after the
+fit pass recorded in [10-agent-events-stage-1](10-agent-events-stage-1.md).
+
+- Migration 0009: `agent_runs`, `agent_events`, `agent_event_diagnostics`.
+- `crates/core/src/activity.rs`: the event contract (schema 1), the `Recorder` that never lets a
+  failure out, exit recording with idempotent source keys, spool import, reconciliation, retention.
+- `Launcher` writes a run before every workspace spawn, labels the PTY `run`, and gives the child
+  `YARDSORT_RUN_ID` / `YARDSORT_WORKSPACE_ID` / `YARDSORT_SESSION_RECORD_ID`. Resume and fork go
+  through the same path (`start_recorded`).
+- The daemon spools every `Exited` to `<data-dir>/activity/spool` when given the directory;
+  protocol unchanged. The app and `ys` drain it on connect, on every live exit, and before
+  reconciling "interrupted" rows — so a clean exit while the window was closed keeps its code.
+- Settings → General: `record_lifecycle` (on) and `show_timeline` (off, experimental); an
+  **Activity** panel in the workspace footer; `ys activity list|export`; `ys doctor` rows.
+- Stage 0: seven harnesses' versions and native surfaces recorded from their own `--help`; no
+  hook, OTLP or session-file adapter, and no fixture, exists yet.
+
+_Exit:_ app/CLI launch, resume, fork, two workspaces, immediate exit, closed-window exit,
+duplicate delivery and a broken table all covered by tests that fail without the change; `just
+check` and `just bindings-check` green; no PTY byte or input path touched.
+
+_Result:_ 2026-09-24, Linux. Rust: 184 core tests (11 new in `activity.rs`, 7 in `launch.rs`
+against a real `PtyHost` and a plan-catching host), 3 new spool unit tests, a real-daemon test in
+`pty-ipc/tests/daemon.rs` (exit spooled after the only client left, live exit spooled too), 2
+`ys` end-to-end tests (`activity list/export`, spool drained before `session list`). Frontend: 5
+new Testing Library tests (timeline paging and clearing, settings switches, footer toggle). By
+hand, against a throwaway profile with a shell standing in for an agent: `ys workspace new`
+started the daemon and the run, the process exited with 5 while nothing was connected, the daemon
+wrote the spool entry and then idled out ("nothing left to look after"), and the next `ys session
+list` drained it — record `ended`, `ys activity list` showing `exit 5, via spool`, `ys doctor`
+showing 0 waiting. macOS and Windows: CI runs every Rust test including the daemon spool test on
+both; the hands-on pass is owed, rows in [08 §11](08-manual-checklist.md#11--activity).
+
+_Notes:_
+
+- The daemon stays storage-free. Giving it SQLite would have made it a second writer on a file
+  the app and `ys` already share; a directory of tiny files with atomic renames needs no lock
+  and no protocol bump, and a client that reads a file the daemon is still writing cannot happen
+  because the daemon renames it into place.
+- `sessions` rows benefit too: the spool import calls `end_session_by_pty`, so Resume no longer
+  labels a clean unattended exit _interrupted_.
+- Found by the launcher tests: `Launcher` had no idea who was launching. It now carries
+  `launched_by`, which the timeline shows as "from ys".
+- Not done, on purpose: no Claude/Codex/OpenCode hook is configured, no OTLP receiver exists, no
+  Jev call is made, no memory. Stage 2 starts with recorded Claude Code hook fixtures.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

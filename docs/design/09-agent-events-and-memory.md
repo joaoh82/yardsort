@@ -1,12 +1,14 @@
 # Agent events and shared context for Yardsort
 
-Status: **proposal and coding-harness handoff** · 23 September 2026 · Target: public `docs/design` · No implementation implied
+Status: **proposal; stages 0–1 implemented** · 23 September 2026, fit pass 24 September 2026 · Target: public `docs/design`
+
+> **Where this stands.** The current-state pass this document asks for was done on 2026-09-24 and is recorded in [10-agent-events-stage-1](10-agent-events-stage-1.md), together with the decisions and what shipped for stages 0 and 1 (roadmap [M11](05-roadmap.md#m11--agent-events-stage-01-)). Premises below that had drifted by then — the migration numbering, the number of built-in harnesses, `project_id` on events, the child environment — are corrected in that document rather than rewritten here; the rest of this proposal, from stage 2 on, still stands as written.
 
 ## Summary
 
 Add an optional, local structured activity layer beside Yardsort's existing PTY. It records what Yardsort itself knows about a workspace and harness process, and accepts richer events from harness-native telemetry when the user enables an adapter. The terminal remains the direct, unmodified harness interface. The first release offers a trustworthy activity timeline. Later releases can add reviewed project memory, cross-harness handoffs, evidence-linked review, and outcome-informed harness suggestions. Cloud sync is outside the initial scope.
 
-This proposal borrows the *ideas* of multi-source collection, normalized events, provenance, and reviewed memory from [Agent Beacon](https://github.com/Asymptote-Labs/agent-beacon). It does not require Beacon, copy its schema, or require an OpenTelemetry Collector. Yardsort adds information Beacon normally cannot own: the workspace, worktree, launch, resume/fork relationship, diff, and user decision. See [Prior art and licensing](#prior-art-and-licensing).
+This proposal borrows the _ideas_ of multi-source collection, normalized events, provenance, and reviewed memory from [Agent Beacon](https://github.com/Asymptote-Labs/agent-beacon). It does not require Beacon, copy its schema, or require an OpenTelemetry Collector. Yardsort adds information Beacon normally cannot own: the workspace, worktree, launch, resume/fork relationship, diff, and user decision. See [Prior art and licensing](#prior-art-and-licensing).
 
 ### Primary user story: Claude to Codex in one workspace
 
@@ -19,15 +21,15 @@ This proposal borrows the *ideas* of multi-source collection, normalized events,
 
 ## Current state and terminology
 
-At Yardsort commit [`cb55ee1`](https://github.com/joaoh82/yardsort/tree/cb55ee1b8582e8cc6c223731bdda02e027803cf2), the v0.9.2 release (this is a snapshot, **not** a substitute for checking the branch when implementation begins):
+At Yardsort commit [`cb55ee1`](https://github.com/joaoh82/yardsort/tree/cb55ee1b8582e8cc6c223731bdda02e027803cf2), the v0.9.2 release (this is a snapshot, **not** a substitute for checking the branch when implementation begins — see [10 §1](10-agent-events-stage-1.md#1--current-state-at-the-start-of-the-work) for the state at `b502b1f`, where four more migrations, three more harnesses and the project run command had arrived):
 
-| Existing object | Source of truth | Relevant fact |
-| --- | --- | --- |
-| Project, workspace, session | `crates/core/src/store.rs`, SQLite migrations 0001–0004 | `sessions` has workspace, harness, model, effort, optional initial prompt, `forked_from`, and live PTY ID. There is no first-class task/attempt table. |
-| Harness launch | `crates/core/src/launch.rs`, `harness.rs` | App and `ys` CLI share `Launcher`; launch labels include workspace and session record IDs. Harness definitions are user-configurable command/argument templates. |
-| Terminal process | `crates/pty-host` and `crates/pty-ipc` | The daemon owns PTYs over a local socket; it need not have a database. Its host events report Busy, Quiet and Exited. The app can reconnect. |
-| Persistent data | `crates/core/src/store.rs` | SQLite WAL supports app and CLI access. The daemon can outlive the window. |
-| Review | `src-tauri/src/assist` | Optional Jev checks assess diffs and suggest a harness from user-written strengths. |
+| Existing object             | Source of truth                                         | Relevant fact                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project, workspace, session | `crates/core/src/store.rs`, SQLite migrations 0001–0004 | `sessions` has workspace, harness, model, effort, optional initial prompt, `forked_from`, and live PTY ID. There is no first-class task/attempt table.           |
+| Harness launch              | `crates/core/src/launch.rs`, `harness.rs`               | App and `ys` CLI share `Launcher`; launch labels include workspace and session record IDs. Harness definitions are user-configurable command/argument templates. |
+| Terminal process            | `crates/pty-host` and `crates/pty-ipc`                  | The daemon owns PTYs over a local socket; it need not have a database. Its host events report Busy, Quiet and Exited. The app can reconnect.                     |
+| Persistent data             | `crates/core/src/store.rs`                              | SQLite WAL supports app and CLI access. The daemon can outlive the window.                                                                                       |
+| Review                      | `src-tauri/src/assist`                                  | Optional Jev checks assess diffs and suggest a harness from user-written strengths.                                                                              |
 
 Changes since the initial `c55eba6` review are mostly frontend/release work: harness icons, update placement and documentation. The v0.9.2 changelog also records workspace-row waiting/exit indicators from the earlier commit. No new event-store migration or native telemetry layer appeared in this range. The latest [`docs/design/06-open-questions.md`](https://github.com/joaoh82/yardsort/blob/main/docs/design/06-open-questions.md) settles two relevant Assist decisions: current threshold defaults remain, and a future, narrow Jev evaluation of the visible screen on harness Quiet is intended. That screen proposal has unresolved privacy/opt-in details. `AGENTS.md` still says not to parse agent output. This feature must neither implement that screen exception accidentally nor assume it is already shipped; revisit the repository's current decision when coding starts.
 
@@ -106,7 +108,7 @@ Default payload contains metadata (tool name, command status, relative path, dur
 
 ## SQLite design
 
-Add migrations after 0004; never edit shipped migrations. Initial tables (exact names may follow existing style):
+Add migrations after the last shipped one (0004 at the snapshot; **0009** is what shipped, after 0005–0008 arrived in between); never edit shipped migrations. Initial tables (exact names may follow existing style; the ones that shipped are in [03-architecture](03-architecture.md#activity-runs-and-lifecycle-events)):
 
 ```sql
 CREATE TABLE agent_runs (
@@ -153,12 +155,13 @@ This is an **illustrative migration**: before coding, decide foreign-key behavio
 
 Adapter capability is separate from `HarnessDef`'s argv templates. Built-in adapters can be selected by a stable built-in ID and compatible runtime version; arbitrary custom harnesses retain lifecycle-only support unless they explicitly supply an adapter. Disable an incompatible adapter without breaking launch. Preserve and compose user-managed settings; do not overwrite global harness configuration silently. Surface conflicts with Beacon or another OTLP exporter and provide a reversible uninstall/restore path.
 
-| Harness | First useful capture path | Caveats and fallback |
-| --- | --- | --- |
-| Claude Code | Opt-in native hooks for prompt/tool/permission/session lifecycle; optionally OTLP for usage and complementary signals. | Hook schemas/version and ordering vary. Chain existing hooks, bound runtime, and run fixture tests. Lifecycle-only if unavailable. |
-| Codex CLI | Opt-in OTLP semantic logs and/or incremental read of its own session JSONL after version-specific fixtures. | Current Beacon code uses Codex session-file collection as well as OTLP; OTLP alone does **not** guarantee per-file edits or every tool boundary. A Beacon Codex hook seen in source is `SessionStart` context, not full tool capture. Start with coverage actually observed in fixtures. |
-| OpenCode | Opt-in managed plugin emitting tool lifecycle, usage and session metadata. | Install only into a scoped/reversible config. Handle plugin version drift; lifecycle-only if unsupported. |
-| Grok and custom CLI | Yardsort process/workspace lifecycle initially; evaluate native hooks only if stable. | No fabricated generic parser. |
+| Harness                                 | First useful capture path                                                                                              | Caveats and fallback                                                                                                                                                                                                                                                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                             | Opt-in native hooks for prompt/tool/permission/session lifecycle; optionally OTLP for usage and complementary signals. | Hook schemas/version and ordering vary. Chain existing hooks, bound runtime, and run fixture tests. Lifecycle-only if unavailable.                                                                                                                                                       |
+| Codex CLI                               | Opt-in OTLP semantic logs and/or incremental read of its own session JSONL after version-specific fixtures.            | Current Beacon code uses Codex session-file collection as well as OTLP; OTLP alone does **not** guarantee per-file edits or every tool boundary. A Beacon Codex hook seen in source is `SessionStart` context, not full tool capture. Start with coverage actually observed in fixtures. |
+| OpenCode                                | Opt-in managed plugin emitting tool lifecycle, usage and session metadata.                                             | Install only into a scoped/reversible config. Handle plugin version drift; lifecycle-only if unsupported.                                                                                                                                                                                |
+| Grok and custom CLI                     | Yardsort process/workspace lifecycle initially; evaluate native hooks only if stable.                                  | No fabricated generic parser.                                                                                                                                                                                                                                                            |
+| OMP, Cursor, Pi (built in since 0.10.0) | Lifecycle only; their `--help` shows plugin and hook-file mechanisms whose event coverage is unknown here.             | See the versioned matrix in [10 §6](10-agent-events-stage-1.md#6--stage-0-baseline-and-the-stage-2-coverage-matrix).                                                                                                                                                                     |
 
 For OTLP, first test a minimal local receiver or a sidecar against the exact supported harness versions. Accept only logs/signals required by the adapter. Binding must be loopback/local, port conflicts handled, and existing user exporters preserved. A full OTel Collector distribution is a deployment cost to justify with measured need, not a prerequisite. For session-file collection, use cursors, partial-line handling, rotation/truncation detection, permissions and bounded reads. Do not claim that “all harness actions” are available; expose a coverage indicator per run.
 
@@ -171,16 +174,16 @@ For OTLP, first test a minimal local receiver or a sidecar against the exact sup
 
 ## Product stages and exit gates
 
-| Stage | Deliverable | Exit gate |
-| --- | --- | --- |
-| 0. Baseline and fixtures | Document supported versions and real hook/OTLP/session-file samples; measure overhead, privacy and conflicts; agree on terminology. | Public coverage matrix identifies exactly which events each adapter supplies. |
-| 1. Yardsort lifecycle | `agent_runs`, event schema/store, launch/resume/fork/exit events, timeline behind an experimental setting, diagnostics and retention. Daemon spool for window-closed exits. | App/CLI/restart/resume/fork tests pass on macOS, Linux and Windows; no PTY behavior regression. This stage needs no native harness config changes. |
-| 2. Native capture | Claude first, then Codex, then OpenCode; opt-in reversible setup, dedupe, correlation and fixture suites. | Multiple live harnesses produce correctly linked events; missing capabilities are honestly marked; telemetry failure does not affect a run. |
-| 3. Review and provenance | Join event ranges to workspace diffs and Jev assessments; show evidence and uncertainty in a review panel. | Review can distinguish reported writes from Git-observed changes; no claim of line-level causality without exact evidence. |
-| 4. Handoffs | User-invoked context packet: task goal or initial prompt, workspace status, chosen event excerpts, tests/errors, diff summary, citations to event IDs. | In one workspace, start Claude, then launch Codex with a previewed/edited snapshot of available Claude and worktree context. Missing conversation content is labeled. Codex receives the packet through normal prompt transport; no automatic agent switching. |
-| 5. Reviewed memory | Candidate extraction, user approval/edit/reject, scoped project knowledge, local search and read-only MCP. | Unapproved candidates never become agent instructions; revocation/update works; injection is opt-in. |
-| 6. Outcome intelligence | First-class task/attempt relations and measured outcomes, then optional suggestions using user strengths plus local history. | Success labels distinguish explicit user choice/merge/test evidence from weak heuristics; small sample sizes do not imply a winner. |
-| 7. Optional sync | Only if user demand warrants: encrypted transport, identity, retention and conflict model. | Explicit design review; local operation remains complete offline. |
+| Stage                    | Deliverable                                                                                                                                                                 | Exit gate                                                                                                                                                                                                                                                      |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0. Baseline and fixtures | Document supported versions and real hook/OTLP/session-file samples; measure overhead, privacy and conflicts; agree on terminology.                                         | Public coverage matrix identifies exactly which events each adapter supplies.                                                                                                                                                                                  |
+| 1. Yardsort lifecycle    | `agent_runs`, event schema/store, launch/resume/fork/exit events, timeline behind an experimental setting, diagnostics and retention. Daemon spool for window-closed exits. | App/CLI/restart/resume/fork tests pass on macOS, Linux and Windows; no PTY behavior regression. This stage needs no native harness config changes.                                                                                                             |
+| 2. Native capture        | Claude first, then Codex, then OpenCode; opt-in reversible setup, dedupe, correlation and fixture suites.                                                                   | Multiple live harnesses produce correctly linked events; missing capabilities are honestly marked; telemetry failure does not affect a run.                                                                                                                    |
+| 3. Review and provenance | Join event ranges to workspace diffs and Jev assessments; show evidence and uncertainty in a review panel.                                                                  | Review can distinguish reported writes from Git-observed changes; no claim of line-level causality without exact evidence.                                                                                                                                     |
+| 4. Handoffs              | User-invoked context packet: task goal or initial prompt, workspace status, chosen event excerpts, tests/errors, diff summary, citations to event IDs.                      | In one workspace, start Claude, then launch Codex with a previewed/edited snapshot of available Claude and worktree context. Missing conversation content is labeled. Codex receives the packet through normal prompt transport; no automatic agent switching. |
+| 5. Reviewed memory       | Candidate extraction, user approval/edit/reject, scoped project knowledge, local search and read-only MCP.                                                                  | Unapproved candidates never become agent instructions; revocation/update works; injection is opt-in.                                                                                                                                                           |
+| 6. Outcome intelligence  | First-class task/attempt relations and measured outcomes, then optional suggestions using user strengths plus local history.                                                | Success labels distinguish explicit user choice/merge/test evidence from weak heuristics; small sample sizes do not imply a winner.                                                                                                                            |
+| 7. Optional sync         | Only if user demand warrants: encrypted transport, identity, retention and conflict model.                                                                                  | Explicit design review; local operation remains complete offline.                                                                                                                                                                                              |
 
 Stages are sequencing, not promised dates. Stages 3–6 can be reprioritized after observing real adapter coverage. Multi-agent scheduling and auto-merge deserve their own proposal: telemetry alone cannot make them safe.
 
@@ -188,12 +191,12 @@ Stages are sequencing, not promised dates. Stages 3–6 can be reprioritized aft
 
 Jev is an **optional judgment component downstream of the event store**, not the collector, event bus, memory database or text generator. Preserve Yardsort's existing Assist behavior and key handling. Add typed judgments incrementally:
 
-| Stage | Proposed Jev input | Typed output and use |
-| --- | --- | --- |
-| 3. Review | Original user request (when available), final diff, test/check changes, selected event-derived facts. | Off-task change, weakened check, suspicious omission or review priority, each with evidence and uncertainty. Extend existing diff review rather than replace it. |
-| 4. Handoff | Goal, recent outcomes/errors, current diff and candidate trace excerpts. | Rank which facts are useful in a handoff. A separate deterministic formatter or optional generation step writes the packet; the user reviews it. |
-| 5. Memory | A proposed claim, its source excerpts and scope. | Relevance, repeatability and possible contradiction as typed signals for the review queue. Jev does not author a memory or approve it. |
-| 6. Outcomes/routing | Explicit user outcome labels, tests, rework, task type and past attempts. | Assess whether an attempt likely met the request and help rank harness/effort suggestions. Keep the user's written strengths, show sample counts, and never treat a Jev judgment as ground truth. |
+| Stage               | Proposed Jev input                                                                                    | Typed output and use                                                                                                                                                                              |
+| ------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3. Review           | Original user request (when available), final diff, test/check changes, selected event-derived facts. | Off-task change, weakened check, suspicious omission or review priority, each with evidence and uncertainty. Extend existing diff review rather than replace it.                                  |
+| 4. Handoff          | Goal, recent outcomes/errors, current diff and candidate trace excerpts.                              | Rank which facts are useful in a handoff. A separate deterministic formatter or optional generation step writes the packet; the user reviews it.                                                  |
+| 5. Memory           | A proposed claim, its source excerpts and scope.                                                      | Relevance, repeatability and possible contradiction as typed signals for the review queue. Jev does not author a memory or approve it.                                                            |
+| 6. Outcomes/routing | Explicit user outcome labels, tests, rework, task type and past attempts.                             | Assess whether an attempt likely met the request and help rank harness/effort suggestions. Keep the user's written strengths, show sample counts, and never treat a Jev judgment as ground truth. |
 
 The first two stages need no Jev calls. Existing Assist remains opt-in and uses the user's own key; event recording and timeline must work without it. No automatic “stuck” detection, harness switch or memory promotion is implied by a model judgment.
 
@@ -243,15 +246,15 @@ After the fit pass, implement a vertical slice that records Yardsort-owned lifec
 
 ### Open design decisions to settle in the fit report
 
-| Question | Preferred starting point | Evidence that could change it |
-| --- | --- | --- |
-| Event write owner | Core store for app/CLI; daemon only spools lifecycle when clients are gone | Existing daemon/store ownership changes or a simpler proven single-writer pattern |
-| Store | SQLite canonical; optional NDJSON export | Proven performance/backup requirement that SQLite cannot meet |
-| Native capture | None in Stage 1; opt-in adapters with fixtures in Stage 2 | A native integration already exists on the latest branch |
-| `Task` and `Attempt` | Add only when user intent/outcomes need them in Stage 6 | A current first-class task model with stable IDs already exists |
-| Memory | Human-approved project scope, later stage | Validated existing memory model that meets provenance and revocation needs |
-| Jev | Optional downstream judgments, with current Assist behavior intact | Current implementation has already expanded its contract |
-| Quiet screen | Separate Assist work; never a substitute for hooks/OTLP | A reviewed product decision explicitly joins it to this feature |
+| Question             | Preferred starting point                                                   | Evidence that could change it                                                     |
+| -------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Event write owner    | Core store for app/CLI; daemon only spools lifecycle when clients are gone | Existing daemon/store ownership changes or a simpler proven single-writer pattern |
+| Store                | SQLite canonical; optional NDJSON export                                   | Proven performance/backup requirement that SQLite cannot meet                     |
+| Native capture       | None in Stage 1; opt-in adapters with fixtures in Stage 2                  | A native integration already exists on the latest branch                          |
+| `Task` and `Attempt` | Add only when user intent/outcomes need them in Stage 6                    | A current first-class task model with stable IDs already exists                   |
+| Memory               | Human-approved project scope, later stage                                  | Validated existing memory model that meets provenance and revocation needs        |
+| Jev                  | Optional downstream judgments, with current Assist behavior intact         | Current implementation has already expanded its contract                          |
+| Quiet screen         | Separate Assist work; never a substitute for hooks/OTLP                    | A reviewed product decision explicitly joins it to this feature                   |
 
 ### Ready-to-paste kickoff prompt
 

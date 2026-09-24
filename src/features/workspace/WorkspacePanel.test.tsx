@@ -1,10 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { harness, project, worktree } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   ptySpawn: vi.fn(),
+  activityTimeline: vi.fn(),
   projectAutomationGet: vi.fn(),
   workspaceRun: vi.fn(),
   ptyList: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("@/features/terminal/TerminalView", () => ({
   TerminalView: () => <div data-testid="terminal" />,
 }));
 
+import { useAppStore } from "@/stores/app";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
@@ -56,6 +58,28 @@ beforeEach(() => {
   useSessionsStore.setState({ byWorkspace: {}, error: null });
   useTerminalStore.setState({ tabs: [], active: {}, error: null });
   useHarnessStore.setState({ harnesses: [harness("claude")], loaded: true });
+  useAppStore.setState({ showTimeline: false });
+  core.activityTimeline.mockResolvedValue({ events: [], hasMore: false });
+});
+
+describe("the activity timeline", () => {
+  it("is offered only when the setting says so, and opens from the footer", async () => {
+    const user = userEvent.setup();
+    useProjectsStore.setState({
+      projects: [{ ...alpha, workspaces: [local, feature] }],
+      selectedWorkspaceId: feature.id,
+    });
+    const { rerender } = render(<WorkspacePanel />);
+    expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
+
+    useAppStore.setState({ showTimeline: true });
+    rerender(<WorkspacePanel />);
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+    const panel = await screen.findByRole("region", { name: "Activity" });
+    expect(core.activityTimeline).toHaveBeenCalledWith(feature.id, null, 50);
+    await user.click(within(panel).getByRole("button", { name: "Close activity" }));
+    expect(screen.queryByRole("region", { name: "Activity" })).toBeNull();
+  });
 });
 
 /** Put `workspace` on screen with nothing running in it. */

@@ -109,11 +109,14 @@ Both apply to workspaces created from now on; existing ones stay where they are.
 
 ## General
 
-| Setting                              | Meaning                                                                                                                                                                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Editor command**                   | What **Edit ↗** runs — `code`, `cursor`, `zed`, … It is given the workspace folder and then the file. Empty tries `cursor`, `code`, `zed`, `windsurf`, `subl` and `idea` in turn.                                                    |
-| **Check for updates automatically**  | Looks for a newer release shortly after starting, once a day, and when you return to the window if that is overdue. On by default. **Check now** looks immediately and shows the version you are running. See [Updates](updates.md). |
-| **Notify me when an agent finishes** | Desktop notifications when a busy agent goes quiet while you are in another window. On by default.                                                                                                                                   |
+| Setting                               | Meaning                                                                                                                                                                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Editor command**                    | What **Edit ↗** runs — `code`, `cursor`, `zed`, … It is given the workspace folder and then the file. Empty tries `cursor`, `code`, `zed`, `windsurf`, `subl` and `idea` in turn.                                                    |
+| **Check for updates automatically**   | Looks for a newer release shortly after starting, once a day, and when you return to the window if that is overdue. On by default. **Check now** looks immediately and shows the version you are running. See [Updates](updates.md). |
+| **Notify me when an agent finishes**  | Desktop notifications when a busy agent goes quiet while you are in another window. On by default.                                                                                                                                   |
+| **Record when agents start and exit** | Keep a local record of each process Yardsort starts in a workspace and how it ended — see [Activity](activity.md). On by default; nothing an agent prints is read, and nothing leaves the machine. Off, and nothing new is written.  |
+| **Show the activity timeline**        | Experimental: an **Activity** button in each workspace's footer opens the list of what was recorded there. Off by default.                                                                                                           |
+| **Clear all recorded activity**       | Forgets every recorded event and run at once. Beneath it: how much is recorded, where the exit spool is, and counters for anything that went wrong while recording.                                                                  |
 
 ## Environment variables
 
@@ -124,3 +127,7 @@ For testing and unusual setups:
 | `YARDSORT_DATA_DIR`      | Keep the database **and** `settings.toml` in this folder — a throwaway profile. Each one gets its own [background process](terminals-and-sessions.md#agents-keep-working-when-you-close-the-window), so its agents are separate too. |
 | `YARDSORT_WORKTREE_ROOT` | Override the worktree folder.                                                                                                                                                                                                        |
 | `YARDSORT_NO_DAEMON`     | Run terminals inside Yardsort, as it did before v0.4: they stop when it closes.                                                                                                                                                      |
+
+Programs started in a workspace are themselves given `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID`
+and, for an agent, `YARDSORT_SESSION_RECORD_ID` — ids a script or hook can use to say which run
+it belongs to. See [Activity](activity.md#what-the-program-is-told).

@@ -312,6 +312,8 @@ mod run_tests {
             host: &host,
             env: &env,
             harnesses: &[],
+            activity: &Default::default(),
+            launched_by: crate::activity::LaunchedBy::App,
         };
         assert!(launcher
             .project_run(&workspace.id, TermSize { cols: 80, rows: 24 })

@@ -235,6 +235,8 @@ fn new(
             host: connected.host.as_ref(),
             env: ys.env(),
             harnesses: &ys.settings.harnesses,
+            activity: &ys.settings.activity,
+            launched_by: yardsort_core::activity::LaunchedBy::Cli,
         }
         .in_workspace(
             &workspace.id,

@@ -1,5 +1,6 @@
 //! One module per noun.
 
+pub mod activity;
 pub mod attach;
 pub mod doctor;
 pub mod logs;

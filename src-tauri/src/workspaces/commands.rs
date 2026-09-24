@@ -63,6 +63,17 @@ pub struct SettingsInfo {
     pub file_path: String,
     /// Why the settings file was ignored, if it was (it is kept, never overwritten).
     pub problem: Option<String>,
+    pub activity: ActivitySettingsDto,
+}
+
+/// The activity switches, as Settings → General shows them. See `crate::activity`.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySettingsDto {
+    /// Record when a harness, shell or run command starts and exits in a workspace.
+    pub record_lifecycle: bool,
+    /// Show the experimental activity timeline in a workspace.
+    pub show_timeline: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -220,10 +231,14 @@ pub async fn harness_test(
     .await
 }
 
-fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
+pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
     let settings = state.settings.get();
     let workspaces = settings.workspaces;
     Ok(SettingsInfo {
+        activity: ActivitySettingsDto {
+            record_lifecycle: settings.activity.record_lifecycle,
+            show_timeline: settings.activity.show_timeline,
+        },
         notify_when_quiet: settings.general.notify_when_quiet,
         check_for_updates: settings.general.check_for_updates,
         editor_command: settings.general.editor_command,

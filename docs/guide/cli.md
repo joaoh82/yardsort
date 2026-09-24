@@ -183,10 +183,34 @@ is open, or while other agents are still working, and gone a short while after t
 stops. `ys logs` says so rather than reporting an empty screen. Nothing is written to disk: a
 screen can hold anything the agent printed, and Yardsort does not keep a copy of that.
 
+### `ys activity list`
+
+The newest recorded [activity](activity.md): when each agent, shell or run command started in a
+workspace and how it ended, newest first. `--workspace <name>` narrows it to one workspace,
+`--limit <N>` changes how many rows (50 by default), and `--json` prints the same rows as a JSON
+array with the event's full payload.
+
+```
+WHEN                  WORKSPACE      EVENT            SOURCE              DETAILS
+2026-09-24 20:44:15Z  fix-the-login  process.exited   yardsort/lifecycle  exit 0, via spool
+2026-09-24 20:43:58Z  fix-the-login  process.started  yardsort/lifecycle  claude, opus
+```
+
+Any `ys` command that reads the daemon first takes the exits it kept while nothing was
+connected into the database, so a `session list` after an agent finished on its own says `ended`
+rather than `gone`.
+
+### `ys activity export`
+
+Every recorded event as **NDJSON** on stdout — one JSON object per line, oldest first, with the
+same fields `--json` shows. `--workspace <name>` narrows it. Pipe it wherever you like; nothing
+else exports it.
+
 ### `ys doctor`
 
 Where `ys` is looking and whether it can get there: the data directory, the database, the daemon,
-and which agents are on your `PATH`. The first thing to run when `ys` and the app seem to disagree.
+which agents are on your `PATH`, how much activity is recorded, and where the exit spool is and
+whether anything is waiting in it. The first thing to run when `ys` and the app seem to disagree.
 
 ## Profiles
 

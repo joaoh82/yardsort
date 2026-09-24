@@ -6,6 +6,10 @@ const POINTS = [
     body: "No account, no telemetry, no keys of ours. Agents use their own logins; Yardsort just starts them. It checks for new versions, which you can switch off — and nothing else leaves your machine unless you switch Assist on and bring your own TypeSafe key.",
   },
   {
+    title: "A record of what ran",
+    body: "A local note of when each agent started in a workspace and how it ended — even while the window was closed — without reading a word it printed. An experimental timeline shows it; ys activity export writes it out.",
+  },
+  {
     title: "Closing the window doesn't stop them",
     body: "Terminals live in a small background process, so agents keep working while Yardsort is closed — or after it crashes. Open it again and every screen is repainted where it got to.",
   },

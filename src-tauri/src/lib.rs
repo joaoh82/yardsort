@@ -3,6 +3,7 @@
 //! The frontend holds no truth: state lives here and the webview renders it. `commands` is the
 //! whole IPC surface and stays thin — real work belongs in the domain modules.
 
+mod activity;
 mod assist;
 mod changes;
 mod commands;
@@ -95,6 +96,10 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             assist::commands::assist_save_settings,
             assist::commands::assist_review,
             assist::commands::assist_suggest,
+            activity::activity_timeline,
+            activity::activity_diagnostics,
+            activity::activity_clear,
+            activity::settings_save_activity,
             sessions::sessions_list,
             sessions::session_resume,
             sessions::session_fork,
@@ -223,6 +228,7 @@ pub fn run() {
             // Find the daemon for this profile, or start one. Agents from a previous run of the
             // app are still in it, which is why this comes before the records are settled.
             let handle = app.handle().clone();
+            let spool_root = data_dir.clone();
             let connected = daemon::connect(
                 &data_dir,
                 std::sync::Arc::new(move |event| {
@@ -232,11 +238,34 @@ pub fn run() {
                             let _ = state
                                 .store
                                 .end_session_by_pty(&id.0, Some(i64::from(exit.code)));
+                            yardsort_core::activity::record_exit(
+                                &state.store,
+                                &id.0,
+                                &yardsort_core::activity::ExitFacts::from(exit),
+                                yardsort_core::activity::Via::Live,
+                            );
+                            // The daemon kept this exit for us too; take it out of the spool
+                            // now rather than find it as a duplicate at the next start.
+                            yardsort_core::activity::import_spool(&state.store, &spool_root);
                         }
                     }
                     let _ = terminal::PtyHostEvent(event).emit(&handle);
                 }),
             );
+            // Exits the daemon kept while no window was open come first: a conversation that
+            // ended cleanly in the meantime must keep its exit code rather than be counted as
+            // interrupted below.
+            let imported = yardsort_core::activity::import_spool(&store, &data_dir);
+            if imported.imported > 0 || imported.unreadable > 0 || imported.dropped > 0 {
+                eprintln!(
+                    "exit spool: {} imported, {} duplicate, {} unmatched, {} unreadable, {} dropped",
+                    imported.imported,
+                    imported.duplicates,
+                    imported.unmatched,
+                    imported.unreadable,
+                    imported.dropped
+                );
+            }
             // Rows still marked running whose process is *not* among these died with the
             // previous run; the rest are conversations that never stopped.
             let alive: Vec<String> = connected
@@ -248,8 +277,15 @@ pub fn run() {
             store
                 .end_interrupted_sessions(&alive)
                 .map_err(|e| format!("cannot tidy session records: {e}"))?;
+            yardsort_core::activity::end_interrupted(&store, &alive);
+            yardsort_core::activity::prune(&store);
 
-            app.manage(state::AppState::new(connected, store, settings));
+            app.manage(state::AppState::new(
+                data_dir.clone(),
+                connected,
+                store,
+                settings,
+            ));
 
             // Warm the login-shell environment now, so the first terminal doesn't wait for it.
             let handle = app.handle().clone();

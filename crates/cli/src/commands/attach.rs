@@ -121,7 +121,14 @@ pub fn run(
 
     match reason {
         Ended::Detached => println!("\nDetached. {} is still running.", target.label),
-        Ended::Exited => println!("\n{} exited.", target.label),
+        Ended::Exited => {
+            // Somebody heard it end, so the record and the run can say so now rather than wait
+            // for the app, or for the next drain of the daemon's spool.
+            if let Ok(info) = client.info(&session) {
+                yardsort_core::launch::settle_record(&ys.store, &*client, &info);
+            }
+            println!("\n{} exited.", target.label);
+        }
         Ended::Input(error) => return Err(Failure::new(format!("stopped reading input: {error}"))),
     }
     Ok(())

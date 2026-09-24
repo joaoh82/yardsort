@@ -94,6 +94,11 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     of Assist's own switch, and what the notification is allowed to repeat. Never on a shell —
     only a harness session, and only when it has fallen quiet.
 
+    _2026-09-24:_ the [agent-events work](10-agent-events-stage-1.md) neither builds nor depends
+    on this. If it ships, its verdict has a place to go — an `evaluation.recorded` event from
+    producer `assist`, method `screen`, fidelity `inferred` — and the event store takes nothing
+    from it meanwhile. Stage 1 reads no terminal output.
+
 17. ~~**Assist threshold defaults.**~~ **Settled 2026-09-23: they stand as shipped.** The defaults
     (flag at 70%, off-task at 60%, suggest at 50%) came from reading TypeSafe's guidance rather
     than from a pass over real diffs, and that is accepted rather than fixed. They are settings:
@@ -134,3 +139,16 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     way, and the obvious way to make every message sound the same); whether a failed agent should
     fall through to the key silently, as it does now, or say which one answered; and whether the
     120-second agent timeout is anywhere near right for a cold agent on a large repository.
+
+## Agent events
+
+20. **Which native surface first, per harness?** Stage 1 of
+    [09-agent-events-and-memory](09-agent-events-and-memory.md) records only what Yardsort itself
+    sees. The coverage matrix in [10 §6](10-agent-events-stage-1.md#6--stage-0-baseline-and-the-stage-2-coverage-matrix)
+    is a reading of each CLI's `--help` on one day, not fixtures. The lean: Claude Code hooks first
+    (documented, and the CLI shows a hook mechanism), recorded as fixtures for the exact version
+    before an installer is written; Codex second, choosing between its trust-gated hooks and its
+    session files once samples exist; OpenCode's plugin third. OMP, Cursor, Grok and Pi stay
+    lifecycle-only until someone finds a stable surface. Not decided: whether an adapter's
+    receiver lives in the app process or in the daemon, which the fit report deliberately left
+    for after the owner/crash boundary was tested.

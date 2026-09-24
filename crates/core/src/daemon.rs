@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pty_host::{EventSink, PtyHost, TerminalHost};
-use pty_ipc::{DaemonClient, Endpoint, IDLE_GRACE};
+use pty_ipc::{DaemonClient, Endpoint, ServeOptions, IDLE_GRACE};
 use serde::Serialize;
 use specta::Type;
 
@@ -28,8 +28,10 @@ const START_POLL: Duration = Duration::from_millis(25);
 /// Run as the daemon and never return, when asked to. Called before anything Tauri does, so a
 /// daemon never creates a window, a webview or a tray icon — it is a plain background process.
 ///
-/// `yardsort --yardsort-daemon <socket>`. Its output is wherever whoever started it pointed it:
-/// `daemon.log` when the app did, the terminal when you did.
+/// `yardsort --yardsort-daemon <socket> [<exit spool directory>]`. Its output is wherever
+/// whoever started it pointed it: `daemon.log` when the app did, the terminal when you did.
+/// Without a spool directory it keeps no exits for absent clients, as daemons before the spool
+/// existed did not.
 pub fn run_daemon_and_exit_if_asked() {
     let mut args = std::env::args_os().skip(1);
     if args.next().as_deref() != Some(std::ffi::OsStr::new(DAEMON_FLAG)) {
@@ -39,10 +41,14 @@ pub fn run_daemon_and_exit_if_asked() {
         eprintln!("{DAEMON_FLAG} needs a socket to listen on");
         std::process::exit(2);
     };
-    let result = pty_ipc::serve(
+    let options = ServeOptions {
+        spool_dir: args.next().map(std::path::PathBuf::from),
+    };
+    let result = pty_ipc::serve_with(
         &Endpoint::parse(&socket),
         env!("CARGO_PKG_VERSION"),
         IDLE_GRACE,
+        options,
     );
     if let Err(error) = result {
         eprintln!("the terminal daemon stopped: {error}");
@@ -86,6 +92,8 @@ pub struct Connected {
 pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
     let endpoint = Endpoint::for_data_dir(data_dir);
     let log_path = data_dir.join("daemon.log");
+    // Where a daemon started here keeps exits for a client that is gone; see `activity`.
+    let spool_dir = crate::activity::spool_dir(data_dir);
     let in_process = |problem: Option<String>| Connected {
         host: Arc::new(PtyHost::new(Arc::clone(&events))),
         client: None,
@@ -105,7 +113,7 @@ pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
         return in_process(None);
     }
 
-    let client = match connect_or_start(&endpoint, &log_path, &events) {
+    let client = match connect_or_start(&endpoint, &log_path, &spool_dir, &events) {
         Ok(client) => Arc::new(client),
         Err(error) => {
             // Falling back keeps the app usable: terminals work, they just will not outlive it.
@@ -138,7 +146,7 @@ pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
         // Nothing at stake: replace it.
         let _ = client.shutdown(false);
         drop(client);
-        return match replace_daemon(&endpoint, &log_path, &events) {
+        return match replace_daemon(&endpoint, &log_path, &spool_dir, &events) {
             Ok(client) => connected_to(client, endpoint, log_path),
             Err(error) => in_process(Some(error.to_string())),
         };
@@ -185,6 +193,7 @@ fn connected_to(
 fn replace_daemon(
     endpoint: &Endpoint,
     log_path: &Path,
+    spool_dir: &Path,
     events: &EventSink,
 ) -> std::io::Result<Arc<DaemonClient>> {
     let deadline = Instant::now() + START_TIMEOUT;
@@ -200,7 +209,7 @@ fn replace_daemon(
         }
         std::thread::sleep(START_POLL);
     }
-    let client = Arc::new(connect_or_start(endpoint, log_path, events)?);
+    let client = Arc::new(connect_or_start(endpoint, log_path, spool_dir, events)?);
     if client.speaks_our_protocol() {
         Ok(client)
     } else {
@@ -214,6 +223,7 @@ fn replace_daemon(
 fn connect_or_start(
     endpoint: &Endpoint,
     log_path: &Path,
+    spool_dir: &Path,
     events: &EventSink,
 ) -> std::io::Result<DaemonClient> {
     if let Ok(client) = attach(endpoint, events) {
@@ -226,7 +236,7 @@ fn connect_or_start(
         return Ok(client);
     }
     if ours.is_some() {
-        spawn_daemon(endpoint, log_path)?;
+        spawn_daemon(endpoint, log_path, spool_dir)?;
     }
 
     let deadline = Instant::now() + START_TIMEOUT;
@@ -244,12 +254,13 @@ fn attach(endpoint: &Endpoint, events: &EventSink) -> std::io::Result<DaemonClie
 }
 
 /// Start this executable again, detached, as the daemon.
-fn spawn_daemon(endpoint: &Endpoint, log_path: &Path) -> std::io::Result<()> {
+fn spawn_daemon(endpoint: &Endpoint, log_path: &Path, spool_dir: &Path) -> std::io::Result<()> {
     clear_stale(endpoint);
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command
         .arg(DAEMON_FLAG)
         .arg(endpoint.as_os_str())
+        .arg(spool_dir.as_os_str())
         .stdin(std::process::Stdio::null());
     // A process with no terminal has nowhere to complain to, so it is given a log. Handing the
     // child the file is simpler than having it reopen its own output, and works the same on
