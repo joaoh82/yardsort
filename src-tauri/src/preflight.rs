@@ -52,14 +52,15 @@ pub struct HarnessStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallHint {
-    /// One command that installs it on any OS with Node.js.
+    /// An install command for the current OS; shown for the user to copy, never executed.
     pub command: String,
     /// The project's own install instructions, for every other way.
     pub url: String,
 }
 
-/// Install advice for the built-in harnesses. Package names and links verified 2026-09-19;
-/// like the harness flags themselves they can drift, which is why a link is always included.
+/// Install advice for the built-in harnesses. Package names and links verified 2026-09-19
+/// (OMP, Cursor and Pi: 2026-09-24); like the harness flags themselves they can drift, which is
+/// why a link is always included.
 fn install_hint(harness_id: &str) -> Option<InstallHint> {
     let (command, url) = match harness_id {
         "claude" => (
@@ -75,6 +76,26 @@ fn install_hint(harness_id: &str) -> Option<InstallHint> {
             "https://www.npmjs.com/package/@xai-official/grok",
         ),
         "opencode" => ("npm install -g opencode-ai", "https://opencode.ai/docs"),
+        "omp" => (
+            if cfg!(windows) {
+                "irm https://omp.sh/install.ps1 | iex"
+            } else {
+                "curl -fsSL https://omp.sh/install | sh"
+            },
+            "https://omp.sh/docs/quickstart",
+        ),
+        "cursor" => (
+            if cfg!(windows) {
+                "irm 'https://cursor.com/install?win32=true' | iex"
+            } else {
+                "curl https://cursor.com/install -fsS | bash"
+            },
+            "https://cursor.com/docs/cli/installation",
+        ),
+        "pi" => (
+            "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
+            "https://pi.dev/",
+        ),
         _ => return None,
     };
     Some(InstallHint {
@@ -180,13 +201,34 @@ mod tests {
                 .install
                 .as_ref()
                 .expect("every built-in says how to get it");
-            assert!(
-                hint.command.starts_with("npm install -g "),
-                "{}",
-                hint.command
-            );
+            assert!(!hint.command.is_empty(), "{}", hint.command);
             assert!(hint.url.starts_with("https://"));
         }
+    }
+
+    #[test]
+    fn new_agents_have_install_advice_for_the_current_platform() {
+        let omp = install_hint("omp").unwrap();
+        let cursor = install_hint("cursor").unwrap();
+        if cfg!(windows) {
+            assert_eq!(omp.command, "irm https://omp.sh/install.ps1 | iex");
+            assert_eq!(
+                cursor.command,
+                "irm 'https://cursor.com/install?win32=true' | iex"
+            );
+        } else {
+            assert_eq!(omp.command, "curl -fsSL https://omp.sh/install | sh");
+            assert_eq!(
+                cursor.command,
+                "curl https://cursor.com/install -fsS | bash"
+            );
+        }
+        assert_eq!(
+            install_hint("pi").unwrap().command,
+            "npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
+        );
+        assert_eq!(omp.url, "https://omp.sh/docs/quickstart");
+        assert_eq!(cursor.url, "https://cursor.com/docs/cli/installation");
     }
 
     #[test]

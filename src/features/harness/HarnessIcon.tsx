@@ -48,6 +48,28 @@ const GLYPHS: Record<string, Glyph> = {
       </g>
     ),
   },
+  omp: {
+    body: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+        <circle cx="8" cy="8" r="5.5" />
+        <path d="M5 10V6l3 3 3-3v4" />
+      </g>
+    ),
+  },
+  cursor: {
+    body: <path d="M3 1.5v12l3.5-3 2.5 4 2-1.2-2.5-4.1 4.5-.7z" fill="currentColor" />,
+  },
+  pi: {
+    body: (
+      <path
+        d="M2.5 4.5h11M5.5 4.5v8M11 4.5v6.5q0 2 2 1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    ),
+  },
   opencode: {
     body: (
       <g>

@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **OMP, Cursor and Pi are built-in harnesses.** Pick them in the composer and configure them
+  in Settings → Harnesses, with install links on the welcome screen. All three can write commit
+  messages and pull request descriptions. OMP and Pi expose thinking levels; Pi supports
+  resuming and forking by session id, while OMP and Cursor resume the latest conversation in
+  the workspace. See [Harness settings](docs/guide/settings.md#harnesses).
+
 - **Worktrees made elsewhere no longer appear by themselves.** Yardsort used to turn every
   worktree of a repository into a workspace the moment it looked; a project with worktrees of
   its own — from a script, another tool, or your own `git worktree add` — opened full of

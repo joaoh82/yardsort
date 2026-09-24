@@ -38,8 +38,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 
 ## Highlights
 
-- **Any terminal agent.** Claude Code, Codex, Grok and OpenCode out of the box; add any other
-  with a few lines of configuration — no plugin, no release to wait for.
+- **Any terminal agent.** Claude Code, Codex, Grok, OpenCode, OMP, Cursor and Pi out of the box;
+  add any other with a few lines of configuration — no plugin, no release to wait for.
 - **The terminal is the truth.** Agents run in a real PTY with their own interface. Whatever they
   can do in your terminal, they can do here — and Yardsort never parses their output.
 - **Plain git, no lock-in.** Workspaces are ordinary worktrees and branches. Inspect or undo

@@ -21,10 +21,19 @@ waiting for a new release.
 
 ![Harness settings](../images/settings.png)
 
-Built in: **Claude Code**, **Codex**, **Grok**, **OpenCode**. The dot next to each shows whether
-its command was found on your `PATH`, and the mark beside it is the one that identifies that
+Built in: **Claude Code**, **Codex**, **Grok**, **OpenCode**, **OMP**, **Cursor**, **Pi**.
+The dot next to each shows whether its command was found on your `PATH`, and the mark beside it is the one that identifies that
 agent everywhere else in the app — the tab strip, the composer's picker, the session history. A
 harness you add yourself is drawn as its initial.
+
+OMP and Pi offer a thinking level through the effort picker and accept `provider/model`
+model names. Cursor runs `cursor-agent`, not the `cursor` editor command; if your installation
+only exposes `agent`, change its **Command** to `agent`. Install links on the welcome screen
+lead to each CLI's own setup instructions. Install and sign in before launching a workspace.
+
+Pi's built-in definition requires a version with `--session-id` and `--fork` (verified with
+0.87.1). OMP and Cursor resume only the latest conversation in a workspace and do not offer
+Fork. Pi supports resuming and forking individual conversations.
 
 ### Fields
 

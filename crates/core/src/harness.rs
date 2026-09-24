@@ -295,6 +295,68 @@ pub fn builtin() -> Vec<HarnessDef> {
             enabled: true,
             strengths: String::new(),
         },
+        HarnessDef {
+            id: "omp".into(),
+            label: "OMP".into(),
+            command: "omp".into(),
+            base_args: vec![],
+            model_args: strings(&["--model", "{model}"]),
+            effort_args: strings(&["--thinking", "{effort}"]),
+            session_args: vec![],
+            prompt_args: strings(&["--", "{prompt}"]),
+            write_args: strings(&["--print", "--no-session", "--", "{prompt}"]),
+            resume_args: strings(&["--continue"]),
+            fork_args: vec![],
+            efforts: strings(&[
+                "off", "minimal", "low", "medium", "high", "xhigh", "max", "auto",
+            ]),
+            models: vec![],
+            prompt_transport: PromptTransport::Argv,
+            session_id_mode: SessionIdMode::LatestInCwd,
+            stdin_ready_ms: DEFAULT_STDIN_READY_MS,
+            enabled: true,
+            strengths: String::new(),
+        },
+        HarnessDef {
+            id: "cursor".into(),
+            label: "Cursor".into(),
+            command: "cursor-agent".into(),
+            base_args: vec![],
+            model_args: strings(&["--model", "{model}"]),
+            effort_args: vec![],
+            session_args: vec![],
+            prompt_args: strings(&["--", "{prompt}"]),
+            write_args: strings(&["--print", "--", "{prompt}"]),
+            resume_args: strings(&["--continue"]),
+            fork_args: vec![],
+            efforts: vec![],
+            models: vec![],
+            prompt_transport: PromptTransport::Argv,
+            session_id_mode: SessionIdMode::LatestInCwd,
+            stdin_ready_ms: DEFAULT_STDIN_READY_MS,
+            enabled: true,
+            strengths: String::new(),
+        },
+        HarnessDef {
+            id: "pi".into(),
+            label: "Pi".into(),
+            command: "pi".into(),
+            base_args: vec![],
+            model_args: strings(&["--model", "{model}"]),
+            effort_args: strings(&["--thinking", "{effort}"]),
+            session_args: strings(&["--session-id", "{session_id}"]),
+            prompt_args: strings(&["--", "{prompt}"]),
+            write_args: strings(&["--print", "--no-session", "--", "{prompt}"]),
+            resume_args: strings(&["--session", "{session_id}"]),
+            fork_args: strings(&["--fork", "{session_id}", "--session-id", "{new_session_id}"]),
+            efforts: strings(&["off", "minimal", "low", "medium", "high", "xhigh", "max"]),
+            models: vec![],
+            prompt_transport: PromptTransport::Argv,
+            session_id_mode: SessionIdMode::Assigned,
+            stdin_ready_ms: DEFAULT_STDIN_READY_MS,
+            enabled: true,
+            strengths: String::new(),
+        },
     ]
 }
 
@@ -510,6 +572,104 @@ mod tests {
                 "fix the bug",
             ]
         );
+    }
+
+    #[test]
+    fn omp_and_cursor_start_and_resume_without_claiming_fork_support() {
+        let prompt = "- Fix `quotes`, \"spaces\" and\nnewlines";
+        for (id, command, effort) in [("omp", "omp", "high"), ("cursor", "cursor-agent", "")] {
+            let def = find(id, &[]).unwrap();
+            assert_eq!(def.command, command);
+            assert!(def.enabled);
+            assert_eq!(def.session_id_mode, SessionIdMode::LatestInCwd);
+            let mut options = strings(&["--model", "provider/model"]);
+            if !effort.is_empty() {
+                options.extend(strings(&["--thinking", effort]));
+            }
+            let mut expected = options.clone();
+            expected.extend(strings(&["--", prompt]));
+            assert_eq!(
+                def.start_args(&values(prompt, "provider/model", effort)),
+                expected
+            );
+            options.push("--continue".into());
+            assert_eq!(
+                def.continue_args(&values("", "provider/model", effort), false),
+                options
+            );
+            assert!(def.start_args(&LaunchValues::default()).is_empty());
+            assert!(def.fork_args.is_empty());
+            assert!(!def.fork_assigns_id());
+        }
+    }
+
+    #[test]
+    fn pi_assigns_ids_for_start_resume_and_fork() {
+        let def = find("pi", &[]).unwrap();
+        let v = values("- fix the bug", "provider/model", "high");
+        assert_eq!(def.command, "pi");
+        assert_eq!(def.session_id_mode, SessionIdMode::Assigned);
+        assert_eq!(
+            def.start_args(&v),
+            [
+                "--model",
+                "provider/model",
+                "--thinking",
+                "high",
+                "--session-id",
+                v.session_id.as_deref().unwrap(),
+                "--",
+                "- fix the bug",
+            ]
+        );
+        assert_eq!(
+            def.continue_args(&v, false),
+            [
+                "--model",
+                "provider/model",
+                "--thinking",
+                "high",
+                "--session",
+                v.session_id.as_deref().unwrap(),
+            ]
+        );
+        assert_eq!(
+            def.continue_args(&v, true),
+            [
+                "--model",
+                "provider/model",
+                "--thinking",
+                "high",
+                "--fork",
+                v.session_id.as_deref().unwrap(),
+                "--session-id",
+                v.new_session_id.as_deref().unwrap(),
+            ]
+        );
+        assert!(def.fork_assigns_id());
+        assert_eq!(
+            def.start_args(&values("", "", "")),
+            ["--session-id", v.session_id.as_deref().unwrap(),]
+        );
+    }
+
+    #[test]
+    fn new_harnesses_can_draft_without_changing_the_latest_omp_or_pi_session() {
+        for id in ["omp", "cursor", "pi"] {
+            let def = find(id, &[]).unwrap();
+            let mut expected = strings(&["--print"]);
+            if id != "cursor" {
+                expected.push("--no-session".into());
+            }
+            expected.extend(strings(&["--", "- draft this\nwith spaces"]));
+            assert_eq!(
+                expand(
+                    &def.write_args,
+                    &values("- draft this\nwith spaces", "", "")
+                ),
+                expected
+            );
+        }
     }
 
     #[test]
