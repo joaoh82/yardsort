@@ -127,8 +127,9 @@ what CI made of it:
 One failure outranks everything, and anything still running outranks success — so green always
 means _finished_ and passing. Hovering gives the whole story, including the title.
 
-The same summary sits at the right of the panel foot for the selected workspace; press it to open
-the pull request in your browser.
+**Press the badge to open the pull request in your browser.** It sits beside the row rather than
+on it, so pressing it opens the pull request while pressing the row still opens the workspace. The
+same summary sits at the right of the panel foot for the selected workspace, and does the same.
 
 **This needs `gh`.** Without it there is no number and no check result anywhere in the app, and
 nothing complains about that: it is a supported way to use Yardsort, not a fault. Logged out of

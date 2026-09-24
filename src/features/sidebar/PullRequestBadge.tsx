@@ -1,11 +1,16 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { PullRequest } from "@/lib/ipc";
 
 /**
- * A workspace's pull request on its row: the number, and what CI made of it.
+ * A workspace's pull request on its row: the number, and what CI made of it. Pressing it opens
+ * the pull request in the browser.
  *
  * The number is the point — it is what you quote to someone else, and it means the branch has
  * left this machine. The checks colour it rather than adding a second mark, because a sidebar
  * row has room for one glance, not two. Nothing shows without `gh`: see `crate::forge`.
+ *
+ * It sits *beside* the row's own button rather than inside it, because a button inside a button
+ * is not a thing: the row opens the workspace, and this opens the pull request.
  */
 export function PullRequestBadge({ pr }: { pr: PullRequest }) {
   const { text, colour } =
@@ -31,16 +36,17 @@ export function PullRequestBadge({ pr }: { pr: PullRequest }) {
     .join(" — ");
 
   return (
-    <span
-      role="img"
-      aria-label={label}
-      title={label}
-      className={`shrink-0 rounded px-1 text-[10px] leading-4 font-medium tabular-nums ${
+    <button
+      type="button"
+      aria-label={`Open ${label}`}
+      title={`${label} — opens in your browser`}
+      onClick={() => void openUrl(pr.url).catch(console.error)}
+      className={`shrink-0 rounded px-1 text-[10px] leading-4 font-medium tabular-nums hover:brightness-125 ${
         pr.draft && pr.state === "open" ? "opacity-60" : ""
       } ${colour}`}
     >
       {text}
-    </span>
+    </button>
   );
 }
 

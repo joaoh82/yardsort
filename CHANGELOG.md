@@ -27,8 +27,8 @@ has the downloads and the full commit lists.
 - **A workspace's pull request and its checks, on its row.** The number appears in the sidebar
   once there is one, coloured by CI — green when every check has finished and passed, amber while
   one is running, red if one failed — and says **merged** or **closed** when it is over. One
-  request per project, not one per workspace. Needs `gh`; without it nothing shows and nothing
-  complains. See [On the workspace row](docs/guide/commits-and-pull-requests.md#on-the-workspace-row).
+  request per project, not one per workspace. Press it to open the pull request in your browser.
+  Needs `gh`; without it nothing shows and nothing complains. See [On the workspace row](docs/guide/commits-and-pull-requests.md#on-the-workspace-row).
 
 - **A waiting update is announced beside Settings.** The **update** pill at the foot of the
   projects panel appears when the daily check finds a newer version, and opens the update dialog;

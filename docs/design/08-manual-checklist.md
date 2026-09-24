@@ -204,6 +204,7 @@ Needs a project with a real remote you may push to. Do the first half **without 
 |     | Without `gh`: **Open pull request** pushes and opens the forge's form in a browser, both branches filled in.                            |
 |     | With `gh`: the dialog's title is the oldest unpushed commit; opening lands the browser on the real pull request.                        |
 |     | Its number then appears on the workspace's row in the sidebar, and at the right of the panel foot.                                      |
+|     | Pressing the badge opens the pull request in a browser; pressing the row still opens the workspace.                                     |
 |     | Let CI run: the row goes amber while checks run, then green or red. Coming back to the window catches up within a minute.               |
 |     | Merge the pull request on the forge: the row says **merged**.                                                                           |
 |     | A project whose remote is a path on disk offers **Commit** and **Push** but no pull request button at all.                              |

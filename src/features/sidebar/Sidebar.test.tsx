@@ -31,6 +31,8 @@ vi.mock("@/lib/ipc", async (original) => ({
   ipc: core,
 }));
 vi.mock("@/lib/native", () => ({ native }));
+const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => opener);
 
 import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
@@ -82,6 +84,7 @@ describe("Sidebar", () => {
     }
     core.ptySpawn.mockImplementation(async ({ workspaceId }) => shellIn(workspaceId));
     core.sessionsList.mockResolvedValue([]);
+    opener.openUrl.mockResolvedValue(undefined);
     core.projectPullRequests.mockResolvedValue({
       gh: true,
       pullRequests: [],
@@ -140,17 +143,46 @@ describe("Sidebar", () => {
     await renderWithWorktree();
 
     const row = await screen.findByRole("treeitem", { name: "feature" });
-    const badge = await within(row).findByRole("img", { name: /Pull request #42/ });
+    const badge = await within(row).findByRole("button", { name: /Pull request #42/ });
     expect(badge).toHaveTextContent("#42");
     expect(badge).toHaveAccessibleName(
-      "Pull request #42 — checks failing — Fix the login redirect",
+      "Open Pull request #42 — checks failing — Fix the login redirect",
     );
     // `local` is on `main`, which no pull request has as its head.
     expect(
-      within(screen.getByRole("treeitem", { name: "local" })).queryByRole("img", {
+      within(screen.getByRole("treeitem", { name: "local" })).queryByRole("button", {
         name: /Pull request/,
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it("opens the pull request in a browser, without opening the workspace", async () => {
+    core.projectPullRequests.mockResolvedValue({
+      gh: true,
+      pullRequests: [
+        {
+          number: 42,
+          url: "https://github.com/o/alpha/pull/42",
+          title: "Fix the login redirect",
+          branch: "ys/feature",
+          state: "open",
+          draft: false,
+          checks: "passing",
+        },
+      ],
+      problem: null,
+      loggedOut: false,
+    });
+    await renderWithWorktree();
+
+    const row = await screen.findByRole("treeitem", { name: "feature" });
+    const badge = await within(row).findByRole("button", { name: /Pull request #42/ });
+    await userEvent.setup().click(badge);
+
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/o/alpha/pull/42");
+    // The row's own button opens the workspace; this one must not.
+    expect(useProjectsStore.getState().selectedWorkspaceId).not.toBe("w-alpha-feature");
+    expect(core.ptySpawn).not.toHaveBeenCalled();
   });
 
   it("says a pull request was merged instead of showing its number", async () => {
@@ -172,7 +204,7 @@ describe("Sidebar", () => {
     });
     await renderWithWorktree();
     const row = await screen.findByRole("treeitem", { name: "feature" });
-    expect(await within(row).findByRole("img", { name: /merged/ })).toHaveTextContent("merged");
+    expect(await within(row).findByRole("button", { name: /merged/ })).toHaveTextContent("merged");
   });
 
   it("shows no pull requests at all without gh, and does not complain about it", async () => {
@@ -183,7 +215,7 @@ describe("Sidebar", () => {
       loggedOut: false,
     });
     await renderWithWorktree();
-    expect(screen.queryByRole("img", { name: /Pull request/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pull request/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 

@@ -283,13 +283,17 @@ function WorkspaceNode({
                 {head.detached ? `@${head.label}` : head.label}
               </span>
             )}
-            {pr && <PullRequestBadge pr={pr} />}
             <HarnessBadge
               state={harnessState(tabs)}
               attention={tabs.some((tab) => tab.attention)}
             />
           </span>
         </button>
+        {pr && (
+          <span className="flex h-full shrink-0 items-center pr-0.5 pl-1">
+            <PullRequestBadge pr={pr} />
+          </span>
+        )}
         {isWorktree && (
           <RowButton
             label={`More actions for ${workspace.name}`}
