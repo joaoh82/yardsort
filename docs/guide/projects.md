@@ -98,9 +98,10 @@ or conflicting destination stops preparation and leaves the worktree available f
 
 **Setup executable** and **Setup arguments** run after copying, in the new worktree, before the
 agent starts. Enter one argument per line without shell quotes; blank lines are ignored. For
-example, use executable `bun` and argument `install`. For a script, use `bash` with `scripts/setup.sh`, or `pwsh` with
-`-File` and `scripts/setup.ps1` on separate lines. Arguments are passed directly; shell operators
-and environment-variable expansion are not interpreted. Leave the executable empty to disable it.
+example, use executable `bun` and argument `install`. For a script, use `bash` with
+`scripts/setup.sh`, or `pwsh` with `-File` and `scripts/setup.ps1` on separate lines. Arguments
+are passed directly; shell operators and environment-variable expansion are not interpreted.
+Leave the executable empty to disable it.
 
 Preparation also runs when opening an existing branch in a new worktree, or restoring a worktree
 created by Yardsort. Imported and adopted worktrees do not run preparation, including on restore.
@@ -113,9 +114,10 @@ Output is saved as `yardsort-setup-….log` in the worktree’s private Git dire
 checkout. It cannot be staged by `git add -A` and does not make the worktree dirty. Git removes
 the log when the worktree is archived or deleted; inspect or save it first if needed. To locate
 that directory from the worktree, run `git rev-parse --absolute-git-dir`. Logs may contain secrets,
-so inspect them before sharing. If preparation fails, the agent is not
-started and the error names the retained worktree (and the log for an unsuccessful setup process).
-Open a shell there to inspect the log, fix the problem and rerun your setup command manually.
+so inspect them before sharing. If preparation fails, the agent is not started and the error
+names the retained worktree. For an unsuccessful setup process, it also gives the log’s full
+path. Open a shell in the worktree to fix the problem and rerun your setup command manually;
+read the log using that full path, or locate it with `git rev-parse --absolute-git-dir`.
 A timeout stops the setup process; check for any child processes it started before retrying.
 If the agent fails to launch after preparation, the prepared worktree is kept too.
 
