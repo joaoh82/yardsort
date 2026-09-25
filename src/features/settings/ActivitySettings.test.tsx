@@ -23,6 +23,9 @@ beforeEach(() => {
     runs: 5,
     spoolDir: "/tmp/ys/activity/spool",
     spoolPending: 1,
+    inboxDir: "/tmp/ys/activity/inbox",
+    inboxPending: 3,
+    claudeHooksFile: "/tmp/ys/activity/hooks/claude.json",
     counters: [{ name: "write_failed", count: 2, lastAt: 0, lastDetail: "disk full" }],
   });
   core.activityClear.mockResolvedValue(undefined);
@@ -34,32 +37,60 @@ describe("ActivitySettings", () => {
     core.settingsSaveActivity.mockImplementation(async (activity) => ({
       activity,
     }));
-    render(<ActivitySettings initial={{ recordLifecycle: true, showTimeline: false }} />);
+    render(
+      <ActivitySettings
+        initial={{ recordLifecycle: true, showTimeline: false, captureClaude: false }}
+      />,
+    );
 
     const save = screen.getByRole("button", { name: "Save activity settings" });
     expect(save).toBeDisabled();
     await user.click(screen.getByRole("checkbox", { name: /Show the activity timeline/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ }));
     await user.click(save);
     expect(core.settingsSaveActivity).toHaveBeenCalledWith({
       recordLifecycle: true,
       showTimeline: true,
+      captureClaude: true,
     });
     await waitFor(() => expect(screen.getByText("Saved.")).toBeInTheDocument());
     expect(useAppStore.getState().showTimeline).toBe(true);
   });
 
+  it("cannot capture what Claude Code reports without recording at all", async () => {
+    const user = userEvent.setup();
+    render(
+      <ActivitySettings
+        initial={{ recordLifecycle: true, showTimeline: false, captureClaude: true }}
+      />,
+    );
+    const capture = screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ });
+    expect(capture).toBeEnabled();
+    await user.click(screen.getByRole("checkbox", { name: /Record when agents start and exit/ }));
+    expect(capture).toBeDisabled();
+  });
+
   it("shows what is recorded and what went wrong, and can clear all of it", async () => {
     const user = userEvent.setup();
-    render(<ActivitySettings initial={{ recordLifecycle: true, showTimeline: false }} />);
+    render(
+      <ActivitySettings
+        initial={{ recordLifecycle: true, showTimeline: false, captureClaude: false }}
+      />,
+    );
     await waitFor(() => expect(screen.getByText(/12 events across 5 runs/)).toBeInTheDocument());
     expect(screen.getByText(/1 exit\(s\) waiting in the spool/)).toBeInTheDocument();
+    expect(screen.getByText(/3 reported event\(s\) waiting in the inbox/)).toBeInTheDocument();
     expect(screen.getByText(/write_failed: 2 — disk full/)).toBeInTheDocument();
+    expect(screen.getByTitle("/tmp/ys/activity/hooks/claude.json")).toBeInTheDocument();
 
     core.activityDiagnostics.mockResolvedValue({
       events: 0,
       runs: 0,
       spoolDir: "/tmp/ys/activity/spool",
       spoolPending: 0,
+      inboxDir: "/tmp/ys/activity/inbox",
+      inboxPending: 0,
+      claudeHooksFile: "/tmp/ys/activity/hooks/claude.json",
       counters: [],
     });
     await user.click(screen.getByRole("button", { name: "Clear all recorded activity" }));

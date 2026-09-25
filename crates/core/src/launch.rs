@@ -5,7 +5,7 @@
 //! to its workspace, and writing the session record. The app and the `ys` CLI both come through
 //! here, which is why it takes its collaborators explicitly rather than reaching for app state.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use pty_host::{LaunchPlan, PendingPrompt, SessionInfo, TermSize, TerminalHost};
@@ -66,6 +66,8 @@ pub struct Launcher<'a> {
     /// Whether launches are recorded as activity, and who to say launched them.
     pub activity: &'a ActivitySettings,
     pub launched_by: LaunchedBy,
+    /// This profile's data directory: where a harness's hooks are told to report to.
+    pub data_dir: &'a Path,
 }
 
 impl Launcher<'_> {
@@ -215,10 +217,27 @@ impl Launcher<'_> {
         if let Some(run_id) = &run_id {
             resolved.labels.insert(RUN_LABEL.to_owned(), run_id.clone());
         }
+        // A recorded Claude Code launch, when asked, is given hooks that report what it does.
+        // Only a recorded one: a run is what the reports are linked to. Refused hooks are a
+        // counted diagnostic, and the launch goes ahead without them.
+        let capture = run_id
+            .as_ref()
+            .filter(|_| self.activity.capture_claude)
+            .filter(|_| draft.harness_id.as_deref() == Some(activity::claude::HARNESS_ID))
+            .and_then(
+                |_| match activity::claude::arm(&mut resolved.args, self.data_dir) {
+                    Ok(_) => Some(activity::claude::METHOD),
+                    Err(why) => {
+                        eprintln!("activity: Claude Code hooks not armed: {why}");
+                        let _ = self.store.bump_diagnostic("hooks_not_armed", Some(&why));
+                        None
+                    }
+                },
+            );
         match self.start(resolved, cwd, size) {
             Ok(session) => {
                 if let Some(run_id) = &run_id {
-                    recorder.spawned(run_id, draft, &session.id.0);
+                    recorder.spawned(run_id, draft, &session.id.0, capture);
                     // The process may be gone already — a shell script that exits at once — in
                     // which case its exit was announced to a PTY id nothing was linked to yet.
                     // Ask now, for every kind of launch; the conversation's record gets the same
@@ -726,6 +745,7 @@ mod tests {
         env: &'a Arc<ShellEnv>,
         harnesses: &'a [HarnessOverride],
         activity: &'a ActivitySettings,
+        data_dir: &'a Path,
     ) -> Launcher<'a> {
         Launcher {
             store,
@@ -734,6 +754,7 @@ mod tests {
             harnesses,
             activity,
             launched_by: LaunchedBy::Cli,
+            data_dir,
         }
     }
 
@@ -746,7 +767,7 @@ mod tests {
         let env = process_env();
         let harnesses = [shell_harness()];
         let activity = ActivitySettings::default();
-        let launcher = launcher(&store, &host, &env, &harnesses, &activity);
+        let launcher = launcher(&store, &host, &env, &harnesses, &activity, dir.path());
 
         let session = launcher
             .in_workspace(
@@ -819,7 +840,7 @@ mod tests {
         };
         let env = process_env();
         let activity = ActivitySettings::default();
-        let launcher = launcher(&store, &host, &env, &[], &activity);
+        let launcher = launcher(&store, &host, &env, &[], &activity, dir.path());
 
         launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
         let run = &store.runs(&ws).unwrap()[0];
@@ -856,7 +877,7 @@ mod tests {
         let host = PlanCatcher::default();
         let env = process_env();
         let activity = ActivitySettings::default();
-        let launcher = launcher(&store, &host, &env, &[], &activity);
+        let launcher = launcher(&store, &host, &env, &[], &activity, dir.path());
 
         launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
         launcher.in_workspace(&ws, script("exit 0"), SIZE).unwrap();
@@ -887,7 +908,7 @@ mod tests {
         let host = PlanCatcher::default();
         let env = process_env();
         let activity = ActivitySettings::default();
-        let launcher = launcher(&store, &host, &env, &[], &activity);
+        let launcher = launcher(&store, &host, &env, &[], &activity, dir.path());
 
         let error = launcher
             .in_workspace(
@@ -917,9 +938,9 @@ mod tests {
         let env = process_env();
         let activity = ActivitySettings {
             record_lifecycle: false,
-            show_timeline: false,
+            ..Default::default()
         };
-        let launcher = launcher(&store, &host, &env, &[], &activity);
+        let launcher = launcher(&store, &host, &env, &[], &activity, dir.path());
         let session = launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
         assert!(!session.labels.contains_key(RUN_LABEL));
         assert!(store.runs(&ws).unwrap().is_empty());
@@ -982,7 +1003,14 @@ mod tests {
         let env = process_env();
         let harnesses = [shell_harness()];
         let activity = ActivitySettings::default();
-        let launcher = launcher(&store, host.as_ref(), &env, &harnesses, &activity);
+        let launcher = launcher(
+            &store,
+            host.as_ref(),
+            &env,
+            &harnesses,
+            &activity,
+            dir.path(),
+        );
 
         let session = launcher
             .in_workspace(
@@ -1039,7 +1067,7 @@ mod tests {
         let (host, events) = real_host();
         let env = process_env();
         let activity = ActivitySettings::default();
-        let launcher = launcher(&store, host.as_ref(), &env, &[], &activity);
+        let launcher = launcher(&store, host.as_ref(), &env, &[], &activity, a.path());
 
         let in_a = launcher
             .in_workspace(&ws_a, script("exit 1"), SIZE)
@@ -1077,7 +1105,14 @@ mod tests {
         let env = process_env();
         let harnesses = [shell_harness()];
         let activity = ActivitySettings::default();
-        let launcher = launcher(&store, host.as_ref(), &env, &harnesses, &activity);
+        let launcher = launcher(
+            &store,
+            host.as_ref(),
+            &env,
+            &harnesses,
+            &activity,
+            dir.path(),
+        );
 
         let session = launcher
             .in_workspace(
@@ -1118,5 +1153,117 @@ mod tests {
             (program.as_str(), args),
             ("/usr/bin/tool.cmd", vec!["a".to_owned()])
         );
+    }
+
+    #[test]
+    fn a_claude_launch_is_given_hooks_when_asked_and_only_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        // "Claude Code" is whatever the built-in is overridden to run; here, the shell.
+        let (command, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let claude = |base_args: Vec<&str>| HarnessOverride {
+            id: "claude".into(),
+            command: Some(command.into()),
+            base_args: Some(base_args.into_iter().map(String::from).collect()),
+            session_args: Some(vec![]),
+            prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
+            ..Default::default()
+        };
+        let request = || {
+            Launch::Harness(HarnessRequest {
+                id: "claude".into(),
+                model: None,
+                effort: None,
+                prompt: Some("exit 0".into()),
+            })
+        };
+        let on = ActivitySettings {
+            capture_claude: true,
+            ..Default::default()
+        };
+
+        let harnesses = [claude(vec![])];
+        let armed = launcher(&store, &host, &env, &harnesses, &on, dir.path());
+        let session = armed.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        let at = plan
+            .args
+            .iter()
+            .position(|arg| arg == "--settings")
+            .expect("--settings added");
+        let settings = PathBuf::from(&plan.args[at + 1]);
+        assert_eq!(settings, activity::claude::settings_path(dir.path()));
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+        assert_eq!(
+            written["hooks"]["PreToolUse"][0]["hooks"][0]["args"],
+            serde_json::json!([
+                activity::hook::HOOK_FLAG,
+                "claude",
+                activity::inbox_dir(dir.path()).to_string_lossy()
+            ])
+        );
+        let started = store
+            .all_events(Some(&ws))
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "process.started")
+            .unwrap();
+        assert_eq!(
+            started.run_id.as_deref(),
+            Some(session.labels[RUN_LABEL].as_str())
+        );
+        assert!(
+            started.payload.contains(r#""capture":"hook""#),
+            "{}",
+            started.payload
+        );
+
+        // The switch off: the same launch, untouched.
+        let off = ActivitySettings::default();
+        let plain = launcher(&store, &host, &env, &harnesses, &off, dir.path());
+        plain.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(!plan.args.iter().any(|arg| arg == "--settings"));
+
+        // Another harness is never touched, whatever the switch says.
+        let others = [shell_harness()];
+        let other = launcher(&store, &host, &env, &others, &on, dir.path());
+        other
+            .in_workspace(
+                &ws,
+                Launch::Harness(HarnessRequest {
+                    id: "sh-agent".into(),
+                    model: None,
+                    effort: None,
+                    prompt: Some("exit 0".into()),
+                }),
+                SIZE,
+            )
+            .unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(!plan.args.iter().any(|arg| arg == "--settings"));
+
+        // The user's own `--settings` wins, and the refusal is counted, not fatal.
+        let theirs = [claude(vec!["--settings", "mine.json"])];
+        let overridden = launcher(&store, &host, &env, &theirs, &on, dir.path());
+        overridden.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert_eq!(
+            plan.args.iter().filter(|arg| *arg == "--settings").count(),
+            1
+        );
+        assert!(store
+            .diagnostics()
+            .unwrap()
+            .iter()
+            .any(|d| d.name == "hooks_not_armed"));
     }
 }

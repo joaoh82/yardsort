@@ -237,6 +237,7 @@ fn new(
             harnesses: &ys.settings.harnesses,
             activity: &ys.settings.activity,
             launched_by: yardsort_core::activity::LaunchedBy::Cli,
+            data_dir: &ys.data_dir,
         }
         .in_workspace(
             &workspace.id,

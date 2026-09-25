@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Claude Code can report what it does.** Switch on **Capture what Claude Code reports** in
+  Settings → General and every Claude Code that Yardsort starts tells the activity timeline about
+  each prompt, tool call, permission prompt, turn and session end — as metadata: the tool's name
+  and the file's relative path, never the prompt, the command or the output. It rides on a
+  per-launch settings file, so your own Claude Code settings and hooks are never touched, and it
+  keeps working while the window is closed. The timeline moves as the agent works; `ys activity
+list` shows the same rows as `claude/hook`. Off by default. Other agents stay at what Yardsort
+  itself sees. See [What Claude Code reports](docs/guide/activity.md#what-claude-code-reports)
+  and the [design note](docs/design/11-agent-events-stage-2-claude.md).
 - **Activity: a local record of what ran.** Yardsort now notes when each agent, shell or run
   command starts in a workspace — fresh, resumed or forked, from the app or from `ys` — and how
   it ended, without reading anything the agent prints. An agent that finishes while the window

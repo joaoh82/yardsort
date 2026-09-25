@@ -1,8 +1,8 @@
 # Agent events and shared context for Yardsort
 
-Status: **proposal; stages 0–1 implemented** · 23 September 2026, fit pass 24 September 2026 · Target: public `docs/design`
+Status: **proposal; stages 0–1 implemented, stage 2 begun (Claude Code)** · 23 September 2026, fit pass 24 September 2026, Claude adapter 25 September 2026 · Target: public `docs/design`
 
-> **Where this stands.** The current-state pass this document asks for was done on 2026-09-24 and is recorded in [10-agent-events-stage-1](10-agent-events-stage-1.md), together with the decisions and what shipped for stages 0 and 1 (roadmap [M11](05-roadmap.md#m11--agent-events-stage-01-)). Premises below that had drifted by then — the migration numbering, the number of built-in harnesses, `project_id` on events, the child environment — are corrected in that document rather than rewritten here; the rest of this proposal, from stage 2 on, still stands as written.
+> **Where this stands.** The current-state pass this document asks for was done on 2026-09-24 and is recorded in [10-agent-events-stage-1](10-agent-events-stage-1.md), together with the decisions and what shipped for stages 0 and 1 (roadmap [M11](05-roadmap.md#m11--agent-events-stage-01-)). Premises below that had drifted by then — the migration numbering, the number of built-in harnesses, `project_id` on events, the child environment — are corrected in that document rather than rewritten here. Stage 2's first adapter, Claude Code's hooks, shipped on 2026-09-25 and is recorded in [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md) ([M12](05-roadmap.md#m12--agent-events-stage-2-claude-code-)); where it departs from the text below — no install and no uninstall, an inbox of files rather than a receiver process, no per-run token — that document says why. Codex and OpenCode, and stages 3 on, still stand as written.
 
 ## Summary
 

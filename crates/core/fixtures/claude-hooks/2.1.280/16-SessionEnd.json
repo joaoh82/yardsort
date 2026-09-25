@@ -1,0 +1,8 @@
+{
+  "session_id": "11111111-1111-4111-8111-111111111111",
+  "transcript_path": "/home/user/.claude/projects/-tmp-yardsort-fixture-repo/11111111-1111-4111-8111-111111111111.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "prompt_id": "ad6af5b0-1bc5-4ed8-ba38-1ab45b34192e",
+  "hook_event_name": "SessionEnd",
+  "reason": "other"
+}

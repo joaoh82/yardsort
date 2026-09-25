@@ -259,6 +259,23 @@ process model. Switch **Show the activity timeline** on in Settings → General 
 |     | Switch **Record when agents start and exit** off, start a shell: nothing new on the timeline, and `YARDSORT_RUN_ID` is unset in it while `YARDSORT_WORKSPACE_ID` is set.                                                                                   |
 |     | **Windows:** the spool directory is under `%APPDATA%\dev.yardsort.app\activity\spool`, entries appear there while the window is closed, and are gone after reopening.                                                                                      |
 
+## 12 · Claude Code reporting
+
+Needs a real Claude Code (2.1.x) logged in. Switch on **Record when agents start and exit**,
+**Show the activity timeline** and **Capture what Claude Code reports** in Settings → General.
+
+| ✓   | Check                                                                                                                                                                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | Start Claude Code from the composer with a message. The timeline's `claude started` row says _reporting through hooks_; within a second, `agent session started` and `prompt submitted · N characters` appear, source `claude/hook`, without pressing Refresh.                    |
+|     | Ask it to read and edit a file. `Read started` / `Read done · <relative path> · N ms`, then `Edit …`. The path is relative to the workspace. Ask it to run a command: `Bash started` / `Bash done`, and no command text anywhere on the timeline or in `ys activity list --json`. |
+|     | Let it ask permission for something. `permission asked for Bash` and/or `agent raised a notification · permission_prompt` appear while it waits.                                                                                                                                  |
+|     | Close the window with **Leave them running**, send it another message from `ys attach`, reopen. The rows it reported meanwhile are there; Settings → General shows nothing waiting in the inbox.                                                                                  |
+|     | Resume the conversation: `agent resumed its session · N tokens of context`. Fork it: `agent forked its session` under the new tab.                                                                                                                                                |
+|     | Your own `~/.claude/settings.json` is byte-for-byte unchanged, and a Claude Code started from a plain terminal reports nothing.                                                                                                                                                   |
+|     | Switch **Capture** off; start Claude Code again: no `claude/hook` rows, and its command line has no `--settings`.                                                                                                                                                                 |
+|     | Add `--settings ~/mine.json` to the Claude harness's arguments in Settings → Harnesses with Capture on: the launch works, no hook rows, and `hooks_not_armed` appears among the counters.                                                                                         |
+|     | **macOS / Windows:** all of the above; on Windows the inbox is under `%APPDATA%\dev.yardsort.app\activity\inbox` and the hook is `yardsort.exe --yardsort-hook claude …`.                                                                                                         |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:

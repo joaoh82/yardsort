@@ -1,15 +1,76 @@
 //! The activity timeline's side of IPC: pages of a workspace's events, the diagnostics, the
-//! switches, and clearing. The recording itself happens in the core (`yardsort_core::activity`)
-//! wherever something is launched or exits; nothing here writes an event.
+//! switches, and clearing — and the inbox watcher that takes in what agents' hooks report.
+//! The recording itself happens in the core (`yardsort_core::activity`) wherever something is
+//! launched, exits, or is drained from the inbox; nothing here writes an event.
 
+use std::path::Path;
+use std::sync::mpsc;
+use std::time::Duration;
+
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use specta::Type;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use tauri_specta::Event;
 
 use crate::error::{IpcError, IpcResult};
-use crate::state::blocking;
-use crate::store::{DiagnosticRow, EventRow};
+use crate::state::{blocking, AppState};
+use crate::store::{DiagnosticRow, EventRow, Store};
 use crate::workspaces::commands::{settings_info, SettingsInfo};
+
+/// New events were recorded for these workspaces; a timeline showing one should ask again.
+#[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityChanged {
+    pub workspace_ids: Vec<String>,
+}
+
+/// Take what the inbox holds into the store, and tell the timeline which workspaces moved.
+pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
+    let report = yardsort_core::activity::import_inbox(store, data_dir);
+    if !report.workspaces.is_empty() {
+        let _ = ActivityChanged {
+            workspace_ids: report.workspaces.into_iter().collect(),
+        }
+        .emit(handle);
+    }
+}
+
+/// Wait this long after the last file lands before draining: a tool call is two files in
+/// quick succession, and one drain covers both.
+const INBOX_QUIET: Duration = Duration::from_millis(200);
+
+/// Watches until dropped.
+pub struct InboxWatcher {
+    _watcher: RecommendedWatcher,
+}
+
+/// Watch the inbox directory and drain it after each burst of files. The directory is
+/// created first — a watch needs something to watch — and the drain runs on its own thread,
+/// so a hook landing during a page load never touches the UI thread.
+pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWatcher> {
+    let dir = yardsort_core::activity::inbox_dir(data_dir);
+    std::fs::create_dir_all(&dir)?;
+    let (tx, rx) = mpsc::channel::<()>();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if event.is_ok() {
+            let _ = tx.send(());
+        }
+    })?;
+    watcher.watch(&dir, RecursiveMode::NonRecursive)?;
+    let data_dir = data_dir.to_path_buf();
+    std::thread::spawn(move || {
+        while rx.recv().is_ok() {
+            // Let the burst finish; whatever else arrives meanwhile is one drain.
+            std::thread::sleep(INBOX_QUIET);
+            while rx.try_recv().is_ok() {}
+            if let Some(state) = handle.try_state::<AppState>() {
+                drain_inbox(&handle, &state.store, &data_dir);
+            }
+        }
+    });
+    Ok(InboxWatcher { _watcher: watcher })
+}
 
 /// One recorded fact, as the timeline shows it. Timestamps are epoch milliseconds; `payload`
 /// is the event's JSON, whose shape depends on `kind` (see the guide).
@@ -98,6 +159,11 @@ pub struct ActivityDiagnostics {
     /// Where the daemon keeps exits for a closed window, and how many are waiting there.
     pub spool_dir: String,
     pub spool_pending: u32,
+    /// Where agents' hooks leave what they report, and how many entries are waiting there.
+    pub inbox_dir: String,
+    pub inbox_pending: u32,
+    /// The settings file Claude Code launches are given when capture is on.
+    pub claude_hooks_file: String,
     pub counters: Vec<ActivityCounter>,
 }
 
@@ -134,14 +200,24 @@ pub async fn activity_diagnostics(app: AppHandle) -> IpcResult<ActivityDiagnosti
     blocking(app, move |state| {
         let (events, runs) = state.store.activity_counts()?;
         let spool = pty_ipc::spool::Spool::new(yardsort_core::activity::spool_dir(&state.data_dir));
+        let inbox = yardsort_core::activity::inbox::Inbox::new(yardsort_core::activity::inbox_dir(
+            &state.data_dir,
+        ));
+        let pending = |entries: std::io::Result<Vec<std::path::PathBuf>>| {
+            entries
+                .map(|entries| u32::try_from(entries.len()).unwrap_or(u32::MAX))
+                .unwrap_or(0)
+        };
         Ok(ActivityDiagnostics {
             events: events as f64,
             runs: runs as f64,
             spool_dir: spool.dir().display().to_string(),
-            spool_pending: spool
-                .entries()
-                .map(|entries| u32::try_from(entries.len()).unwrap_or(u32::MAX))
-                .unwrap_or(0),
+            spool_pending: pending(spool.entries()),
+            inbox_dir: inbox.dir().display().to_string(),
+            inbox_pending: pending(inbox.entries()),
+            claude_hooks_file: yardsort_core::activity::claude::settings_path(&state.data_dir)
+                .display()
+                .to_string(),
             counters: state
                 .store
                 .diagnostics()?
@@ -171,6 +247,7 @@ pub async fn settings_save_activity(
     app: AppHandle,
     record_lifecycle: bool,
     show_timeline: bool,
+    capture_claude: bool,
 ) -> IpcResult<SettingsInfo> {
     blocking(app, move |state| {
         state
@@ -178,6 +255,7 @@ pub async fn settings_save_activity(
             .update(|settings| {
                 settings.activity.record_lifecycle = record_lifecycle;
                 settings.activity.show_timeline = show_timeline;
+                settings.activity.capture_claude = capture_claude;
             })
             .map_err(|error| {
                 IpcError::new(

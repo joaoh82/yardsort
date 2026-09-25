@@ -126,7 +126,7 @@ export const commands = {
 	 *  so their exit can still be matched; nothing about the processes themselves is touched.
 	 */
 	activityClear: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("activity_clear", { workspaceId })),
-	settingsSaveActivity: (recordLifecycle: boolean, showTimeline: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { recordLifecycle, showTimeline })),
+	settingsSaveActivity: (recordLifecycle: boolean, showTimeline: boolean, captureClaude: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { recordLifecycle, showTimeline, captureClaude })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
 	sessionResume: (id: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("session_resume", { id, size })),
@@ -193,12 +193,18 @@ export const commands = {
 
 /** Events */
 export const events = {
+	activityChanged: makeEvent<ActivityChanged>("activity-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
 };
 
 /* Types */
+/**  New events were recorded for these workspaces; a timeline showing one should ask again. */
+export type ActivityChanged = {
+	workspaceIds: string[],
+};
+
 export type ActivityCounter = {
 	name: string,
 	count: number | null,
@@ -213,6 +219,11 @@ export type ActivityDiagnostics = {
 	/**  Where the daemon keeps exits for a closed window, and how many are waiting there. */
 	spoolDir: string,
 	spoolPending: number,
+	/**  Where agents' hooks leave what they report, and how many entries are waiting there. */
+	inboxDir: string,
+	inboxPending: number,
+	/**  The settings file Claude Code launches are given when capture is on. */
+	claudeHooksFile: string,
 	counters: ActivityCounter[],
 };
 
@@ -255,6 +266,8 @@ export type ActivitySettingsDto = {
 	recordLifecycle: boolean,
 	/**  Show the experimental activity timeline in a workspace. */
 	showTimeline: boolean,
+	/**  Give Claude Code launches hooks that report what the agent does, as metadata. */
+	captureClaude: boolean,
 };
 
 /**  The result of adding a project: it may have been known already. */

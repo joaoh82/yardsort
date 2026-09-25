@@ -314,6 +314,7 @@ mod run_tests {
             harnesses: &[],
             activity: &Default::default(),
             launched_by: crate::activity::LaunchedBy::App,
+            data_dir: dir.path(),
         };
         assert!(launcher
             .project_run(&workspace.id, TermSize { cols: 80, rows: 24 })

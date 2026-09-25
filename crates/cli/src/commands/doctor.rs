@@ -28,6 +28,9 @@ struct Report {
     activity_runs: Option<i64>,
     spool_dir: Option<String>,
     spool_pending: Option<usize>,
+    /// Where agents' hooks leave what they report, and how many entries are waiting.
+    inbox_dir: Option<String>,
+    inbox_pending: Option<usize>,
 }
 
 pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
@@ -54,6 +57,8 @@ pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
         activity_runs: None,
         spool_dir: None,
         spool_pending: None,
+        inbox_dir: None,
+        inbox_pending: None,
     };
 
     // Everything past this point needs the database, and not having one is the thing most worth
@@ -74,6 +79,11 @@ pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
         let spool = pty_ipc::spool::Spool::new(yardsort_core::activity::spool_dir(&ys.data_dir));
         report.spool_dir = Some(spool.dir().display().to_string());
         report.spool_pending = spool.entries().ok().map(|entries| entries.len());
+        let inbox = yardsort_core::activity::inbox::Inbox::new(yardsort_core::activity::inbox_dir(
+            &ys.data_dir,
+        ));
+        report.inbox_dir = Some(inbox.dir().display().to_string());
+        report.inbox_pending = inbox.entries().ok().map(|entries| entries.len());
         let cwd = std::env::current_dir().unwrap_or_default();
         report.harnesses_installed = yardsort_core::harness::resolve_all(&ys.settings.harnesses)
             .into_iter()
@@ -139,6 +149,14 @@ pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
                     "{} ({} waiting)",
                     or_unknown(&report.spool_dir),
                     report.spool_pending.unwrap_or(0)
+                ),
+            ]);
+            rows.push(vec![
+                "agent inbox".to_owned(),
+                format!(
+                    "{} ({} waiting)",
+                    or_unknown(&report.inbox_dir),
+                    report.inbox_pending.unwrap_or(0)
                 ),
             ]);
         }

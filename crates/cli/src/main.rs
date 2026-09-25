@@ -99,8 +99,10 @@ enum Command {
 
 fn main() {
     // This binary can also be the daemon, exactly as the app's can: whichever process needs one
-    // first starts it from its own executable, and both are the same build.
+    // first starts it from its own executable, and both are the same build. And it can be the
+    // hook an agent started from here runs to report what it is doing.
     yardsort_core::daemon::run_daemon_and_exit_if_asked();
+    yardsort_core::activity::hook::run_hook_and_exit_if_asked();
 
     let cli = Cli::parse();
     let out = Output { json: cli.json };

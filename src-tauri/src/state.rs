@@ -31,6 +31,8 @@ pub struct AppState {
     pub reconciling: Mutex<()>,
     /// The file watcher of the workspace on screen, if any.
     pub watcher: Mutex<Option<crate::changes::watch::WorkspaceWatcher>>,
+    /// Watches the activity inbox for what agents' hooks drop there. See `crate::activity`.
+    pub inbox_watcher: Mutex<Option<crate::activity::InboxWatcher>>,
     env: Mutex<Option<Arc<ShellEnv>>>,
 }
 
@@ -52,6 +54,7 @@ impl AppState {
             forge: crate::publish::Forge::default(),
             reconciling: Mutex::new(()),
             watcher: Mutex::new(None),
+            inbox_watcher: Mutex::new(None),
             env: Mutex::new(None),
         }
     }

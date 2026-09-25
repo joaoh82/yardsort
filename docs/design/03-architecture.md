@@ -18,7 +18,7 @@
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
 │   ├─ assist       optional Jev judgments: diffs, composer hints    │
-│   ├─ activity     runs and lifecycle events; drains the exit spool │
+│   ├─ activity     runs, lifecycle events, Claude hooks; spool+inbox│
 │   └─ store        SQLite (state) + settings file                   │
 └──────────────────────────────┬──────────────────┬──────────────────┘
                                │ local socket     │ shells out
@@ -337,6 +337,19 @@ an exit heard live, found in the daemon's spool, settled right after a launch, o
 startup is one row, and the event says which of those it was (`via`). Payloads are metadata only
 — never the prompt, the argv, a path or output. The timeline (Settings → General, experimental)
 and `ys activity` read it; `ys activity export` is the one export, NDJSON.
+
+**What an agent reports** (stage 2, Claude Code only, opt-in) arrives the same way the exit spool
+does, in reverse. A recorded launch of harness `claude` is given `--settings
+<data-dir>/activity/hooks/claude.json`, whose hooks run _this executable_ — the app's or `ys`,
+whichever launched — with `--yardsort-hook claude <inbox>`, as an argument list. That mode runs
+before Tauri or clap: it reads the payload, keeps metadata (`activity/claude.rs`), writes one file
+to `<data-dir>/activity/inbox/` (`activity/inbox.rs`, atomic rename, 10 000 cap, drops counted)
+and exits 0. `activity::import_inbox` places each entry by `YARDSORT_RUN_ID` from the hook's
+environment, else by the agent's session id (`Store::run_by_harness_session`), else by workspace,
+never by path; the app drains on start, on every exit and on a `notify` watch of the directory,
+emitting `ActivityChanged`; `ys` drains with the spool. Producer `claude`, method `hook`, fidelity
+`reported`. Nothing of the user's Claude Code configuration is touched, and the daemon knows
+nothing of any of it. See [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md).
 
 ## Assist (optional, off by default)
 

@@ -1,0 +1,9 @@
+{
+  "session_id": "11111111-1111-4111-8111-111111111111",
+  "transcript_path": "/home/user/.claude/projects/-tmp-yardsort-fixture-repo/11111111-1111-4111-8111-111111111111.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "prompt_id": "53ecea32-a99c-483f-9a76-d859619e4265",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run `ls` with the Bash tool. Reply with one word when done."
+}

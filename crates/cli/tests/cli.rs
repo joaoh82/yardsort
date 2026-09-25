@@ -558,7 +558,7 @@ fn activity_is_listed_as_a_table_as_json_and_exported_as_ndjson() {
         continuation: Continuation::Fresh,
     };
     let run = recorder.begin(&draft).unwrap();
-    recorder.spawned(&run, &draft, "pty-1");
+    recorder.spawned(&run, &draft, "pty-1", None);
     yardsort_core::activity::record_exit(
         &store,
         "pty-1",
@@ -622,7 +622,7 @@ fn a_spooled_exit_is_taken_into_the_records_before_sessions_are_listed() {
         continuation: Continuation::Fresh,
     };
     let run = recorder.begin(&draft).unwrap();
-    recorder.spawned(&run, &draft, "pty-gone");
+    recorder.spawned(&run, &draft, "pty-gone", None);
     store
         .add_session(&NewSession {
             id: "rec-1",
@@ -664,4 +664,83 @@ fn a_spooled_exit_is_taken_into_the_records_before_sessions_are_listed() {
     assert_eq!(report["activityEvents"], 2);
     assert_eq!(report["activityRuns"], 1);
     assert_eq!(report["spoolPending"], 0);
+}
+
+/// `ys --yardsort-hook claude <inbox>` is what a Claude Code launched from here runs at each
+/// step: the real binary, a recorded payload on stdin, the launcher's ids in the environment.
+/// The next `ys` command drains what it left and the event is on the timeline, placed.
+#[test]
+fn the_binary_is_a_hook_that_leaves_an_entry_the_next_command_takes_in() {
+    use std::io::Write;
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    drop(store);
+    let inbox = yardsort_core::activity::inbox_dir(&fx.data_dir);
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/fixtures/claude-hooks")
+        .join(yardsort_core::activity::claude::FIXTURE_VERSION)
+        .join("04-PostToolUse.json");
+
+    let mut hook = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .arg(yardsort_core::activity::hook::HOOK_FLAG)
+        .arg("claude")
+        .arg(&inbox)
+        .env(yardsort_core::activity::WORKSPACE_ENV, &workspace.id)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    hook.stdin
+        .take()
+        .unwrap()
+        .write_all(&std::fs::read(&fixture).unwrap())
+        .unwrap();
+    let output = hook.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stdout.is_empty(), "a hook says nothing to the agent");
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 1);
+
+    // Garbage on stdin is still exit 0 — the agent must never be blocked — and no file.
+    let mut bad = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .arg(yardsort_core::activity::hook::HOOK_FLAG)
+        .arg("claude")
+        .arg(&inbox)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    bad.stdin.take().unwrap().write_all(b"not json").unwrap();
+    let output = bad.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not JSON"));
+    assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 1);
+
+    let json = fx.ys(&["activity", "list", "--json"]).ok();
+    let events: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(events[0]["kind"], "tool.completed");
+    assert_eq!(events[0]["producer"], "claude");
+    assert_eq!(events[0]["method"], "hook");
+    assert_eq!(events[0]["workspaceId"], workspace.id);
+    let payload = &events[0]["payload"];
+    assert_eq!(payload["tool"], "Write");
+    assert_eq!(payload["path"], "hello.txt");
+    assert!(payload.get("content").is_none(), "metadata only");
+    assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0, "drained");
+
+    let table = fx.ys(&["activity", "list"]).ok();
+    assert!(table.contains("claude/hook"), "{table}");
+    assert!(table.contains("Write hello.txt, 3 ms"), "{table}");
+
+    let doctor = fx.ys(&["doctor", "--json"]).ok();
+    let report: serde_json::Value = serde_json::from_str(&doctor).unwrap();
+    assert_eq!(report["inboxPending"], 0);
+    assert_eq!(report["inboxDir"].as_str(), Some(&*inbox.to_string_lossy()));
 }
