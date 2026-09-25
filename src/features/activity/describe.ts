@@ -35,6 +35,9 @@ interface Payload {
   outputTokens?: number | null;
   detail?: string | null;
   permission?: string | null;
+  waitMs?: number | null;
+  outcome?: string | null;
+  turnNumber?: number | null;
 }
 
 function parse(event: ActivityEvent): Payload {
@@ -161,8 +164,26 @@ export function describeEvent(event: ActivityEvent): {
     case "approval.resolved":
       return {
         title: `${toolName(p)} ${p.decision ?? "resolved"}`,
-        detail: toolDetail(p),
-        tone: p.decision === "denied" ? "bad" : "plain",
+        detail: [
+          toolDetail(p),
+          p.waitMs !== null && p.waitMs !== undefined && p.waitMs > 0
+            ? `you took ${(p.waitMs / 1000).toFixed(1)} s`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        tone: p.decision === "denied" || p.decision === "deny" ? "bad" : "plain",
+      };
+    case "turn.started":
+      return {
+        title: "agent started a turn",
+        detail: [
+          p.turnNumber !== null && p.turnNumber !== undefined ? `turn ${p.turnNumber}` : null,
+          p.model,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        tone: "plain",
       };
     case "agent.notified":
       return { title: "agent raised a notification", detail: p.type ?? "", tone: "plain" };
@@ -178,7 +199,11 @@ export function describeEvent(event: ActivityEvent): {
         tone: "ok",
       };
     case "turn.failed":
-      return { title: "agent's turn failed", detail: p.errorType ?? "", tone: "bad" };
+      return {
+        title: p.outcome === "interrupted" ? "agent's turn was interrupted" : "agent's turn failed",
+        detail: p.errorType ?? (p.outcome !== "interrupted" ? (p.outcome ?? "") : ""),
+        tone: "bad",
+      };
     case "agent.subagent_started":
       return { title: "subagent started", detail: p.agentType ?? "", tone: "plain" };
     case "agent.subagent_stopped":

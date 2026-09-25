@@ -29,6 +29,7 @@ use crate::store::{NewEvent, NewRun, RunRow, Store, StoreResult};
 
 pub mod claude;
 pub mod codex;
+pub mod grok;
 pub mod hook;
 pub mod inbox;
 pub mod opencode;
@@ -834,8 +835,53 @@ fn normalized<'a>(base: impl Iterator<Item = &'a str>, path: &'a str) -> Vec<Str
     parts
 }
 
+/// An RFC 3339 timestamp to epoch milliseconds: `2026-09-25T11:07:32.796Z`, or with
+/// `+00:00` and any number of fraction digits, as the agents' own files write them. Only
+/// UTC; an offset that is not zero is refused rather than misread.
+pub fn iso_to_ms(text: &str) -> Option<i64> {
+    let text = text
+        .strip_suffix('Z')
+        .or_else(|| text.strip_suffix("+00:00"))
+        .or_else(|| text.strip_suffix("-00:00"))?;
+    let (date, time) = text.split_once('T')?;
+    let mut date = date.split('-').map(|p| p.parse::<i64>());
+    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, ""));
+    let mut clock = clock.split(':').map(|p| p.parse::<i64>());
+    let (hour, minute, second) = (
+        clock.next()?.ok()?,
+        clock.next()?.ok()?,
+        clock.next()?.ok()?,
+    );
+    let millis: i64 = if fraction.is_empty() {
+        0
+    } else {
+        let digits = &fraction[..fraction.len().min(3)];
+        if !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        format!("{digits:0<3}").parse().ok()?
+    };
+    // Days from civil, Howard Hinnant's algorithm.
+    let (y, m) = if month <= 2 {
+        (year - 1, month + 9)
+    } else {
+        (year, month - 3)
+    };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some((((days * 24 + hour) * 60 + minute) * 60 + second) * 1000 + millis)
+}
+
 /// Run one store operation, and turn a failure into a printed line and a counter.
-fn attempt<T>(store: &Store, what: &str, op: impl FnOnce() -> StoreResult<T>) -> Option<T> {
+pub(crate) fn attempt<T>(
+    store: &Store,
+    what: &str,
+    op: impl FnOnce() -> StoreResult<T>,
+) -> Option<T> {
     match op() {
         Ok(value) => Some(value),
         Err(error) => {

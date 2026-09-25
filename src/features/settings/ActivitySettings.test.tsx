@@ -45,6 +45,7 @@ describe("ActivitySettings", () => {
           captureClaude: false,
           captureCodex: false,
           captureOpencode: false,
+          captureGrok: false,
         }}
       />,
     );
@@ -55,6 +56,7 @@ describe("ActivitySettings", () => {
     await user.click(screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ }));
     await user.click(screen.getByRole("checkbox", { name: /Capture what Codex reports/ }));
     await user.click(screen.getByRole("checkbox", { name: /Capture what OpenCode reports/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Read what Grok records/ }));
     await user.click(save);
     expect(core.settingsSaveActivity).toHaveBeenCalledWith({
       recordLifecycle: true,
@@ -62,6 +64,7 @@ describe("ActivitySettings", () => {
       captureClaude: true,
       captureCodex: true,
       captureOpencode: true,
+      captureGrok: true,
     });
     await waitFor(() => expect(screen.getByText("Saved.")).toBeInTheDocument());
     expect(useAppStore.getState().showTimeline).toBe(true);
@@ -77,19 +80,23 @@ describe("ActivitySettings", () => {
           captureClaude: true,
           captureCodex: true,
           captureOpencode: true,
+          captureGrok: true,
         }}
       />,
     );
     const capture = screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ });
     const codex = screen.getByRole("checkbox", { name: /Capture what Codex reports/ });
     const opencode = screen.getByRole("checkbox", { name: /Capture what OpenCode reports/ });
+    const grok = screen.getByRole("checkbox", { name: /Read what Grok records/ });
     expect(capture).toBeEnabled();
     expect(codex).toBeEnabled();
     expect(opencode).toBeEnabled();
+    expect(grok).toBeEnabled();
     await user.click(screen.getByRole("checkbox", { name: /Record when agents start and exit/ }));
     expect(capture).toBeDisabled();
     expect(codex).toBeDisabled();
     expect(opencode).toBeDisabled();
+    expect(grok).toBeDisabled();
   });
 
   it("shows what is recorded and what went wrong, and can clear all of it", async () => {
@@ -102,6 +109,7 @@ describe("ActivitySettings", () => {
           captureClaude: false,
           captureCodex: false,
           captureOpencode: false,
+          captureGrok: false,
         }}
       />,
     );

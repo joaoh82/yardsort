@@ -86,6 +86,7 @@ const settings: SettingsInfo = {
     captureClaude: false,
     captureCodex: false,
     captureOpencode: false,
+    captureGrok: false,
   },
 };
 

@@ -14,6 +14,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
   const [claude, setClaude] = useState(initial.captureClaude);
   const [codex, setCodex] = useState(initial.captureCodex);
   const [opencode, setOpencode] = useState(initial.captureOpencode);
+  const [grok, setGrok] = useState(initial.captureGrok);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<ActivityDiagnostics | null>(null);
@@ -29,7 +30,8 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
     timeline !== saved.showTimeline ||
     claude !== saved.captureClaude ||
     codex !== saved.captureCodex ||
-    opencode !== saved.captureOpencode;
+    opencode !== saved.captureOpencode ||
+    grok !== saved.captureGrok;
   const save = async () => {
     setError(null);
     try {
@@ -40,6 +42,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
         captureClaude: claude && record,
         captureCodex: codex && record,
         captureOpencode: opencode && record,
+        captureGrok: grok && record,
       });
       setSaved(info.activity);
       useAppStore.setState({ showTimeline: info.activity.showTimeline });
@@ -165,6 +168,27 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
             its token usage — names, paths, exit codes and counts, never a command, a file&apos;s
             contents or a message. Your OpenCode configuration is not edited and your own plugins
             keep running.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={grok}
+          disabled={!record}
+          onChange={(e) => {
+            setGrok(e.target.checked);
+            setJustSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Read what Grok records
+          <span className="block text-ink-faint">
+            Grok keeps its own log of each session — which tool ran and how long it took, the
+            permissions you were asked for, each turn and its tokens — with no commands, paths or
+            messages in it. Yardsort reads that log for the sessions it started. Nothing is given to
+            Grok and nothing in <code>~/.grok</code> is written.
           </span>
         </span>
       </label>

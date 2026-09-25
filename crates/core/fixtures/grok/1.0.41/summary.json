@@ -1,0 +1,23 @@
+{
+  "info": "<stripped>",
+  "agent_id": "<stripped>",
+  "attempt_id": "<stripped>",
+  "session_summary": "<stripped>",
+  "created_at": "2026-09-25T16:33:12.254113121Z",
+  "updated_at": "2026-09-25T16:33:21.187784356Z",
+  "num_messages": 32,
+  "num_chat_messages": 16,
+  "current_model_id": "grok-4.7",
+  "next_trace_turn": 1,
+  "chat_format_version": 1,
+  "session_kind": "headless",
+  "git_root_dir": "/tmp/yardsort-fixture/repo/",
+  "head_commit": "b25c211031b56460580ccaed3ae4f4489f03883e",
+  "head_branch": "master",
+  "request_id": "<stripped>",
+  "grok_home": "/tmp/yardsort-fixture/grok-home",
+  "last_active_at": "2026-09-25T16:33:21.187784356Z",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high"
+}

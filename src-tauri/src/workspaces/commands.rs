@@ -80,6 +80,8 @@ pub struct ActivitySettingsDto {
     pub capture_codex: bool,
     /// Give OpenCode launches a plugin, through their environment, that reports what they do.
     pub capture_opencode: bool,
+    /// Read Grok's own session directory for Yardsort's launches of Grok.
+    pub capture_grok: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -248,6 +250,7 @@ pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
             capture_claude: settings.activity.capture_claude,
             capture_codex: settings.activity.capture_codex,
             capture_opencode: settings.activity.capture_opencode,
+            capture_grok: settings.activity.capture_grok,
         },
         notify_when_quiet: settings.general.notify_when_quiet,
         check_for_updates: settings.general.check_for_updates,

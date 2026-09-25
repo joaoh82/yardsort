@@ -106,9 +106,11 @@ pub fn spawn_in_workspace(
     launch: Launch,
     size: TermSize,
 ) -> IpcResult<SessionInfo> {
-    with_launcher(state, |launcher| {
+    let session = with_launcher(state, |launcher| {
         launcher.in_workspace(workspace_id, launch, size)
-    })
+    })?;
+    crate::activity::launched(state);
+    Ok(session)
 }
 
 /// Spawn a resolved launch.
@@ -118,7 +120,9 @@ pub fn start(
     cwd: Option<String>,
     size: TermSize,
 ) -> IpcResult<SessionInfo> {
-    with_launcher(state, |launcher| launcher.start(resolved, cwd, size))
+    let session = with_launcher(state, |launcher| launcher.start(resolved, cwd, size))?;
+    crate::activity::launched(state);
+    Ok(session)
 }
 
 /// A program can exit before its record exists, in which case the exit event found nothing to

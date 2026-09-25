@@ -155,7 +155,9 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     `notify` program and the substance its session file. **OpenCode came third**
     ([13-agent-events-stage-2-opencode](13-agent-events-stage-2-opencode.md)): a plugin, as the
     proposal said, but given for one launch through `OPENCODE_CONFIG_CONTENT` and installed
-    nowhere. What remains is not a question but a watch: OMP, Cursor, Grok and Pi stay
-    lifecycle-only until someone finds a stable surface, and the three patterns now in the tree —
-    a settings file, a program, a plugin, each per launch — are what such a surface would be
-    fitted to.
+    nowhere. **Grok followed the same day**
+    ([14-agent-events-stage-2-grok](14-agent-events-stage-2-grok.md)), by a fourth pattern that
+    needs no surface at all: its own session directory holds a metadata-only event log, and
+    Yardsort chose the session id. What remains is a watch: OMP, Cursor and Pi stay
+    lifecycle-only until someone finds a stable surface, and the four patterns now in the tree —
+    a settings file, a program, a plugin, a directory read — are what it would be fitted to.

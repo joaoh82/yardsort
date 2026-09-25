@@ -36,12 +36,50 @@ pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
         }
         .emit(handle);
     }
-    if report.deferred > 0 {
-        if let Some(state) = handle.try_state::<AppState>() {
-            if let Some(watcher) = state.inbox_watcher.lock().unwrap().as_ref() {
-                watcher.look_again();
-            }
+    // The watcher's thread also reads the session directories of harnesses that keep their
+    // own — Grok's — and an exit is the moment their last lines land; so it is woken here
+    // whatever the inbox held.
+    if let Some(state) = handle.try_state::<AppState>() {
+        if let Some(watcher) = state.inbox_watcher.lock().unwrap().as_ref() {
+            watcher.look_again();
         }
+    }
+}
+
+/// Read the session directories Yardsort's own Grok launches write into, when asked to.
+/// Returns how many runs are still worth watching.
+fn read_session_files(
+    handle: &AppHandle,
+    state: &AppState,
+    cursors: &mut yardsort_core::activity::grok::Cursors,
+) -> usize {
+    if !state.settings.get().activity.capture_grok {
+        return 0;
+    }
+    let shell = state.env();
+    let home = yardsort_core::activity::grok::grok_home(&|name| {
+        std::env::var(name)
+            .ok()
+            .or_else(|| shell.vars.get(name).cloned())
+    });
+    let Some(home) = home else {
+        return 0;
+    };
+    let report = yardsort_core::activity::grok::import(&state.store, &home, cursors);
+    if !report.workspaces.is_empty() {
+        let _ = ActivityChanged {
+            workspace_ids: report.workspaces.into_iter().collect(),
+        }
+        .emit(handle);
+    }
+    report.watching
+}
+
+/// A launch happened: wake the watcher, so a harness whose files are read rather than delivered
+/// — Grok — is followed from its first line, not from the next unrelated event.
+pub fn launched(state: &AppState) {
+    if let Some(watcher) = state.inbox_watcher.lock().unwrap().as_ref() {
+        watcher.look_again();
     }
 }
 
@@ -54,9 +92,9 @@ const INBOX_QUIET: Duration = Duration::from_millis(200);
 const RETRY_DEFERRED: Duration = Duration::from_secs(5);
 
 /// How long the watcher's thread waits for a signal before draining on its own: forever when
-/// nothing was deferred, [`RETRY_DEFERRED`] otherwise.
-fn wait_for(deferred: usize) -> Option<Duration> {
-    (deferred > 0).then_some(RETRY_DEFERRED)
+/// nothing was deferred and no session file is being followed, [`RETRY_DEFERRED`] otherwise.
+fn wait_for(pending: usize) -> Option<Duration> {
+    (pending > 0).then_some(RETRY_DEFERRED)
 }
 
 /// Watches until dropped.
@@ -88,18 +126,27 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
     watcher.watch(&dir, RecursiveMode::NonRecursive)?;
     let data_dir = data_dir.to_path_buf();
     std::thread::spawn(move || {
-        let mut deferred = 0;
+        let mut pending = 0;
+        let mut cursors = yardsort_core::activity::grok::Cursors::new();
+        // The first pass does not wait: a Grok run left going when the window last closed has
+        // a directory to read now, and nothing else would say so.
+        let mut first = true;
         loop {
-            let woken = match wait_for(deferred) {
-                Some(wait) => match rx.recv_timeout(wait) {
-                    Ok(()) => true,
-                    Err(RecvTimeoutError::Timeout) => false,
-                    Err(RecvTimeoutError::Disconnected) => break,
-                },
-                None => match rx.recv() {
-                    Ok(()) => true,
-                    Err(_) => break,
-                },
+            let woken = if first {
+                first = false;
+                false
+            } else {
+                match wait_for(pending) {
+                    Some(wait) => match rx.recv_timeout(wait) {
+                        Ok(()) => true,
+                        Err(RecvTimeoutError::Timeout) => false,
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    },
+                    None => match rx.recv() {
+                        Ok(()) => true,
+                        Err(_) => break,
+                    },
+                }
             };
             if woken {
                 // Let the burst finish; whatever else arrives meanwhile is one drain.
@@ -116,7 +163,8 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
                 }
                 .emit(&handle);
             }
-            deferred = report.deferred;
+            let watching = read_session_files(&handle, &state, &mut cursors);
+            pending = report.deferred + watching;
         }
     });
     Ok(InboxWatcher {
@@ -311,6 +359,7 @@ pub async fn settings_save_activity(
     capture_claude: bool,
     capture_codex: bool,
     capture_opencode: bool,
+    capture_grok: bool,
 ) -> IpcResult<SettingsInfo> {
     blocking(app, move |state| {
         state
@@ -321,6 +370,7 @@ pub async fn settings_save_activity(
                 settings.activity.capture_claude = capture_claude;
                 settings.activity.capture_codex = capture_codex;
                 settings.activity.capture_opencode = capture_opencode;
+                settings.activity.capture_grok = capture_grok;
             })
             .map_err(|error| {
                 IpcError::new(

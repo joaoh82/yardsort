@@ -18,7 +18,7 @@
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
 │   ├─ assist       optional Jev judgments: diffs, composer hints    │
-│   ├─ activity     runs, events; Claude, Codex, OpenCode adapters │
+│   ├─ activity     runs, events; four harness adapters; inbox     │
 │   └─ store        SQLite (state) + settings file                   │
 └──────────────────────────────┬──────────────────┬──────────────────┘
                                │ local socket     │ shells out
@@ -369,6 +369,14 @@ runs inside OpenCode's process: it keeps a whitelist of fields from a few hooks 
 and hands each to the executable in hook mode on stdin. `ResolvedLaunch::env` is how a launch
 carries variables of its own. Producer `opencode`, method `plugin`. `--pure` means no plugin.
 See [13-agent-events-stage-2-opencode](13-agent-events-stage-2-opencode.md).
+
+**Grok** is given nothing. Its session directory, `$GROK_HOME/sessions/<encoded cwd>/<id>/`,
+holds an `events.jsonl` that is metadata by Grok's own design and a `usage.json` of tokens per
+turn; Yardsort chose `<id>` at launch and recorded it on the run, so `activity/grok.rs` finds
+the directory by id and reads it as it grows — from a cursor the app's inbox watcher keeps per
+run, on its tick while a Grok run is going and for ten minutes after it ends; `ys` reads it whole
+with the spool, the unique source keys making that harmless. Producer `grok`, method
+`session_file`. See [14-agent-events-stage-2-grok](14-agent-events-stage-2-grok.md).
 
 ## Assist (optional, off by default)
 

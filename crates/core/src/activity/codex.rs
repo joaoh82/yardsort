@@ -458,39 +458,7 @@ fn item_events(item: &Value, thread: &str, turn: &str, at: i64, cwd: Option<&str
     }
 }
 
-/// `2026-09-25T11:07:32.796Z` to epoch milliseconds. Only that shape: the session file's own.
-pub fn iso_to_ms(text: &str) -> Option<i64> {
-    let text = text.strip_suffix('Z')?;
-    let (date, time) = text.split_once('T')?;
-    let mut date = date.split('-').map(|p| p.parse::<i64>());
-    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
-    let (clock, fraction) = time.split_once('.').unwrap_or((time, ""));
-    let mut clock = clock.split(':').map(|p| p.parse::<i64>());
-    let (hour, minute, second) = (
-        clock.next()?.ok()?,
-        clock.next()?.ok()?,
-        clock.next()?.ok()?,
-    );
-    let millis: i64 = if fraction.is_empty() {
-        0
-    } else {
-        format!("{:0<3}", &fraction[..fraction.len().min(3)])
-            .parse()
-            .ok()?
-    };
-    // Days from civil, Howard Hinnant's algorithm.
-    let (y, m) = if month <= 2 {
-        (year - 1, month + 9)
-    } else {
-        (year, month - 3)
-    };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let doy = (153 * m + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    Some((((days * 24 + hour) * 60 + minute) * 60 + second) * 1000 + millis)
-}
+pub use super::iso_to_ms;
 
 #[cfg(test)]
 mod tests {
