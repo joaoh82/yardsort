@@ -120,6 +120,10 @@ pub struct ActivitySettings {
     pub record_lifecycle: bool,
     /// Show the experimental activity timeline in a workspace's footer.
     pub show_timeline: bool,
+    /// Give Yardsort's own launches of Claude Code a settings file whose hooks report what it
+    /// does — prompts, tools, turns, the session — as metadata. Off by default: it is the
+    /// agent's cooperation, asked for per launch, and needs `record_lifecycle`.
+    pub capture_claude: bool,
 }
 
 impl Default for ActivitySettings {
@@ -127,6 +131,7 @@ impl Default for ActivitySettings {
         Self {
             record_lifecycle: true,
             show_timeline: false,
+            capture_claude: false,
         }
     }
 }

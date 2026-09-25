@@ -11,6 +11,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
   const [saved, setSaved] = useState(initial);
   const [record, setRecord] = useState(initial.recordLifecycle);
   const [timeline, setTimeline] = useState(initial.showTimeline);
+  const [claude, setClaude] = useState(initial.captureClaude);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<ActivityDiagnostics | null>(null);
@@ -21,13 +22,18 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
     void loadDiagnostics();
   }, []);
 
-  const dirty = record !== saved.recordLifecycle || timeline !== saved.showTimeline;
+  const dirty =
+    record !== saved.recordLifecycle ||
+    timeline !== saved.showTimeline ||
+    claude !== saved.captureClaude;
   const save = async () => {
     setError(null);
     try {
       const info = await ipc.settingsSaveActivity({
         recordLifecycle: record,
         showTimeline: timeline,
+        // Capture needs recording: without a run there is nothing to link a report to.
+        captureClaude: claude && record,
       });
       setSaved(info.activity);
       useAppStore.setState({ showTimeline: info.activity.showTimeline });
@@ -54,7 +60,8 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
         <p className="text-ink-faint">
           A local record of what Yardsort itself saw: when an agent, shell or run command started in
           a workspace and how it ended. It is kept in your Yardsort database and never leaves this
-          machine. Nothing an agent prints or does is read.
+          machine. Nothing an agent prints is read; what an agent <em>reports</em> is a separate
+          switch, per agent, below.
         </p>
       </div>
       <label className="flex items-start gap-2">
@@ -91,6 +98,27 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
           </span>
         </span>
       </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={claude}
+          disabled={!record}
+          onChange={(e) => {
+            setClaude(e.target.checked);
+            setJustSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Capture what Claude Code reports
+          <span className="block text-ink-faint">
+            Claude Code started from Yardsort is given hooks that report each prompt, tool, turn and
+            session end — the tool&apos;s name and the file&apos;s path, never the prompt, the
+            command or the output. Your own Claude Code settings are not touched: the hooks ride on
+            a per-launch settings file and are gone when this is off.
+          </span>
+        </span>
+      </label>
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -115,6 +143,23 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
             title={diagnostics.spoolDir}
           >
             spool: {diagnostics.spoolDir}
+          </div>
+          <div>
+            {diagnostics.inboxPending > 0
+              ? `${diagnostics.inboxPending} reported event(s) waiting in the inbox.`
+              : "Nothing waiting in the agents' inbox."}
+          </div>
+          <div
+            className="truncate font-mono text-[11px] text-ink-faint"
+            title={diagnostics.inboxDir}
+          >
+            inbox: {diagnostics.inboxDir}
+          </div>
+          <div
+            className="truncate font-mono text-[11px] text-ink-faint"
+            title={diagnostics.claudeHooksFile}
+          >
+            Claude Code hooks: {diagnostics.claudeHooksFile}
           </div>
           {diagnostics.counters.length > 0 && (
             <ul className="text-[11px] text-ink-faint">

@@ -22,12 +22,12 @@ One **run** per process Yardsort starts in a workspace, and a few **events** for
 | `session.resumed`      | A recorded conversation was continued in a new process.                                                                                                                                                                                                                       |
 | `session.forked`       | A copy of a conversation was started, and which one it came from.                                                                                                                                                                                                             |
 
-What is **not** recorded, on purpose: your first message, the command line, anything the agent
-printed, the files it touched, tool calls, tokens. Those would need the agent's own cooperation,
-which a later stage may add, per agent and only if you turn it on. Until then the timeline says
-so: _nothing from inside the agent is recorded yet_. Every event names its source
-(`yardsort/lifecycle`) so that, when agent-reported events do arrive, you can tell "Yardsort saw
-the process end" from "the agent says it edited a file".
+What is **not** recorded here, on purpose: your first message, the command line, anything the
+agent printed, the files it touched, tool calls, tokens. Those need the agent's own cooperation,
+which Yardsort asks for per agent and only when you turn it on — today for
+[Claude Code](#what-claude-code-reports), nothing else. Every event names its source
+(`yardsort/lifecycle`, `claude/hook`) so you can tell "Yardsort saw the process end" from "the
+agent says it wrote a file".
 
 Activity is on by default, because it is only what Yardsort already knew; switch it off in
 [Settings → General](settings.md#general) and nothing new is written. What is already recorded
@@ -41,6 +41,54 @@ workspace's events, with **Show earlier** to page back, **Refresh**, **Clear** f
 workspace, and a note on what the list covers.
 
 It is experimental: the words and the layout will change as later stages add more to show.
+While Claude Code is reporting, the list moves as the agent works; you do not have to press
+**Refresh**.
+
+## What Claude Code reports
+
+Switch on **Capture what Claude Code reports** in Settings → General (it needs **Record when
+agents start and exit**, and is off by default) and every Claude Code that Yardsort starts —
+from the composer, the tab bar, Resume, Fork or `ys` — reports what it does, in its own words:
+
+| Timeline row                                                                     | What Claude Code said                                                                                                      |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| _agent session started_, _agent resumed its session_, _agent forked its session_ | Its session began, and how. On a resume, how many tokens of context it picked up.                                          |
+| _prompt submitted · 147 characters_                                              | You sent a message. The length, never the text.                                                                            |
+| _Edit started_, _Edit done · src/app.rs · 12 ms_                                 | A tool ran: its name, the file's path relative to the workspace (or _a file outside the workspace_), and how long it took. |
+| _Bash started_, _Bash done_                                                      | A command ran. The command itself is not recorded.                                                                         |
+| _Agent (Explore) started_                                                        | It started a subagent, of that type.                                                                                       |
+| _Read failed_, _Bash denied_, _permission asked for Bash_                        | A tool failed, was refused, or is waiting for your yes. No error text, no command.                                         |
+| _agent raised a notification · permission_prompt_                                | It wants you: a permission prompt, or it has been idle waiting for input.                                                  |
+| _agent finished its turn_ / _agent's turn failed · rate_limit_                   | The turn ended, or ended in an error of that kind.                                                                         |
+| _agent compacted its context_, _agent switched model_                            | Housekeeping it did.                                                                                                       |
+| _agent session ended_                                                            | It is shutting down, and why.                                                                                              |
+
+The run's own _claude started_ row says _reporting through hooks_ when this was on for it, so a
+quiet timeline means the agent had nothing to say, not that nobody was listening.
+
+**How it works, and what it touches.** Claude Code has _hooks_: commands it runs at points in its
+own life, handing them a description of the moment. Yardsort gives its own launches of Claude
+Code one extra settings file (`claude --settings <file>`, kept under `activity/hooks/` in your
+data directory) whose hooks run the Yardsort executable itself, as an argument list, never
+through a shell. Claude Code merges that file with your settings, so **your own hooks and
+settings are untouched** — nothing is written to `~/.claude`, and a launch made while the switch
+is off has none of ours. The hook keeps the moment's metadata, drops the rest before anything
+reaches disk, leaves one small file in `activity/inbox/`, and exits — with a success code
+whatever happened, because a hook that fails can make Claude Code stop and ask, and Yardsort
+only watches. The app takes the inbox in as files land, on start, and on every exit; `ys` takes
+it in before it lists anything. It works while the window is closed, exactly like the exit
+spool.
+
+**What is kept, and what is not.** Names, ids, relative paths, durations, counts, kinds. Not the
+prompt, not a command, not a tool's input or output, not what Claude wrote back, not a path
+outside the workspace. The recorded shapes come from Claude Code **2.1.280**; a newer version
+that renames a field loses that detail, not the event. Claude Code started by any other means —
+from your own terminal, say — reports nothing to Yardsort. A Claude Code harness whose arguments
+already carry `--settings` or `--bare` is left alone, and the timeline's settings show a
+`hooks_not_armed` counter so you know.
+
+Other agents stay at what Yardsort itself sees. Which ones could report, and how, is in the
+[design note](../design/11-agent-events-stage-2-claude.md#4--coverage-honestly).
 
 ## Exits while Yardsort is closed
 
@@ -73,19 +121,23 @@ scripts get a different pair, `YARDSORT_PROJECT` and `YARDSORT_WORKSPACE`, which
 ## Keeping it small
 
 Yardsort keeps the newest 20 000 events and nothing older than 90 days, pruning when it starts.
+The agents' inbox holds at most 10 000 reports waiting to be taken in; past that, reports are
+dropped and counted.
 **Clear all recorded activity** in Settings → General forgets everything at once; the timeline's
 **Clear** forgets one workspace. Deleting a workspace, or forgetting one without keeping its
 history, takes its activity with it, exactly as it takes the conversations. Runs still going are
 never cleared, so their exit can still be matched when it comes.
 
-Settings → General also shows how much is recorded, where the spool is and whether anything is
-waiting in it, and counters for anything that went wrong while recording — a write that failed,
-a spool file that could not be read. Recording is never allowed to get in the way: if the
-database cannot take a row, the agent starts anyway and the failure is counted here.
+Settings → General also shows how much is recorded, where the spool and the inbox are and whether
+anything is waiting in them, where the Claude Code hooks file is, and counters for anything that
+went wrong while recording — a write that failed, a spool file that could not be read, a report
+that named a run this database does not have (`inbox_unlinked`: it is dropped rather than
+guessed at). Recording is never allowed to get in the way: if the database cannot take a row,
+the agent starts anyway and the failure is counted here.
 
 ## From the command line
 
 `ys activity list` prints the newest events (`--workspace` for one workspace, `--limit N`,
 `--json`), and `ys activity export` writes every event as NDJSON — one JSON object per line, the
-same fields the app sees — for whatever you want to do with it. `ys doctor` reports the counts
-and the spool. See [The `ys` command line](cli.md#ys-activity-list).
+same fields the app sees — for whatever you want to do with it. `ys doctor` reports the counts,
+the spool and the inbox. See [The `ys` command line](cli.md#ys-activity-list).

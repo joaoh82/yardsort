@@ -1,0 +1,11 @@
+{
+  "session_id": "22222222-2222-4222-8222-222222222222",
+  "transcript_path": "/home/user/.claude/projects/-tmp-yardsort-fixture-repo/22222222-2222-4222-8222-222222222222.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "hook_event_name": "SessionStart",
+  "source": "fork",
+  "seconds_since_last_response": 1,
+  "context_tokens": 29763,
+  "prompt_cache_likely_expired": false,
+  "estimated_cache_write_usd": 0.0595
+}

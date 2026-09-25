@@ -142,13 +142,13 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
 
 ## Agent events
 
-20. **Which native surface first, per harness?** Stage 1 of
-    [09-agent-events-and-memory](09-agent-events-and-memory.md) records only what Yardsort itself
-    sees. The coverage matrix in [10 §6](10-agent-events-stage-1.md#6--stage-0-baseline-and-the-stage-2-coverage-matrix)
-    is a reading of each CLI's `--help` on one day, not fixtures. The lean: Claude Code hooks first
-    (documented, and the CLI shows a hook mechanism), recorded as fixtures for the exact version
-    before an installer is written; Codex second, choosing between its trust-gated hooks and its
-    session files once samples exist; OpenCode's plugin third. OMP, Cursor, Grok and Pi stay
-    lifecycle-only until someone finds a stable surface. Not decided: whether an adapter's
-    receiver lives in the app process or in the daemon, which the fit report deliberately left
-    for after the owner/crash boundary was tested.
+20. **Which native surface first, per harness?** **Partly settled 2026-09-25: Claude Code's hooks
+    first, and they shipped** — see [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md).
+    The fixtures came first, as the lean said; the "installer" turned out to be no installer at
+    all, a per-launch `--settings` file Claude Code merges with the user's own. The receiver
+    question is settled the same way the exit spool was: neither the app process nor the daemon,
+    but an inbox of files the hook writes and any client drains, so it works with the window
+    closed and the daemon is still storage-free. Still open, in the order the lean gave: Codex
+    second, choosing between its trust-gated hooks and its session files once samples exist;
+    OpenCode's plugin third. OMP, Cursor, Grok and Pi stay lifecycle-only until someone finds a
+    stable surface.

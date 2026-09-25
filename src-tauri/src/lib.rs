@@ -36,6 +36,7 @@ mod workspaces {
     pub use yardsort_core::workspaces::*;
 }
 
+pub use yardsort_core::activity::hook::run_hook_and_exit_if_asked;
 pub use yardsort_core::daemon::run_daemon_and_exit_if_asked;
 pub use yardsort_core::env::print_env_and_exit_if_asked;
 
@@ -129,6 +130,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             terminal::PtyHostEvent,
             changes::commands::WorkspaceFilesChanged,
+            activity::ActivityChanged,
             quit::QuitRequested
         ])
 }
@@ -245,13 +247,27 @@ pub fn run() {
                                 yardsort_core::activity::Via::Live,
                             );
                             // The daemon kept this exit for us too; take it out of the spool
-                            // now rather than find it as a duplicate at the next start.
+                            // now rather than find it as a duplicate at the next start. And
+                            // an agent's last hooks ran just before it exited.
                             yardsort_core::activity::import_spool(&state.store, &spool_root);
+                            activity::drain_inbox(&handle, &state.store, &spool_root);
                         }
                     }
                     let _ = terminal::PtyHostEvent(event).emit(&handle);
                 }),
             );
+            // What agents reported while no window was open.
+            let inbox = yardsort_core::activity::import_inbox(&store, &data_dir);
+            if inbox.imported > 0 || inbox.unlinked > 0 || inbox.unreadable > 0 || inbox.dropped > 0 {
+                eprintln!(
+                    "activity inbox: {} imported, {} duplicate, {} unlinked, {} unreadable, {} dropped",
+                    inbox.imported,
+                    inbox.duplicates,
+                    inbox.unlinked,
+                    inbox.unreadable,
+                    inbox.dropped
+                );
+            }
             // Exits the daemon kept while no window was open come first: a conversation that
             // ended cleanly in the meantime must keep its exit code rather than be counted as
             // interrupted below.
@@ -286,6 +302,15 @@ pub fn run() {
                 store,
                 settings,
             ));
+
+            // Hooks write to the inbox whenever an agent does something; watch it, so the
+            // timeline moves while the agent works rather than when it exits.
+            match activity::watch_inbox(app.handle().clone(), &data_dir) {
+                Ok(watcher) => {
+                    *app.state::<state::AppState>().inbox_watcher.lock().unwrap() = Some(watcher);
+                }
+                Err(error) => eprintln!("not watching the activity inbox: {error}"),
+            }
 
             // Warm the login-shell environment now, so the first terminal doesn't wait for it.
             let handle = app.handle().clone();

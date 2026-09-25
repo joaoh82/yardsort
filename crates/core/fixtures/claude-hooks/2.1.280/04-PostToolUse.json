@@ -1,0 +1,20 @@
+{
+  "session_id": "11111111-1111-4111-8111-111111111111",
+  "transcript_path": "/home/user/.claude/projects/-tmp-yardsort-fixture-repo/11111111-1111-4111-8111-111111111111.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "prompt_id": "53ecea32-a99c-483f-9a76-d859619e4265",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": { "file_path": "/tmp/yardsort-fixture/repo/hello.txt", "content": "hello" },
+  "tool_response": {
+    "type": "create",
+    "filePath": "/tmp/yardsort-fixture/repo/hello.txt",
+    "content": "hello",
+    "structuredPatch": [],
+    "originalFile": null,
+    "userModified": false
+  },
+  "tool_use_id": "toolu_01AQAx1rsDGUM6NAeePkNtJT",
+  "duration_ms": 3
+}

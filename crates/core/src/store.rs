@@ -741,6 +741,22 @@ impl Store {
             .optional()?)
     }
 
+    /// The newest run recorded under a harness's own session id, an open one first: the
+    /// fallback key for a reported event whose environment did not name its run.
+    pub fn run_by_harness_session(&self, harness_session_id: &str) -> StoreResult<Option<RunRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT {RUN_COLUMNS} FROM agent_runs WHERE harness_session_id = ?
+                     ORDER BY (ended_at IS NULL) DESC, started_at DESC, rowid DESC LIMIT 1"
+                ),
+                [harness_session_id],
+                run_from_row,
+            )
+            .optional()?)
+    }
+
     /// A workspace's runs, most recently started first.
     pub fn runs(&self, workspace_id: &str) -> StoreResult<Vec<RunRow>> {
         let conn = self.conn();

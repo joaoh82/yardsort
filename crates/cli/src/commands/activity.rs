@@ -179,6 +179,34 @@ fn details(payload: &serde_json::Value) -> String {
     if let Some(program) = text("harnessId").or_else(|| text("program")) {
         parts.push(program);
     }
+    // What an agent reported: the tool and the file, a duration, the source of a session.
+    if let Some(tool) = text("tool") {
+        parts.push(match text("path") {
+            Some(path) => format!("{tool} {path}"),
+            None => tool,
+        });
+    }
+    if let Some(ms) = payload.get("durationMs").and_then(|v| v.as_i64()) {
+        parts.push(format!("{ms} ms"));
+    }
+    for key in [
+        "source",
+        "decision",
+        "type",
+        "errorType",
+        "agentType",
+        "model",
+    ] {
+        if let Some(value) = text(key) {
+            parts.push(value);
+        }
+    }
+    if let Some(chars) = payload.get("chars").and_then(|v| v.as_i64()) {
+        parts.push(format!("{chars} chars"));
+    }
+    if let Some(capture) = text("capture") {
+        parts.push(format!("reporting via {capture}"));
+    }
     if let Some(continuation) = text("continuation").filter(|c| c != "fresh") {
         parts.push(continuation);
     }
@@ -222,5 +250,13 @@ mod tests {
         assert_eq!(details(&interrupted), "interrupted, via reconcile");
         let failed = serde_json::json!({"program": "claude", "reason": "not found"});
         assert_eq!(details(&failed), "claude, not found");
+        let tool = serde_json::json!({"tool": "Edit", "path": "src/a.rs", "durationMs": 12});
+        assert_eq!(details(&tool), "Edit src/a.rs, 12 ms");
+        let started = serde_json::json!({"source": "resume", "contextTokens": 29241});
+        assert_eq!(details(&started), "resume");
+        let prompt = serde_json::json!({"promptId": "p", "chars": 40});
+        assert_eq!(details(&prompt), "40 chars");
+        let hooked = serde_json::json!({"harnessId": "claude", "capture": "hook"});
+        assert_eq!(details(&hooked), "claude, reporting via hook");
     }
 }

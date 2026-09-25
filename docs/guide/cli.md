@@ -193,8 +193,12 @@ array with the event's full payload.
 ```
 WHEN                  WORKSPACE      EVENT            SOURCE              DETAILS
 2026-09-24 20:44:15Z  fix-the-login  process.exited   yardsort/lifecycle  exit 0, via spool
-2026-09-24 20:43:58Z  fix-the-login  process.started  yardsort/lifecycle  claude, opus
+2026-09-24 20:44:02Z  fix-the-login  tool.completed   claude/hook         Edit src/login.rs, 12 ms
+2026-09-24 20:43:58Z  fix-the-login  process.started  yardsort/lifecycle  claude, opus, reporting via hook
 ```
+
+Rows from `claude/hook` are what Claude Code itself reported, when
+[capture](activity.md#what-claude-code-reports) is on; the rest is what Yardsort saw.
 
 Any `ys` command that reads the daemon first takes the exits it kept while nothing was
 connected into the database, so a `session list` after an agent finished on its own says `ended`
@@ -209,8 +213,9 @@ else exports it.
 ### `ys doctor`
 
 Where `ys` is looking and whether it can get there: the data directory, the database, the daemon,
-which agents are on your `PATH`, how much activity is recorded, and where the exit spool is and
-whether anything is waiting in it. The first thing to run when `ys` and the app seem to disagree.
+which agents are on your `PATH`, how much activity is recorded, and where the exit spool and the
+agents' inbox are and whether anything is waiting in them. The first thing to run when `ys` and
+the app seem to disagree.
 
 ## Profiles
 

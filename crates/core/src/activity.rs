@@ -27,6 +27,12 @@ use serde_json::json;
 use crate::settings::ActivitySettings;
 use crate::store::{NewEvent, NewRun, RunRow, Store, StoreResult};
 
+pub mod claude;
+pub mod hook;
+pub mod inbox;
+
+use inbox::{Inbox, InboxEntry};
+
 /// The shape of every event this module writes. Bumped when a payload changes shape.
 pub const SCHEMA_VERSION: u16 = 1;
 pub const PRODUCER: &str = "yardsort";
@@ -52,6 +58,12 @@ pub const RECORD_ENV: &str = "YARDSORT_SESSION_RECORD_ID";
 /// throwaway profile's activity stays with the profile.
 pub fn spool_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("activity").join("spool")
+}
+
+/// Where an agent's hooks leave what they report, for the next client to take in. See
+/// [`inbox`].
+pub fn inbox_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("activity").join("inbox")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,8 +194,16 @@ impl<'a> Recorder<'a> {
         .map(|()| id)
     }
 
-    /// The host spawned the process: attach the PTY id and record the start.
-    pub fn spawned(&self, run_id: &str, draft: &RunDraft, pty_session_id: &str) {
+    /// The host spawned the process: attach the PTY id and record the start. `capture` names
+    /// the native source this run was given — `hook`, for a Claude Code launch with hooks — so
+    /// a reader of the timeline can tell a run that could report from one that could not.
+    pub fn spawned(
+        &self,
+        run_id: &str,
+        draft: &RunDraft,
+        pty_session_id: &str,
+        capture: Option<&str>,
+    ) {
         attempt(self.store, "run_spawned", || {
             self.store.run_spawned(run_id, pty_session_id)
         });
@@ -196,6 +216,7 @@ impl<'a> Recorder<'a> {
             "continuation": draft.continuation.as_str(),
             "launchedBy": self.launched_by.as_str(),
             "ptySessionId": pty_session_id,
+            "capture": capture,
         });
         self.event(
             draft,
@@ -530,6 +551,141 @@ fn adopt_early_exit(
     record_exit(store, pty_session_id, exit, Via::Spool)
 }
 
+/// What draining the inbox found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InboxReport {
+    /// Events recorded for the first time.
+    pub imported: usize,
+    /// Entries already in the database: another client drained the same file first.
+    pub duplicates: usize,
+    /// Entries naming no run and no workspace this database knows. Counted, then dropped —
+    /// an event that cannot be placed is not shown somewhere it might not belong.
+    pub unlinked: usize,
+    /// Files that could not be read; they are removed and counted.
+    pub unreadable: usize,
+    /// Entries a hook had to drop because the inbox was full.
+    pub dropped: u64,
+    /// The workspaces that gained events, for whoever is showing one.
+    pub workspaces: std::collections::BTreeSet<String>,
+}
+
+/// Drain the agents' inbox into the store: every event a hook left is linked to its run and
+/// written once, and the file removed. Safe from any client at any time; two draining at once
+/// make duplicates, not damage. An entry the database refuses is left for the next drain.
+pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
+    let inbox = Inbox::new(inbox_dir(data_dir));
+    let mut report = InboxReport::default();
+    let entries = match inbox.entries() {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("could not read the activity inbox: {error}");
+            let _ = store.bump_diagnostic("inbox_unreadable", Some(&error.to_string()));
+            return report;
+        }
+    };
+    for path in entries {
+        let entry = match Inbox::read(&path) {
+            Ok(entry) => entry,
+            Err(error) => {
+                eprintln!(
+                    "dropping unreadable inbox entry {}: {error}",
+                    path.display()
+                );
+                let _ = store.bump_diagnostic("inbox_unreadable", Some(&error.to_string()));
+                report.unreadable += 1;
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+        };
+        match link(store, &entry) {
+            Some(link) => {
+                let source_key = format!("inbox:{}", entry.id);
+                let payload = entry.payload.to_string();
+                let added = attempt(store, &entry.kind, || {
+                    store.add_event(&NewEvent {
+                        id: &entry.id,
+                        schema_version: SCHEMA_VERSION,
+                        workspace_id: &link.workspace_id,
+                        session_id: link.session_id.as_deref(),
+                        run_id: link.run_id.as_deref(),
+                        occurred_at: entry.at_ms,
+                        kind: &entry.kind,
+                        producer: &entry.producer,
+                        method: &entry.method,
+                        fidelity: &entry.fidelity,
+                        source_key: Some(&source_key),
+                        privacy_class: &entry.privacy_class,
+                        payload: &payload,
+                    })
+                });
+                match added {
+                    Some(true) => {
+                        report.imported += 1;
+                        report.workspaces.insert(link.workspace_id);
+                    }
+                    Some(false) => report.duplicates += 1,
+                    // The database would not take it now; the file stays for the next drain.
+                    None => continue,
+                }
+            }
+            None => {
+                report.unlinked += 1;
+                let _ = store.bump_diagnostic("inbox_unlinked", Some(&entry.kind));
+            }
+        }
+        if let Err(error) = std::fs::remove_file(&path) {
+            eprintln!("could not remove inbox entry {}: {error}", path.display());
+        }
+    }
+    report.dropped = inbox.take_dropped();
+    if report.dropped > 0 {
+        let _ = store.bump_diagnostic("inbox_dropped", Some(&report.dropped.to_string()));
+    }
+    report
+}
+
+/// Where a reported event belongs.
+struct Link {
+    workspace_id: String,
+    session_id: Option<String>,
+    run_id: Option<String>,
+}
+
+/// Place an entry: by the run the launcher named, if its environment reached the hook; else by
+/// the agent's own session id, which the launcher recorded when it chose it; else by the
+/// workspace alone. Never by a working directory — a path is not an identity.
+fn link(store: &Store, entry: &InboxEntry) -> Option<Link> {
+    let record = entry
+        .session_record_id
+        .as_deref()
+        .filter(|id| matches!(store.session(id), Ok(Some(_))))
+        .map(str::to_owned);
+    let from_run = |run: RunRow| Link {
+        workspace_id: run.workspace_id,
+        session_id: run.session_id.or_else(|| record.clone()),
+        run_id: Some(run.id),
+    };
+    if let Some(run_id) = &entry.run_id {
+        if let Ok(Some(run)) = store.run(run_id) {
+            return Some(from_run(run));
+        }
+    }
+    if let Some(native) = &entry.native_session_id {
+        if let Ok(Some(run)) = store.run_by_harness_session(native) {
+            return Some(from_run(run));
+        }
+    }
+    let workspace_id = entry.workspace_id.as_deref()?;
+    if !matches!(store.workspace(workspace_id), Ok(Some(_))) {
+        return None;
+    }
+    Some(Link {
+        workspace_id: workspace_id.to_owned(),
+        session_id: record,
+        run_id: None,
+    })
+}
+
 /// Keep the tables bounded. Returns how many events were removed.
 pub fn prune(store: &Store) -> usize {
     let removed = attempt(store, "prune_activity", || {
@@ -626,7 +782,7 @@ mod tests {
         assert_eq!((pending.pty_session_id, pending.session_id), (None, None));
         assert!(kinds(&store, &ws).is_empty(), "nothing has happened yet");
 
-        recorder.spawned(&run_id, &draft, "pty-1");
+        recorder.spawned(&run_id, &draft, "pty-1", None);
         store
             .add_session(&NewSession {
                 id: "rec-1",
@@ -667,7 +823,7 @@ mod tests {
         let recorder = recorder(&store);
         let draft = harness_draft(&ws);
         let run_id = recorder.begin(&draft).unwrap();
-        recorder.spawned(&run_id, &draft, "pty-1");
+        recorder.spawned(&run_id, &draft, "pty-1", None);
 
         let exit = ExitFacts {
             code: Some(3),
@@ -749,7 +905,7 @@ mod tests {
             ..harness_draft(&ws)
         };
         let run = recorder.begin(&resume).unwrap();
-        recorder.spawned(&run, &resume, "pty-2");
+        recorder.spawned(&run, &resume, "pty-2", None);
         assert_eq!(
             store.run(&run).unwrap().unwrap().session_id.as_deref(),
             Some("rec-1")
@@ -762,7 +918,7 @@ mod tests {
             ..harness_draft(&ws)
         };
         let run = recorder.begin(&fork).unwrap();
-        recorder.spawned(&run, &fork, "pty-3");
+        recorder.spawned(&run, &fork, "pty-3", None);
 
         assert_eq!(
             kinds(&store, &ws),
@@ -785,7 +941,7 @@ mod tests {
             &store,
             &ActivitySettings {
                 record_lifecycle: false,
-                show_timeline: false,
+                ..Default::default()
             },
             LaunchedBy::Cli,
         );
@@ -860,7 +1016,7 @@ mod tests {
         let recorder = recorder(&store);
         let draft = harness_draft(&ws);
         let run_id = recorder.begin(&draft).unwrap();
-        recorder.spawned(&run_id, &draft, "pty-1");
+        recorder.spawned(&run_id, &draft, "pty-1", None);
         store
             .add_session(&NewSession {
                 id: "rec-1",
@@ -924,7 +1080,7 @@ mod tests {
         let recorder = recorder(&store);
         let draft = harness_draft(&ws);
         let run_id = recorder.begin(&draft).unwrap();
-        recorder.spawned(&run_id, &draft, "pty-1");
+        recorder.spawned(&run_id, &draft, "pty-1", None);
         store
             .add_session(&NewSession {
                 id: "rec-1",
@@ -1001,7 +1157,7 @@ mod tests {
         );
 
         // The launcher now catches up: its own link is a no-op, and its settle a duplicate.
-        recorder.spawned(&run_id, &draft, "pty-early");
+        recorder.spawned(&run_id, &draft, "pty-early", None);
         let settle = ExitFacts {
             code: Some(7),
             success: false,
@@ -1024,9 +1180,9 @@ mod tests {
         let recorder = recorder(&store);
         let draft = harness_draft(&ws);
         let dead = recorder.begin(&draft).unwrap();
-        recorder.spawned(&dead, &draft, "pty-dead");
+        recorder.spawned(&dead, &draft, "pty-dead", None);
         let alive = recorder.begin(&draft).unwrap();
-        recorder.spawned(&alive, &draft, "pty-alive");
+        recorder.spawned(&alive, &draft, "pty-alive", None);
         let pending = recorder.begin(&draft).unwrap();
 
         assert_eq!(end_interrupted(&store, &["pty-alive".to_owned()]), 1);
@@ -1059,7 +1215,7 @@ mod tests {
         for n in 0..5 {
             let draft = harness_draft(&ws);
             let id = recorder.begin(&draft).unwrap();
-            recorder.spawned(&id, &draft, &format!("pty-{n}"));
+            recorder.spawned(&id, &draft, &format!("pty-{n}"), None);
             let exit = ExitFacts {
                 code: Some(0),
                 success: true,
@@ -1095,9 +1251,9 @@ mod tests {
         let recorder = recorder(&store);
         let draft = harness_draft(&ws);
         let open = recorder.begin(&draft).unwrap();
-        recorder.spawned(&open, &draft, "pty-open");
+        recorder.spawned(&open, &draft, "pty-open", None);
         let done = recorder.begin(&draft).unwrap();
-        recorder.spawned(&done, &draft, "pty-done");
+        recorder.spawned(&done, &draft, "pty-done", None);
         let exit = ExitFacts {
             code: Some(0),
             success: true,
@@ -1125,7 +1281,7 @@ mod tests {
         let recorder = recorder(&store);
         let draft = harness_draft(&ws);
         let run = recorder.begin(&draft).unwrap();
-        recorder.spawned(&run, &draft, "pty-1");
+        recorder.spawned(&run, &draft, "pty-1", None);
         store
             .add_session(&NewSession {
                 id: "rec-1",
@@ -1156,7 +1312,7 @@ mod tests {
         for n in 0..6 {
             let draft = harness_draft(&ws);
             let id = recorder.begin(&draft).unwrap();
-            recorder.spawned(&id, &draft, &format!("pty-{n}"));
+            recorder.spawned(&id, &draft, &format!("pty-{n}"), None);
         }
         let first = store.events(&ws, None, 4).unwrap();
         assert_eq!(first.len(), 4);
@@ -1170,5 +1326,136 @@ mod tests {
             rest[1].seq,
             "oldest first"
         );
+    }
+
+    fn inbox_entry(id: &str, kind: &str) -> InboxEntry {
+        InboxEntry {
+            version: inbox::INBOX_VERSION,
+            id: id.into(),
+            at_ms: 1_790_000_000_000,
+            producer: claude::PRODUCER.into(),
+            method: claude::METHOD.into(),
+            fidelity: claude::FIDELITY.into(),
+            run_id: None,
+            workspace_id: None,
+            session_record_id: None,
+            native_session_id: None,
+            kind: kind.into(),
+            privacy_class: PRIVACY_METADATA.into(),
+            payload: json!({ "tool": "Read", "path": "a.rs" }),
+        }
+    }
+
+    #[test]
+    fn inbox_entries_are_placed_by_run_then_by_the_agents_session_then_by_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let recorder = recorder(&store);
+        let draft = harness_draft(&ws);
+        let run_id = recorder.begin(&draft).unwrap();
+        recorder.spawned(&run_id, &draft, "pty-1", Some(claude::METHOD));
+        store
+            .add_session(&NewSession {
+                id: "rec-1",
+                workspace_id: &ws,
+                harness_id: "claude",
+                harness_session_id: Some("h-1"),
+                title: "",
+                pty_session_id: "pty-1",
+                ..Default::default()
+            })
+            .unwrap();
+        recorder.link_session(&run_id, "rec-1");
+        let inbox = Inbox::new(inbox_dir(dir.path()));
+
+        // The environment made it through: the run is named.
+        let mut by_run = inbox_entry("e-run", "tool.started");
+        by_run.run_id = Some(run_id.clone());
+        inbox.record(&by_run).unwrap();
+        // It did not, but the agent's own session id is one the launcher recorded.
+        let mut by_native = inbox_entry("e-native", "tool.completed");
+        by_native.native_session_id = Some("h-1".into());
+        inbox.record(&by_native).unwrap();
+        // Neither, but the workspace is known: placed there, without a run.
+        let mut by_ws = inbox_entry("e-ws", "turn.completed");
+        by_ws.workspace_id = Some(ws.clone());
+        inbox.record(&by_ws).unwrap();
+        // Nothing this database knows: dropped and counted, never guessed.
+        let mut stray = inbox_entry("e-stray", "session.ended");
+        stray.run_id = Some("run-from-another-profile".into());
+        stray.workspace_id = Some("ws-from-another-profile".into());
+        stray.native_session_id = Some("h-unknown".into());
+        inbox.record(&stray).unwrap();
+
+        let report = import_inbox(&store, dir.path());
+        assert_eq!(
+            (
+                report.imported,
+                report.duplicates,
+                report.unlinked,
+                report.unreadable
+            ),
+            (3, 0, 1, 0)
+        );
+        assert_eq!(report.workspaces.iter().collect::<Vec<_>>(), [&ws]);
+        assert!(
+            inbox.entries().unwrap().is_empty(),
+            "drained, strays included"
+        );
+
+        let events = store.all_events(Some(&ws)).unwrap();
+        let find = |id: &str| events.iter().find(|e| e.id == id).unwrap();
+        let placed = find("e-run");
+        assert_eq!(placed.run_id.as_deref(), Some(run_id.as_str()));
+        assert_eq!(placed.session_id.as_deref(), Some("rec-1"));
+        assert_eq!(
+            (
+                placed.producer.as_str(),
+                placed.method.as_str(),
+                placed.fidelity.as_str()
+            ),
+            ("claude", "hook", "reported")
+        );
+        assert_eq!(
+            placed.occurred_at, 1_790_000_000_000,
+            "the hook's clock, not the drain's"
+        );
+        assert_eq!(placed.source_key.as_deref(), Some("inbox:e-run"));
+        assert_eq!(find("e-native").run_id.as_deref(), Some(run_id.as_str()));
+        assert_eq!(find("e-ws").run_id, None);
+        assert_eq!(find("e-ws").session_id, None);
+        assert!(events.iter().all(|e| e.id != "e-stray"));
+        assert!(store
+            .diagnostics()
+            .unwrap()
+            .iter()
+            .any(|d| d.name == "inbox_unlinked" && d.count == 1));
+
+        // The run's start says it could report.
+        let started = events.iter().find(|e| e.kind == "process.started").unwrap();
+        assert_eq!(payload(started)["capture"], "hook");
+    }
+
+    #[test]
+    fn an_inbox_entry_drained_twice_is_one_event_and_a_bad_file_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let inbox = Inbox::new(inbox_dir(dir.path()));
+        let mut entry = inbox_entry("e-1", "tool.started");
+        entry.workspace_id = Some(ws.clone());
+        inbox.record(&entry).unwrap();
+        assert_eq!(import_inbox(&store, dir.path()).imported, 1);
+        // Another client read the same file before this one removed it.
+        inbox.record(&entry).unwrap();
+        let again = import_inbox(&store, dir.path());
+        assert_eq!((again.imported, again.duplicates), (0, 1));
+        assert_eq!(store.all_events(Some(&ws)).unwrap().len(), 1);
+
+        std::fs::write(inbox.dir().join("0000000000001-junk.json"), b"{not json").unwrap();
+        let junk = import_inbox(&store, dir.path());
+        assert_eq!(junk.unreadable, 1);
+        assert!(inbox.entries().unwrap().is_empty());
     }
 }

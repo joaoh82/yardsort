@@ -2,9 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    // Both of these can take over the process entirely, before Tauri is touched: this executable
-    // doubles as the environment probe and as the terminal daemon.
+    // Each of these can take over the process entirely, before Tauri is touched: this
+    // executable doubles as the environment probe, as the terminal daemon, and as the hook an
+    // agent runs to report what it is doing.
     yardsort_lib::print_env_and_exit_if_asked();
     yardsort_lib::run_daemon_and_exit_if_asked();
+    yardsort_lib::run_hook_and_exit_if_asked();
     yardsort_lib::run()
 }

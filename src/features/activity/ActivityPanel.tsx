@@ -1,13 +1,13 @@
 import { useEffect } from "react";
-import type { ActivityEvent } from "@/lib/ipc";
+import { ipc, type ActivityEvent } from "@/lib/ipc";
 import { useActivityStore } from "@/stores/activity";
 import { describeEvent, eventTime } from "./describe";
 
 /**
  * The experimental activity timeline: what Yardsort itself recorded about a workspace's
- * processes — starts, exits, resumes and forks — newest first. Every row says where it came
- * from, because later stages will add events reported by the agents themselves, and a reader
- * must be able to tell "Yardsort saw the process end" from "the agent says it edited a file".
+ * processes — starts, exits, resumes and forks — and, when capture is on, what Claude Code
+ * reported through its hooks, newest first. Every row says where it came from, so a reader can
+ * tell "Yardsort saw the process end" from "the agent says it wrote a file".
  */
 export function ActivityPanel({
   workspaceId,
@@ -25,6 +25,16 @@ export function ActivityPanel({
     void load(workspaceId);
   }, [workspaceId, load]);
 
+  // Hooks land while the agent works; the core says which workspaces gained events.
+  useEffect(() => {
+    const unlisten = ipc.onActivityChanged((ids) => {
+      if (ids.includes(workspaceId)) void useActivityStore.getState().refresh(workspaceId);
+    });
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, [workspaceId]);
+
   const events = timeline?.events ?? [];
   return (
     <section
@@ -34,8 +44,8 @@ export function ActivityPanel({
       <header className="flex h-7 shrink-0 items-center gap-3 border-b border-line px-3">
         <h2 className="font-semibold">Activity</h2>
         <span className="text-ink-faint">
-          Experimental · what Yardsort saw from outside: starts and exits. Nothing from inside the
-          agent is recorded yet.
+          Experimental · starts and exits Yardsort saw, and what Claude Code reports when capture is
+          on in Settings. Each row names its source.
         </span>
         <span className="flex-1" />
         <button

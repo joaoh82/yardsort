@@ -204,16 +204,25 @@ export const ipc = {
     ),
 
   settingsSaveActivity: (activity: ActivitySettingsDto) =>
-    unwrap(commands.settingsSaveActivity(activity.recordLifecycle, activity.showTimeline)),
+    unwrap(
+      commands.settingsSaveActivity(
+        activity.recordLifecycle,
+        activity.showTimeline,
+        activity.captureClaude,
+      ),
+    ),
 
   /**
    * A page of a workspace's recorded activity, newest first: events before `beforeSeq`, or the
-   * newest when it is null. What Yardsort itself saw — starts and exits — nothing from inside
-   * the agent.
+   * newest when it is null. What Yardsort itself saw — starts and exits — and, when capture is
+   * on, what Claude Code reported through its hooks. Every event says which.
    */
   activityTimeline: (workspaceId: string, beforeSeq: number | null = null, limit = 50) =>
     unwrap(commands.activityTimeline(workspaceId, beforeSeq, limit)),
-  /** How much is recorded, where the exit spool is, and what went wrong recording. */
+  /** New events were recorded for these workspaces: a timeline showing one should reload. */
+  onActivityChanged: (handler: (workspaceIds: string[]) => void) =>
+    events.activityChanged.listen((event) => handler(event.payload.workspaceIds)),
+  /** How much is recorded, where the spool and the inbox are, and what went wrong recording. */
   activityDiagnostics: () => unwrap(commands.activityDiagnostics()),
   /** Forget recorded activity: one workspace's, or all of it for `null`. */
   activityClear: (workspaceId: string | null) => done(commands.activityClear(workspaceId)),

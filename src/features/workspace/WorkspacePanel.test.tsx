@@ -6,6 +6,7 @@ import { harness, project, worktree } from "@/test/fixtures";
 const core = vi.hoisted(() => ({
   ptySpawn: vi.fn(),
   activityTimeline: vi.fn(),
+  onActivityChanged: vi.fn(),
   projectAutomationGet: vi.fn(),
   workspaceRun: vi.fn(),
   ptyList: vi.fn(),
@@ -60,6 +61,7 @@ beforeEach(() => {
   useHarnessStore.setState({ harnesses: [harness("claude")], loaded: true });
   useAppStore.setState({ showTimeline: false });
   core.activityTimeline.mockResolvedValue({ events: [], hasMore: false });
+  core.onActivityChanged.mockResolvedValue(() => {});
 });
 
 describe("the activity timeline", () => {

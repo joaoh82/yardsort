@@ -95,6 +95,7 @@ pub(crate) fn with_launcher<T>(state: &AppState, f: impl FnOnce(&Launcher<'_>) -
         harnesses: &settings.harnesses,
         activity: &settings.activity,
         launched_by: yardsort_core::activity::LaunchedBy::App,
+        data_dir: &state.data_dir,
     })
 }
 

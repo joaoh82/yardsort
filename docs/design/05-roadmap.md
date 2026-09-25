@@ -395,6 +395,31 @@ _Exit:_ app/CLI launch, resume, fork, two workspaces, immediate exit, closed-win
 duplicate delivery and a broken table all covered by tests that fail without the change; `just
 check` and `just bindings-check` green; no PTY byte or input path touched.
 
+## M12 — Agent events, stage 2: Claude Code ✅
+
+The first native adapter, recorded in [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md).
+
+- `scripts/record-claude-hooks.sh` and twenty real payloads from Claude Code 2.1.280 under
+  `crates/core/fixtures/claude-hooks/`: fresh, resumed and forked sessions, a failed tool; the
+  launcher's environment shown to reach the hook.
+- `activity/claude.rs`: a per-launch `--settings` file whose hooks run the Yardsort executable as
+  an argument list; `normalize()` keeps metadata only. `activity/hook.rs`: the `--yardsort-hook`
+  mode in both binaries, always exit 0. `activity/inbox.rs`: the spool's twin for reports.
+- `Launcher` arms a recorded `claude` launch when `capture_claude` is on; the run's start says
+  `capture: "hook"`. The app drains on start, exit and inbox change; `ys` with the spool.
+- Settings → General switch (off by default), inbox diagnostics, the timeline's words for
+  reported events and a live reload, `ys doctor` and `ys activity list` rows.
+- Coverage: sessions, prompts, tools, permissions, turns, subagents, compaction and model
+  switches for Claude Code; token usage is not available through hooks. Everything else stays
+  lifecycle-only.
+
+_Exit:_ every fixture maps and leaks nothing; arming rules, the hook binary end to end, inbox
+placement by run / native session / workspace, double drains and bad files covered by tests that
+fail without the change; `just check`, `just bindings-check`, `just lint-windows` green; a real
+Claude Code launched through `ys` on Linux seen reporting live — which is how the `--settings`
+placement bug was found before it shipped. The app-window rows, macOS and Windows are in
+[08 §12](08-manual-checklist.md#12--claude-code-reporting).
+
 _Result:_ 2026-09-24, Linux. Rust: 184 core tests (11 new in `activity.rs`, 7 in `launch.rs`
 against a real `PtyHost` and a plan-catching host), 3 new spool unit tests, a real-daemon test in
 `pty-ipc/tests/daemon.rs` (exit spooled after the only client left, live exit spooled too), 2

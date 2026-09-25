@@ -92,6 +92,8 @@ impl Yardsort {
     /// the records say and what happened agree. Cheap when there is nothing there, which is
     /// nearly always; done whenever a command is about to ask the daemon anything.
     pub fn drain_spool(&self) -> yardsort_core::activity::ImportReport {
+        // What agents' hooks reported since anyone last looked comes in at the same time.
+        yardsort_core::activity::import_inbox(&self.store, &self.data_dir);
         yardsort_core::activity::import_spool(&self.store, &self.data_dir)
     }
 

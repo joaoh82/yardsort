@@ -80,7 +80,7 @@ const settings: SettingsInfo = {
   worktreeRootOverride: null,
   filePath: "/home/me/.config/yardsort/settings.toml",
   problem: null,
-  activity: { recordLifecycle: true, showTimeline: false },
+  activity: { recordLifecycle: true, showTimeline: false, captureClaude: false },
 };
 
 const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
@@ -122,6 +122,9 @@ describe("Settings", () => {
       spoolDir: "/tmp/ys/activity/spool",
       spoolPending: 0,
       counters: [],
+      inboxDir: "/tmp/ys/activity/inbox",
+      inboxPending: 0,
+      claudeHooksFile: "/tmp/ys/activity/hooks/claude.json",
     });
     core.harnessesList.mockResolvedValue([claude, codex]);
     core.harnessPreview.mockImplementation(async (def: HarnessDef) => ({
