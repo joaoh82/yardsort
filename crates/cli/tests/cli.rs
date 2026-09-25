@@ -566,6 +566,7 @@ fn activity_is_listed_as_a_table_as_json_and_exported_as_ndjson() {
             code: Some(4),
             success: false,
             signal: None,
+            at: None,
         },
         yardsort_core::activity::Via::Live,
     );

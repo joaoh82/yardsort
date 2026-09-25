@@ -51,7 +51,8 @@ started, the conversation was listed as _interrupted_ even though it had ended c
 Now the background process keeps every exit in a small **spool** — one file per exit, under
 `activity/spool/` in your data directory — and whichever client connects next, the app or `ys`,
 takes them into the database and empties it. The conversation is then shown as ended with its
-real exit code, and the timeline says the exit came `via spool`. The spool is capped at 2 000
+real exit code and the time it actually ended, on the background process's clock — not the time
+you next opened Yardsort — and the timeline says the exit came `via spool`. The spool is capped at 2 000
 entries; past that, exits are dropped and counted, never allowed to fill a disk.
 
 ## What the program is told

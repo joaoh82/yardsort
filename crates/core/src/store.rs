@@ -586,6 +586,17 @@ impl Store {
         pty_session_id: &str,
         exit_code: Option<i64>,
     ) -> StoreResult<Option<String>> {
+        self.end_session_by_pty_at(pty_session_id, exit_code, now_ms())
+    }
+
+    /// [`Self::end_session_by_pty`], with the moment the process ended as whoever saw it
+    /// reports it — the daemon's clock for an exit kept in its spool overnight.
+    pub fn end_session_by_pty_at(
+        &self,
+        pty_session_id: &str,
+        exit_code: Option<i64>,
+        ended_at: i64,
+    ) -> StoreResult<Option<String>> {
         let conn = self.conn();
         let id: Option<String> = conn
             .query_row(
@@ -598,7 +609,7 @@ impl Store {
             conn.execute(
                 "UPDATE sessions SET state = 'ended', exit_code = ?, pty_session_id = NULL, ended_at = ?
                  WHERE id = ?",
-                params![exit_code, now_ms(), id],
+                params![exit_code, ended_at, id],
             )?;
         }
         Ok(id)
@@ -777,12 +788,14 @@ impl Store {
         )? > 0)
     }
 
-    /// End the run behind a PTY session, once. Returns the run it was, if it was still open.
+    /// End the run behind a PTY session, once, at `ended_at` — the reporter's clock, not this
+    /// one's. Returns the run it was, if it was still open.
     pub fn end_run_by_pty(
         &self,
         pty_session_id: &str,
         exit_code: Option<i64>,
         end_reason: &str,
+        ended_at: i64,
     ) -> StoreResult<Option<RunRow>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -799,7 +812,7 @@ impl Store {
         if let Some(run) = &open {
             tx.execute(
                 "UPDATE agent_runs SET ended_at = ?, exit_code = ?, end_reason = ? WHERE id = ?",
-                params![now_ms(), exit_code, end_reason, run.id],
+                params![ended_at, exit_code, end_reason, run.id],
             )?;
         }
         tx.commit()?;

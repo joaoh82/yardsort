@@ -310,6 +310,9 @@ pub struct ExitFacts {
     pub code: Option<i64>,
     pub success: bool,
     pub signal: Option<String>,
+    /// When it ended, on the clock of whoever saw it: the daemon's, for an exit it kept while
+    /// no window was open. `None` means now — the exit is being seen as it happens.
+    pub at: Option<i64>,
 }
 
 impl From<&ExitInfo> for ExitFacts {
@@ -318,6 +321,7 @@ impl From<&ExitInfo> for ExitFacts {
             code: Some(i64::from(exit.code)),
             success: exit.success,
             signal: exit.signal.clone(),
+            at: None,
         }
     }
 }
@@ -341,12 +345,13 @@ pub fn record_exit(store: &Store, pty_session_id: &str, exit: &ExitFacts, via: V
     } else {
         "interrupted"
     };
+    let at = exit.at.unwrap_or_else(crate::store::now_ms);
     let ended = attempt(store, "end_run_by_pty", || {
-        store.end_run_by_pty(pty_session_id, exit.code, reason)
+        store.end_run_by_pty(pty_session_id, exit.code, reason, at)
     });
     match ended {
         Some(Some(run)) => {
-            write_exit(store, &run, exit, reason, via);
+            write_exit(store, &run, exit, reason, via, at);
             Recorded::New
         }
         Some(None) => match store.run_by_pty(pty_session_id) {
@@ -360,7 +365,14 @@ pub fn record_exit(store: &Store, pty_session_id: &str, exit: &ExitFacts, via: V
     }
 }
 
-fn write_exit(store: &Store, run: &RunRow, exit: &ExitFacts, reason: &str, via: Via) {
+fn write_exit(
+    store: &Store,
+    run: &RunRow,
+    exit: &ExitFacts,
+    reason: &str,
+    via: Via,
+    occurred_at: i64,
+) {
     let source_key = match &run.pty_session_id {
         Some(pty) => format!("pty:{pty}:exited"),
         None => format!("run:{}:exited", run.id),
@@ -379,7 +391,7 @@ fn write_exit(store: &Store, run: &RunRow, exit: &ExitFacts, reason: &str, via: 
             workspace_id: &run.workspace_id,
             session_id: run.session_id.as_deref(),
             run_id: Some(&run.id),
-            occurred_at: crate::store::now_ms(),
+            occurred_at,
             kind: "process.exited",
             producer: PRODUCER,
             method: METHOD_LIFECYCLE,
@@ -404,9 +416,11 @@ pub fn end_interrupted(store: &Store, alive: &[String]) -> usize {
         code: None,
         success: false,
         signal: None,
+        at: None,
     };
+    let now = crate::store::now_ms();
     for run in &gone {
-        write_exit(store, run, &interrupted, "interrupted", Via::Reconcile);
+        write_exit(store, run, &interrupted, "interrupted", Via::Reconcile, now);
     }
     gone.len()
 }
@@ -456,9 +470,24 @@ pub fn import_spool(store: &Store, data_dir: &Path) -> ImportReport {
             }
         };
         let pty = entry.session.0.as_str();
+        // The daemon's clock: this may be hours after the fact, and the event must not say the
+        // agent finished the moment somebody looked.
+        let at = i64::try_from(entry.at_ms).unwrap_or(i64::MAX);
+        let facts = ExitFacts {
+            at: Some(at),
+            ..ExitFacts::from(&entry.exit)
+        };
         // The session record first, as the app's live handler does: it is what Resume reads.
-        let _ = store.end_session_by_pty(pty, Some(i64::from(entry.exit.code)));
-        match record_exit(store, pty, &ExitFacts::from(&entry.exit), Via::Spool) {
+        let _ = store.end_session_by_pty_at(pty, facts.code, at);
+        let mut recorded = record_exit(store, pty, &facts, Via::Spool);
+        if recorded == Recorded::NoRun {
+            // A process can end before its launcher has attached the PTY id to the run it wrote
+            // beforehand — a shell that exits at once, say — and a client draining the spool in
+            // that gap would otherwise throw the only copy of the exit away. The entry names
+            // the run, so the link is made here instead, and the launcher finds it done.
+            recorded = adopt_early_exit(store, &entry.labels, pty, &facts);
+        }
+        match recorded {
             Recorded::New => report.imported += 1,
             Recorded::Duplicate => report.duplicates += 1,
             Recorded::NoRun => report.unmatched += 1,
@@ -474,6 +503,31 @@ pub fn import_spool(store: &Store, data_dir: &Path) -> ImportReport {
         let _ = store.bump_diagnostic("spool_dropped", Some(&report.dropped.to_string()));
     }
     report
+}
+
+/// A spooled exit for a PTY no run has yet: if its labels name a run that is still waiting for
+/// its PTY id, attach the id and record the exit against it.
+fn adopt_early_exit(
+    store: &Store,
+    labels: &std::collections::BTreeMap<String, String>,
+    pty_session_id: &str,
+    exit: &ExitFacts,
+) -> Recorded {
+    let Some(run_id) = labels.get(crate::launch::RUN_LABEL) else {
+        return Recorded::NoRun;
+    };
+    let pending = match store.run(run_id) {
+        Ok(Some(run)) if run.pty_session_id.is_none() && run.ended_at.is_none() => run,
+        _ => return Recorded::NoRun,
+    };
+    if attempt(store, "run_spawned", || {
+        store.run_spawned(&pending.id, pty_session_id)
+    })
+    .is_none()
+    {
+        return Recorded::NoRun;
+    }
+    record_exit(store, pty_session_id, exit, Via::Spool)
 }
 
 /// Keep the tables bounded. Returns how many events were removed.
@@ -619,6 +673,7 @@ mod tests {
             code: Some(3),
             success: false,
             signal: None,
+            at: None,
         };
         assert_eq!(
             record_exit(&store, "pty-1", &exit, Via::Live),
@@ -740,6 +795,7 @@ mod tests {
             code: Some(0),
             success: true,
             signal: None,
+            at: None,
         };
         assert_eq!(
             record_exit(&store, "pty-1", &exit, Via::Live),
@@ -760,6 +816,7 @@ mod tests {
             code: Some(0),
             success: true,
             signal: None,
+            at: None,
         };
         assert_eq!(
             record_exit(&store, "pty-1", &exit, Via::Live),
@@ -857,6 +914,109 @@ mod tests {
         assert_eq!(kinds(&store, &ws), ["process.started", "process.exited"]);
     }
 
+    /// An agent that finishes overnight finished overnight, not when somebody opened the window
+    /// the next morning: the daemon's clock is what the event, the run and the record keep.
+    #[test]
+    fn a_spooled_exit_keeps_the_time_the_daemon_saw_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let recorder = recorder(&store);
+        let draft = harness_draft(&ws);
+        let run_id = recorder.begin(&draft).unwrap();
+        recorder.spawned(&run_id, &draft, "pty-1");
+        store
+            .add_session(&NewSession {
+                id: "rec-1",
+                workspace_id: &ws,
+                harness_id: "claude",
+                title: "",
+                pty_session_id: "pty-1",
+                ..Default::default()
+            })
+            .unwrap();
+        recorder.link_session(&run_id, "rec-1");
+
+        let overnight: u64 = 1_700_000_000_000;
+        spool_entry(dir.path(), overnight, "pty-1", 0);
+        assert_eq!(import_spool(&store, dir.path()).imported, 1);
+
+        let exited = store.events(&ws, None, 1).unwrap().remove(0);
+        assert_eq!(exited.kind, "process.exited");
+        assert_eq!(exited.occurred_at, overnight as i64);
+        assert!(
+            exited.received_at > exited.occurred_at,
+            "received now, occurred then"
+        );
+        assert_eq!(
+            store.run(&run_id).unwrap().unwrap().ended_at,
+            Some(overnight as i64)
+        );
+        assert_eq!(
+            store.session("rec-1").unwrap().unwrap().ended_at,
+            Some(overnight as i64)
+        );
+    }
+
+    /// The launcher writes the run, spawns, and only then attaches the PTY id. A process that
+    /// exits inside that gap, with another client draining the spool at that moment, must not
+    /// lose its only copy of the exit: the entry names the run, so the link is made here.
+    #[test]
+    fn an_exit_spooled_before_the_pty_was_linked_still_settles_its_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let recorder = recorder(&store);
+        let draft = harness_draft(&ws);
+        let run_id = recorder.begin(&draft).unwrap();
+
+        let spool = Spool::new(spool_dir(dir.path()));
+        let entry = |at, pty: &str, run: &str, code| SpoolEntry {
+            version: SPOOL_VERSION,
+            at_ms: at,
+            daemon_pid: 1,
+            session: SessionId(pty.into()),
+            labels: [(crate::launch::RUN_LABEL.to_owned(), run.to_owned())]
+                .into_iter()
+                .collect(),
+            exit: ExitInfo {
+                code,
+                success: code == 0,
+                signal: None,
+            },
+        };
+        spool.record(&entry(10, "pty-early", &run_id, 7)).unwrap();
+        spool
+            .record(&entry(11, "pty-orphan", "no-such-run", 1))
+            .unwrap();
+
+        let report = import_spool(&store, dir.path());
+        assert_eq!((report.imported, report.unmatched), (1, 1));
+        assert!(spool.entries().unwrap().is_empty(), "both consumed");
+        let run = store.run(&run_id).unwrap().unwrap();
+        assert_eq!(run.pty_session_id.as_deref(), Some("pty-early"));
+        assert_eq!(
+            (run.exit_code, run.end_reason.as_deref()),
+            (Some(7), Some("exited"))
+        );
+
+        // The launcher now catches up: its own link is a no-op, and its settle a duplicate.
+        recorder.spawned(&run_id, &draft, "pty-early");
+        let settle = ExitFacts {
+            code: Some(7),
+            success: false,
+            signal: None,
+            at: None,
+        };
+        assert_eq!(
+            record_exit(&store, "pty-early", &settle, Via::Settle),
+            Recorded::Duplicate
+        );
+        let mut kinds = kinds(&store, &ws);
+        kinds.sort();
+        assert_eq!(kinds, ["process.exited", "process.started"]);
+    }
+
     #[test]
     fn runs_whose_process_is_gone_are_interrupted_and_young_pending_ones_are_left_alone() {
         let store = Store::in_memory();
@@ -904,6 +1064,7 @@ mod tests {
                 code: Some(0),
                 success: true,
                 signal: None,
+                at: None,
             };
             record_exit(&store, &format!("pty-{n}"), &exit, Via::Live);
             runs.push(id);
@@ -941,6 +1102,7 @@ mod tests {
             code: Some(0),
             success: true,
             signal: None,
+            at: None,
         };
         record_exit(&store, "pty-done", &exit, Via::Live);
 

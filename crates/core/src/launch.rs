@@ -219,6 +219,22 @@ impl Launcher<'_> {
             Ok(session) => {
                 if let Some(run_id) = &run_id {
                     recorder.spawned(run_id, draft, &session.id.0);
+                    // The process may be gone already — a shell script that exits at once — in
+                    // which case its exit was announced to a PTY id nothing was linked to yet.
+                    // Ask now, for every kind of launch; the conversation's record gets the same
+                    // treatment from `settle_record` once it exists.
+                    if let Ok(SessionInfo {
+                        state: pty_host::SessionState::Exited { exit },
+                        ..
+                    }) = self.host.info(&session.id)
+                    {
+                        activity::record_exit(
+                            self.store,
+                            &session.id.0,
+                            &activity::ExitFacts::from(&exit),
+                            activity::Via::Settle,
+                        );
+                    }
                 }
                 Ok((session, run_id))
             }
@@ -578,13 +594,18 @@ mod tests {
     }
 
     /// A host that spawns nothing and keeps the plans it was given, for looking at what a
-    /// launch would have run with.
-    struct PlanCatcher(std::sync::Mutex<Vec<LaunchPlan>>);
+    /// launch would have run with. With `exited` set, every session it is asked about has
+    /// already ended that way — the process that was gone before the spawn even returned.
+    #[derive(Default)]
+    struct PlanCatcher {
+        plans: std::sync::Mutex<Vec<LaunchPlan>>,
+        exited: Option<pty_host::ExitInfo>,
+    }
 
     impl TerminalHost for PlanCatcher {
         fn spawn(&self, plan: LaunchPlan) -> pty_host::Result<SessionInfo> {
             let info = SessionInfo {
-                id: pty_host::SessionId(format!("fake-{}", self.0.lock().unwrap().len())),
+                id: pty_host::SessionId(format!("fake-{}", self.plans.lock().unwrap().len())),
                 program: plan.program.clone(),
                 args: plan.args.clone(),
                 cwd: plan.cwd.clone(),
@@ -596,7 +617,7 @@ mod tests {
                 busy: false,
                 idle_ms: 0,
             };
-            self.0.lock().unwrap().push(plan);
+            self.plans.lock().unwrap().push(plan);
             Ok(info)
         }
         fn attach(
@@ -629,7 +650,22 @@ mod tests {
             unimplemented!()
         }
         fn info(&self, id: &pty_host::SessionId) -> pty_host::Result<SessionInfo> {
-            Err(pty_host::HostError::UnknownSession(id.clone()))
+            let Some(exit) = &self.exited else {
+                return Err(pty_host::HostError::UnknownSession(id.clone()));
+            };
+            Ok(SessionInfo {
+                id: id.clone(),
+                program: String::new(),
+                args: Vec::new(),
+                cwd: None,
+                pid: None,
+                size: TermSize::DEFAULT,
+                labels: Default::default(),
+                state: pty_host::SessionState::Exited { exit: exit.clone() },
+                has_output: true,
+                busy: false,
+                idle_ms: 0,
+            })
         }
         fn list(&self) -> Vec<SessionInfo> {
             Vec::new()
@@ -706,7 +742,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::in_memory();
         let ws = workspace_in(dir.path(), &store);
-        let host = PlanCatcher(Default::default());
+        let host = PlanCatcher::default();
         let env = process_env();
         let harnesses = [shell_harness()];
         let activity = ActivitySettings::default();
@@ -727,7 +763,7 @@ mod tests {
         let run_id = session.labels[RUN_LABEL].clone();
         let record_id = session.labels[RECORD_LABEL].clone();
 
-        let plan = host.0.lock().unwrap().remove(0);
+        let plan = host.plans.lock().unwrap().remove(0);
         let var = |name: &str| {
             plan.env
                 .iter()
@@ -765,12 +801,59 @@ mod tests {
         assert_eq!(events[0].session_id.as_deref(), Some(record_id.as_str()));
     }
 
+    /// A shell or run command has no session record, so nothing called `settle_record` for it:
+    /// a script that exited before the spawn returned stayed an open run until the next start
+    /// called it interrupted. Every recorded launch is settled now.
+    #[test]
+    fn a_launch_that_has_already_ended_when_the_spawn_returns_is_settled_whatever_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher {
+            exited: Some(pty_host::ExitInfo {
+                code: 9,
+                success: false,
+                signal: None,
+            }),
+            ..Default::default()
+        };
+        let env = process_env();
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &[], &activity);
+
+        launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
+        let run = &store.runs(&ws).unwrap()[0];
+        assert_eq!(run.kind, "shell");
+        assert_eq!(
+            (run.exit_code, run.end_reason.as_deref()),
+            (Some(9), Some("exited"))
+        );
+        let kinds: Vec<_> = store
+            .events(&ws, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.kind, e.payload.contains("\"via\":\"settle\"")))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("process.exited".to_owned(), true),
+                ("process.started".to_owned(), false)
+            ]
+        );
+        assert_eq!(
+            activity::end_interrupted(&store, &[]),
+            0,
+            "nothing left to call interrupted"
+        );
+    }
+
     #[test]
     fn a_shell_and_a_run_command_are_runs_too_but_a_launch_outside_a_workspace_is_not() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::in_memory();
         let ws = workspace_in(dir.path(), &store);
-        let host = PlanCatcher(Default::default());
+        let host = PlanCatcher::default();
         let env = process_env();
         let activity = ActivitySettings::default();
         let launcher = launcher(&store, &host, &env, &[], &activity);
@@ -792,7 +875,7 @@ mod tests {
             ["program", "shell"],
             "newest first, nothing for the outsider"
         );
-        let plans = host.0.lock().unwrap();
+        let plans = host.plans.lock().unwrap();
         assert!(plans[2].env.iter().all(|(k, _)| k != activity::RUN_ENV));
     }
 
@@ -801,7 +884,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::in_memory();
         let ws = workspace_in(dir.path(), &store);
-        let host = PlanCatcher(Default::default());
+        let host = PlanCatcher::default();
         let env = process_env();
         let activity = ActivitySettings::default();
         let launcher = launcher(&store, &host, &env, &[], &activity);
@@ -830,7 +913,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::in_memory();
         let ws = workspace_in(dir.path(), &store);
-        let host = PlanCatcher(Default::default());
+        let host = PlanCatcher::default();
         let env = process_env();
         let activity = ActivitySettings {
             record_lifecycle: false,
@@ -840,7 +923,7 @@ mod tests {
         let session = launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
         assert!(!session.labels.contains_key(RUN_LABEL));
         assert!(store.runs(&ws).unwrap().is_empty());
-        let plan = host.0.lock().unwrap().remove(0);
+        let plan = host.plans.lock().unwrap().remove(0);
         assert!(plan.env.iter().all(|(k, _)| k != activity::RUN_ENV));
         assert!(
             plan.env.iter().any(|(k, _)| k == activity::WORKSPACE_ENV),
