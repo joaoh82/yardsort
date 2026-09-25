@@ -262,61 +262,7 @@ fn tool_path(input: Option<&Value>, cwd: Option<&str>) -> (Option<String>, bool)
     else {
         return (None, false);
     };
-    // Without the workspace to measure against, no path can be called inside it.
-    let Some(cwd) = cwd else {
-        return (None, true);
-    };
-    let root = normalized(std::iter::empty(), cwd);
-    let full = if is_absolute(path) {
-        normalized(std::iter::empty(), path)
-    } else {
-        normalized(root.iter().map(String::as_str), path)
-    };
-    // Only a drive-lettered path is compared without case: Windows does not distinguish
-    // `C:\Repo` from `C:\repo`, but on Linux `/work/REPO` is another directory altogether.
-    let windows = root.first().is_some_and(|first| first.ends_with(':'));
-    let same = |a: &String, b: &String| {
-        if windows {
-            a.eq_ignore_ascii_case(b)
-        } else {
-            a == b
-        }
-    };
-    let inside = full.len() >= root.len() && root.iter().zip(&full).all(|(a, b)| same(a, b));
-    if !inside {
-        return (None, true);
-    }
-    let relative = full[root.len()..].join("/");
-    if relative.is_empty() {
-        return (Some(".".to_owned()), false);
-    }
-    (Some(relative), false)
-}
-
-fn is_absolute(path: &str) -> bool {
-    path.starts_with('/')
-        || path.starts_with('\\')
-        || path.get(1..3).is_some_and(|s| s == ":\\" || s == ":/")
-}
-
-/// The components of `path` after `base`, with `.` dropped and `..` resolved lexically — so a
-/// path that climbs out of the workspace and back into somewhere else is seen for where it
-/// ends up, not for how it was spelled. Both separators count; a drive letter is a component.
-fn normalized<'a>(base: impl Iterator<Item = &'a str>, path: &'a str) -> Vec<String> {
-    let mut parts: Vec<String> = base.map(str::to_owned).collect();
-    for part in path.split(['/', '\\']) {
-        match part {
-            "" | "." => {}
-            ".." => {
-                // A drive letter is the floor on Windows, as the root is elsewhere.
-                if parts.last().is_some_and(|last| !last.ends_with(':')) {
-                    parts.pop();
-                }
-            }
-            other => parts.push(other.to_owned()),
-        }
-    }
-    parts
+    super::workspace_relative(path, cwd)
 }
 
 #[cfg(test)]

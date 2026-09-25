@@ -18,7 +18,7 @@
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
 │   ├─ assist       optional Jev judgments: diffs, composer hints    │
-│   ├─ activity     runs, lifecycle events, Claude hooks; spool+inbox│
+│   ├─ activity     runs, events; Claude hooks, Codex notify; inbox │
 │   └─ store        SQLite (state) + settings file                   │
 └──────────────────────────────┬──────────────────┬──────────────────┘
                                │ local socket     │ shells out
@@ -350,6 +350,16 @@ never by path; the app drains on start, on every exit and on a `notify` watch of
 emitting `ActivityChanged`; `ys` drains with the spool. Producer `claude`, method `hook`, fidelity
 `reported`. Nothing of the user's Claude Code configuration is touched, and the daemon knows
 nothing of any of it. See [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md).
+
+**Codex** takes the same road with a different first step. Its hooks are trust-gated, so a
+recorded `codex` launch is given `-c notify=[<exe>, "--yardsort-hook", "codex", <inbox>, …]`
+instead — Codex runs that at the end of every turn, as an argument list, with the turn's ids as
+the last argument — and the hook leaves a _trigger_ in the inbox. The drain (`activity/codex.rs`)
+reads the turn out of Codex's own session file under `CODEX_HOME/sessions/`: commands with exit
+codes and durations, file changes with paths, MCP calls, token usage, turn timing; each fact
+with its own source key, so a turn read twice is one row per fact. A turn the file has not
+finished is retried for five minutes, then recorded from the trigger alone. Producer `codex`,
+method `session_file` (or `notify`). See [12-agent-events-stage-2-codex](12-agent-events-stage-2-codex.md).
 
 ## Assist (optional, off by default)
 

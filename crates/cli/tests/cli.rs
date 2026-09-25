@@ -744,3 +744,76 @@ fn the_binary_is_a_hook_that_leaves_an_entry_the_next_command_takes_in() {
     assert_eq!(report["inboxPending"], 0);
     assert_eq!(report["inboxDir"].as_str(), Some(&*inbox.to_string_lossy()));
 }
+
+/// `ys --yardsort-hook codex <inbox> <payload>` is what Codex's `notify` runs at the end of a
+/// turn: the payload as the last argument, the launcher's ids in the environment. The next `ys`
+/// command reads the turn out of Codex's session file — here, the fixture, placed where Codex
+/// keeps them under a throwaway `CODEX_HOME` — and the commands, the file and the tokens are on
+/// the timeline.
+#[test]
+fn the_binary_as_codex_notify_leaves_a_trigger_the_next_command_expands_from_the_session_file() {
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    drop(store);
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/fixtures/codex")
+        .join(yardsort_core::activity::codex::FIXTURE_VERSION);
+    let codex_home = fx.data_dir.join("codex-home");
+    let day = codex_home.join("sessions/2026/09/25");
+    std::fs::create_dir_all(&day).unwrap();
+    std::fs::copy(
+        fixtures.join("rollout.jsonl"),
+        day.join("rollout-2026-09-25T13-07-32-01a0d83f-c3ea-7ae0-88df-82c9431d3f8b.jsonl"),
+    )
+    .unwrap();
+    let notify = std::fs::read_to_string(fixtures.join("notify/01.json")).unwrap();
+    let inbox = yardsort_core::activity::inbox_dir(&fx.data_dir);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .arg(yardsort_core::activity::hook::HOOK_FLAG)
+        .arg("codex")
+        .arg(&inbox)
+        .arg(&notify)
+        .env(yardsort_core::activity::WORKSPACE_ENV, &workspace.id)
+        .env("CODEX_HOME", &codex_home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 1);
+
+    let json = fx.ys(&["activity", "list", "--json", "--limit", "20"]).ok();
+    let events: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let kinds: Vec<&str> = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"file.reported_write"), "{kinds:?}");
+    assert!(kinds.contains(&"usage.reported"), "{kinds:?}");
+    assert!(kinds.contains(&"tool.failed"), "{kinds:?}");
+    let turn = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "turn.completed")
+        .unwrap();
+    assert_eq!(turn["producer"], "codex");
+    assert_eq!(turn["method"], "session_file");
+    assert_eq!(turn["workspaceId"], workspace.id);
+    assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0, "drained");
+
+    let table = fx.ys(&["activity", "list"]).ok();
+    assert!(table.contains("codex/session_file"), "{table}");
+    assert!(table.contains("add hello.txt"), "{table}");
+    assert!(table.contains("29842 tokens"), "{table}");
+    assert!(!table.contains("cat hello.txt"), "no command text: {table}");
+}

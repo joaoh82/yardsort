@@ -217,23 +217,34 @@ impl Launcher<'_> {
         if let Some(run_id) = &run_id {
             resolved.labels.insert(RUN_LABEL.to_owned(), run_id.clone());
         }
-        // A recorded Claude Code launch, when asked, is given hooks that report what it does.
-        // Only a recorded one: a run is what the reports are linked to. Refused hooks are a
-        // counted diagnostic, and the launch goes ahead without them.
-        let capture = run_id
-            .as_ref()
-            .filter(|_| self.activity.capture_claude)
-            .filter(|_| draft.harness_id.as_deref() == Some(activity::claude::HARNESS_ID))
-            .and_then(
-                |_| match activity::claude::arm(&mut resolved.args, self.data_dir) {
-                    Ok(_) => Some(activity::claude::METHOD),
-                    Err(why) => {
-                        eprintln!("activity: Claude Code hooks not armed: {why}");
-                        let _ = self.store.bump_diagnostic("hooks_not_armed", Some(&why));
-                        None
-                    }
-                },
-            );
+        // A recorded launch of a harness with an adapter, when asked, is given the means to
+        // report what it does. Only a recorded one: a run is what the reports are linked to. A
+        // refusal is a counted diagnostic, and the launch goes ahead without.
+        let capture = run_id.as_ref().and_then(|_| {
+            let armed = match draft.harness_id.as_deref() {
+                Some(activity::claude::HARNESS_ID) if self.activity.capture_claude => (
+                    activity::claude::arm(&mut resolved.args, self.data_dir).map(|_| ()),
+                    activity::claude::METHOD,
+                ),
+                Some(activity::codex::HARNESS_ID) if self.activity.capture_codex => {
+                    let home =
+                        activity::codex::codex_home(&|name| self.env.vars.get(name).cloned());
+                    (
+                        activity::codex::arm(&mut resolved.args, self.data_dir, home.as_deref()),
+                        activity::codex::METHOD_NOTIFY,
+                    )
+                }
+                _ => return None,
+            };
+            match armed {
+                (Ok(()), method) => Some(method),
+                (Err(why), _) => {
+                    eprintln!("activity: {} not armed: {why}", draft.program);
+                    let _ = self.store.bump_diagnostic("hooks_not_armed", Some(&why));
+                    None
+                }
+            }
+        });
         match self.start(resolved, cwd, size) {
             Ok(session) => {
                 if let Some(run_id) = &run_id {
@@ -1265,5 +1276,82 @@ mod tests {
             .unwrap()
             .iter()
             .any(|d| d.name == "hooks_not_armed"));
+    }
+
+    #[test]
+    fn a_codex_launch_is_given_notify_when_asked_and_only_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let (command, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let harnesses = [HarnessOverride {
+            id: "codex".into(),
+            command: Some(command.into()),
+            prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
+            ..Default::default()
+        }];
+        let request = || {
+            Launch::Harness(HarnessRequest {
+                id: "codex".into(),
+                model: None,
+                effort: Some("high".into()),
+                prompt: Some("exit 0".into()),
+            })
+        };
+        let on = ActivitySettings {
+            capture_codex: true,
+            ..Default::default()
+        };
+        let armed = launcher(&store, &host, &env, &harnesses, &on, dir.path());
+        armed.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        let notify = plan
+            .args
+            .iter()
+            .find(|arg| arg.starts_with("notify="))
+            .expect("a notify override");
+        let value: toml::Value = toml::from_str(notify).unwrap();
+        let argv = value["notify"].as_array().unwrap();
+        assert_eq!(argv[1].as_str(), Some(activity::hook::HOOK_FLAG));
+        assert_eq!(argv[2].as_str(), Some("codex"));
+        assert_eq!(
+            argv[3].as_str(),
+            Some(activity::inbox_dir(dir.path()).to_string_lossy().as_ref())
+        );
+        let at = plan.args.iter().position(|a| a == notify).unwrap();
+        assert_eq!(plan.args[at - 1], "-c");
+        assert!(
+            plan.args
+                .contains(&"model_reasoning_effort=\"high\"".to_owned()),
+            "the effort override is still there: {:?}",
+            plan.args
+        );
+        let started = store
+            .all_events(Some(&ws))
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "process.started")
+            .unwrap();
+        assert!(
+            started.payload.contains(r#""capture":"notify""#),
+            "{}",
+            started.payload
+        );
+
+        // Only Codex, and only when asked.
+        let claude_only = ActivitySettings {
+            capture_claude: true,
+            ..Default::default()
+        };
+        let plain = launcher(&store, &host, &env, &harnesses, &claude_only, dir.path());
+        plain.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(!plan.args.iter().any(|arg| arg.starts_with("notify=")));
     }
 }

@@ -148,7 +148,9 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     all, a per-launch `--settings` file Claude Code merges with the user's own. The receiver
     question is settled the same way the exit spool was: neither the app process nor the daemon,
     but an inbox of files the hook writes and any client drains, so it works with the window
-    closed and the daemon is still storage-free. Still open, in the order the lean gave: Codex
-    second, choosing between its trust-gated hooks and its session files once samples exist;
-    OpenCode's plugin third. OMP, Cursor, Grok and Pi stay lifecycle-only until someone finds a
-    stable surface.
+    closed and the daemon is still storage-free. **Codex followed the same day**
+    ([12-agent-events-stage-2-codex](12-agent-events-stage-2-codex.md)), and the samples chose
+    for it: its hooks are Claude Code's to the letter but trust-gated with no per-launch way
+    through that does not also waive trust for a repository's own hooks, so the trigger is its
+    `notify` program and the substance its session file. Still open: OpenCode's plugin third.
+    OMP, Cursor, Grok and Pi stay lifecycle-only until someone finds a stable surface.

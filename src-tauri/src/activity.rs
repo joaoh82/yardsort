@@ -4,7 +4,7 @@
 //! launched, exits, or is drained from the inbox; nothing here writes an event.
 
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -26,6 +26,8 @@ pub struct ActivityChanged {
 }
 
 /// Take what the inbox holds into the store, and tell the timeline which workspaces moved.
+/// Anything the drain had to leave — a Codex turn its session file has not finished — is
+/// handed to the watcher, which looks again on its own clock: nothing else would.
 pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
     let report = yardsort_core::activity::import_inbox(store, data_dir);
     if !report.workspaces.is_empty() {
@@ -34,15 +36,40 @@ pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
         }
         .emit(handle);
     }
+    if report.deferred > 0 {
+        if let Some(state) = handle.try_state::<AppState>() {
+            if let Some(watcher) = state.inbox_watcher.lock().unwrap().as_ref() {
+                watcher.look_again();
+            }
+        }
+    }
 }
 
 /// Wait this long after the last file lands before draining: a tool call is two files in
 /// quick succession, and one drain covers both.
 const INBOX_QUIET: Duration = Duration::from_millis(200);
+/// While a drain has left something for later, look again this often. Codex writes a turn's
+/// end to its session file within moments of announcing it; five seconds is patience, not
+/// polling, and the core gives up on a turn after five minutes, which ends the looking.
+const RETRY_DEFERRED: Duration = Duration::from_secs(5);
+
+/// How long the watcher's thread waits for a signal before draining on its own: forever when
+/// nothing was deferred, [`RETRY_DEFERRED`] otherwise.
+fn wait_for(deferred: usize) -> Option<Duration> {
+    (deferred > 0).then_some(RETRY_DEFERRED)
+}
 
 /// Watches until dropped.
 pub struct InboxWatcher {
     _watcher: RecommendedWatcher,
+    wake: mpsc::Sender<()>,
+}
+
+impl InboxWatcher {
+    /// Drain now, and keep draining on the retry clock while anything stays deferred.
+    pub fn look_again(&self) {
+        let _ = self.wake.send(());
+    }
 }
 
 /// Watch the inbox directory and drain it after each burst of files. The directory is
@@ -52,6 +79,7 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
     let dir = yardsort_core::activity::inbox_dir(data_dir);
     std::fs::create_dir_all(&dir)?;
     let (tx, rx) = mpsc::channel::<()>();
+    let wake = tx.clone();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         if event.is_ok_and(|event| brings_entries(&event.kind)) {
             let _ = tx.send(());
@@ -60,16 +88,41 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
     watcher.watch(&dir, RecursiveMode::NonRecursive)?;
     let data_dir = data_dir.to_path_buf();
     std::thread::spawn(move || {
-        while rx.recv().is_ok() {
-            // Let the burst finish; whatever else arrives meanwhile is one drain.
-            std::thread::sleep(INBOX_QUIET);
-            while rx.try_recv().is_ok() {}
-            if let Some(state) = handle.try_state::<AppState>() {
-                drain_inbox(&handle, &state.store, &data_dir);
+        let mut deferred = 0;
+        loop {
+            let woken = match wait_for(deferred) {
+                Some(wait) => match rx.recv_timeout(wait) {
+                    Ok(()) => true,
+                    Err(RecvTimeoutError::Timeout) => false,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                },
+                None => match rx.recv() {
+                    Ok(()) => true,
+                    Err(_) => break,
+                },
+            };
+            if woken {
+                // Let the burst finish; whatever else arrives meanwhile is one drain.
+                std::thread::sleep(INBOX_QUIET);
+                while rx.try_recv().is_ok() {}
             }
+            let Some(state) = handle.try_state::<AppState>() else {
+                continue;
+            };
+            let report = yardsort_core::activity::import_inbox(&state.store, &data_dir);
+            if !report.workspaces.is_empty() {
+                let _ = ActivityChanged {
+                    workspace_ids: report.workspaces.into_iter().collect(),
+                }
+                .emit(&handle);
+            }
+            deferred = report.deferred;
         }
     });
-    Ok(InboxWatcher { _watcher: watcher })
+    Ok(InboxWatcher {
+        _watcher: watcher,
+        wake,
+    })
 }
 
 /// Whether an event on the inbox directory can mean a new entry: a file created or renamed
@@ -256,6 +309,7 @@ pub async fn settings_save_activity(
     record_lifecycle: bool,
     show_timeline: bool,
     capture_claude: bool,
+    capture_codex: bool,
 ) -> IpcResult<SettingsInfo> {
     blocking(app, move |state| {
         state
@@ -264,6 +318,7 @@ pub async fn settings_save_activity(
                 settings.activity.record_lifecycle = record_lifecycle;
                 settings.activity.show_timeline = show_timeline;
                 settings.activity.capture_claude = capture_claude;
+                settings.activity.capture_codex = capture_codex;
             })
             .map_err(|error| {
                 IpcError::new(
@@ -298,5 +353,22 @@ mod tests {
         assert!(!brings_entries(&EventKind::Remove(RemoveKind::File)));
         assert!(!brings_entries(&EventKind::Any));
         assert!(!brings_entries(&EventKind::Other));
+    }
+
+    /// A deferred entry — a Codex turn whose session file is still being written — gets a
+    /// retry on a timer, because nothing else will wake the drain for it: the session file is
+    /// not watched, and the agent may then sit waiting for the user with no exit in sight.
+    #[test]
+    fn the_watcher_looks_again_on_its_own_only_while_something_is_deferred() {
+        assert_eq!(
+            wait_for(0),
+            None,
+            "nothing waiting: sleep until a file lands"
+        );
+        assert_eq!(wait_for(1), Some(RETRY_DEFERRED));
+        assert_eq!(wait_for(7), Some(RETRY_DEFERRED));
+        assert!(
+            RETRY_DEFERRED.as_millis() < yardsort_core::activity::codex::NOT_READY_GRACE_MS as u128
+        );
     }
 }

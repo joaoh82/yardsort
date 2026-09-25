@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Codex can report what it does.** Switch on **Capture what Codex reports** in Settings →
+  General and every Codex that Yardsort starts puts each turn on the activity timeline: the shell
+  commands it ran with their exit codes and durations, the files it added or changed, the tokens
+  the turn cost, and how long it took — never a command line, a file's contents or a message. It
+  works through Codex's `notify` program, given for that launch alone, plus Codex's own session
+  file; nothing in `~/.codex` is edited and a `notify` of your own keeps running. Off by default.
+  See [What Codex reports](docs/guide/activity.md#what-codex-reports) and the
+  [design note](docs/design/12-agent-events-stage-2-codex.md).
 - **Claude Code can report what it does.** Switch on **Capture what Claude Code reports** in
   Settings → General and every Claude Code that Yardsort starts tells the activity timeline about
   each prompt, tool call, permission prompt, turn and session end — as metadata: the tool's name

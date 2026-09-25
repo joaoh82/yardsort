@@ -1,0 +1,11 @@
+{
+  "session_id": "01a0d83f-c3ea-7ae0-88df-82c9431d3f8b",
+  "turn_id": "01a0d83f-c42b-7fd3-b4af-c46bc45458cc",
+  "transcript_path": "/tmp/yardsort-fixture/codex-home/sessions/2026/09/25/rollout-2026-09-25T13-07-32-01a0d83f-c3ea-7ae0-88df-82c9431d3f8b.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "hook_event_name": "Stop",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "last_assistant_message": "Done"
+}

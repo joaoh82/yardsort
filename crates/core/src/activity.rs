@@ -28,6 +28,7 @@ use crate::settings::ActivitySettings;
 use crate::store::{NewEvent, NewRun, RunRow, Store, StoreResult};
 
 pub mod claude;
+pub mod codex;
 pub mod hook;
 pub mod inbox;
 
@@ -565,6 +566,9 @@ pub struct InboxReport {
     pub unreadable: usize,
     /// Entries a hook had to drop because the inbox was full.
     pub dropped: u64,
+    /// Entries left for a later drain: a Codex turn its session file has not finished, or a
+    /// row the database would not take just now. Whoever drains should look again soon.
+    pub deferred: usize,
     /// The workspaces that gained events, for whoever is showing one.
     pub workspaces: std::collections::BTreeSet<String>,
 }
@@ -598,6 +602,15 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
             }
         };
         match link(store, &entry) {
+            // A Codex trigger stands for a turn the session file describes; read it from there.
+            Some(link)
+                if entry.producer == codex::PRODUCER && entry.kind == codex::TRIGGER_KIND =>
+            {
+                if !import_codex_turn(store, &entry, &link, &mut report) {
+                    report.deferred += 1;
+                    continue;
+                }
+            }
             Some(link) => {
                 let source_key = format!("inbox:{}", entry.id);
                 let payload = entry.payload.to_string();
@@ -625,7 +638,10 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
                     }
                     Some(false) => report.duplicates += 1,
                     // The database would not take it now; the file stays for the next drain.
-                    None => continue,
+                    None => {
+                        report.deferred += 1;
+                        continue;
+                    }
                 }
             }
             None => {
@@ -642,6 +658,66 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
         let _ = store.bump_diagnostic("inbox_dropped", Some(&report.dropped.to_string()));
     }
     report
+}
+
+/// Expand a Codex turn trigger into the turn's events. Returns whether the trigger's file is
+/// done with: a turn the session file has not finished writing is left for the next drain,
+/// for a while; after that, or when the file cannot be read at all, the turn is recorded from
+/// the trigger alone and the shortfall counted.
+fn import_codex_turn(
+    store: &Store,
+    entry: &InboxEntry,
+    link: &Link,
+    report: &mut InboxReport,
+) -> bool {
+    let (events, method) = match codex::expand(entry, link.run_id.as_deref()) {
+        Ok(codex::Expanded::Events(events)) => (events, codex::METHOD_SESSION_FILE),
+        Ok(codex::Expanded::NotYet(why)) => {
+            if crate::store::now_ms() - entry.at_ms < codex::NOT_READY_GRACE_MS {
+                return false;
+            }
+            let _ = store.bump_diagnostic("codex_turn_incomplete", Some(&why));
+            (vec![codex::fallback(entry)], codex::METHOD_NOTIFY)
+        }
+        Err(why) => {
+            eprintln!("activity: codex session file: {why}");
+            let _ = store.bump_diagnostic("codex_session_file", Some(&why));
+            (vec![codex::fallback(entry)], codex::METHOD_NOTIFY)
+        }
+    };
+    let mut any_new = false;
+    for event in events {
+        let payload = event.payload.to_string();
+        let added = attempt(store, event.kind, || {
+            store.add_event(&NewEvent {
+                id: &uuid::Uuid::new_v4().to_string(),
+                schema_version: SCHEMA_VERSION,
+                workspace_id: &link.workspace_id,
+                session_id: link.session_id.as_deref(),
+                run_id: link.run_id.as_deref(),
+                occurred_at: event.occurred_at,
+                kind: event.kind,
+                producer: codex::PRODUCER,
+                method,
+                fidelity: codex::FIDELITY,
+                source_key: Some(&event.source_key),
+                privacy_class: PRIVACY_METADATA,
+                payload: &payload,
+            })
+        });
+        match added {
+            Some(true) => {
+                report.imported += 1;
+                any_new = true;
+            }
+            Some(false) => report.duplicates += 1,
+            None => return false,
+        }
+    }
+    if any_new {
+        report.workspaces.insert(link.workspace_id.clone());
+    }
+    true
 }
 
 /// Where a reported event belongs.
@@ -696,6 +772,65 @@ pub fn prune(store: &Store) -> usize {
         let _ = store.bump_diagnostic("pruned", Some(&removed.to_string()));
     }
     removed
+}
+
+/// A path an agent reported, relative to the workspace — or nothing, and a flag, when it is
+/// somewhere else. `.` and `..` are resolved lexically first, so a path that climbs out of the
+/// workspace and back into somewhere else is seen for where it ends up, not for how it was
+/// spelled; without a workspace to measure against, no path can be called inside one.
+pub(crate) fn workspace_relative(path: &str, cwd: Option<&str>) -> (Option<String>, bool) {
+    let Some(cwd) = cwd else {
+        return (None, true);
+    };
+    let root = normalized(std::iter::empty(), cwd);
+    let full = if is_absolute(path) {
+        normalized(std::iter::empty(), path)
+    } else {
+        normalized(root.iter().map(String::as_str), path)
+    };
+    // Only a drive-lettered path is compared without case: Windows does not distinguish
+    // `C:\Repo` from `C:\repo`, but on Linux `/work/REPO` is another directory altogether.
+    let windows = root.first().is_some_and(|first| first.ends_with(':'));
+    let same = |a: &String, b: &String| {
+        if windows {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    };
+    let inside = full.len() >= root.len() && root.iter().zip(&full).all(|(a, b)| same(a, b));
+    if !inside {
+        return (None, true);
+    }
+    let relative = full[root.len()..].join("/");
+    if relative.is_empty() {
+        return (Some(".".to_owned()), false);
+    }
+    (Some(relative), false)
+}
+
+fn is_absolute(path: &str) -> bool {
+    path.starts_with('/')
+        || path.starts_with('\\')
+        || path.get(1..3).is_some_and(|s| s == ":\\" || s == ":/")
+}
+
+/// The components of `path` after `base`, with `.` dropped and `..` resolved. Both separators
+/// count; a drive letter is a component, and the floor on Windows as the root is elsewhere.
+fn normalized<'a>(base: impl Iterator<Item = &'a str>, path: &'a str) -> Vec<String> {
+    let mut parts: Vec<String> = base.map(str::to_owned).collect();
+    for part in path.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if parts.last().is_some_and(|last| !last.ends_with(':')) {
+                    parts.pop();
+                }
+            }
+            other => parts.push(other.to_owned()),
+        }
+    }
+    parts
 }
 
 /// Run one store operation, and turn a failure into a printed line and a counter.
@@ -1457,5 +1592,194 @@ mod tests {
         let junk = import_inbox(&store, dir.path());
         assert_eq!(junk.unreadable, 1);
         assert!(inbox.entries().unwrap().is_empty());
+    }
+
+    /// A throwaway CODEX_HOME holding the fixture session file where Codex would keep it.
+    fn codex_home_with_fixture(dir: &Path) -> PathBuf {
+        let home = dir.join("codex");
+        let day = home.join("sessions/2026/09/25");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("fixtures/codex")
+                .join(codex::FIXTURE_VERSION)
+                .join("rollout.jsonl"),
+            day.join("rollout-2026-09-25T13-07-32-01a0d83f-c3ea-7ae0-88df-82c9431d3f8b.jsonl"),
+        )
+        .unwrap();
+        home
+    }
+
+    fn codex_trigger(id: &str, home: &Path, run_id: &str, at_ms: i64) -> InboxEntry {
+        let mut entry = inbox_entry(id, codex::TRIGGER_KIND);
+        entry.producer = codex::PRODUCER.into();
+        entry.method = codex::METHOD_NOTIFY.into();
+        entry.run_id = Some(run_id.into());
+        entry.at_ms = at_ms;
+        entry.payload = json!({
+            "threadId": "01a0d83f-c3ea-7ae0-88df-82c9431d3f8b",
+            "turnId": "01a0d83f-c42b-7fd3-b4af-c46bc45458cc",
+            "client": "codex_exec",
+            "codexHome": home.to_string_lossy(),
+        });
+        entry
+    }
+
+    #[test]
+    fn a_codex_turn_trigger_is_expanded_from_the_session_file_once_however_often_it_is_drained() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let recorder = recorder(&store);
+        let mut draft = harness_draft(&ws);
+        draft.harness_id = Some("codex".into());
+        draft.harness_session_id = None;
+        let run_id = recorder.begin(&draft).unwrap();
+        recorder.spawned(&run_id, &draft, "pty-c", Some(codex::METHOD_NOTIFY));
+        let home = codex_home_with_fixture(dir.path());
+        let inbox = Inbox::new(inbox_dir(dir.path()));
+
+        inbox
+            .record(&codex_trigger(
+                "t-1",
+                &home,
+                &run_id,
+                crate::store::now_ms(),
+            ))
+            .unwrap();
+        let report = import_inbox(&store, dir.path());
+        assert_eq!(
+            (report.imported, report.duplicates, report.unlinked),
+            (8, 0, 0)
+        );
+        assert!(
+            inbox.entries().unwrap().is_empty(),
+            "the trigger is done with"
+        );
+        let events = store.all_events(Some(&ws)).unwrap();
+        let of = |kind: &str| events.iter().filter(|e| e.kind == kind).count();
+        assert_eq!(of("tool.completed"), 2);
+        assert_eq!(of("tool.failed"), 1);
+        assert_eq!(of("file.reported_write"), 1);
+        assert_eq!(of("usage.reported"), 1);
+        assert_eq!(of("turn.completed"), 1);
+        let turn = events.iter().find(|e| e.kind == "turn.completed").unwrap();
+        assert_eq!(turn.run_id.as_deref(), Some(run_id.as_str()));
+        assert_eq!(
+            (
+                turn.producer.as_str(),
+                turn.method.as_str(),
+                turn.fidelity.as_str()
+            ),
+            ("codex", "session_file", "reported")
+        );
+        assert_eq!(
+            turn.occurred_at,
+            codex::iso_to_ms("2026-09-25T11:07:43.814Z").unwrap()
+        );
+        assert_eq!(turn.source_key.as_deref(), Some("codex:01a0d83f-c3ea-7ae0-88df-82c9431d3f8b:01a0d83f-c42b-7fd3-b4af-c46bc45458cc:turn"));
+
+        // The same turn, delivered again (a second notify for it, or a second client's drain).
+        inbox
+            .record(&codex_trigger(
+                "t-2",
+                &home,
+                &run_id,
+                crate::store::now_ms(),
+            ))
+            .unwrap();
+        let again = import_inbox(&store, dir.path());
+        assert_eq!((again.imported, again.duplicates), (0, 8));
+        assert_eq!(
+            store.all_events(Some(&ws)).unwrap().len(),
+            9,
+            "plus process.started"
+        );
+    }
+
+    #[test]
+    fn a_codex_turn_the_file_has_not_finished_waits_and_a_lost_file_still_records_the_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let recorder = recorder(&store);
+        let mut draft = harness_draft(&ws);
+        draft.harness_id = Some("codex".into());
+        let run_id = recorder.begin(&draft).unwrap();
+        recorder.spawned(&run_id, &draft, "pty-c", Some(codex::METHOD_NOTIFY));
+        let home = codex_home_with_fixture(dir.path());
+        let inbox = Inbox::new(inbox_dir(dir.path()));
+
+        // A turn the session file has not ended: fresh, so it waits.
+        let mut early = codex_trigger("t-early", &home, &run_id, crate::store::now_ms());
+        early.payload["turnId"] = json!("turn-still-running");
+        inbox.record(&early).unwrap();
+        let report = import_inbox(&store, dir.path());
+        assert_eq!(report.imported, 0);
+        assert_eq!(
+            report.deferred, 1,
+            "and said so, so the drain is asked again"
+        );
+        assert_eq!(inbox.entries().unwrap().len(), 1, "left for the next drain");
+
+        // Codex finishes writing the turn — nothing lands in the inbox for that — and the next
+        // drain, which the app schedules on `deferred`, takes it in.
+        let rollout = codex::find_rollout(&home, "01a0d83f-c3ea-7ae0-88df-82c9431d3f8b").unwrap();
+        let mut text = std::fs::read_to_string(&rollout).unwrap();
+        text.push_str(
+            r#"{"timestamp":"2026-09-25T11:09:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-still-running","duration_ms":5,"time_to_first_token_ms":1},"ordinal":99}"#,
+        );
+        text.push('\n');
+        std::fs::write(&rollout, text).unwrap();
+        let caught_up = import_inbox(&store, dir.path());
+        assert_eq!(
+            (caught_up.imported, caught_up.deferred),
+            (2, 0),
+            "session + turn"
+        );
+        assert!(inbox.entries().unwrap().is_empty());
+        let events = store.all_events(Some(&ws)).unwrap();
+        let turn = events.iter().find(|e| e.kind == "turn.completed").unwrap();
+        assert_eq!(turn.method, "session_file");
+        assert_eq!(
+            turn.occurred_at,
+            codex::iso_to_ms("2026-09-25T11:09:00.000Z").unwrap()
+        );
+
+        // The same, but older than the grace: recorded from the trigger alone, and counted.
+        let mut late = codex_trigger(
+            "t-late",
+            &home,
+            &run_id,
+            crate::store::now_ms() - codex::NOT_READY_GRACE_MS - 1,
+        );
+        late.payload["turnId"] = json!("turn-never-written");
+        inbox.record(&late).unwrap();
+        let report = import_inbox(&store, dir.path());
+        assert_eq!(report.imported, 1);
+        let events = store.all_events(Some(&ws)).unwrap();
+        let fallback = events
+            .iter()
+            .find(|e| e.kind == "turn.completed" && e.method == "notify")
+            .expect("the turn from the trigger alone");
+        assert_eq!(payload(fallback)["turnId"], "turn-never-written");
+        assert!(store
+            .diagnostics()
+            .unwrap()
+            .iter()
+            .any(|d| d.name == "codex_turn_incomplete"));
+
+        // No session file at all: the same, under its own counter, and the file is done with.
+        let mut lost = codex_trigger("t-lost", &home, &run_id, crate::store::now_ms());
+        lost.payload["threadId"] = json!("no-such-thread");
+        inbox.record(&lost).unwrap();
+        let report = import_inbox(&store, dir.path());
+        assert_eq!(report.imported, 1);
+        assert!(inbox.entries().unwrap().is_empty(), "nothing left waiting");
+        assert!(store
+            .diagnostics()
+            .unwrap()
+            .iter()
+            .any(|d| d.name == "codex_session_file"));
     }
 }

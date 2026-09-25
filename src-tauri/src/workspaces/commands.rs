@@ -76,6 +76,8 @@ pub struct ActivitySettingsDto {
     pub show_timeline: bool,
     /// Give Claude Code launches hooks that report what the agent does, as metadata.
     pub capture_claude: bool,
+    /// Give Codex launches a `notify` program, and read each turn from its session file.
+    pub capture_codex: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -241,6 +243,7 @@ pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
             record_lifecycle: settings.activity.record_lifecycle,
             show_timeline: settings.activity.show_timeline,
             capture_claude: settings.activity.capture_claude,
+            capture_codex: settings.activity.capture_codex,
         },
         notify_when_quiet: settings.general.notify_when_quiet,
         check_for_updates: settings.general.check_for_updates,

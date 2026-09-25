@@ -124,6 +124,10 @@ pub struct ActivitySettings {
     /// does — prompts, tools, turns, the session — as metadata. Off by default: it is the
     /// agent's cooperation, asked for per launch, and needs `record_lifecycle`.
     pub capture_claude: bool,
+    /// Give Yardsort's own launches of Codex a `notify` program that reports each turn, and
+    /// read the turn's commands, file changes and token usage from Codex's own session file.
+    /// Off by default, for the same reasons.
+    pub capture_codex: bool,
 }
 
 impl Default for ActivitySettings {
@@ -132,6 +136,7 @@ impl Default for ActivitySettings {
             record_lifecycle: true,
             show_timeline: false,
             capture_claude: false,
+            capture_codex: false,
         }
     }
 }

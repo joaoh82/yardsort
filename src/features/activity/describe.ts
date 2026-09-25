@@ -29,6 +29,11 @@ interface Payload {
   agentType?: string | null;
   trigger?: string | null;
   contextTokens?: number | null;
+  // Read from Codex's session file.
+  status?: string | null;
+  totalTokens?: number | null;
+  outputTokens?: number | null;
+  detail?: string | null;
 }
 
 function parse(event: ActivityEvent): Payload {
@@ -115,6 +120,7 @@ export function describeEvent(event: ActivityEvent): {
         title: `${toolName(p)} done`,
         detail: [
           toolDetail(p),
+          p.exitCode !== null && p.exitCode !== undefined ? `exit ${p.exitCode}` : null,
           p.durationMs !== null && p.durationMs !== undefined ? `${p.durationMs} ms` : null,
         ]
           .filter(Boolean)
@@ -122,7 +128,33 @@ export function describeEvent(event: ActivityEvent): {
         tone: "plain",
       };
     case "tool.failed":
-      return { title: `${toolName(p)} failed`, detail: toolDetail(p), tone: "bad" };
+      return {
+        title: `${toolName(p)} failed`,
+        detail: [
+          toolDetail(p),
+          p.exitCode !== null && p.exitCode !== undefined ? `exit ${p.exitCode}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        tone: "bad",
+      };
+    case "file.reported_write": {
+      const what = p.kind === "add" ? "added" : p.kind === "delete" ? "deleted" : "changed";
+      return { title: `file ${what}`, detail: toolDetail(p), tone: "plain" };
+    }
+    case "usage.reported":
+      return {
+        title: "tokens used",
+        detail:
+          p.totalTokens !== null && p.totalTokens !== undefined
+            ? `${p.totalTokens.toLocaleString()} total${
+                p.outputTokens !== null && p.outputTokens !== undefined
+                  ? ` · ${p.outputTokens.toLocaleString()} out`
+                  : ""
+              }`
+            : "",
+        tone: "plain",
+      };
     case "approval.requested":
       return { title: `permission asked for ${toolName(p)}`, detail: toolDetail(p), tone: "plain" };
     case "approval.resolved":
@@ -134,7 +166,16 @@ export function describeEvent(event: ActivityEvent): {
     case "agent.notified":
       return { title: "agent raised a notification", detail: p.type ?? "", tone: "plain" };
     case "turn.completed":
-      return { title: "agent finished its turn", detail: "", tone: "ok" };
+      return {
+        title: "agent finished its turn",
+        detail:
+          p.durationMs !== null && p.durationMs !== undefined
+            ? `${(p.durationMs / 1000).toFixed(1)} s`
+            : p.detail === "notify"
+              ? "from notify alone; the session file could not be read"
+              : "",
+        tone: "ok",
+      };
     case "turn.failed":
       return { title: "agent's turn failed", detail: p.errorType ?? "", tone: "bad" };
     case "agent.subagent_started":

@@ -1,0 +1,15 @@
+{
+  "session_id": "01a0d83f-c3ea-7ae0-88df-82c9431d3f8b",
+  "turn_id": "01a0d83f-c42b-7fd3-b4af-c46bc45458cc",
+  "transcript_path": "/tmp/yardsort-fixture/codex-home/sessions/2026/09/25/rollout-2026-09-25T13-07-32-01a0d83f-c3ea-7ae0-88df-82c9431d3f8b.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Add File: /tmp/yardsort-fixture/repo/hello.txt\n+hello\n*** End Patch"
+  },
+  "tool_response": "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nA /tmp/yardsort-fixture/repo/hello.txt\n",
+  "tool_use_id": "exec-e0d8d4fd-99e7-4688-8099-743217c844c8"
+}

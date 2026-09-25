@@ -25,9 +25,9 @@ One **run** per process Yardsort starts in a workspace, and a few **events** for
 What is **not** recorded here, on purpose: your first message, the command line, anything the
 agent printed, the files it touched, tool calls, tokens. Those need the agent's own cooperation,
 which Yardsort asks for per agent and only when you turn it on — today for
-[Claude Code](#what-claude-code-reports), nothing else. Every event names its source
-(`yardsort/lifecycle`, `claude/hook`) so you can tell "Yardsort saw the process end" from "the
-agent says it wrote a file".
+[Claude Code](#what-claude-code-reports) and [Codex](#what-codex-reports). Every event names its
+source (`yardsort/lifecycle`, `claude/hook`, `codex/session_file`) so you can tell "Yardsort saw
+the process end" from "the agent says it wrote a file".
 
 Activity is on by default, because it is only what Yardsort already knew; switch it off in
 [Settings → General](settings.md#general) and nothing new is written. What is already recorded
@@ -87,8 +87,49 @@ from your own terminal, say — reports nothing to Yardsort. A Claude Code harne
 already carry `--settings` or `--bare` is left alone, and the timeline's settings show a
 `hooks_not_armed` counter so you know.
 
+## What Codex reports
+
+Switch on **Capture what Codex reports** in Settings → General (also needs **Record when agents
+start and exit**, also off by default) and every Codex that Yardsort starts reports each of its
+turns. Codex works differently from Claude Code, so the mechanism does too: Codex is given, for
+that launch only, a `notify` program — the Yardsort executable — that it runs at the end of every
+turn with the turn's ids. Yardsort then reads what the turn did from **Codex's own session file**,
+the one Codex keeps under `~/.codex/sessions/` and that `codex resume` reads. Rows appear when a
+turn ends, not while it runs:
+
+| Timeline row                                          | What it comes from                                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| _agent session started_                               | The session file's header: which Codex version, and that it was started from the CLI.                                           |
+| _prompt submitted · 214 characters_                   | Your message. The length, never the text.                                                                                       |
+| _shell done · exit 0 · 3 ms_, _shell failed · exit 1_ | Each command Codex ran, with its exit code and how long it took. The command itself is not recorded.                            |
+| _file added · hello.txt_, _file changed · …_          | Each file Codex wrote through its patch tool: the path relative to the workspace, and whether it was added, changed or deleted. |
+| _mcp:server/tool done_                                | A tool call to one of your MCP servers.                                                                                         |
+| _tokens used · 29,842 total · 138 out_                | What the turn cost. Codex records this; Claude Code's hooks do not.                                                             |
+| _agent finished its turn · 11.0 s_                    | The turn ended, and how long it took.                                                                                           |
+
+Why not Codex's hooks, which look just like Claude Code's? Because Codex, rightly, refuses to run
+a hook until you have reviewed it in its own **/hooks** screen, and the only way past that is a
+flag that also waives review for every other hook, including a cloned repository's. Yardsort will
+not pass that on your behalf. `notify` needs no review, is run as an argument list rather than
+through a shell, and touches nothing in `~/.codex`. If your `config.toml` has a `notify` of your
+own, Yardsort's runs first and then yours, with the same argument, so nothing you set up stops
+working.
+
+**What is kept, and what is not.** Ids, exit codes, durations, counts, relative paths, kinds of
+change. Not a command, not a file's contents, not your message, not Codex's answer, not its
+reasoning, not a path outside the workspace. A turn that `notify` reports before Codex has finished
+writing it to the session file is picked up on a later look — the app looks again every few
+seconds while a turn is waiting, `ys` on its next command — for up to five minutes; after that,
+or if the file cannot be read at all, the timeline still shows _agent finished its turn_, marked
+as coming from `notify` alone, and Settings → General counts what was missed
+(`codex_turn_incomplete`, `codex_session_file`). If Codex's automatic reviewer is on, its review runs as a second thread, and its turns show as
+_agent finished its turn_ from `notify` alone. Recorded against Codex **0.156.1**; the session
+file is Codex's own and undocumented, so a newer version may change a detail, and a detail this
+build does not recognise is skipped rather than guessed. A Codex harness whose arguments already
+set `notify` is left alone.
+
 Other agents stay at what Yardsort itself sees. Which ones could report, and how, is in the
-[design note](../design/11-agent-events-stage-2-claude.md#4--coverage-honestly).
+[design notes](../design/12-agent-events-stage-2-codex.md#4--coverage-honestly).
 
 ## Exits while Yardsort is closed
 

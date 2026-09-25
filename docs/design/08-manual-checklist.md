@@ -276,6 +276,21 @@ Needs a real Claude Code (2.1.x) logged in. Switch on **Record when agents start
 |     | Add `--settings ~/mine.json` to the Claude harness's arguments in Settings → Harnesses with Capture on: the launch works, no hook rows, and `hooks_not_armed` appears among the counters.                                                                                         |
 |     | **macOS / Windows:** all of the above; on Windows the inbox is under `%APPDATA%\dev.yardsort.app\activity\inbox` and the hook is `yardsort.exe --yardsort-hook claude …`.                                                                                                         |
 
+## 13 · Codex reporting
+
+Needs a real Codex (0.156.x) logged in. Switch on **Record when agents start and exit**, **Show
+the activity timeline** and **Capture what Codex reports** in Settings → General.
+
+| ✓   | Check                                                                                                                                                                                                                                                                                                                                        |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | Start Codex from the composer with a message asking it to create a file and run a command. The `codex started` row says _reporting through notify_. When the turn ends: `agent session started`, `prompt submitted`, `shell done · exit 0`, `file added · <path>`, `tokens used`, `agent finished its turn · N s`, all `codex/session_file`. |
+|     | `ys activity list --json`: no command text, no file content, no message anywhere in the payloads.                                                                                                                                                                                                                                            |
+|     | Send a second message. Only that turn's rows are added; the first turn's are not repeated.                                                                                                                                                                                                                                                   |
+|     | Resume the conversation and send a message: a new `agent session started` under the new run, then the turn.                                                                                                                                                                                                                                  |
+|     | `~/.codex/config.toml` and `~/.codex/hooks.json` are byte-for-byte unchanged. If `config.toml` has a `notify` of your own, it still fires.                                                                                                                                                                                                   |
+|     | Switch **Capture** off; start Codex again: no `codex/` rows, and its command line has no `notify=`.                                                                                                                                                                                                                                          |
+|     | **macOS / Windows:** all of the above; on Windows the `notify` program is `yardsort.exe --yardsort-hook codex …` and the session file is under `%USERPROFILE%\.codex\sessions`.                                                                                                                                                              |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:

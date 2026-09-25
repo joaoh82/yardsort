@@ -420,6 +420,29 @@ Claude Code launched through `ys` on Linux seen reporting live — which is how 
 placement bug was found before it shipped. The app-window rows, macOS and Windows are in
 [08 §12](08-manual-checklist.md#12--claude-code-reporting).
 
+## M13 — Agent events, stage 2: Codex ✅
+
+The second native adapter, recorded in [12-agent-events-stage-2-codex](12-agent-events-stage-2-codex.md).
+
+- `scripts/record-codex.sh` and fixtures from Codex 0.156.1: the session file of one `exec`
+  turn, the twelve hook payloads (Claude Code's shape, delivered only under the trust bypass),
+  and the `notify` argument.
+- The decision the fixtures forced: not hooks (trust-gated, no per-launch way through that is
+  safe to pass for a user), but `notify` as the per-launch trigger — an argument list, no shell,
+  no review, the user's own `notify` chained — and the session file, read at drain time, for
+  commands with exit codes and durations, file changes with paths, MCP calls, token usage and
+  turn timing.
+- `activity/codex.rs`; the hook mode takes its payload as the last argument; the drain expands a
+  trigger with per-fact source keys, waits for a turn the file has not finished, and falls back
+  to the trigger alone after five minutes or when the file cannot be read.
+- Settings → General **Capture what Codex reports** (off); timeline words for files and tokens.
+
+_Exit:_ fixtures map and leak nothing; arming, the hook binary as `notify`, expansion linked to
+the run and idempotent, the wait and both fallbacks covered by tests that fail without the
+change; `just check`, `just bindings-check`, `just lint-windows` green; a real Codex launched
+through `ys` on Linux seen reporting a turn from its own session file. Hands-on rows in
+[08 §13](08-manual-checklist.md#13--codex-reporting).
+
 _Result:_ 2026-09-24, Linux. Rust: 184 core tests (11 new in `activity.rs`, 7 in `launch.rs`
 against a real `PtyHost` and a plan-catching host), 3 new spool unit tests, a real-daemon test in
 `pty-ipc/tests/daemon.rs` (exit spooled after the only client left, live exit spooled too), 2
