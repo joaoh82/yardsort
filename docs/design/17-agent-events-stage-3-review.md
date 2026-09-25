@@ -46,12 +46,19 @@ copies.
   contract's own kind and always counts. For the adapters that report tool calls instead, the
   harness's writing tools are named per producer (above); a tool the table does not know is
   not a write, and a write with no path is no claim about any file. OpenCode's double report
-  is one write: only its `file.reported_write` is counted.
+  is one write: only its `file.reported_write` is counted. A report that says the change did
+  not land is not a write either: Codex writes a `FileChange` item's `status` through, and a
+  failed patch against a file the user changed must not badge that file as Codex's.
 - **Coverage is part of the answer.** The join also lists the workspace's agent runs and how
   each was asked to report (`capture` from its `process.started`, or nothing). That is what
   lets the panel say _why_ a changed file has no report — a run that was not reporting — and
   what keeps it silent when no run was: with no reporting run, every file is unreported for the
-  same uninteresting reason, and the list reads as it always did.
+  same uninteresting reason, and the list reads as it always did. The start event is not the
+  only witness, because it can be gone while the run is not: **Clear** during a live run, or
+  retention, removes it and keeps the run and the reports that follow. So a run with no start
+  event is known by what it reported through — capture is named by the events' `method` — and
+  a run with neither is `capture_known: false`: unknown, counted as neither reporting nor
+  silent.
 - **The words never reach a line.** A badge names the agent; its tooltip says how many times it
   reported writing the file, when it last did, and through what, then: _Git shows every change
   since the last commit; which of those lines came from that report is not known._ The note
@@ -69,8 +76,10 @@ copies.
 ## 3 · What shipped
 
 - `crates/core/src/activity/provenance.rs`: `Report`, `FileReports`, `RunCoverage`,
-  `Provenance`; `join(runs, events)` pure, `of(store, workspace)` over a new
-  `Store::events_of_kinds` that reads only the kinds that can carry a write.
+  `Provenance`; `join(runs, events, native)` pure, `of(store, workspace)` over two new store
+  queries: `events_of_kinds`, which reads only the kinds that can carry a write, and
+  `native_methods_by_run`, which says which runs have events of the agent's own and through
+  what.
 - `workspace_provenance` command and DTOs (`src-tauri/src/activity.rs`);
   `ipc.workspaceProvenance`; a `provenance` store that follows the Changes panel's workspace
   and refreshes on every file-system signal and every `activityChanged`.
@@ -83,12 +92,13 @@ copies.
 
 ## 4 · Verification
 
-- `activity::provenance` tests (7): Claude's reading tool and command are not writes and its
+- `activity::provenance` tests (9): Claude's reading tool and command are not writes and its
   `Write` and `Edit` are two; OpenCode's tool call beside its file event is one write and Codex's
-  a second row for the same file; Grok's `write` without a path claims nothing; the pi family's
-  `write`/`edit`; coverage lists spawned agent runs oldest first with their capture and leaves
-  shells and never-spawned runs out; an unlinked report keeps its file and has no run; only the
-  three kinds are read.
+  a second row for the same file; a Codex report with `status: "failed"` is not a write; Grok's
+  `write` without a path claims nothing; the pi family's `write`/`edit`; coverage lists spawned
+  agent runs oldest first with their capture and leaves shells and never-spawned runs out; a run
+  whose start event was cleared is known by what it reported through, and one with nothing is
+  unknown; an unlinked report keeps its file and has no run; only the three kinds are read.
 - `ChangesPanel.test.tsx` (3): the badge, its tooltip's count, source and caveat, the note's
   arithmetic, the expanded header's two wordings; nothing shown while no run was reporting; a
   report landing refreshes the join for the followed workspace only.

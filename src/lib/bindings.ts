@@ -864,6 +864,8 @@ export type RunCoverage = {
 	startedAt: number | null,
 	endedAt: number | null,
 	capture: string | null,
+	/**  Whether a `None` capture is known to mean the run was not reporting. */
+	captureKnown: boolean,
 };
 
 export type Scope = "uncommitted" | "committed";

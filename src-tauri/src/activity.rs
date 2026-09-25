@@ -269,6 +269,8 @@ pub struct RunCoverage {
     pub started_at: f64,
     pub ended_at: Option<f64>,
     pub capture: Option<String>,
+    /// Whether a `None` capture is known to mean the run was not reporting.
+    pub capture_known: bool,
 }
 
 /// Which of a workspace's files its agents said they wrote, and which runs could have said so.
@@ -313,6 +315,7 @@ impl From<yardsort_core::activity::provenance::Provenance> for Provenance {
                     started_at: run.started_at as f64,
                     ended_at: run.ended_at.map(|at| at as f64),
                     capture: run.capture,
+                    capture_known: run.capture_known,
                 })
                 .collect(),
         }

@@ -57,6 +57,10 @@ pub struct RunCoverage {
     /// How the run was asked to report (`hook`, `notify`, `plugin`, `session_file`,
     /// `extension`), or `None` for a run that was not: capture was off, or refused.
     pub capture: Option<String>,
+    /// Whether `None` means that. The start event says what a run was asked; when it has been
+    /// cleared or pruned, a report linked to the run says as much; with neither, nothing is
+    /// known, and the run is not one to count as silent.
+    pub capture_known: bool,
 }
 
 /// The join for one workspace: reported writes by path, and the runs that could have reported.
@@ -81,12 +85,14 @@ impl Provenance {
 const KINDS: [&str; 3] = ["file.reported_write", "tool.completed", "process.started"];
 
 /// Whether an event says a file was written. `file.reported_write` is the contract's own kind
-/// for it (Codex, OpenCode, Cursor); the hook and extension adapters that report a tool call
-/// instead name the harness's writing tools. Grok's log carries a tool name and no path, so it
-/// never reaches here with one — and a tool the list does not know is not a write.
-fn is_write(producer: &str, kind: &str, tool: Option<&str>) -> bool {
+/// for it (Codex, OpenCode, Cursor) — unless the report itself says the change did not land:
+/// Codex writes a `FileChange` item's `status` through, and a failed patch is not a write. The
+/// hook and extension adapters that report a tool call instead name the harness's writing
+/// tools. Grok's log carries a tool name and no path, so it never reaches here with one — and a
+/// tool the list does not know is not a write.
+fn is_write(producer: &str, kind: &str, tool: Option<&str>, status: Option<&str>) -> bool {
     match kind {
-        "file.reported_write" => true,
+        "file.reported_write" => status.is_none_or(|status| status == "completed"),
         "tool.completed" => match (producer, tool) {
             ("claude", Some(tool)) => {
                 matches!(tool, "Write" | "Edit" | "MultiEdit" | "NotebookEdit")
@@ -102,16 +108,29 @@ fn is_write(producer: &str, kind: &str, tool: Option<&str>) -> bool {
 pub fn of(store: &Store, workspace_id: &str) -> StoreResult<Provenance> {
     let runs = store.runs(workspace_id)?;
     let events = store.events_of_kinds(workspace_id, &KINDS)?;
-    Ok(join(&runs, &events))
+    let native = store.native_methods_by_run(workspace_id)?;
+    Ok(join(&runs, &events, &native))
 }
 
-/// The pure part: reports by path from the events, coverage from the runs.
-pub fn join(runs: &[crate::store::RunRow], events: &[EventRow]) -> Provenance {
+/// The pure part: reports by path from the events, coverage from the runs. `native` is which
+/// runs have events of the agent's own, and through what — the fallback for a run whose start
+/// event is gone.
+pub fn join(
+    runs: &[crate::store::RunRow],
+    events: &[EventRow],
+    native: &[(String, String)],
+) -> Provenance {
     let harness_of: BTreeMap<&str, Option<&str>> = runs
         .iter()
         .map(|run| (run.id.as_str(), run.harness_id.as_deref()))
         .collect();
     let mut capture_of: BTreeMap<&str, Option<String>> = BTreeMap::new();
+    let mut reported_through: BTreeMap<&str, &str> = BTreeMap::new();
+    for (run_id, method) in native {
+        reported_through
+            .entry(run_id.as_str())
+            .or_insert(method.as_str());
+    }
     // Path → (run id, producer) → the report so far. A run's reports of one path are one row.
     let mut files: BTreeMap<String, BTreeMap<(Option<String>, String), Report>> = BTreeMap::new();
 
@@ -130,7 +149,8 @@ pub fn join(runs: &[crate::store::RunRow], events: &[EventRow]) -> Provenance {
             continue;
         }
         let tool = payload.get("tool").and_then(Value::as_str);
-        if !is_write(&event.producer, &event.kind, tool) {
+        let status = payload.get("status").and_then(Value::as_str);
+        if !is_write(&event.producer, &event.kind, tool, status) {
             continue;
         }
         // A path the adapter could not place inside the workspace was never recorded; a write
@@ -176,12 +196,25 @@ pub fn join(runs: &[crate::store::RunRow], events: &[EventRow]) -> Provenance {
             .filter(|run| run.kind == "harness" && run.pty_session_id.is_some())
             // The store lists runs newest first; a reader of coverage wants the story in order.
             .rev()
-            .map(|run| RunCoverage {
-                run_id: run.id.clone(),
-                harness_id: run.harness_id.clone(),
-                started_at: run.started_at,
-                ended_at: run.ended_at,
-                capture: capture_of.get(run.id.as_str()).cloned().flatten(),
+            .map(|run| {
+                // The start event is the word on what the run was asked. Without it — cleared
+                // while the run was live, or pruned — a report the agent made through the run
+                // says it was asked, and through what, since capture is named by its method.
+                let (capture, capture_known) = match capture_of.get(run.id.as_str()) {
+                    Some(capture) => (capture.clone(), true),
+                    None => match reported_through.get(run.id.as_str()) {
+                        Some(method) => (Some((*method).to_owned()), true),
+                        None => (None, false),
+                    },
+                };
+                RunCoverage {
+                    run_id: run.id.clone(),
+                    harness_id: run.harness_id.clone(),
+                    started_at: run.started_at,
+                    ended_at: run.ended_at,
+                    capture,
+                    capture_known,
+                }
             })
             .collect(),
     }
@@ -467,8 +500,88 @@ mod tests {
         let ids: Vec<&str> = p.runs.iter().map(|r| r.run_id.as_str()).collect();
         assert_eq!(ids, ["r1", "r2"]);
         assert_eq!(p.runs[0].capture.as_deref(), Some("hook"));
-        assert_eq!(p.runs[1].capture, None);
+        assert_eq!(
+            (p.runs[1].capture.as_deref(), p.runs[1].capture_known),
+            (None, true)
+        );
         assert_eq!(p.reporting_runs(), 1);
+    }
+
+    /// Codex reports a `FileChange` item whether or not the patch landed, and says which in
+    /// `status`. A failed patch against a file changed some other way must not badge that
+    /// file as Codex's, nor count as a write.
+    #[test]
+    fn a_reported_write_that_says_it_failed_is_not_a_write() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("codex"), Some("notify"));
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "codex",
+            "file.reported_write",
+            2_000,
+            json!({ "path": "src/lib.rs", "kind": "update", "status": "failed" }),
+        );
+        assert!(of(&store, &ws).unwrap().files.is_empty());
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "codex",
+            "file.reported_write",
+            3_000,
+            json!({ "path": "src/lib.rs", "kind": "update", "status": "completed" }),
+        );
+        let p = of(&store, &ws).unwrap();
+        assert_eq!(paths(&p), ["src/lib.rs"]);
+        assert_eq!(
+            p.files[0].reports[0].writes, 1,
+            "the failed one is not counted"
+        );
+    }
+
+    /// Clearing a workspace's activity while an agent is live takes its start event and leaves
+    /// the run; the reports that follow still arrive. Coverage must not then call that run
+    /// silent: what it reported through says it was reporting. A run with neither a start
+    /// event nor a report is unknown, not silent.
+    #[test]
+    fn a_run_whose_start_event_is_gone_is_known_by_what_it_reported_through() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("claude"), Some("hook"));
+        run(&store, &ws, "r2", "harness", Some("codex"), None);
+        store.clear_activity(Some(&ws)).unwrap();
+        assert_eq!(store.runs(&ws).unwrap().len(), 2, "clearing keeps the runs");
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "claude",
+            "tool.completed",
+            5_000,
+            json!({ "tool": "Write", "path": "hello.txt" }),
+        );
+
+        let p = of(&store, &ws).unwrap();
+        assert_eq!(paths(&p), ["hello.txt"]);
+        assert_eq!(
+            p.reporting_runs(),
+            1,
+            "the report says the run was reporting"
+        );
+        let r1 = p.runs.iter().find(|r| r.run_id == "r1").unwrap();
+        assert_eq!(
+            (r1.capture.as_deref(), r1.capture_known),
+            (Some("hook"), true)
+        );
+        let r2 = p.runs.iter().find(|r| r.run_id == "r2").unwrap();
+        assert_eq!(
+            (r2.capture.as_deref(), r2.capture_known),
+            (None, false),
+            "nothing is known of r2"
+        );
     }
 
     /// A report an adapter could not link to a run still names a file; it is shown without a

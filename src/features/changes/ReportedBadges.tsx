@@ -41,7 +41,9 @@ export function ProvenanceNote({ changes }: { changes: ChangeSet }) {
   const paths = new Set([...changes.uncommitted, ...changes.committed].map((c) => c.path));
   if (paths.size === 0) return null;
   const reported = [...paths].filter((path) => (reports.get(path)?.reports.length ?? 0) > 0).length;
-  const silent = provenance.runs.length - reporting;
+  // A run is silent only when that is known: its start event said so, or nothing of the
+  // agent's ever came through it. A run with neither is unknown, and not counted either way.
+  const silent = provenance.runs.filter((run) => run.capture === null && run.captureKnown).length;
 
   const summary =
     reported === paths.size

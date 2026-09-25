@@ -960,6 +960,20 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Which of a workspace's runs have events from somewhere other than Yardsort's own
+    /// lifecycle, and through which method: one `(run id, method)` per pair, in first-seen
+    /// order. What a run was asked to report survives here after its start event is gone.
+    pub fn native_methods_by_run(&self, workspace_id: &str) -> StoreResult<Vec<(String, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT run_id, method, MIN(seq) AS first FROM agent_events
+             WHERE workspace_id = ? AND run_id IS NOT NULL AND producer <> 'yardsort'
+             GROUP BY run_id, method ORDER BY first",
+        )?;
+        let rows = stmt.query_map([workspace_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Every event, oldest first — one workspace's, or all of them. For export.
     pub fn all_events(&self, workspace_id: Option<&str>) -> StoreResult<Vec<EventRow>> {
         let conn = self.conn();

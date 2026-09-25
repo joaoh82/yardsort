@@ -426,8 +426,31 @@ describe("ChangesPanel with reported writes", () => {
       },
     ],
     runs: [
-      { runId: "run-1", harnessId: "claude", startedAt: at, endedAt: null, capture: "hook" },
-      { runId: "run-2", harnessId: "codex", startedAt: at, endedAt: null, capture: null },
+      {
+        runId: "run-1",
+        harnessId: "claude",
+        startedAt: at,
+        endedAt: null,
+        capture: "hook",
+        captureKnown: true,
+      },
+      {
+        runId: "run-2",
+        harnessId: "codex",
+        startedAt: at,
+        endedAt: null,
+        capture: null,
+        captureKnown: true,
+      },
+      // Its start event is gone and nothing came through it: unknown, and counted as neither.
+      {
+        runId: "run-3",
+        harnessId: "grok",
+        startedAt: at,
+        endedAt: null,
+        capture: null,
+        captureKnown: false,
+      },
     ],
     ...extra,
   });
@@ -488,7 +511,16 @@ describe("ChangesPanel with reported writes", () => {
     core.workspaceProvenance.mockResolvedValue(
       provenance({
         files: [],
-        runs: [{ runId: "run-2", harnessId: "codex", startedAt: at, endedAt: null, capture: null }],
+        runs: [
+          {
+            runId: "run-2",
+            harnessId: "codex",
+            startedAt: at,
+            endedAt: null,
+            capture: null,
+            captureKnown: true,
+          },
+        ],
       }),
     );
     const user = await renderPanel();
