@@ -256,9 +256,9 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
           Capture what Cursor reports
           <span className="block text-ink-faint">
             The Cursor agent started from Yardsort is given a small plugin, on its command line for
-            that launch alone, whose hooks report each tool with its file or duration, each file it
-            changes and each prompt's length — never the prompt, a command, a file or a reply. Your
-            own Cursor hooks keep running.
+            that launch alone, whose hooks report each tool with its file or duration and each file
+            it changes — never the prompt, a command, a file or a reply. Your own Cursor hooks keep
+            running.
           </span>
         </span>
       </label>

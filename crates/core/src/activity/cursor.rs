@@ -38,22 +38,36 @@ pub const DOCUMENTED_VERSION: &str = "2026.09.23-86fc751";
 /// Cursor's default hook timeout is a minute; a file write does not need it.
 pub const HOOK_TIMEOUT_SECS: u32 = 10;
 
-/// The hook events subscribed to: those Cursor treats as passive, or whose answer is optional.
-/// `stop` and `afterAgentResponse` are among them although, in the build this was written
-/// against, Cursor fires them only for hooks from the user's or the project's own file.
+/// The hook events subscribed to: the ones Cursor documents as observation-only, or whose
+/// only output is an optional follow-up message (`stop`, `subagentStop`) — nothing whose
+/// silence could be read as a decision. `stop` and `afterAgentResponse` are among them
+/// although, in the build this was written against, Cursor fires them only for hooks from the
+/// user's or the project's own file.
 pub const EVENTS: &[&str] = &[
     "sessionStart",
     "sessionEnd",
-    "beforeSubmitPrompt",
     "postToolUse",
     "postToolUseFailure",
     "afterShellExecution",
     "afterMCPExecution",
     "afterFileEdit",
-    "subagentStart",
     "subagentStop",
     "stop",
     "afterAgentResponse",
+];
+
+/// The hooks never subscribed to, because Cursor reads their stdout as an answer. The first
+/// six are its documented permission hooks, where an exit of 0 with no or invalid JSON
+/// *blocks the action*; `beforeSubmitPrompt` answers with `continue`, and what silence means
+/// there is not documented. Yardsort's hook prints nothing, so it must never be asked.
+pub const DECIDING: &[&str] = &[
+    "preToolUse",
+    "beforeShellExecution",
+    "beforeMCPExecution",
+    "beforeReadFile",
+    "beforeTabFileRead",
+    "subagentStart",
+    "beforeSubmitPrompt",
 ];
 
 /// Where the plugin directory lives: written before each launch.
@@ -64,10 +78,22 @@ pub fn plugin_dir(data_dir: &Path) -> PathBuf {
         .join("cursor-plugin")
 }
 
-/// A shell word: single-quoted, which both `sh -c` and PowerShell read literally, and which
-/// Cursor prefixes with `&` on Windows when a command starts with a quote.
+/// A shell word for the shell Cursor will hand the command to on this platform: `sh -c` (or
+/// the user's `$SHELL`) elsewhere, PowerShell on Windows, where Cursor prefixes `&` when a
+/// command starts with a quote. Single-quoted in both, which both read literally; the one
+/// difference is an apostrophe inside, which POSIX closes and reopens around (`'it'\''s'`) and
+/// PowerShell doubles (`'it''s'`).
 pub fn shell_word(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
+    quote(text, cfg!(windows))
+}
+
+fn quote(text: &str, powershell: bool) -> String {
+    let inner = if powershell {
+        text.replace('\'', "''")
+    } else {
+        text.replace('\'', "'\\''")
+    };
+    format!("'{inner}'")
 }
 
 /// The plugin's `hooks.json`.
@@ -203,15 +229,6 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
                 "status": text("final_status"),
             }),
         ),
-        "beforeSubmitPrompt" => (
-            "prompt.submitted",
-            json!({
-                "conversationId": conversation,
-                "generationId": text("generation_id"),
-                "chars": text("prompt").map(|p| p.chars().count()),
-                "attachments": hook["attachments"].as_array().map(Vec::len),
-            }),
-        ),
         "postToolUse" => ("tool.completed", tool()),
         "postToolUseFailure" => ("tool.failed", tool()),
         "afterShellExecution" => (
@@ -245,15 +262,6 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
                 }),
                 text("file_path").as_deref(),
             ),
-        ),
-        "subagentStart" => (
-            "agent.subagent_started",
-            json!({
-                "agentId": text("subagent_id"),
-                "agentType": text("subagent_type"),
-                "conversationId": conversation,
-                "model": text("subagent_model"),
-            }),
         ),
         "subagentStop" => (
             "agent.subagent_stopped",
@@ -337,13 +345,6 @@ mod tests {
             ),
             (
                 documented(
-                    "beforeSubmitPrompt",
-                    json!({ "prompt": "fix the login", "attachments": [{ "type": "file", "file_path": "/w/s/a.rs" }] }),
-                ),
-                "prompt.submitted",
-            ),
-            (
-                documented(
                     "postToolUse",
                     json!({ "tool_name": "Read", "tool_input": { "path": "/w/s/src/a.rs" }, "tool_output": "{\"contents\":\"secret\"}", "tool_use_id": "t-1", "cwd": "/w/s", "duration": 12 }),
                 ),
@@ -422,26 +423,63 @@ mod tests {
                 );
             }
         }
-        let read = normalize(&cases[2].0).unwrap();
+        let read = normalize(&cases[1].0).unwrap();
         assert_eq!(read.payload["path"], "src/a.rs");
         assert_eq!(read.payload["durationMs"], 12);
-        let outside = normalize(&cases[3].0).unwrap();
+        let outside = normalize(&cases[2].0).unwrap();
         assert_eq!(outside.payload["pathOutsideWorkspace"], true);
-        let prompt = normalize(&cases[1].0).unwrap();
-        assert_eq!(prompt.payload["chars"], 13);
-        assert_eq!(prompt.payload["attachments"], 1);
-        let stop = normalize(&cases[6].0).unwrap();
+        let stop = normalize(&cases[5].0).unwrap();
         assert_eq!(stop.payload["inputTokens"], 1200);
-        let usage = normalize(&cases[7].0).unwrap();
+        let usage = normalize(&cases[6].0).unwrap();
         assert_eq!(usage.payload["cachedInputTokens"], 900);
         assert_eq!(usage.payload["chars"], 17);
         let failed_turn = normalize(&documented("stop", json!({ "status": "error" }))).unwrap();
         assert_eq!(failed_turn.kind, "turn.failed");
-        assert!(
-            normalize(&documented("preToolUse", json!({}))).is_err(),
-            "never subscribed to, never mapped"
-        );
+        for deciding in DECIDING {
+            assert!(
+                normalize(&documented(
+                    deciding,
+                    json!({ "prompt": "x", "subagent_id": "s" })
+                ))
+                .is_err(),
+                "{deciding}: never subscribed to, never mapped"
+            );
+        }
         assert!(normalize(&json!({ "nope": 1 })).is_err());
+    }
+
+    /// The response contract: Cursor blocks an action whose permission hook answered with
+    /// nothing, and Yardsort's hook answers with nothing — so no permission hook may be in the
+    /// plugin, and the deciding list must hold every documented one.
+    #[test]
+    fn no_hook_whose_silence_decides_anything_is_ever_subscribed_to() {
+        for event in EVENTS {
+            assert!(!DECIDING.contains(event), "{event} is a deciding hook");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut args = vec![];
+        let plugin = arm(&mut args, dir.path()).unwrap();
+        let hooks: Value =
+            serde_json::from_slice(&std::fs::read(plugin.join("hooks/hooks.json")).unwrap())
+                .unwrap();
+        for deciding in DECIDING {
+            assert!(
+                hooks["hooks"].get(*deciding).is_none(),
+                "{deciding} in the plugin"
+            );
+        }
+        // Cursor's documented permission hooks, as of `DOCUMENTED_VERSION`: "invalid JSON or a
+        // response that doesn't match the hook's schema blocks the action".
+        for permission in [
+            "beforeShellExecution",
+            "beforeMCPExecution",
+            "beforeReadFile",
+            "beforeTabFileRead",
+            "subagentStart",
+            "preToolUse",
+        ] {
+            assert!(DECIDING.contains(&permission), "{permission} missing");
+        }
     }
 
     #[test]
@@ -485,11 +523,39 @@ mod tests {
     }
 
     #[test]
-    fn shell_words_survive_spaces_and_quotes_in_both_shells() {
+    fn shell_words_are_quoted_for_the_shell_that_will_read_them() {
         assert_eq!(
-            shell_word("/opt/y a r d/yardsort"),
+            quote("/opt/y a r d/yardsort", false),
             "'/opt/y a r d/yardsort'"
         );
-        assert_eq!(shell_word("it's"), "'it'\\''s'");
+        assert_eq!(quote("it's", false), "'it'\\''s'");
+        assert_eq!(
+            quote(r"C:\Users\O'Neil\ys.exe", true),
+            r"'C:\Users\O''Neil\ys.exe'"
+        );
+        assert_eq!(shell_word("it's"), quote("it's", cfg!(windows)));
+    }
+
+    /// The real shell reads the word back as the path it came from — `sh -c` here, PowerShell
+    /// on Windows, the two Cursor hands a hook command to.
+    #[test]
+    fn the_shell_cursor_uses_reads_a_quoted_word_back_unchanged() {
+        let awkward = "/tmp/yard sort/O'Neil's data/ys";
+        let word = shell_word(awkward);
+        let output = if cfg!(windows) {
+            std::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", &format!("Write-Output {word}")])
+                .output()
+        } else {
+            std::process::Command::new("sh")
+                .args(["-c", &format!("printf '%s' {word}")])
+                .output()
+        }
+        .expect("a shell to run");
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim_end_matches(['\r', '\n']),
+            awkward
+        );
     }
 }

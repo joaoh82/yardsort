@@ -226,19 +226,19 @@ command line for that launch alone, whose hooks report what it does. Cursor runs
 hooks beside your own from `~/.cursor/hooks.json` and the project's; nothing of yours is edited.
 Only hooks Cursor does not wait on for a decision are used, so nothing is ever blocked.
 
-| Timeline row                                     | What Cursor reported                                                                                               |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| _agent session started · composer-2_             | The session and its model.                                                                                         |
-| _prompt submitted · 13 characters_               | You sent a message, and how long it was. Never the message.                                                        |
-| _Read done · src/a.rs · 12 ms_, _Read failed_    | A tool ran or failed, on which file, how long it took. Cursor's own tool names.                                    |
-| _shell done · 30 ms_, _mcp:search done_          | A shell command ran, or an MCP tool. Never the command line.                                                       |
-| _file changed · src/b.rs_                        | Cursor edited a file. How many edits is in the payload, never their text.                                          |
-| _subagent started · explore_, _subagent stopped_ | A subagent ran.                                                                                                    |
-| _agent finished its turn · 1,500 tokens_         | The turn ended and what it cost — when Cursor fires that hook for plugins, which this version was reported not to. |
+| Timeline row                                  | What Cursor reported                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| _agent session started · composer-2_          | The session and its model.                                                                                         |
+| _Read done · src/a.rs · 12 ms_, _Read failed_ | A tool ran or failed, on which file, how long it took. Cursor's own tool names.                                    |
+| _shell done · 30 ms_, _mcp:search done_       | A shell command ran, or an MCP tool. Never the command line.                                                       |
+| _file changed · src/b.rs_                     | Cursor edited a file. How many edits is in the payload, never their text.                                          |
+| _subagent stopped · explore_                  | A subagent finished.                                                                                               |
+| _agent finished its turn · 1,500 tokens_      | The turn ended and what it cost — when Cursor fires that hook for plugins, which this version was reported not to. |
 
 **What is kept, and what is not.** Tool names, file paths relative to the workspace, durations,
-outcomes, edit counts, token counts, prompt lengths. Not the prompt, not a command, not a tool's
-output, not an edit's text, not the reply. **Built from Cursor's documentation, not a
+outcomes, edit counts, token counts. Not the prompt, not a command, not a tool's output, not an
+edit's text, not the reply. Nor the prompt's length: the one hook that carries the prompt can
+also block it, and Yardsort never answers a hook that decides. **Built from Cursor's documentation, not a
 recording**: the Cursor agent on the machine this was written on was not logged in. A field
 named differently in your version is left blank on the timeline rather than guessed; the
 [design note](../design/16-agent-events-stage-2-cursor.md) says how to record it.

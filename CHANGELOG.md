@@ -10,8 +10,8 @@ has the downloads and the full commit lists.
   those agents a small extension on the command line of each launch — never in your extension
   folders — that reports each turn with its tokens and cost, each tool with its file or duration,
   and, on OMP, each permission you answer. **Capture what Cursor reports** gives the Cursor agent
-  a plugin directory for that launch, whose hooks report each tool, file edit and prompt length
-  beside your own hooks. Never a prompt, a command, a file or a reply, as before. The Cursor
+  a plugin directory for that launch, whose hooks report each tool and file edit beside your own
+  hooks. Never a prompt, a command, a file or a reply, as before. The Cursor
   adapter is built from Cursor's documentation and awaits a recording; pi was recorded as far as
   its first prompt. See [What OMP and pi report](docs/guide/activity.md#what-omp-and-pi-report),
   [What Cursor reports](docs/guide/activity.md#what-cursor-reports) and the design notes
