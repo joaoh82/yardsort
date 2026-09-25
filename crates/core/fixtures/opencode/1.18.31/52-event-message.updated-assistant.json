@@ -1,0 +1,38 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f12e8e001nnM5ike3Nyrxpk",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "info": {
+        "id": "msg_00000000000fixture05",
+        "parentID": "msg_00000000000fixture01",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/tmp/yardsort-fixture/repo",
+          "root": "/tmp/yardsort-fixture/repo"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "modelID": "big-pickle",
+        "providerID": "opencode",
+        "time": {
+          "created": 1790346079886
+        },
+        "sessionID": "ses_00000000000fixture01"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

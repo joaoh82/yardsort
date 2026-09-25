@@ -31,6 +31,7 @@ pub mod claude;
 pub mod codex;
 pub mod hook;
 pub mod inbox;
+pub mod opencode;
 
 use inbox::{Inbox, InboxEntry};
 

@@ -187,6 +187,13 @@ describe("describeEvent", () => {
       tone: "bad",
     });
     expect(words("approval.resolved", { tool: "Bash", decision: "denied" }).tone).toBe("bad");
+    // OpenCode names the operation it asks about as a permission; that is what to show.
+    expect(words("approval.requested", { permission: "bash", permissionId: "per_1" }).title).toBe(
+      "permission asked for bash",
+    );
+    expect(
+      words("approval.requested", { tool: "bash", permission: "bash", toolUseId: "c" }).title,
+    ).toBe("permission asked for bash");
     expect(words("session.started", { source: "resume", contextTokens: 29241 })).toEqual({
       title: "agent resumed its session",
       detail: "29,241 tokens of context",

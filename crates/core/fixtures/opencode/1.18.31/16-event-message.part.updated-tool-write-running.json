@@ -1,0 +1,30 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f121f5001N1OEyn7v5iCDb4",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "type": "tool",
+        "tool": "write",
+        "callID": "call_function_e863vxf71uly_1",
+        "state": {
+          "status": "running",
+          "input": {
+            "content": "hello",
+            "filePath": "/tmp/yardsort-fixture/repo/hello.txt"
+          },
+          "time": {
+            "start": 1790346076661
+          }
+        },
+        "id": "prt_00000000000fixture03",
+        "sessionID": "ses_00000000000fixture01",
+        "messageID": "msg_00000000000fixture02"
+      },
+      "time": 1790346076661
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

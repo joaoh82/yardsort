@@ -1,0 +1,62 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f122340010mXVfecjhzuyfs",
+    "type": "session.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "info": {
+        "id": "ses_00000000000fixture01",
+        "slug": "neon-knight",
+        "projectID": "0dc654c7ffc68761b62bb0bf3c85ffb6c9c23156",
+        "directory": "/tmp/yardsort-fixture/repo",
+        "path": "",
+        "title": "hello.txt creation and missing.txt checks",
+        "agent": "build",
+        "model": {
+          "id": "big-pickle",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "version": "1.18.31",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8255,
+          "output": 50,
+          "reasoning": 208,
+          "cache": {
+            "read": 1926,
+            "write": 0
+          }
+        },
+        "permission": [
+          {
+            "permission": "question",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_enter",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_exit",
+            "pattern": "*",
+            "action": "deny"
+          }
+        ],
+        "time": {
+          "created": 1790346070039,
+          "updated": 1790346076723
+        }
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

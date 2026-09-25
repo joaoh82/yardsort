@@ -1,0 +1,25 @@
+{
+  "hook": "tool.execute.after",
+  "payload": {
+    "input": {
+      "tool": "write",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "call_function_e863vxf71uly_1",
+      "args": {
+        "content": "hello",
+        "filePath": "/tmp/yardsort-fixture/repo/hello.txt"
+      }
+    },
+    "output": {
+      "title": "hello.txt",
+      "metadata": {
+        "diagnostics": {},
+        "filepath": "/tmp/yardsort-fixture/repo/hello.txt",
+        "exists": false,
+        "truncated": false
+      },
+      "output": "Wrote file successfully."
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

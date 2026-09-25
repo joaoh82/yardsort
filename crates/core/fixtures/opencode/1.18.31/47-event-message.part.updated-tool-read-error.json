@@ -1,0 +1,33 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f12e5b0015HS3e3wRb3C6Ft",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "type": "tool",
+        "tool": "read",
+        "callID": "call_function_tyqnje85gedu_1",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "/tmp/yardsort-fixture/repo/missing.txt",
+            "offset": 1,
+            "limit": 2000
+          },
+          "error": "File not found: /tmp/yardsort-fixture/repo/missing.txt",
+          "time": {
+            "start": 1790346079830,
+            "end": 1790346079835
+          }
+        },
+        "id": "prt_00000000000fixture10",
+        "sessionID": "ses_00000000000fixture01",
+        "messageID": "msg_00000000000fixture04"
+      },
+      "time": 1790346079835
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

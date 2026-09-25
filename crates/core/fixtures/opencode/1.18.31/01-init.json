@@ -1,0 +1,22 @@
+{
+  "hook": "init",
+  "payload": {
+    "keys": [
+      "client",
+      "project",
+      "worktree",
+      "directory",
+      "experimental_workspace",
+      "serverUrl",
+      "$"
+    ],
+    "directory": "/tmp/yardsort-fixture/repo",
+    "worktree": "/tmp/yardsort-fixture/repo",
+    "env": {
+      "YARDSORT_RUN_ID": "run-fixture",
+      "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+      "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

@@ -18,7 +18,7 @@
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
 │   ├─ assist       optional Jev judgments: diffs, composer hints    │
-│   ├─ activity     runs, events; Claude hooks, Codex notify; inbox │
+│   ├─ activity     runs, events; Claude, Codex, OpenCode adapters │
 │   └─ store        SQLite (state) + settings file                   │
 └──────────────────────────────┬──────────────────┬──────────────────┘
                                │ local socket     │ shells out
@@ -360,6 +360,15 @@ codes and durations, file changes with paths, MCP calls, token usage, turn timin
 with its own source key, so a turn read twice is one row per fact. A turn the file has not
 finished is retried for five minutes, then recorded from the trigger alone. Producer `codex`,
 method `session_file` (or `notify`). See [12-agent-events-stage-2-codex](12-agent-events-stage-2-codex.md).
+
+**OpenCode** is given a plugin. A recorded `opencode` launch gets `OPENCODE_CONFIG_CONTENT`
+in its environment — `{"plugin":["file://<data-dir>/activity/hooks/opencode.js"]}`, merged by
+OpenCode with the user's configuration and with whatever the variable already held — and the
+plugin, written from a template in the binary before each launch (`activity/opencode-plugin.js`),
+runs inside OpenCode's process: it keeps a whitelist of fields from a few hooks and bus events
+and hands each to the executable in hook mode on stdin. `ResolvedLaunch::env` is how a launch
+carries variables of its own. Producer `opencode`, method `plugin`. `--pure` means no plugin.
+See [13-agent-events-stage-2-opencode](13-agent-events-stage-2-opencode.md).
 
 ## Assist (optional, off by default)
 

@@ -1,0 +1,18 @@
+{
+  "hook": "tool.execute.before",
+  "payload": {
+    "input": {
+      "tool": "read",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "call_function_tyqnje85gedu_1"
+    },
+    "output": {
+      "args": {
+        "filePath": "/tmp/yardsort-fixture/repo/missing.txt",
+        "offset": 1,
+        "limit": 2000
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

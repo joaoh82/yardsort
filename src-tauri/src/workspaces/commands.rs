@@ -78,6 +78,8 @@ pub struct ActivitySettingsDto {
     pub capture_claude: bool,
     /// Give Codex launches a `notify` program, and read each turn from its session file.
     pub capture_codex: bool,
+    /// Give OpenCode launches a plugin, through their environment, that reports what they do.
+    pub capture_opencode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -229,6 +231,7 @@ pub async fn harness_test(
             paste_when_ready: None,
             // A test launch is not a conversation worth remembering.
             record: None,
+            env: vec![],
         };
         crate::terminal::start(state, resolved, None, size)
     })
@@ -244,6 +247,7 @@ pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
             show_timeline: settings.activity.show_timeline,
             capture_claude: settings.activity.capture_claude,
             capture_codex: settings.activity.capture_codex,
+            capture_opencode: settings.activity.capture_opencode,
         },
         notify_when_quiet: settings.general.notify_when_quiet,
         check_for_updates: settings.general.check_for_updates,

@@ -222,6 +222,7 @@ fn continue_session(
                 labels,
                 paste_when_ready: None,
                 record: None,
+                env: vec![],
             },
             Some(workspace.path),
             size,

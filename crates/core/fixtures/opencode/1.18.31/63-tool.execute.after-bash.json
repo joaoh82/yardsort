@@ -1,0 +1,25 @@
+{
+  "hook": "tool.execute.after",
+  "payload": {
+    "input": {
+      "tool": "bash",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "call_function_pguqr87l41mm_1",
+      "args": {
+        "command": "ls",
+        "timeout": 120000,
+        "workdir": "/tmp/yardsort-fixture/repo"
+      }
+    },
+    "output": {
+      "title": "ls",
+      "metadata": {
+        "output": "hello.txt\n",
+        "exit": 0,
+        "truncated": false
+      },
+      "output": "hello.txt\n"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

@@ -1,0 +1,34 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f135fe001ZYc1IHcOt6emaq",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "type": "tool",
+        "tool": "bash",
+        "callID": "call_function_pguqr87l41mm_1",
+        "state": {
+          "metadata": {
+            "output": ""
+          },
+          "status": "running",
+          "input": {
+            "command": "ls",
+            "timeout": 120000,
+            "workdir": "/tmp/yardsort-fixture/repo"
+          },
+          "time": {
+            "start": 1790346081757
+          }
+        },
+        "id": "prt_00000000000fixture13",
+        "sessionID": "ses_00000000000fixture01",
+        "messageID": "msg_00000000000fixture05"
+      },
+      "time": 1790346081789
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

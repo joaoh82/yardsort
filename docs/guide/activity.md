@@ -25,9 +25,10 @@ One **run** per process Yardsort starts in a workspace, and a few **events** for
 What is **not** recorded here, on purpose: your first message, the command line, anything the
 agent printed, the files it touched, tool calls, tokens. Those need the agent's own cooperation,
 which Yardsort asks for per agent and only when you turn it on — today for
-[Claude Code](#what-claude-code-reports) and [Codex](#what-codex-reports). Every event names its
-source (`yardsort/lifecycle`, `claude/hook`, `codex/session_file`) so you can tell "Yardsort saw
-the process end" from "the agent says it wrote a file".
+[Claude Code](#what-claude-code-reports), [Codex](#what-codex-reports) and
+[OpenCode](#what-opencode-reports). Every event names its source (`yardsort/lifecycle`,
+`claude/hook`, `codex/session_file`, `opencode/plugin`) so you can tell "Yardsort saw the process
+end" from "the agent says it wrote a file".
 
 Activity is on by default, because it is only what Yardsort already knew; switch it off in
 [Settings → General](settings.md#general) and nothing new is written. What is already recorded
@@ -128,8 +129,37 @@ file is Codex's own and undocumented, so a newer version may change a detail, an
 build does not recognise is skipped rather than guessed. A Codex harness whose arguments already
 set `notify` is left alone.
 
+## What OpenCode reports
+
+Switch on **Capture what OpenCode reports** in Settings → General (also needs **Record when
+agents start and exit**, also off by default) and every OpenCode that Yardsort starts reports as
+it works. OpenCode has _plugins_: small programs it loads and calls at points in its own life.
+Yardsort gives its launches one, for that launch alone, through OpenCode's environment
+(`OPENCODE_CONFIG_CONTENT`, which OpenCode merges with your own configuration), kept under
+`activity/hooks/` in your data directory. Your `opencode.json` is not edited, and your own
+plugins keep running beside it.
+
+| Timeline row                              | What OpenCode reported                                                                                                  |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| _agent session started_                   | A session began, and which OpenCode version.                                                                            |
+| _prompt submitted · 216 characters_       | Your message. The length, never the text.                                                                               |
+| _write started_, _write done · hello.txt_ | A tool ran: its name and, for a file tool, the path relative to the workspace. A `bash` done row carries the exit code. |
+| _read failed · missing.txt · 5 ms_        | A tool failed, and how long it took. No error text.                                                                     |
+| _file changed · hello.txt_                | OpenCode edited a file.                                                                                                 |
+| _permission asked for bash_               | It is waiting for your yes.                                                                                             |
+| _tokens used · 10,814 total · 2 out_      | What each of its replies cost, with the model. OpenCode reports this per step, so a turn has several.                   |
+| _agent finished its turn_                 | It went idle: your turn.                                                                                                |
+
+**What is kept, and what is not.** Names, ids, relative paths, exit codes, counts, the failed
+tool's duration. Not your message, not a command, not a tool's output, not a file's contents,
+not an error message, not OpenCode's reply, not a path outside the workspace. The plugin keeps
+only those fields before anything leaves OpenCode's process, and hands them to the Yardsort
+executable, which writes one small file to the inbox. Recorded against OpenCode **1.18.31**. An
+OpenCode harness whose arguments carry `--pure` — OpenCode's own "no external plugins" — is left
+alone, and the timeline's settings count it under `hooks_not_armed`.
+
 Other agents stay at what Yardsort itself sees. Which ones could report, and how, is in the
-[design notes](../design/12-agent-events-stage-2-codex.md#4--coverage-honestly).
+[design notes](../design/13-agent-events-stage-2-opencode.md#4--coverage-honestly).
 
 ## Exits while Yardsort is closed
 

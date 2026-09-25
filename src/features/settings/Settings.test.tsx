@@ -85,6 +85,7 @@ const settings: SettingsInfo = {
     showTimeline: false,
     captureClaude: false,
     captureCodex: false,
+    captureOpencode: false,
   },
 };
 

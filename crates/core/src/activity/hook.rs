@@ -15,7 +15,7 @@ use std::io::Read;
 use std::path::Path;
 
 use super::inbox::{Inbox, InboxEntry, INBOX_VERSION};
-use super::{claude, codex, PRIVACY_METADATA, RECORD_ENV, RUN_ENV, WORKSPACE_ENV};
+use super::{claude, codex, opencode, PRIVACY_METADATA, RECORD_ENV, RUN_ENV, WORKSPACE_ENV};
 
 /// Makes this executable *be* a hook. See the module documentation.
 pub const HOOK_FLAG: &str = "--yardsort-hook";
@@ -111,6 +111,16 @@ pub fn deliver_payload(
             (
                 codex::PRODUCER,
                 codex::METHOD_NOTIFY,
+                r.kind,
+                r.native_session_id,
+                r.payload,
+            )
+        }
+        opencode::HARNESS_ID => {
+            let r = opencode::normalize(&payload)?;
+            (
+                opencode::PRODUCER,
+                opencode::METHOD,
                 r.kind,
                 r.native_session_id,
                 r.payload,
@@ -255,6 +265,31 @@ mod tests {
         assert!(
             !entry.payload.to_string().contains("apply_patch"),
             "messages dropped"
+        );
+    }
+
+    #[test]
+    fn an_opencode_plugin_delivery_on_stdin_becomes_an_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let delivery = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("fixtures/opencode")
+                .join(opencode::FIXTURE_VERSION)
+                .join("63-tool.execute.after-bash.json"),
+        )
+        .unwrap();
+        let env = |name: &str| (name == RUN_ENV).then(|| "run-3".to_owned());
+        let entry = deliver("opencode", dir.path(), &mut delivery.as_slice(), &env).unwrap();
+        assert_eq!(entry.kind, "tool.completed");
+        assert_eq!(
+            (entry.producer.as_str(), entry.method.as_str()),
+            ("opencode", "plugin")
+        );
+        assert_eq!(entry.run_id.as_deref(), Some("run-3"));
+        assert_eq!(entry.payload["exitCode"], 0);
+        assert!(
+            !entry.payload.to_string().contains("hello.txt"),
+            "no output"
         );
     }
 }

@@ -1,0 +1,48 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f1277e0013QoOSW5i69ylVr",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "type": "tool",
+        "tool": "read",
+        "callID": "call_function_vtdkmnhxi1ri_1",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "/tmp/yardsort-fixture/repo/hello.txt",
+            "offset": 1,
+            "limit": 2000
+          },
+          "output": "<path>/tmp/yardsort-fixture/repo/hello.txt</path>\n<type>file</type>\n<content>\n1: hello\n\n(End of file - total 1 lines)\n</content>",
+          "metadata": {
+            "preview": "hello",
+            "truncated": false,
+            "loaded": [],
+            "display": {
+              "type": "file",
+              "path": "/tmp/yardsort-fixture/repo/hello.txt",
+              "text": "hello",
+              "lineStart": 1,
+              "lineEnd": 1,
+              "totalLines": 1,
+              "truncated": false
+            }
+          },
+          "title": "hello.txt",
+          "time": {
+            "start": 1790346078064,
+            "end": 1790346078078
+          }
+        },
+        "id": "prt_00000000000fixture07",
+        "sessionID": "ses_00000000000fixture01",
+        "messageID": "msg_00000000000fixture03"
+      },
+      "time": 1790346078078
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

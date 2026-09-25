@@ -34,6 +34,7 @@ interface Payload {
   totalTokens?: number | null;
   outputTokens?: number | null;
   detail?: string | null;
+  permission?: string | null;
 }
 
 function parse(event: ActivityEvent): Payload {
@@ -193,7 +194,8 @@ export function describeEvent(event: ActivityEvent): {
 }
 
 function toolName(p: Payload): string {
-  return p.tool ? `${p.tool}${p.subagentType ? ` (${p.subagentType})` : ""}` : "tool";
+  const name = p.tool ?? p.permission;
+  return name ? `${name}${p.subagentType ? ` (${p.subagentType})` : ""}` : "tool";
 }
 
 function toolDetail(p: Payload): string {

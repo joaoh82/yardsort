@@ -1,0 +1,25 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f1276b001aTIyCjXquR5l0t",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "id": "prt_00000000000fixture07",
+        "messageID": "msg_00000000000fixture03",
+        "sessionID": "ses_00000000000fixture01",
+        "type": "tool",
+        "tool": "read",
+        "callID": "call_function_vtdkmnhxi1ri_1",
+        "state": {
+          "status": "pending",
+          "input": {},
+          "raw": ""
+        }
+      },
+      "time": 1790346078059
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

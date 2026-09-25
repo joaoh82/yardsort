@@ -1,0 +1,24 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f10a49001xzy83fA4Ccl5fi",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "info": {
+        "id": "msg_00000000000fixture01",
+        "role": "user",
+        "sessionID": "ses_00000000000fixture01",
+        "time": {
+          "created": 1790346070593
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "opencode",
+          "modelID": "big-pickle"
+        }
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

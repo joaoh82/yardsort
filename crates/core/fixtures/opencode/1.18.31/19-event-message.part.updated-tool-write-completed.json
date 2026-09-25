@@ -1,0 +1,39 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f121fd001JdLNFNR3E0h8Q1",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "type": "tool",
+        "tool": "write",
+        "callID": "call_function_e863vxf71uly_1",
+        "state": {
+          "status": "completed",
+          "input": {
+            "content": "hello",
+            "filePath": "/tmp/yardsort-fixture/repo/hello.txt"
+          },
+          "output": "Wrote file successfully.",
+          "metadata": {
+            "diagnostics": {},
+            "filepath": "/tmp/yardsort-fixture/repo/hello.txt",
+            "exists": false,
+            "truncated": false
+          },
+          "title": "hello.txt",
+          "time": {
+            "start": 1790346076661,
+            "end": 1790346076669
+          }
+        },
+        "id": "prt_00000000000fixture03",
+        "sessionID": "ses_00000000000fixture01",
+        "messageID": "msg_00000000000fixture02"
+      },
+      "time": 1790346076669
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

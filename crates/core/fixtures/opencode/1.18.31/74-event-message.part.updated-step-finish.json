@@ -1,0 +1,31 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f14240001Zw0ZGa5efqpUXf",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "id": "prt_00000000000fixture16",
+        "reason": "stop",
+        "snapshot": "04df07b08ca746b3167d0f1d1514e2f39a52c16c",
+        "messageID": "msg_00000000000fixture06",
+        "sessionID": "ses_00000000000fixture01",
+        "type": "step-finish",
+        "tokens": {
+          "total": 10814,
+          "input": 21,
+          "output": 1,
+          "reasoning": 20,
+          "cache": {
+            "write": 0,
+            "read": 10772
+          }
+        },
+        "cost": 0
+      },
+      "time": 1790346084928
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

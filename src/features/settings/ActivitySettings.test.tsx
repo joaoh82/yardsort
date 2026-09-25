@@ -44,6 +44,7 @@ describe("ActivitySettings", () => {
           showTimeline: false,
           captureClaude: false,
           captureCodex: false,
+          captureOpencode: false,
         }}
       />,
     );
@@ -53,12 +54,14 @@ describe("ActivitySettings", () => {
     await user.click(screen.getByRole("checkbox", { name: /Show the activity timeline/ }));
     await user.click(screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ }));
     await user.click(screen.getByRole("checkbox", { name: /Capture what Codex reports/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Capture what OpenCode reports/ }));
     await user.click(save);
     expect(core.settingsSaveActivity).toHaveBeenCalledWith({
       recordLifecycle: true,
       showTimeline: true,
       captureClaude: true,
       captureCodex: true,
+      captureOpencode: true,
     });
     await waitFor(() => expect(screen.getByText("Saved.")).toBeInTheDocument());
     expect(useAppStore.getState().showTimeline).toBe(true);
@@ -73,16 +76,20 @@ describe("ActivitySettings", () => {
           showTimeline: false,
           captureClaude: true,
           captureCodex: true,
+          captureOpencode: true,
         }}
       />,
     );
     const capture = screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ });
     const codex = screen.getByRole("checkbox", { name: /Capture what Codex reports/ });
+    const opencode = screen.getByRole("checkbox", { name: /Capture what OpenCode reports/ });
     expect(capture).toBeEnabled();
     expect(codex).toBeEnabled();
+    expect(opencode).toBeEnabled();
     await user.click(screen.getByRole("checkbox", { name: /Record when agents start and exit/ }));
     expect(capture).toBeDisabled();
     expect(codex).toBeDisabled();
+    expect(opencode).toBeDisabled();
   });
 
   it("shows what is recorded and what went wrong, and can clear all of it", async () => {
@@ -94,6 +101,7 @@ describe("ActivitySettings", () => {
           showTimeline: false,
           captureClaude: false,
           captureCodex: false,
+          captureOpencode: false,
         }}
       />,
     );

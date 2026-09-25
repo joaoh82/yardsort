@@ -1,0 +1,34 @@
+{
+  "hook": "tool.execute.after",
+  "payload": {
+    "input": {
+      "tool": "read",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "call_function_vtdkmnhxi1ri_1",
+      "args": {
+        "filePath": "/tmp/yardsort-fixture/repo/hello.txt",
+        "offset": 1,
+        "limit": 2000
+      }
+    },
+    "output": {
+      "title": "hello.txt",
+      "output": "<path>/tmp/yardsort-fixture/repo/hello.txt</path>\n<type>file</type>\n<content>\n1: hello\n\n(End of file - total 1 lines)\n</content>",
+      "metadata": {
+        "preview": "hello",
+        "truncated": false,
+        "loaded": [],
+        "display": {
+          "type": "file",
+          "path": "/tmp/yardsort-fixture/repo/hello.txt",
+          "text": "hello",
+          "lineStart": 1,
+          "lineEnd": 1,
+          "totalLines": 1,
+          "truncated": false
+        }
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}
