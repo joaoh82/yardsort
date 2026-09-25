@@ -28,7 +28,8 @@ and which version it is. It is optional: nothing in the app needs `ys`.
 
 - **Something else is called `ys`.** If there is already a file at the install location and it is
   not Yardsort's `ys`, Yardsort asks before replacing it; **Cancel** leaves it alone. A `ys`
-  already there, of any version, is replaced without asking.
+  already there, of any version, is replaced without asking. So is a broken link left by a `Yardsort.app` that has since
+  moved; a broken link to anything else counts as something else.
 - **Another `ys` comes first.** If your terminal finds a `ys` somewhere else — one you unpacked
   by hand, say — the panel names it. Installing then puts Yardsort's own copy at the install
   location, but the other one keeps winning until you remove it.

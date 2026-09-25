@@ -19,7 +19,7 @@
 //! Nothing is installed until the user asks. A file already at the target that is not a `ys` is
 //! replaced only after a second, explicit yes.
 
-use std::io::Read;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -179,7 +179,7 @@ pub fn install(layout: &Layout, env: &ShellEnv, replace: bool) -> IpcResult<()> 
             ),
         ));
     };
-    if !replace && occupied_by_something_else(target, env) {
+    if !replace && occupied_by_something_else(target, bundled, env) {
         return Err(IpcError::new(
             "ys_exists",
             format!(
@@ -250,11 +250,20 @@ fn failed(target: &Path, error: impl std::fmt::Display) -> IpcError {
 }
 
 /// Is there something at `target` we should not replace without asking?
-fn occupied_by_something_else(target: &Path, env: &ShellEnv) -> bool {
-    std::fs::symlink_metadata(target).is_ok()
-        // A link to nowhere is a `ys` whose app was moved or deleted.
-        && target.exists()
-        && version_of(target, env).is_none()
+fn occupied_by_something_else(target: &Path, bundled: &Path, env: &ShellEnv) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(target) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() && !target.exists() {
+        // A link to nowhere cannot be asked its version. It is ours only if it points where we
+        // put links: this app's `ys`, or the `ys` of a Yardsort.app that has since been moved or
+        // deleted. A dangling link to anything else may be a tool on a disk that is not mounted.
+        return !std::fs::read_link(target).is_ok_and(|to| {
+            let to = target.parent().map_or(to.clone(), |dir| dir.join(&to));
+            to == bundled || to.ends_with(Path::new("Yardsort.app/Contents/MacOS").join(EXE))
+        });
+    }
+    version_of(target, env).is_none()
 }
 
 /// Write a new file beside the old one and rename it into place, so that a terminal never finds
@@ -340,7 +349,13 @@ fn link_as_administrator(from: &Path, to: &Path) -> IpcResult<()> {
 /// What `<path> --version` says, if it is a `ys`. Anything else — another program called `ys`,
 /// one that fails or hangs — is `None`.
 fn version_of(path: &Path, env: &ShellEnv) -> Option<String> {
-    const TIMEOUT: Duration = Duration::from_secs(5);
+    version_within(path, env, Duration::from_secs(5))
+}
+
+/// The same, giving up after `timeout` — on the whole probe, output included. A program can exit
+/// and leave a descendant holding its stdout, so the end of the output may never come: only the
+/// first line is read, and that too against the deadline.
+fn version_within(path: &Path, env: &ShellEnv, timeout: Duration) -> Option<String> {
     let mut child = Program::at(path.to_owned(), env)
         .command(&std::env::temp_dir())
         .arg("--version")
@@ -348,18 +363,19 @@ fn version_of(path: &Path, env: &ShellEnv) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = stdout.read_to_string(&mut text);
-        text
+    let stdout = child.stdout.take()?;
+    let (sender, first_line) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = std::io::BufReader::new(stdout).read_line(&mut line);
+        let _ = sender.send(line);
     });
     let started = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
             Ok(Some(_)) | Err(_) => return None,
-            Ok(None) if started.elapsed() > TIMEOUT => {
+            Ok(None) if started.elapsed() > timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return None;
@@ -367,7 +383,10 @@ fn version_of(path: &Path, env: &ShellEnv) -> Option<String> {
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
         }
     }
-    parse_version(&reader.join().ok()?)
+    let line = first_line
+        .recv_timeout(timeout.saturating_sub(started.elapsed()))
+        .ok()?;
+    parse_version(&line)
 }
 
 /// `ys 0.10.0` → `0.10.0`, as clap prints it.
@@ -559,6 +578,70 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::write(path, "#!/bin/sh\necho 'something else 1.0'\n").unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn script(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// A wrapper that exits but leaves a descendant holding its stdout: the end of the output
+    /// never comes while the descendant lives.
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_holding_stdout_does_not_outlast_the_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = env_with_path(dir.path());
+        let answers = dir.path().join("answers");
+        script(&answers, "sleep 30 &\necho 'ys 0.10.0'");
+        let silent = dir.path().join("silent");
+        script(&silent, "sleep 30 &\nexit 0");
+
+        let started = Instant::now();
+        assert_eq!(
+            version_within(&answers, &env, Duration::from_secs(3)).as_deref(),
+            Some("0.10.0"),
+            "the first line is the answer; the rest need not arrive"
+        );
+        assert_eq!(version_within(&silent, &env, Duration::from_secs(1)), None);
+        assert!(
+            started.elapsed() < Duration::from_secs(6),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_link_is_replaced_without_asking_only_when_it_was_ours() {
+        let app = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let env = env_with_path(bin.path());
+        let target = bin.path().join(EXE);
+        let layout = Layout {
+            method: YsMethod::Copy,
+            bundled: Some(fake_ys(app.path(), VERSION)),
+            target: Some(target.clone()),
+        };
+
+        // A tool on a disk that is not mounted.
+        let elsewhere = Path::new("/nonexistent-volume/tools/ys");
+        std::os::unix::fs::symlink(elsewhere, &target).unwrap();
+        assert_eq!(install(&layout, &env, false).unwrap_err().code, "ys_exists");
+        assert_eq!(
+            std::fs::read_link(&target).unwrap(),
+            elsewhere,
+            "a no leaves the link alone"
+        );
+
+        // The link a Yardsort.app that has since been deleted left behind.
+        std::fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink("/Applications/Old/Yardsort.app/Contents/MacOS/ys", &target)
+            .unwrap();
+        install(&layout, &env, false).unwrap();
+        assert_eq!(version_of(&target, &env).as_deref(), Some(VERSION));
     }
 
     #[test]
