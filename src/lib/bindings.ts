@@ -126,6 +126,8 @@ export const commands = {
 	 *  so their exit can still be matched; nothing about the processes themselves is touched.
 	 */
 	activityClear: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("activity_clear", { workspaceId })),
+	/**  The reported writes for a workspace, as they stand now. */
+	workspaceProvenance: (workspaceId: string) => typedError<Provenance, IpcError>(__TAURI_INVOKE("workspace_provenance", { workspaceId })),
 	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
@@ -489,6 +491,12 @@ export type FileEntry = {
 	ignored: boolean,
 };
 
+/**  Every report about one workspace-relative path, oldest first. */
+export type FileReports = {
+	path: string,
+	reports: WriteReport[],
+};
+
 export type FileReview = {
 	path: string,
 	scope: Scope,
@@ -713,6 +721,15 @@ export type PromptTransport =
  */
 "stdin";
 
+/**
+ *  Which of a workspace's files its agents said they wrote, and which runs could have said so.
+ *  Joined to git's own change list by the Changes panel; nothing here is stored.
+ */
+export type Provenance = {
+	files: FileReports[],
+	runs: RunCoverage[],
+};
+
 /**  Emitted for every [`HostEvent`]. */
 export type PtyHostEvent = HostEvent;
 
@@ -839,6 +856,15 @@ export type ReviewFlag =
 "weakensTests" | 
 /**  A lint, type check or CI step was switched off. */
 "disablesChecks";
+
+/**  One of the workspace's agent runs and how it was asked to report, or `None` if it was not. */
+export type RunCoverage = {
+	runId: string,
+	harnessId: string | null,
+	startedAt: number | null,
+	endedAt: number | null,
+	capture: string | null,
+};
 
 export type Scope = "uncommitted" | "committed";
 
@@ -1016,6 +1042,22 @@ export type WorkspaceSettingsDto = {
 	/**  `None` uses `default_worktree_root`. */
 	worktreeRoot: string | null,
 	branchPrefix: string,
+};
+
+/**
+ *  What one agent run reported about one changed file. See
+ *  `yardsort_core::activity::provenance`.
+ */
+export type WriteReport = {
+	runId: string | null,
+	harnessId: string | null,
+	producer: string,
+	method: string,
+	fidelity: string,
+	firstAt: number | null,
+	lastAt: number | null,
+	/**  Reports, not lines: how many times the agent said it wrote the file. */
+	writes: number,
 };
 
 /* Tauri Specta runtime */

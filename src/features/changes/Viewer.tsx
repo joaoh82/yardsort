@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { errorMessage, ipc, type Content } from "@/lib/ipc";
 import { useChangesStore, type Viewing } from "@/stores/changes";
 import { recall, useProjectsStore } from "@/stores/projects";
+import { ReportedLine } from "./ReportedBadges";
 import { titleOf } from "./viewing";
 
 /** Inline or two panes, remembered across restarts like the composer's last picks. */
@@ -65,6 +66,7 @@ export function Viewer({
             {viewing.scope === "uncommitted" ? "uncommitted" : "on this branch"}
           </span>
         )}
+        {expanded && viewing.kind === "diff" && <ReportedLine path={viewing.change.path} />}
         {viewing.kind === "diff" && (
           <button
             type="button"

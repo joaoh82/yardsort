@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { ipc, type ActivityEvent } from "@/lib/ipc";
 import { useActivityStore } from "@/stores/activity";
-import { describeEvent, eventTime } from "./describe";
+import { useChangesStore } from "@/stores/changes";
+import { describeEvent, eventTime, pathOf } from "./describe";
 
 /**
  * The experimental activity timeline: what Yardsort itself recorded about a workspace's
@@ -114,6 +115,7 @@ function Row({ event }: { event: ActivityEvent }) {
   const described = describeEvent(event);
   // The binding types a float as nullable; a timestamp the core wrote is never absent.
   const at = event.occurredAt ?? 0;
+  const diff = useDiffOf(event);
   return (
     <li className="flex items-baseline gap-3 px-3 py-1">
       <time
@@ -128,6 +130,16 @@ function Row({ event }: { event: ActivityEvent }) {
         </span>
         {described.detail && <span className="text-ink-muted"> · {described.detail}</span>}
       </span>
+      {diff && (
+        <button
+          type="button"
+          onClick={diff.open}
+          title="Show this file's diff in the Changes panel. The diff is everything that changed since the last commit, whoever changed it."
+          className="shrink-0 text-[11px] text-ink-faint hover:text-ink"
+        >
+          diff
+        </button>
+      )}
       <span
         className="shrink-0 font-mono text-[10px] text-ink-faint"
         title={`Recorded by ${event.producer} (${event.method}, ${event.fidelity})`}
@@ -136,4 +148,22 @@ function Row({ event }: { event: ActivityEvent }) {
       </span>
     </li>
   );
+}
+
+/**
+ * The trace link the other way: an event that names a file which is on the change list of
+ * the workspace the Changes panel follows can open that file's diff. The link says nothing
+ * about which lines the event accounts for; the diff is git's whole answer.
+ */
+function useDiffOf(event: ActivityEvent): { open: () => void } | null {
+  const changesWorkspace = useChangesStore((s) => s.workspaceId);
+  const changes = useChangesStore((s) => s.changes);
+  const path = pathOf(event);
+  if (!path || !changes || changesWorkspace !== event.workspaceId) return null;
+  const uncommitted = changes.uncommitted.find((change) => change.path === path);
+  const committed = uncommitted ? null : changes.committed.find((change) => change.path === path);
+  const change = uncommitted ?? committed;
+  if (!change) return null;
+  const scope = uncommitted ? "uncommitted" : "committed";
+  return { open: () => void useChangesStore.getState().view({ kind: "diff", change, scope }) };
 }

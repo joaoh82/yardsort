@@ -7,7 +7,7 @@ const POINTS = [
   },
   {
     title: "A record of what ran",
-    body: "A local note of when each agent started in a workspace and how it ended — even while the window was closed — without reading a word it printed. Opt in, and every built-in agent reports its own tool calls and turns to it as metadata, its own settings untouched. An experimental timeline shows it; ys activity export writes it out.",
+    body: "A local note of when each agent started in a workspace and how it ended — even while the window was closed — without reading a word it printed. Opt in, and every built-in agent reports its own tool calls and turns to it as metadata, its own settings untouched. The Changes list marks which files an agent reported writing, and which changed with no report. An experimental timeline shows the rest; ys activity export writes it out.",
   },
   {
     title: "Closing the window doesn't stop them",

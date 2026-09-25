@@ -11,6 +11,10 @@ import {
   type ActivityEvent,
   type ActivityPage,
   type ActivitySettingsDto,
+  type FileReports,
+  type Provenance,
+  type RunCoverage,
+  type WriteReport,
   type AddedProject,
   type AppInfo,
   type AssistStatus,
@@ -67,6 +71,10 @@ export type {
   ActivityEvent,
   ActivityPage,
   ActivitySettingsDto,
+  FileReports,
+  Provenance,
+  RunCoverage,
+  WriteReport,
   ProjectAutomation,
   AddedProject,
   AppInfo,
@@ -220,6 +228,8 @@ export const ipc = {
   activityDiagnostics: () => unwrap(commands.activityDiagnostics()),
   /** Forget recorded activity: one workspace's, or all of it for `null`. */
   activityClear: (workspaceId: string | null) => done(commands.activityClear(workspaceId)),
+  /** Which of a workspace's files its agents reported writing, and which runs could have. */
+  workspaceProvenance: (workspaceId: string) => unwrap(commands.workspaceProvenance(workspaceId)),
 
   /** Is there a newer release? Looks only; nothing is downloaded. */
   updateCheck: () => unwrap(commands.updateCheck()),

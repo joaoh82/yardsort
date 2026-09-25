@@ -3,6 +3,8 @@ import type { ChangeSet, FileChange, Scope } from "@/lib/ipc";
 import { useAssistStore } from "@/stores/assist";
 import { useChangesStore } from "@/stores/changes";
 import { AssistBadges, AssistNote } from "./AssistBadges";
+import { ProvenanceNote, ReportedBadges } from "./ReportedBadges";
+import { useReports } from "./reported";
 
 const KIND: Record<FileChange["kind"], { letter: string; label: string; colour: string }> = {
   added: { letter: "A", label: "Added", colour: "text-green-400" },
@@ -20,6 +22,7 @@ export function ChangeList({ changes }: { changes: ChangeSet }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto pb-2">
       <AssistNote />
+      <ProvenanceNote changes={changes} />
       <Group title="Uncommitted" scope="uncommitted" files={changes.uncommitted} />
       {changes.base && (
         <Group
@@ -36,6 +39,7 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
   const viewing = useChangesStore((s) => s.viewing);
   const view = useChangesStore((s) => s.view);
   const review = useAssistStore((s) => s.review);
+  const reports = useReports();
   // One lookup per group; a selector that built this map would rebuild it on every render.
   const judged = useMemo(
     () =>
@@ -83,6 +87,7 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
                 <span className="min-w-0 flex-1 truncate text-[11px] text-ink-faint" dir="rtl">
                   {slash > 0 ? change.path.slice(0, slash) : ""}
                 </span>
+                <ReportedBadges file={reports?.get(change.path)} />
                 <AssistBadges review={judged.get(change.path)} />
                 <span className="shrink-0 font-mono text-[11px]">
                   {change.additions != null && (

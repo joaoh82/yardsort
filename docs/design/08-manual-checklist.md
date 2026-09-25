@@ -358,6 +358,22 @@ General.
 |     | Switch **Capture** off; start it again: no `cursor/` rows.                                                                                                                                                                                                                                                                                                                             |
 |     | **macOS / Windows:** all of the above; on Windows the hook command runs through PowerShell, so a data directory with spaces in its path is the case to try.                                                                                                                                                                                                                            |
 
+## 18 · Reported writes beside the diff
+
+Needs one reporting agent; Claude Code is the most direct (`Write` and `Edit` are reported as
+tool calls with the file). Switch on **Record when agents start and exit**, **Show the activity
+timeline** and **Capture what Claude Code reports** in Settings → General.
+
+| ✓   | Check                                                                                                                                                                                                                                                                                              |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | Start Claude Code from the composer and ask it to create `hello.txt`. As the `Write done · hello.txt` row lands, the Changes list's `hello.txt` gains a **claude** badge without a refresh; hovering it says _claude reported writing this file once, last at …_ and ends with the line about git. |
+|     | A line above the list reads _Every changed file was reported written by an agent._ Now edit a second file yourself: the line becomes _Agents reported writing 1 of 2 changed files_ and names you, a script, or a non-reporting run as the alternatives. Your file has no badge.                   |
+|     | Open `hello.txt` and **Expand**: the header says _reported by claude · 1 write · HH:MM_. Open your own file and expand: _no agent reported writing this_.                                                                                                                                          |
+|     | In the Activity panel, the `Write done · hello.txt` row has a **diff** button; pressing it opens that diff below the list. A `Bash done` row has none.                                                                                                                                             |
+|     | Switch **Capture** off and start a second Claude Code; ask it to edit `hello.txt`. The badge stays (the first run reported) and the line now counts _one of the 1 agent run here that was not reporting_.                                                                                          |
+|     | Clear the activity: every badge and the line go; the list reads as it did before this section.                                                                                                                                                                                                     |
+|     | **macOS / Windows:** the first three rows; the badge's path is what the Changes list shows (forward slashes on Windows too).                                                                                                                                                                       |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:

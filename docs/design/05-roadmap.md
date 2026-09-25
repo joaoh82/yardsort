@@ -558,6 +558,26 @@ _Exit:_ the documented shapes map and leak nothing; arming writes the plugin and
 `--`, only when asked; the real `ys` as the hook; the gates green. Owed: the recording, and the
 hands-on rows in [08 §17](08-manual-checklist.md#17--cursor-reporting).
 
+## M18 — Agent events, stage 3: review and provenance (first slice) ✅
+
+The join of what the agents reported to what git shows, recorded in
+[17-agent-events-stage-3-review](17-agent-events-stage-3-review.md).
+
+- The decision: joined at read time, per path, from the three event kinds that can carry a
+  write, with the harness's writing tools named per producer; nothing stored, no
+  `workspace.changed` event. The join also lists the workspace's agent runs and how each was
+  asked to report, which is what lets the panel say why a file has no report — and stay silent
+  when no run was reporting.
+- Changes list: a badge per reporting agent on a changed file, a counting line above the list,
+  a word in the expanded viewer's header. Activity timeline: a **diff** button on a row that
+  names a listed file. Every word stops short of a line.
+- Not done, by decision: event-derived facts for Assist's review — the Jev half of stage 3 —
+  which changes what is sent under the user's key and gets its own opt-in and design pass.
+
+_Exit:_ reported writes are told apart from git-observed changes on the panel, with the
+alternatives named; no claim of line-level causality anywhere; the gates green. Owed: the
+hands-on pass in [08 §18](08-manual-checklist.md#18--reported-writes-beside-the-diff).
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

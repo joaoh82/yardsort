@@ -6,6 +6,7 @@ import { useChangesStore } from "@/stores/changes";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { useDraftStore } from "@/stores/draft";
 import { usePublishStore } from "@/stores/publish";
+import { useProvenanceStore } from "@/stores/provenance";
 import { ChangeList } from "./ChangeList";
 import { FileTree } from "./FileTree";
 import { PublishBar } from "./PublishBar";
@@ -40,6 +41,8 @@ export function ChangesPanel() {
     void useAssistStore.getState().load();
     useAssistStore.getState().follow(workspaceId);
     void usePublishStore.getState().follow(workspaceId);
+    // What the agents reported writing, joined to the list above.
+    void useProvenanceStore.getState().follow(workspaceId);
     void useDraftStore.getState().load();
   }, [workspaceId]);
 
@@ -52,15 +55,22 @@ export function ChangesPanel() {
       // A commit or a checkout moves what there is to push; the forge has not changed, so its
       // last answer is reused rather than asked for again.
       void usePublishStore.getState().refresh();
+      void useProvenanceStore.getState().refresh();
     };
     const unlisten = ipc.onWorkspaceFilesChanged((changedId) => {
       if (changedId === useChangesStore.getState().workspaceId) refresh();
+    });
+    // A hook landing is a report that may name a file already on the list.
+    const unlistenActivity = ipc.onActivityChanged((ids) => {
+      const followed = useProvenanceStore.getState().workspaceId;
+      if (followed && ids.includes(followed)) void useProvenanceStore.getState().refresh();
     });
     // The watcher is best-effort; coming back to the window always catches up.
     window.addEventListener("focus", refresh);
     return () => {
       window.removeEventListener("focus", refresh);
       void unlisten.then((stop) => stop());
+      void unlistenActivity.then((stop) => stop());
     };
   }, []);
 

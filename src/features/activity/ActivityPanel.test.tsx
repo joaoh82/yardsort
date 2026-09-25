@@ -14,6 +14,7 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 import { useActivityStore } from "@/stores/activity";
+import { useChangesStore } from "@/stores/changes";
 import { ActivityPanel } from "./ActivityPanel";
 import { describeEvent } from "./describe";
 
@@ -138,6 +139,51 @@ describe("ActivityPanel", () => {
     notify?.(["ws"]);
     await waitFor(() => expect(within(panel).getAllByRole("listitem")).toHaveLength(2));
     expect(within(panel).getAllByRole("listitem")[0]).toHaveTextContent("agent finished its turn");
+  });
+
+  it("links a row that names a changed file to that file's diff, and only such a row", async () => {
+    const user = userEvent.setup();
+    const reported = (seq: number, kind: string, payload: object): ActivityEvent => ({
+      ...event(seq, kind, payload),
+      producer: "codex",
+      method: "notify",
+      fidelity: "reported",
+    });
+    core.activityTimeline.mockResolvedValue({
+      events: [
+        reported(3, "file.reported_write", { path: "src/a.rs", kind: "update" }),
+        reported(2, "file.reported_write", { path: "gone.rs", kind: "update" }),
+        reported(1, "tool.completed", { tool: "shell", durationMs: 4 }),
+      ],
+      hasMore: false,
+    });
+    const change = {
+      path: "src/a.rs",
+      oldPath: null,
+      kind: "modified" as const,
+      additions: 1,
+      deletions: 0,
+    };
+    const view = vi.fn().mockResolvedValue(undefined);
+    useChangesStore.setState({
+      workspaceId: "ws",
+      changes: { uncommitted: [], committed: [change], base: "main" },
+      view,
+    });
+    render(<ActivityPanel workspaceId="ws" onClose={() => {}} />);
+    const panel = screen.getByRole("region", { name: "Activity" });
+    await waitFor(() => expect(within(panel).getAllByRole("listitem")).toHaveLength(3));
+    const rows = within(panel).getAllByRole("listitem");
+    expect(within(rows[1]!).queryByRole("button", { name: "diff" })).toBeNull();
+    expect(within(rows[2]!).queryByRole("button", { name: "diff" })).toBeNull();
+    const link = within(rows[0]!).getByRole("button", { name: "diff" });
+    expect(link.title).toContain("whoever changed it");
+    await user.click(link);
+    expect(view).toHaveBeenCalledWith({ kind: "diff", change, scope: "committed" });
+
+    // The Changes panel following another workspace has no diff of this file to show.
+    useChangesStore.setState({ workspaceId: "elsewhere" });
+    await waitFor(() => expect(within(panel).queryByRole("button", { name: "diff" })).toBeNull());
   });
 
   it("reports a failure to load rather than showing an empty list", async () => {

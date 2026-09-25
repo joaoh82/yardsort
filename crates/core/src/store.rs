@@ -939,6 +939,27 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// A workspace's events of the given kinds, oldest first. For a join that reads one or
+    /// two kinds out of everything a busy workspace recorded, without paging through the rest.
+    pub fn events_of_kinds(
+        &self,
+        workspace_id: &str,
+        kinds: &[&str],
+    ) -> StoreResult<Vec<EventRow>> {
+        if kinds.is_empty() {
+            return Ok(vec![]);
+        }
+        let conn = self.conn();
+        let marks = kinds.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM agent_events
+             WHERE workspace_id = ? AND kind IN ({marks}) ORDER BY seq"
+        ))?;
+        let params = std::iter::once(workspace_id).chain(kinds.iter().copied());
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), event_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Every event, oldest first — one workspace's, or all of them. For export.
     pub fn all_events(&self, workspace_id: Option<&str>) -> StoreResult<Vec<EventRow>> {
         let conn = self.conn();
