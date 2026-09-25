@@ -210,6 +210,7 @@ export const ipc = {
         activity.showTimeline,
         activity.captureClaude,
         activity.captureCodex,
+        activity.captureOpencode,
       ),
     ),
 

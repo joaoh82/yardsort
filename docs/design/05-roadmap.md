@@ -443,6 +443,26 @@ change; `just check`, `just bindings-check`, `just lint-windows` green; a real C
 through `ys` on Linux seen reporting a turn from its own session file. Hands-on rows in
 [08 §13](08-manual-checklist.md#13--codex-reporting).
 
+## M14 — Agent events, stage 2: OpenCode ✅
+
+The third native adapter, recorded in [13-agent-events-stage-2-opencode](13-agent-events-stage-2-opencode.md).
+
+- `scripts/record-opencode.sh` and 80 fixtures from OpenCode 1.18.31: every plugin hook call and
+  bus event of one `run` turn, recorded through the same per-launch channel the adapter uses.
+- `activity/opencode.rs` and `opencode-plugin.js`: a plugin written before each launch and given
+  through `OPENCODE_CONFIG_CONTENT`, merged by OpenCode with the user's own; `reduce()` keeps a
+  whitelist of fields inside OpenCode's process and hands each call to the executable in hook
+  mode on stdin. `--pure` is respected. `ResolvedLaunch` carries per-launch environment.
+- Settings → General **Capture what OpenCode reports** (off); the plugin's `reduce` tested under
+  vitest over the same fixtures the Rust side reads.
+- Coverage: sessions, prompts, tools with exit codes and failures, file edits, permissions, turns,
+  token usage and cost per reply. Not available: a successful tool's duration.
+
+_Exit:_ fixtures map and leak nothing on both sides; arming, merging and the `--pure` refusal;
+the hook binary end to end; covered by tests that fail without the change; `just check`,
+`just bindings-check`, `just lint-windows` green; a real OpenCode launched through `ys` on Linux
+seen reporting live. Hands-on rows in [08 §14](08-manual-checklist.md#14--opencode-reporting).
+
 _Result:_ 2026-09-24, Linux. Rust: 184 core tests (11 new in `activity.rs`, 7 in `launch.rs`
 against a real `PtyHost` and a plan-catching host), 3 new spool unit tests, a real-daemon test in
 `pty-ipc/tests/daemon.rs` (exit spooled after the only client left, live exit spooled too), 2

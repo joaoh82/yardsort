@@ -1,0 +1,14 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f10a56001bs3S4wafgHSeps",
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "status": {
+        "type": "busy"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **OpenCode can report what it does.** Switch on **Capture what OpenCode reports** in Settings
+  → General and every OpenCode that Yardsort starts puts its work on the activity timeline as it
+  happens: each tool with its file or exit code, tools that failed, files it edited, permission
+  prompts, and the tokens each reply cost — never a message, a command, an output or a file's
+  contents. It works through a small plugin given to that launch alone through OpenCode's
+  environment; your `opencode.json` is not edited and your own plugins keep running. Off by
+  default. See [What OpenCode reports](docs/guide/activity.md#what-opencode-reports) and the
+  [design note](docs/design/13-agent-events-stage-2-opencode.md).
 - **Codex can report what it does.** Switch on **Capture what Codex reports** in Settings →
   General and every Codex that Yardsort starts puts each turn on the activity timeline: the shell
   commands it ran with their exit codes and durations, the files it added or changed, the tokens

@@ -817,3 +817,54 @@ fn the_binary_as_codex_notify_leaves_a_trigger_the_next_command_expands_from_the
     assert!(table.contains("29842 tokens"), "{table}");
     assert!(!table.contains("cat hello.txt"), "no command text: {table}");
 }
+
+/// `ys --yardsort-hook opencode <inbox>` with a plugin delivery on stdin is what OpenCode's
+/// plugin runs at each step. The next `ys` command drains it and the event is on the timeline.
+#[test]
+fn the_binary_as_the_opencode_plugins_hook_leaves_an_entry_the_next_command_takes_in() {
+    use std::io::Write;
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    drop(store);
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/fixtures/opencode")
+        .join(yardsort_core::activity::opencode::FIXTURE_VERSION)
+        .join("18-tool.execute.after-write.json");
+    let inbox = yardsort_core::activity::inbox_dir(&fx.data_dir);
+
+    let mut hook = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .arg(yardsort_core::activity::hook::HOOK_FLAG)
+        .arg("opencode")
+        .arg(&inbox)
+        .env(yardsort_core::activity::WORKSPACE_ENV, &workspace.id)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    hook.stdin
+        .take()
+        .unwrap()
+        .write_all(&std::fs::read(&fixture).unwrap())
+        .unwrap();
+    let output = hook.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = fx.ys(&["activity", "list", "--json"]).ok();
+    let events: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(events[0]["kind"], "tool.completed");
+    assert_eq!(events[0]["producer"], "opencode");
+    assert_eq!(events[0]["method"], "plugin");
+    assert_eq!(events[0]["payload"]["tool"], "write");
+    assert_eq!(events[0]["payload"]["path"], "hello.txt");
+    assert_eq!(events[0]["payload"]["created"], true);
+    let table = fx.ys(&["activity", "list"]).ok();
+    assert!(table.contains("opencode/plugin"), "{table}");
+    assert!(table.contains("write hello.txt"), "{table}");
+}

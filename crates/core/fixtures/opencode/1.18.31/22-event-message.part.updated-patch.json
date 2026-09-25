@@ -1,0 +1,20 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f1222c001O1AuUoSsrm9l9Y",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "id": "prt_00000000000fixture05",
+        "messageID": "msg_00000000000fixture02",
+        "sessionID": "ses_00000000000fixture01",
+        "type": "patch",
+        "hash": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "files": ["/tmp/yardsort-fixture/repo/hello.txt"]
+      },
+      "time": 1790346076716
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

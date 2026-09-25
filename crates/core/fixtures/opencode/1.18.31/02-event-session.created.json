@@ -1,0 +1,51 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f10818001ADqRFp751tTo3Q",
+    "type": "session.created",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "info": {
+        "id": "ses_00000000000fixture01",
+        "slug": "neon-knight",
+        "version": "1.18.31",
+        "projectID": "0dc654c7ffc68761b62bb0bf3c85ffb6c9c23156",
+        "directory": "/tmp/yardsort-fixture/repo",
+        "path": "",
+        "title": "New session - 2026-09-25T14:21:10.039Z",
+        "permission": [
+          {
+            "permission": "question",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_enter",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_exit",
+            "pattern": "*",
+            "action": "deny"
+          }
+        ],
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1790346070039,
+          "updated": 1790346070039
+        }
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

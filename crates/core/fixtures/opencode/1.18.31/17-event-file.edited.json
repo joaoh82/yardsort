@@ -1,0 +1,11 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f121fa001lKkKxeylw9xfZv",
+    "type": "file.edited",
+    "properties": {
+      "file": "/tmp/yardsort-fixture/repo/hello.txt"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

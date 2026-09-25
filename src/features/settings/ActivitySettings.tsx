@@ -13,6 +13,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
   const [timeline, setTimeline] = useState(initial.showTimeline);
   const [claude, setClaude] = useState(initial.captureClaude);
   const [codex, setCodex] = useState(initial.captureCodex);
+  const [opencode, setOpencode] = useState(initial.captureOpencode);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<ActivityDiagnostics | null>(null);
@@ -27,7 +28,8 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
     record !== saved.recordLifecycle ||
     timeline !== saved.showTimeline ||
     claude !== saved.captureClaude ||
-    codex !== saved.captureCodex;
+    codex !== saved.captureCodex ||
+    opencode !== saved.captureOpencode;
   const save = async () => {
     setError(null);
     try {
@@ -37,6 +39,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
         // Capture needs recording: without a run there is nothing to link a report to.
         captureClaude: claude && record,
         captureCodex: codex && record,
+        captureOpencode: opencode && record,
       });
       setSaved(info.activity);
       useAppStore.setState({ showTimeline: info.activity.showTimeline });
@@ -140,6 +143,28 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
             of each turn, and the turn&apos;s commands, file changes and token usage are read from
             Codex&apos;s own session file — exit codes and paths, never a command or a message. Your
             Codex configuration is not edited; a <code>notify</code> of your own still runs.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={opencode}
+          disabled={!record}
+          onChange={(e) => {
+            setOpencode(e.target.checked);
+            setJustSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Capture what OpenCode reports
+          <span className="block text-ink-faint">
+            OpenCode started from Yardsort is given a small plugin, through its environment for that
+            launch alone, that reports each prompt, tool, file edit, permission prompt and turn with
+            its token usage — names, paths, exit codes and counts, never a command, a file&apos;s
+            contents or a message. Your OpenCode configuration is not edited and your own plugins
+            keep running.
           </span>
         </span>
       </label>

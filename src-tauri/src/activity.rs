@@ -310,6 +310,7 @@ pub async fn settings_save_activity(
     show_timeline: bool,
     capture_claude: bool,
     capture_codex: bool,
+    capture_opencode: bool,
 ) -> IpcResult<SettingsInfo> {
     blocking(app, move |state| {
         state
@@ -319,6 +320,7 @@ pub async fn settings_save_activity(
                 settings.activity.show_timeline = show_timeline;
                 settings.activity.capture_claude = capture_claude;
                 settings.activity.capture_codex = capture_codex;
+                settings.activity.capture_opencode = capture_opencode;
             })
             .map_err(|error| {
                 IpcError::new(

@@ -1,0 +1,19 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f141b80015zfYb2i72ppzoc",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "id": "prt_00000000000fixture15",
+        "messageID": "msg_00000000000fixture06",
+        "sessionID": "ses_00000000000fixture01",
+        "snapshot": "04df07b08ca746b3167d0f1d1514e2f39a52c16c",
+        "type": "step-start"
+      },
+      "time": 1790346084792
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

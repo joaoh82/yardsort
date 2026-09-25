@@ -142,8 +142,8 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
 
 ## Agent events
 
-20. **Which native surface first, per harness?** **Partly settled 2026-09-25: Claude Code's hooks
-    first, and they shipped** — see [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md).
+20. ~~**Which native surface first, per harness?**~~ **Settled 2026-09-25, in three slices in one
+    day.** Claude Code's hooks first, and they shipped — see [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md).
     The fixtures came first, as the lean said; the "installer" turned out to be no installer at
     all, a per-launch `--settings` file Claude Code merges with the user's own. The receiver
     question is settled the same way the exit spool was: neither the app process nor the daemon,
@@ -152,5 +152,10 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     ([12-agent-events-stage-2-codex](12-agent-events-stage-2-codex.md)), and the samples chose
     for it: its hooks are Claude Code's to the letter but trust-gated with no per-launch way
     through that does not also waive trust for a repository's own hooks, so the trigger is its
-    `notify` program and the substance its session file. Still open: OpenCode's plugin third.
-    OMP, Cursor, Grok and Pi stay lifecycle-only until someone finds a stable surface.
+    `notify` program and the substance its session file. **OpenCode came third**
+    ([13-agent-events-stage-2-opencode](13-agent-events-stage-2-opencode.md)): a plugin, as the
+    proposal said, but given for one launch through `OPENCODE_CONFIG_CONTENT` and installed
+    nowhere. What remains is not a question but a watch: OMP, Cursor, Grok and Pi stay
+    lifecycle-only until someone finds a stable surface, and the three patterns now in the tree —
+    a settings file, a program, a plugin, each per launch — are what such a surface would be
+    fitted to.

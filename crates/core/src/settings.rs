@@ -128,6 +128,9 @@ pub struct ActivitySettings {
     /// read the turn's commands, file changes and token usage from Codex's own session file.
     /// Off by default, for the same reasons.
     pub capture_codex: bool,
+    /// Give Yardsort's own launches of OpenCode a plugin, through its environment, that
+    /// reports what it does. Off by default, for the same reasons.
+    pub capture_opencode: bool,
 }
 
 impl Default for ActivitySettings {
@@ -137,6 +140,7 @@ impl Default for ActivitySettings {
             show_timeline: false,
             capture_claude: false,
             capture_codex: false,
+            capture_opencode: false,
         }
     }
 }

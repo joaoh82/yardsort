@@ -195,11 +195,13 @@ WHEN                  WORKSPACE      EVENT            SOURCE              DETAIL
 2026-09-24 20:44:15Z  fix-the-login  process.exited   yardsort/lifecycle  exit 0, via spool
 2026-09-24 20:44:02Z  fix-the-login  tool.completed   claude/hook         Edit src/login.rs, 12 ms
 2026-09-24 20:43:59Z  add-a-footer   usage.reported   codex/session_file  29842 tokens
+2026-09-24 20:43:41Z  rename-the-cli tool.completed   opencode/plugin     write src/main.rs
 2026-09-24 20:43:58Z  fix-the-login  process.started  yardsort/lifecycle  claude, opus, reporting via hook
 ```
 
-Rows from `claude/hook` and `codex/session_file` are what the agents themselves reported, when
-[capture](activity.md#what-claude-code-reports) is on for them; the rest is what Yardsort saw.
+Rows from `claude/hook`, `codex/session_file` and `opencode/plugin` are what the agents
+themselves reported, when [capture](activity.md#what-claude-code-reports) is on for them; the
+rest is what Yardsort saw.
 
 Any `ys` command that reads the daemon first takes the exits it kept while nothing was
 connected into the database, so a `session list` after an agent finished on its own says `ended`

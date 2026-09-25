@@ -1,0 +1,17 @@
+{
+  "hook": "tool.execute.before",
+  "payload": {
+    "input": {
+      "tool": "write",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "call_function_e863vxf71uly_1"
+    },
+    "output": {
+      "args": {
+        "content": "hello",
+        "filePath": "/tmp/yardsort-fixture/repo/hello.txt"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

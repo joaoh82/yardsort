@@ -234,6 +234,14 @@ impl Launcher<'_> {
                         activity::codex::METHOD_NOTIFY,
                     )
                 }
+                Some(activity::opencode::HARNESS_ID) if self.activity.capture_opencode => {
+                    let existing = self.env.vars.get(activity::opencode::CONFIG_ENV).cloned();
+                    (
+                        activity::opencode::arm(&resolved.args, self.data_dir, existing.as_deref())
+                            .map(|variable| resolved.env.push(variable)),
+                        activity::opencode::METHOD,
+                    )
+                }
                 _ => return None,
             };
             match armed {
@@ -303,6 +311,7 @@ impl Launcher<'_> {
                 plan.env.push((variable.to_owned(), value.clone()));
             }
         }
+        plan.env.extend(resolved.env);
         plan.labels = resolved.labels;
         plan.prompt = resolved.paste_when_ready;
         Ok(self.host.spawn(plan)?)
@@ -342,6 +351,9 @@ pub struct ResolvedLaunch {
     pub paste_when_ready: Option<PendingPrompt>,
     /// For a new harness conversation: what to remember about it.
     pub record: Option<RecordDraft>,
+    /// Variables for this launch alone, appended to the user's environment: an adapter's
+    /// configuration, for a harness that takes it that way.
+    pub env: Vec<(String, String)>,
 }
 
 /// What a session record needs beyond the ids chosen at spawn time.
@@ -384,6 +396,7 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
             labels,
             paste_when_ready: None,
             record: None,
+            env: vec![],
         },
         Launch::Program { program, args } => ResolvedLaunch {
             program: Some(program),
@@ -391,6 +404,7 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
             labels,
             paste_when_ready: None,
             record: None,
+            env: vec![],
         },
         Launch::Harness(request) => {
             let mut def = harness::find(&request.id, overrides).ok_or_else(|| {
@@ -435,6 +449,7 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
                         quiet_ms: def.stdin_ready_ms,
                     }),
                 record: Some(record),
+                env: vec![],
             }
         }
     })
@@ -1353,5 +1368,92 @@ mod tests {
         plain.in_workspace(&ws, request(), SIZE).unwrap();
         let plan = host.plans.lock().unwrap().remove(0);
         assert!(!plan.args.iter().any(|arg| arg.starts_with("notify=")));
+    }
+
+    #[test]
+    fn an_opencode_launch_is_given_its_plugin_through_the_environment_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let (command, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let opencode = |base_args: Vec<&str>| HarnessOverride {
+            id: "opencode".into(),
+            command: Some(command.into()),
+            base_args: Some(base_args.into_iter().map(String::from).collect()),
+            prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
+            ..Default::default()
+        };
+        let request = || {
+            Launch::Harness(HarnessRequest {
+                id: "opencode".into(),
+                model: None,
+                effort: None,
+                prompt: Some("exit 0".into()),
+            })
+        };
+        let on = ActivitySettings {
+            capture_opencode: true,
+            ..Default::default()
+        };
+        let harnesses = [opencode(vec![])];
+        let armed = launcher(&store, &host, &env, &harnesses, &on, dir.path());
+        armed.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        let (_, content) = plan
+            .env
+            .iter()
+            .find(|(k, _)| k == activity::opencode::CONFIG_ENV)
+            .expect("the configuration variable");
+        let config: serde_json::Value = serde_json::from_str(content).unwrap();
+        assert_eq!(
+            config["plugin"][0],
+            activity::opencode::file_url(&activity::opencode::plugin_path(dir.path()))
+        );
+        assert!(activity::opencode::plugin_path(dir.path()).is_file());
+        assert!(
+            !plan.args.iter().any(|a| a.contains("plugin")),
+            "nothing on the command line: {:?}",
+            plan.args
+        );
+        let started = store
+            .all_events(Some(&ws))
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "process.started")
+            .unwrap();
+        assert!(
+            started.payload.contains(r#""capture":"plugin""#),
+            "{}",
+            started.payload
+        );
+
+        // Off, or `--pure`: nothing given.
+        let off = ActivitySettings::default();
+        let plain = launcher(&store, &host, &env, &harnesses, &off, dir.path());
+        plain.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(!plan
+            .env
+            .iter()
+            .any(|(k, _)| k == activity::opencode::CONFIG_ENV));
+        let pure = [opencode(vec!["--pure"])];
+        let refused = launcher(&store, &host, &env, &pure, &on, dir.path());
+        refused.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(!plan
+            .env
+            .iter()
+            .any(|(k, _)| k == activity::opencode::CONFIG_ENV));
+        assert!(store
+            .diagnostics()
+            .unwrap()
+            .iter()
+            .any(|d| d.name == "hooks_not_armed"));
     }
 }

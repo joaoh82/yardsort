@@ -1,0 +1,11 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f14259002lvTgftnz3YcRLh",
+    "type": "session.idle",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

@@ -1,0 +1,33 @@
+{
+  "hook": "chat.message",
+  "payload": {
+    "input": {
+      "sessionID": "ses_00000000000fixture01"
+    },
+    "output": {
+      "message": {
+        "id": "msg_00000000000fixture01",
+        "role": "user",
+        "sessionID": "ses_00000000000fixture01",
+        "time": {
+          "created": 1790346070593
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "opencode",
+          "modelID": "big-pickle"
+        }
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Create a file named hello.txt containing the single word hello using the write tool. Then read it back with the read tool. Then read a file named missing.txt, which does not exist. Then run `ls` with the bash tool. Reply with one word when done.\"",
+          "messageID": "msg_00000000000fixture01",
+          "sessionID": "ses_00000000000fixture01",
+          "id": "prt_00000000000fixture01"
+        }
+      ]
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

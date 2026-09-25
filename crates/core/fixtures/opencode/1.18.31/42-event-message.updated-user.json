@@ -1,0 +1,35 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_0d8f127d2001fQ4nQ9ktl2RLN8",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1790346070593
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "opencode",
+          "modelID": "big-pickle"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": "hello.txt",
+              "patch": "Index: hello.txt\n===================================================================\n--- hello.txt\t\n+++ hello.txt\t\n@@ -0,0 +1,1 @@\n+hello\n\\ No newline at end of file\n",
+              "additions": 1,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_00000000000fixture01",
+        "sessionID": "ses_00000000000fixture01"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

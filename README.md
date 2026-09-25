@@ -74,8 +74,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   diffs.
 - **A record of what ran.** Yardsort keeps a local note of when each agent started in a
   workspace and how it ended — even if it ended while the window was closed — without reading a
-  word the agent printed. Turn it on, and Claude Code and Codex report their own tool calls,
-  file changes and turns to the same record, as metadata, with their own settings untouched. An experimental
+  word the agent printed. Turn it on, and Claude Code, Codex and OpenCode report their own tool
+  calls, file changes and turns to the same record, as metadata, with their own settings
+  untouched. An experimental
   timeline shows it; `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
