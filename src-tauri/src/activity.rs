@@ -75,6 +75,14 @@ fn read_session_files(
     report.watching
 }
 
+/// A launch happened: wake the watcher, so a harness whose files are read rather than delivered
+/// — Grok — is followed from its first line, not from the next unrelated event.
+pub fn launched(state: &AppState) {
+    if let Some(watcher) = state.inbox_watcher.lock().unwrap().as_ref() {
+        watcher.look_again();
+    }
+}
+
 /// Wait this long after the last file lands before draining: a tool call is two files in
 /// quick succession, and one drain covers both.
 const INBOX_QUIET: Duration = Duration::from_millis(200);
@@ -120,17 +128,25 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
     std::thread::spawn(move || {
         let mut pending = 0;
         let mut cursors = yardsort_core::activity::grok::Cursors::new();
+        // The first pass does not wait: a Grok run left going when the window last closed has
+        // a directory to read now, and nothing else would say so.
+        let mut first = true;
         loop {
-            let woken = match wait_for(pending) {
-                Some(wait) => match rx.recv_timeout(wait) {
-                    Ok(()) => true,
-                    Err(RecvTimeoutError::Timeout) => false,
-                    Err(RecvTimeoutError::Disconnected) => break,
-                },
-                None => match rx.recv() {
-                    Ok(()) => true,
-                    Err(_) => break,
-                },
+            let woken = if first {
+                first = false;
+                false
+            } else {
+                match wait_for(pending) {
+                    Some(wait) => match rx.recv_timeout(wait) {
+                        Ok(()) => true,
+                        Err(RecvTimeoutError::Timeout) => false,
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    },
+                    None => match rx.recv() {
+                        Ok(()) => true,
+                        Err(_) => break,
+                    },
+                }
             };
             if woken {
                 // Let the burst finish; whatever else arrives meanwhile is one drain.

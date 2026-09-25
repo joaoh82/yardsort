@@ -252,6 +252,7 @@ fn continue_session(
         state.store.mark_session_running(&row.id, &session.id.0)?;
     }
     settle_record(state, &session);
+    crate::activity::launched(state);
     Ok(session)
 }
 

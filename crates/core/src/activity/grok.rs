@@ -90,15 +90,12 @@ pub fn import(store: &Store, grok_home: &Path, cursors: &mut Cursors) -> Report 
         let Some(session_id) = run.harness_session_id.as_deref() else {
             continue;
         };
+        // Every run the query returned is worth another look: one still going, or one that
+        // ended within the grace and may yet gain its last lines and its usage.
+        report.watching += 1;
         let Some(dir) = find_session_dir(grok_home, session_id) else {
-            if run.ended_at.is_none() {
-                report.watching += 1;
-            }
             continue;
         };
-        if run.ended_at.is_none() {
-            report.watching += 1;
-        }
         let mut derived = Vec::new();
         if let Some(started) = read_summary(&dir, session_id, &run.id) {
             derived.push(started);
@@ -181,7 +178,12 @@ pub fn read_events(dir: &Path, session_id: &str, from: usize) -> (Vec<Derived>, 
     let mut events = Vec::new();
     let mut lines = 0;
     let mut turn: Option<i64> = None;
-    for (index, line) in text.lines().enumerate() {
+    // Only a line Grok has finished writing counts: a fragment at the end — a record caught
+    // mid-append — is left for the next read, when it will be whole.
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        let Some(line) = line.strip_suffix('\n') else {
+            break;
+        };
         lines = index + 1;
         let Ok(record) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -391,6 +393,41 @@ mod tests {
     }
 
     #[test]
+    fn a_record_caught_mid_append_waits_for_the_next_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("events.jsonl");
+        let whole =
+            r#"{"ts":"2026-09-25T16:33:17.216Z","type":"tool_started","tool_name":"write"}"#;
+        let (head, tail) = whole.split_at(40);
+        std::fs::write(
+            &log,
+            format!(
+                "{}\n{head}",
+                r#"{"ts":"2026-09-25T16:33:12.317Z","type":"turn_started","turn_number":0,"model_id":"grok-4.7"}"#
+            ),
+        )
+        .unwrap();
+        let (events, cursor) = read_events(dir.path(), "s", 0);
+        assert_eq!(
+            events.iter().map(|e| e.kind).collect::<Vec<_>>(),
+            ["turn.started"]
+        );
+        assert_eq!(cursor, 1, "the fragment is not counted");
+
+        let mut text = std::fs::read_to_string(&log).unwrap();
+        text.push_str(tail);
+        text.push('\n');
+        std::fs::write(&log, text).unwrap();
+        let (events, cursor) = read_events(dir.path(), "s", cursor);
+        assert_eq!(
+            events.iter().map(|e| e.kind).collect::<Vec<_>>(),
+            ["tool.started"]
+        );
+        assert_eq!(events[0].payload["tool"], "write");
+        assert_eq!(cursor, 2);
+    }
+
+    #[test]
     fn a_permission_that_waited_or_was_refused_is_an_event() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -545,7 +582,7 @@ mod tests {
         // A run that just ended is read once more, in case the last lines landed late.
         store.end_run(&run_id, Some(0), "exited").unwrap();
         let ended = import(&store, &home, &mut cursors);
-        assert_eq!(ended.watching, 0, "not going any more");
+        assert_eq!(ended.watching, 1, "just ended: still worth looking at");
         assert_eq!(ended.duplicates, 2);
 
         // One that ended long ago is left alone.
@@ -567,6 +604,7 @@ mod tests {
             (0, 11 + 2),
             "only the recent run"
         );
+        assert_eq!(stale.watching, 1, "the old one is not watched either");
         assert!(store
             .all_events(Some(&ws))
             .unwrap()
