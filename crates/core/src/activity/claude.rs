@@ -105,7 +105,10 @@ pub fn arm(args: &mut Vec<String>, data_dir: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| "settings path has no directory".to_owned())?;
     std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
     let settings = settings_json(&hook, &super::inbox_dir(data_dir));
-    let temporary = path.with_extension("json.tmp");
+    // A temporary name of this writer's own: two launches at once — two tabs, or the app and
+    // `ys` — each write their file and each rename it into place; the last one wins, and both
+    // are the same content.
+    let temporary = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
     let write = || -> io::Result<()> {
         std::fs::write(&temporary, serde_json::to_vec_pretty(&settings)?)?;
         std::fs::rename(&temporary, &path)
@@ -259,24 +262,55 @@ fn tool_path(input: Option<&Value>, cwd: Option<&str>) -> (Option<String>, bool)
     else {
         return (None, false);
     };
-    let is_absolute = path.starts_with('/')
-        || path.starts_with('\\')
-        || path.get(1..3).is_some_and(|s| s == ":\\" || s == ":/");
-    if !is_absolute {
-        return (Some(path.replace('\\', "/")), false);
+    // Without the workspace to measure against, no path can be called inside it.
+    let Some(cwd) = cwd else {
+        return (None, true);
+    };
+    let root = normalized(std::iter::empty(), cwd);
+    let full = if is_absolute(path) {
+        normalized(std::iter::empty(), path)
+    } else {
+        normalized(root.iter().map(String::as_str), path)
+    };
+    let inside = full.len() >= root.len()
+        && root
+            .iter()
+            .zip(&full)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b));
+    if !inside {
+        return (None, true);
     }
-    if let Some(cwd) = cwd {
-        let cwd = cwd.trim_end_matches(['/', '\\']);
-        if let Some(rest) = path.strip_prefix(cwd) {
-            if let Some(relative) = rest.strip_prefix(['/', '\\']) {
-                return (Some(relative.replace('\\', "/")), false);
+    let relative = full[root.len()..].join("/");
+    if relative.is_empty() {
+        return (Some(".".to_owned()), false);
+    }
+    (Some(relative), false)
+}
+
+fn is_absolute(path: &str) -> bool {
+    path.starts_with('/')
+        || path.starts_with('\\')
+        || path.get(1..3).is_some_and(|s| s == ":\\" || s == ":/")
+}
+
+/// The components of `path` after `base`, with `.` dropped and `..` resolved lexically — so a
+/// path that climbs out of the workspace and back into somewhere else is seen for where it
+/// ends up, not for how it was spelled. Both separators count; a drive letter is a component.
+fn normalized<'a>(base: impl Iterator<Item = &'a str>, path: &'a str) -> Vec<String> {
+    let mut parts: Vec<String> = base.map(str::to_owned).collect();
+    for part in path.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                // A drive letter is the floor on Windows, as the root is elsewhere.
+                if parts.last().is_some_and(|last| !last.ends_with(':')) {
+                    parts.pop();
+                }
             }
-            if rest.is_empty() {
-                return (Some(".".to_owned()), false);
-            }
+            other => parts.push(other.to_owned()),
         }
     }
-    (None, true)
+    parts
 }
 
 #[cfg(test)]
@@ -475,6 +509,30 @@ mod tests {
         );
         assert_eq!(at("/w/s", "/w/s"), (Some(".".into()), false));
         assert_eq!(at("/w/s", "rel/b.rs"), (Some("rel/b.rs".into()), false));
+        assert_eq!(at("/w/s", "./rel/../b.rs"), (Some("b.rs".into()), false));
+        // Climbing out is climbing out, however it is spelled — seen in review.
+        assert_eq!(
+            at("/work/repo", "../../home/alice/private.txt"),
+            (None, true)
+        );
+        assert_eq!(
+            at("/work/repo", "/work/repo/../../home/alice/private.txt"),
+            (None, true)
+        );
+        assert_eq!(
+            at("/work/repo", "/work/repo/../repo/src/a.rs"),
+            (Some("src/a.rs".into()), false)
+        );
+        assert_eq!(at("C:\\w\\s", "..\\..\\..\\Users\\x\\secret"), (None, true));
+        assert_eq!(
+            at("c:\\w\\s", "C:/w/s/a.rs"),
+            (Some("a.rs".into()), false),
+            "drive case"
+        );
+        assert_eq!(
+            tool_path(Some(&json!({ "file_path": "a.rs" })), None),
+            (None, true)
+        );
         assert_eq!(
             at("C:\\w\\s", "C:\\w\\s\\src\\a.rs"),
             (Some("src/a.rs".into()), false)
@@ -550,6 +608,25 @@ mod tests {
                 "--",
                 "Reply with ok."
             ]
+        );
+
+        // Sixteen launches at once, as the app and `ys` and many tabs can be: every one arms,
+        // and the file each named is whole. Seen failing in review with one shared temporary.
+        let shared = std::sync::Arc::new(dir.path().to_path_buf());
+        let writers: Vec<_> = (0..16)
+            .map(|_| {
+                let data_dir = std::sync::Arc::clone(&shared);
+                std::thread::spawn(move || (0..20).all(|_| arm(&mut vec![], &data_dir).is_ok()))
+            })
+            .collect();
+        assert!(writers.into_iter().all(|w| w.join().unwrap()));
+        let written: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written["hooks"]["Stop"][0]["hooks"][0]["command"], expected);
+        assert!(
+            std::fs::read_dir(path.parent().unwrap())
+                .unwrap()
+                .all(|e| e.unwrap().path() == path),
+            "no temporary files left behind"
         );
 
         let mut theirs = vec!["--settings".to_owned(), "mine.json".to_owned()];

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager};
@@ -53,7 +53,7 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
     std::fs::create_dir_all(&dir)?;
     let (tx, rx) = mpsc::channel::<()>();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if event.is_ok() {
+        if event.is_ok_and(|event| brings_entries(&event.kind)) {
             let _ = tx.send(());
         }
     })?;
@@ -70,6 +70,14 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
         }
     });
     Ok(InboxWatcher { _watcher: watcher })
+}
+
+/// Whether an event on the inbox directory can mean a new entry: a file created or renamed
+/// into place. A drain *reads* the directory, which on Linux is an `Access` event of its own,
+/// and a drain that woke the next drain would never let the worker sleep. Removals are the
+/// drain's too.
+fn brings_entries(kind: &EventKind) -> bool {
+    matches!(kind, EventKind::Create(_) | EventKind::Modify(_))
 }
 
 /// One recorded fact, as the timeline shows it. Timestamps are epoch milliseconds; `payload`
@@ -266,4 +274,29 @@ pub async fn settings_save_activity(
         settings_info(state)
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{AccessKind, AccessMode, CreateKind, ModifyKind, RemoveKind, RenameMode};
+
+    #[test]
+    fn only_a_file_arriving_wakes_the_drain_never_the_drain_itself() {
+        assert!(brings_entries(&EventKind::Create(CreateKind::File)));
+        assert!(brings_entries(&EventKind::Modify(ModifyKind::Name(
+            RenameMode::To
+        ))));
+        assert!(brings_entries(&EventKind::Modify(ModifyKind::Any)));
+        // What a drain does: lists the directory, then removes what it took.
+        assert!(!brings_entries(&EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(!brings_entries(&EventKind::Access(AccessKind::Close(
+            AccessMode::Read
+        ))));
+        assert!(!brings_entries(&EventKind::Remove(RemoveKind::File)));
+        assert!(!brings_entries(&EventKind::Any));
+        assert!(!brings_entries(&EventKind::Other));
+    }
 }
