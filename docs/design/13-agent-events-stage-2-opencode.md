@@ -64,7 +64,7 @@ clock (OpenCode's events carry no time of their own except a tool's `state.time`
 | `event message.updated`, assistant, completed            | `usage.reported`      | `sessionId`, `messageId`, `model`, `agent`, `finish`, `inputTokens`, `outputTokens`, `reasoningOutputTokens`, `cachedInputTokens`, `cacheWriteTokens`, `totalTokens`, `cost` | fixture    |
 | `event session.idle`                                     | `turn.completed`      | `sessionId`                                                                                                                                                                  | fixture    |
 | `event session.error`                                    | `turn.failed`         | `sessionId`, `errorType`                                                                                                                                                     | documented |
-| `event permission.asked` (and the `permission.ask` hook) | `approval.requested`  | `sessionId`, `permission`, `permissionId`, `callId`                                                                                                                          | documented |
+| `event permission.asked` (and the `permission.ask` hook) | `approval.requested`  | `sessionId`, `tool` (the permission is the tool asked for), `permission`, `permissionId`, `toolUseId`                                                                        | documented |
 | `event permission.replied`                               | `approval.resolved`   | `sessionId`, `decision`, `permissionId`                                                                                                                                      | documented |
 
 ## 4 · Coverage, honestly

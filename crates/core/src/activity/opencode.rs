@@ -46,13 +46,24 @@ pub fn plugin_source(hook: &Path, inbox_dir: &Path) -> String {
         .replace("__YARDSORT_INBOX__", &quoted(inbox_dir))
 }
 
-/// A `file://` URL for a local path, as OpenCode's `plugin` list takes them.
+/// A `file://` URL for a local path, as OpenCode's `plugin` list takes them. Every byte a URL
+/// would read as something else — `#`, `%`, `?`, a space — is percent-encoded, so a profile
+/// under `profile#one` loads the same as any other; `/` and a drive's `:` are kept.
 pub fn file_url(path: &Path) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
-    if text.starts_with('/') {
-        format!("file://{text}")
+    let mut encoded = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                encoded.push(byte as char)
+            }
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    if encoded.starts_with('/') {
+        format!("file://{encoded}")
     } else {
-        format!("file:///{text}")
+        format!("file:///{encoded}")
     }
 }
 
@@ -175,15 +186,21 @@ pub fn normalize(delivery: &Value) -> Result<Reported, String> {
                         ),
                     )
                 }
-                Some("permission.asked") => (
-                    "approval.requested",
-                    json!({
-                        "sessionId": session,
-                        "permission": text(props, "permission").or_else(|| text(props, "type")),
-                        "permissionId": text(props, "id"),
-                        "callId": text(props, "callID").or_else(|| text(&props["tool"], "callID")),
-                    }),
-                ),
+                // OpenCode's permission is the tool it is asked for — `bash`, `edit` — and
+                // the timeline names an approval by its `tool`.
+                Some("permission.asked") => {
+                    let permission = text(props, "permission").or_else(|| text(props, "type"));
+                    (
+                        "approval.requested",
+                        json!({
+                            "sessionId": session,
+                            "tool": permission,
+                            "permission": permission,
+                            "permissionId": text(props, "id"),
+                            "toolUseId": text(props, "callID").or_else(|| text(&props["tool"], "callID")),
+                        }),
+                    )
+                }
                 Some("permission.replied") => (
                     "approval.resolved",
                     json!({
@@ -331,13 +348,16 @@ pub fn normalize(delivery: &Value) -> Result<Reported, String> {
         }
         "permission.ask" => {
             let session = text(input, "sessionID");
+            let permission = text(input, "permission").or_else(|| text(input, "type"));
             Ok(Reported {
                 kind: "approval.requested",
                 native_session_id: session.clone(),
                 payload: json!({
                     "sessionId": session,
-                    "permission": text(input, "permission").or_else(|| text(input, "type")),
-                    "callId": text(input, "callID"),
+                    "tool": permission,
+                    "permission": permission,
+                    "permissionId": text(input, "id"),
+                    "toolUseId": text(input, "callID"),
                 }),
             })
         }
@@ -514,12 +534,14 @@ mod tests {
         .unwrap();
         assert_eq!(asked.kind, "approval.requested");
         assert_eq!(asked.payload["permission"], "bash");
+        assert_eq!(asked.payload["tool"], "bash", "what the timeline names");
         // The bus event, which is the one this version delivers: the call sits under `tool`.
         let asked = normalize(&json!({ "hook": "event", "payload": { "type": "permission.asked",
             "properties": { "id": "per_1", "sessionID": "s", "permission": "bash",
                             "patterns": ["rm -rf *"], "tool": { "messageID": "m", "callID": "c" } } } }))
         .unwrap();
-        assert_eq!(asked.payload["callId"], "c");
+        assert_eq!(asked.payload["toolUseId"], "c");
+        assert_eq!(asked.payload["tool"], "bash");
         assert!(!asked.payload.to_string().contains("rm -rf"));
         let replied = normalize(
             &json!({ "hook": "event", "payload": { "type": "permission.replied",
@@ -577,11 +599,25 @@ mod tests {
     }
 
     #[test]
-    fn file_urls_are_made_for_both_kinds_of_path() {
-        assert_eq!(file_url(Path::new("/a/b c.js")), "file:///a/b c.js");
+    fn file_urls_are_made_for_both_kinds_of_path_and_encode_what_a_url_would_misread() {
+        assert_eq!(file_url(Path::new("/a/b c.js")), "file:///a/b%20c.js");
         assert_eq!(
             file_url(Path::new(r"C:\Users\x\p.js")),
             "file:///C:/Users/x/p.js"
+        );
+        // Seen in review: `#` starts a fragment and `%` an escape, and a module under either
+        // was not found.
+        assert_eq!(
+            file_url(Path::new("/home/u/profile#one/hooks/opencode.js")),
+            "file:///home/u/profile%23one/hooks/opencode.js"
+        );
+        assert_eq!(
+            file_url(Path::new("/home/u/profile%20one/x.js")),
+            "file:///home/u/profile%2520one/x.js"
+        );
+        assert_eq!(
+            file_url(Path::new("/q?a=1/é.js")),
+            "file:///q%3Fa%3D1/%C3%A9.js"
         );
     }
 }
