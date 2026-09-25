@@ -126,7 +126,7 @@ export const commands = {
 	 *  so their exit can still be matched; nothing about the processes themselves is touched.
 	 */
 	activityClear: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("activity_clear", { workspaceId })),
-	settingsSaveActivity: (recordLifecycle: boolean, showTimeline: boolean, captureClaude: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { recordLifecycle, showTimeline, captureClaude })),
+	settingsSaveActivity: (recordLifecycle: boolean, showTimeline: boolean, captureClaude: boolean, captureCodex: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { recordLifecycle, showTimeline, captureClaude, captureCodex })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
 	sessionResume: (id: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("session_resume", { id, size })),
@@ -268,6 +268,8 @@ export type ActivitySettingsDto = {
 	showTimeline: boolean,
 	/**  Give Claude Code launches hooks that report what the agent does, as metadata. */
 	captureClaude: boolean,
+	/**  Give Codex launches a `notify` program, and read each turn from its session file. */
+	captureCodex: boolean,
 };
 
 /**  The result of adding a project: it may have been known already. */

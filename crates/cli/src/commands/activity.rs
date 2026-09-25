@@ -204,6 +204,12 @@ fn details(payload: &serde_json::Value) -> String {
     if let Some(chars) = payload.get("chars").and_then(|v| v.as_i64()) {
         parts.push(format!("{chars} chars"));
     }
+    if let (Some(kind), Some(path)) = (text("kind"), text("path")) {
+        parts.push(format!("{kind} {path}"));
+    }
+    if let Some(total) = payload.get("totalTokens").and_then(|v| v.as_i64()) {
+        parts.push(format!("{total} tokens"));
+    }
     if let Some(capture) = text("capture") {
         parts.push(format!("reporting via {capture}"));
     }
@@ -258,5 +264,11 @@ mod tests {
         assert_eq!(details(&prompt), "40 chars");
         let hooked = serde_json::json!({"harnessId": "claude", "capture": "hook"});
         assert_eq!(details(&hooked), "claude, reporting via hook");
+        let shell = serde_json::json!({"tool": "shell", "exitCode": 1, "durationMs": 0});
+        assert_eq!(details(&shell), "shell, 0 ms, exit 1");
+        let file = serde_json::json!({"kind": "add", "path": "hello.txt"});
+        assert_eq!(details(&file), "add hello.txt");
+        let usage = serde_json::json!({"totalTokens": 29842, "outputTokens": 138});
+        assert_eq!(details(&usage), "29842 tokens");
     }
 }

@@ -39,7 +39,12 @@ describe("ActivitySettings", () => {
     }));
     render(
       <ActivitySettings
-        initial={{ recordLifecycle: true, showTimeline: false, captureClaude: false }}
+        initial={{
+          recordLifecycle: true,
+          showTimeline: false,
+          captureClaude: false,
+          captureCodex: false,
+        }}
       />,
     );
 
@@ -47,11 +52,13 @@ describe("ActivitySettings", () => {
     expect(save).toBeDisabled();
     await user.click(screen.getByRole("checkbox", { name: /Show the activity timeline/ }));
     await user.click(screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Capture what Codex reports/ }));
     await user.click(save);
     expect(core.settingsSaveActivity).toHaveBeenCalledWith({
       recordLifecycle: true,
       showTimeline: true,
       captureClaude: true,
+      captureCodex: true,
     });
     await waitFor(() => expect(screen.getByText("Saved.")).toBeInTheDocument());
     expect(useAppStore.getState().showTimeline).toBe(true);
@@ -61,20 +68,33 @@ describe("ActivitySettings", () => {
     const user = userEvent.setup();
     render(
       <ActivitySettings
-        initial={{ recordLifecycle: true, showTimeline: false, captureClaude: true }}
+        initial={{
+          recordLifecycle: true,
+          showTimeline: false,
+          captureClaude: true,
+          captureCodex: true,
+        }}
       />,
     );
     const capture = screen.getByRole("checkbox", { name: /Capture what Claude Code reports/ });
+    const codex = screen.getByRole("checkbox", { name: /Capture what Codex reports/ });
     expect(capture).toBeEnabled();
+    expect(codex).toBeEnabled();
     await user.click(screen.getByRole("checkbox", { name: /Record when agents start and exit/ }));
     expect(capture).toBeDisabled();
+    expect(codex).toBeDisabled();
   });
 
   it("shows what is recorded and what went wrong, and can clear all of it", async () => {
     const user = userEvent.setup();
     render(
       <ActivitySettings
-        initial={{ recordLifecycle: true, showTimeline: false, captureClaude: false }}
+        initial={{
+          recordLifecycle: true,
+          showTimeline: false,
+          captureClaude: false,
+          captureCodex: false,
+        }}
       />,
     );
     await waitFor(() => expect(screen.getByText(/12 events across 5 runs/)).toBeInTheDocument());

@@ -1,7 +1,8 @@
 //! The executable's hook mode: `yardsort --yardsort-hook <harness> <inbox directory>`.
 //!
-//! An agent runs this with a JSON payload on stdin. It reduces the payload to metadata, writes
-//! one file to the inbox, and exits 0 — always 0. A non-zero exit is something Claude Code
+//! An agent runs this with a JSON payload on stdin (Claude Code's hooks) or as the last argument
+//! (Codex's `notify`). It reduces the payload to metadata, writes one file to the inbox, and
+//! exits 0 — always 0. A non-zero exit is something Claude Code
 //! shows the user, and 2 would *block* the action the hook was told about; Yardsort observes,
 //! it never gets in the way. Whatever goes wrong is a line on stderr, which the agent keeps to
 //! itself. Nothing is written to stdout: some hooks' stdout is read back as instructions.
@@ -14,7 +15,7 @@ use std::io::Read;
 use std::path::Path;
 
 use super::inbox::{Inbox, InboxEntry, INBOX_VERSION};
-use super::{claude, PRIVACY_METADATA, RECORD_ENV, RUN_ENV, WORKSPACE_ENV};
+use super::{claude, codex, PRIVACY_METADATA, RECORD_ENV, RUN_ENV, WORKSPACE_ENV};
 
 /// Makes this executable *be* a hook. See the module documentation.
 pub const HOOK_FLAG: &str = "--yardsort-hook";
@@ -32,14 +33,38 @@ pub fn run_hook_and_exit_if_asked() {
         std::process::exit(0);
     };
     let env = |name: &str| std::env::var(name).ok();
-    let mut stdin = std::io::stdin().lock();
-    if let Err(why) = deliver(
-        &harness.to_string_lossy(),
-        Path::new(&inbox),
-        &mut stdin,
-        &env,
-    ) {
+    let harness = harness.to_string_lossy().into_owned();
+    let inbox = Path::new(&inbox);
+    // What is left: nothing (the payload is on stdin); the payload alone; or `--then`, the
+    // user's own program and its arguments, and then the payload, which Codex appends last.
+    let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+    let (chain, payload) = match rest.split_first() {
+        Some((flag, tail)) if flag == codex::THEN_FLAG => match tail.split_last() {
+            Some((payload, chain)) => (chain.to_vec(), Some(payload.clone())),
+            None => (vec![], None),
+        },
+        Some((payload, [])) => (vec![], Some(payload.clone())),
+        _ => (vec![], None),
+    };
+    let delivered = match &payload {
+        Some(text) => serde_json::from_str::<serde_json::Value>(text)
+            .map_err(|error| format!("the payload argument is not JSON: {error}"))
+            .and_then(|value| deliver_payload(&harness, inbox, value, &env)),
+        None => deliver(&harness, inbox, &mut std::io::stdin().lock(), &env),
+    };
+    if let Err(why) = delivered {
         eprintln!("yardsort hook: {why}");
+    }
+    // The user's own program gets the same payload, whatever became of ours.
+    if let (Some((program, arguments)), Some(text)) = (chain.split_first(), &payload) {
+        let status = std::process::Command::new(program)
+            .args(arguments)
+            .arg(text)
+            .stdin(std::process::Stdio::null())
+            .status();
+        if let Err(error) = status {
+            eprintln!("yardsort hook: could not run {program}: {error}");
+        }
     }
     std::process::exit(0);
 }
@@ -60,8 +85,37 @@ pub fn deliver(
         .map_err(|error| format!("reading stdin: {error}"))?;
     let payload: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|error| format!("stdin is not JSON: {error}"))?;
-    let (producer, reported) = match harness {
-        claude::HARNESS_ID => (claude::PRODUCER, claude::normalize(&payload)?),
+    deliver_payload(harness, inbox_dir, payload, env)
+}
+
+/// The same, for a payload already in hand.
+pub fn deliver_payload(
+    harness: &str,
+    inbox_dir: &Path,
+    payload: serde_json::Value,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<InboxEntry, String> {
+    let (producer, method, kind, native_session_id, reduced) = match harness {
+        claude::HARNESS_ID => {
+            let r = claude::normalize(&payload)?;
+            (
+                claude::PRODUCER,
+                claude::METHOD,
+                r.kind,
+                r.native_session_id,
+                r.payload,
+            )
+        }
+        codex::HARNESS_ID => {
+            let r = codex::normalize_notify(&payload, codex::codex_home(env).as_deref())?;
+            (
+                codex::PRODUCER,
+                codex::METHOD_NOTIFY,
+                r.kind,
+                r.native_session_id,
+                r.payload,
+            )
+        }
         other => return Err(format!("no adapter for harness `{other}`")),
     };
     let entry = InboxEntry {
@@ -69,15 +123,15 @@ pub fn deliver(
         id: uuid::Uuid::new_v4().to_string(),
         at_ms: crate::store::now_ms(),
         producer: producer.to_owned(),
-        method: claude::METHOD.to_owned(),
+        method: method.to_owned(),
         fidelity: claude::FIDELITY.to_owned(),
         run_id: env(RUN_ENV).filter(|v| !v.is_empty()),
         workspace_id: env(WORKSPACE_ENV).filter(|v| !v.is_empty()),
         session_record_id: env(RECORD_ENV).filter(|v| !v.is_empty()),
-        native_session_id: reported.native_session_id,
-        kind: reported.kind.to_owned(),
+        native_session_id,
+        kind: kind.to_owned(),
         privacy_class: PRIVACY_METADATA.to_owned(),
-        payload: reported.payload,
+        payload: reduced,
     };
     Inbox::new(inbox_dir.to_path_buf())
         .record(&entry)
@@ -144,13 +198,15 @@ mod tests {
             &env,
         );
         assert!(unknown.unwrap_err().contains("MessageDisplay"));
-        let no_adapter = deliver(
+        let no_adapter = deliver("grok", dir.path(), &mut fixture("11-Stop").as_slice(), &env);
+        assert!(no_adapter.unwrap_err().contains("grok"));
+        let wrong_shape = deliver(
             "codex",
             dir.path(),
             &mut fixture("11-Stop").as_slice(),
             &env,
         );
-        assert!(no_adapter.unwrap_err().contains("codex"));
+        assert!(wrong_shape.unwrap_err().contains("notify"));
         assert!(Inbox::new(dir.path().to_path_buf())
             .entries()
             .unwrap()
@@ -168,5 +224,37 @@ mod tests {
         huge.resize(usize::try_from(MAX_STDIN_BYTES).unwrap() + 100, b'x');
         let result = deliver("claude", dir.path(), &mut huge.as_slice(), &env);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_codex_notify_payload_becomes_a_trigger_naming_its_codex_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let notify = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("fixtures/codex")
+                .join(codex::FIXTURE_VERSION)
+                .join("notify/01.json"),
+        )
+        .unwrap();
+        let env = |name: &str| match name {
+            RUN_ENV => Some("run-9".to_owned()),
+            "CODEX_HOME" => Some("/h/.codex".to_owned()),
+            _ => None,
+        };
+        let entry = deliver_payload(
+            "codex",
+            dir.path(),
+            serde_json::from_slice(&notify).unwrap(),
+            &env,
+        )
+        .unwrap();
+        assert_eq!(entry.kind, codex::TRIGGER_KIND);
+        assert_eq!(entry.method, "notify");
+        assert_eq!(entry.run_id.as_deref(), Some("run-9"));
+        assert_eq!(entry.payload["codexHome"], "/h/.codex");
+        assert!(
+            !entry.payload.to_string().contains("apply_patch"),
+            "messages dropped"
+        );
     }
 }

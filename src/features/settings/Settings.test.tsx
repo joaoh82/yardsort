@@ -80,7 +80,12 @@ const settings: SettingsInfo = {
   worktreeRootOverride: null,
   filePath: "/home/me/.config/yardsort/settings.toml",
   problem: null,
-  activity: { recordLifecycle: true, showTimeline: false, captureClaude: false },
+  activity: {
+    recordLifecycle: true,
+    showTimeline: false,
+    captureClaude: false,
+    captureCodex: false,
+  },
 };
 
 const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({

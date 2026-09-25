@@ -256,6 +256,7 @@ pub async fn settings_save_activity(
     record_lifecycle: bool,
     show_timeline: bool,
     capture_claude: bool,
+    capture_codex: bool,
 ) -> IpcResult<SettingsInfo> {
     blocking(app, move |state| {
         state
@@ -264,6 +265,7 @@ pub async fn settings_save_activity(
                 settings.activity.record_lifecycle = record_lifecycle;
                 settings.activity.show_timeline = show_timeline;
                 settings.activity.capture_claude = capture_claude;
+                settings.activity.capture_codex = capture_codex;
             })
             .map_err(|error| {
                 IpcError::new(

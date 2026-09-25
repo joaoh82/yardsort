@@ -1,0 +1,11 @@
+{
+  "type": "agent-turn-complete",
+  "thread-id": "01a0d83f-c3ea-7ae0-88df-82c9431d3f8b",
+  "turn-id": "01a0d83f-c42b-7fd3-b4af-c46bc45458cc",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "client": "codex_exec",
+  "input-messages": [
+    "Use apply_patch to create a file named hello.txt containing the single word hello. Then read it back with cat. Then read a file named missing.txt, which does not exist. Then run `ls`. Reply with one word when done."
+  ],
+  "last-assistant-message": "Done"
+}

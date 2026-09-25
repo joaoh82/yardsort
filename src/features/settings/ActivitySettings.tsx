@@ -12,6 +12,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
   const [record, setRecord] = useState(initial.recordLifecycle);
   const [timeline, setTimeline] = useState(initial.showTimeline);
   const [claude, setClaude] = useState(initial.captureClaude);
+  const [codex, setCodex] = useState(initial.captureCodex);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<ActivityDiagnostics | null>(null);
@@ -25,7 +26,8 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
   const dirty =
     record !== saved.recordLifecycle ||
     timeline !== saved.showTimeline ||
-    claude !== saved.captureClaude;
+    claude !== saved.captureClaude ||
+    codex !== saved.captureCodex;
   const save = async () => {
     setError(null);
     try {
@@ -34,6 +36,7 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
         showTimeline: timeline,
         // Capture needs recording: without a run there is nothing to link a report to.
         captureClaude: claude && record,
+        captureCodex: codex && record,
       });
       setSaved(info.activity);
       useAppStore.setState({ showTimeline: info.activity.showTimeline });
@@ -116,6 +119,27 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
             session end — the tool&apos;s name and the file&apos;s path, never the prompt, the
             command or the output. Your own Claude Code settings are not touched: the hooks ride on
             a per-launch settings file and are gone when this is off.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={codex}
+          disabled={!record}
+          onChange={(e) => {
+            setCodex(e.target.checked);
+            setJustSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Capture what Codex reports
+          <span className="block text-ink-faint">
+            Codex started from Yardsort is given a <code>notify</code> program that reports the end
+            of each turn, and the turn&apos;s commands, file changes and token usage are read from
+            Codex&apos;s own session file — exit codes and paths, never a command or a message. Your
+            Codex configuration is not edited; a <code>notify</code> of your own still runs.
           </span>
         </span>
       </label>
