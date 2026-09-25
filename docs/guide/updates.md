@@ -38,6 +38,10 @@ installs it and starts the new version.
 | Linux `.deb` / `.rpm`, or the AUR package            | **Told, not updated.** Those files belong to your package manager, and an app must not change them behind its back. Update the way you installed — `yay -Syu`, or download the new `.deb`/`.rpm` from the release page the dialog links to. |
 | A build you made yourself (`just dev`, `just build`) | Never updates itself.                                                                                                                                                                                                                       |
 
+The [`ys` command](cli.md) comes with the app, so it is updated with it: through your package
+manager, through the link into the macOS app, or — for an AppImage or on Windows — by Yardsort
+replacing the copy it installed the next time it starts. See [Installing `ys`](cli.md#installing).
+
 ## If it goes wrong
 
 - **"Could not check for updates"** — you are offline, or GitHub is unreachable. The automatic

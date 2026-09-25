@@ -78,5 +78,8 @@ it). Never edit it by hand; commit it when it changes.
 YARDSORT_DATA_DIR=/tmp/ys YARDSORT_WORKTREE_ROOT=/tmp/ys-wt just dev
 ```
 
+`YARDSORT_YS_DIR=/tmp/ys-bin` does the same for **Install ys**, which otherwise writes to
+`~/.local/bin`, `/usr/local/bin` or the user's `PATH`.
+
 If the app is started from a terminal that is itself inside an agent, that is fine: the launch
 environment drops the enclosing agent's session markers (see `src-tauri/src/env.rs`).

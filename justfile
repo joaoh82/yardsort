@@ -13,12 +13,14 @@ setup:
     bun install
     cargo fetch
 
-# Run the app with hot reload
+# Run the app with hot reload. `ys` is built first: the app finds it next to its own binary.
 dev:
+    cargo build -q -p yardsort-cli
     bun tauri dev
 
 # Run the app forcing a terminal renderer: webgl or dom
 dev-renderer $YARDSORT_RENDERER:
+    cargo build -q -p yardsort-cli
     bun tauri dev
 
 # Run the frontend alone in a browser tab (no Rust core; terminals won't work)
@@ -83,13 +85,17 @@ bindings-check: bindings
 
 # --- build ----------------------------------------------------------------------------------
 
-# Build installers for this OS (target/release/bundle/)
-build:
-    bun tauri build
+# Build installers for this OS (target/release/bundle/), with `ys` inside
+build: sidecar
+    bun tauri build --config src-tauri/tauri.bundle.conf.json
 
 # Build only the given bundle types, e.g. `just bundle deb` or `just bundle appimage,deb`
-bundle types:
-    bun tauri build --bundles {{ types }}
+bundle types: sidecar
+    bun tauri build --config src-tauri/tauri.bundle.conf.json --bundles {{ types }}
+
+# Build `ys` in release mode where the bundler picks it up (src-tauri/binaries/)
+sidecar:
+    bun scripts/sidecar.mjs
 
 # Debug build of the app, no installers
 build-debug:

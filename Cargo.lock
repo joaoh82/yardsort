@@ -6801,6 +6801,8 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "uuid",
  "which",
+ "windows-sys 0.59.0",
+ "winreg 0.55.0",
  "yardsort-core",
 ]
 

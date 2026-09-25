@@ -163,6 +163,10 @@ export const commands = {
 	 *  Only for [`InstallKind::SelfUpdating`] copies.
 	 */
 	updateInstall: (progress: Channel<DownloadProgress>) => typedError<null, IpcError>(__TAURI_INVOKE("update_install", { progress })),
+	/**  Where `ys` is, whether it is this version, and where Install would put it. */
+	ysStatus: () => typedError<YsStatus, IpcError>(__TAURI_INVOKE("ys_status")),
+	/**  Put `ys` on `PATH`. With `replace`, over a file that is not a `ys` — ask first. */
+	ysInstall: (replace: boolean) => typedError<YsStatus, IpcError>(__TAURI_INVOKE("ys_install", { replace })),
 	envInfo: (reload: boolean) => typedError<EnvInfo, IpcError>(__TAURI_INVOKE("env_info", { reload })),
 	/**
 	 *  What the app is talking to. Shown in the status bar, and the first thing worth knowing when
@@ -663,6 +667,8 @@ export type Preflight = {
 	env: EnvInfo,
 	/**  `linux`, `macos` or `windows`: install advice differs. */
 	os: string,
+	/**  The `ys` command. Optional: it never stands in the way of `ready`. */
+	ys: YsStatus,
 	/**  Nothing stands between the user and their first workspace. */
 	ready: boolean,
 };
@@ -1016,6 +1022,38 @@ export type WorkspaceSettingsDto = {
 	/**  `None` uses `default_worktree_root`. */
 	worktreeRoot: string | null,
 	branchPrefix: string,
+};
+
+/**  How this copy of the app puts `ys` on `PATH`. */
+export type YsMethod = 
+/**  The package installed it along with the app. Nothing to do. */
+"packaged" | 
+/**  A symlink into the app bundle (macOS). */
+"link" | 
+/**  A copy, refreshed when the app is updated (AppImage, Windows). */
+"copy";
+
+export type YsStatus = {
+	/**  The app's version; the `ys` that came with it is the same one. */
+	version: string,
+	method: YsMethod,
+	/**
+	 *  The `ys` that came with this copy of the app. `None` for a build without one: a
+	 *  development build before `cargo build -p yardsort-cli`, or one bundled by hand.
+	 */
+	bundled: string | null,
+	/**  Where Install puts it. `None` when the package already did. */
+	target: string | null,
+	/**  Something is at `target` already. */
+	installed: boolean,
+	/**  The folder `target` is in is on the login shell's `PATH`, so a terminal will find it. */
+	targetOnPath: boolean,
+	/**  The `ys` a terminal finds, if any. */
+	found: string | null,
+	/**  What `found --version` says. `None` if it is not a `ys` at all. */
+	foundVersion: string | null,
+	/**  `found` is the one this app ships or installed. */
+	foundIsOurs: boolean,
 };
 
 /* Tauri Specta runtime */

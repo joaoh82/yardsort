@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { errorMessage, hasCore, ipc, type Preflight } from "@/lib/ipc";
+import { errorMessage, hasCore, ipc, type Preflight, type YsStatus } from "@/lib/ipc";
 import { useAppStore } from "./app";
 import { useHarnessStore } from "./harnesses";
 import { useProjectsStore } from "./projects";
@@ -10,6 +10,8 @@ interface PreflightState {
   error: string | null;
   /** Look at the machine. With `reload`, re-read the login shell's environment first. */
   check: (reload?: boolean) => Promise<void>;
+  /** Put `ys` on `PATH`. Rejects as the core does — `ys_exists` means ask, then pass `replace`. */
+  installYs: (replace?: boolean) => Promise<void>;
 }
 
 /** Whether git and at least one agent are here — see `src-tauri/src/preflight.rs`. */
@@ -35,5 +37,11 @@ export const usePreflightStore = create<PreflightState>((set, get) => ({
     } finally {
       set({ checking: false });
     }
+  },
+
+  async installYs(replace = false) {
+    const ys: YsStatus = await ipc.ysInstall(replace);
+    const report = get().report;
+    if (report) set({ report: { ...report, ys } });
   },
 }));

@@ -1,11 +1,12 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Preflight } from "@/lib/ipc";
+import type { Preflight, YsStatus } from "@/lib/ipc";
 import { project } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   preflight: vi.fn(),
+  ysInstall: vi.fn(),
   harnessesList: vi.fn(),
   projectsList: vi.fn(),
   uiStateLoad: vi.fn(),
@@ -33,12 +34,33 @@ const agent = (id: string, label: string, path: string | null, enabled = true) =
   install: { command: `npm install -g ${id}-package`, url: `https://example.com/${id}` },
 });
 
+/** An AppImage whose `ys` has not been installed yet. */
+const ysMissing: YsStatus = {
+  version: "0.10.0",
+  method: "copy",
+  bundled: "/tmp/.mount_abc/usr/bin/ys",
+  target: "/home/you/.local/bin/ys",
+  installed: false,
+  targetOnPath: true,
+  found: null,
+  foundVersion: null,
+  foundIsOurs: false,
+};
+const ysInstalled: YsStatus = {
+  ...ysMissing,
+  installed: true,
+  found: "/home/you/.local/bin/ys",
+  foundVersion: "0.10.0",
+  foundIsOurs: true,
+};
+
 function report(overrides: Partial<Preflight> = {}): Preflight {
   return {
     git: { path: "/usr/bin/git", version: "git version 2.55.0" },
     harnesses: [agent("claude", "Claude Code", "/usr/bin/claude"), agent("codex", "Codex", null)],
     env: { source: "loginShell", shell: "/bin/zsh", pathEntries: 12, warning: null },
     os: "linux",
+    ys: ysInstalled,
     ready: true,
     ...overrides,
   };
@@ -174,5 +196,64 @@ describe("status bar environment indicator", () => {
 
     expect(core.preflight).toHaveBeenCalledWith(true);
     expect(await screen.findByRole("button", { name: /14 PATH/ })).toBeInTheDocument();
+  });
+
+  describe("the ys command", () => {
+    it("is installed from here, and then says so", async () => {
+      core.ysInstall.mockResolvedValue(ysInstalled);
+      const user = await show(report({ ys: ysMissing }));
+      const list = await screen.findByRole("region", { name: "Getting started" });
+      expect(list).toHaveTextContent("The ys command is not installed");
+      expect(list).toHaveTextContent("/home/you/.local/bin/ys");
+
+      await user.click(screen.getByRole("button", { name: "Install ys" }));
+
+      expect(core.ysInstall).toHaveBeenCalledWith(false);
+      expect(await screen.findByText("The ys command is installed")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Install ys" })).not.toBeInTheDocument();
+    });
+
+    it("offers an update when the one on PATH is Yardsort's but older", async () => {
+      core.ysInstall.mockResolvedValue(ysInstalled);
+      const user = await show(report({ ys: { ...ysInstalled, foundVersion: "0.9.0" } }));
+      expect(await screen.findByText("The ys command is out of date")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Update to 0.10.0" }));
+      expect(core.ysInstall).toHaveBeenCalledWith(false);
+      expect(await screen.findByText("The ys command is installed")).toBeInTheDocument();
+    });
+
+    it("replaces a file that is not ys only after a second yes", async () => {
+      const inTheWay = {
+        code: "ys_exists",
+        message: "There is already a file at /home/you/.local/bin/ys and it is not Yardsort's ys.",
+      };
+      core.ysInstall
+        .mockRejectedValueOnce(inTheWay)
+        .mockRejectedValueOnce(inTheWay)
+        .mockResolvedValueOnce(ysInstalled);
+      const user = await show(report({ ys: { ...ysMissing, installed: true } }));
+
+      await user.click(await screen.findByRole("button", { name: "Install ys" }));
+      const ask = await screen.findByRole("alertdialog", { name: "Replace the file?" });
+      expect(ask).toHaveTextContent("it is not Yardsort's ys. Replace it?");
+
+      await user.click(within(ask).getByRole("button", { name: "Cancel" }));
+      expect(core.ysInstall).toHaveBeenCalledTimes(1);
+      expect(core.ysInstall).not.toHaveBeenCalledWith(true);
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Install ys" }));
+      await user.click(await screen.findByRole("button", { name: "Replace it" }));
+      expect(core.ysInstall).toHaveBeenLastCalledWith(true);
+      expect(await screen.findByText("The ys command is installed")).toBeInTheDocument();
+    });
+
+    it("is optional: a machine without it is still ready", async () => {
+      await show(report({ ys: ysMissing }));
+      const list = await screen.findByRole("region", { name: "Getting started" });
+      expect(list).toHaveTextContent("optional");
+      expect(screen.queryByRole("button", { name: "Check again" })).not.toBeInTheDocument();
+    });
   });
 });

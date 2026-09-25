@@ -118,8 +118,12 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      # Every bundle carries `ys` beside the app; see `src-tauri/src/ys.rs`.
+      - name: Stage the ys sidecar
+        run: bun scripts/sidecar.mjs
+
       - name: Build installers
-        run: bun tauri build
+        run: bun tauri build --config src-tauri/tauri.bundle.conf.json
 
       - uses: actions/upload-artifact@v4
         with:
