@@ -272,11 +272,17 @@ fn tool_path(input: Option<&Value>, cwd: Option<&str>) -> (Option<String>, bool)
     } else {
         normalized(root.iter().map(String::as_str), path)
     };
-    let inside = full.len() >= root.len()
-        && root
-            .iter()
-            .zip(&full)
-            .all(|(a, b)| a.eq_ignore_ascii_case(b));
+    // Only a drive-lettered path is compared without case: Windows does not distinguish
+    // `C:\Repo` from `C:\repo`, but on Linux `/work/REPO` is another directory altogether.
+    let windows = root.first().is_some_and(|first| first.ends_with(':'));
+    let same = |a: &String, b: &String| {
+        if windows {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    };
+    let inside = full.len() >= root.len() && root.iter().zip(&full).all(|(a, b)| same(a, b));
     if !inside {
         return (None, true);
     }
@@ -529,6 +535,9 @@ mod tests {
             (Some("a.rs".into()), false),
             "drive case"
         );
+        // A sibling that differs only in case is a different directory on Linux — seen in review.
+        assert_eq!(at("/work/repo", "/work/REPO/private.txt"), (None, true));
+        assert_eq!(at("/work/repo", "/Work/repo/a.rs"), (None, true));
         assert_eq!(
             tool_path(Some(&json!({ "file_path": "a.rs" })), None),
             (None, true)
