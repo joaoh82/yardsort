@@ -15,7 +15,9 @@ use std::io::Read;
 use std::path::Path;
 
 use super::inbox::{Inbox, InboxEntry, INBOX_VERSION};
-use super::{claude, codex, opencode, PRIVACY_METADATA, RECORD_ENV, RUN_ENV, WORKSPACE_ENV};
+use super::{
+    claude, codex, cursor, opencode, pi, PRIVACY_METADATA, RECORD_ENV, RUN_ENV, WORKSPACE_ENV,
+};
 
 /// Makes this executable *be* a hook. See the module documentation.
 pub const HOOK_FLAG: &str = "--yardsort-hook";
@@ -116,11 +118,32 @@ pub fn deliver_payload(
                 r.payload,
             )
         }
+        cursor::HARNESS_ID => {
+            let r = cursor::normalize(&payload)?;
+            (
+                cursor::PRODUCER,
+                cursor::METHOD,
+                r.kind,
+                r.native_session_id,
+                r.payload,
+            )
+        }
         opencode::HARNESS_ID => {
             let r = opencode::normalize(&payload)?;
             (
                 opencode::PRODUCER,
                 opencode::METHOD,
+                r.kind,
+                r.native_session_id,
+                r.payload,
+            )
+        }
+        // The producer is whichever of the pi family launched: the same extension serves both.
+        pi::PI | pi::OMP => {
+            let r = pi::normalize(&payload)?;
+            (
+                if harness == pi::PI { pi::PI } else { pi::OMP },
+                pi::METHOD,
                 r.kind,
                 r.native_session_id,
                 r.payload,

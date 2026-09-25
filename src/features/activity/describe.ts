@@ -106,7 +106,9 @@ export function describeEvent(event: ActivityEvent): {
             : p.source === "fork"
               ? "agent forked its session"
               : "agent session started",
-        detail: p.contextTokens ? `${p.contextTokens.toLocaleString()} tokens of context` : "",
+        detail:
+          p.model ??
+          (p.contextTokens ? `${p.contextTokens.toLocaleString()} tokens of context` : ""),
         tone: "plain",
       };
     case "session.ended":
@@ -190,12 +192,18 @@ export function describeEvent(event: ActivityEvent): {
     case "turn.completed":
       return {
         title: "agent finished its turn",
-        detail:
+        detail: [
           p.durationMs !== null && p.durationMs !== undefined
             ? `${(p.durationMs / 1000).toFixed(1)} s`
-            : p.detail === "notify"
-              ? "from notify alone; the session file could not be read"
-              : "",
+            : null,
+          // The pi family and Cursor report a turn's tokens on the turn itself.
+          p.totalTokens !== null && p.totalTokens !== undefined
+            ? `${p.totalTokens.toLocaleString()} tokens`
+            : null,
+          p.detail === "notify" ? "from notify alone; the session file could not be read" : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
         tone: "ok",
       };
     case "turn.failed":

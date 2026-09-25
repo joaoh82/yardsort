@@ -247,6 +247,19 @@ impl Launcher<'_> {
                 Some(activity::grok::HARNESS_ID) if self.activity.capture_grok => {
                     (Ok(()), activity::grok::METHOD)
                 }
+                Some(activity::cursor::HARNESS_ID) if self.activity.capture_cursor => (
+                    activity::cursor::arm(&mut resolved.args, self.data_dir).map(|_| ()),
+                    activity::cursor::METHOD,
+                ),
+                Some(harness @ (activity::pi::PI | activity::pi::OMP))
+                    if (harness == activity::pi::PI && self.activity.capture_pi)
+                        || (harness == activity::pi::OMP && self.activity.capture_omp) =>
+                {
+                    (
+                        activity::pi::arm(&mut resolved.args, self.data_dir, harness).map(|_| ()),
+                        activity::pi::METHOD,
+                    )
+                }
                 _ => return None,
             };
             match armed {
@@ -1529,6 +1542,146 @@ mod tests {
             .unwrap();
         assert!(
             started.payload.contains(r#""capture":null"#),
+            "{}",
+            started.payload
+        );
+    }
+
+    #[test]
+    fn a_pi_family_launch_is_given_its_extension_when_asked_and_only_for_the_one_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let (command, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        // The real definitions put the prompt after a `--`, and so must the extension not.
+        let harness = |id: &str| HarnessOverride {
+            id: id.into(),
+            command: Some(command.into()),
+            base_args: Some(vec![flag.into()]),
+            prompt_args: Some(vec!["--".into(), "{prompt}".into()]),
+            session_args: Some(vec![]),
+            ..Default::default()
+        };
+        let harnesses = [harness("omp"), harness("pi")];
+        let request = |id: &str| {
+            Launch::Harness(HarnessRequest {
+                id: id.into(),
+                model: None,
+                effort: None,
+                prompt: Some("exit 0".into()),
+            })
+        };
+        let omp_only = ActivitySettings {
+            capture_omp: true,
+            ..Default::default()
+        };
+        let launcher = launcher(&store, &host, &env, &harnesses, &omp_only, dir.path());
+        launcher.in_workspace(&ws, request("omp"), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        let at = plan.args.iter().position(|a| a == "-e").expect("-e added");
+        assert_eq!(
+            plan.args[at + 1],
+            activity::pi::extension_path(dir.path(), "omp").to_string_lossy()
+        );
+        assert!(
+            at < plan.args.iter().position(|a| a == "--").unwrap(),
+            "before the prompt: {:?}",
+            plan.args
+        );
+        let started = store
+            .all_events(Some(&ws))
+            .unwrap()
+            .into_iter()
+            .rfind(|event| event.kind == "process.started")
+            .unwrap();
+        assert!(
+            started.payload.contains(r#""capture":"extension""#),
+            "{}",
+            started.payload
+        );
+
+        // pi's switch is off: pi gets nothing, even though the adapter serves it.
+        launcher.in_workspace(&ws, request("pi"), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(!plan.args.iter().any(|a| a == "-e"), "{:?}", plan.args);
+    }
+
+    #[test]
+    fn a_cursor_launch_is_given_its_plugin_directory_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let (command, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let harnesses = [HarnessOverride {
+            id: "cursor".into(),
+            command: Some(command.into()),
+            base_args: Some(vec![flag.into()]),
+            prompt_args: Some(vec!["--".into(), "{prompt}".into()]),
+            session_args: Some(vec![]),
+            ..Default::default()
+        }];
+        let request = || {
+            Launch::Harness(HarnessRequest {
+                id: "cursor".into(),
+                model: None,
+                effort: None,
+                prompt: Some("exit 0".into()),
+            })
+        };
+        let off = ActivitySettings::default();
+        let quiet = launcher(&store, &host, &env, &harnesses, &off, dir.path());
+        quiet.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(
+            !plan.args.iter().any(|a| a == "--plugin-dir"),
+            "{:?}",
+            plan.args
+        );
+
+        let on = ActivitySettings {
+            capture_cursor: true,
+            ..Default::default()
+        };
+        let armed = launcher(&store, &host, &env, &harnesses, &on, dir.path());
+        armed.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        let at = plan
+            .args
+            .iter()
+            .position(|a| a == "--plugin-dir")
+            .expect("--plugin-dir added");
+        assert_eq!(
+            plan.args[at + 1],
+            activity::cursor::plugin_dir(dir.path()).to_string_lossy()
+        );
+        assert!(
+            at < plan.args.iter().position(|a| a == "--").unwrap(),
+            "before the prompt: {:?}",
+            plan.args
+        );
+        assert!(activity::cursor::plugin_dir(dir.path())
+            .join("hooks/hooks.json")
+            .is_file());
+        let started = store
+            .all_events(Some(&ws))
+            .unwrap()
+            .into_iter()
+            .rfind(|event| event.kind == "process.started")
+            .unwrap();
+        assert!(
+            started.payload.contains(r#""capture":"hook""#),
             "{}",
             started.payload
         );

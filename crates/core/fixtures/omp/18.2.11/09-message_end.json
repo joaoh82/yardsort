@@ -1,0 +1,113 @@
+{
+  "event": "message_end",
+  "payload": {
+    "type": "message_end",
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": " ",
+          "textSignature": "{\"v\":1,\"id\":\"msg_tmp_kxxc5q8w3z\"}"
+        },
+        {
+          "type": "thinking",
+          "thinking": "Simple file operations. Create hello.txt with \"hello\", read it back, read missing.txt (will fail), run ls. Batch independent calls where possible. Create first, then read depends on create. Actually I\u2026",
+          "thinkingSignature": "{\"id\":\"rs_tmp_hxhywh68j8b\",\"type\":\"reasoning\",\"status\":\"completed\",\"content\":[{\"type\":\"reasoning_text\",\"text\":\"Simple file operations. Create hello.txt with \\\"hello\\\", read it back, read missing.txt (\u2026"
+        },
+        {
+          "type": "toolCall",
+          "id": "chatcmpl-tool-ad41c2d652717eee|fc_tmp_astyemd73wu",
+          "name": "write",
+          "arguments": {
+            "i": "write-hello",
+            "path": "hello.txt",
+            "content": "hello"
+          },
+          "intent": "write-hello"
+        }
+      ],
+      "api": "openrouter",
+      "provider": "openrouter",
+      "model": "z-ai/glm-5.3-flash",
+      "usage": {
+        "input": 5926,
+        "output": 97,
+        "cacheRead": 13940,
+        "cacheWrite": 0,
+        "totalTokens": 19963,
+        "reasoningTokens": 71,
+        "cost": {
+          "input": 0.00035198025259144516,
+          "output": 1.792437030859049e-5,
+          "cacheRead": 0.0001839953770999642,
+          "cacheWrite": 0,
+          "total": 0.0005539
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1790364101036,
+      "responseId": "gen-1790364101-DhVfFKEDCN2SyZuHfi2q",
+      "providerPayload": {
+        "type": "openaiResponsesHistory",
+        "provider": "openrouter",
+        "dt": true,
+        "items": [
+          {
+            "id": "msg_tmp_kxxc5q8w3z",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": " ",
+                "annotations": [],
+                "logprobs": []
+              }
+            ]
+          },
+          {
+            "id": "rs_tmp_hxhywh68j8b",
+            "type": "reasoning",
+            "status": "completed",
+            "content": [
+              {
+                "type": "reasoning_text",
+                "text": "Simple file operations. Create hello.txt with \"hello\", read it back, read missing.txt (will fail), run ls. Batch independent calls where possible. Create first, then read depends on create. Actually I\u2026"
+              }
+            ],
+            "summary": [],
+            "format": "unknown"
+          },
+          {
+            "id": "fc_tmp_astyemd73wu",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "chatcmpl-tool-ad41c2d652717eee",
+            "name": "write",
+            "arguments": "{\"i\": \"write-hello\", \"path\": \"hello.txt\", \"content\": \"hello\"}"
+          }
+        ]
+      },
+      "duration": 11481.634681,
+      "ttft": 7794.913170000001,
+      "completedAt": 1790364112523
+    }
+  },
+  "session": {
+    "id": "22222222-2222-4222-8222-000000000001",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-25T19-21-40-774Z_01a0da04-28a6-761b-ac53-47800c1ff939.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "z-ai/glm-5.3-flash",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

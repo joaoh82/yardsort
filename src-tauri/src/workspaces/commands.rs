@@ -82,6 +82,12 @@ pub struct ActivitySettingsDto {
     pub capture_opencode: bool,
     /// Read Grok's own session directory for Yardsort's launches of Grok.
     pub capture_grok: bool,
+    /// Give OMP launches an extension, on the command line, that reports what they do.
+    pub capture_omp: bool,
+    /// The same for pi.
+    pub capture_pi: bool,
+    /// Give Cursor agent launches a plugin directory, on the command line, whose hooks report.
+    pub capture_cursor: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -251,6 +257,9 @@ pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
             capture_codex: settings.activity.capture_codex,
             capture_opencode: settings.activity.capture_opencode,
             capture_grok: settings.activity.capture_grok,
+            capture_omp: settings.activity.capture_omp,
+            capture_pi: settings.activity.capture_pi,
+            capture_cursor: settings.activity.capture_cursor,
         },
         notify_when_quiet: settings.general.notify_when_quiet,
         check_for_updates: settings.general.check_for_updates,

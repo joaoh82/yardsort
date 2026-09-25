@@ -222,6 +222,12 @@ describe("describeEvent", () => {
       "29,842 total · 138 out",
     );
     expect(words("turn.completed", { durationMs: 11033 }).detail).toBe("11.0 s");
+    expect(words("turn.completed", { durationMs: 1200, totalTokens: 19963 }).detail).toBe(
+      "1.2 s · 19,963 tokens",
+    );
+    expect(words("session.started", { model: "openai-codex/gpt-5.3-codex" }).detail).toBe(
+      "openai-codex/gpt-5.3-codex",
+    );
     expect(words("turn.completed", { detail: "notify" }).detail).toMatch(/notify alone/);
     // Grok's log: a permission the user really answered, and turns with their outcome.
     expect(

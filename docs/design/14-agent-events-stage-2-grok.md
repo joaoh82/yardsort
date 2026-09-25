@@ -78,7 +78,8 @@ should not be told "prompt submitted" by a source that did not see the prompt.
 | Codex 0.156.1       | yes       | `notify` + session file, opt-in: [12](12-agent-events-stage-2-codex.md).                                                                                                                                                                                                  |
 | OpenCode 1.18.31    | yes       | Plugin, opt-in: [13](13-agent-events-stage-2-opencode.md).                                                                                                                                                                                                                |
 | Grok 1.0.41         | yes       | **Session directory, opt-in**: turns with model and outcome, tools with durations and outcomes, permissions the user really answered with how long they took, tokens and cost per turn. **Not available**: file paths, prompt sizes, subagents (the log is the parent's). |
-| OMP, Cursor, Pi     | yes       | Lifecycle only. Four patterns now exist — a settings file, a program, a plugin, a directory read — for whichever grows a stable surface.                                                                                                                                  |
+| OMP, Pi             | yes       | **Shipped**: [15](15-agent-events-stage-2-pi-omp.md), the plugin pattern.                                                                                                                                                                                                 |
+| Cursor              | yes       | **Shipped**, from the documentation: [16](16-agent-events-stage-2-cursor.md), the settings-file pattern.                                                                                                                                                                  |
 
 ## 5 · What shipped
 

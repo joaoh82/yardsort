@@ -1,0 +1,26 @@
+{
+  "event": "tool_call",
+  "payload": {
+    "type": "tool_call",
+    "toolName": "read",
+    "toolCallId": "chatcmpl-tool-bb9fb88b0dc37120|fc_tmp_v4ypy05kebk",
+    "input": {
+      "path": "missing.txt"
+    }
+  },
+  "session": {
+    "id": "22222222-2222-4222-8222-000000000001",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-25T19-21-40-774Z_01a0da04-28a6-761b-ac53-47800c1ff939.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "z-ai/glm-5.3-flash",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

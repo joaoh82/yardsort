@@ -16,7 +16,7 @@ use tauri_specta::Event;
 use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
 use crate::store::{DiagnosticRow, EventRow, Store};
-use crate::workspaces::commands::{settings_info, SettingsInfo};
+use crate::workspaces::commands::{settings_info, ActivitySettingsDto, SettingsInfo};
 
 /// New events were recorded for these workspaces; a timeline showing one should ask again.
 #[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
@@ -354,23 +354,21 @@ pub async fn activity_clear(app: AppHandle, workspace_id: Option<String>) -> Ipc
 #[specta::specta]
 pub async fn settings_save_activity(
     app: AppHandle,
-    record_lifecycle: bool,
-    show_timeline: bool,
-    capture_claude: bool,
-    capture_codex: bool,
-    capture_opencode: bool,
-    capture_grok: bool,
+    activity: ActivitySettingsDto,
 ) -> IpcResult<SettingsInfo> {
     blocking(app, move |state| {
         state
             .settings
             .update(|settings| {
-                settings.activity.record_lifecycle = record_lifecycle;
-                settings.activity.show_timeline = show_timeline;
-                settings.activity.capture_claude = capture_claude;
-                settings.activity.capture_codex = capture_codex;
-                settings.activity.capture_opencode = capture_opencode;
-                settings.activity.capture_grok = capture_grok;
+                settings.activity.record_lifecycle = activity.record_lifecycle;
+                settings.activity.show_timeline = activity.show_timeline;
+                settings.activity.capture_claude = activity.capture_claude;
+                settings.activity.capture_codex = activity.capture_codex;
+                settings.activity.capture_opencode = activity.capture_opencode;
+                settings.activity.capture_grok = activity.capture_grok;
+                settings.activity.capture_omp = activity.capture_omp;
+                settings.activity.capture_pi = activity.capture_pi;
+                settings.activity.capture_cursor = activity.capture_cursor;
             })
             .map_err(|error| {
                 IpcError::new(

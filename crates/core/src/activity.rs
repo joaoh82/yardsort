@@ -29,10 +29,12 @@ use crate::store::{NewEvent, NewRun, RunRow, Store, StoreResult};
 
 pub mod claude;
 pub mod codex;
+pub mod cursor;
 pub mod grok;
 pub mod hook;
 pub mod inbox;
 pub mod opencode;
+pub mod pi;
 
 use inbox::{Inbox, InboxEntry};
 

@@ -126,7 +126,7 @@ export const commands = {
 	 *  so their exit can still be matched; nothing about the processes themselves is touched.
 	 */
 	activityClear: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("activity_clear", { workspaceId })),
-	settingsSaveActivity: (recordLifecycle: boolean, showTimeline: boolean, captureClaude: boolean, captureCodex: boolean, captureOpencode: boolean, captureGrok: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { recordLifecycle, showTimeline, captureClaude, captureCodex, captureOpencode, captureGrok })),
+	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
 	sessionResume: (id: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("session_resume", { id, size })),
@@ -274,6 +274,12 @@ export type ActivitySettingsDto = {
 	captureOpencode: boolean,
 	/**  Read Grok's own session directory for Yardsort's launches of Grok. */
 	captureGrok: boolean,
+	/**  Give OMP launches an extension, on the command line, that reports what they do. */
+	captureOmp: boolean,
+	/**  The same for pi. */
+	capturePi: boolean,
+	/**  Give Cursor agent launches a plugin directory, on the command line, whose hooks report. */
+	captureCursor: boolean,
 };
 
 /**  The result of adding a project: it may have been known already. */

@@ -1,0 +1,23 @@
+{
+  "event": "input",
+  "payload": {
+    "type": "input",
+    "text": "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done.",
+    "source": "interactive"
+  },
+  "session": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-25T19-22-52-048Z_11111111-1111-4111-8111-111111111111.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "unknown",
+      "provider": "unknown"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

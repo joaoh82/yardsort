@@ -5,6 +5,18 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Every built-in agent can now report what it does.** Three more switches in Settings →
+  General, all off by default: **Capture what OMP reports** and **Capture what pi reports** give
+  those agents a small extension on the command line of each launch — never in your extension
+  folders — that reports each turn with its tokens and cost, each tool with its file or duration,
+  and, on OMP, each permission you answer. **Capture what Cursor reports** gives the Cursor agent
+  a plugin directory for that launch, whose hooks report each tool and file edit beside your own
+  hooks. Never a prompt, a command, a file or a reply, as before. The Cursor
+  adapter is built from Cursor's documentation and awaits a recording; pi was recorded as far as
+  its first prompt. See [What OMP and pi report](docs/guide/activity.md#what-omp-and-pi-report),
+  [What Cursor reports](docs/guide/activity.md#what-cursor-reports) and the design notes
+  ([15](docs/design/15-agent-events-stage-2-pi-omp.md),
+  [16](docs/design/16-agent-events-stage-2-cursor.md)).
 - **Grok's own session log on the timeline.** Switch on **Read what Grok records** in Settings →
   General and every Grok that Yardsort starts has its turns read from the log Grok keeps for
   each session: which tool ran and how long it took, tools that failed, the permissions you were

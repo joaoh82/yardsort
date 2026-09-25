@@ -510,6 +510,54 @@ _Notes:_
 - Not done, on purpose: no Claude/Codex/OpenCode hook is configured, no OTLP receiver exists, no
   Jev call is made, no memory. Stage 2 starts with recorded Claude Code hook fixtures.
 
+## M16 — Agent events, stage 2: OMP and Pi ✅
+
+One adapter for the two forks, recorded in [15-agent-events-stage-2-pi-omp](15-agent-events-stage-2-pi-omp.md).
+
+- `scripts/record-pi.sh pi|omp` and fixtures: OMP 18.2.11 in full (44 extension events and the
+  session file), Pi 0.87.1 as far as its first prompt (no provider on the recording machine).
+- The decision: the plugin pattern again — a TypeScript extension written from a template in
+  the binary, given with `-e <file>` for one launch, never in the user's extension directories;
+  `reduce` in the extension keeps the whitelist before anything leaves the agent's process, and
+  is tested in vitest against the same fixtures the Rust side reads.
+- Settings → General **Capture what OMP reports** and **Capture what pi reports** (off);
+  `capture: "extension"` on the run's start; producers `omp` and `pi`.
+
+_Exit:_ every OMP fixture maps and leaks nothing; Pi's partial recording carries the assigned
+id; arming for either, refusing `--trusted-extension`; the real `ys` as the hook; `just check`,
+`just bindings-check`, `just lint-windows` green; a real OMP launched through `ys` on Linux
+reporting live. Hands-on rows in [08 §16](08-manual-checklist.md#16--omp-and-pi-reporting).
+
+_Result:_ 2026-09-25, Linux. Rust: `activity::pi` (6 tests), `launch::tests` (1), a `ys`
+end-to-end test; vitest over the OMP fixtures through the extension's own `reduce`. By hand,
+against a throwaway profile: `ys workspace new … --harness omp` started OMP with `-e` and the
+run's start said _reporting via extension_; within seconds `ys activity list` showed
+`session.started` with the model, `turn.started`, `write` started and done with the file's
+name, `turn.completed` with duration and tokens, all `omp/extension`; the payloads held no
+command, message or content; ending the process recorded `session.ended` from the extension and
+`process.exited` from the spool. Found: OMP raises no `input` for the opening message given on
+the command line, so a launch's first prompt has no `prompt.submitted` row (typed ones do); and
+the timeline's turn row now shows the turn's tokens, which the pi family and Cursor report on
+the turn itself. Pi: not run live — no provider on the machine. macOS and Windows: CI runs the
+tests; the hands-on pass is owed.
+
+## M17 — Agent events, stage 2: Cursor ✅
+
+The last built-in harness, recorded in [16-agent-events-stage-2-cursor](16-agent-events-stage-2-cursor.md).
+
+- The decision: Cursor's hooks, Claude Code's in shape, through `--plugin-dir <dir>` for one
+  launch — a manifest and a `hooks.json` written under the data directory before each launch,
+  the command a single-quoted shell string because that is the only form Cursor takes. Passive
+  events only; nothing that decides.
+- **Built from the documentation.** The agent was not logged in on the machine at hand, so
+  `scripts/record-cursor.sh` is written and owed a run; the tests use the documented shapes and
+  say so.
+- Settings → General **Capture what Cursor reports** (off); `capture: "hook"`; producer `cursor`.
+
+_Exit:_ the documented shapes map and leak nothing; arming writes the plugin and names it before
+`--`, only when asked; the real `ys` as the hook; the gates green. Owed: the recording, and the
+hands-on rows in [08 §17](08-manual-checklist.md#17--cursor-reporting).
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

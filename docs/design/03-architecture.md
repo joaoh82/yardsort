@@ -18,7 +18,7 @@
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
 │   ├─ assist       optional Jev judgments: diffs, composer hints    │
-│   ├─ activity     runs, events; four harness adapters; inbox     │
+│   ├─ activity     runs, events; six harness adapters; inbox      │
 │   └─ store        SQLite (state) + settings file                   │
 └──────────────────────────────┬──────────────────┬──────────────────┘
                                │ local socket     │ shells out
@@ -377,6 +377,21 @@ the directory by id and reads it as it grows — from a cursor the app's inbox w
 run, on its tick while a Grok run is going and for ten minutes after it ends; `ys` reads it whole
 with the spool, the unique source keys making that harmless. Producer `grok`, method
 `session_file`. See [14-agent-events-stage-2-grok](14-agent-events-stage-2-grok.md).
+
+**OMP and Pi** share an extension API, so they share an adapter. A recorded launch of either is
+given `-e <data-dir>/activity/hooks/<harness>.ts`, written from a template in the binary
+(`activity/pi-extension.ts`) before each launch; the extension subscribes to notification
+events only — never `tool_call`, which can block — reduces each to a whitelist of fields inside
+the agent's process, and spawns the executable in hook mode with the result on stdin. Producer
+`omp` or `pi`, method `extension`. `--trusted-extension` among the user's arguments means no
+extension. See [15-agent-events-stage-2-pi-omp](15-agent-events-stage-2-pi-omp.md).
+
+**Cursor** is Claude Code's pattern with a directory: a recorded `cursor` launch is given
+`--plugin-dir <data-dir>/activity/hooks/cursor-plugin`, a manifest and a `hooks.json` written
+before each launch whose commands are `'<exe>' --yardsort-hook cursor '<inbox>'` — a shell
+string, the one place in the tree, because that is the only form Cursor takes; the two paths
+are single-quoted. Passive events only. Producer `cursor`, method `hook`. Built from the
+documentation and owed a recording. See [16-agent-events-stage-2-cursor](16-agent-events-stage-2-cursor.md).
 
 ## Assist (optional, off by default)
 

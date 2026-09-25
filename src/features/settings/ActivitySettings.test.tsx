@@ -46,6 +46,9 @@ describe("ActivitySettings", () => {
           captureCodex: false,
           captureOpencode: false,
           captureGrok: false,
+          captureOmp: false,
+          capturePi: false,
+          captureCursor: false,
         }}
       />,
     );
@@ -57,6 +60,9 @@ describe("ActivitySettings", () => {
     await user.click(screen.getByRole("checkbox", { name: /Capture what Codex reports/ }));
     await user.click(screen.getByRole("checkbox", { name: /Capture what OpenCode reports/ }));
     await user.click(screen.getByRole("checkbox", { name: /Read what Grok records/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Capture what OMP reports/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Capture what pi reports/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Capture what Cursor reports/ }));
     await user.click(save);
     expect(core.settingsSaveActivity).toHaveBeenCalledWith({
       recordLifecycle: true,
@@ -65,6 +71,9 @@ describe("ActivitySettings", () => {
       captureCodex: true,
       captureOpencode: true,
       captureGrok: true,
+      captureOmp: true,
+      capturePi: true,
+      captureCursor: true,
     });
     await waitFor(() => expect(screen.getByText("Saved.")).toBeInTheDocument());
     expect(useAppStore.getState().showTimeline).toBe(true);
@@ -81,6 +90,9 @@ describe("ActivitySettings", () => {
           captureCodex: true,
           captureOpencode: true,
           captureGrok: true,
+          captureOmp: true,
+          capturePi: true,
+          captureCursor: true,
         }}
       />,
     );
@@ -88,15 +100,12 @@ describe("ActivitySettings", () => {
     const codex = screen.getByRole("checkbox", { name: /Capture what Codex reports/ });
     const opencode = screen.getByRole("checkbox", { name: /Capture what OpenCode reports/ });
     const grok = screen.getByRole("checkbox", { name: /Read what Grok records/ });
-    expect(capture).toBeEnabled();
-    expect(codex).toBeEnabled();
-    expect(opencode).toBeEnabled();
-    expect(grok).toBeEnabled();
+    const omp = screen.getByRole("checkbox", { name: /Capture what OMP reports/ });
+    const pi = screen.getByRole("checkbox", { name: /Capture what pi reports/ });
+    const cursor = screen.getByRole("checkbox", { name: /Capture what Cursor reports/ });
+    for (const box of [capture, codex, opencode, grok, omp, pi, cursor]) expect(box).toBeEnabled();
     await user.click(screen.getByRole("checkbox", { name: /Record when agents start and exit/ }));
-    expect(capture).toBeDisabled();
-    expect(codex).toBeDisabled();
-    expect(opencode).toBeDisabled();
-    expect(grok).toBeDisabled();
+    for (const box of [capture, codex, opencode, grok, omp, pi, cursor]) expect(box).toBeDisabled();
   });
 
   it("shows what is recorded and what went wrong, and can clear all of it", async () => {
@@ -110,6 +119,9 @@ describe("ActivitySettings", () => {
           captureCodex: false,
           captureOpencode: false,
           captureGrok: false,
+          captureOmp: false,
+          capturePi: false,
+          captureCursor: false,
         }}
       />,
     );

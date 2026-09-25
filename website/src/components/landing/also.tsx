@@ -7,7 +7,7 @@ const POINTS = [
   },
   {
     title: "A record of what ran",
-    body: "A local note of when each agent started in a workspace and how it ended — even while the window was closed — without reading a word it printed. Opt in, and Claude Code, Codex, OpenCode and Grok report their own tool calls and turns to it as metadata. An experimental timeline shows it; ys activity export writes it out.",
+    body: "A local note of when each agent started in a workspace and how it ended — even while the window was closed — without reading a word it printed. Opt in, and every built-in agent reports its own tool calls and turns to it as metadata, its own settings untouched. An experimental timeline shows it; ys activity export writes it out.",
   },
   {
     title: "Closing the window doesn't stop them",
