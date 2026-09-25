@@ -57,17 +57,23 @@ workflow_) and give it an existing tag.
 | macOS (universal: Apple Silicon + Intel) | `.dmg`, `.app.tar.gz`                                  | Signed and notarized when the Apple secrets below are set; otherwise an unsigned build |
 | Windows (x86_64)                         | `-setup.exe` (NSIS), `.msi`                            | Not signed yet — users see a SmartScreen warning                                       |
 
-Each platform also builds and attaches **`ys`**, the [command-line client](guide/cli.md), as a
-plain archive: `ys-<version>-linux-x86_64.tar.gz`, `ys-<version>-macos-universal.tar.gz` and
-`ys-<version>-windows-x86_64.zip`. It is a separate binary from the app — the app's has no
-console on Windows — built from the same commit in the same job.
+Each platform first builds **`ys`**, the [command-line client](guide/cli.md), with
+`scripts/sidecar.mjs`, which puts it in `src-tauri/binaries/` under its target triple.
+`src-tauri/tauri.bundle.conf.json` names it as a sidecar, so every installer carries `ys` next to
+the app's own executable: `/usr/bin/ys` in the `.deb` and `.rpm` (and so the AUR package),
+`Contents/MacOS/ys` in the macOS app, beside `Yardsort.exe` on Windows, inside the AppImage. The
+Homebrew cask links the macOS one onto `PATH`; elsewhere the app offers to
+([`src-tauri/src/ys.rs`](../src-tauri/src/ys.rs)). It is a separate binary from the app — the
+app's has no console on Windows — built from the same commit in the same job. `just build` and
+`just bundle` do the same locally.
 
-The macOS one is `lipo`'d from both architectures but is **neither signed nor notarized**, unlike
-the app. Two reasons: `tauri-action` imports the certificate into a keychain of its own for its
-own run, so no identity is available to a later step; and a ticket cannot be stapled to a bare
-executable, so signing without notarization would not spare anyone the quarantine prompt anyway.
-The [guide](guide/cli.md) says how to clear it. `ys` does not self-update and no package manager
-carries it.
+The same binary is also attached as a plain archive: `ys-<version>-linux-x86_64.tar.gz`,
+`ys-<version>-macos-universal.tar.gz` and `ys-<version>-windows-x86_64.zip`. The macOS one is
+`lipo`'d from both architectures. Inside the app it is signed and notarized with the bundle; the
+loose copy is **neither**. Two reasons: `tauri-action` imports the certificate into a keychain of
+its own for its own run, so no identity is available to a later step; and a ticket cannot be
+stapled to a bare executable, so signing without notarization would not spare anyone the
+quarantine prompt anyway. The [guide](guide/cli.md) says how to clear it.
 
 ## macOS signing and notarization
 

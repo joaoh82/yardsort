@@ -307,7 +307,10 @@ Yardsort without the window, for scripting and for asking an agent to start anot
   first message — the composer's job, from a terminal. The agent belongs to the daemon, so it
   outlives the command.
 - Shipped as its own archive in each release, per platform. Not self-updating, and no package
-  manager carries it.
+  manager carries it. _Since superseded:_ every bundle now carries `ys` as a Tauri sidecar; the
+  packages and the Homebrew cask put it on `PATH`, the app offers to elsewhere (a link on macOS,
+  a copy refreshed at startup for an AppImage and on Windows), and it updates with the app — see
+  `src-tauri/src/ys.rs`. The loose archives stay for anyone who wants `ys` without the app.
 
 _Exit:_ `ys workspace new` from a terminal leaves a working agent behind after the command
 returns, and the app shows it when it next looks.

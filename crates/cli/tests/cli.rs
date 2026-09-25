@@ -452,6 +452,21 @@ fn an_unknown_project_says_which_ones_there_are() {
     );
 }
 
+/// The app reads this line to tell whether the `ys` on `PATH` is its own, and which version it is
+/// (`src-tauri/src/ys.rs`). Change the format there too.
+#[test]
+fn the_version_is_printed_the_way_the_app_reads_it() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("ys {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
 #[test]
 fn a_profile_with_no_database_is_an_error_naming_the_path() {
     let empty = tempfile::tempdir().unwrap();

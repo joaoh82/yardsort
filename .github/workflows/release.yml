@@ -126,6 +126,31 @@ jobs:
             } >> "$GITHUB_ENV"
           done
 
+      # `ys`, the command-line client. A separate binary because the app's has no console on
+      # Windows, and because a CLI has no business carrying a webview. It is built first because
+      # every bundle carries it next to the app (`tauri.bundle.conf.json` names it as a sidecar):
+      # the packages put it on PATH or the app offers to, and it updates with the app. See
+      # `src-tauri/src/ys.rs`.
+      #
+      # Inside the macOS app it is signed and notarized with the bundle. The loose copy attached
+      # below is not: a bare executable cannot have a notarization ticket stapled to it, so a
+      # quarantined download is refused whether it is signed or not. `docs/guide/cli.md` tells
+      # people how to clear the flag.
+      - name: Build the ys CLI
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # One binary for both architectures, as the app bundle is.
+            bun scripts/sidecar.mjs --universal
+            cp src-tauri/binaries/ys-universal-apple-darwin ys
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            bun scripts/sidecar.mjs
+            cp src-tauri/binaries/ys-x86_64-pc-windows-msvc.exe ys.exe
+          else
+            bun scripts/sidecar.mjs
+            cp src-tauri/binaries/ys-x86_64-unknown-linux-gnu ys
+          fi
+
       # `tauri.release.conf.json` switches on updater artifacts: each self-updating bundle is signed
       # with the update key, and a `latest.json` describing them is attached to the release — that
       # is what installed copies read to find out about this version. See docs/releasing.md.
@@ -138,37 +163,9 @@ jobs:
         with:
           releaseId: ${{ needs.draft.outputs.release_id }}
           tauriScript: bun tauri
-          args: --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
+          args: --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.bundle.conf.json ${{ matrix.args }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
-
-      # `ys`, the command-line client. A separate binary because the app's has no console on
-      # Windows, and because a CLI has no business carrying a webview. It is not self-updating
-      # and no package manager ships it yet: it is a plain archive people put on their PATH.
-      #
-      # Unsigned on macOS, deliberately. `tauri-action` imports the certificate into a keychain
-      # of its own for its own run, so there is no identity here to sign with, and signing alone
-      # would buy nothing: a bare executable cannot have a notarization ticket stapled to it, so
-      # a quarantined download is refused whether it is signed or not. `docs/guide/cli.md` tells
-      # people how to clear the flag.
-      - name: Build the ys CLI
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            # One binary for both architectures, as the app bundle is.
-            cargo build --release -p yardsort-cli --target aarch64-apple-darwin
-            cargo build --release -p yardsort-cli --target x86_64-apple-darwin
-            lipo -create -output ys \
-              target/aarch64-apple-darwin/release/ys \
-              target/x86_64-apple-darwin/release/ys
-            lipo -info ys
-          elif [ "$RUNNER_OS" = "Windows" ]; then
-            cargo build --release -p yardsort-cli
-            cp target/release/ys.exe ys.exe
-          else
-            cargo build --release -p yardsort-cli
-            cp target/release/ys ys
-          fi
 
       - name: Attach the ys CLI to the release
         shell: bash

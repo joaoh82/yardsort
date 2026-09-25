@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **`ys` comes with the app, and stays up to date with it.** Every installer now carries the
+  command-line client next to Yardsort. The `.deb`, `.rpm` and AUR packages put it in
+  `/usr/bin`, and the Homebrew cask links it. Elsewhere, **Install ys** — in Settings → General
+  and in the first-run checklist — links it into `/usr/local/bin` on macOS, or copies it to
+  `~/.local/bin` (AppImage) or to a folder it adds to your `PATH` (Windows). Both screens say
+  which `ys` your terminal finds and whether it is this version. A copy is replaced when Yardsort
+  starts and finds it older, and a file there that is not `ys` is replaced only after you
+  confirm. On macOS the bundled `ys` is signed and notarized with the app. See
+  [Installing `ys`](docs/guide/cli.md#installing).
 - **Every built-in agent can now report what it does.** Three more switches in Settings →
   General, all off by default: **Capture what OMP reports** and **Capture what pi reports** give
   those agents a small extension on the command line of each launch — never in your extension

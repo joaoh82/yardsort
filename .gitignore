@@ -33,3 +33,6 @@ artifacts/
 *.key
 *.mobileprovision
 *.keystore
+
+# The `ys` sidecar, staged by `scripts/sidecar.mjs` before bundling.
+src-tauri/binaries/

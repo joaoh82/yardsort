@@ -19,6 +19,8 @@ cask "yardsort" do
   depends_on macos: :catalina
 
   app "Yardsort.app"
+  # The command-line client ships inside the app, signed with it; Homebrew links it onto PATH.
+  binary "#{appdir}/Yardsort.app/Contents/MacOS/ys"
 
   zap trash: [
     "~/Library/Application Support/dev.yardsort.app",

@@ -103,6 +103,7 @@ EOF
   cat <<EOF
   YARDSORT_DATA_DIR=$SHOT/data \\
   YARDSORT_WORKTREE_ROOT=$DEMO/wt \\
+  YARDSORT_YS_DIR=$DEMO/bin \\
   SHELL=$SHOT/loginshell \\
   DBUS_SESSION_BUS_ADDRESS=unix:path=$SHOT/no-bus \\
   just dev
