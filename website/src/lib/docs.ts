@@ -28,6 +28,7 @@ export const DOCS_NAV: DocSection[] = [
       { slug: "guide/commits-and-pull-requests", title: "Commits & pull requests" },
       { slug: "guide/settings", title: "Settings & harnesses" },
       { slug: "guide/assist", title: "Assist" },
+      { slug: "guide/activity", title: "Activity" },
       { slug: "guide/updates", title: "Updates" },
       { slug: "guide/shortcuts", title: "Shortcuts" },
       { slug: "guide/cli", title: "The ys command line" },

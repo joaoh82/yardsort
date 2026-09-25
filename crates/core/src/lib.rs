@@ -10,6 +10,7 @@
 //! still `serde`/`specta` shaped, because the app's generated TypeScript bindings are built from
 //! these types, but that is reflection, not a UI.
 
+pub mod activity;
 pub mod assist;
 pub mod daemon;
 pub mod draft;

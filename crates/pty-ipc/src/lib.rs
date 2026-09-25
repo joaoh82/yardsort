@@ -18,8 +18,9 @@ mod client;
 mod endpoint;
 mod proto;
 mod server;
+pub mod spool;
 
 pub use client::DaemonClient;
 pub use endpoint::Endpoint;
 pub use proto::{DaemonInfo, PROTOCOL};
-pub use server::{serve, IDLE_GRACE};
+pub use server::{serve, serve_with, ServeOptions, IDLE_GRACE};

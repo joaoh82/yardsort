@@ -12,6 +12,9 @@ const core = vi.hoisted(() => ({
   settingsGet: vi.fn(),
   settingsSaveWorkspaces: vi.fn(),
   settingsSaveGeneral: vi.fn(),
+  settingsSaveActivity: vi.fn(),
+  activityDiagnostics: vi.fn(),
+  activityClear: vi.fn(),
   assistStatus: vi.fn(),
   assistSaveKey: vi.fn(),
   assistForgetKey: vi.fn(),
@@ -77,6 +80,7 @@ const settings: SettingsInfo = {
   worktreeRootOverride: null,
   filePath: "/home/me/.config/yardsort/settings.toml",
   problem: null,
+  activity: { recordLifecycle: true, showTimeline: false },
 };
 
 const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
@@ -112,6 +116,13 @@ async function openSettings() {
 describe("Settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    core.activityDiagnostics.mockResolvedValue({
+      events: 0,
+      runs: 0,
+      spoolDir: "/tmp/ys/activity/spool",
+      spoolPending: 0,
+      counters: [],
+    });
     core.harnessesList.mockResolvedValue([claude, codex]);
     core.harnessPreview.mockImplementation(async (def: HarnessDef) => ({
       resolvedPath: def.command === "claude" ? "/usr/bin/claude" : null,

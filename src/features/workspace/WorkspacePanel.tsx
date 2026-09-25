@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ActivityPanel } from "@/features/activity/ActivityPanel";
 import { Composer } from "@/features/composer/Composer";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
@@ -87,6 +88,9 @@ function WorkspaceTerminals(props: {
   const dismissError = useTerminalStore((s) => s.dismissError);
   const open = useTerminalStore((s) => s.open);
   const head = workspace.head;
+  // The experimental timeline: offered only when the setting says so, opened per workspace.
+  const timelineOffered = useAppStore((s) => s.showTimeline);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   return (
     <>
@@ -142,7 +146,20 @@ function WorkspaceTerminals(props: {
           </div>
         )}
       </div>
+      {timelineOffered && timelineOpen && (
+        <ActivityPanel workspaceId={workspace.id} onClose={() => setTimelineOpen(false)} />
+      )}
       <footer className="flex h-6 shrink-0 items-center gap-2 border-t border-line bg-surface px-3 font-mono text-[11px] whitespace-nowrap text-ink-faint *:shrink-0">
+        {timelineOffered && (
+          <button
+            type="button"
+            aria-pressed={timelineOpen}
+            onClick={() => setTimelineOpen((open) => !open)}
+            className="rounded px-1 text-ink-muted hover:text-ink aria-pressed:bg-raised aria-pressed:text-ink"
+          >
+            Activity
+          </button>
+        )}
         <span className="text-ink-muted">{project.name}</span>
         <span>/</span>
         <span className="text-ink-muted">{workspace.name}</span>

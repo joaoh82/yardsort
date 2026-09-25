@@ -72,6 +72,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   logins; Yardsort just starts them. It talks to the network to check for new versions, which you
   can switch off — and, only if you switch Assist on and add your own key, to ask Jev about your
   diffs.
+- **A record of what ran.** Yardsort keeps a local note of when each agent started in a
+  workspace and how it ended — even if it ended while the window was closed — without reading a
+  word the agent printed. An experimental timeline shows it; `ys activity export` writes it out.
+  See [Activity](docs/guide/activity.md).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client, starts a workspace and

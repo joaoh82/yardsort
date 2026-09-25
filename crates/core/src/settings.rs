@@ -23,6 +23,8 @@ pub struct Settings {
     pub assist: AssistSettings,
     #[serde(skip_serializing_if = "DraftSettings::is_default")]
     pub draft: DraftSettings,
+    #[serde(skip_serializing_if = "ActivitySettings::is_default")]
+    pub activity: ActivitySettings,
     /// Overrides of built-in harnesses, and whole custom ones. See [`HarnessOverride`].
     #[serde(rename = "harness", skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessOverride>,
@@ -103,6 +105,33 @@ impl Default for DraftSettings {
 }
 
 impl DraftSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Agent activity: the local record of what was started and how it ended. See
+/// [`crate::activity`]. Nothing here leaves the machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ActivitySettings {
+    /// Record when a harness, shell or run command starts and exits in a workspace. On by
+    /// default: it is what Yardsort already knew, kept.
+    pub record_lifecycle: bool,
+    /// Show the experimental activity timeline in a workspace's footer.
+    pub show_timeline: bool,
+}
+
+impl Default for ActivitySettings {
+    fn default() -> Self {
+        Self {
+            record_lifecycle: true,
+            show_timeline: false,
+        }
+    }
+}
+
+impl ActivitySettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::io::{BufReader, BufWriter, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use interprocess::local_socket::traits::ListenerExt as _;
@@ -20,6 +20,7 @@ use crate::proto::{
     event_frame, DaemonInfo, Frame, Op, OpResult, Request, Response, StreamId, WireError,
     KIND_REQUEST, KIND_RESPONSE, PROTOCOL,
 };
+use crate::spool::{Spool, SpoolEntry, SPOOL_VERSION};
 
 /// How long the daemon lingers with no clients and no sessions before exiting. Long enough that
 /// restarting the app, or reloading the webview, does not take the daemon down with it.
@@ -36,9 +37,27 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// The gap between a session's state changing and its `Exited` event being broadcast.
 const EXIT_ANNOUNCE_GRACE: Duration = Duration::from_millis(200);
 
+/// What a daemon may be given beyond its socket.
+#[derive(Debug, Clone, Default)]
+pub struct ServeOptions {
+    /// Where to keep exits for clients that are not connected to hear them. `None` keeps them
+    /// nowhere, as before the spool existed. See [`crate::spool`].
+    pub spool_dir: Option<std::path::PathBuf>,
+}
+
 /// Run the daemon until it is told to stop, or until `idle_grace` has passed with nothing to
 /// look after — no client connected and no session running.
 pub fn serve(endpoint: &Endpoint, version: &str, idle_grace: Duration) -> std::io::Result<()> {
+    serve_with(endpoint, version, idle_grace, ServeOptions::default())
+}
+
+/// [`serve`], with [`ServeOptions`].
+pub fn serve_with(
+    endpoint: &Endpoint,
+    version: &str,
+    idle_grace: Duration,
+    options: ServeOptions,
+) -> std::io::Result<()> {
     if let Some(dir) = endpoint.parent_dir() {
         std::fs::create_dir_all(dir)?;
         // Best effort: the socket may sit in a directory that is not ours to tighten — `/tmp`,
@@ -60,9 +79,38 @@ pub fn serve(endpoint: &Endpoint, version: &str, idle_grace: Duration) -> std::i
 
     let conns: Conns = Arc::new(Mutex::new(Vec::new()));
     let broadcasting = Arc::clone(&conns);
+    // The host is built around its event sink, so the sink cannot hold the host: it borrows it
+    // weakly through a slot filled in just after. An exit reaching the sink while the host is
+    // being dropped finds nothing there and is spooled without labels, which is still an exit.
+    let spool = options.spool_dir.map(Spool::new);
+    let host_slot: Arc<OnceLock<Weak<PtyHost>>> = Arc::new(OnceLock::new());
+    let labelling = Arc::clone(&host_slot);
     let host = Arc::new(PtyHost::new(Arc::new(move |event| {
+        if let (Some(spool), HostEvent::Exited { id, exit }) = (&spool, &event) {
+            // Kept before it is announced: a client that hears the live event and later finds
+            // the same exit in the spool treats the second as a duplicate, which is cheap. The
+            // other order could lose an exit to a daemon stopping between the two.
+            let labels = labelling
+                .get()
+                .and_then(Weak::upgrade)
+                .and_then(|host| host.info(id).ok())
+                .map(|info| info.labels)
+                .unwrap_or_default();
+            let entry = SpoolEntry {
+                version: SPOOL_VERSION,
+                at_ms: epoch_ms(),
+                daemon_pid: std::process::id(),
+                session: id.clone(),
+                labels,
+                exit: exit.clone(),
+            };
+            if let Err(error) = spool.record(&entry) {
+                eprintln!("could not spool the exit of session {id}: {error}");
+            }
+        }
         broadcast(&broadcasting, &event);
     })));
+    let _ = host_slot.set(Arc::downgrade(&host));
 
     let daemon = Arc::new(Daemon {
         host,

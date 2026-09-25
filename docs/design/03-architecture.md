@@ -18,6 +18,7 @@
 │   ├─ watch        notify-based fs watcher, debounced               │
 │   ├─ env          login-shell environment resolution               │
 │   ├─ assist       optional Jev judgments: diffs, composer hints    │
+│   ├─ activity     runs and lifecycle events; drains the exit spool │
 │   └─ store        SQLite (state) + settings file                   │
 └──────────────────────────────┬──────────────────┬──────────────────┘
                                │ local socket     │ shells out
@@ -156,6 +157,7 @@ window or a webview.
 | Wire format     | `[u32 len][u8 kind][payload]`. Requests, responses and events are JSON, reusing the host types' `serde` impls; **output has a frame kind of its own and stays raw bytes**, so a repainting TUI never pays for JSON.                                                                                                                                                                                                 |
 | Back-pressure   | Each connection has a writer thread and a queue; a client that stops reading is dropped at 32 MiB rather than allowed to block the session's pump thread. Dropping it is safe — reattaching starts from a snapshot.                                                                                                                                                                                                 |
 | Logs            | The app hands the child `daemon.log` in the data directory, replaced on each start. Started by hand, it keeps its terminal.                                                                                                                                                                                                                                                                                         |
+| Exit spool      | A third argument, `<data-dir>/activity/spool`, where the daemon keeps one JSON file per `Exited` (atomic rename, capped at 2 000, drops counted) for clients that were not connected to hear it. Whichever client connects next drains it into SQLite. No protocol change; a daemon without the argument simply never spools.                                                                                       |
 
 `attach` needed one adjustment to cross a socket. In-process, the snapshot is handed to the sink
 _before_ `attach` returns, under the lock that delivers output, so no byte is lost or doubled.
@@ -182,8 +184,11 @@ machine this was planned on, every harness is installed via mise.)
 - **Windows**: use the process environment; re-read user/system `PATH` from the registry on reload.
 - Resolve the harness `command` against that `PATH` ourselves so "not found" becomes a clear,
   actionable error in the UI (with the PATH we searched), not a silent dead terminal.
-- Set `TERM=xterm-256color`, `COLORTERM=truecolor`, and `YARDSORT_WORKSPACE`, `YARDSORT_PROJECT`
-  for scripts and hooks.
+- A workspace launch is given `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` and, for a harness,
+  `YARDSORT_SESSION_RECORD_ID` — ids only, appended to the resolved environment (see
+  [activity](#activity-runs-and-lifecycle-events)). Project setup scripts get `YARDSORT_PROJECT`
+  and `YARDSORT_WORKSPACE` as paths. Nothing else is added: `TERM` and friends are whatever the
+  user's shell had.
 
 Harnesses are spawned **directly with an argv array — never through a shell string.** This removes
 a whole class of quoting bugs, especially for prompts and especially on Windows.
@@ -303,6 +308,35 @@ are looking at the terminal. Nothing is ever parsed out of the output.
 
 Live sessions themselves are not in the database — the PTY host owns them. Each carries a `workspace`
 label, which is how terminal tabs find their workspace after a webview reload.
+
+### Activity: runs and lifecycle events
+
+Migration 0009 adds what [09-agent-events-and-memory](09-agent-events-and-memory.md) calls stage 1,
+as decided in [10-agent-events-stage-1](10-agent-events-stage-1.md):
+
+```
+agent_runs               id, workspace_id → workspaces (cascade), session_id → sessions (set null),
+                         kind ('harness' | 'shell' | 'program'), harness_id, harness_session_id,
+                         pty_session_id (unique), launched_by ('app' | 'cli'), started_at,
+                         ended_at, exit_code, end_reason ('exited' | 'interrupted' | 'spawn_failed'),
+                         collection ('lifecycle')
+agent_events             seq (autoincrement), id, schema_version, workspace_id → workspaces (cascade),
+                         session_id → sessions (set null), run_id → agent_runs (cascade),
+                         occurred_at, received_at, kind, producer, method, fidelity, source_key,
+                         privacy_class, payload (JSON); unique (producer, source_key)
+agent_event_diagnostics  name, count, last_at, last_detail
+```
+
+A **run** is one process in a workspace's PTY, a fourth id beside the session record, the PTY
+id and the harness's own conversation id. `Launcher` writes its row _before_ spawning, attaches
+the PTY id after, and links the session record once that exists — so a process that exits before
+anyone hears of it still has something to be matched to. Every write goes through
+`activity::Recorder`, which prints and counts a failure and never raises one: a database that
+cannot take the row must not stop the harness. The unique source key makes delivery idempotent:
+an exit heard live, found in the daemon's spool, settled right after a launch, or reconciled at
+startup is one row, and the event says which of those it was (`via`). Payloads are metadata only
+— never the prompt, the argv, a path or output. The timeline (Settings → General, experimental)
+and `ys activity` read it; `ys activity export` is the one export, NDJSON.
 
 ## Assist (optional, off by default)
 

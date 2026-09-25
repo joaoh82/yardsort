@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { errorMessage, ipc, type SettingsInfo } from "@/lib/ipc";
 import { useAppStore } from "@/stores/app";
 import { useUpdatesStore } from "@/stores/updates";
+import { ActivitySettings } from "./ActivitySettings";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
 
 /** The running version, and a way to look for a newer one right now. */
@@ -154,6 +155,7 @@ export function GeneralSettings() {
         </button>
         {saved && !dirty && <span className="text-ink-faint">Saved.</span>}
       </div>
+      <ActivitySettings initial={info.activity} />
     </form>
   );
 }

@@ -130,7 +130,10 @@ Same conversation, new process.
 Sessions labelled _interrupted_ ended without saying so — Yardsort was killed, or the machine
 went down. They resume like any other. An agent that simply kept working while Yardsort was
 closed is not interrupted and needs no resuming: it is
-[still running](#agents-keep-working-when-you-close-the-window), and comes back by itself.
+[still running](#agents-keep-working-when-you-close-the-window), and comes back by itself. One
+that finished while Yardsort was closed is listed as ended with its exit code, not as
+interrupted: the background process keeps the exit for the next time something connects — see
+[Activity](activity.md#exits-while-yardsort-is-closed).
 
 ### Fork
 

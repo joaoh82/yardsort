@@ -23,6 +23,11 @@ struct Report {
     daemon_endpoint: Option<String>,
     projects: Option<usize>,
     harnesses_installed: Vec<String>,
+    /// Recorded activity: events and runs in the database, exits waiting in the daemon's spool.
+    activity_events: Option<i64>,
+    activity_runs: Option<i64>,
+    spool_dir: Option<String>,
+    spool_pending: Option<usize>,
 }
 
 pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
@@ -45,6 +50,10 @@ pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
         daemon_endpoint: None,
         projects: None,
         harnesses_installed: Vec::new(),
+        activity_events: None,
+        activity_runs: None,
+        spool_dir: None,
+        spool_pending: None,
     };
 
     // Everything past this point needs the database, and not having one is the thing most worth
@@ -58,6 +67,13 @@ pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
             report.daemon_version = Some(info.version.clone());
         }
         report.daemon_endpoint = Some(yardsort_core::daemon::endpoint_for(&ys.data_dir));
+        if let Ok((events, runs)) = ys.store.activity_counts() {
+            report.activity_events = Some(events);
+            report.activity_runs = Some(runs);
+        }
+        let spool = pty_ipc::spool::Spool::new(yardsort_core::activity::spool_dir(&ys.data_dir));
+        report.spool_dir = Some(spool.dir().display().to_string());
+        report.spool_pending = spool.entries().ok().map(|entries| entries.len());
         let cwd = std::env::current_dir().unwrap_or_default();
         report.harnesses_installed = yardsort_core::harness::resolve_all(&ys.settings.harnesses)
             .into_iter()
@@ -108,6 +124,22 @@ pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
                 } else {
                     report.harnesses_installed.join(", ")
                 },
+            ]);
+            rows.push(vec![
+                "activity".to_owned(),
+                format!(
+                    "{} events, {} runs",
+                    report.activity_events.unwrap_or(0),
+                    report.activity_runs.unwrap_or(0)
+                ),
+            ]);
+            rows.push(vec![
+                "exit spool".to_owned(),
+                format!(
+                    "{} ({} waiting)",
+                    or_unknown(&report.spool_dir),
+                    report.spool_pending.unwrap_or(0)
+                ),
             ]);
         }
         let _ = yes_no;

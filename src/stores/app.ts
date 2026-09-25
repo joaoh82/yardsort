@@ -9,6 +9,8 @@ interface AppState {
   /** Mirrors the general setting, so event handlers need not ask the core each time. */
   notifyWhenQuiet: boolean;
   checkForUpdates: boolean;
+  /** Mirrors the activity setting: whether a workspace offers its experimental timeline. */
+  showTimeline: boolean;
   load: () => Promise<void>;
 }
 
@@ -20,11 +22,16 @@ export const useAppStore = create<AppState>((set) => ({
   notifyWhenQuiet: true,
   // Off until the settings say otherwise, so nothing phones home before they are read.
   checkForUpdates: false,
+  showTimeline: false,
   async load() {
     if (!hasCore()) return;
     set({ info: await ipc.appInfo(), daemon: await ipc.daemonStatus() });
     const settings = await ipc.settingsGet();
-    set({ notifyWhenQuiet: settings.notifyWhenQuiet, checkForUpdates: settings.checkForUpdates });
+    set({
+      notifyWhenQuiet: settings.notifyWhenQuiet,
+      checkForUpdates: settings.checkForUpdates,
+      showTimeline: settings.activity.showTimeline,
+    });
     // Slower: the first call waits for the login shell to report its environment.
     set({ env: await ipc.envInfo() });
   },

@@ -536,3 +536,132 @@ fn logs_says_where_screens_live_when_nothing_is_holding_them() {
         "should explain that screens live in the daemon: {error}"
     );
 }
+
+/// What `ys activity` shows is what the core recorded — here, a run written the way a launch
+/// writes one — and `export` is the same rows as NDJSON.
+#[test]
+fn activity_is_listed_as_a_table_as_json_and_exported_as_ndjson() {
+    use yardsort_core::activity::{Continuation, LaunchedBy, Recorder, RunDraft, RunKind};
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    let recorder = Recorder::new(&store, &Default::default(), LaunchedBy::Cli);
+    let draft = RunDraft {
+        workspace_id: workspace.id.clone(),
+        session_id: None,
+        kind: RunKind::Harness,
+        harness_id: Some("claude".into()),
+        harness_session_id: None,
+        model: Some("opus".into()),
+        effort: None,
+        program: "claude".into(),
+        continuation: Continuation::Fresh,
+    };
+    let run = recorder.begin(&draft).unwrap();
+    recorder.spawned(&run, &draft, "pty-1");
+    yardsort_core::activity::record_exit(
+        &store,
+        "pty-1",
+        &yardsort_core::activity::ExitFacts {
+            code: Some(4),
+            success: false,
+            signal: None,
+            at: None,
+        },
+        yardsort_core::activity::Via::Live,
+    );
+    drop(store);
+
+    let table = fx.ys(&["activity", "list"]).ok();
+    assert!(table.contains("process.started"), "{table}");
+    assert!(table.contains("exit 4, via live"), "{table}");
+    assert!(table.contains("yardsort/lifecycle"), "{table}");
+    assert!(table.contains("local"), "the workspace's name: {table}");
+
+    let json = fx.ys(&["activity", "list", "--json", "--limit", "1"]).ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed.as_array().unwrap().len(), 1);
+    assert_eq!(parsed[0]["kind"], "process.exited", "newest first");
+    assert_eq!(parsed[0]["payload"]["exitCode"], 4);
+    assert_eq!(parsed[0]["producer"], "yardsort");
+
+    let ndjson = fx.ys(&["activity", "export", "--workspace", "local"]).ok();
+    let lines: Vec<serde_json::Value> = ndjson
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("one object per line"))
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["kind"], "process.started", "oldest first");
+    assert_eq!(lines[0]["payload"]["model"], "opus");
+    assert_eq!(lines[1]["runId"], run);
+
+    let missing = fx.ys(&["activity", "list", "--workspace", "nope"]).failed();
+    assert!(missing.contains("No workspace called"), "{missing}");
+}
+
+/// An agent that ended while nothing was connected left its exit in the daemon's spool. Any
+/// `ys` command that would ask the daemon drains it first, so the record stops saying `running`
+/// and says how the process really ended.
+#[test]
+fn a_spooled_exit_is_taken_into_the_records_before_sessions_are_listed() {
+    use yardsort_core::activity::{Continuation, LaunchedBy, Recorder, RunDraft, RunKind};
+    use yardsort_core::store::NewSession;
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    let recorder = Recorder::new(&store, &Default::default(), LaunchedBy::App);
+    let draft = RunDraft {
+        workspace_id: workspace.id.clone(),
+        session_id: None,
+        kind: RunKind::Harness,
+        harness_id: Some("claude".into()),
+        harness_session_id: Some("h-1".into()),
+        model: None,
+        effort: None,
+        program: "claude".into(),
+        continuation: Continuation::Fresh,
+    };
+    let run = recorder.begin(&draft).unwrap();
+    recorder.spawned(&run, &draft, "pty-gone");
+    store
+        .add_session(&NewSession {
+            id: "rec-1",
+            workspace_id: &workspace.id,
+            harness_id: "claude",
+            harness_session_id: Some("h-1"),
+            title: "fix it",
+            pty_session_id: "pty-gone",
+            ..Default::default()
+        })
+        .unwrap();
+    recorder.link_session(&run, "rec-1");
+    drop(store);
+
+    let spool = pty_ipc::spool::Spool::new(yardsort_core::activity::spool_dir(&fx.data_dir));
+    spool
+        .record(&pty_ipc::spool::SpoolEntry {
+            version: pty_ipc::spool::SPOOL_VERSION,
+            at_ms: 1,
+            daemon_pid: 1,
+            session: pty_host::SessionId("pty-gone".into()),
+            labels: Default::default(),
+            exit: pty_host::ExitInfo {
+                code: 0,
+                success: true,
+                signal: None,
+            },
+        })
+        .unwrap();
+
+    let json = fx.ys(&["session", "list", "--json", "--all"]).ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed[0]["id"], "rec-1");
+    assert_eq!(parsed[0]["running"], false, "the spooled exit settled it");
+    assert!(spool.entries().unwrap().is_empty(), "drained");
+
+    let doctor = fx.ys(&["doctor", "--json"]).ok();
+    let report: serde_json::Value = serde_json::from_str(&doctor).unwrap();
+    assert_eq!(report["activityEvents"], 2);
+    assert_eq!(report["activityRuns"], 1);
+    assert_eq!(report["spoolPending"], 0);
+}

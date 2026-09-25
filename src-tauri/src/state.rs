@@ -12,6 +12,9 @@ use crate::store::Store;
 
 /// Everything the commands share. Managed by Tauri, created in `setup`.
 pub struct AppState {
+    /// This profile's data directory: the database, the daemon's socket and log, and the exit
+    /// spool all sit in it.
+    pub data_dir: PathBuf,
     /// The PTY host: the daemon over a local socket, or an in-process host under
     /// `YARDSORT_NO_DAEMON`. Nothing here knows or cares which.
     pub host: Arc<dyn TerminalHost>,
@@ -32,8 +35,14 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(connected: crate::daemon::Connected, store: Store, settings: SettingsFile) -> Self {
+    pub fn new(
+        data_dir: PathBuf,
+        connected: crate::daemon::Connected,
+        store: Store,
+        settings: SettingsFile,
+    ) -> Self {
         Self {
+            data_dir,
             host: connected.host,
             daemon_client: connected.client,
             daemon: connected.status,

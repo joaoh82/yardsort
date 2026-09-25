@@ -12,9 +12,11 @@ use pty_host::{LaunchPlan, PendingPrompt, SessionInfo, TermSize, TerminalHost};
 use serde::Deserialize;
 use specta::Type;
 
+use crate::activity::{self, Continuation, LaunchedBy, Recorder, RunDraft, RunKind};
 use crate::env::{EnvInfo, ShellEnv};
 use crate::error::{IpcError, IpcResult};
 use crate::harness::{self, HarnessOverride, LaunchValues, PromptTransport, SessionIdMode};
+use crate::settings::ActivitySettings;
 use crate::store::Store;
 
 /// Which harness to start, and with what.
@@ -48,6 +50,8 @@ pub const HARNESS_LABEL: &str = "harness";
 pub const HARNESS_SESSION_LABEL: &str = "harnessSession";
 /// Label carrying the id of the session record (see `sessions.rs`) a PTY session belongs to.
 pub const RECORD_LABEL: &str = "record";
+/// Label carrying the id of the activity run (see [`crate::activity`]) a PTY session is.
+pub const RUN_LABEL: &str = "run";
 
 /// What launching something needs: where sessions are recorded, what runs them, the user's
 /// environment, and the harness definitions in force.
@@ -59,6 +63,9 @@ pub struct Launcher<'a> {
     pub host: &'a dyn TerminalHost,
     pub env: &'a Arc<ShellEnv>,
     pub harnesses: &'a [HarnessOverride],
+    /// Whether launches are recorded as activity, and who to say launched them.
+    pub activity: &'a ActivitySettings,
+    pub launched_by: LaunchedBy,
 }
 
 impl Launcher<'_> {
@@ -104,7 +111,20 @@ impl Launcher<'_> {
         resolved
             .labels
             .insert(WORKSPACE_LABEL.into(), workspace_id.to_owned());
-        self.start(resolved, Some(workspace.path), size)
+        let draft = RunDraft {
+            workspace_id: workspace_id.to_owned(),
+            session_id: None,
+            kind: RunKind::Program,
+            harness_id: None,
+            harness_session_id: None,
+            model: None,
+            effort: None,
+            program: activity::program_name(resolved.program.as_deref()),
+            continuation: Continuation::Fresh,
+        };
+        Ok(self
+            .start_recorded(resolved, Some(workspace.path), size, &draft)?
+            .0)
     }
 
     /// Start something in a workspace's folder, labelled so it can be matched back to it.
@@ -136,7 +156,23 @@ impl Launcher<'_> {
             resolved.labels.insert(RECORD_LABEL.to_owned(), id.clone());
         }
         let draft = resolved.record.take();
-        let session = self.start(resolved, Some(workspace.path), size)?;
+        let run = RunDraft {
+            workspace_id: workspace_id.to_owned(),
+            // The record is written after the spawn, so the run is linked to it afterwards.
+            session_id: None,
+            kind: match (&resolved.program, &draft) {
+                (None, _) => RunKind::Shell,
+                (Some(_), Some(_)) => RunKind::Harness,
+                (Some(_), None) => RunKind::Program,
+            },
+            harness_id: draft.as_ref().map(|d| d.harness_id.clone()),
+            harness_session_id: draft.as_ref().and_then(|d| d.harness_session_id.clone()),
+            model: draft.as_ref().and_then(|d| d.model.clone()),
+            effort: draft.as_ref().and_then(|d| d.effort.clone()),
+            program: activity::program_name(resolved.program.as_deref()),
+            continuation: Continuation::Fresh,
+        };
+        let (session, run_id) = self.start_recorded(resolved, Some(workspace.path), size, &run)?;
         if let (Some(id), Some(draft)) = (record_id, draft) {
             self.store.add_session(&crate::store::NewSession {
                 id: &id,
@@ -150,9 +186,65 @@ impl Launcher<'_> {
                 pty_session_id: &session.id.0,
                 prompt: draft.prompt.as_deref(),
             })?;
+            if let Some(run_id) = &run_id {
+                self.recorder().link_session(run_id, &id);
+            }
             self.settle_record(&session);
         }
         Ok(session)
+    }
+
+    /// The activity recorder for this launcher's settings and client.
+    pub fn recorder(&self) -> Recorder<'_> {
+        Recorder::new(self.store, self.activity, self.launched_by)
+    }
+
+    /// Spawn a resolved launch as a recorded run: the run row is written before the spawn, the
+    /// PTY id attached after, and a spawn that fails is recorded as such. Returns the session
+    /// and the run id — `None` when recording is off, or could not be done; the launch is never
+    /// the one to pay for that.
+    pub fn start_recorded(
+        &self,
+        mut resolved: ResolvedLaunch,
+        cwd: Option<String>,
+        size: TermSize,
+        draft: &RunDraft,
+    ) -> IpcResult<(SessionInfo, Option<String>)> {
+        let recorder = self.recorder();
+        let run_id = recorder.begin(draft);
+        if let Some(run_id) = &run_id {
+            resolved.labels.insert(RUN_LABEL.to_owned(), run_id.clone());
+        }
+        match self.start(resolved, cwd, size) {
+            Ok(session) => {
+                if let Some(run_id) = &run_id {
+                    recorder.spawned(run_id, draft, &session.id.0);
+                    // The process may be gone already — a shell script that exits at once — in
+                    // which case its exit was announced to a PTY id nothing was linked to yet.
+                    // Ask now, for every kind of launch; the conversation's record gets the same
+                    // treatment from `settle_record` once it exists.
+                    if let Ok(SessionInfo {
+                        state: pty_host::SessionState::Exited { exit },
+                        ..
+                    }) = self.host.info(&session.id)
+                    {
+                        activity::record_exit(
+                            self.store,
+                            &session.id.0,
+                            &activity::ExitFacts::from(&exit),
+                            activity::Via::Settle,
+                        );
+                    }
+                }
+                Ok((session, run_id))
+            }
+            Err(error) => {
+                if let Some(run_id) = &run_id {
+                    recorder.spawn_failed(run_id, draft, &error.message);
+                }
+                Err(error)
+            }
+        }
     }
 
     /// See [`settle_record`].
@@ -169,6 +261,18 @@ impl Launcher<'_> {
         size: TermSize,
     ) -> IpcResult<SessionInfo> {
         let mut plan = launch_plan(self.env, resolved.program, resolved.args, cwd, size)?;
+        // A workspace launch is told which run, workspace and conversation it is, so that a
+        // program — or, later, a hook it runs — can say so. Ids only, appended to the user's
+        // environment; nothing is taken out of it.
+        for (label, variable) in [
+            (RUN_LABEL, activity::RUN_ENV),
+            (WORKSPACE_LABEL, activity::WORKSPACE_ENV),
+            (RECORD_LABEL, activity::RECORD_ENV),
+        ] {
+            if let Some(value) = resolved.labels.get(label) {
+                plan.env.push((variable.to_owned(), value.clone()));
+            }
+        }
         plan.labels = resolved.labels;
         plan.prompt = resolved.paste_when_ready;
         Ok(self.host.spawn(plan)?)
@@ -187,6 +291,12 @@ pub fn settle_record(store: &Store, host: &dyn TerminalHost, session: &SessionIn
     }) = host.info(&session.id)
     {
         let _ = store.end_session_by_pty(&session.id.0, Some(i64::from(exit.code)));
+        activity::record_exit(
+            store,
+            &session.id.0,
+            &activity::ExitFacts::from(&exit),
+            activity::Via::Settle,
+        );
     }
 }
 
@@ -481,6 +591,523 @@ mod tests {
             blank.paste_when_ready.is_none(),
             "nothing to say means nothing to paste"
         );
+    }
+
+    /// A host that spawns nothing and keeps the plans it was given, for looking at what a
+    /// launch would have run with. With `exited` set, every session it is asked about has
+    /// already ended that way — the process that was gone before the spawn even returned.
+    #[derive(Default)]
+    struct PlanCatcher {
+        plans: std::sync::Mutex<Vec<LaunchPlan>>,
+        exited: Option<pty_host::ExitInfo>,
+    }
+
+    impl TerminalHost for PlanCatcher {
+        fn spawn(&self, plan: LaunchPlan) -> pty_host::Result<SessionInfo> {
+            let info = SessionInfo {
+                id: pty_host::SessionId(format!("fake-{}", self.plans.lock().unwrap().len())),
+                program: plan.program.clone(),
+                args: plan.args.clone(),
+                cwd: plan.cwd.clone(),
+                pid: None,
+                size: plan.size,
+                labels: plan.labels.clone(),
+                state: pty_host::SessionState::Running,
+                has_output: false,
+                busy: false,
+                idle_ms: 0,
+            };
+            self.plans.lock().unwrap().push(plan);
+            Ok(info)
+        }
+        fn attach(
+            &self,
+            _: &pty_host::SessionId,
+            _: pty_host::OutputSink,
+        ) -> pty_host::Result<pty_host::AttachmentId> {
+            unimplemented!()
+        }
+        fn detach(
+            &self,
+            _: &pty_host::SessionId,
+            _: pty_host::AttachmentId,
+        ) -> pty_host::Result<()> {
+            unimplemented!()
+        }
+        fn write(&self, _: &pty_host::SessionId, _: &[u8]) -> pty_host::Result<()> {
+            unimplemented!()
+        }
+        fn paste(&self, _: &pty_host::SessionId, _: &str) -> pty_host::Result<()> {
+            unimplemented!()
+        }
+        fn resize(&self, _: &pty_host::SessionId, _: TermSize) -> pty_host::Result<()> {
+            unimplemented!()
+        }
+        fn kill(&self, _: &pty_host::SessionId) -> pty_host::Result<()> {
+            unimplemented!()
+        }
+        fn remove(&self, _: &pty_host::SessionId) -> pty_host::Result<()> {
+            unimplemented!()
+        }
+        fn info(&self, id: &pty_host::SessionId) -> pty_host::Result<SessionInfo> {
+            let Some(exit) = &self.exited else {
+                return Err(pty_host::HostError::UnknownSession(id.clone()));
+            };
+            Ok(SessionInfo {
+                id: id.clone(),
+                program: String::new(),
+                args: Vec::new(),
+                cwd: None,
+                pid: None,
+                size: TermSize::DEFAULT,
+                labels: Default::default(),
+                state: pty_host::SessionState::Exited { exit: exit.clone() },
+                has_output: true,
+                busy: false,
+                idle_ms: 0,
+            })
+        }
+        fn list(&self) -> Vec<SessionInfo> {
+            Vec::new()
+        }
+    }
+
+    /// A store with one project whose `local` workspace is a real (temporary) directory.
+    fn workspace_in(dir: &std::path::Path, store: &Store) -> String {
+        store
+            .add_project(
+                &dir.file_name().unwrap().to_string_lossy(),
+                &dir.to_string_lossy(),
+            )
+            .unwrap();
+        store
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|w| w.path == dir.to_string_lossy())
+            .unwrap()
+            .id
+    }
+
+    /// `sh -c <script>`, or `cmd.exe /C <script>`, as a program launch.
+    fn script(script: &str) -> Launch {
+        let (program, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        Launch::Program {
+            program: program.into(),
+            args: vec![flag.into(), script.into()],
+        }
+    }
+
+    /// A harness that is really the shell, so a "conversation" can be started without an agent
+    /// on the machine. Its prompt is the script to run.
+    fn shell_harness() -> HarnessOverride {
+        let (command, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        HarnessOverride {
+            id: "sh-agent".into(),
+            builtin: Some(false),
+            command: Some(command.into()),
+            prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
+            session_id_mode: Some(SessionIdMode::Assigned),
+            ..Default::default()
+        }
+    }
+
+    fn launcher<'a>(
+        store: &'a Store,
+        host: &'a dyn TerminalHost,
+        env: &'a Arc<ShellEnv>,
+        harnesses: &'a [HarnessOverride],
+        activity: &'a ActivitySettings,
+    ) -> Launcher<'a> {
+        Launcher {
+            store,
+            host,
+            env,
+            harnesses,
+            activity,
+            launched_by: LaunchedBy::Cli,
+        }
+    }
+
+    #[test]
+    fn a_workspace_launch_is_a_recorded_run_and_tells_the_program_which_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &harnesses, &activity);
+
+        let session = launcher
+            .in_workspace(
+                &ws,
+                Launch::Harness(HarnessRequest {
+                    id: "sh-agent".into(),
+                    model: Some("m".into()),
+                    effort: None,
+                    prompt: Some("exit 0".into()),
+                }),
+                SIZE,
+            )
+            .unwrap();
+        let run_id = session.labels[RUN_LABEL].clone();
+        let record_id = session.labels[RECORD_LABEL].clone();
+
+        let plan = host.plans.lock().unwrap().remove(0);
+        let var = |name: &str| {
+            plan.env
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(var(activity::RUN_ENV), Some(run_id.clone()));
+        assert_eq!(var(activity::WORKSPACE_ENV), Some(ws.clone()));
+        assert_eq!(var(activity::RECORD_ENV), Some(record_id.clone()));
+        // `Path` on Windows, `PATH` elsewhere: the point is that it is there exactly once.
+        assert!(
+            plan.env
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+                .count()
+                == 1,
+            "appended to the user's environment, not replacing it"
+        );
+
+        let run = store.run(&run_id).unwrap().unwrap();
+        assert_eq!(run.kind, "harness");
+        assert_eq!(run.harness_id.as_deref(), Some("sh-agent"));
+        assert_eq!(run.session_id.as_deref(), Some(record_id.as_str()));
+        assert_eq!(run.pty_session_id.as_deref(), Some(session.id.0.as_str()));
+        assert_eq!(run.launched_by, "cli");
+        assert!(run.ended_at.is_none());
+        let events = store.events(&ws, None, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "process.started");
+        assert!(
+            !events[0].payload.contains("exit 0"),
+            "the prompt is never in an event: {}",
+            events[0].payload
+        );
+        assert_eq!(events[0].session_id.as_deref(), Some(record_id.as_str()));
+    }
+
+    /// A shell or run command has no session record, so nothing called `settle_record` for it:
+    /// a script that exited before the spawn returned stayed an open run until the next start
+    /// called it interrupted. Every recorded launch is settled now.
+    #[test]
+    fn a_launch_that_has_already_ended_when_the_spawn_returns_is_settled_whatever_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher {
+            exited: Some(pty_host::ExitInfo {
+                code: 9,
+                success: false,
+                signal: None,
+            }),
+            ..Default::default()
+        };
+        let env = process_env();
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &[], &activity);
+
+        launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
+        let run = &store.runs(&ws).unwrap()[0];
+        assert_eq!(run.kind, "shell");
+        assert_eq!(
+            (run.exit_code, run.end_reason.as_deref()),
+            (Some(9), Some("exited"))
+        );
+        let kinds: Vec<_> = store
+            .events(&ws, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.kind, e.payload.contains("\"via\":\"settle\"")))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("process.exited".to_owned(), true),
+                ("process.started".to_owned(), false)
+            ]
+        );
+        assert_eq!(
+            activity::end_interrupted(&store, &[]),
+            0,
+            "nothing left to call interrupted"
+        );
+    }
+
+    #[test]
+    fn a_shell_and_a_run_command_are_runs_too_but_a_launch_outside_a_workspace_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &[], &activity);
+
+        launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
+        launcher.in_workspace(&ws, script("exit 0"), SIZE).unwrap();
+        let resolved = resolve_launch(script("exit 0"), &[]).unwrap();
+        let outside = launcher.start(resolved, None, SIZE).unwrap();
+        assert!(!outside.labels.contains_key(RUN_LABEL));
+
+        let kinds: Vec<_> = store
+            .runs(&ws)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            ["program", "shell"],
+            "newest first, nothing for the outsider"
+        );
+        let plans = host.plans.lock().unwrap();
+        assert!(plans[2].env.iter().all(|(k, _)| k != activity::RUN_ENV));
+    }
+
+    #[test]
+    fn a_program_that_cannot_start_is_recorded_as_such_and_still_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &[], &activity);
+
+        let error = launcher
+            .in_workspace(
+                &ws,
+                Launch::Program {
+                    program: "yardsort-no-such-program".into(),
+                    args: vec![],
+                },
+                SIZE,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "program_not_found");
+        let run = &store.runs(&ws).unwrap()[0];
+        assert_eq!(run.end_reason.as_deref(), Some("spawn_failed"));
+        assert!(run.pty_session_id.is_none());
+        let events = store.events(&ws, None, 10).unwrap();
+        assert_eq!(events[0].kind, "process.spawn_failed");
+        assert!(events[0].payload.contains("not found"));
+    }
+
+    #[test]
+    fn recording_off_means_no_run_no_label_and_no_variable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let activity = ActivitySettings {
+            record_lifecycle: false,
+            show_timeline: false,
+        };
+        let launcher = launcher(&store, &host, &env, &[], &activity);
+        let session = launcher.in_workspace(&ws, Launch::Shell, SIZE).unwrap();
+        assert!(!session.labels.contains_key(RUN_LABEL));
+        assert!(store.runs(&ws).unwrap().is_empty());
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert!(plan.env.iter().all(|(k, _)| k != activity::RUN_ENV));
+        assert!(
+            plan.env.iter().any(|(k, _)| k == activity::WORKSPACE_ENV),
+            "the workspace id is a fact of the launch, not of recording"
+        );
+    }
+
+    /// Real processes in real PTYs from here: the exit path is where the platforms differ.
+    fn real_host() -> (
+        Arc<pty_host::PtyHost>,
+        std::sync::mpsc::Receiver<pty_host::HostEvent>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = std::sync::Mutex::new(tx);
+        let host = pty_host::PtyHost::new(Arc::new(move |event| {
+            let _ = tx.lock().unwrap().send(event);
+        }));
+        (Arc::new(host), rx)
+    }
+
+    /// The exits of every session in `ids`, however they are ordered: two processes started
+    /// together end in whichever order the platform pleases, and an exit that arrives while
+    /// another is being waited for must not be thrown away.
+    fn wait_for_exits(
+        events: &std::sync::mpsc::Receiver<pty_host::HostEvent>,
+        ids: &[&pty_host::SessionId],
+    ) -> std::collections::HashMap<pty_host::SessionId, pty_host::ExitInfo> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut seen = std::collections::HashMap::new();
+        while seen.len() < ids.len() {
+            match events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            {
+                Ok(pty_host::HostEvent::Exited { id, exit }) if ids.contains(&&id) => {
+                    seen.insert(id, exit);
+                }
+                Ok(_) => {}
+                Err(_) => panic!("no exit for {ids:?}"),
+            }
+        }
+        seen
+    }
+
+    fn wait_for_exit(
+        events: &std::sync::mpsc::Receiver<pty_host::HostEvent>,
+        id: &pty_host::SessionId,
+    ) -> pty_host::ExitInfo {
+        wait_for_exits(events, &[id]).remove(id).unwrap()
+    }
+
+    #[test]
+    fn a_process_that_exits_at_once_is_settled_in_the_record_and_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let (host, events) = real_host();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, host.as_ref(), &env, &harnesses, &activity);
+
+        let session = launcher
+            .in_workspace(
+                &ws,
+                Launch::Harness(HarnessRequest {
+                    id: "sh-agent".into(),
+                    model: None,
+                    effort: None,
+                    prompt: Some("exit 3".into()),
+                }),
+                SIZE,
+            )
+            .unwrap();
+        let exit = wait_for_exit(&events, &session.id);
+        assert_eq!(exit.code, 3);
+        // What the app's event sink and the CLI both do on an exit, whichever arrives first.
+        let _ = store.end_session_by_pty(&session.id.0, Some(3));
+        activity::record_exit(
+            &store,
+            &session.id.0,
+            &activity::ExitFacts::from(&exit),
+            activity::Via::Live,
+        );
+        // `in_workspace` settled it too, if the exit beat the record; the two must agree.
+        launcher.settle_record(&session);
+
+        let record = store
+            .session(&session.labels[RECORD_LABEL])
+            .unwrap()
+            .unwrap();
+        assert_eq!((record.running, record.exit_code), (false, Some(3)));
+        let run = store.run(&session.labels[RUN_LABEL]).unwrap().unwrap();
+        assert_eq!(
+            (run.exit_code, run.end_reason.as_deref()),
+            (Some(3), Some("exited"))
+        );
+        let kinds: Vec<_> = store
+            .events(&ws, None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        assert_eq!(kinds, ["process.exited", "process.started"], "once each");
+    }
+
+    #[test]
+    fn two_workspaces_keep_their_runs_and_exits_apart() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let store = Store::in_memory();
+        let (ws_a, ws_b) = (
+            workspace_in(a.path(), &store),
+            workspace_in(b.path(), &store),
+        );
+        let (host, events) = real_host();
+        let env = process_env();
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, host.as_ref(), &env, &[], &activity);
+
+        let in_a = launcher
+            .in_workspace(&ws_a, script("exit 1"), SIZE)
+            .unwrap();
+        let in_b = launcher
+            .in_workspace(&ws_b, script("exit 2"), SIZE)
+            .unwrap();
+        for (id, exit) in wait_for_exits(&events, &[&in_a.id, &in_b.id]) {
+            activity::record_exit(
+                &store,
+                &id.0,
+                &activity::ExitFacts::from(&exit),
+                activity::Via::Live,
+            );
+        }
+        let code = |ws: &str| store.runs(ws).unwrap()[0].exit_code;
+        assert_eq!((code(&ws_a), code(&ws_b)), (Some(1), Some(2)));
+        assert_eq!(store.events(&ws_a, None, 10).unwrap().len(), 2);
+        assert_eq!(store.events(&ws_b, None, 10).unwrap().len(), 2);
+        assert_eq!(
+            store.runs(&ws_a).unwrap()[0].pty_session_id.as_deref(),
+            Some(in_a.id.0.as_str())
+        );
+    }
+
+    /// The point of the recorder: a database that cannot take the row must not take the launch
+    /// down with it.
+    #[test]
+    fn a_broken_activity_table_does_not_stop_a_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        store.break_activity_tables();
+        let (host, events) = real_host();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, host.as_ref(), &env, &harnesses, &activity);
+
+        let session = launcher
+            .in_workspace(
+                &ws,
+                Launch::Harness(HarnessRequest {
+                    id: "sh-agent".into(),
+                    model: None,
+                    effort: None,
+                    prompt: Some("exit 0".into()),
+                }),
+                SIZE,
+            )
+            .expect("the launch goes ahead");
+        assert!(!session.labels.contains_key(RUN_LABEL));
+        wait_for_exit(&events, &session.id);
+        launcher.settle_record(&session);
+        assert!(
+            store
+                .session(&session.labels[RECORD_LABEL])
+                .unwrap()
+                .is_some(),
+            "the record is written as before"
+        );
+        let failed = store
+            .diagnostics()
+            .unwrap()
+            .into_iter()
+            .find(|d| d.name == "write_failed")
+            .expect("the failure is counted, not raised");
+        assert!(failed.count >= 1);
     }
 
     #[cfg(not(windows))]

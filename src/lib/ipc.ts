@@ -6,6 +6,11 @@ import { Channel, isTauri } from "@tauri-apps/api/core";
 import {
   commands,
   events,
+  type ActivityCounter,
+  type ActivityDiagnostics,
+  type ActivityEvent,
+  type ActivityPage,
+  type ActivitySettingsDto,
   type AddedProject,
   type AppInfo,
   type AssistStatus,
@@ -57,6 +62,11 @@ import {
 } from "./bindings";
 
 export type {
+  ActivityCounter,
+  ActivityDiagnostics,
+  ActivityEvent,
+  ActivityPage,
+  ActivitySettingsDto,
   ProjectAutomation,
   AddedProject,
   AppInfo,
@@ -192,6 +202,21 @@ export const ipc = {
         general.checkForUpdates,
       ),
     ),
+
+  settingsSaveActivity: (activity: ActivitySettingsDto) =>
+    unwrap(commands.settingsSaveActivity(activity.recordLifecycle, activity.showTimeline)),
+
+  /**
+   * A page of a workspace's recorded activity, newest first: events before `beforeSeq`, or the
+   * newest when it is null. What Yardsort itself saw — starts and exits — nothing from inside
+   * the agent.
+   */
+  activityTimeline: (workspaceId: string, beforeSeq: number | null = null, limit = 50) =>
+    unwrap(commands.activityTimeline(workspaceId, beforeSeq, limit)),
+  /** How much is recorded, where the exit spool is, and what went wrong recording. */
+  activityDiagnostics: () => unwrap(commands.activityDiagnostics()),
+  /** Forget recorded activity: one workspace's, or all of it for `null`. */
+  activityClear: (workspaceId: string | null) => done(commands.activityClear(workspaceId)),
 
   /** Is there a newer release? Looks only; nothing is downloaded. */
   updateCheck: () => unwrap(commands.updateCheck()),

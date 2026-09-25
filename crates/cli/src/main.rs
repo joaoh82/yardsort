@@ -70,6 +70,9 @@ enum Command {
     /// Agent conversations and the terminals running them.
     #[command(subcommand)]
     Session(commands::session::Command),
+    /// What Yardsort recorded about the processes it started: the activity timeline.
+    #[command(subcommand)]
+    Activity(commands::activity::Command),
     /// Put a running session on this terminal. Detaching leaves it running.
     Attach {
         /// Which one: a workspace name, or the start of an id from `ys session list`. With one
@@ -114,6 +117,8 @@ fn main() {
                 .and_then(|ys| commands::workspace::run(&ys, command, &out)),
             Command::Session(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::session::run(&ys, command, &out)),
+            Command::Activity(command) => Yardsort::open(cli.data_dir)
+                .and_then(|ys| commands::activity::run(&ys, command, &out)),
         };
     if let Err(Failure(message)) = result {
         eprintln!("{message}");

@@ -15,6 +15,7 @@ few minutes.
 | [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row         |
 | [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor                   |
 | [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer            |
+| [Activity](guide/activity.md)                                 | The local record of what started and how it ended; the experimental timeline   |
 | [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can             |
 | [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                              |
 | [The `ys` command line](guide/cli.md)                         | Starting and deleting workspaces, and agents, from a terminal and from scripts |

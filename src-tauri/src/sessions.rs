@@ -17,9 +17,10 @@ use crate::harness::{self, HarnessDef, LaunchValues, SessionIdMode};
 use crate::state::{blocking, AppState};
 use crate::store::{NewSession, SessionRow};
 use crate::terminal::{
-    settle_record, start, ResolvedLaunch, HARNESS_LABEL, HARNESS_SESSION_LABEL, RECORD_LABEL,
-    WORKSPACE_LABEL,
+    settle_record, with_launcher, ResolvedLaunch, HARNESS_LABEL, HARNESS_SESSION_LABEL,
+    RECORD_LABEL, WORKSPACE_LABEL,
 };
+use yardsort_core::activity::{self, Continuation, RunDraft, RunKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -195,18 +196,38 @@ fn continue_session(
         labels.insert(HARNESS_SESSION_LABEL.to_owned(), id.clone());
     }
 
-    let session = start(
-        state,
-        ResolvedLaunch {
-            program: Some(def.command.clone()),
-            args,
-            labels,
-            paste_when_ready: None,
-            record: None,
+    let run = RunDraft {
+        workspace_id: row.workspace_id.clone(),
+        // A resume's record exists; a fork's is written after the spawn and linked then.
+        session_id: (!fork).then(|| row.id.clone()),
+        kind: RunKind::Harness,
+        harness_id: Some(def.id.clone()),
+        harness_session_id: harness_session_id.clone(),
+        model: row.model.clone(),
+        effort: row.effort.clone(),
+        program: activity::program_name(Some(&def.command)),
+        continuation: if fork {
+            Continuation::Forked {
+                from: row.id.clone(),
+            }
+        } else {
+            Continuation::Resumed
         },
-        Some(workspace.path),
-        size,
-    )?;
+    };
+    let (session, run_id) = with_launcher(state, |launcher| {
+        launcher.start_recorded(
+            ResolvedLaunch {
+                program: Some(def.command.clone()),
+                args,
+                labels,
+                paste_when_ready: None,
+                record: None,
+            },
+            Some(workspace.path),
+            size,
+            &run,
+        )
+    })?;
     if fork {
         state.store.add_session(&NewSession {
             id: &target_id,
@@ -221,6 +242,11 @@ fn continue_session(
             // A fork continues a conversation; nothing new was asked.
             prompt: None,
         })?;
+        if let Some(run_id) = &run_id {
+            with_launcher(state, |launcher| {
+                launcher.recorder().link_session(run_id, &target_id);
+            });
+        }
     } else {
         state.store.mark_session_running(&row.id, &session.id.0)?;
     }

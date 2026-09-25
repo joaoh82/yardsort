@@ -115,6 +115,18 @@ export const commands = {
 	 *  harnesses' "Good at" descriptions.
 	 */
 	assistSuggest: (message: string) => typedError<Suggestion, IpcError>(__TAURI_INVOKE("assist_suggest", { message })),
+	/**
+	 *  A page of a workspace's events, newest first: those before `before_seq` (or the newest,
+	 *  when `None`), at most `limit` of them.
+	 */
+	activityTimeline: (workspaceId: string, beforeSeq: number | null, limit: number) => typedError<ActivityPage, IpcError>(__TAURI_INVOKE("activity_timeline", { workspaceId, beforeSeq, limit })),
+	activityDiagnostics: () => typedError<ActivityDiagnostics, IpcError>(__TAURI_INVOKE("activity_diagnostics")),
+	/**
+	 *  Forget recorded activity — one workspace's, or all of it. Runs still going keep their row,
+	 *  so their exit can still be matched; nothing about the processes themselves is touched.
+	 */
+	activityClear: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("activity_clear", { workspaceId })),
+	settingsSaveActivity: (recordLifecycle: boolean, showTimeline: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { recordLifecycle, showTimeline })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
 	sessionResume: (id: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("session_resume", { id, size })),
@@ -187,6 +199,64 @@ export const events = {
 };
 
 /* Types */
+export type ActivityCounter = {
+	name: string,
+	count: number | null,
+	lastAt: number | null,
+	lastDetail: string | null,
+};
+
+/**  What there is, and what went wrong recording it. For Settings → General and bug reports. */
+export type ActivityDiagnostics = {
+	events: number | null,
+	runs: number | null,
+	/**  Where the daemon keeps exits for a closed window, and how many are waiting there. */
+	spoolDir: string,
+	spoolPending: number,
+	counters: ActivityCounter[],
+};
+
+/**
+ *  One recorded fact, as the timeline shows it. Timestamps are epoch milliseconds; `payload`
+ *  is the event's JSON, whose shape depends on `kind` (see the guide).
+ */
+export type ActivityEvent = {
+	/**  Ingestion order: the cursor for paging, and the tie-breaker for display. */
+	seq: number | null,
+	id: string,
+	schemaVersion: number,
+	workspaceId: string,
+	sessionId: string | null,
+	runId: string | null,
+	occurredAt: number | null,
+	receivedAt: number | null,
+	kind: string,
+	/**
+	 *  Who said so, how, and how sure to be: `yardsort` / `lifecycle` / `observed` for
+	 *  everything recorded today.
+	 */
+	producer: string,
+	method: string,
+	fidelity: string,
+	privacyClass: string,
+	payload: string,
+};
+
+/**  One page of a workspace's timeline, newest first. */
+export type ActivityPage = {
+	events: ActivityEvent[],
+	/**  Whether asking again with the last event's `seq` as `before` would find more. */
+	hasMore: boolean,
+};
+
+/**  The activity switches, as Settings → General shows them. See `crate::activity`. */
+export type ActivitySettingsDto = {
+	/**  Record when a harness, shell or run command starts and exits in a workspace. */
+	recordLifecycle: boolean,
+	/**  Show the experimental activity timeline in a workspace. */
+	showTimeline: boolean,
+};
+
 /**  The result of adding a project: it may have been known already. */
 export type AddedProject = {
 	project: Project,
@@ -821,6 +891,7 @@ export type SettingsInfo = {
 	filePath: string,
 	/**  Why the settings file was ignored, if it was (it is kept, never overwritten). */
 	problem: string | null,
+	activity: ActivitySettingsDto,
 };
 
 export type SpawnRequest = {
