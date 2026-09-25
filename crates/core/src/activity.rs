@@ -566,6 +566,9 @@ pub struct InboxReport {
     pub unreadable: usize,
     /// Entries a hook had to drop because the inbox was full.
     pub dropped: u64,
+    /// Entries left for a later drain: a Codex turn its session file has not finished, or a
+    /// row the database would not take just now. Whoever drains should look again soon.
+    pub deferred: usize,
     /// The workspaces that gained events, for whoever is showing one.
     pub workspaces: std::collections::BTreeSet<String>,
 }
@@ -604,6 +607,7 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
                 if entry.producer == codex::PRODUCER && entry.kind == codex::TRIGGER_KIND =>
             {
                 if !import_codex_turn(store, &entry, &link, &mut report) {
+                    report.deferred += 1;
                     continue;
                 }
             }
@@ -634,7 +638,10 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
                     }
                     Some(false) => report.duplicates += 1,
                     // The database would not take it now; the file stays for the next drain.
-                    None => continue,
+                    None => {
+                        report.deferred += 1;
+                        continue;
+                    }
                 }
             }
             None => {
@@ -1709,7 +1716,35 @@ mod tests {
         inbox.record(&early).unwrap();
         let report = import_inbox(&store, dir.path());
         assert_eq!(report.imported, 0);
+        assert_eq!(
+            report.deferred, 1,
+            "and said so, so the drain is asked again"
+        );
         assert_eq!(inbox.entries().unwrap().len(), 1, "left for the next drain");
+
+        // Codex finishes writing the turn — nothing lands in the inbox for that — and the next
+        // drain, which the app schedules on `deferred`, takes it in.
+        let rollout = codex::find_rollout(&home, "01a0d83f-c3ea-7ae0-88df-82c9431d3f8b").unwrap();
+        let mut text = std::fs::read_to_string(&rollout).unwrap();
+        text.push_str(
+            r#"{"timestamp":"2026-09-25T11:09:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-still-running","duration_ms":5,"time_to_first_token_ms":1},"ordinal":99}"#,
+        );
+        text.push('\n');
+        std::fs::write(&rollout, text).unwrap();
+        let caught_up = import_inbox(&store, dir.path());
+        assert_eq!(
+            (caught_up.imported, caught_up.deferred),
+            (2, 0),
+            "session + turn"
+        );
+        assert!(inbox.entries().unwrap().is_empty());
+        let events = store.all_events(Some(&ws)).unwrap();
+        let turn = events.iter().find(|e| e.kind == "turn.completed").unwrap();
+        assert_eq!(turn.method, "session_file");
+        assert_eq!(
+            turn.occurred_at,
+            codex::iso_to_ms("2026-09-25T11:09:00.000Z").unwrap()
+        );
 
         // The same, but older than the grace: recorded from the trigger alone, and counted.
         let mut late = codex_trigger(
@@ -1718,13 +1753,16 @@ mod tests {
             &run_id,
             crate::store::now_ms() - codex::NOT_READY_GRACE_MS - 1,
         );
-        late.payload["turnId"] = json!("turn-still-running");
+        late.payload["turnId"] = json!("turn-never-written");
         inbox.record(&late).unwrap();
         let report = import_inbox(&store, dir.path());
         assert_eq!(report.imported, 1);
         let events = store.all_events(Some(&ws)).unwrap();
-        let fallback = events.iter().find(|e| e.kind == "turn.completed").unwrap();
-        assert_eq!(fallback.method, "notify");
+        let fallback = events
+            .iter()
+            .find(|e| e.kind == "turn.completed" && e.method == "notify")
+            .expect("the turn from the trigger alone");
+        assert_eq!(payload(fallback)["turnId"], "turn-never-written");
         assert!(store
             .diagnostics()
             .unwrap()
@@ -1737,11 +1775,7 @@ mod tests {
         inbox.record(&lost).unwrap();
         let report = import_inbox(&store, dir.path());
         assert_eq!(report.imported, 1);
-        assert_eq!(
-            inbox.entries().unwrap().len(),
-            1,
-            "only the fresh one waits"
-        );
+        assert!(inbox.entries().unwrap().is_empty(), "nothing left waiting");
         assert!(store
             .diagnostics()
             .unwrap()

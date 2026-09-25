@@ -195,7 +195,28 @@ describe("describeEvent", () => {
     expect(words("prompt.submitted", { chars: 147 }).detail).toBe("147 characters");
     expect(words("agent.notified", { type: "permission_prompt" }).detail).toBe("permission_prompt");
     expect(words("turn.failed", { errorType: "rate_limit" }).tone).toBe("bad");
-    expect(words("usage.reported", { tokens: 1 }).title).toBe("usage.reported");
+    expect(words("tool.failed", { tool: "shell", exitCode: 1 })).toEqual({
+      title: "shell failed",
+      detail: "exit 1",
+      tone: "bad",
+    });
+    expect(words("tool.completed", { tool: "shell", exitCode: 0, durationMs: 3 }).detail).toBe(
+      "exit 0 · 3 ms",
+    );
+    expect(words("file.reported_write", { kind: "add", path: "hello.txt" })).toEqual({
+      title: "file added",
+      detail: "hello.txt",
+      tone: "plain",
+    });
+    expect(
+      words("file.reported_write", { kind: "update", pathOutsideWorkspace: true }).detail,
+    ).toBe("a file outside the workspace");
+    expect(words("usage.reported", { totalTokens: 29842, outputTokens: 138 }).detail).toBe(
+      "29,842 total · 138 out",
+    );
+    expect(words("turn.completed", { durationMs: 11033 }).detail).toBe("11.0 s");
+    expect(words("turn.completed", { detail: "notify" }).detail).toMatch(/notify alone/);
+    expect(words("workspace.changed", { files: 1 }).title).toBe("workspace.changed");
     expect(describeEvent({ ...event(1, "process.exited", {}), payload: "{ not json" }).title).toBe(
       "ended without an exit status",
     );

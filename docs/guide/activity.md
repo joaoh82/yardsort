@@ -118,7 +118,8 @@ working.
 **What is kept, and what is not.** Ids, exit codes, durations, counts, relative paths, kinds of
 change. Not a command, not a file's contents, not your message, not Codex's answer, not its
 reasoning, not a path outside the workspace. A turn that `notify` reports before Codex has finished
-writing it to the session file is picked up on a later look, for up to five minutes; after that,
+writing it to the session file is picked up on a later look — the app looks again every few
+seconds while a turn is waiting, `ys` on its next command — for up to five minutes; after that,
 or if the file cannot be read at all, the timeline still shows _agent finished its turn_, marked
 as coming from `notify` alone, and Settings → General counts what was missed
 (`codex_turn_incomplete`, `codex_session_file`). If Codex's automatic reviewer is on, its review runs as a second thread, and its turns show as
