@@ -45,22 +45,23 @@ export function ProvenanceNote({ changes }: { changes: ChangeSet }) {
   // agent's ever came through it. A run with neither is unknown, and not counted either way.
   const silent = provenance.runs.filter((run) => run.capture === null && run.captureKnown).length;
 
+  // The alternatives are named every time, and a command the agent ran is one of them: a file
+  // made by `echo > hello.txt` is the agent's doing and carries no report, since a command
+  // names no file.
+  const alternatives = `you, a script, a command the agent ran${
+    silent > 0
+      ? `, or one of the ${silent} agent run${silent === 1 ? "" : "s"} here that was not reporting`
+      : ""
+  }`;
   const summary =
     reported === paths.size
       ? `Every changed file was reported written by an agent.`
       : reported === 0
-        ? `No changed file was reported written by an agent.`
-        : `Agents reported writing ${reported} of ${paths.size} changed files.`;
-  const rest =
-    reported < paths.size
-      ? silent > 0
-        ? ` The rest changed with no report — you, a script, or one of the ${silent} agent run${silent === 1 ? "" : "s"} here that was not reporting.`
-        : " The rest changed with no report — you, a script, or a tool the agent did not report."
-      : "";
+        ? `No changed file was reported written by an agent — ${alternatives}.`
+        : `Agents reported writing ${reported} of ${paths.size} changed files. The rest changed with no report — ${alternatives}.`;
   return (
     <p className="px-3 py-1 text-[11px] text-ink-faint" title={CAVEAT}>
       {summary}
-      {rest}
     </p>
   );
 }

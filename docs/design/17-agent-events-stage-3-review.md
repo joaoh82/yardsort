@@ -104,8 +104,9 @@ copies.
   report landing refreshes the join for the followed workspace only.
 - `ActivityPanel.test.tsx` (1): the **diff** button on a row naming a listed file, absent on
   rows that do not, absent when the Changes panel follows another workspace, and what it opens.
-- Live: not yet exercised in the window at the time of writing; [08 §18](08-manual-checklist.md)
-  is the pass, on the harness with the most direct report (Claude Code, `Write`).
+- Live, first pass on Linux: Claude Code's hooks reported the session, the prompt, a Bash
+  tool and the turn — and no file, because the file was made by the command (§5). The
+  checklist now asks for the Write tool by name.
 
 ## 5 · What this slice does not do, and the next
 
@@ -119,5 +120,12 @@ copies.
   events and 90 days, see [Keeping it small](../guide/activity.md#keeping-it-small); a diff older
   than the retained activity has no report, and the note says so in the same words as any other
   unreported file. Whether that case deserves its own words is left to seeing it.
+- **A shell command is not a reported write**, and that is the common case for a small file.
+  Found on the first hands-on pass: asked to "create hello.txt", Claude Code ran one Bash
+  command, which reports a tool and a duration and no file — so no row named the file and
+  nothing was badged, correctly. The note above the list now names _a command the agent ran_
+  among the alternatives, and the guide says a missing badge is not a change the agent did not
+  make. Reading the command to find the file is exactly what the contract forbids; the gap
+  stays.
 - **Grok** cannot contribute: its log has no path. The note counts its runs as reporting, since
   they were; its files are simply never badged. Honest, and worth a line in the guide.

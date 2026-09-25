@@ -490,6 +490,7 @@ describe("ChangesPanel with reported writes", () => {
     expect(within(row("README.md")).queryByTestId("reported")).toBeNull();
 
     const note = screen.getByText(/Agents reported writing 1 of 3 changed files/);
+    expect(note).toHaveTextContent("a command the agent ran");
     expect(note).toHaveTextContent("one of the 1 agent run here that was not reporting");
 
     // The open diff says the same in its header, once there is room for it.
