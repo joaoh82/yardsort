@@ -19,6 +19,8 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 12  | [Agent events, stage 2: Codex](12-agent-events-stage-2-codex.md)        | Why not its hooks; `notify` as the trigger, the session file as the substance           |
 | 13  | [Agent events, stage 2: OpenCode](13-agent-events-stage-2-opencode.md)  | A plugin given per launch through the environment; the last of the three named          |
 | 14  | [Agent events, stage 2: Grok](14-agent-events-stage-2-grok.md)          | Its own metadata-only session log, read where Yardsort knows to look; nothing installed |
+| 15  | [Agent events, stage 2: OMP and Pi](15-agent-events-stage-2-pi-omp.md)  | One extension for the two forks, given on the command line per launch                   |
+| 16  | [Agent events, stage 2: Cursor](16-agent-events-stage-2-cursor.md)      | Hooks through a per-launch plugin directory; built from the docs, recording owed        |
 
 ## Vocabulary
 

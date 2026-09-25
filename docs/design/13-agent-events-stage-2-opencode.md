@@ -75,7 +75,8 @@ clock (OpenCode's events carry no time of their own except a tool's `state.time`
 | Codex 0.156.1       | yes       | `notify` + session file, opt-in: [12](12-agent-events-stage-2-codex.md).                                                                                                                                                                                             |
 | OpenCode 1.18.31    | yes       | **Plugin, opt-in**: sessions, prompts, tools with exit codes and failures, file edits, permissions, turns, token usage and cost per assistant message. **Not available**: a tool's duration when it succeeds (the hooks carry no timing; only the error state does). |
 | Grok                | yes       | **Shipped**: [14](14-agent-events-stage-2-grok.md).                                                                                                                                                                                                                  |
-| OMP, Cursor, Pi     | yes       | Lifecycle only. Four patterns now exist — a per-launch settings file, a per-launch program, a per-launch plugin, a directory read — for whichever of these grows a stable surface.                                                                                   |
+| OMP, Pi             | yes       | **Shipped**: [15](15-agent-events-stage-2-pi-omp.md), this pattern again.                                                                                                                                                                                            |
+| Cursor              | yes       | **Shipped**, from the documentation: [16](16-agent-events-stage-2-cursor.md).                                                                                                                                                                                        |
 
 ## 5 · What shipped
 

@@ -15,6 +15,9 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
   const [codex, setCodex] = useState(initial.captureCodex);
   const [opencode, setOpencode] = useState(initial.captureOpencode);
   const [grok, setGrok] = useState(initial.captureGrok);
+  const [omp, setOmp] = useState(initial.captureOmp);
+  const [pi, setPi] = useState(initial.capturePi);
+  const [cursor, setCursor] = useState(initial.captureCursor);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<ActivityDiagnostics | null>(null);
@@ -31,7 +34,10 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
     claude !== saved.captureClaude ||
     codex !== saved.captureCodex ||
     opencode !== saved.captureOpencode ||
-    grok !== saved.captureGrok;
+    grok !== saved.captureGrok ||
+    omp !== saved.captureOmp ||
+    pi !== saved.capturePi ||
+    cursor !== saved.captureCursor;
   const save = async () => {
     setError(null);
     try {
@@ -43,6 +49,9 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
         captureCodex: codex && record,
         captureOpencode: opencode && record,
         captureGrok: grok && record,
+        captureOmp: omp && record,
+        capturePi: pi && record,
+        captureCursor: cursor && record,
       });
       setSaved(info.activity);
       useAppStore.setState({ showTimeline: info.activity.showTimeline });
@@ -189,6 +198,67 @@ export function ActivitySettings({ initial }: { initial: ActivitySettingsDto }) 
             permissions you were asked for, each turn and its tokens — with no commands, paths or
             messages in it. Yardsort reads that log for the sessions it started. Nothing is given to
             Grok and nothing in <code>~/.grok</code> is written.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={omp}
+          disabled={!record}
+          onChange={(e) => {
+            setOmp(e.target.checked);
+            setJustSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Capture what OMP reports
+          <span className="block text-ink-faint">
+            OMP started from Yardsort is given a small extension, on its command line for that
+            launch alone, that reports each turn with its tokens, each tool with its file or
+            duration, and each permission you answer — never a prompt, a command, a file or a reply.
+            Your own OMP extensions keep running.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={pi}
+          disabled={!record}
+          onChange={(e) => {
+            setPi(e.target.checked);
+            setJustSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Capture what pi reports
+          <span className="block text-ink-faint">
+            The same extension, for pi: turns with their tokens, tools with their file or duration,
+            model switches. Your own pi extensions keep running.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={cursor}
+          disabled={!record}
+          onChange={(e) => {
+            setCursor(e.target.checked);
+            setJustSaved(false);
+          }}
+          className="mt-0.5 accent-(--color-accent)"
+        />
+        <span>
+          Capture what Cursor reports
+          <span className="block text-ink-faint">
+            The Cursor agent started from Yardsort is given a small plugin, on its command line for
+            that launch alone, whose hooks report each tool with its file or duration, each file it
+            changes and each prompt's length — never the prompt, a command, a file or a reply. Your
+            own Cursor hooks keep running.
           </span>
         </span>
       </label>

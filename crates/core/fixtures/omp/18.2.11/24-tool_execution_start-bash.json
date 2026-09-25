@@ -1,0 +1,31 @@
+{
+  "event": "tool_execution_start",
+  "payload": {
+    "type": "tool_execution_start",
+    "toolCallId": "chatcmpl-tool-ba0a2bcb373cd368|fc_tmp_3mm5kkvnwob",
+    "toolName": "bash",
+    "args": {
+      "command": "ls",
+      "timeout": 10,
+      "cwd": "/tmp/yardsort-fixture/repo",
+      "pty": false,
+      "async": false
+    },
+    "intent": "listing-files"
+  },
+  "session": {
+    "id": "22222222-2222-4222-8222-000000000001",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-25T19-21-40-774Z_01a0da04-28a6-761b-ac53-47800c1ff939.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "z-ai/glm-5.3-flash",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

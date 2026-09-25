@@ -944,3 +944,112 @@ fn groks_session_directory_is_read_for_its_runs_when_switched_on() {
     assert!(table.contains("grok/session_file"), "{table}");
     assert!(table.contains("57107 tokens"), "{table}");
 }
+
+/// `ys --yardsort-hook omp <inbox>` with an extension delivery on stdin is what OMP's — and
+/// pi's — extension runs at each step. The next `ys` command drains it.
+#[test]
+fn the_binary_as_the_pi_familys_extension_hook_leaves_an_entry_the_next_command_takes_in() {
+    use std::io::Write;
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    drop(store);
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/fixtures/omp")
+        .join(yardsort_core::activity::pi::OMP_FIXTURE_VERSION)
+        .join("15-turn_end.json");
+    let inbox = yardsort_core::activity::inbox_dir(&fx.data_dir);
+    let mut hook = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .arg(yardsort_core::activity::hook::HOOK_FLAG)
+        .arg("omp")
+        .arg(&inbox)
+        .env(yardsort_core::activity::WORKSPACE_ENV, &workspace.id)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    hook.stdin
+        .take()
+        .unwrap()
+        .write_all(&std::fs::read(&fixture).unwrap())
+        .unwrap();
+    let output = hook.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = fx.ys(&["activity", "list", "--json"]).ok();
+    let events: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(events[0]["kind"], "turn.completed");
+    assert_eq!(events[0]["producer"], "omp");
+    assert_eq!(events[0]["method"], "extension");
+    assert_eq!(events[0]["payload"]["totalTokens"], 19963);
+    let table = fx.ys(&["activity", "list"]).ok();
+    assert!(table.contains("omp/extension"), "{table}");
+    assert!(table.contains("19963 tokens"), "{table}");
+}
+
+/// `ys --yardsort-hook cursor <inbox>` with a hook payload on stdin is what the plugin's
+/// `hooks.json` runs at each step of a Cursor agent. The shape is the documented one: the
+/// Cursor agent has not been recorded yet (see `scripts/record-cursor.sh`).
+#[test]
+fn the_binary_as_a_cursor_hook_leaves_an_entry_the_next_command_takes_in() {
+    use std::io::Write;
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    drop(store);
+    let payload = serde_json::json!({
+        "conversation_id": "conv-1",
+        "generation_id": "gen-1",
+        "model": "composer-2",
+        "hook_event_name": "afterFileEdit",
+        "cursor_version": yardsort_core::activity::cursor::DOCUMENTED_VERSION,
+        "workspace_roots": [workspace.path],
+        "transcript_path": "/home/user/.cursor/projects/x/agent-transcripts/conv-1.jsonl",
+        "file_path": format!("{}/src/lib.rs", workspace.path),
+        "edits": [{ "old_string": "fn a()", "new_string": "fn b()" }],
+    });
+    let inbox = yardsort_core::activity::inbox_dir(&fx.data_dir);
+    let mut hook = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .arg(yardsort_core::activity::hook::HOOK_FLAG)
+        .arg("cursor")
+        .arg(&inbox)
+        .env(yardsort_core::activity::WORKSPACE_ENV, &workspace.id)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    hook.stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    let output = hook.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stdout.is_empty(), "nothing on stdout: {output:?}");
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json = fx.ys(&["activity", "list", "--json"]).ok();
+    let events: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(events[0]["kind"], "file.reported_write");
+    assert_eq!(events[0]["producer"], "cursor");
+    assert_eq!(events[0]["method"], "hook");
+    assert_eq!(events[0]["payload"]["path"], "src/lib.rs");
+    assert_eq!(events[0]["payload"]["edits"], 1);
+    assert!(
+        !json.contains("fn a()"),
+        "the edit's text stays out: {json}"
+    );
+    let table = fx.ys(&["activity", "list"]).ok();
+    assert!(table.contains("cursor/hook"), "{table}");
+}

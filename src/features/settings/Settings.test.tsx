@@ -87,6 +87,9 @@ const settings: SettingsInfo = {
     captureCodex: false,
     captureOpencode: false,
     captureGrok: false,
+    captureOmp: false,
+    capturePi: false,
+    captureCursor: false,
   },
 };
 

@@ -134,6 +134,14 @@ pub struct ActivitySettings {
     /// Read Grok's own session directory — its event log, usage and summary — for Yardsort's
     /// own launches of Grok. Nothing is given to Grok; it is read. Off by default all the same.
     pub capture_grok: bool,
+    /// Give Yardsort's own launches of OMP an extension, on the command line for that launch,
+    /// that reports what it does. Off by default, for the same reasons.
+    pub capture_omp: bool,
+    /// The same for pi, whose extension API OMP's is a fork of.
+    pub capture_pi: bool,
+    /// Give Yardsort's own launches of the Cursor agent a plugin directory, on the command line
+    /// for that launch, whose hooks report what it does. Off by default, for the same reasons.
+    pub capture_cursor: bool,
 }
 
 impl Default for ActivitySettings {
@@ -145,6 +153,9 @@ impl Default for ActivitySettings {
             capture_codex: false,
             capture_opencode: false,
             capture_grok: false,
+            capture_omp: false,
+            capture_pi: false,
+            capture_cursor: false,
         }
     }
 }

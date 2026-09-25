@@ -204,16 +204,7 @@ export const ipc = {
     ),
 
   settingsSaveActivity: (activity: ActivitySettingsDto) =>
-    unwrap(
-      commands.settingsSaveActivity(
-        activity.recordLifecycle,
-        activity.showTimeline,
-        activity.captureClaude,
-        activity.captureCodex,
-        activity.captureOpencode,
-        activity.captureGrok,
-      ),
-    ),
+    unwrap(commands.settingsSaveActivity(activity)),
 
   /**
    * A page of a workspace's recorded activity, newest first: events before `beforeSeq`, or the

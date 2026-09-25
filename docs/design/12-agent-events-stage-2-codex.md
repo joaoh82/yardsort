@@ -72,7 +72,8 @@ Producer `codex`; method `session_file` (or `notify` for a fallback); fidelity `
 | Codex 0.156.1       | yes       | **`notify` + session file, opt-in**: turns, prompts, shell commands with exit codes and durations, file changes with paths, MCP calls, token usage. **Not available**: anything mid-turn (the file is read at the turn's end), permission prompts, subagents. |
 | OpenCode            | yes       | **Shipped**: [13](13-agent-events-stage-2-opencode.md).                                                                                                                                                                                                       |
 | Grok                | yes       | **Shipped**: [14](14-agent-events-stage-2-grok.md).                                                                                                                                                                                                           |
-| OMP, Cursor, Pi     | yes       | Lifecycle only.                                                                                                                                                                                                                                               |
+| OMP, Pi             | yes       | **Shipped**: [15](15-agent-events-stage-2-pi-omp.md).                                                                                                                                                                                                         |
+| Cursor              | yes       | **Shipped**, from the documentation: [16](16-agent-events-stage-2-cursor.md).                                                                                                                                                                                 |
 
 ## 5 · What shipped
 

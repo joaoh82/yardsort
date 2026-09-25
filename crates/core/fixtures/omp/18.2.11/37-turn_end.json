@@ -1,0 +1,194 @@
+{
+  "event": "turn_end",
+  "payload": {
+    "type": "turn_end",
+    "turnIndex": 1,
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": " ",
+          "textSignature": "{\"v\":1,\"id\":\"msg_tmp_s7u59efn39\"}"
+        },
+        {
+          "type": "toolCall",
+          "id": "chatcmpl-tool-8dd91f143efe212e|fc_tmp_ort7r30w56",
+          "name": "read",
+          "arguments": {
+            "i": "reading-hello",
+            "path": "hello.txt"
+          },
+          "intent": "reading-hello"
+        },
+        {
+          "type": "toolCall",
+          "id": "chatcmpl-tool-bb9fb88b0dc37120|fc_tmp_v4ypy05kebk",
+          "name": "read",
+          "arguments": {
+            "i": "reading-missing",
+            "path": "missing.txt"
+          },
+          "intent": "reading-missing"
+        },
+        {
+          "type": "toolCall",
+          "id": "chatcmpl-tool-ba0a2bcb373cd368|fc_tmp_3mm5kkvnwob",
+          "name": "bash",
+          "arguments": {
+            "i": "listing-files",
+            "command": "ls",
+            "timeout": 10,
+            "cwd": "/tmp/yardsort-fixture/repo",
+            "pty": false,
+            "async": false
+          },
+          "intent": "listing-files"
+        }
+      ],
+      "api": "openrouter",
+      "provider": "openrouter",
+      "model": "z-ai/glm-5.3-flash",
+      "usage": {
+        "input": 6000,
+        "output": 89,
+        "cacheRead": 13904,
+        "cacheWrite": 0,
+        "totalTokens": 19993,
+        "cost": {
+          "input": 0.0003542733096085409,
+          "output": 1.6349057176749702e-5,
+          "cacheRead": 0.00018243763321470935,
+          "cacheWrite": 0,
+          "total": 0.00055306
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1790364112537,
+      "responseId": "gen-1790364112-iItawYzwXatAdI1ehYBZ",
+      "providerPayload": {
+        "type": "openaiResponsesHistory",
+        "provider": "openrouter",
+        "dt": true,
+        "items": [
+          {
+            "id": "msg_tmp_s7u59efn39",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": " ",
+                "annotations": [],
+                "logprobs": []
+              }
+            ]
+          },
+          {
+            "id": "fc_tmp_ort7r30w56",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "chatcmpl-tool-8dd91f143efe212e",
+            "name": "read",
+            "arguments": "{\"i\": \"reading-hello\", \"path\": \"hello.txt\"}"
+          },
+          {
+            "id": "fc_tmp_v4ypy05kebk",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "chatcmpl-tool-bb9fb88b0dc37120",
+            "name": "read",
+            "arguments": "{\"i\": \"reading-missing\", \"path\": \"missing.txt\"}"
+          },
+          {
+            "id": "fc_tmp_3mm5kkvnwob",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "chatcmpl-tool-ba0a2bcb373cd368",
+            "name": "bash",
+            "arguments": "{\"i\": \"listing-files\", \"command\": \"ls\", \"timeout\": 10, \"cwd\": \"/tmp/yardsort-fixture/repo\", \"pty\": false, \"async\": false}"
+          }
+        ]
+      },
+      "duration": 10102.913899,
+      "ttft": 5986.650317
+    },
+    "toolResults": [
+      {
+        "role": "toolResult",
+        "toolCallId": "chatcmpl-tool-8dd91f143efe212e|fc_tmp_ort7r30w56",
+        "toolName": "read",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "details": {
+          "totalLines": 1,
+          "displayContent": {
+            "text": "hello",
+            "startLine": 1,
+            "lineNumbers": [1]
+          },
+          "fileSize": 5,
+          "meta": {
+            "source": {
+              "type": "path",
+              "value": "/tmp/yardsort-fixture/repo/hello.txt"
+            }
+          }
+        },
+        "isError": false,
+        "timestamp": 1790364122647
+      },
+      {
+        "role": "toolResult",
+        "toolCallId": "chatcmpl-tool-bb9fb88b0dc37120|fc_tmp_v4ypy05kebk",
+        "toolName": "read",
+        "content": [
+          {
+            "type": "text",
+            "text": "Path 'missing.txt' not found"
+          }
+        ],
+        "details": {},
+        "isError": true,
+        "timestamp": 1790364122648
+      },
+      {
+        "role": "toolResult",
+        "toolCallId": "chatcmpl-tool-ba0a2bcb373cd368|fc_tmp_3mm5kkvnwob",
+        "toolName": "bash",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello.txt\n\n\nWall time: 0.02 seconds"
+          }
+        ],
+        "details": {
+          "timeoutSeconds": 10,
+          "wallTimeMs": 18.744171999998798
+        },
+        "isError": false,
+        "timestamp": 1790364122665
+      }
+    ]
+  },
+  "session": {
+    "id": "22222222-2222-4222-8222-000000000001",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-25T19-21-40-774Z_01a0da04-28a6-761b-ac53-47800c1ff939.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "z-ai/glm-5.3-flash",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

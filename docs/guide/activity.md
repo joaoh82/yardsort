@@ -187,8 +187,65 @@ never had them. Recorded against Grok **1.0.41**; the event log is Grok's own an
 documented file list, so a newer version may change it, and a line this build does not recognise
 is skipped rather than guessed.
 
-Other agents stay at what Yardsort itself sees. Which ones could report, and how, is in the
-[design notes](../design/14-agent-events-stage-2-grok.md#4--coverage-honestly).
+## What OMP and pi report
+
+Switch on **Capture what OMP reports** or **Capture what pi reports** in Settings → General
+(both also need **Record when agents start and exit**) and every OMP or pi that Yardsort starts is
+given a small extension, on its command line for that launch alone, that reports what it does.
+OMP is a fork of pi and the two share one extension API, so it is the same file for both. Your
+own extensions keep running; nothing under `~/.pi` or `~/.omp` is edited. Passing
+`--trusted-extension` yourself, in the harness's arguments, means that launch gets no extension.
+
+| Timeline row                                         | What the agent reported                                                                                               |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| _agent session started · openai-codex/gpt-5.3-codex_ | The session and its model. On pi, the session id is one Yardsort chose; OMP picks its own.                            |
+| _prompt submitted · 184 characters_                  | You sent a message, and how long it was. Never the message.                                                           |
+| _agent started a turn · turn 0 · openai-codex/…_     | A turn began.                                                                                                         |
+| _write started_, _write done · src/a.rs · 12 ms_     | A tool ran, on which file, how long it took. Tool names are the agent's own: `write`, `read`, `bash`, `edit`, `grep`… |
+| _read failed · missing.txt_                          | A tool failed. Not why.                                                                                               |
+| _permission asked for bash_, _bash allow_            | OMP asked you for permission, and what you answered (`allow` / `deny`). pi has no such events.                        |
+| _agent finished its turn · 6.1 s · 19,963 tokens_    | The turn ended, how long it took and what it cost. The cost in the agent's currency is in the payload (`cost`).       |
+| _agent switched model · anthropic/opus_              | pi's model was changed mid-session. OMP has no such event.                                                            |
+| _agent session ended_                                | The agent shut down.                                                                                                  |
+
+**What is kept, and what is not.** Tool names, file paths relative to the workspace (a path
+outside it is marked as such, not shown), durations, outcomes, decisions, turn numbers, models,
+token counts and cost, the length of each prompt. Not the prompt, not a command (a `bash` call's
+command line stays in the agent), not a file's contents, not the reply — the extension copies
+only the fields listed before anything leaves the agent's process. Recorded against **OMP
+18.2.11**; pi **0.87.1** was recorded only as far as its first prompt, because no model provider
+was configured on the recording machine, and the rest of its events are mapped from OMP's
+identical shapes. The opening message Yardsort passes on the command line is not an input
+event to OMP, so its length is not reported; the messages you type afterwards are.
+
+## What Cursor reports
+
+Switch on **Capture what Cursor reports** in Settings → General (also needs **Record when agents
+start and exit**) and every Cursor agent that Yardsort starts is given a small plugin, on its
+command line for that launch alone, whose hooks report what it does. Cursor runs the plugin's
+hooks beside your own from `~/.cursor/hooks.json` and the project's; nothing of yours is edited.
+Only hooks Cursor does not wait on for a decision are used, so nothing is ever blocked.
+
+| Timeline row                                     | What Cursor reported                                                                                               |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| _agent session started · composer-2_             | The session and its model.                                                                                         |
+| _prompt submitted · 13 characters_               | You sent a message, and how long it was. Never the message.                                                        |
+| _Read done · src/a.rs · 12 ms_, _Read failed_    | A tool ran or failed, on which file, how long it took. Cursor's own tool names.                                    |
+| _shell done · 30 ms_, _mcp:search done_          | A shell command ran, or an MCP tool. Never the command line.                                                       |
+| _file changed · src/b.rs_                        | Cursor edited a file. How many edits is in the payload, never their text.                                          |
+| _subagent started · explore_, _subagent stopped_ | A subagent ran.                                                                                                    |
+| _agent finished its turn · 1,500 tokens_         | The turn ended and what it cost — when Cursor fires that hook for plugins, which this version was reported not to. |
+
+**What is kept, and what is not.** Tool names, file paths relative to the workspace, durations,
+outcomes, edit counts, token counts, prompt lengths. Not the prompt, not a command, not a tool's
+output, not an edit's text, not the reply. **Built from Cursor's documentation, not a
+recording**: the Cursor agent on the machine this was written on was not logged in. A field
+named differently in your version is left blank on the timeline rather than guessed; the
+[design note](../design/16-agent-events-stage-2-cursor.md) says how to record it.
+
+Every built-in agent now reports natively when asked; a custom harness stays at what Yardsort
+itself sees. The [design notes](../design/16-agent-events-stage-2-cursor.md#4--coverage-honestly)
+say exactly what each one can and cannot report.
 
 ## Exits while Yardsort is closed
 
