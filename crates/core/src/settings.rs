@@ -131,6 +131,9 @@ pub struct ActivitySettings {
     /// Give Yardsort's own launches of OpenCode a plugin, through its environment, that
     /// reports what it does. Off by default, for the same reasons.
     pub capture_opencode: bool,
+    /// Read Grok's own session directory — its event log, usage and summary — for Yardsort's
+    /// own launches of Grok. Nothing is given to Grok; it is read. Off by default all the same.
+    pub capture_grok: bool,
 }
 
 impl Default for ActivitySettings {
@@ -141,6 +144,7 @@ impl Default for ActivitySettings {
             capture_claude: false,
             capture_codex: false,
             capture_opencode: false,
+            capture_grok: false,
         }
     }
 }

@@ -868,3 +868,79 @@ fn the_binary_as_the_opencode_plugins_hook_leaves_an_entry_the_next_command_take
     assert!(table.contains("opencode/plugin"), "{table}");
     assert!(table.contains("write hello.txt"), "{table}");
 }
+
+/// Grok writes its own session directory; when reading it is switched on, any `ys` command
+/// that drains takes what is there for Yardsort's own Grok runs — found by the id Yardsort
+/// chose — and the tools, turns and tokens are on the timeline.
+#[test]
+fn groks_session_directory_is_read_for_its_runs_when_switched_on() {
+    use yardsort_core::activity::{Continuation, LaunchedBy, Recorder, RunDraft, RunKind};
+    let fx = Fixture::new();
+    std::fs::write(
+        fx.data_dir.join("settings.toml"),
+        "[activity]\ncapture_grok = true\n",
+    )
+    .unwrap();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    let session = "11111111-1111-4111-8111-111111111111";
+    let recorder = Recorder::new(&store, &Default::default(), LaunchedBy::Cli);
+    let draft = RunDraft {
+        workspace_id: workspace.id.clone(),
+        session_id: None,
+        kind: RunKind::Harness,
+        harness_id: Some("grok".into()),
+        harness_session_id: Some(session.into()),
+        model: None,
+        effort: None,
+        program: "grok".into(),
+        continuation: Continuation::Fresh,
+    };
+    let run = recorder.begin(&draft).unwrap();
+    recorder.spawned(&run, &draft, "pty-grok", Some("session_file"));
+    drop(store);
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/fixtures/grok")
+        .join(yardsort_core::activity::grok::FIXTURE_VERSION);
+    let grok_home = fx.data_dir.join("grok-home");
+    let dir = grok_home.join("sessions/%2Fsomewhere").join(session);
+    std::fs::create_dir_all(&dir).unwrap();
+    for file in ["events.jsonl", "usage.json", "summary.json"] {
+        std::fs::copy(fixtures.join(file), dir.join(file)).unwrap();
+    }
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+    command
+        .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+        .args(["activity", "list", "--json", "--limit", "20"])
+        .env("YARDSORT_NO_DAEMON", "1")
+        .env("GROK_HOME", &grok_home);
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let events: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let kinds: Vec<&str> = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"tool.failed"), "{kinds:?}");
+    assert!(kinds.contains(&"usage.reported"), "{kinds:?}");
+    assert!(kinds.contains(&"turn.completed"), "{kinds:?}");
+    let usage = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "usage.reported")
+        .unwrap();
+    assert_eq!(usage["producer"], "grok");
+    assert_eq!(usage["method"], "session_file");
+    assert_eq!(usage["runId"], run);
+    let table = fx.ys(&["activity", "list"]).ok();
+    assert!(table.contains("grok/session_file"), "{table}");
+    assert!(table.contains("57107 tokens"), "{table}");
+}

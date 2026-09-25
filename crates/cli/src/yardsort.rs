@@ -92,8 +92,23 @@ impl Yardsort {
     /// the records say and what happened agree. Cheap when there is nothing there, which is
     /// nearly always; done whenever a command is about to ask the daemon anything.
     pub fn drain_spool(&self) -> yardsort_core::activity::ImportReport {
-        // What agents' hooks reported since anyone last looked comes in at the same time.
+        // What agents' hooks reported since anyone last looked comes in at the same time, and
+        // so does what Grok wrote into its own session directories, when that is switched on.
         yardsort_core::activity::import_inbox(&self.store, &self.data_dir);
+        if self.settings.activity.capture_grok {
+            let home = yardsort_core::activity::grok::grok_home(&|name| {
+                std::env::var(name)
+                    .ok()
+                    .or_else(|| self.env().vars.get(name).cloned())
+            });
+            if let Some(home) = home {
+                yardsort_core::activity::grok::import(
+                    &self.store,
+                    &home,
+                    &mut yardsort_core::activity::grok::Cursors::new(),
+                );
+            }
+        }
         yardsort_core::activity::import_spool(&self.store, &self.data_dir)
     }
 

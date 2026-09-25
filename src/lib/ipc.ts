@@ -211,6 +211,7 @@ export const ipc = {
         activity.captureClaude,
         activity.captureCodex,
         activity.captureOpencode,
+        activity.captureGrok,
       ),
     ),
 

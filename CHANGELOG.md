@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Grok's own session log on the timeline.** Switch on **Read what Grok records** in Settings →
+  General and every Grok that Yardsort starts has its turns read from the log Grok keeps for
+  each session: which tool ran and how long it took, tools that failed, the permissions you were
+  actually asked for and how long you took to answer, each turn and its tokens. That log never
+  holds a command, a path or a message. Nothing is given to Grok and nothing in `~/.grok` is
+  written; Yardsort chose the session id, so it knows where to look. Off by default. See
+  [What Grok records](docs/guide/activity.md#what-grok-records) and the
+  [design note](docs/design/14-agent-events-stage-2-grok.md).
 - **OpenCode can report what it does.** Switch on **Capture what OpenCode reports** in Settings
   → General and every OpenCode that Yardsort starts puts its work on the activity timeline as it
   happens: each tool with its file or exit code, tools that failed, files it edited, permission

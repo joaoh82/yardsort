@@ -223,6 +223,23 @@ describe("describeEvent", () => {
     );
     expect(words("turn.completed", { durationMs: 11033 }).detail).toBe("11.0 s");
     expect(words("turn.completed", { detail: "notify" }).detail).toMatch(/notify alone/);
+    // Grok's log: a permission the user really answered, and turns with their outcome.
+    expect(
+      words("approval.resolved", { tool: "run_terminal_command", decision: "allow", waitMs: 4210 }),
+    ).toEqual({
+      title: "run_terminal_command allow",
+      detail: "you took 4.2 s",
+      tone: "plain",
+    });
+    expect(words("approval.resolved", { tool: "write", decision: "deny", waitMs: 0 }).tone).toBe(
+      "bad",
+    );
+    expect(words("turn.started", { turnNumber: 2, model: "grok-4.7" }).detail).toBe(
+      "turn 2 · grok-4.7",
+    );
+    expect(words("turn.failed", { outcome: "interrupted" }).title).toBe(
+      "agent's turn was interrupted",
+    );
     expect(words("workspace.changed", { files: 1 }).title).toBe("workspace.changed");
     expect(describeEvent({ ...event(1, "process.exited", {}), payload: "{ not json" }).title).toBe(
       "ended without an exit status",

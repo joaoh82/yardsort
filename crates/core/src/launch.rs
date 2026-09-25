@@ -242,6 +242,11 @@ impl Launcher<'_> {
                         activity::opencode::METHOD,
                     )
                 }
+                // Grok's session directory is read, not written to: nothing to give the
+                // launch, only the run to mark as one whose files will be read.
+                Some(activity::grok::HARNESS_ID) if self.activity.capture_grok => {
+                    (Ok(()), activity::grok::METHOD)
+                }
                 _ => return None,
             };
             match armed {
@@ -1455,5 +1460,77 @@ mod tests {
             .unwrap()
             .iter()
             .any(|d| d.name == "hooks_not_armed"));
+    }
+
+    #[test]
+    fn a_grok_launch_is_marked_for_its_session_files_when_asked_and_given_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let (command, flag) = if cfg!(windows) {
+            ("cmd.exe", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let harnesses = [HarnessOverride {
+            id: "grok".into(),
+            command: Some(command.into()),
+            prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
+            session_args: Some(vec![]),
+            ..Default::default()
+        }];
+        let request = || {
+            Launch::Harness(HarnessRequest {
+                id: "grok".into(),
+                model: None,
+                effort: None,
+                prompt: Some("exit 0".into()),
+            })
+        };
+        let on = ActivitySettings {
+            capture_grok: true,
+            ..Default::default()
+        };
+        let marked = launcher(&store, &host, &env, &harnesses, &on, dir.path());
+        let session = marked.in_workspace(&ws, request(), SIZE).unwrap();
+        let plan = host.plans.lock().unwrap().remove(0);
+        assert_eq!(
+            plan.args,
+            [flag, "exit 0"],
+            "nothing added to the command line"
+        );
+        let run = store.run(&session.labels[RUN_LABEL]).unwrap().unwrap();
+        assert!(
+            run.harness_session_id.is_some(),
+            "the id Yardsort chose, for finding the files"
+        );
+        let started = store
+            .all_events(Some(&ws))
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "process.started")
+            .unwrap();
+        assert!(
+            started.payload.contains(r#""capture":"session_file""#),
+            "{}",
+            started.payload
+        );
+
+        let off = ActivitySettings::default();
+        let plain = launcher(&store, &host, &env, &harnesses, &off, dir.path());
+        plain.in_workspace(&ws, request(), SIZE).unwrap();
+        let started = store
+            .all_events(Some(&ws))
+            .unwrap()
+            .into_iter()
+            .rfind(|event| event.kind == "process.started")
+            .unwrap();
+        assert!(
+            started.payload.contains(r#""capture":null"#),
+            "{}",
+            started.payload
+        );
     }
 }

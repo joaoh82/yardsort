@@ -463,6 +463,25 @@ the hook binary end to end; covered by tests that fail without the change; `just
 `just bindings-check`, `just lint-windows` green; a real OpenCode launched through `ys` on Linux
 seen reporting live. Hands-on rows in [08 §14](08-manual-checklist.md#14--opencode-reporting).
 
+## M15 — Agent events, stage 2: Grok ✅
+
+A fourth native adapter, recorded in [14-agent-events-stage-2-grok](14-agent-events-stage-2-grok.md).
+
+- `scripts/record-grok.sh` and fixtures from Grok 1.0.41: the session directory's `events.jsonl`,
+  `usage.json` and `summary.json`, plus the 13 hook payloads kept as the record of the
+  alternative.
+- The decision: not hooks — no per-launch way to give them to the TUI, so they would mean a
+  file of ours in the user's home — but Grok's own session directory, metadata-only by design,
+  found by the id Yardsort chose and read as it grows: `activity/grok.rs`, `Store::live_runs`,
+  a cursor per run in the app's watcher, which now ticks while a Grok run is going.
+- Settings → General **Read what Grok records** (off); `turn.started` as a new kind; waits and
+  outcomes on the timeline and in `ys activity list`.
+
+_Exit:_ the log, usage and summary map and leak nothing; cursors, duplicates, the ten-minute
+grace; the real `ys` binary reading a fixture directory; covered by tests that fail without the
+change; `just check`, `just bindings-check`, `just lint-windows` green; a real Grok launched
+through `ys` on Linux read live. Hands-on rows in [08 §15](08-manual-checklist.md#15--grok-reporting).
+
 _Result:_ 2026-09-24, Linux. Rust: 184 core tests (11 new in `activity.rs`, 7 in `launch.rs`
 against a real `PtyHost` and a plan-catching host), 3 new spool unit tests, a real-daemon test in
 `pty-ipc/tests/daemon.rs` (exit spooled after the only client left, live exit spooled too), 2

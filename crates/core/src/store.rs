@@ -757,6 +757,20 @@ impl Store {
             .optional()?)
     }
 
+    /// A harness's runs that are still going, or ended after `ended_after`: the ones whose
+    /// own session files may still gain lines worth reading.
+    pub fn live_runs(&self, harness_id: &str, ended_after: i64) -> StoreResult<Vec<RunRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM agent_runs
+             WHERE harness_id = ? AND pty_session_id IS NOT NULL
+               AND (ended_at IS NULL OR ended_at > ?)
+             ORDER BY started_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map(params![harness_id, ended_after], run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// A workspace's runs, most recently started first.
     pub fn runs(&self, workspace_id: &str) -> StoreResult<Vec<RunRow>> {
         let conn = self.conn();

@@ -66,12 +66,13 @@ Producer `codex`; method `session_file` (or `notify` for a fallback); fidelity `
 
 ## 4 · Coverage, honestly
 
-| Harness               | Lifecycle | Native                                                                                                                                                                                                                                                        |
-| --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code 2.1.280   | yes       | Hooks, opt-in: [11](11-agent-events-stage-2-claude.md).                                                                                                                                                                                                       |
-| Codex 0.156.1         | yes       | **`notify` + session file, opt-in**: turns, prompts, shell commands with exit codes and durations, file changes with paths, MCP calls, token usage. **Not available**: anything mid-turn (the file is read at the turn's end), permission prompts, subagents. |
-| OpenCode              | yes       | **Shipped**: [13](13-agent-events-stage-2-opencode.md).                                                                                                                                                                                                       |
-| Grok, OMP, Cursor, Pi | yes       | Lifecycle only.                                                                                                                                                                                                                                               |
+| Harness             | Lifecycle | Native                                                                                                                                                                                                                                                        |
+| ------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code 2.1.280 | yes       | Hooks, opt-in: [11](11-agent-events-stage-2-claude.md).                                                                                                                                                                                                       |
+| Codex 0.156.1       | yes       | **`notify` + session file, opt-in**: turns, prompts, shell commands with exit codes and durations, file changes with paths, MCP calls, token usage. **Not available**: anything mid-turn (the file is read at the turn's end), permission prompts, subagents. |
+| OpenCode            | yes       | **Shipped**: [13](13-agent-events-stage-2-opencode.md).                                                                                                                                                                                                       |
+| Grok                | yes       | **Shipped**: [14](14-agent-events-stage-2-grok.md).                                                                                                                                                                                                           |
+| OMP, Cursor, Pi     | yes       | Lifecycle only.                                                                                                                                                                                                                                               |
 
 ## 5 · What shipped
 

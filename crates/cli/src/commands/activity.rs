@@ -210,6 +210,12 @@ fn details(payload: &serde_json::Value) -> String {
     if let Some(total) = payload.get("totalTokens").and_then(|v| v.as_i64()) {
         parts.push(format!("{total} tokens"));
     }
+    if let Some(waited) = payload.get("waitMs").and_then(|v| v.as_i64()) {
+        parts.push(format!("waited {waited} ms"));
+    }
+    if let Some(outcome) = text("outcome").filter(|o| o != "success" && o != "completed") {
+        parts.push(outcome);
+    }
     if let Some(capture) = text("capture") {
         parts.push(format!("reporting via {capture}"));
     }
@@ -270,5 +276,12 @@ mod tests {
         assert_eq!(details(&file), "add hello.txt");
         let usage = serde_json::json!({"totalTokens": 29842, "outputTokens": 138});
         assert_eq!(details(&usage), "29842 tokens");
+        let asked = serde_json::json!({"tool": "run_terminal_command", "decision": "allow", "waitMs": 4210});
+        assert_eq!(
+            details(&asked),
+            "run_terminal_command, allow, waited 4210 ms"
+        );
+        let cut = serde_json::json!({"outcome": "interrupted"});
+        assert_eq!(details(&cut), "interrupted");
     }
 }

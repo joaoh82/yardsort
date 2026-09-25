@@ -25,10 +25,11 @@ One **run** per process Yardsort starts in a workspace, and a few **events** for
 What is **not** recorded here, on purpose: your first message, the command line, anything the
 agent printed, the files it touched, tool calls, tokens. Those need the agent's own cooperation,
 which Yardsort asks for per agent and only when you turn it on — today for
-[Claude Code](#what-claude-code-reports), [Codex](#what-codex-reports) and
-[OpenCode](#what-opencode-reports). Every event names its source (`yardsort/lifecycle`,
-`claude/hook`, `codex/session_file`, `opencode/plugin`) so you can tell "Yardsort saw the process
-end" from "the agent says it wrote a file".
+[Claude Code](#what-claude-code-reports), [Codex](#what-codex-reports),
+[OpenCode](#what-opencode-reports) and [Grok](#what-grok-records). Every event names its source
+(`yardsort/lifecycle`, `claude/hook`, `codex/session_file`, `opencode/plugin`,
+`grok/session_file`) so you can tell "Yardsort saw the process end" from "the agent says it
+wrote a file".
 
 Activity is on by default, because it is only what Yardsort already knew; switch it off in
 [Settings → General](settings.md#general) and nothing new is written. What is already recorded
@@ -158,8 +159,36 @@ executable, which writes one small file to the inbox. Recorded against OpenCode 
 OpenCode harness whose arguments carry `--pure` — OpenCode's own "no external plugins" — is left
 alone, and the timeline's settings count it under `hooks_not_armed`.
 
+## What Grok records
+
+Switch on **Read what Grok records** in Settings → General (also needs **Record when agents start
+and exit**, also off by default) and every Grok that Yardsort starts has its turns read from the
+log Grok keeps of its own accord. Grok writes, for each session, a directory under
+`~/.grok/sessions/` with an event log that holds no commands, paths, prompts or replies — only
+which tool ran, how long it took, how it came out, which permissions you were asked for, and
+when each turn began and ended — plus a file of tokens and cost per turn. Yardsort chooses
+Grok's session id when it starts it, so it knows which directory is which conversation's, and
+reads it as it grows: every few seconds while the agent is running, once more after it exits.
+Nothing is given to Grok, and nothing in `~/.grok` is written.
+
+| Timeline row                                               | What Grok recorded                                                                                                               |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| _agent session started · grok-4.7_                         | The session, its model and reasoning effort.                                                                                     |
+| _agent started a turn · turn 0 · grok-4.7_                 | You sent a message. Grok's log does not say how long it was.                                                                     |
+| _read_file started_, _read_file done · 8 ms_               | A tool ran, and how long it took. Grok's own tool names: `run_terminal_command`, `read_file`, `search_replace`…                  |
+| _read_file failed · 8 ms_                                  | A tool failed.                                                                                                                   |
+| _run_terminal_command allow · you took 4.2 s_              | A permission you were actually asked for, and how long you took; or _deny_. The ones Grok granted itself at once are not listed. |
+| _tokens used · 57,107 total · 464 out_                     | What the turn cost. `costUsdTicks` is kept as Grok writes it; its unit is not documented.                                        |
+| _agent finished its turn_ / _agent's turn was interrupted_ | The turn ended, and how.                                                                                                         |
+
+**What is kept, and what is not.** Tool names, durations, outcomes, decisions, waits, turn numbers,
+models, token counts. Not a command, not a path, not your message, not Grok's reply — the log
+never had them. Recorded against Grok **1.0.41**; the event log is Grok's own and not in its
+documented file list, so a newer version may change it, and a line this build does not recognise
+is skipped rather than guessed.
+
 Other agents stay at what Yardsort itself sees. Which ones could report, and how, is in the
-[design notes](../design/13-agent-events-stage-2-opencode.md#4--coverage-honestly).
+[design notes](../design/14-agent-events-stage-2-grok.md#4--coverage-honestly).
 
 ## Exits while Yardsort is closed
 
