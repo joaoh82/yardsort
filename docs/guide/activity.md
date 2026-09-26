@@ -46,7 +46,7 @@ It is experimental: the words and the layout will change as later stages add mor
 While an agent is reporting, the list moves as it works; you do not have to press **Refresh**.
 
 A row that names a file which is on the Changes list — a reported write, a `Write done` — has a
-**diff** button that opens that file's diff in the right panel. The diff is everything that
+**Show diff** button that opens that file's diff in the right panel. The diff is everything that
 changed since the last commit, whoever changed it; the row says the agent reported writing the
 file, not which lines are its. The Changes list shows the same join from the other side: a badge
 on each file an agent reported writing. See [Who wrote it](changes-and-files.md#who-wrote-it).

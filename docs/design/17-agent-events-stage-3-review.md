@@ -66,7 +66,7 @@ copies.
   for the latter: you, a script, or a run that was not reporting. Nothing joins an event's time
   to a hunk; no adapter records one.
 - **The trace link runs both ways.** A timeline row that names a file on the change list gets a
-  **diff** button that opens that file's diff in the Changes panel. The button's own words say
+  **Show diff** button that opens that file's diff in the Changes panel. The button's own words say
   the diff is everything that changed since the last commit, whoever changed it.
 - **Assist is not changed.** Stage 3's Jev row asks for "selected event-derived facts" beside
   the diff. That changes what is sent to a third party under the user's key, which is an
@@ -85,7 +85,7 @@ copies.
   and refreshes on every file-system signal and every `activityChanged`.
 - Changes panel: a badge per reporting agent on each changed file, a line above the list, and
   a word in the expanded viewer's header — _reported by claude · 2 writes · 14:02_ or _no agent
-  reported writing this_. Activity panel: the **diff** button.
+  reported writing this_. Activity panel: the **Show diff** button.
 - Guides: [changes and files](../guide/changes-and-files.md#who-wrote-it),
   [activity](../guide/activity.md#the-timeline-experimental); checklist
   [08 §18](08-manual-checklist.md#18--reported-writes-beside-the-diff).
@@ -102,7 +102,7 @@ copies.
 - `ChangesPanel.test.tsx` (3): the badge, its tooltip's count, source and caveat, the note's
   arithmetic, the expanded header's two wordings; nothing shown while no run was reporting; a
   report landing refreshes the join for the followed workspace only.
-- `ActivityPanel.test.tsx` (1): the **diff** button on a row naming a listed file, absent on
+- `ActivityPanel.test.tsx` (1): the **Show diff** button on a row naming a listed file, absent on
   rows that do not, absent when the Changes panel follows another workspace, and what it opens.
 - Live on Linux, 2026-09-26, Claude Code 2.1.280 through the dev build: asked plainly to
   create a file, it ran one Bash command — a tool and a duration reported, no file, nothing

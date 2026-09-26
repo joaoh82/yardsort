@@ -569,7 +569,7 @@ The join of what the agents reported to what git shows, recorded in
   asked to report, which is what lets the panel say why a file has no report — and stay silent
   when no run was reporting.
 - Changes list: a badge per reporting agent on a changed file, a counting line above the list,
-  a word in the expanded viewer's header. Activity timeline: a **diff** button on a row that
+  a word in the expanded viewer's header. Activity timeline: a **Show diff** button on a row that
   names a listed file. Every word stops short of a line.
 - Not done, by decision: event-derived facts for Assist's review — the Jev half of stage 3 —
   which changes what is sent under the user's key and gets its own opt-in and design pass.

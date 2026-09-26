@@ -174,16 +174,18 @@ describe("ActivityPanel", () => {
     const panel = screen.getByRole("region", { name: "Activity" });
     await waitFor(() => expect(within(panel).getAllByRole("listitem")).toHaveLength(3));
     const rows = within(panel).getAllByRole("listitem");
-    expect(within(rows[1]!).queryByRole("button", { name: "diff" })).toBeNull();
-    expect(within(rows[2]!).queryByRole("button", { name: "diff" })).toBeNull();
-    const link = within(rows[0]!).getByRole("button", { name: "diff" });
+    expect(within(rows[1]!).queryByRole("button", { name: "Show diff" })).toBeNull();
+    expect(within(rows[2]!).queryByRole("button", { name: "Show diff" })).toBeNull();
+    const link = within(rows[0]!).getByRole("button", { name: "Show diff" });
     expect(link.title).toContain("whoever changed it");
     await user.click(link);
     expect(view).toHaveBeenCalledWith({ kind: "diff", change, scope: "committed" });
 
     // The Changes panel following another workspace has no diff of this file to show.
     useChangesStore.setState({ workspaceId: "elsewhere" });
-    await waitFor(() => expect(within(panel).queryByRole("button", { name: "diff" })).toBeNull());
+    await waitFor(() =>
+      expect(within(panel).queryByRole("button", { name: "Show diff" })).toBeNull(),
+    );
   });
 
   it("reports a failure to load rather than showing an empty list", async () => {

@@ -135,9 +135,9 @@ function Row({ event }: { event: ActivityEvent }) {
           type="button"
           onClick={diff.open}
           title="Show this file's diff in the Changes panel. The diff is everything that changed since the last commit, whoever changed it."
-          className="shrink-0 text-[11px] text-ink-faint hover:text-ink"
+          className="shrink-0 rounded border border-line px-1.5 text-[10px] leading-4 text-ink-muted hover:bg-raised hover:text-ink"
         >
-          diff
+          Show diff
         </button>
       )}
       <span
