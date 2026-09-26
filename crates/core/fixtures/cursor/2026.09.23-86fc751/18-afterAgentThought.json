@@ -1,0 +1,24 @@
+{
+  "conversation_id": "22222222-2222-4222-8222-000000000001",
+  "generation_id": "22222222-2222-4222-8222-000000000004-2-nloy",
+  "model": "cursor-grok-4.5-high",
+  "model_id": "grok-4.5",
+  "model_params": [
+    {
+      "id": "effort",
+      "value": "high"
+    },
+    {
+      "id": "speed",
+      "value": "default"
+    }
+  ],
+  "text": "The ls command returned empty output.\n\nAll requested operations are complete. The empty ls output is unexpected since hello.txt exists. Ready to reply with one word.",
+  "duration_ms": 2075,
+  "session_id": "22222222-2222-4222-8222-000000000001",
+  "hook_event_name": "afterAgentThought",
+  "cursor_version": "2026.09.23-86fc751",
+  "workspace_roots": ["/tmp/yardsort-fixture/repo"],
+  "user_email": "user@example.com",
+  "transcript_path": "/home/user/.cursor/projects/tmp-yardsort-cursor-XXXXXX-repo/agent-transcripts/22222222-2222-4222-8222-000000000001/22222222-2222-4222-8222-000000000001.jsonl"
+}

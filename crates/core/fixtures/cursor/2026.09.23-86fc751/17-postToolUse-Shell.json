@@ -1,0 +1,21 @@
+{
+  "conversation_id": "22222222-2222-4222-8222-000000000001",
+  "generation_id": "22222222-2222-4222-8222-000000000001",
+  "model": "default",
+  "tool_name": "Shell",
+  "tool_input": {
+    "command": "ls",
+    "cwd": "",
+    "timeout": 30000
+  },
+  "tool_output": "{\"output\":\"\",\"exitCode\":0}",
+  "duration": 190.85,
+  "tool_use_id": "22222222-2222-4222-8222-000000000007",
+  "cwd": "",
+  "session_id": "22222222-2222-4222-8222-000000000001",
+  "hook_event_name": "postToolUse",
+  "cursor_version": "2026.09.23-86fc751",
+  "workspace_roots": ["/tmp/yardsort-fixture/repo"],
+  "user_email": "user@example.com",
+  "transcript_path": "/home/user/.cursor/projects/tmp-yardsort-cursor-XXXXXX-repo/agent-transcripts/22222222-2222-4222-8222-000000000001/22222222-2222-4222-8222-000000000001.jsonl"
+}

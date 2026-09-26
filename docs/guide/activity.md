@@ -218,10 +218,10 @@ outside it is marked as such, not shown), durations, outcomes, decisions, turn n
 token counts and cost, the length of each prompt. Not the prompt, not a command (a `bash` call's
 command line stays in the agent), not a file's contents, not the reply — the extension copies
 only the fields listed before anything leaves the agent's process. Recorded against **OMP
-18.2.11**; pi **0.87.1** was recorded only as far as its first prompt, because no model provider
-was configured on the recording machine, and the rest of its events are mapped from OMP's
-identical shapes. The opening message Yardsort passes on the command line is not an input
-event to OMP, so its length is not reported; the messages you type afterwards are.
+18.2.11** and **pi 0.87.1**. The opening message Yardsort passes on the command line is not an
+input event to OMP, so its length is not reported there; pi does report it. The messages you
+type afterwards are reported by both. On pi, a `write` is named by its `write started` row and
+not by `write done`, which carries no path.
 
 ## What Cursor reports
 
@@ -243,10 +243,11 @@ Only hooks Cursor does not wait on for a decision are used, so nothing is ever b
 **What is kept, and what is not.** Tool names, file paths relative to the workspace, durations,
 outcomes, edit counts, token counts. Not the prompt, not a command, not a tool's output, not an
 edit's text, not the reply. Nor the prompt's length: the one hook that carries the prompt can
-also block it, and Yardsort never answers a hook that decides. **Built from Cursor's documentation, not a
-recording**: the Cursor agent on the machine this was written on was not logged in. A field
-named differently in your version is left blank on the timeline rather than guessed; the
-[design note](../design/16-agent-events-stage-2-cursor.md) says how to record it.
+also block it, and Yardsort never answers a hook that decides. Recorded against Cursor agent
+**2026.09.23-86fc751**. In that build, Cursor does not deliver `stop`, `afterAgentResponse` or
+`subagentStop` to a plugin's hooks, so a Cursor turn's end, its tokens and a subagent's end are
+not on the timeline; the rows appear when a build sends them. A field named differently in
+your version is left blank on the timeline rather than guessed.
 
 Every built-in agent now reports natively when asked; a custom harness stays at what Yardsort
 itself sees. The [design notes](../design/16-agent-events-stage-2-cursor.md#4--coverage-honestly)

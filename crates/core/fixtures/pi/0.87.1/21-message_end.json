@@ -1,0 +1,86 @@
+{
+  "event": "message_end",
+  "payload": {
+    "type": "message_end",
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": " Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. ",
+          "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. \",\"format\":\"unknown\",\"index\":0}]"
+        },
+        {
+          "type": "text",
+          "text": " "
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.read:1",
+          "name": "read",
+          "arguments": {
+            "limit": null,
+            "offset": null,
+            "path": "hello.txt"
+          }
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.read:2",
+          "name": "read",
+          "arguments": {
+            "limit": null,
+            "offset": null,
+            "path": "missing.txt"
+          }
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.bash:3",
+          "name": "bash",
+          "arguments": {
+            "command": "ls",
+            "timeout": null
+          }
+        }
+      ],
+      "api": "openai-completions",
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.6",
+      "usage": {
+        "input": 308,
+        "output": 91,
+        "cacheRead": 1584,
+        "cacheWrite": 0,
+        "reasoning": 24,
+        "totalTokens": 1983,
+        "cost": {
+          "input": 0.00029259999999999996,
+          "output": 0.00036399999999999996,
+          "cacheRead": 0.00025344,
+          "cacheWrite": 0,
+          "total": 0.00091004
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1790453824198,
+      "responseId": "gen-1790453824-zSZuci18yh1oBWNtFVyl",
+      "rawStopReason": "tool_calls"
+    }
+  },
+  "session": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-26T20-16-59-760Z_11111111-1111-4111-8111-111111111111.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "moonshotai/kimi-k2.6",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

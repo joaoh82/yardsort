@@ -286,6 +286,23 @@ pub fn join(
     let mut files_by_path: BTreeMap<String, BTreeMap<(Option<String>, String), Report>> =
         BTreeMap::new();
 
+    // A tool call names its file at its start, and not always at its end: pi's `write` result
+    // carries no path where OMP's does. A completed write tool with no path of its own takes
+    // the file from the start with the same `toolUseId` in the same run.
+    let mut started_path: BTreeMap<(Option<String>, String), String> = BTreeMap::new();
+    for event in events {
+        if event.kind != "tool.started" {
+            continue;
+        }
+        let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
+        if let (Some(id), Some(path)) = (
+            payload.get("toolUseId").and_then(Value::as_str),
+            payload.get("path").and_then(Value::as_str),
+        ) {
+            started_path.insert((event.run_id.clone(), id.to_owned()), path.to_owned());
+        }
+    }
+
     for event in events {
         let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
         if event.kind == "process.started" {
@@ -306,8 +323,13 @@ pub fn join(
             continue;
         }
         // A path the adapter could not place inside the workspace was never recorded; a write
-        // without one says nothing about any file the diff shows.
-        let Some(path) = payload.get("path").and_then(Value::as_str) else {
+        // without one — at its end or its start — says nothing about any file the diff shows.
+        let from_start = payload
+            .get("toolUseId")
+            .and_then(Value::as_str)
+            .and_then(|id| started_path.get(&(event.run_id.clone(), id.to_owned())))
+            .map(String::as_str);
+        let Some(path) = payload.get("path").and_then(Value::as_str).or(from_start) else {
             continue;
         };
         let key = (event.run_id.clone(), event.producer.clone());
@@ -637,6 +659,49 @@ mod tests {
         let p = of(&store, &ws, &[]).unwrap();
         assert!(p.files.is_empty());
         assert_eq!(p.reporting_runs(), 1, "the run did report — just not files");
+    }
+
+    /// pi's `write` names its file at the start and not at the end (OMP's end does too). The
+    /// completed write takes its file from the start with the same tool-use id; one without a
+    /// start to take it from is still no claim.
+    #[test]
+    fn a_completed_write_tool_without_a_path_takes_the_file_from_its_start() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("pi"), Some("extension"));
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "pi",
+            "tool.started",
+            2_000,
+            json!({ "tool": "write", "toolUseId": "functions.write:0", "path": "hello.txt" }),
+        );
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "pi",
+            "tool.completed",
+            2_100,
+            json!({ "tool": "write", "toolUseId": "functions.write:0" }),
+        );
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "pi",
+            "tool.completed",
+            3_000,
+            json!({ "tool": "write", "toolUseId": "functions.write:1" }),
+        );
+        let p = of(&store, &ws, &[]).unwrap();
+        assert_eq!(paths(&p), ["hello.txt"]);
+        assert_eq!(
+            p.files[0].reports[0].writes, 1,
+            "the orphan end claims nothing"
+        );
     }
 
     /// The pi family reports tool calls like Claude, under its own tool names.

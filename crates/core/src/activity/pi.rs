@@ -9,7 +9,7 @@
 //! user's is edited; a launch without the switch has no extension of ours.
 //!
 //! One adapter, two harness ids: the producer is whichever launched. The shapes are those of the
-//! fixtures under `crates/core/fixtures/omp/` (a full turn) and `crates/core/fixtures/pi/` (what
+//! fixtures under `crates/core/fixtures/omp/` and `crates/core/fixtures/pi/` (a full turn each; what
 //! pi delivered before its missing provider stopped it, which is the same channel and the same
 //! session id Yardsort chose). See `docs/design/15-agent-events-stage-2-pi-omp.md`.
 
@@ -357,24 +357,88 @@ mod tests {
         }
     }
 
+    /// pi's recording (`scripts/record-pi.sh pi`, one headless turn, 48 events): the same
+    /// channel as OMP's, under the session id Yardsort chose — with one difference OMP does
+    /// not have: pi raises `input` for the opening message given on the command line, so a
+    /// launch's first prompt does have a `prompt.submitted` row.
     #[test]
-    fn pis_partial_recording_is_the_same_channel_under_the_id_yardsort_chose() {
+    fn pis_recorded_turn_is_the_same_channel_under_the_id_yardsort_chose() {
         let all = fixtures(PI, PI_FIXTURE_VERSION);
-        let mapped: Vec<(&str, Option<String>)> = all
+        let mapped: Vec<&str> = all
             .iter()
-            .filter_map(|(_, d)| normalize(d).ok().map(|r| (r.kind, r.native_session_id)))
+            .filter_map(|(_, d)| normalize(d).ok().map(|r| r.kind))
             .collect();
-        assert_eq!(mapped.len(), 3);
-        assert_eq!(mapped[0].0, "session.started");
-        assert_eq!(mapped[1].0, "prompt.submitted");
-        assert_eq!(mapped[2].0, "session.ended");
-        for (_, id) in &mapped {
-            assert_eq!(id.as_deref(), Some("11111111-1111-4111-8111-111111111111"));
+        assert_eq!(
+            mapped,
+            [
+                "session.started",
+                "prompt.submitted", // the opening message: pi raises `input` for it, OMP not
+                "turn.started",
+                "tool.started",   // write
+                "tool.completed", // write
+                "turn.completed",
+                "turn.started",
+                "tool.started",   // read
+                "tool.started",   // read, missing
+                "tool.started",   // bash
+                "tool.failed",    // read, missing — the first to end
+                "tool.completed", // read
+                "tool.completed", // bash
+                "turn.completed",
+                "turn.started",
+                "turn.completed",
+                "session.ended",
+            ]
+        );
+        for (name, d) in &all {
+            if let Ok(r) = normalize(d) {
+                assert_eq!(
+                    r.native_session_id.as_deref(),
+                    Some("11111111-1111-4111-8111-111111111111"),
+                    "{name}"
+                );
+            }
         }
-        let (_, input) = all.iter().find(|(n, _)| n.starts_with("02-input")).unwrap();
-        let prompt = normalize(input).unwrap();
-        assert_eq!(prompt.payload["chars"], 184);
+        let by = |prefix: &str| {
+            all.iter()
+                .find(|(n, _)| n.starts_with(prefix))
+                .map(|(_, v)| v)
+                .unwrap()
+        };
+        let prompt = normalize(by("02-input")).unwrap();
+        assert!(prompt.payload["chars"].as_i64().unwrap() > 100);
         assert!(!prompt.payload.to_string().contains("Create a file"));
+        // Where pi and OMP part: OMP's write result carries `details.resolvedPath`, pi's does
+        // not, so on pi the file is named by the tool's start and not its end. The provenance
+        // join takes a write tool's file from its start when the end has none.
+        let write = normalize(by("12-tool_execution_start-write")).unwrap();
+        assert_eq!(write.payload["path"], "hello.txt");
+        let write_done = normalize(by("15-tool_execution_end-write")).unwrap();
+        assert!(
+            write_done.payload.get("path").is_none(),
+            "no resolvedPath on pi"
+        );
+        assert_eq!(write_done.payload["toolUseId"], write.payload["toolUseId"]);
+        let turn = normalize(by("18-turn_end")).unwrap();
+        assert!(turn.payload["totalTokens"].as_i64().unwrap() > 0);
+        assert!(turn.payload["model"]
+            .as_str()
+            .unwrap()
+            .starts_with("openrouter/"));
+        for (name, d) in &all {
+            let Ok(reported) = normalize(d) else { continue };
+            let text = reported.payload.to_string();
+            for content in [
+                "Create a file",
+                "\"hello\"",
+                "Successfully wrote",
+                "/tmp/yardsort-fixture",
+                "thinking",
+                "\"ls\"",
+            ] {
+                assert!(!text.contains(content), "{name} leaked {content:?}: {text}");
+            }
+        }
     }
 
     #[test]

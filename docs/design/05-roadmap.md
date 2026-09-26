@@ -518,7 +518,7 @@ _Notes:_
 One adapter for the two forks, recorded in [15-agent-events-stage-2-pi-omp](15-agent-events-stage-2-pi-omp.md).
 
 - `scripts/record-pi.sh pi|omp` and fixtures: OMP 18.2.11 in full (44 extension events and the
-  session file), Pi 0.87.1 as far as its first prompt (no provider on the recording machine).
+  session file), Pi 0.87.1 in full the next day (48 events; it had no provider on the first).
 - The decision: the plugin pattern again — a TypeScript extension written from a template in
   the binary, given with `-e <file>` for one launch, never in the user's extension directories;
   `reduce` in the extension keeps the whitelist before anything leaves the agent's process, and
@@ -552,9 +552,10 @@ The last built-in harness, recorded in [16-agent-events-stage-2-cursor](16-agent
   launch — a manifest and a `hooks.json` written under the data directory before each launch,
   the command a single-quoted shell string because that is the only form Cursor takes. Passive
   events only; nothing that decides.
-- **Built from the documentation.** The agent was not logged in on the machine at hand, so
-  `scripts/record-cursor.sh` is written and owed a run; the tests use the documented shapes and
-  say so.
+- **Built from the documentation, recorded the next day.** The agent was not logged in on the
+  machine at hand when it was written; `scripts/record-cursor.sh` ran on 2026-09-26 (19 hooks),
+  the tests now read the recording, and it found fractional durations the adapter had been
+  dropping, the account's email on every hook, and three hooks this build never delivers.
 - Settings → General **Capture what Cursor reports** (off); `capture: "hook"`; producer `cursor`.
 
 _Exit:_ the documented shapes map and leak nothing; arming writes the plugin and names it before

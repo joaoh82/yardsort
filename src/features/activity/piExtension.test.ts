@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { reduce } from "../../../crates/core/src/activity/pi-extension";
 
 const OMP = join(__dirname, "../../../crates/core/fixtures/omp/18.2.11");
+const PI = join(__dirname, "../../../crates/core/fixtures/pi/0.87.1");
 
 interface Delivery {
   event: string;
@@ -13,13 +14,13 @@ interface Delivery {
   session: { id?: string; cwd?: string; model?: { id?: string; provider?: string } };
 }
 
-function fixtures(): Array<{ name: string; delivery: Delivery }> {
-  return readdirSync(OMP)
+function fixtures(dir = OMP): Array<{ name: string; delivery: Delivery }> {
+  return readdirSync(dir)
     .filter((name) => name.endsWith(".json"))
     .sort()
     .map((name) => ({
       name,
-      delivery: JSON.parse(readFileSync(join(OMP, name), "utf8")) as Delivery,
+      delivery: JSON.parse(readFileSync(join(dir, name), "utf8")) as Delivery,
     }));
 }
 
@@ -84,5 +85,39 @@ describe("the pi-family extension's reduce", () => {
       result: { details: { wallTimeMs: expect.any(Number) } },
     });
     expect(reduce("agent_end", { messages: [] }, {})).toBeNull();
+  });
+});
+
+describe("the same reduce over pi's own recording", () => {
+  it("keeps the same events, under the id Yardsort assigned, and lets nothing through", () => {
+    const kept = fixtures(PI).filter(({ delivery }) =>
+      reduce(delivery.event, delivery.payload, delivery.session),
+    );
+    expect(kept.map(({ delivery }) => delivery.event)).toEqual([
+      "session_start",
+      "input",
+      "turn_start",
+      "tool_execution_start",
+      "tool_execution_end",
+      "turn_end",
+      "turn_start",
+      "tool_execution_start",
+      "tool_execution_start",
+      "tool_execution_start",
+      "tool_execution_end",
+      "tool_execution_end",
+      "tool_execution_end",
+      "turn_end",
+      "turn_start",
+      "turn_end",
+      "session_shutdown",
+    ]);
+    for (const { name, delivery } of kept) {
+      const reduced = reduce(delivery.event, delivery.payload, delivery.session);
+      const text = JSON.stringify(reduced);
+      expect(text, name).not.toContain("Create a file");
+      expect(text, name).not.toContain("Successfully wrote");
+      // The session's cwd stays: the core measures every path against it, then drops it.
+    }
   });
 });

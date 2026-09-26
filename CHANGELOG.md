@@ -5,6 +5,11 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Cursor and pi recorded.** The Cursor and pi adapters now rest on recordings of the real
+  agents rather than their documentation. For Cursor that found tool durations being dropped
+  (they are fractional), which is fixed, and that this Cursor build does not tell a plugin's
+  hooks when a turn ends. For pi it found that a `write` is named by its start and not its end,
+  which the Changes list's badges now allow for.
 - **A file an agent made with a shell command is marked too, as seen rather than reported.**
   A command names no file, so it cannot be reported; but the file's own modification time says
   when it was last written, and if that falls inside the command's run on the timeline the file
@@ -36,9 +41,8 @@ has the downloads and the full commit lists.
   folders — that reports each turn with its tokens and cost, each tool with its file or duration,
   and, on OMP, each permission you answer. **Capture what Cursor reports** gives the Cursor agent
   a plugin directory for that launch, whose hooks report each tool and file edit beside your own
-  hooks. Never a prompt, a command, a file or a reply, as before. The Cursor
-  adapter is built from Cursor's documentation and awaits a recording; pi was recorded as far as
-  its first prompt. See [What OMP and pi report](docs/guide/activity.md#what-omp-and-pi-report),
+  hooks. Never a prompt, a command, a file or a reply, as before. Both are
+  recorded against the real agents. See [What OMP and pi report](docs/guide/activity.md#what-omp-and-pi-report),
   [What Cursor reports](docs/guide/activity.md#what-cursor-reports) and the design notes
   ([15](docs/design/15-agent-events-stage-2-pi-omp.md),
   [16](docs/design/16-agent-events-stage-2-cursor.md)).

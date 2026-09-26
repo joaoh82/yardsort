@@ -1,0 +1,24 @@
+{
+  "conversation_id": "22222222-2222-4222-8222-000000000001",
+  "generation_id": "22222222-2222-4222-8222-000000000004-0-dbpq",
+  "model": "cursor-grok-4.5-high",
+  "model_id": "grok-4.5",
+  "model_params": [
+    {
+      "id": "effort",
+      "value": "high"
+    },
+    {
+      "id": "speed",
+      "value": "default"
+    }
+  ],
+  "text": "Creating hello.txt with the word hello.\n\nReading hello.txt back. Reading missing.txt. Running ls. One-word reply.",
+  "duration_ms": 1,
+  "session_id": "22222222-2222-4222-8222-000000000001",
+  "hook_event_name": "afterAgentThought",
+  "cursor_version": "2026.09.23-86fc751",
+  "workspace_roots": ["/tmp/yardsort-fixture/repo"],
+  "user_email": "user@example.com",
+  "transcript_path": null
+}
