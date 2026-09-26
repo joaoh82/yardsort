@@ -70,10 +70,16 @@ export function ChangesPanel() {
     const unlisten = ipc.onWorkspaceFilesChanged((changedId) => {
       if (changedId === useChangesStore.getState().workspaceId) refresh();
     });
-    // A hook landing is a report that may name a file already on the list.
+    // A hook landing is a report that may name a file already on the list — and, when Assist
+    // is told who wrote each file, may change what it is told, so its verdict is asked again.
     const unlistenActivity = ipc.onActivityChanged((ids) => {
       const followed = useProvenanceStore.getState().workspaceId;
-      if (followed && ids.includes(followed)) void useProvenanceStore.getState().refresh();
+      if (followed && ids.includes(followed)) {
+        void useProvenanceStore.getState().refresh();
+        if (useAssistStore.getState().status?.sendProvenance) {
+          useAssistStore.getState().reviewSoon();
+        }
+      }
     });
     // The watcher is best-effort; coming back to the window always catches up.
     window.addEventListener("focus", refresh);

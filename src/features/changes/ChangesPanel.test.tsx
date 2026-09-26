@@ -677,4 +677,39 @@ describe("ChangesPanel with reported writes", () => {
     act(() => activityChanged?.(["other"]));
     expect(core.workspaceProvenance).toHaveBeenCalledTimes(2);
   });
+
+  it("asks Assist again when a report lands, but only while Assist is told who wrote each file", async () => {
+    const reviewSoon = vi.fn();
+    const assist = (sendProvenance: boolean) =>
+      useAssistStore.setState({
+        status: {
+          keySource: "keychain",
+          keyHint: "…1234",
+          problem: null,
+          reviewChanges: true,
+          suggestInComposer: false,
+          sendProvenance,
+          thresholds: {
+            flagAtPercent: 70,
+            offTaskAtPercent: 60,
+            suggestAtPercent: 50,
+            defaults: [70, 60, 50],
+            range: [5, 95],
+          },
+          model: "jev-1.13.0",
+        },
+        reviewSoon,
+      });
+    assist(false);
+    await renderPanel();
+    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalled());
+    act(() => activityChanged?.(["w1"]));
+    expect(reviewSoon).not.toHaveBeenCalled();
+
+    assist(true);
+    act(() => activityChanged?.(["w1"]));
+    expect(reviewSoon).toHaveBeenCalledTimes(1);
+    act(() => activityChanged?.(["other"]));
+    expect(reviewSoon).toHaveBeenCalledTimes(1);
+  });
 });

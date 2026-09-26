@@ -339,13 +339,20 @@ pub async fn review(
         if input.credentials_file {
             flags.push(ReviewFlag::CredentialsFile);
         }
+        // `told` is what left the machine about this file. A credentials file and a file with
+        // nothing to read are never sent, sentence included, so nothing was told of them.
+        let sent = !input.credentials_file && not_checked.is_none();
         files.push(FileReview {
             path: input.path.clone(),
             scope: input.scope,
             relevance,
             flags,
             not_checked,
-            told: input.written.as_ref().map(Written::sentence),
+            told: input
+                .written
+                .as_ref()
+                .filter(|_| sent)
+                .map(Written::sentence),
         });
     }
 
@@ -512,6 +519,21 @@ mod tests {
             .starts_with("not reported written by any agent"));
         assert_eq!(checked.files[3].told, None);
         assert_eq!(checked.files[2].flags, [ReviewFlag::Unaccounted]);
+        // A credentials file is never sent, its sentence included: nothing was told of it.
+        let mut env = input(".env", "+KEY=hunter2\n");
+        env.written = Some(Written::Reported(vec!["claude".into()]));
+        let before = server.received.lock().unwrap().len();
+        let excluded = block(review(
+            Arc::new(Jev::at(&server.url, "k")),
+            &Cache::default(),
+            None,
+            vec![env],
+            Thresholds::default(),
+        ))
+        .unwrap();
+        assert_eq!(excluded.files[0].flags, [ReviewFlag::CredentialsFile]);
+        assert_eq!(excluded.files[0].told, None, "not sent, so not told");
+        assert_eq!(server.received.lock().unwrap().len(), before, "no request");
         assert_eq!(checked.files[0].flags, [], "a reported file is not asked");
         assert_eq!(checked.files[1].flags, []);
 
