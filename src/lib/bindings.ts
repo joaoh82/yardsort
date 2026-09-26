@@ -126,8 +126,11 @@ export const commands = {
 	 *  so their exit can still be matched; nothing about the processes themselves is touched.
 	 */
 	activityClear: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("activity_clear", { workspaceId })),
-	/**  The reported writes for a workspace, as they stand now. */
-	workspaceProvenance: (workspaceId: string) => typedError<Provenance, IpcError>(__TAURI_INVOKE("workspace_provenance", { workspaceId })),
+	/**
+	 *  The reported writes for a workspace, as they stand now, and for each of `paths` — the
+	 *  change list's files — whether its last write fell inside a tool call.
+	 */
+	workspaceProvenance: (workspaceId: string, paths: string[]) => typedError<Provenance, IpcError>(__TAURI_INVOKE("workspace_provenance", { workspaceId, paths })),
 	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
@@ -495,10 +498,11 @@ export type FileEntry = {
 	ignored: boolean,
 };
 
-/**  Every report about one workspace-relative path, oldest first. */
+/**  Every report about one workspace-relative path, oldest first, and what was observed of it. */
 export type FileReports = {
 	path: string,
 	reports: WriteReport[],
+	observed: ObservedWrite | null,
 };
 
 export type FileReview = {
@@ -667,6 +671,22 @@ export type NewWorkspace = {
 	existingBranch: string | null,
 	harness: HarnessRequest,
 	size: TermSize,
+};
+
+/**  One tool call that was executing when the file was last written. */
+export type ObservedMatch = {
+	runId: string,
+	harnessId: string | null,
+	tool: string | null,
+	from: number | null,
+	/**  `None` while the tool call is still running. */
+	to: number | null,
+};
+
+/**  The file's last write, by its own clock, fell inside one or more tool calls' windows. */
+export type ObservedWrite = {
+	at: number | null,
+	matches: ObservedMatch[],
 };
 
 export type Preflight = {

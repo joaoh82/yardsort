@@ -36,13 +36,21 @@ export function ChangesPanel() {
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
-    void useChangesStore.getState().follow(workspaceId);
+    // What the agents reported writing is joined to the list, so it follows once the list is
+    // in — unless the user has moved on meanwhile, in which case the later workspace's own
+    // effect follows and this one must not pull the join back.
+    void useChangesStore
+      .getState()
+      .follow(workspaceId)
+      .then(() => {
+        if (useChangesStore.getState().workspaceId === workspaceId) {
+          void useProvenanceStore.getState().follow(workspaceId);
+        }
+      });
     // Assist, when it is on, checks the same workspace shortly after the writing stops.
     void useAssistStore.getState().load();
     useAssistStore.getState().follow(workspaceId);
     void usePublishStore.getState().follow(workspaceId);
-    // What the agents reported writing, joined to the list above.
-    void useProvenanceStore.getState().follow(workspaceId);
     void useDraftStore.getState().load();
   }, [workspaceId]);
 
@@ -50,12 +58,14 @@ export function ChangesPanel() {
     if (!hasCore()) return;
     const refresh = () => {
       setRevision((value) => value + 1);
-      void useChangesStore.getState().refresh();
+      void useChangesStore
+        .getState()
+        .refresh()
+        .then(() => useProvenanceStore.getState().refresh());
       useAssistStore.getState().reviewSoon();
       // A commit or a checkout moves what there is to push; the forge has not changed, so its
       // last answer is reused rather than asked for again.
       void usePublishStore.getState().refresh();
-      void useProvenanceStore.getState().refresh();
     };
     const unlisten = ipc.onWorkspaceFilesChanged((changedId) => {
       if (changedId === useChangesStore.getState().workspaceId) refresh();

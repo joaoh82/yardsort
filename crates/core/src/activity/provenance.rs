@@ -7,9 +7,18 @@
 //! lines of a diff came from which report is never claimed: git shows the sum of every change
 //! since the last commit, and no adapter records a line.
 //!
+//! A file the agent made with a shell command has no report: a command names no file, and the
+//! command is never read. For those, the second join is an *observation*: the file's own
+//! modification time against the windows in which the run's tools were executing. A write
+//! that falls inside `Bash started … Bash done` was made while that command ran — by the
+//! command, or by whoever else wrote the file in that second, which is why it is a lower
+//! fidelity than a report and is worded as one. Only a tool call is a window; a run as a whole
+//! is not, because an agent writes through its tools, and a file written while it sat idle
+//! is more likely the user's.
+//!
 //! Nothing here is stored. A `workspace.changed` event, which the stage 1 report deferred to
 //! this stage, is still not recorded: the join needs git's answer at the moment of reading, and
-//! a row per file-system signal would only restate the Changes panel in the store.
+//! the file's clock is a better witness than a debounced watcher's.
 
 use std::collections::BTreeMap;
 
@@ -37,13 +46,42 @@ pub struct Report {
     pub writes: u32,
 }
 
-/// Every report for one workspace-relative path.
+/// One tool call whose execution window contains the file's last write.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservedMatch {
+    pub run_id: String,
+    pub harness_id: Option<String>,
+    /// The tool that was running, as the agent named it (`Bash`, `shell`, …).
+    pub tool: Option<String>,
+    pub from: i64,
+    /// `None` for a tool call that has not ended: the window is open, and the write fell after
+    /// its start.
+    pub to: Option<i64>,
+}
+
+/// The file's last write on disk fell inside the execution window of one or more tool calls.
+/// The file's own clock against the timeline: an observation, not a report, and worded as one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Observed {
+    /// When the file was last written, as the file system has it.
+    pub at: i64,
+    /// Every tool call that was executing then. More than one means two agents at once, and the
+    /// observation cannot say which.
+    pub matches: Vec<ObservedMatch>,
+}
+
+/// Every report for one workspace-relative path, and what was observed of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileReports {
     pub path: String,
     /// Oldest first.
     pub reports: Vec<Report>,
+    /// Set when the file's last write fell inside a tool call's window, whether or not it was
+    /// also reported. Only for files whose modification time the caller supplied.
+    pub observed: Option<Observed>,
 }
 
 /// One agent run, and whether it was in a position to report anything.
@@ -81,8 +119,117 @@ impl Provenance {
     }
 }
 
-/// The event kinds a write is reported through. Everything else is read for nothing.
-const KINDS: [&str; 3] = ["file.reported_write", "tool.completed", "process.started"];
+/// The event kinds a write is reported through, plus the ones that bound a tool call's
+/// window. Everything else is read for nothing.
+const KINDS: [&str; 5] = [
+    "file.reported_write",
+    "tool.completed",
+    "tool.started",
+    "tool.failed",
+    "process.started",
+];
+
+/// A tool call's execution window, for the observed join.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Window {
+    run_id: String,
+    tool: Option<String>,
+    /// A tool that reported its own file is a window for that file alone; a command is a window
+    /// for any file.
+    path: Option<String>,
+    from: i64,
+    to: i64,
+}
+
+/// The tool calls' windows, per run. A `tool.started` is paired with the next `tool.completed`
+/// or `tool.failed` of the same run and, when both carry one, the same `toolUseId` — else the
+/// same tool name, in order. A completion with no start is bounded by its own `durationMs`;
+/// without either, it is no window. A start with no end is open until the run's end.
+fn windows(runs: &[crate::store::RunRow], events: &[EventRow]) -> Vec<Window> {
+    let run_end: BTreeMap<&str, i64> = runs
+        .iter()
+        .map(|run| (run.id.as_str(), run.ended_at.unwrap_or(i64::MAX)))
+        .collect();
+    /// A `tool.started` waiting for its end.
+    struct Started {
+        run_id: String,
+        tool: Option<String>,
+        use_id: Option<String>,
+        path: Option<String>,
+        from: i64,
+    }
+    let mut open: Vec<Started> = vec![];
+    let mut windows = vec![];
+    for event in events {
+        if !matches!(
+            event.kind.as_str(),
+            "tool.started" | "tool.completed" | "tool.failed"
+        ) {
+            continue;
+        }
+        let Some(run_id) = event.run_id.as_deref() else {
+            continue;
+        };
+        let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
+        let text = |key: &str| payload.get(key).and_then(Value::as_str).map(str::to_owned);
+        let (tool, use_id, path) = (text("tool"), text("toolUseId"), text("path"));
+        if event.kind == "tool.started" {
+            open.push(Started {
+                run_id: run_id.to_owned(),
+                tool,
+                use_id,
+                path,
+                from: event.occurred_at,
+            });
+            continue;
+        }
+        let matching = open.iter().position(|started| {
+            started.run_id == run_id
+                && match (&started.use_id, &use_id) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => started.tool == tool,
+                }
+        });
+        match matching {
+            Some(index) => {
+                let started = open.remove(index);
+                windows.push(Window {
+                    run_id: started.run_id,
+                    tool: started.tool,
+                    path: path.or(started.path),
+                    from: started.from,
+                    to: event.occurred_at,
+                });
+            }
+            None => {
+                if let Some(duration) = payload.get("durationMs").and_then(Value::as_i64) {
+                    windows.push(Window {
+                        run_id: run_id.to_owned(),
+                        tool,
+                        path,
+                        from: event.occurred_at - duration.max(0),
+                        to: event.occurred_at,
+                    });
+                }
+            }
+        }
+    }
+    for started in open {
+        let to = run_end
+            .get(started.run_id.as_str())
+            .copied()
+            .unwrap_or(i64::MAX);
+        windows.push(Window {
+            run_id: started.run_id,
+            tool: started.tool,
+            path: started.path,
+            from: started.from,
+            to,
+        });
+    }
+    windows.sort_by_key(|window| (window.from, window.to));
+    windows
+}
 
 /// Whether an event says a file was written. `file.reported_write` is the contract's own kind
 /// for it (Codex, OpenCode, Cursor) — unless the report itself says the change did not land:
@@ -105,20 +252,24 @@ fn is_write(producer: &str, kind: &str, tool: Option<&str>, status: Option<&str>
 }
 
 /// The join for `workspace_id`, from the store as it is now.
-pub fn of(store: &Store, workspace_id: &str) -> StoreResult<Provenance> {
+/// `files` is each changed file the caller wants observed, with its modification time in
+/// epoch milliseconds; a file that is gone from disk is simply left out.
+pub fn of(store: &Store, workspace_id: &str, files: &[(String, i64)]) -> StoreResult<Provenance> {
     let runs = store.runs(workspace_id)?;
     let events = store.events_of_kinds(workspace_id, &KINDS)?;
     let native = store.native_methods_by_run(workspace_id)?;
-    Ok(join(&runs, &events, &native))
+    Ok(join(&runs, &events, &native, files))
 }
 
-/// The pure part: reports by path from the events, coverage from the runs. `native` is which
-/// runs have events of the agent's own, and through what — the fallback for a run whose start
-/// event is gone.
+/// The pure part: reports by path from the events, coverage from the runs, and for each of
+/// `files` (path, modification time) the tool calls that were executing when it was last
+/// written. `native` is which runs have events of the agent's own, and through what — the
+/// fallback for a run whose start event is gone.
 pub fn join(
     runs: &[crate::store::RunRow],
     events: &[EventRow],
     native: &[(String, String)],
+    files: &[(String, i64)],
 ) -> Provenance {
     let harness_of: BTreeMap<&str, Option<&str>> = runs
         .iter()
@@ -132,7 +283,8 @@ pub fn join(
             .or_insert(method.as_str());
     }
     // Path → (run id, producer) → the report so far. A run's reports of one path are one row.
-    let mut files: BTreeMap<String, BTreeMap<(Option<String>, String), Report>> = BTreeMap::new();
+    let mut files_by_path: BTreeMap<String, BTreeMap<(Option<String>, String), Report>> =
+        BTreeMap::new();
 
     for event in events {
         let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
@@ -159,7 +311,7 @@ pub fn join(
             continue;
         };
         let key = (event.run_id.clone(), event.producer.clone());
-        let report = files
+        let report = files_by_path
             .entry(path.to_owned())
             .or_default()
             .entry(key)
@@ -182,13 +334,52 @@ pub fn join(
         report.writes += 1;
     }
 
+    // The observed join: only harness runs have tools, and only a tool that named no file (or
+    // named this one) is a window for this file.
+    let harness_runs: BTreeMap<&str, Option<&str>> = runs
+        .iter()
+        .filter(|run| run.kind == "harness")
+        .map(|run| (run.id.as_str(), run.harness_id.as_deref()))
+        .collect();
+    let windows = windows(runs, events);
+    let mut observed: BTreeMap<String, Observed> = BTreeMap::new();
+    for (path, at) in files {
+        let matches: Vec<ObservedMatch> = windows
+            .iter()
+            .filter(|window| window.from <= *at && *at <= window.to)
+            .filter(|window| window.path.as_deref().is_none_or(|p| p == path))
+            .filter_map(|window| {
+                harness_runs
+                    .get(window.run_id.as_str())
+                    .map(|harness| ObservedMatch {
+                        run_id: window.run_id.clone(),
+                        harness_id: harness.map(str::to_owned),
+                        tool: window.tool.clone(),
+                        from: window.from,
+                        to: (window.to != i64::MAX).then_some(window.to),
+                    })
+            })
+            .collect();
+        if !matches.is_empty() {
+            observed.insert(path.clone(), Observed { at: *at, matches });
+        }
+    }
+    for path in observed.keys() {
+        files_by_path.entry(path.clone()).or_default();
+    }
+
     Provenance {
-        files: files
+        files: files_by_path
             .into_iter()
             .map(|(path, by_run)| {
                 let mut reports: Vec<Report> = by_run.into_values().collect();
                 reports.sort_by_key(|report| report.first_at);
-                FileReports { path, reports }
+                let observed = observed.remove(&path);
+                FileReports {
+                    path,
+                    reports,
+                    observed,
+                }
             })
             .collect(),
         runs: runs
@@ -346,7 +537,7 @@ mod tests {
             json!({ "tool": "Write", "pathOutsideWorkspace": true }),
         );
 
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         assert_eq!(paths(&p), ["src/lib.rs"]);
         let report = &p.files[0].reports[0];
         assert_eq!(
@@ -405,7 +596,7 @@ mod tests {
             json!({ "path": "README.md", "kind": "update" }),
         );
 
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         assert_eq!(paths(&p), ["README.md"]);
         let reports = &p.files[0].reports;
         assert_eq!(reports.len(), 2, "one row per run");
@@ -443,7 +634,7 @@ mod tests {
             2_000,
             json!({ "tool": "write", "durationMs": 3 }),
         );
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         assert!(p.files.is_empty());
         assert_eq!(p.reporting_runs(), 1, "the run did report — just not files");
     }
@@ -470,7 +661,7 @@ mod tests {
                 json!({ "tool": tool, "path": "hello.txt" }),
             );
         }
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         assert_eq!(p.files[0].reports[0].writes, 2);
     }
 
@@ -496,7 +687,7 @@ mod tests {
             })
             .unwrap();
 
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         let ids: Vec<&str> = p.runs.iter().map(|r| r.run_id.as_str()).collect();
         assert_eq!(ids, ["r1", "r2"]);
         assert_eq!(p.runs[0].capture.as_deref(), Some("hook"));
@@ -524,7 +715,7 @@ mod tests {
             2_000,
             json!({ "path": "src/lib.rs", "kind": "update", "status": "failed" }),
         );
-        assert!(of(&store, &ws).unwrap().files.is_empty());
+        assert!(of(&store, &ws, &[]).unwrap().files.is_empty());
         event(
             &store,
             &ws,
@@ -534,7 +725,7 @@ mod tests {
             3_000,
             json!({ "path": "src/lib.rs", "kind": "update", "status": "completed" }),
         );
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         assert_eq!(paths(&p), ["src/lib.rs"]);
         assert_eq!(
             p.files[0].reports[0].writes, 1,
@@ -564,7 +755,7 @@ mod tests {
             json!({ "tool": "Write", "path": "hello.txt" }),
         );
 
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         assert_eq!(paths(&p), ["hello.txt"]);
         assert_eq!(
             p.reporting_runs(),
@@ -599,7 +790,7 @@ mod tests {
             2_000,
             json!({ "path": "a.ts", "kind": "changed" }),
         );
-        let p = of(&store, &ws).unwrap();
+        let p = of(&store, &ws, &[]).unwrap();
         assert_eq!(paths(&p), ["a.ts"]);
         assert_eq!(p.files[0].reports[0].run_id, None);
         assert_eq!(p.files[0].reports[0].harness_id, None);
@@ -631,11 +822,186 @@ mod tests {
             json!({ "tool": "Write", "path": "x" }),
         );
         let rows = store.events_of_kinds(&ws, &KINDS).unwrap();
-        assert_eq!(rows.len(), 1, "process.started only");
+        assert_eq!(
+            rows.len(),
+            2,
+            "process.started and the tool's start; not the turn"
+        );
         assert!(store.events_of_kinds(&ws, &[]).unwrap().is_empty());
         assert!(
-            of(&store, &ws).unwrap().files.is_empty(),
+            of(&store, &ws, &[]).unwrap().files.is_empty(),
             "a started tool has not written"
+        );
+    }
+
+    /// The file an agent made with `echo > hello.txt` has no report, but its clock says when it
+    /// was last written, and the Bash call was executing then: observed, named with its tool,
+    /// while a write outside every window is nothing at all.
+    #[test]
+    fn a_file_written_while_a_command_ran_is_observed_with_that_command() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("claude"), Some("hook"));
+        let bash = |kind: &str, at: i64| {
+            event(
+                &store,
+                &ws,
+                Some("r1"),
+                "claude",
+                kind,
+                at,
+                json!({ "tool": "Bash", "toolUseId": "t1" }),
+            )
+        };
+        bash("tool.started", 2_000);
+        bash("tool.completed", 2_400);
+
+        let p = of(
+            &store,
+            &ws,
+            &[("hello.txt".into(), 2_100), ("mine.txt".into(), 9_000)],
+        )
+        .unwrap();
+        assert_eq!(
+            paths(&p),
+            ["hello.txt"],
+            "mine.txt was written outside every window"
+        );
+        let file = &p.files[0];
+        assert!(file.reports.is_empty(), "nothing was reported");
+        let observed = file.observed.as_ref().unwrap();
+        assert_eq!(observed.at, 2_100);
+        assert_eq!(observed.matches.len(), 1);
+        let m = &observed.matches[0];
+        assert_eq!(
+            (
+                m.run_id.as_str(),
+                m.harness_id.as_deref(),
+                m.tool.as_deref(),
+                m.from,
+                m.to
+            ),
+            ("r1", Some("claude"), Some("Bash"), 2_000, Some(2_400))
+        );
+
+        // A command still running in a live run is an open window: a write after its start
+        // is inside it, and the match says so by having no end rather than a far-off one.
+        run(&store, &ws, "r2", "harness", Some("omp"), Some("extension"));
+        event(
+            &store,
+            &ws,
+            Some("r2"),
+            "omp",
+            "tool.started",
+            8_000,
+            json!({ "tool": "bash", "toolUseId": "x" }),
+        );
+        let p = of(&store, &ws, &[("live.txt".into(), 9_000)]).unwrap();
+        let m = &p.files[0].observed.as_ref().unwrap().matches[0];
+        assert_eq!((m.run_id.as_str(), m.from, m.to), ("r2", 8_000, None));
+    }
+
+    /// A tool that named its own file is a window for that file alone: hello4.txt written by
+    /// `Write hello4.txt` is reported, and a write to another file in the same instant is not
+    /// laid at that tool's door. A file tool's report and its window meet on the same row.
+    #[test]
+    fn a_tool_that_named_its_file_is_a_window_for_that_file_only() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("claude"), Some("hook"));
+        let write = |kind: &str, at: i64| {
+            event(
+                &store,
+                &ws,
+                Some("r1"),
+                "claude",
+                kind,
+                at,
+                json!({ "tool": "Write", "toolUseId": "t1", "path": "hello4.txt" }),
+            )
+        };
+        write("tool.started", 2_000);
+        write("tool.completed", 2_050);
+
+        let files = [
+            ("hello4.txt".to_owned(), 2_020),
+            ("other.txt".to_owned(), 2_020),
+        ];
+        let p = of(&store, &ws, &files).unwrap();
+        assert_eq!(paths(&p), ["hello4.txt"]);
+        let file = &p.files[0];
+        assert_eq!(file.reports.len(), 1, "reported");
+        assert_eq!(
+            file.observed.as_ref().unwrap().matches[0].tool.as_deref(),
+            Some("Write"),
+            "and observed, in the same row"
+        );
+    }
+
+    /// Two agents with commands running at once: the observation names both and decides
+    /// nothing. A completion with only a duration is a window too (Codex's session file); a
+    /// start with no end is open until the run ends; a shell's tools are no window at all.
+    #[test]
+    fn windows_come_from_pairs_durations_and_open_starts_and_never_from_a_shell() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("claude"), Some("hook"));
+        run(&store, &ws, "r2", "harness", Some("codex"), Some("notify"));
+        run(&store, &ws, "sh", "shell", None, None);
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "claude",
+            "tool.started",
+            2_000,
+            json!({ "tool": "Bash", "toolUseId": "a" }),
+        );
+        // Codex: a completion with a duration and no start.
+        event(
+            &store,
+            &ws,
+            Some("r2"),
+            "codex",
+            "tool.completed",
+            2_500,
+            json!({ "tool": "shell", "durationMs": 1_000 }),
+        );
+        // A shell run's events (none exist today) would be no window: it is not a harness.
+        event(
+            &store,
+            &ws,
+            Some("sh"),
+            "yardsort",
+            "tool.started",
+            1_000,
+            json!({ "tool": "Bash" }),
+        );
+        store.end_run("r1", Some(0), "exited").unwrap();
+
+        let ended = store.run("r1").unwrap().unwrap().ended_at.unwrap();
+        let p = of(
+            &store,
+            &ws,
+            &[("both.txt".into(), 2_200), ("late.txt".into(), ended + 1)],
+        )
+        .unwrap();
+        assert_eq!(
+            paths(&p),
+            ["both.txt"],
+            "after r1 ended, its open Bash is no window"
+        );
+        let matches = &p.files[0].observed.as_ref().unwrap().matches;
+        let who: Vec<&str> = matches.iter().map(|m| m.run_id.as_str()).collect();
+        assert_eq!(
+            who,
+            ["r2", "r1"],
+            "both, by when each began; the shell never"
+        );
+        assert_eq!(
+            (matches[0].from, matches[0].to),
+            (1_500, Some(2_500)),
+            "from the duration"
         );
     }
 }

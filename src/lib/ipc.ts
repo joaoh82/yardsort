@@ -12,6 +12,8 @@ import {
   type ActivityPage,
   type ActivitySettingsDto,
   type FileReports,
+  type ObservedMatch,
+  type ObservedWrite,
   type Provenance,
   type RunCoverage,
   type WriteReport,
@@ -73,6 +75,8 @@ export type {
   ActivityPage,
   ActivitySettingsDto,
   FileReports,
+  ObservedMatch,
+  ObservedWrite,
   Provenance,
   RunCoverage,
   WriteReport,
@@ -235,8 +239,12 @@ export const ipc = {
   activityDiagnostics: () => unwrap(commands.activityDiagnostics()),
   /** Forget recorded activity: one workspace's, or all of it for `null`. */
   activityClear: (workspaceId: string | null) => done(commands.activityClear(workspaceId)),
-  /** Which of a workspace's files its agents reported writing, and which runs could have. */
-  workspaceProvenance: (workspaceId: string) => unwrap(commands.workspaceProvenance(workspaceId)),
+  /**
+   * Which of a workspace's files its agents reported writing, which runs could have, and for
+   * each of `paths` (the change list's files) whether its last write fell inside a tool call.
+   */
+  workspaceProvenance: (workspaceId: string, paths: string[]) =>
+    unwrap(commands.workspaceProvenance(workspaceId, paths)),
 
   /** Is there a newer release? Looks only; nothing is downloaded. */
   updateCheck: () => unwrap(commands.updateCheck()),

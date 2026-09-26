@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A file an agent made with a shell command is marked too, as seen rather than reported.**
+  A command names no file, so it cannot be reported; but the file's own modification time says
+  when it was last written, and if that falls inside the command's run on the timeline the file
+  gets a dashed badge with the agent's name. Its tooltip says exactly that: the time on the file
+  was read, not who wrote it. A report, when there is one, is shown instead. Only a tool call
+  counts as a window, never the agent merely being open, so with no capture switched on nothing
+  changes. See [Who wrote it](docs/guide/changes-and-files.md#who-wrote-it).
 - **The Changes list says which files an agent reported writing.** With any _Capture what …
   reports_ switch on, a changed file the agent said it wrote carries a badge with the agent's
   name — hover it for how many times, when, and through what — and a line above the list counts
