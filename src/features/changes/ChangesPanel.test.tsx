@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AssistStatus, ChangeSet, FileChange, FileReview } from "@/lib/ipc";
+import type { AssistStatus, ChangeSet, FileChange, FileReview, Provenance } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   uiStateSave: vi.fn(),
@@ -14,6 +14,8 @@ const core = vi.hoisted(() => ({
   onWorkspaceFilesChanged: vi.fn(),
   assistStatus: vi.fn(),
   assistReview: vi.fn(),
+  workspaceProvenance: vi.fn(),
+  onActivityChanged: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -30,6 +32,7 @@ vi.mock("./CodeView", () => ({
 import { useAssistStore } from "@/stores/assist";
 import { useChangesStore } from "@/stores/changes";
 import { useProjectsStore } from "@/stores/projects";
+import { useProvenanceStore } from "@/stores/provenance";
 import { ChangesPanel } from "./ChangesPanel";
 
 const change = (path: string, extra: Partial<FileChange> = {}): FileChange => ({
@@ -76,6 +79,9 @@ describe("ChangesPanel", () => {
       fileSystemChanged = handler;
       return Promise.resolve(() => {});
     });
+    core.onActivityChanged.mockImplementation(() => Promise.resolve(() => {}));
+    core.workspaceProvenance.mockResolvedValue({ files: [], runs: [] });
+    useProvenanceStore.setState({ workspaceId: null, provenance: null });
     setChanges({
       uncommitted: [
         change("src/app.ts"),
@@ -337,6 +343,9 @@ describe("ChangesPanel with Assist", () => {
     vi.clearAllMocks();
     core.workspaceWatch.mockResolvedValue(undefined);
     core.onWorkspaceFilesChanged.mockImplementation(() => Promise.resolve(() => {}));
+    core.onActivityChanged.mockImplementation(() => Promise.resolve(() => {}));
+    core.workspaceProvenance.mockResolvedValue({ files: [], runs: [] });
+    useProvenanceStore.setState({ workspaceId: null, provenance: null });
     core.assistStatus.mockResolvedValue(status());
     setChanges({
       uncommitted: [change("src/app.ts"), change("ci.yml"), change(".env")],
@@ -393,5 +402,148 @@ describe("ChangesPanel with Assist", () => {
     await renderPanel();
     expect(screen.queryByRole("button", { name: "Check now" })).not.toBeInTheDocument();
     expect(screen.getByTitle("ci.yml").textContent).not.toContain("off-task");
+  });
+});
+
+describe("ChangesPanel with reported writes", () => {
+  const at = 1_790_000_000_000;
+  const provenance = (extra: Partial<Provenance> = {}): Provenance => ({
+    files: [
+      {
+        path: "src/app.ts",
+        reports: [
+          {
+            runId: "run-1",
+            harnessId: "claude",
+            producer: "claude",
+            method: "hook",
+            fidelity: "reported",
+            firstAt: at,
+            lastAt: at + 60_000,
+            writes: 2,
+          },
+        ],
+      },
+    ],
+    runs: [
+      {
+        runId: "run-1",
+        harnessId: "claude",
+        startedAt: at,
+        endedAt: null,
+        capture: "hook",
+        captureKnown: true,
+      },
+      {
+        runId: "run-2",
+        harnessId: "codex",
+        startedAt: at,
+        endedAt: null,
+        capture: null,
+        captureKnown: true,
+      },
+      // Its start event is gone and nothing came through it: unknown, and counted as neither.
+      {
+        runId: "run-3",
+        harnessId: "grok",
+        startedAt: at,
+        endedAt: null,
+        capture: null,
+        captureKnown: false,
+      },
+    ],
+    ...extra,
+  });
+  let activityChanged: ((ids: string[]) => void) | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    core.workspaceWatch.mockResolvedValue(undefined);
+    core.uiStateSave.mockResolvedValue(undefined);
+    core.onWorkspaceFilesChanged.mockImplementation(() => Promise.resolve(() => {}));
+    core.onActivityChanged.mockImplementation((handler: (ids: string[]) => void) => {
+      activityChanged = handler;
+      return Promise.resolve(() => {});
+    });
+    core.workspaceProvenance.mockResolvedValue(provenance());
+    core.workspaceDiff.mockResolvedValue({ old: text("before"), new: text("after") });
+    setChanges({
+      uncommitted: [change("src/app.ts"), change("notes.md")],
+      committed: [change("README.md")],
+    });
+    useProjectsStore.setState({ selectedWorkspaceId: "w1", composingProjectId: null, ui: {} });
+    useChangesStore.setState({ workspaceId: null, changes: null, viewing: null, error: null });
+    useProvenanceStore.setState({ workspaceId: null, provenance: null });
+    useAssistStore.setState({ status: null, review: null, error: null, reviewing: false });
+  });
+
+  it("marks the files an agent reported writing, counts the rest, and never claims a line", async () => {
+    const user = await renderPanel();
+    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalledWith("w1"));
+    const row = (path: string) => screen.getByTitle(path);
+    const badge = await within(row("src/app.ts")).findByTestId("reported");
+    expect(badge).toHaveTextContent("claude");
+    expect(badge.title).toContain("claude reported writing this file 2 times");
+    expect(badge.title).toContain("(claude/hook)");
+    expect(badge.title).toContain("which of those lines came from that report is not known");
+    expect(within(row("notes.md")).queryByTestId("reported")).toBeNull();
+    expect(within(row("README.md")).queryByTestId("reported")).toBeNull();
+
+    const note = screen.getByText(/Agents reported writing 1 of 3 changed files/);
+    expect(note).toHaveTextContent("a command the agent ran");
+    expect(note).toHaveTextContent("one of the 1 agent run here that was not reporting");
+
+    // The open diff says the same in its header, once there is room for it.
+    await user.click(row("src/app.ts"));
+    await user.click(await screen.findByRole("button", { name: "Expand" }));
+    const viewer = screen.getByRole("region", { name: "Viewing src/app.ts" });
+    expect(viewer).toHaveTextContent("reported by claude · 2 writes");
+
+    // A file with no report, open, says so rather than nothing.
+    await user.click(within(viewer).getByRole("button", { name: "Shrink" }));
+    await user.click(row("notes.md"));
+    await user.click(await screen.findByRole("button", { name: "Expand" }));
+    expect(screen.getByRole("region", { name: "Viewing notes.md" })).toHaveTextContent(
+      "no agent reported writing this",
+    );
+  });
+
+  it("says nothing at all while no run in the workspace was reporting", async () => {
+    core.workspaceProvenance.mockResolvedValue(
+      provenance({
+        files: [],
+        runs: [
+          {
+            runId: "run-2",
+            harnessId: "codex",
+            startedAt: at,
+            endedAt: null,
+            capture: null,
+            captureKnown: true,
+          },
+        ],
+      }),
+    );
+    const user = await renderPanel();
+    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalledWith("w1"));
+    expect(screen.queryByTestId("reported")).toBeNull();
+    expect(screen.queryByText(/reported writing/)).toBeNull();
+    await user.click(screen.getByTitle("src/app.ts"));
+    await user.click(await screen.findByRole("button", { name: "Expand" }));
+    expect(screen.getByRole("region", { name: "Viewing src/app.ts" })).not.toHaveTextContent(
+      "reported",
+    );
+  });
+
+  it("asks again when a report lands, so a badge appears as the agent writes", async () => {
+    core.workspaceProvenance.mockResolvedValueOnce(provenance({ files: [] }));
+    await renderPanel();
+    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/No changed file was reported written/)).toBeInTheDocument();
+    core.workspaceProvenance.mockResolvedValue(provenance());
+    act(() => activityChanged?.(["other", "w1"]));
+    await within(screen.getByTitle("src/app.ts")).findByTestId("reported");
+    act(() => activityChanged?.(["other"]));
+    expect(core.workspaceProvenance).toHaveBeenCalledTimes(2);
   });
 });

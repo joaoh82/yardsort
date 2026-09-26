@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **The Changes list says which files an agent reported writing.** With any _Capture what …
+  reports_ switch on, a changed file the agent said it wrote carries a badge with the agent's
+  name — hover it for how many times, when, and through what — and a line above the list counts
+  the files with a report and the files without one: you, a script, or a run that was not
+  reporting. The expanded diff's header says the same for the open file. The other way round, a
+  timeline row that names a listed file has a **Show diff** button. It never claims which lines came
+  from whom; git's diff is the whole change and no agent reports a line. Nothing new is
+  stored. See [Who wrote it](docs/guide/changes-and-files.md#who-wrote-it) and the design note
+  ([17](docs/design/17-agent-events-stage-3-review.md)).
 - **`ys` comes with the app, and stays up to date with it.** Every installer now carries the
   command-line client next to Yardsort. The `.deb`, `.rpm` and AUR packages put it in
   `/usr/bin`, and the Homebrew cask links it. Elsewhere, **Install ys** — in Settings → General

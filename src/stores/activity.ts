@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { errorMessage, ipc, type ActivityEvent } from "@/lib/ipc";
+import { useProvenanceStore } from "@/stores/provenance";
 
 /** How many events a page asks for. Small: the panel is a glance, not an archive. */
 export const PAGE = 50;
@@ -81,6 +82,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     try {
       await ipc.activityClear(workspaceId);
       await get().load(workspaceId);
+      // The badges on the Changes list came from what was just forgotten.
+      void useProvenanceStore.getState().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
     }

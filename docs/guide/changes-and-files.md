@@ -31,6 +31,32 @@ easier on a wide diff. The choice sticks until you change it back.
 
 Binary files and very large files are listed but not rendered.
 
+### Who wrote it
+
+With any **Capture what … reports** switch on in [Settings → General](settings.md#general),
+the list also shows what the workspace's agents _said_ they wrote. A changed file an agent
+reported writing carries a small badge with that agent's name; hover it for how many times it
+reported writing the file, when it last did, and through what (`claude/hook`, `codex/notify`,
+…). A line above the list counts the files with such a report and the files without one — you,
+a script, or an agent run that was not reporting — and the expanded viewer's header says the
+same for the open diff: _reported by claude · 2 writes · 14:02_, or _no agent reported writing
+this_.
+
+Two things it never says. Which **lines** came from which report: git shows every change since
+the last commit, and no agent reports a line, so a file you and the agent both touched carries
+the agent's badge over the whole diff. And anything at all while **no** agent run in the
+workspace was reporting: then every file is unreported for the same reason, and the list reads
+as above.
+
+A badge means the agent used a **file** tool — Claude Code's `Write` or `Edit`, Codex's patch,
+and so on. A file the agent made with a **shell command** (`echo hello > hello.txt`) has no
+badge: a command reports no file, and Yardsort never reads the command. Agents do this often
+for small files, so a change without a badge is not a change the agent did not make; the line
+above the list names a command the agent ran among the alternatives. A report that says the
+change failed — Codex says so for a patch that did not apply — is not counted. Grok's log
+names the tools it ran and never the file, so a Grok run counts as reporting but badges
+nothing. See [Activity](activity.md) for what each agent reports.
+
 ### Assist badges
 
 With [Assist](assist.md) switched on, files carry small badges — **off-task**, **secret**,

@@ -236,6 +236,102 @@ pub struct ActivityPage {
     pub has_more: bool,
 }
 
+/// What one agent run reported about one changed file. See
+/// `yardsort_core::activity::provenance`.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteReport {
+    pub run_id: Option<String>,
+    pub harness_id: Option<String>,
+    pub producer: String,
+    pub method: String,
+    pub fidelity: String,
+    pub first_at: f64,
+    pub last_at: f64,
+    /// Reports, not lines: how many times the agent said it wrote the file.
+    pub writes: u32,
+}
+
+/// Every report about one workspace-relative path, oldest first.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileReports {
+    pub path: String,
+    pub reports: Vec<WriteReport>,
+}
+
+/// One of the workspace's agent runs and how it was asked to report, or `None` if it was not.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCoverage {
+    pub run_id: String,
+    pub harness_id: Option<String>,
+    pub started_at: f64,
+    pub ended_at: Option<f64>,
+    pub capture: Option<String>,
+    /// Whether a `None` capture is known to mean the run was not reporting.
+    pub capture_known: bool,
+}
+
+/// Which of a workspace's files its agents said they wrote, and which runs could have said so.
+/// Joined to git's own change list by the Changes panel; nothing here is stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Provenance {
+    pub files: Vec<FileReports>,
+    pub runs: Vec<RunCoverage>,
+}
+
+impl From<yardsort_core::activity::provenance::Provenance> for Provenance {
+    fn from(p: yardsort_core::activity::provenance::Provenance) -> Self {
+        Self {
+            files: p
+                .files
+                .into_iter()
+                .map(|file| FileReports {
+                    path: file.path,
+                    reports: file
+                        .reports
+                        .into_iter()
+                        .map(|r| WriteReport {
+                            run_id: r.run_id,
+                            harness_id: r.harness_id,
+                            producer: r.producer,
+                            method: r.method,
+                            fidelity: r.fidelity,
+                            first_at: r.first_at as f64,
+                            last_at: r.last_at as f64,
+                            writes: r.writes,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            runs: p
+                .runs
+                .into_iter()
+                .map(|run| RunCoverage {
+                    run_id: run.run_id,
+                    harness_id: run.harness_id,
+                    started_at: run.started_at as f64,
+                    ended_at: run.ended_at.map(|at| at as f64),
+                    capture: run.capture,
+                    capture_known: run.capture_known,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The reported writes for a workspace, as they stand now.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_provenance(app: AppHandle, workspace_id: String) -> IpcResult<Provenance> {
+    blocking(app, move |state| {
+        Ok(yardsort_core::activity::provenance::of(&state.store, &workspace_id)?.into())
+    })
+    .await
+}
+
 /// How many events a page holds at most, whatever is asked for.
 const MAX_PAGE: u32 = 200;
 

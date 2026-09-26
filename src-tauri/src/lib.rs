@@ -101,6 +101,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::activity_timeline,
             activity::activity_diagnostics,
             activity::activity_clear,
+            activity::workspace_provenance,
             activity::settings_save_activity,
             sessions::sessions_list,
             sessions::session_resume,

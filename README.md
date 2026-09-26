@@ -76,8 +76,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   workspace and how it ended — even if it ended while the window was closed — without reading a
   word the agent printed. Turn it on, and every built-in agent — Claude Code, Codex, OpenCode,
   Grok, OMP, pi and Cursor — reports its own tool calls, file changes and turns to the same
-  record, as metadata, with its own settings untouched. An experimental
-  timeline shows it; `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
+  record, as metadata, with its own settings untouched. The Changes list marks which files an
+  agent reported writing, and which changed with no report. An experimental timeline shows the
+  rest; `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client, starts a workspace and

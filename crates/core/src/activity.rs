@@ -35,6 +35,7 @@ pub mod hook;
 pub mod inbox;
 pub mod opencode;
 pub mod pi;
+pub mod provenance;
 
 use inbox::{Inbox, InboxEntry};
 

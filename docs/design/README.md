@@ -21,6 +21,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 14  | [Agent events, stage 2: Grok](14-agent-events-stage-2-grok.md)          | Its own metadata-only session log, read where Yardsort knows to look; nothing installed |
 | 15  | [Agent events, stage 2: OMP and Pi](15-agent-events-stage-2-pi-omp.md)  | One extension for the two forks, given on the command line per launch                   |
 | 16  | [Agent events, stage 2: Cursor](16-agent-events-stage-2-cursor.md)      | Hooks through a per-launch plugin directory; built from the docs, recording owed        |
+| 17  | [Agent events, stage 3: review](17-agent-events-stage-3-review.md)      | Reported writes joined to git's change list at read time; no line is ever claimed       |
 
 ## Vocabulary
 

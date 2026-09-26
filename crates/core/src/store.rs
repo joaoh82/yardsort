@@ -939,6 +939,41 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// A workspace's events of the given kinds, oldest first. For a join that reads one or
+    /// two kinds out of everything a busy workspace recorded, without paging through the rest.
+    pub fn events_of_kinds(
+        &self,
+        workspace_id: &str,
+        kinds: &[&str],
+    ) -> StoreResult<Vec<EventRow>> {
+        if kinds.is_empty() {
+            return Ok(vec![]);
+        }
+        let conn = self.conn();
+        let marks = kinds.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM agent_events
+             WHERE workspace_id = ? AND kind IN ({marks}) ORDER BY seq"
+        ))?;
+        let params = std::iter::once(workspace_id).chain(kinds.iter().copied());
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), event_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Which of a workspace's runs have events from somewhere other than Yardsort's own
+    /// lifecycle, and through which method: one `(run id, method)` per pair, in first-seen
+    /// order. What a run was asked to report survives here after its start event is gone.
+    pub fn native_methods_by_run(&self, workspace_id: &str) -> StoreResult<Vec<(String, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT run_id, method, MIN(seq) AS first FROM agent_events
+             WHERE workspace_id = ? AND run_id IS NOT NULL AND producer <> 'yardsort'
+             GROUP BY run_id, method ORDER BY first",
+        )?;
+        let rows = stmt.query_map([workspace_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Every event, oldest first — one workspace's, or all of them. For export.
     pub fn all_events(&self, workspace_id: Option<&str>) -> StoreResult<Vec<EventRow>> {
         let conn = self.conn();

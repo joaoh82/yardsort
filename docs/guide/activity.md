@@ -43,8 +43,13 @@ workspace's events, with **Show earlier** to page back, **Refresh**, **Clear** f
 workspace, and a note on what the list covers.
 
 It is experimental: the words and the layout will change as later stages add more to show.
-While Claude Code is reporting, the list moves as the agent works; you do not have to press
-**Refresh**.
+While an agent is reporting, the list moves as it works; you do not have to press **Refresh**.
+
+A row that names a file which is on the Changes list — a reported write, a `Write done` — has a
+**Show diff** button that opens that file's diff in the right panel. The diff is everything that
+changed since the last commit, whoever changed it; the row says the agent reported writing the
+file, not which lines are its. The Changes list shows the same join from the other side: a badge
+on each file an agent reported writing. See [Who wrote it](changes-and-files.md#who-wrote-it).
 
 ## What Claude Code reports
 

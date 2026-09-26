@@ -49,6 +49,11 @@ function parse(event: ActivityEvent): Payload {
   }
 }
 
+/** The workspace-relative file an event names, if it names one. */
+export function pathOf(event: ActivityEvent): string | null {
+  return parse(event).path ?? null;
+}
+
 /** A row's words: what happened, in the user's terms, and how sure to be of it. */
 export function describeEvent(event: ActivityEvent): {
   title: string;
