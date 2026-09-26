@@ -26,7 +26,7 @@ const CONCURRENCY: usize = 6;
 /// Below this the model is not saying anything useful about relevance.
 const UNSURE_BELOW: f64 = 0.5;
 /// Bumped whenever the questions change, so cached verdicts from older wording are not reused.
-const QUESTIONS_VERSION: u32 = 1;
+const QUESTIONS_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -194,12 +194,13 @@ fn questions(task_known: bool, unaccounted: bool) -> BTreeMap<String, Question> 
         questions.insert(
             "unaccounted".to_owned(),
             Question::Noul {
-                instructions: "`written` says no agent reported writing the file named by `file`, \
-                               although the agents in this workspace were reporting what they \
-                               wrote. Is the change in `diff` substantive — logic, configuration, \
-                               tests, dependencies or documentation, rather than formatting, \
-                               whitespace, generated output or a lock file — so that a reviewer \
-                               should know it came from outside what the agents reported?"
+                instructions: "Does `diff` add or change something with meaning — code, text, \
+                               configuration, tests, dependencies or documentation? Answer no \
+                               only if the change is nothing but formatting, whitespace, \
+                               generated output, or a lock file. (`written` says no agent \
+                               reported writing this file, although the agents in this \
+                               workspace were reporting what they wrote; that is already known \
+                               and is not the question.)"
                     .into(),
             },
         );
@@ -366,6 +367,26 @@ pub async fn review(
             };
             match answered {
                 Ok(answers) => {
+                    // A dev build says what Jev answered, per question, so a badge that does
+                    // or does not appear can be traced to a number: the path and the
+                    // probabilities, never the diff.
+                    if cfg!(debug_assertions) {
+                        let said: Vec<String> = answers
+                            .answers
+                            .iter()
+                            .map(|(id, answer)| match answer.yes() {
+                                Some(p) => format!("{id}={p:.2}"),
+                                None => format!(
+                                    "{id}=[{}]",
+                                    (0..3)
+                                        .map(|i| format!("{:.2}", answer.level(i).unwrap_or(0.0)))
+                                        .collect::<Vec<_>>()
+                                        .join(" ")
+                                ),
+                            })
+                            .collect();
+                        eprintln!("assist review {}: {}", input.path, said.join(" "));
+                    }
                     let (relevance, flags) = verdict(&answers, thresholds);
                     cache.put(cache_key(&input, task.as_deref()), answers);
                     files[index].relevance = relevance;

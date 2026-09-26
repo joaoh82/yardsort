@@ -209,6 +209,17 @@ unaccounted file only, flags it, and sends nothing new for a file with nothing t
 settings screen offers the switch only once the review is on and saves it; the panel shows the
 badge and every badge's tooltip carries what was told.
 
+Found on the first hands-on pass: the extra question was first worded as two judgments in one —
+is the change substantive, _such that a reviewer should know_ it came from outside the agents'
+reports — and Jev hedged at 0.58 on a text file holding a line of prose and a Python function,
+under the 0.70 flag threshold, so no badge. Asked one plain thing — does `diff` add or change
+something with meaning, answer no only for formatting, whitespace, generated output or a lock
+file — it answered 0.97 on the same diff. The question version was bumped so cached answers
+to the old wording are not reused. What made it traceable: a dev build now prints each file's
+answers per question to stderr (`assist review <path>: unaccounted=0.97 …`) — the path and the
+numbers, never the diff. Lesson for the next question anyone adds: one criterion per question;
+put what is already known in a parenthesis, not in the ask.
+
 Not measured: whether the sentence improves the off-task judgment. Like the thresholds
 ([06 q17](06-open-questions.md)), it is a setting that costs nothing to switch back, and the
 tooltip shows what was sent; anyone who finds the badge noisy turns the switch off where they
