@@ -1,6 +1,6 @@
 # 17 — Agent events, stage 3: review and provenance
 
-Status: **first slice shipped** · 25 September 2026 · Stage 3 of
+Status: **two slices shipped** · 25–26 September 2026 · Stage 3 of
 [09](09-agent-events-and-memory.md): _join event ranges to workspace diffs and Jev assessments;
 show evidence and uncertainty in a review panel_, with the exit gate _review can distinguish
 reported writes from Git-observed changes; no claim of line-level causality without exact
@@ -128,9 +128,50 @@ copies.
 - **A shell command is not a reported write**, and that is the common case for a small file.
   Found on the first hands-on pass: asked to "create hello.txt", Claude Code ran one Bash
   command, which reports a tool and a duration and no file — so no row named the file and
-  nothing was badged, correctly. The note above the list now names _a command the agent ran_
-  among the alternatives, and the guide says a missing badge is not a change the agent did not
-  make. Reading the command to find the file is exactly what the contract forbids; the gap
-  stays.
+  nothing was badged, correctly. Reading the command to find the file is exactly what the
+  contract forbids. The second slice (§6) answers it another way.
 - **Grok** cannot contribute: its log has no path. The note counts its runs as reporting, since
   they were; its files are simply never badged. Honest, and worth a line in the guide.
+
+## 6 · Second slice: observed writes
+
+The file the agent made with `echo hello > hello3.txt` has a witness after all: its own
+modification time. Every adapter bounds a tool call — a `tool.started` and a `tool.completed`
+or `tool.failed` for the hook, plugin, extension and Grok adapters; a `durationMs` on the
+completion for Codex's session file and Cursor's post-hooks — and a file whose last write falls
+inside such a window was written while that tool ran. That is an _observation_: Yardsort read
+the time on the file and the times on the timeline, not who wrote the file. It is worded and
+styled as one, and ranked below a report.
+
+- **Only a tool call is a window.** A run as a whole is not, though the run's start and end
+  are known: an agent writes through its tools, so a file written while it sat idle is more
+  likely the user's, and a run window would badge every file a user touched while an agent was
+  open — with lifecycle recording on by default, that is every user. With no capture there are
+  no tool windows and nothing changes.
+- **A tool that named its own file is a window for that file alone.** `Write hello4.txt`
+  cannot vouch for `other.txt` written in the same instant; a command, which names nothing,
+  can vouch for anything.
+- **Two agents at once decide nothing.** Every window containing the time is listed; the badge
+  then says _2 agents_ and the tooltip names both.
+- **The clock is the file's, not a watcher's.** The `workspace.changed` event stays unrecorded
+  for a third reason: the app's watcher is debounced and best-effort, and it is not there while
+  the window is closed. `mtime` is exact, is there afterwards, and costs one `stat` per changed
+  file. The command takes the change list's paths from the panel and stats them inside the
+  workspace (`resolve_inside`); a deleted or renamed-away file has no time and is left out.
+- **A report outranks an observation.** A file with both shows its report; the observation is
+  in the data for the row and in the tooltip's absence.
+- **Words.** Badge: the agent's name in a dashed border. Tooltip: _This file was last written
+  at 07:57:46, while claude was running Bash (07:57:46 to 07:57:47). Yardsort read the time on
+  the file, not who wrote it: you or a script could have written it in that window, and no
+  agent reported it._ Note: _One was last written while an agent ran a command — seen on the
+  file's clock, not reported._ Header: _last written while claude ran Bash · 07:57_.
+
+Limits, stated: a file the agent made with a command and the user then edited carries the
+user's time and no badge — `mtime` is the last write only. A command that runs for minutes is
+a wide window, and everything written in it is attributed to it. Checkouts and formatters the
+agent runs through a command are, correctly, "while claude ran Bash". Tests: `activity::provenance`
+gains three (a command's window names the file with the tool and leaves a later write alone; a
+file tool's window is for its file only and meets its report on one row; pairs, durations, open
+starts, two agents at once, and never a shell); `last_written` in the app reads the file's clock
+and skips what it cannot; `ChangesPanel.test.tsx` gains one for the badge, the tooltip, the
+note's arithmetic, the header, and the report outranking the observation.

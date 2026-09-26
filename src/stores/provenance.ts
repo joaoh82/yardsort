@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ipc, type Provenance } from "@/lib/ipc";
+import { useChangesStore } from "@/stores/changes";
 
 interface ProvenanceState {
   workspaceId: string | null;
@@ -7,7 +8,10 @@ interface ProvenanceState {
   provenance: Provenance | null;
   /** Point at a workspace (or none) and load what its agents reported. */
   follow: (workspaceId: string | null) => Promise<void>;
-  /** Ask again: a hook landed, or the files changed. */
+  /**
+   * Ask again: a hook landed, or the files changed. The change list's files are what the core
+   * looks at on disk, so this runs after the list has been loaded.
+   */
   refresh: () => Promise<void>;
 }
 
@@ -29,8 +33,17 @@ export const useProvenanceStore = create<ProvenanceState>((set, get) => ({
   async refresh() {
     const { workspaceId } = get();
     if (!workspaceId) return;
+    const changes = useChangesStore.getState();
+    const listed =
+      changes.workspaceId === workspaceId && changes.changes
+        ? [
+            ...new Set(
+              [...changes.changes.uncommitted, ...changes.changes.committed].map((c) => c.path),
+            ),
+          ]
+        : [];
     try {
-      const provenance = await ipc.workspaceProvenance(workspaceId);
+      const provenance = await ipc.workspaceProvenance(workspaceId, listed);
       if (get().workspaceId === workspaceId) set({ provenance });
     } catch (error) {
       console.error(error);

@@ -252,12 +252,32 @@ pub struct WriteReport {
     pub writes: u32,
 }
 
-/// Every report about one workspace-relative path, oldest first.
+/// One tool call that was executing when the file was last written.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservedMatch {
+    pub run_id: String,
+    pub harness_id: Option<String>,
+    pub tool: Option<String>,
+    pub from: f64,
+    pub to: f64,
+}
+
+/// The file's last write, by its own clock, fell inside one or more tool calls' windows.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservedWrite {
+    pub at: f64,
+    pub matches: Vec<ObservedMatch>,
+}
+
+/// Every report about one workspace-relative path, oldest first, and what was observed of it.
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FileReports {
     pub path: String,
     pub reports: Vec<WriteReport>,
+    pub observed: Option<ObservedWrite>,
 }
 
 /// One of the workspace's agent runs and how it was asked to report, or `None` if it was not.
@@ -304,6 +324,20 @@ impl From<yardsort_core::activity::provenance::Provenance> for Provenance {
                             writes: r.writes,
                         })
                         .collect(),
+                    observed: file.observed.map(|observed| ObservedWrite {
+                        at: observed.at as f64,
+                        matches: observed
+                            .matches
+                            .into_iter()
+                            .map(|m| ObservedMatch {
+                                run_id: m.run_id,
+                                harness_id: m.harness_id,
+                                tool: m.tool,
+                                from: m.from as f64,
+                                to: m.to as f64,
+                            })
+                            .collect(),
+                    }),
                 })
                 .collect(),
             runs: p
@@ -322,14 +356,66 @@ impl From<yardsort_core::activity::provenance::Provenance> for Provenance {
     }
 }
 
-/// The reported writes for a workspace, as they stand now.
+/// When each of `paths` (workspace-relative, from the change list) was last written, in epoch
+/// milliseconds, by the file system's own clock. A path that is gone — deleted, or renamed
+/// away — or that would leave the workspace is left out rather than guessed at.
+pub fn last_written(root: &Path, paths: &[String]) -> Vec<(String, i64)> {
+    paths
+        .iter()
+        .filter_map(|path| {
+            let full = crate::changes::resolve_inside(root, path).ok()?;
+            let modified = std::fs::metadata(full).ok()?.modified().ok()?;
+            let ms = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_millis();
+            Some((path.clone(), i64::try_from(ms).ok()?))
+        })
+        .collect()
+}
+
+/// The reported writes for a workspace, as they stand now, and for each of `paths` — the
+/// change list's files — whether its last write fell inside a tool call.
 #[tauri::command]
 #[specta::specta]
-pub async fn workspace_provenance(app: AppHandle, workspace_id: String) -> IpcResult<Provenance> {
+pub async fn workspace_provenance(
+    app: AppHandle,
+    workspace_id: String,
+    paths: Vec<String>,
+) -> IpcResult<Provenance> {
     blocking(app, move |state| {
-        Ok(yardsort_core::activity::provenance::of(&state.store, &workspace_id)?.into())
+        let (_, root) = crate::changes::commands::workspace(state, &workspace_id)?;
+        let files = last_written(&root, &paths);
+        Ok(yardsort_core::activity::provenance::of(&state.store, &workspace_id, &files)?.into())
     })
     .await
+}
+
+#[cfg(test)]
+mod last_written_tests {
+    use super::*;
+
+    /// The clock is the file's own; a file that is not there, or a path that would leave the
+    /// workspace, is left out.
+    #[test]
+    fn last_written_reads_the_files_own_clock_and_skips_what_it_cannot_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() {}").unwrap();
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let paths = [
+            "src/a.rs".to_owned(),
+            "gone.rs".to_owned(),
+            "../secret".to_owned(),
+        ];
+        let written = last_written(dir.path(), &paths);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "src/a.rs");
+        assert!(written[0].1 <= before + 1 && written[0].1 > before - 60_000);
+    }
 }
 
 /// How many events a page holds at most, whatever is asked for.

@@ -1,16 +1,41 @@
 import type { ChangeSet, FileReports } from "@/lib/ipc";
 import { eventTime } from "@/features/activity/describe";
 import { useProvenanceStore } from "@/stores/provenance";
-import { CAVEAT, describeReports, useAnyReporting, useReports, who } from "./reported";
+import {
+  CAVEAT,
+  describeObserved,
+  describeReports,
+  observedTool,
+  useAnyReporting,
+  useReports,
+  who,
+  whoObserved,
+} from "./reported";
 
 /**
  * What the workspace's agents said they wrote, beside what git shows: a badge on a changed
  * file, a line above the list, a word in the viewer's header. The words are in `reported.ts`.
  */
 
-/** One badge per reporting agent on a changed file, or nothing when no agent reported it. */
+/**
+ * One badge per reporting agent on a changed file; failing a report, a dashed badge for a file
+ * whose last write fell inside an agent's tool call; nothing otherwise. A report outranks an
+ * observation, so a file with both shows the report.
+ */
 export function ReportedBadges({ file }: { file: FileReports | undefined }) {
-  if (!file || file.reports.length === 0) return null;
+  if (!file) return null;
+  if (file.reports.length === 0) {
+    if (!file.observed) return null;
+    return (
+      <span
+        className="shrink-0 rounded border border-dashed border-ink-faint/60 px-1 text-[10px] leading-4 text-ink-muted"
+        title={`${describeObserved(file.observed)} ${CAVEAT}`}
+        data-testid="observed"
+      >
+        {whoObserved(file.observed)}
+      </span>
+    );
+  }
   const names = [...new Set(file.reports.map(who))];
   return (
     <span
@@ -41,6 +66,10 @@ export function ProvenanceNote({ changes }: { changes: ChangeSet }) {
   const paths = new Set([...changes.uncommitted, ...changes.committed].map((c) => c.path));
   if (paths.size === 0) return null;
   const reported = [...paths].filter((path) => (reports.get(path)?.reports.length ?? 0) > 0).length;
+  const observed = [...paths].filter((path) => {
+    const file = reports.get(path);
+    return file !== undefined && file.reports.length === 0 && file.observed !== null;
+  }).length;
   // A run is silent only when that is known: its start event said so, or nothing of the
   // agent's ever came through it. A run with neither is unknown, and not counted either way.
   const silent = provenance.runs.filter((run) => run.capture === null && run.captureKnown).length;
@@ -53,12 +82,21 @@ export function ProvenanceNote({ changes }: { changes: ChangeSet }) {
       ? `, or one of the ${silent} agent run${silent === 1 ? "" : "s"} here that was not reporting`
       : ""
   }`;
-  const summary =
+  const rest = paths.size - reported - observed;
+  const sentences = [
     reported === paths.size
-      ? `Every changed file was reported written by an agent.`
+      ? "Every changed file was reported written by an agent."
       : reported === 0
-        ? `No changed file was reported written by an agent — the changes came from ${alternatives}.`
-        : `Agents reported writing ${reported} of ${paths.size} changed files. The rest changed with no report — ${alternatives}.`;
+        ? "No changed file was reported written by an agent."
+        : `Agents reported writing ${reported} of ${paths.size} changed files.`,
+    observed > 0
+      ? `${observed === paths.size ? "Every one" : observed === 1 ? "One" : String(observed)} ${observed === 1 ? "was" : "were"} last written while an agent ran a command — seen on the file's clock, not reported.`
+      : null,
+    rest > 0
+      ? `${reported + observed === 0 ? "The changes" : rest === 1 ? "One more" : `${rest} more`} came from ${alternatives}.`
+      : null,
+  ].filter(Boolean);
+  const summary = sentences.join(" ");
   return (
     <p className="px-3 py-1 text-[11px] text-ink-faint" title={CAVEAT}>
       {summary}
@@ -73,6 +111,18 @@ export function ReportedLine({ path }: { path: string }) {
   if (!reports || !reporting) return null;
   const file = reports.get(path);
   if (!file || file.reports.length === 0) {
+    if (file?.observed) {
+      const tool = observedTool(file.observed);
+      return (
+        <span
+          className="shrink-0 text-[11px] text-ink-faint"
+          title={`${describeObserved(file.observed)} ${CAVEAT}`}
+        >
+          last written while {whoObserved(file.observed)} ran {tool ?? "a tool"} ·{" "}
+          {eventTime(file.observed.at ?? 0)}
+        </span>
+      );
+    }
     return (
       <span className="shrink-0 text-[11px] text-ink-faint" title={CAVEAT}>
         no agent reported writing this

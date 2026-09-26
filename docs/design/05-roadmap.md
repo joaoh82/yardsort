@@ -574,6 +574,10 @@ The join of what the agents reported to what git shows, recorded in
 - Changes list: a badge per reporting agent on a changed file, a counting line above the list,
   a word in the expanded viewer's header. Activity timeline: a **Show diff** button on a row that
   names a listed file. Every word stops short of a line.
+- Second slice (2026-09-26): **observed writes**. A file the agent made with a shell command
+  has no report, but its own modification time falls inside the command's window on the
+  timeline; that is shown as an observation — a dashed badge, worded as what Yardsort read and
+  what it did not — and ranked below a report. Only a tool call is a window, never a run.
 - Not done, by decision: event-derived facts for Assist's review — the Jev half of stage 3 —
   which changes what is sent under the user's key and gets its own opt-in and design pass.
 

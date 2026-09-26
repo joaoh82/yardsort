@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { FileReports, WriteReport } from "@/lib/ipc";
+import type { FileReports, ObservedWrite, WriteReport } from "@/lib/ipc";
 import { eventTime } from "@/features/activity/describe";
 import { useProvenanceStore } from "@/stores/provenance";
 
@@ -41,3 +41,31 @@ export function describeReports(reports: WriteReport[]): string {
 
 export const CAVEAT =
   "Git shows every change since the last commit; which of those lines came from that report is not known.";
+
+/** The agents an observation names: one, or "2 agents" when two were running commands at once. */
+export function whoObserved(observed: ObservedWrite): string {
+  const names = [...new Set(observed.matches.map((m) => m.harnessId ?? "an agent"))];
+  return names.length === 1 ? names[0]! : `${names.length} agents`;
+}
+
+/**
+ * The words for an observation. It says what Yardsort saw — the time on the file, the tool
+ * that was running — and what it did not: who wrote the file.
+ */
+export function describeObserved(observed: ObservedWrite): string {
+  const at = observed.at ?? 0;
+  const during = observed.matches
+    .map((m) => {
+      const who = m.harnessId ?? "an agent";
+      const tool = m.tool ? `was running ${m.tool}` : "was running a tool";
+      return `${who} ${tool} (${eventTime(m.from ?? 0)} to ${eventTime(m.to ?? 0)})`;
+    })
+    .join(" and ");
+  return `This file was last written at ${eventTime(at)}, while ${during}. Yardsort read the time on the file, not who wrote it: you or a script could have written it in that window, and no agent reported it.`;
+}
+
+/** The tool an observation names, when every match agrees on one. */
+export function observedTool(observed: ObservedWrite): string | null {
+  const tools = [...new Set(observed.matches.map((m) => m.tool ?? ""))];
+  return tools.length === 1 && tools[0] ? tools[0] : null;
+}

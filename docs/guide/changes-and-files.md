@@ -48,14 +48,20 @@ the agent's badge over the whole diff. And anything at all while **no** agent ru
 workspace was reporting: then every file is unreported for the same reason, and the list reads
 as above.
 
-A badge means the agent used a **file** tool — Claude Code's `Write` or `Edit`, Codex's patch,
-and so on. A file the agent made with a **shell command** (`echo hello > hello.txt`) has no
-badge: a command reports no file, and Yardsort never reads the command. Agents do this often
-for small files, so a change without a badge is not a change the agent did not make; the line
-above the list names a command the agent ran among the alternatives. A report that says the
-change failed — Codex says so for a patch that did not apply — is not counted. Grok's log
-names the tools it ran and never the file, so a Grok run counts as reporting but badges
-nothing. See [Activity](activity.md) for what each agent reports.
+A solid badge means the agent used a **file** tool — Claude Code's `Write` or `Edit`, Codex's
+patch, and so on — and reported the file. A file the agent made with a **shell command**
+(`echo hello > hello.txt`) cannot be reported, because a command names no file and Yardsort
+never reads the command. For those there is a **dashed** badge: the file's own modification
+time fell inside that command's run on the timeline, so it was last written _while_ the agent
+ran it. Hover it for the words: the time on the file was read, not who wrote it — you or a
+script could have written it in that window. A report always outranks this, and only a tool
+call counts as a window, never the agent merely being open; so with no _Capture_ switch on,
+nothing is marked. A file you edit after the agent made it carries your time and no badge.
+
+A report that says the change failed — Codex says so for a patch that did not apply — is not
+counted. Grok's log names the tools it ran and never the file, so a Grok run counts as reporting
+and its commands' windows still mark files, but no file of its is ever reported. See
+[Activity](activity.md) for what each agent reports.
 
 ### Assist badges
 

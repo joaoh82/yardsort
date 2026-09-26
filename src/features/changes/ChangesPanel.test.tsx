@@ -423,6 +423,7 @@ describe("ChangesPanel with reported writes", () => {
             writes: 2,
           },
         ],
+        observed: null,
       },
     ],
     runs: [
@@ -479,7 +480,13 @@ describe("ChangesPanel with reported writes", () => {
 
   it("marks the files an agent reported writing, counts the rest, and never claims a line", async () => {
     const user = await renderPanel();
-    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalledWith("w1"));
+    await waitFor(() =>
+      expect(core.workspaceProvenance).toHaveBeenCalledWith("w1", [
+        "src/app.ts",
+        "notes.md",
+        "README.md",
+      ]),
+    );
     const row = (path: string) => screen.getByTitle(path);
     const badge = await within(row("src/app.ts")).findByTestId("reported");
     expect(badge).toHaveTextContent("claude");
@@ -525,7 +532,7 @@ describe("ChangesPanel with reported writes", () => {
       }),
     );
     const user = await renderPanel();
-    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalledWith("w1"));
+    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalled());
     expect(screen.queryByTestId("reported")).toBeNull();
     expect(screen.queryByText(/reported writing/)).toBeNull();
     await user.click(screen.getByTitle("src/app.ts"));
@@ -535,11 +542,69 @@ describe("ChangesPanel with reported writes", () => {
     );
   });
 
+  it("marks a file last written while an agent ran a command as seen, not reported", async () => {
+    core.workspaceProvenance.mockResolvedValue(
+      provenance({
+        files: [
+          {
+            path: "notes.md",
+            reports: [],
+            observed: {
+              at: at + 5_000,
+              matches: [
+                {
+                  runId: "run-1",
+                  harnessId: "claude",
+                  tool: "Bash",
+                  from: at + 4_000,
+                  to: at + 6_000,
+                },
+              ],
+            },
+          },
+          // Reported and observed: the report is what is shown.
+          {
+            ...provenance().files[0]!,
+            observed: {
+              at: at + 5_000,
+              matches: [
+                { runId: "run-1", harnessId: "claude", tool: "Write", from: at, to: at + 100 },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const user = await renderPanel();
+    const row = (path: string) => screen.getByTitle(path);
+    const seen = await within(row("notes.md")).findByTestId("observed");
+    expect(seen).toHaveTextContent("claude");
+    expect(seen.title).toContain("while claude was running Bash");
+    expect(seen.title).toContain("Yardsort read the time on the file, not who wrote it");
+    expect(within(row("src/app.ts")).getByTestId("reported")).toBeInTheDocument();
+    expect(within(row("src/app.ts")).queryByTestId("observed")).toBeNull();
+    expect(within(row("README.md")).queryByTestId("observed")).toBeNull();
+
+    const note = screen.getByText(/Agents reported writing 1 of 3 changed files/);
+    expect(note).toHaveTextContent("One was last written while an agent ran a command");
+    expect(note).toHaveTextContent("seen on the file's clock, not reported");
+    expect(note).toHaveTextContent("One more came from you, a script, a command the agent ran");
+
+    await user.click(row("notes.md"));
+    await user.click(await screen.findByRole("button", { name: "Expand" }));
+    expect(screen.getByRole("region", { name: "Viewing notes.md" })).toHaveTextContent(
+      "last written while claude ran Bash",
+    );
+  });
+
   it("asks again when a report lands, so a badge appears as the agent writes", async () => {
     core.workspaceProvenance.mockResolvedValueOnce(provenance({ files: [] }));
     await renderPanel();
     await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalledTimes(1));
     expect(screen.getByText(/No changed file was reported written/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/The changes came from you, a script, a command the agent ran/),
+    ).toBeInTheDocument();
     core.workspaceProvenance.mockResolvedValue(provenance());
     act(() => activityChanged?.(["other", "w1"]));
     await within(screen.getByTitle("src/app.ts")).findByTestId("reported");
