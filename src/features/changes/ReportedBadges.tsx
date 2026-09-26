@@ -57,7 +57,7 @@ export function ProvenanceNote({ changes }: { changes: ChangeSet }) {
     reported === paths.size
       ? `Every changed file was reported written by an agent.`
       : reported === 0
-        ? `No changed file was reported written by an agent — ${alternatives}.`
+        ? `No changed file was reported written by an agent — the changes came from ${alternatives}.`
         : `Agents reported writing ${reported} of ${paths.size} changed files. The rest changed with no report — ${alternatives}.`;
   return (
     <p className="px-3 py-1 text-[11px] text-ink-faint" title={CAVEAT}>
