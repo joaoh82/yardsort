@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Hand off a workspace to another agent.** A new **Hand off…** button in the tab bar writes
+  the next agent's first message from what Yardsort recorded: what the workspace was asked,
+  where the branch stands and who wrote each changed file, what each agent run did, and what
+  is not known — never the last agent's words, which Yardsort does not keep. It opens in the
+  composer to read and edit before it is sent; the new conversation's record keeps no first
+  message, so the task on record stays yours. See
+  [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent)
+  and the design note ([18](docs/design/18-agent-events-stage-4-handoff.md)).
 - **Assist can be told who wrote each file.** A new switch under Settings → Assist, off by
   default and offered once the review is on, sends with each diff one sentence in the Changes
   list's own words: _reported written by claude_, _last written while claude ran a command_,

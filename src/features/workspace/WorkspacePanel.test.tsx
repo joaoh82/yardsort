@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { harness, project, worktree } from "@/test/fixtures";
@@ -15,6 +15,7 @@ const core = vi.hoisted(() => ({
   appInfo: vi.fn(),
   harnessesList: vi.fn(),
   uiStateSave: vi.fn(),
+  workspaceHandoff: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -127,6 +128,22 @@ describe("an empty workspace", () => {
 
     await user.click(screen.getByRole("button", { name: /Open Composer/ }));
     expect(useProjectsStore.getState().composingWorkspaceId).toBe(local.id);
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+  });
+
+  it("Hand off asks the core for the packet and opens the composer here with it", async () => {
+    const user = userEvent.setup();
+    core.workspaceHandoff.mockResolvedValue({
+      text: '# Handoff from Yardsort: workspace "feature" in alpha\n',
+      runs: 1,
+      events: 9,
+    });
+    show(feature.id);
+
+    await user.click(screen.getByRole("button", { name: "Hand off…" }));
+    await waitFor(() => expect(core.workspaceHandoff).toHaveBeenCalledWith(feature.id));
+    await waitFor(() => expect(useProjectsStore.getState().composingWorkspaceId).toBe(feature.id));
+    expect(useProjectsStore.getState().composingPrompt).toContain("# Handoff from Yardsort");
     expect(core.ptySpawn).not.toHaveBeenCalled();
   });
 

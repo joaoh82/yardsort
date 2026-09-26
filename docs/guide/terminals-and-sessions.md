@@ -10,6 +10,8 @@ Each workspace has its own row of tabs.
 - The agent buttons on the right of the tab bar start that agent in this workspace, with no
   prompt. Each carries that agent's mark, which a tab running a conversation wears too, so a row
   of tabs says at a glance which agent is in which. (To start one _with_ a prompt and a fresh branch, use the [composer](workspaces.md).)
+- **Hand off…**, before them, starts another agent here with what Yardsort recorded about the
+  workspace as its first message — see [below](#handing-work-to-another-agent).
 - **+** or `Ctrl+Shift+T` / `⌘T` opens a **shell** in the workspace folder — for running tests, a
   dev server, or git by hand, next to the agent.
 - **×** or `Ctrl+Shift+W` / `⌘W` closes a tab and stops what runs in it.
@@ -43,6 +45,34 @@ Plain `Ctrl+C`, `Ctrl+V` and a plain click belong to the program in the terminal
   it goes to whatever program is in the tab — a shell gets an argument it can use as it is. To
   put a path in the first message, before anything is running, drop the file on the
   [composer](workspaces.md#starting-one-the-composer) instead.
+
+## Handing work to another agent
+
+One agent has worked in a workspace and you want a second one there: Codex after Claude, or the
+same agent again from a clean start. The second agent sees the same files and the same diff, but
+nothing of what was asked, tried or found. **Hand off…** in the tab bar writes it a first message
+from what Yardsort recorded and opens the [composer](workspaces.md#starting-one-the-composer)
+with it, to run in this workspace. Read it, change it, pick the agent, press Enter.
+
+The message has four parts:
+
+- **What this workspace was asked** — the first message of each conversation here, whole.
+- **Where the work stands** — the branch and what it started from, the commits on it, and each
+  changed file with the same word the Changes list gives it: reported written by an agent,
+  written while one ran a command, or no report.
+- **What the agents did here** — one entry per run: which agent, when, how long, how it ended;
+  then, for a run that was reporting, its turns, tools by count, what failed and on which file,
+  what it reported writing, permissions asked, notifications raised. A run that was not
+  reporting says only that it ran.
+- **What is not here** — the conversations themselves, the commands, the contents of files as
+  they were, and how many events the summary rests on, with the `ys activity list` line that
+  shows them.
+
+Two things to know. Nothing in it comes from a model or from the last agent's words: Yardsort
+keeps metadata, never a conversation, so the message says where it is blind and tells the agent
+to ask you. And a handoff is not the task: the new conversation's record keeps no first message,
+so what the workspace was asked stays what you first typed — for Assist, and for the next
+handoff. Times in the message are UTC, in case it travels.
 
 ## Agents keep working when you close the window
 

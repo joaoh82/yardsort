@@ -588,6 +588,25 @@ _Exit:_ reported writes are told apart from git-observed changes on the panel, w
 alternatives named; no claim of line-level causality anywhere; the gates green. Owed: the
 hands-on pass in [08 §18](08-manual-checklist.md#18--reported-writes-beside-the-diff).
 
+## M19 — Agent events, stage 4: handoffs (first slice) ✅
+
+The user story the design opened with, recorded in
+[18-agent-events-stage-4-handoff](18-agent-events-stage-4-handoff.md).
+
+- The decision: a deterministic packet — the task whole, the branch and its commits, each
+  changed file with the Changes list's word on who wrote it, one entry per run with what it
+  did, and what is not there — as the next agent's first message, previewed and edited in the
+  composer, sent through the ordinary prompt transport. No model in the loop; Jev's ranking
+  waits for use.
+- A handoff is not the task: its session record keeps no prompt, so `session_prompts` — what
+  Assist and the next packet read — stays the user's own words.
+- Not built: `ys workspace handoff`, until the change list moves to the core.
+
+_Exit:_ the packet renders every part from a recorded run and leaks nothing; **Hand off…**
+opens the composer here with it; an edited packet spawns with `handoff: true` and creates no
+workspace; the gates green. Owed: the live story in
+[08 §19](08-manual-checklist.md#19--handing-off).
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ContextMenu, type MenuItem } from "@/features/sidebar/ContextMenu";
 import { formatShortcut } from "@/lib/platform";
+import { errorMessage, ipc } from "@/lib/ipc";
+import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
@@ -32,6 +34,7 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
         +
       </button>
       <div className="ml-auto flex items-center gap-1 pr-2">
+        <HandOff workspaceId={workspaceId} />
         {harnesses.map((harness) => (
           <button
             key={harness.id}
@@ -112,5 +115,41 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
       </button>
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
     </div>
+  );
+}
+
+/**
+ * Start another agent here with what Yardsort recorded about the workspace as its first
+ * message. The packet opens in the composer, where it is read and edited before anything is
+ * sent; the agent is chosen there too. Nothing of the last agent's conversation is in it.
+ */
+function HandOff({ workspaceId }: { workspaceId: string }) {
+  const [busy, setBusy] = useState(false);
+  const handOff = async () => {
+    const projects = useProjectsStore.getState();
+    const workspace = projects.projects
+      .flatMap((project) => project.workspaces)
+      .find((candidate) => candidate.id === workspaceId);
+    if (!workspace) return;
+    setBusy(true);
+    try {
+      const packet = await ipc.workspaceHandoff(workspaceId);
+      useProjectsStore.getState().composeIn(workspace, packet.text);
+    } catch (error) {
+      useProjectsStore.setState({ error: errorMessage(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      title="Start another agent here, with what Yardsort recorded about this workspace as its first message — to read and edit before it is sent"
+      onClick={() => void handOff()}
+      className="mr-1 rounded border border-line px-2 py-0.5 text-[11px] text-ink-faint hover:border-accent hover:text-ink disabled:opacity-40"
+    >
+      Hand off…
+    </button>
   );
 }

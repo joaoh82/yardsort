@@ -29,6 +29,12 @@ pub struct HarnessRequest {
     pub effort: Option<String>,
     /// The first message. `None` or empty just opens the harness.
     pub prompt: Option<String>,
+    /// The first message is a handoff packet Yardsort assembled (see `activity::handoff`),
+    /// not the user's own task: it is sent like any prompt, but the session's record keeps no
+    /// prompt, so the workspace's task — what Assist and the next packet read — stays the
+    /// user's words.
+    #[serde(default)]
+    pub handoff: bool,
 }
 
 /// What to run in a workspace.
@@ -452,9 +458,13 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
                 model,
                 effort,
                 harness_session_id: session_id,
-                title: title_from_prompt(prompt.as_deref()),
+                title: if request.handoff {
+                    "Handoff".to_owned()
+                } else {
+                    title_from_prompt(prompt.as_deref())
+                },
                 forked_from: None,
-                prompt: prompt.clone(),
+                prompt: prompt.clone().filter(|_| !request.handoff),
             };
             ResolvedLaunch {
                 program: Some(def.command.clone()),
@@ -595,6 +605,7 @@ mod tests {
             model: Some("opus".into()),
             effort: None,
             prompt: Some("fix it".into()),
+            handoff: false,
         };
         let claude = resolve_launch(Launch::Harness(request("claude")), &[]).unwrap();
         assert_eq!(claude.program.as_deref(), Some("claude"));
@@ -629,6 +640,7 @@ mod tests {
             model: None,
             effort: None,
             prompt: Some(prompt),
+            handoff: false,
         };
         let stdin = [HarnessOverride {
             id: "claude".into(),
@@ -821,6 +833,7 @@ mod tests {
                     model: Some("m".into()),
                     effort: None,
                     prompt: Some("exit 0".into()),
+                    handoff: false,
                 }),
                 SIZE,
             )
@@ -1064,6 +1077,7 @@ mod tests {
                     model: None,
                     effort: None,
                     prompt: Some("exit 3".into()),
+                    handoff: false,
                 }),
                 SIZE,
             )
@@ -1166,6 +1180,7 @@ mod tests {
                     model: None,
                     effort: None,
                     prompt: Some("exit 0".into()),
+                    handoff: false,
                 }),
                 SIZE,
             )
@@ -1226,6 +1241,7 @@ mod tests {
                 model: None,
                 effort: None,
                 prompt: Some("exit 0".into()),
+                handoff: false,
             })
         };
         let on = ActivitySettings {
@@ -1288,6 +1304,7 @@ mod tests {
                     model: None,
                     effort: None,
                     prompt: Some("exit 0".into()),
+                    handoff: false,
                 }),
                 SIZE,
             )
@@ -1335,6 +1352,7 @@ mod tests {
                 model: None,
                 effort: Some("high".into()),
                 prompt: Some("exit 0".into()),
+                handoff: false,
             })
         };
         let on = ActivitySettings {
@@ -1413,6 +1431,7 @@ mod tests {
                 model: None,
                 effort: None,
                 prompt: Some("exit 0".into()),
+                handoff: false,
             })
         };
         let on = ActivitySettings {
@@ -1500,6 +1519,7 @@ mod tests {
                 model: None,
                 effort: None,
                 prompt: Some("exit 0".into()),
+                handoff: false,
             })
         };
         let on = ActivitySettings {
@@ -1575,6 +1595,7 @@ mod tests {
                 model: None,
                 effort: None,
                 prompt: Some("exit 0".into()),
+                handoff: false,
             })
         };
         let omp_only = ActivitySettings {
@@ -1638,6 +1659,7 @@ mod tests {
                 model: None,
                 effort: None,
                 prompt: Some("exit 0".into()),
+                handoff: false,
             })
         };
         let off = ActivitySettings::default();

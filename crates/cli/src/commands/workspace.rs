@@ -246,6 +246,7 @@ fn new(
                 model,
                 effort,
                 prompt: Some(prompt),
+                handoff: false,
             }),
             DETACHED_SIZE,
         )?;

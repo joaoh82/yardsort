@@ -375,6 +375,72 @@ pub fn last_written(root: &Path, paths: &[String]) -> Vec<(String, i64)> {
         .collect()
 }
 
+/// A handoff packet: what Yardsort recorded about a workspace, as the opening prompt for the
+/// next agent there. See `yardsort_core::activity::handoff`.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffPacket {
+    /// Markdown, for the composer's message box: the user reads and edits it before sending.
+    pub text: String,
+    /// How many agent runs and events stand behind it, for the line above the box.
+    pub runs: u32,
+    pub events: u32,
+}
+
+/// Assemble the packet for a workspace: the store's facts, and git's — branch, commits since
+/// the base, the change list with each file's modification time for the observed join.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_handoff(app: AppHandle, workspace_id: String) -> IpcResult<HandoffPacket> {
+    use yardsort_core::activity::handoff::{self, ChangedFile};
+    blocking(app, move |state| {
+        let (row, root) = crate::changes::commands::workspace(state, &workspace_id)?;
+        let git = crate::git::Git::new(&state.env())?;
+        let set = crate::changes::Changes {
+            git: &git,
+            root: &root,
+            base_branch: row.base_branch.as_deref(),
+        }
+        .list()?;
+        let file = |change: &crate::changes::FileChange| ChangedFile {
+            path: change.path.clone(),
+            kind: serde_json::to_value(change.kind)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default(),
+            additions: change.additions,
+            deletions: change.deletions,
+        };
+        let paths: Vec<String> = set
+            .uncommitted
+            .iter()
+            .chain(&set.committed)
+            .map(|change| change.path.clone())
+            .collect();
+        let mut facts =
+            handoff::from_store(&state.store, &workspace_id, &last_written(&root, &paths))?;
+        facts.branch = match git.head(&root) {
+            Ok(crate::git::Head::Branch(name) | crate::git::Head::Unborn(name)) => Some(name),
+            _ => None,
+        };
+        facts.base = set.base.clone();
+        if let Some(base) = &set.base {
+            facts.commits = git
+                .commits_since(&root, base)
+                .map(|commits| commits.into_iter().map(|c| c.subject).collect())
+                .unwrap_or_default();
+        }
+        facts.uncommitted = set.uncommitted.iter().map(file).collect();
+        facts.committed = set.committed.iter().map(file).collect();
+        Ok(HandoffPacket {
+            runs: facts.runs.len() as u32,
+            events: facts.events as u32,
+            text: handoff::render(&facts),
+        })
+    })
+    .await
+}
+
 /// The reported writes for a workspace, as they stand now, and for each of `paths` — the
 /// change list's files — whether its last write fell inside a tool call.
 #[tauri::command]
