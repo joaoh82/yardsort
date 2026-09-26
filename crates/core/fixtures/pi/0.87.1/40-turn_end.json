@@ -1,0 +1,1347 @@
+{
+  "event": "turn_end",
+  "payload": {
+    "type": "turn_end",
+    "turnIndex": 1,
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": " Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. ",
+          "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. \",\"format\":\"unknown\",\"index\":0}]"
+        },
+        {
+          "type": "text",
+          "text": " "
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.read:1",
+          "name": "read",
+          "arguments": {
+            "limit": null,
+            "offset": null,
+            "path": "hello.txt"
+          }
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.read:2",
+          "name": "read",
+          "arguments": {
+            "limit": null,
+            "offset": null,
+            "path": "missing.txt"
+          }
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.bash:3",
+          "name": "bash",
+          "arguments": {
+            "command": "ls",
+            "timeout": null
+          }
+        }
+      ],
+      "api": "openai-completions",
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.6",
+      "usage": {
+        "input": 308,
+        "output": 91,
+        "cacheRead": 1584,
+        "cacheWrite": 0,
+        "reasoning": 24,
+        "totalTokens": 1983,
+        "cost": {
+          "input": 0.00029259999999999996,
+          "output": 0.00036399999999999996,
+          "cacheRead": 0.00025344,
+          "cacheWrite": 0,
+          "total": 0.00091004
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1790453824198,
+      "responseId": "gen-1790453824-zSZuci18yh1oBWNtFVyl",
+      "rawStopReason": "tool_calls"
+    },
+    "toolResults": [
+      {
+        "role": "toolResult",
+        "toolCallId": "functions.read:1",
+        "toolName": "read",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "isError": false,
+        "timestamp": 1790453825308
+      },
+      {
+        "role": "toolResult",
+        "toolCallId": "functions.read:2",
+        "toolName": "read",
+        "content": [
+          {
+            "type": "text",
+            "text": "ENOENT: no such file or directory, access '/tmp/yardsort-fixture/repo/missing.txt'"
+          }
+        ],
+        "details": {},
+        "isError": true,
+        "timestamp": 1790453825308
+      },
+      {
+        "role": "toolResult",
+        "toolCallId": "functions.bash:3",
+        "toolName": "bash",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello.txt\n"
+          }
+        ],
+        "isError": false,
+        "timestamp": 1790453825309
+      }
+    ],
+    "messageEntryId": "0ed4afc6",
+    "toolResultEntryIds": ["b444cd15", "b1e41a6a", "08869c39"],
+    "outcome": "completed",
+    "entries": [],
+    "continue": false,
+    "context": {
+      "contextEntries": [
+        {
+          "sourceEntry": {
+            "type": "model_change",
+            "id": "57145460",
+            "parentId": null,
+            "timestamp": "2026-09-26T20:16:59.974Z",
+            "provider": "openrouter",
+            "modelId": "moonshotai/kimi-k2.6"
+          },
+          "messages": []
+        },
+        {
+          "sourceEntry": {
+            "type": "thinking_level_change",
+            "id": "2519cd29",
+            "parentId": "57145460",
+            "timestamp": "2026-09-26T20:16:59.974Z",
+            "thinkingLevel": "medium"
+          },
+          "messages": []
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "c51d1239",
+            "parentId": "2519cd29",
+            "timestamp": "2026-09-26T20:16:59.989Z",
+            "message": {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+                "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+                "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+                "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/0.87.1/pi/README.m\u2026",
+                "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relati\u2026",
+                "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+              },
+              "timestamp": 1790453819986,
+              "toolsAdded": [
+                {
+                  "name": "read",
+                  "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to read (relative or absolute)"
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Line number to start reading from (1-indexed)"
+                      },
+                      "limit": {
+                        "type": "number",
+                        "description": "Maximum number of lines to read"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "bash",
+                  "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "description": "Shell command to execute"
+                      },
+                      "timeout": {
+                        "type": "number",
+                        "description": "Timeout in seconds (optional, no default timeout)"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "edit",
+                  "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "edits"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to edit (relative or absolute)"
+                      },
+                      "edits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["oldText", "newText"],
+                          "properties": {
+                            "oldText": {
+                              "type": "string",
+                              "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                            },
+                            "newText": {
+                              "type": "string",
+                              "description": "Replacement text for this targeted edit."
+                            }
+                          }
+                        },
+                        "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "write",
+                  "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "content"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to write (relative or absolute)"
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "Content to write to the file"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                }
+              ]
+            }
+          },
+          "messages": [
+            {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+                "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+                "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+                "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/0.87.1/pi/README.m\u2026",
+                "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relati\u2026",
+                "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+              },
+              "timestamp": 1790453819986,
+              "toolsAdded": [
+                {
+                  "name": "read",
+                  "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to read (relative or absolute)"
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Line number to start reading from (1-indexed)"
+                      },
+                      "limit": {
+                        "type": "number",
+                        "description": "Maximum number of lines to read"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "bash",
+                  "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "description": "Shell command to execute"
+                      },
+                      "timeout": {
+                        "type": "number",
+                        "description": "Timeout in seconds (optional, no default timeout)"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "edit",
+                  "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "edits"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to edit (relative or absolute)"
+                      },
+                      "edits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["oldText", "newText"],
+                          "properties": {
+                            "oldText": {
+                              "type": "string",
+                              "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                            },
+                            "newText": {
+                              "type": "string",
+                              "description": "Replacement text for this targeted edit."
+                            }
+                          }
+                        },
+                        "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "write",
+                  "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "content"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to write (relative or absolute)"
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "Content to write to the file"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "680276b3",
+            "parentId": "c51d1239",
+            "timestamp": "2026-09-26T20:16:59.989Z",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done."
+                }
+              ],
+              "timestamp": 1790453819986
+            }
+          },
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done."
+                }
+              ],
+              "timestamp": 1790453819986
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "7bc10c2d",
+            "parentId": "680276b3",
+            "timestamp": "2026-09-26T20:17:04.191Z",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": " The user wants me to:\n1. Create a file named hello.txt containing the single word \"hello\"\n2. Read it back\n3. Read a file named missing.txt (which doesn't exist)\n4. Run ls\n5. Reply with one word when \u2026",
+                  "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to:\\n1. Create a file named hello.txt containing the single word \\\"hello\\\"\\n2. Read it back\\n3. Read a file named missing.txt (which doesn't exist)\u2026"
+                },
+                {
+                  "type": "text",
+                  "text": " "
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.write:0",
+                  "name": "write",
+                  "arguments": {
+                    "content": "hello",
+                    "path": "hello.txt"
+                  }
+                }
+              ],
+              "api": "openai-completions",
+              "provider": "openrouter",
+              "model": "moonshotai/kimi-k2.6",
+              "usage": {
+                "input": 778,
+                "output": 260,
+                "cacheRead": 832,
+                "cacheWrite": 0,
+                "reasoning": 243,
+                "totalTokens": 1870,
+                "cost": {
+                  "input": 0.0007390999999999999,
+                  "output": 0.00104,
+                  "cacheRead": 0.00013312,
+                  "cacheWrite": 0,
+                  "total": 0.0019122199999999998
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1790453820000,
+              "responseId": "gen-1790453820-VUd8ZFoEqAeKY0oqYKnb",
+              "rawStopReason": "tool_calls"
+            }
+          },
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": " The user wants me to:\n1. Create a file named hello.txt containing the single word \"hello\"\n2. Read it back\n3. Read a file named missing.txt (which doesn't exist)\n4. Run ls\n5. Reply with one word when \u2026",
+                  "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to:\\n1. Create a file named hello.txt containing the single word \\\"hello\\\"\\n2. Read it back\\n3. Read a file named missing.txt (which doesn't exist)\u2026"
+                },
+                {
+                  "type": "text",
+                  "text": " "
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.write:0",
+                  "name": "write",
+                  "arguments": {
+                    "content": "hello",
+                    "path": "hello.txt"
+                  }
+                }
+              ],
+              "api": "openai-completions",
+              "provider": "openrouter",
+              "model": "moonshotai/kimi-k2.6",
+              "usage": {
+                "input": 778,
+                "output": 260,
+                "cacheRead": 832,
+                "cacheWrite": 0,
+                "reasoning": 243,
+                "totalTokens": 1870,
+                "cost": {
+                  "input": 0.0007390999999999999,
+                  "output": 0.00104,
+                  "cacheRead": 0.00013312,
+                  "cacheWrite": 0,
+                  "total": 0.0019122199999999998
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1790453820000,
+              "responseId": "gen-1790453820-VUd8ZFoEqAeKY0oqYKnb",
+              "rawStopReason": "tool_calls"
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "3491bd7a",
+            "parentId": "7bc10c2d",
+            "timestamp": "2026-09-26T20:17:04.195Z",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "functions.write:0",
+              "toolName": "write",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Successfully wrote to hello.txt"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1790453824195
+            }
+          },
+          "messages": [
+            {
+              "role": "toolResult",
+              "toolCallId": "functions.write:0",
+              "toolName": "write",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Successfully wrote to hello.txt"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1790453824195
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "0ed4afc6",
+            "parentId": "3491bd7a",
+            "timestamp": "2026-09-26T20:17:05.300Z",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": " Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. ",
+                  "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. \",\"format\":\"unknown\",\"index\":0}]"
+                },
+                {
+                  "type": "text",
+                  "text": " "
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.read:1",
+                  "name": "read",
+                  "arguments": {
+                    "limit": null,
+                    "offset": null,
+                    "path": "hello.txt"
+                  }
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.read:2",
+                  "name": "read",
+                  "arguments": {
+                    "limit": null,
+                    "offset": null,
+                    "path": "missing.txt"
+                  }
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.bash:3",
+                  "name": "bash",
+                  "arguments": {
+                    "command": "ls",
+                    "timeout": null
+                  }
+                }
+              ],
+              "api": "openai-completions",
+              "provider": "openrouter",
+              "model": "moonshotai/kimi-k2.6",
+              "usage": {
+                "input": 308,
+                "output": 91,
+                "cacheRead": 1584,
+                "cacheWrite": 0,
+                "reasoning": 24,
+                "totalTokens": 1983,
+                "cost": {
+                  "input": 0.00029259999999999996,
+                  "output": 0.00036399999999999996,
+                  "cacheRead": 0.00025344,
+                  "cacheWrite": 0,
+                  "total": 0.00091004
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1790453824198,
+              "responseId": "gen-1790453824-zSZuci18yh1oBWNtFVyl",
+              "rawStopReason": "tool_calls"
+            }
+          },
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": " Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. ",
+                  "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. \",\"format\":\"unknown\",\"index\":0}]"
+                },
+                {
+                  "type": "text",
+                  "text": " "
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.read:1",
+                  "name": "read",
+                  "arguments": {
+                    "limit": null,
+                    "offset": null,
+                    "path": "hello.txt"
+                  }
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.read:2",
+                  "name": "read",
+                  "arguments": {
+                    "limit": null,
+                    "offset": null,
+                    "path": "missing.txt"
+                  }
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.bash:3",
+                  "name": "bash",
+                  "arguments": {
+                    "command": "ls",
+                    "timeout": null
+                  }
+                }
+              ],
+              "api": "openai-completions",
+              "provider": "openrouter",
+              "model": "moonshotai/kimi-k2.6",
+              "usage": {
+                "input": 308,
+                "output": 91,
+                "cacheRead": 1584,
+                "cacheWrite": 0,
+                "reasoning": 24,
+                "totalTokens": 1983,
+                "cost": {
+                  "input": 0.00029259999999999996,
+                  "output": 0.00036399999999999996,
+                  "cacheRead": 0.00025344,
+                  "cacheWrite": 0,
+                  "total": 0.00091004
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1790453824198,
+              "responseId": "gen-1790453824-zSZuci18yh1oBWNtFVyl",
+              "rawStopReason": "tool_calls"
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "b444cd15",
+            "parentId": "0ed4afc6",
+            "timestamp": "2026-09-26T20:17:05.308Z",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "functions.read:1",
+              "toolName": "read",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1790453825308
+            }
+          },
+          "messages": [
+            {
+              "role": "toolResult",
+              "toolCallId": "functions.read:1",
+              "toolName": "read",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "isError": false,
+              "timestamp": 1790453825308
+            }
+          ]
+        }
+      ],
+      "contextMessages": [
+        {
+          "role": "system",
+          "content": "",
+          "sections": {
+            "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+            "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+            "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+            "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/0.87.1/pi/README.m\u2026",
+            "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relati\u2026",
+            "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+          },
+          "timestamp": 1790453819986,
+          "toolsAdded": [
+            {
+              "name": "read",
+              "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative or absolute)"
+                  },
+                  "offset": {
+                    "type": "number",
+                    "description": "Line number to start reading from (1-indexed)"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum number of lines to read"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "bash",
+              "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Shell command to execute"
+                  },
+                  "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds (optional, no default timeout)"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "edit",
+              "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "edits"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to edit (relative or absolute)"
+                  },
+                  "edits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["oldText", "newText"],
+                      "properties": {
+                        "oldText": {
+                          "type": "string",
+                          "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                        },
+                        "newText": {
+                          "type": "string",
+                          "description": "Replacement text for this targeted edit."
+                        }
+                      }
+                    },
+                    "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "write",
+              "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "content"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to write (relative or absolute)"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Content to write to the file"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done."
+            }
+          ],
+          "timestamp": 1790453819986
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": " The user wants me to:\n1. Create a file named hello.txt containing the single word \"hello\"\n2. Read it back\n3. Read a file named missing.txt (which doesn't exist)\n4. Run ls\n5. Reply with one word when \u2026",
+              "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to:\\n1. Create a file named hello.txt containing the single word \\\"hello\\\"\\n2. Read it back\\n3. Read a file named missing.txt (which doesn't exist)\u2026"
+            },
+            {
+              "type": "text",
+              "text": " "
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.write:0",
+              "name": "write",
+              "arguments": {
+                "content": "hello",
+                "path": "hello.txt"
+              }
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "openrouter",
+          "model": "moonshotai/kimi-k2.6",
+          "usage": {
+            "input": 778,
+            "output": 260,
+            "cacheRead": 832,
+            "cacheWrite": 0,
+            "reasoning": 243,
+            "totalTokens": 1870,
+            "cost": {
+              "input": 0.0007390999999999999,
+              "output": 0.00104,
+              "cacheRead": 0.00013312,
+              "cacheWrite": 0,
+              "total": 0.0019122199999999998
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1790453820000,
+          "responseId": "gen-1790453820-VUd8ZFoEqAeKY0oqYKnb",
+          "rawStopReason": "tool_calls"
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.write:0",
+          "toolName": "write",
+          "content": [
+            {
+              "type": "text",
+              "text": "Successfully wrote to hello.txt"
+            }
+          ],
+          "isError": false,
+          "timestamp": 1790453824195
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": " Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. ",
+              "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. \",\"format\":\"unknown\",\"index\":0}]"
+            },
+            {
+              "type": "text",
+              "text": " "
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.read:1",
+              "name": "read",
+              "arguments": {
+                "limit": null,
+                "offset": null,
+                "path": "hello.txt"
+              }
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.read:2",
+              "name": "read",
+              "arguments": {
+                "limit": null,
+                "offset": null,
+                "path": "missing.txt"
+              }
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.bash:3",
+              "name": "bash",
+              "arguments": {
+                "command": "ls",
+                "timeout": null
+              }
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "openrouter",
+          "model": "moonshotai/kimi-k2.6",
+          "usage": {
+            "input": 308,
+            "output": 91,
+            "cacheRead": 1584,
+            "cacheWrite": 0,
+            "reasoning": 24,
+            "totalTokens": 1983,
+            "cost": {
+              "input": 0.00029259999999999996,
+              "output": 0.00036399999999999996,
+              "cacheRead": 0.00025344,
+              "cacheWrite": 0,
+              "total": 0.00091004
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1790453824198,
+          "responseId": "gen-1790453824-zSZuci18yh1oBWNtFVyl",
+          "rawStopReason": "tool_calls"
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.read:1",
+          "toolName": "read",
+          "content": [
+            {
+              "type": "text",
+              "text": "hello"
+            }
+          ],
+          "isError": false,
+          "timestamp": 1790453825308
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.read:2",
+          "toolName": "read",
+          "content": [
+            {
+              "type": "text",
+              "text": "ENOENT: no such file or directory, access '/tmp/yardsort-fixture/repo/missing.txt'"
+            }
+          ],
+          "details": {},
+          "isError": true,
+          "timestamp": 1790453825308
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.bash:3",
+          "toolName": "bash",
+          "content": [
+            {
+              "type": "text",
+              "text": "hello.txt\n"
+            }
+          ],
+          "isError": false,
+          "timestamp": 1790453825309
+        }
+      ],
+      "llmMessages": [
+        {
+          "role": "system",
+          "content": "",
+          "sections": {
+            "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+            "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+            "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+            "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/0.87.1/pi/README.m\u2026",
+            "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relati\u2026",
+            "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+          },
+          "timestamp": 1790453819986,
+          "toolsAdded": [
+            {
+              "name": "read",
+              "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative or absolute)"
+                  },
+                  "offset": {
+                    "type": "number",
+                    "description": "Line number to start reading from (1-indexed)"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum number of lines to read"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "bash",
+              "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Shell command to execute"
+                  },
+                  "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds (optional, no default timeout)"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "edit",
+              "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "edits"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to edit (relative or absolute)"
+                  },
+                  "edits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["oldText", "newText"],
+                      "properties": {
+                        "oldText": {
+                          "type": "string",
+                          "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                        },
+                        "newText": {
+                          "type": "string",
+                          "description": "Replacement text for this targeted edit."
+                        }
+                      }
+                    },
+                    "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "write",
+              "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "content"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to write (relative or absolute)"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Content to write to the file"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done."
+            }
+          ],
+          "timestamp": 1790453819986
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": " The user wants me to:\n1. Create a file named hello.txt containing the single word \"hello\"\n2. Read it back\n3. Read a file named missing.txt (which doesn't exist)\n4. Run ls\n5. Reply with one word when \u2026",
+              "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to:\\n1. Create a file named hello.txt containing the single word \\\"hello\\\"\\n2. Read it back\\n3. Read a file named missing.txt (which doesn't exist)\u2026"
+            },
+            {
+              "type": "text",
+              "text": " "
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.write:0",
+              "name": "write",
+              "arguments": {
+                "content": "hello",
+                "path": "hello.txt"
+              }
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "openrouter",
+          "model": "moonshotai/kimi-k2.6",
+          "usage": {
+            "input": 778,
+            "output": 260,
+            "cacheRead": 832,
+            "cacheWrite": 0,
+            "reasoning": 243,
+            "totalTokens": 1870,
+            "cost": {
+              "input": 0.0007390999999999999,
+              "output": 0.00104,
+              "cacheRead": 0.00013312,
+              "cacheWrite": 0,
+              "total": 0.0019122199999999998
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1790453820000,
+          "responseId": "gen-1790453820-VUd8ZFoEqAeKY0oqYKnb",
+          "rawStopReason": "tool_calls"
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.write:0",
+          "toolName": "write",
+          "content": [
+            {
+              "type": "text",
+              "text": "Successfully wrote to hello.txt"
+            }
+          ],
+          "isError": false,
+          "timestamp": 1790453824195
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": " Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. ",
+              "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" Now I can read hello.txt, read missing.txt, and run ls in parallel since they're independent. \",\"format\":\"unknown\",\"index\":0}]"
+            },
+            {
+              "type": "text",
+              "text": " "
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.read:1",
+              "name": "read",
+              "arguments": {
+                "limit": null,
+                "offset": null,
+                "path": "hello.txt"
+              }
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.read:2",
+              "name": "read",
+              "arguments": {
+                "limit": null,
+                "offset": null,
+                "path": "missing.txt"
+              }
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.bash:3",
+              "name": "bash",
+              "arguments": {
+                "command": "ls",
+                "timeout": null
+              }
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "openrouter",
+          "model": "moonshotai/kimi-k2.6",
+          "usage": {
+            "input": 308,
+            "output": 91,
+            "cacheRead": 1584,
+            "cacheWrite": 0,
+            "reasoning": 24,
+            "totalTokens": 1983,
+            "cost": {
+              "input": 0.00029259999999999996,
+              "output": 0.00036399999999999996,
+              "cacheRead": 0.00025344,
+              "cacheWrite": 0,
+              "total": 0.00091004
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1790453824198,
+          "responseId": "gen-1790453824-zSZuci18yh1oBWNtFVyl",
+          "rawStopReason": "tool_calls"
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.read:1",
+          "toolName": "read",
+          "content": [
+            {
+              "type": "text",
+              "text": "hello"
+            }
+          ],
+          "isError": false,
+          "timestamp": 1790453825308
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.read:2",
+          "toolName": "read",
+          "content": [
+            {
+              "type": "text",
+              "text": "ENOENT: no such file or directory, access '/tmp/yardsort-fixture/repo/missing.txt'"
+            }
+          ],
+          "details": {},
+          "isError": true,
+          "timestamp": 1790453825308
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.bash:3",
+          "toolName": "bash",
+          "content": [
+            {
+              "type": "text",
+              "text": "hello.txt\n"
+            }
+          ],
+          "isError": false,
+          "timestamp": 1790453825309
+        }
+      ],
+      "pendingMessages": [],
+      "canContinue": true
+    }
+  },
+  "session": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-26T20-16-59-760Z_11111111-1111-4111-8111-111111111111.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "moonshotai/kimi-k2.6",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

@@ -286,6 +286,29 @@ pub fn join(
     let mut files_by_path: BTreeMap<String, BTreeMap<(Option<String>, String), Report>> =
         BTreeMap::new();
 
+    // A tool call names its file at its start, and not always at its end: pi's `write` result
+    // carries no path where OMP's does. A completed write tool with no path of its own takes
+    // the file from the start with the same `toolUseId` in the same run — and only in a run.
+    // Events the adapter could not link have no run, and a tool id such as `functions.write:0`
+    // is not an identity across sessions; grouping them would hand one session's file to
+    // another's completion.
+    let mut started_path: BTreeMap<(String, String), String> = BTreeMap::new();
+    for event in events {
+        if event.kind != "tool.started" {
+            continue;
+        }
+        let Some(run_id) = event.run_id.as_deref() else {
+            continue;
+        };
+        let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
+        if let (Some(id), Some(path)) = (
+            payload.get("toolUseId").and_then(Value::as_str),
+            payload.get("path").and_then(Value::as_str),
+        ) {
+            started_path.insert((run_id.to_owned(), id.to_owned()), path.to_owned());
+        }
+    }
+
     for event in events {
         let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
         if event.kind == "process.started" {
@@ -306,8 +329,20 @@ pub fn join(
             continue;
         }
         // A path the adapter could not place inside the workspace was never recorded; a write
-        // without one says nothing about any file the diff shows.
-        let Some(path) = payload.get("path").and_then(Value::as_str) else {
+        // without one — at its end or its start — says nothing about any file the diff shows.
+        // And an end that says its destination was outside the workspace has said where the
+        // write went: not to the file its start named (a link, a resolved path elsewhere), so
+        // the start is no fallback for it.
+        let outside = payload.get("pathOutsideWorkspace") == Some(&Value::Bool(true));
+        let from_start = match (event.run_id.as_deref(), outside) {
+            (Some(run_id), false) => payload
+                .get("toolUseId")
+                .and_then(Value::as_str)
+                .and_then(|id| started_path.get(&(run_id.to_owned(), id.to_owned())))
+                .map(String::as_str),
+            _ => None,
+        };
+        let Some(path) = payload.get("path").and_then(Value::as_str).or(from_start) else {
             continue;
         };
         let key = (event.run_id.clone(), event.producer.clone());
@@ -637,6 +672,104 @@ mod tests {
         let p = of(&store, &ws, &[]).unwrap();
         assert!(p.files.is_empty());
         assert_eq!(p.reporting_runs(), 1, "the run did report — just not files");
+    }
+
+    /// pi's `write` names its file at the start and not at the end (OMP's end does too). The
+    /// completed write takes its file from the start with the same tool-use id; one without a
+    /// start to take it from is still no claim.
+    #[test]
+    fn a_completed_write_tool_without_a_path_takes_the_file_from_its_start() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("pi"), Some("extension"));
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "pi",
+            "tool.started",
+            2_000,
+            json!({ "tool": "write", "toolUseId": "functions.write:0", "path": "hello.txt" }),
+        );
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "pi",
+            "tool.completed",
+            2_100,
+            json!({ "tool": "write", "toolUseId": "functions.write:0" }),
+        );
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "pi",
+            "tool.completed",
+            3_000,
+            json!({ "tool": "write", "toolUseId": "functions.write:1" }),
+        );
+        let p = of(&store, &ws, &[]).unwrap();
+        assert_eq!(paths(&p), ["hello.txt"]);
+        assert_eq!(
+            p.files[0].reports[0].writes, 1,
+            "the orphan end claims nothing"
+        );
+    }
+
+    /// Two sessions the adapter could not link, each starting a write with the same tool id
+    /// (`functions.write:0` is pi's counter, not an identity): neither has a run, so neither
+    /// completion may take the other's file. Nothing is reported, and nothing is invented.
+    #[test]
+    fn unlinked_sessions_never_lend_each_other_a_started_path() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let tool = |kind: &str, at: i64, path: Option<&str>| {
+            let mut payload = json!({ "tool": "write", "toolUseId": "functions.write:0" });
+            if let Some(path) = path {
+                payload["path"] = json!(path);
+            }
+            event(&store, &ws, None, "pi", kind, at, payload);
+        };
+        tool("tool.started", 1_000, Some("a.txt"));
+        tool("tool.completed", 1_100, None);
+        tool("tool.started", 2_000, Some("b.txt"));
+        let p = of(&store, &ws, &[]).unwrap();
+        assert!(
+            p.files.is_empty(),
+            "a completion with no run has no start to take a file from: {:?}",
+            paths(&p)
+        );
+    }
+
+    /// A completion that says its destination lay outside the workspace has said where the
+    /// write went — a link, a resolved path elsewhere — and the file its start named must not
+    /// be badged in its place.
+    #[test]
+    fn a_completion_marked_outside_the_workspace_takes_no_path_from_its_start() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        run(&store, &ws, "r1", "harness", Some("omp"), Some("extension"));
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "omp",
+            "tool.started",
+            2_000,
+            json!({ "tool": "write", "toolUseId": "c1", "path": "link.txt" }),
+        );
+        event(
+            &store,
+            &ws,
+            Some("r1"),
+            "omp",
+            "tool.completed",
+            2_100,
+            json!({ "tool": "write", "toolUseId": "c1", "pathOutsideWorkspace": true }),
+        );
+        let p = of(&store, &ws, &[]).unwrap();
+        assert!(p.files.is_empty(), "went outside: {:?}", paths(&p));
     }
 
     /// The pi family reports tool calls like Claude, under its own tool names.

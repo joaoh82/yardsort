@@ -18,10 +18,12 @@
 //! Yardsort does not choose it at launch, so it links nothing on its own — and `workspace_roots`
 //! is never used as a key: a path is not an identity.
 //!
-//! **Recorded against nothing yet.** The Cursor agent CLI was not logged in on the machine this
-//! was built on, so the shapes here are Cursor's documented ones (`cursor.com/docs/hooks`), and
-//! `scripts/record-cursor.sh` is ready for the day it is. See
-//! `docs/design/16-agent-events-stage-2-cursor.md`.
+//! **Recorded on 2026-09-26** (`scripts/record-cursor.sh`, `crates/core/fixtures/cursor/`): one
+//! headless turn delivered 19 hooks. What the recording added to the documentation: durations
+//! are fractional milliseconds; `sandbox` is a boolean; every hook carries the account's
+//! `user_email`, which is never read; and this build delivered no `stop`, `afterAgentResponse`
+//! or `subagentStop` to a plugin's hooks, so a turn's end and its tokens are not on the
+//! timeline yet. The launch environment reached the hooks, so every event links to its run.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -166,7 +168,12 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| "no hook_event_name".to_owned())?;
     let text = |key: &str| hook.get(key).and_then(Value::as_str).map(str::to_owned);
-    let number = |key: &str| hook.get(key).and_then(Value::as_i64);
+    // Cursor's durations are fractional milliseconds (`67.921`); its counts are integers.
+    let number = |key: &str| {
+        hook.get(key)
+            .and_then(Value::as_f64)
+            .map(|n| n.round() as i64)
+    };
     let conversation = text("conversation_id");
     let root = hook["workspace_roots"]
         .as_array()
@@ -238,7 +245,7 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
                 "conversationId": conversation,
                 "generationId": text("generation_id"),
                 "durationMs": number("duration"),
-                "sandbox": text("sandbox"),
+                "sandbox": hook.get("sandbox").and_then(Value::as_bool),
             }),
         ),
         "afterMCPExecution" => (
@@ -316,7 +323,111 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
 mod tests {
     use super::*;
 
-    /// Shapes as `cursor.com/docs/hooks` documents them: nothing here was recorded.
+    fn fixtures() -> Vec<(String, Value)> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures")
+            .join("cursor")
+            .join(DOCUMENTED_VERSION);
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        files.sort();
+        files
+            .into_iter()
+            .map(|path| {
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                let value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                (name, value)
+            })
+            .collect()
+    }
+
+    /// The recording (`scripts/record-cursor.sh`, one headless turn): every hook Cursor
+    /// delivered, in order. The passive ones map; the deciding ones — which the capture
+    /// plugin subscribed to and Yardsort's never does — are refused; and nothing the hooks
+    /// carried beyond metadata gets through, the account's email included.
+    #[test]
+    fn the_recorded_turn_maps_to_the_events_a_reader_would_expect_and_nothing_else() {
+        let all = fixtures();
+        let mapped: Vec<&str> = all
+            .iter()
+            .filter_map(|(_, d)| normalize(d).ok().map(|r| r.kind))
+            .collect();
+        assert_eq!(
+            mapped,
+            [
+                "session.started",
+                "tool.failed",         // Read, before the file existed
+                "file.reported_write", // afterFileEdit, delivered before the tool's own end
+                "tool.completed",      // Write
+                "tool.failed",         // Read, missing.txt
+                "tool.completed",      // Read
+                "tool.completed",      // afterShellExecution
+                "tool.completed",      // Shell
+                "session.ended",
+            ],
+            "thoughts and deciding hooks are refused; no stop, afterAgentResponse or \
+             subagentStop was delivered for a plugin's hooks in this build"
+        );
+        for (name, d) in &all {
+            let event = d["hook_event_name"].as_str().unwrap();
+            if DECIDING.contains(&event) || event == "afterAgentThought" {
+                assert!(normalize(d).is_err(), "{name} must not map");
+            }
+        }
+        let by = |prefix: &str| {
+            all.iter()
+                .find(|(n, _)| n.starts_with(prefix))
+                .map(|(_, v)| v)
+                .unwrap()
+        };
+        let started = normalize(by("01-sessionStart")).unwrap();
+        assert_eq!(started.payload["model"], "default");
+        assert_eq!(
+            started.native_session_id.as_deref(),
+            Some("22222222-2222-4222-8222-000000000001")
+        );
+        let write = normalize(by("07-postToolUse-Write")).unwrap();
+        assert_eq!(write.payload["path"], "hello.txt");
+        assert_eq!(
+            write.payload["durationMs"], 68,
+            "a fractional duration, rounded"
+        );
+        let edited = normalize(by("06-afterFileEdit")).unwrap();
+        assert_eq!(edited.payload["path"], "hello.txt");
+        assert_eq!(edited.payload["edits"], 1);
+        let shell = normalize(by("16-afterShellExecution")).unwrap();
+        assert_eq!(shell.payload["tool"], "shell");
+        assert_eq!(shell.payload["durationMs"], 191);
+        assert_eq!(shell.payload["sandbox"], false);
+        let failed = normalize(by("12-postToolUseFailure-Read")).unwrap();
+        assert_eq!(failed.payload["path"], "missing.txt");
+        let ended = normalize(by("19-sessionEnd")).unwrap();
+        assert_eq!(ended.payload["durationMs"], 22749);
+
+        for (name, d) in &all {
+            let Ok(reported) = normalize(d) else { continue };
+            let text = reported.payload.to_string();
+            for content in [
+                "@",
+                "user_email",
+                "hello\n",
+                "\"ls\"",
+                "File not found",
+                "transcript",
+                "/tmp/yardsort-fixture",
+                "old_string",
+                "Creating hello.txt",
+            ] {
+                assert!(!text.contains(content), "{name} leaked {content:?}: {text}");
+            }
+        }
+    }
+
+    /// Shapes as `cursor.com/docs/hooks` documents them, for the hooks the recording did not
+    /// deliver (`stop`, `afterAgentResponse`, `subagentStop`, `afterMCPExecution`).
     fn documented(event: &str, extra: Value) -> Value {
         let mut base = json!({
             "conversation_id": "conv-1",
@@ -360,7 +471,7 @@ mod tests {
             (
                 documented(
                     "afterShellExecution",
-                    json!({ "command": "rm -rf build", "output": "gone", "duration": 30, "sandbox": "enabled" }),
+                    json!({ "command": "rm -rf build", "output": "gone", "duration": 30.4, "sandbox": true }),
                 ),
                 "tool.completed",
             ),

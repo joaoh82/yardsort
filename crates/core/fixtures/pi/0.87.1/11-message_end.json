@@ -1,0 +1,66 @@
+{
+  "event": "message_end",
+  "payload": {
+    "type": "message_end",
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": " The user wants me to:\n1. Create a file named hello.txt containing the single word \"hello\"\n2. Read it back\n3. Read a file named missing.txt (which doesn't exist)\n4. Run ls\n5. Reply with one word when \u2026",
+          "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to:\\n1. Create a file named hello.txt containing the single word \\\"hello\\\"\\n2. Read it back\\n3. Read a file named missing.txt (which doesn't exist)\u2026"
+        },
+        {
+          "type": "text",
+          "text": " "
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.write:0",
+          "name": "write",
+          "arguments": {
+            "content": "hello",
+            "path": "hello.txt"
+          }
+        }
+      ],
+      "api": "openai-completions",
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.6",
+      "usage": {
+        "input": 778,
+        "output": 260,
+        "cacheRead": 832,
+        "cacheWrite": 0,
+        "reasoning": 243,
+        "totalTokens": 1870,
+        "cost": {
+          "input": 0.0007390999999999999,
+          "output": 0.00104,
+          "cacheRead": 0.00013312,
+          "cacheWrite": 0,
+          "total": 0.0019122199999999998
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1790453820000,
+      "responseId": "gen-1790453820-VUd8ZFoEqAeKY0oqYKnb",
+      "rawStopReason": "tool_calls"
+    }
+  },
+  "session": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-26T20-16-59-760Z_11111111-1111-4111-8111-111111111111.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "moonshotai/kimi-k2.6",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

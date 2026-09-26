@@ -73,6 +73,10 @@ ids = {}
 def redact(text):
     text = text.replace(work + "/repo", "/tmp/yardsort-fixture/repo").replace(work, "/tmp/yardsort-fixture")
     text = text.replace(home, "/home/user")
+    # Cursor sends the account's email on every hook, and derives a project slug from the
+    # throwaway directory's random name.
+    text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "user@example.com", text)
+    text = re.sub(r"yardsort-cursor[.-][A-Za-z0-9]{6}", "yardsort-cursor-XXXXXX", text)
     def stable(m):
         v = m.group(0)
         n = ids.setdefault(v, len(ids) + 1)

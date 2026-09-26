@@ -21,10 +21,16 @@ wrote.
 
 Recorded 2026-09-25 against **OMP 18.2.11** (`openai-codex/gpt-5.3-codex`): 44 events over one
 headless turn with a `write`, two `read`s (one of a missing file) and a `bash`. **Pi 0.87.1**
-had no provider configured on the machine, so its recording is three events long
-(`session_start`, `input`, `session_shutdown`) — enough to see that the shapes are OMP's and that
-`--session-id` is honoured — and the rest of Pi's mapping is from OMP's fixtures and Pi's
-documented API. Re-run `scripts/record-pi.sh pi` on a machine with a provider to complete it.
+was recorded in full on 2026-09-26 (`openrouter/moonshotai/kimi-k2.6`, 48 events, the same
+turn) once a provider was configured; on 2026-09-25 it had none and its recording stopped at
+its first prompt. Two differences from OMP came out of the full recording: Pi **does** raise
+`input` for the opening message given on the command line, so a launch's first prompt has a
+`prompt.submitted` row on Pi and not on OMP; and Pi's `tool_execution_end` for `write` carries
+no `details.resolvedPath` — OMP's fork adds it — so on Pi the file is named by the tool's start
+and not its end. The provenance join ([17](17-agent-events-stage-3-review.md)) takes a completed
+write tool's file from its start when the end has none, for that reason — within one run only,
+since an unlinked event's tool id is no identity across sessions, and never when the end says
+the write went outside the workspace.
 
 | Surface                                                               | Seen                                                                                                                                                                                                                                                                                                                  |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -81,7 +87,7 @@ not know is refused without a file.
 | OpenCode 1.18.31    | yes       | Plugin, opt-in: [13](13-agent-events-stage-2-opencode.md).                                                                                                                                                                                                                                                                       |
 | Grok 1.0.41         | yes       | Session directory, opt-in: [14](14-agent-events-stage-2-grok.md).                                                                                                                                                                                                                                                                |
 | OMP 18.2.11         | yes       | **Extension, opt-in**: sessions, prompt sizes, turns with tokens and cost, tools with paths and durations, approvals. **Not available**: subagents (the events are the parent's), compaction, the length of the opening message given on the command line (OMP raises no `input` for it; typed messages it does). Recorded live. |
-| Pi 0.87.1           | yes       | **The same extension, opt-in**, plus model switches, minus approvals (Pi has no such events). **Recorded only to the first prompt** — no provider on the recording machine — so the turn and tool mapping is from OMP's identical shapes and Pi's API. `scripts/record-pi.sh pi` completes it.                                   |
+| Pi 0.87.1           | yes       | **The same extension, opt-in**, plus model switches, minus approvals (Pi has no such events). **Recorded in full** on 2026-09-26; the shapes are OMP's but for a `write` end with no `resolvedPath`, and an `input` for the opening message that OMP does not raise.                                                             |
 | Cursor              | yes       | Hooks through a per-launch plugin directory, opt-in: [16](16-agent-events-stage-2-cursor.md).                                                                                                                                                                                                                                    |
 
 ## 5 · What shipped
@@ -101,7 +107,8 @@ not know is refused without a file.
 
 - Rust: `activity::pi` tests read every OMP fixture through `normalize` and check the sixteen
   kinds come out in order with nothing leaked (no command, no content, no prompt text), Pi's
-  partial recording carries the assigned id and the prompt's length, approvals and model
+  recording comes out as the same seventeen under the assigned id with its opening prompt's
+  length and no path on the write's end, approvals and model
   switches map from the documented fields, arming writes the file with the template filled and
   names it before `--` for either harness, and refuses `--trusted-extension` and a harness the
   adapter does not serve. `launch::tests` arms OMP through a plan-catching host and leaves Pi
@@ -118,5 +125,6 @@ not know is refused without a file.
   fixtures name the versions.
 - OMP's session id is its own; a delivery whose environment was lost (there is no known way for
   that to happen — the extension runs in-process) would fall to the workspace alone.
-- Pi's recording wants a provider. The next slice is [16](16-agent-events-stage-2-cursor.md),
-  Cursor, and with it every built-in harness has a native source.
+- ~~Pi's recording wants a provider.~~ Done 2026-09-26. The next slice is
+  [16](16-agent-events-stage-2-cursor.md), Cursor, and with it every built-in harness has a
+  native source.

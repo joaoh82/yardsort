@@ -1,19 +1,18 @@
 # 16 — Agent events, stage 2: Cursor
 
-Status: **shipped, unrecorded** · 25 September 2026 · The last built-in harness without a
+Status: **shipped, recorded 2026-09-26** · 25 September 2026 · The last built-in harness without a
 native source. Cursor's agent CLI (`cursor-agent`) has hooks in Claude Code's image — commands
 named per event in a `hooks.json`, given the event as JSON on stdin — and a per-process way to
 add them that needs no file of ours in the user's home: `--plugin-dir <dir>` loads a plugin for
 that one process, merged with the user's own hooks, with no trust prompt. This slice is
 [11](11-agent-events-stage-2-claude.md) with a directory in place of a settings file.
 
-**What is different about this note:** the adapter was built against Cursor's documentation,
-not a recording. The Cursor agent on the machine this was written on was not logged in, and a
-hook fixture cannot be made without a turn. `scripts/record-cursor.sh` is ready; the day it runs,
-its fixtures replace the documented shapes in `activity/cursor.rs`'s tests, and this note is
-updated with what was actually seen. Until then the mapping is honest about its source, and a
-payload whose shape differs from the documented one loses the fields that differ, never the
-launch.
+**How this note came about:** the adapter was built against Cursor's documentation, because
+the Cursor agent on the machine it was written on was not logged in. The recording came the
+next day (`scripts/record-cursor.sh`, `crates/core/fixtures/cursor/2026.09.23-86fc751/`, 19
+hooks over one headless turn) and its fixtures now drive `activity/cursor.rs`'s tests; the
+documented shapes remain only for the hooks the recording did not deliver. What the recording
+added, in §8.
 
 ## 1 · What was read, and what could not be recorded
 
@@ -63,14 +62,14 @@ a row, and a thought is content.
 
 ## 4 · Coverage, honestly
 
-| Harness                   | Lifecycle | Native                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code 2.1.280       | yes       | Hooks, opt-in: [11](11-agent-events-stage-2-claude.md).                                                                                                                                                                                                                                                                                                                                                                                   |
-| Codex 0.156.1             | yes       | `notify` + session file, opt-in: [12](12-agent-events-stage-2-codex.md).                                                                                                                                                                                                                                                                                                                                                                  |
-| OpenCode 1.18.31          | yes       | Plugin, opt-in: [13](13-agent-events-stage-2-opencode.md).                                                                                                                                                                                                                                                                                                                                                                                |
-| Grok 1.0.41               | yes       | Session directory, opt-in: [14](14-agent-events-stage-2-grok.md).                                                                                                                                                                                                                                                                                                                                                                         |
-| OMP 18.2.11, Pi 0.87.1    | yes       | Extension, opt-in: [15](15-agent-events-stage-2-pi-omp.md).                                                                                                                                                                                                                                                                                                                                                                               |
-| Cursor 2026.09.23-86fc751 | yes       | **Hooks through a per-launch plugin, opt-in, built from the documentation**: sessions, tools with paths and durations, shell and MCP calls, file edits, subagents' ends, and — where the build fires them for plugins — turns with tokens. **Not available**: prompt sizes and subagent starts, because the only hooks that carry them can block (see §2). **Unverified live** until `cursor-agent login` and `scripts/record-cursor.sh`. |
+| Harness                   | Lifecycle | Native                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code 2.1.280       | yes       | Hooks, opt-in: [11](11-agent-events-stage-2-claude.md).                                                                                                                                                                                                                                                                                                                                                               |
+| Codex 0.156.1             | yes       | `notify` + session file, opt-in: [12](12-agent-events-stage-2-codex.md).                                                                                                                                                                                                                                                                                                                                              |
+| OpenCode 1.18.31          | yes       | Plugin, opt-in: [13](13-agent-events-stage-2-opencode.md).                                                                                                                                                                                                                                                                                                                                                            |
+| Grok 1.0.41               | yes       | Session directory, opt-in: [14](14-agent-events-stage-2-grok.md).                                                                                                                                                                                                                                                                                                                                                     |
+| OMP 18.2.11, Pi 0.87.1    | yes       | Extension, opt-in: [15](15-agent-events-stage-2-pi-omp.md).                                                                                                                                                                                                                                                                                                                                                           |
+| Cursor 2026.09.23-86fc751 | yes       | **Hooks through a per-launch plugin, opt-in, recorded**: sessions, tools with paths and durations, shell and MCP calls, file edits, subagents' ends, and — where the build fires them for plugins — turns with tokens. **Not available**: prompt sizes and subagent starts, because the only hooks that carry them can block (see §2). **Unverified live** until `cursor-agent login` and `scripts/record-cursor.sh`. |
 
 Every built-in harness now has a native source. What stays lifecycle-only is a custom harness.
 
@@ -96,17 +95,38 @@ Every built-in harness now has a native source. What stays lifecycle-only is a c
   plan-catching host only when its switch is on. `crates/cli/tests/cli.rs` runs the real `ys`
   as the hook with a documented `afterFileEdit` on stdin and lists `file.reported_write`,
   `cursor/hook`, the path, and not the edit's text.
-- By hand: owed. See [08 §17](08-manual-checklist.md#17--cursor-reporting), which starts with
-  the recording.
+- By hand: owed. See [08 §17](08-manual-checklist.md#17--cursor-reporting); the recording it
+  used to start with is done.
 
 ## 7 · Risks and the next slice
 
-- **Unrecorded.** A field named differently from the documentation is a missing field on the
-  timeline, and a hook event the build does not fire for plugins is a missing row; neither
-  touches the launch. The first recording will say which.
-- **Environment.** If hooks do not inherit the launch environment, every Cursor entry is
-  unlinked; the fix is a session id Yardsort chooses (`--new-session-id`, if it is what
-  `conversation_id` reports), recorded on the run as Grok's is.
+- ~~**Unrecorded.**~~ Recorded; see §8. A hook event this build does not fire for plugins is
+  a missing row, and the build did not fire three of them.
+- ~~**Environment.**~~ The hooks inherit the launch environment: `YARDSORT_RUN_ID` and the
+  rest reached every one of the 19, so every Cursor event links to its run with nothing more.
 - **The shell string.** A data directory containing a single quote is handled; one containing a
   newline is not tested.
 - The next slice is not another adapter: stage 3 of [09](09-agent-events-and-memory.md).
+
+## 8 · What the recording added
+
+Recorded 2026-09-26 with `scripts/record-cursor.sh`, Cursor agent 2026.09.23-86fc751, one
+headless turn (`-p --output-format json`, the plugin subscribed to every documented hook): 19
+hook calls. Against the documentation:
+
+- **Durations are fractional milliseconds** (`"duration": 67.921`). The adapter read them as
+  integers and dropped every one; it now rounds. `sessionEnd`'s `duration_ms` is an integer.
+- **`sandbox` is a boolean**, not a string.
+- **Every hook carries the account's `user_email`.** Never read by the adapter — the tests now
+  assert no `@` in any payload — and redacted by the recording script, which also redacts the
+  project slug Cursor derives from the recording directory's name.
+- **`afterFileEdit` is delivered before the tool's own `postToolUse`**, so `file.reported_write`
+  precedes `Write done` on the timeline.
+- **Not delivered to a plugin's hooks in this build:** `stop`, `afterAgentResponse`,
+  `subagentStop`, `beforeSubmitPrompt`. So a Cursor turn's end, its tokens and its prompt sizes
+  are not on the timeline yet; the mapping for the first three stays, from the documentation,
+  for a build that sends them. `afterAgentThought` is delivered and is not subscribed to.
+- **`tool_use_id` can contain a newline** (`call-…-0\nfc_…_0`): two ids joined. Recorded as
+  given; it is a key, not a display string.
+- **The launch environment reaches the hooks.** The `--new-session-id` fallback in §7 is not
+  needed.

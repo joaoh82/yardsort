@@ -162,4 +162,4 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     ([15](15-agent-events-stage-2-pi-omp.md), [16](16-agent-events-stage-2-cursor.md)): the
     pi family through one extension given with `-e`, the plugin pattern again; Cursor through
     `--plugin-dir`, the settings-file pattern again with a directory. Every built-in harness now
-    has a native source. Cursor's is built from its documentation and owes a recording.
+    has a native source, each recorded against the real agent.

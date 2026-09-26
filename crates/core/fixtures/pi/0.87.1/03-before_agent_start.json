@@ -1,0 +1,87 @@
+{
+  "event": "before_agent_start",
+  "payload": {
+    "type": "before_agent_start",
+    "prompt": "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done.",
+    "systemPrompt": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n<tools>\n- read: Read file con\u2026",
+    "systemPromptOptions": {
+      "selectedTools": ["read", "bash", "edit", "write"],
+      "toolSnippets": {
+        "read": "Read file contents",
+        "bash": "Execute bash commands (ls, grep, find, etc.)",
+        "powershell": "Execute PowerShell commands",
+        "edit": "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+        "write": "Create or overwrite files",
+        "grep": "Search file contents for patterns (respects .gitignore)",
+        "find": "Find files by glob pattern (respects .gitignore)",
+        "ls": "List directory contents"
+      },
+      "toolGuidelines": {
+        "read": ["Use read to examine files instead of cat or sed."],
+        "bash": [
+          "You can inspect PI_* environment variables for current model and session details."
+        ],
+        "powershell": [
+          "You can inspect PI_* environment variables for current model and session details."
+        ],
+        "edit": [
+          "Use edit for precise changes (edits[].oldText must match exactly)",
+          "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+          "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+          "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions."
+        ],
+        "write": ["Use write only for new files or complete rewrites."]
+      },
+      "promptGuidelines": [],
+      "appendSystemPrompt": "",
+      "sections": {},
+      "cwd": "/tmp/yardsort-fixture/repo",
+      "contextFiles": [],
+      "skills": [
+        {
+          "name": "diagnose-crash",
+          "description": "Diagnose why a program crashed on this machine, from a systemd-coredump core dump. Use when a process has segfaulted, aborted, or otherwise dumped core, when asked why an application crashed or disapp\u2026",
+          "filePath": "/home/user/.pi/agent/skills/diagnose-crash/SKILL.md",
+          "baseDir": "/home/user/.pi/agent/skills/diagnose-crash",
+          "sourceInfo": {
+            "path": "/home/user/.pi/agent/skills/diagnose-crash/SKILL.md",
+            "source": "auto",
+            "scope": "user",
+            "origin": "top-level",
+            "baseDir": "/home/user/.pi/agent"
+          },
+          "disableModelInvocation": false
+        },
+        {
+          "name": "omarchy",
+          "description": "REQUIRED for end-user customization of Linux desktop, window manager, or system config. Use when editing ~/.config/hypr/, ~/.config/omarchy/, ~/.config/alacritty/, ~/.config/foot/, ~/.config/kitty/, o\u2026",
+          "filePath": "/home/user/.pi/agent/skills/omarchy/SKILL.md",
+          "baseDir": "/home/user/.pi/agent/skills/omarchy",
+          "sourceInfo": {
+            "path": "/home/user/.pi/agent/skills/omarchy/SKILL.md",
+            "source": "auto",
+            "scope": "user",
+            "origin": "top-level",
+            "baseDir": "/home/user/.pi/agent"
+          },
+          "disableModelInvocation": false
+        }
+      ]
+    }
+  },
+  "session": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "file": "/tmp/yardsort-fixture/sessions/2026-09-26T20-16-59-760Z_11111111-1111-4111-8111-111111111111.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "moonshotai/kimi-k2.6",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}
