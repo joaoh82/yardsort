@@ -72,6 +72,11 @@ pub struct AssistSettings {
     /// Suggest a harness and an effort in the composer. Sends the message being typed, and the
     /// harnesses' "Good at" descriptions.
     pub suggest_in_composer: bool,
+    /// With the review, also tell Jev what the agents reported about each file: reported
+    /// written by which agent, written while one ran a command, or reported by none. Only the
+    /// words the Changes list shows; no tool, time or command. Off by default: it changes what
+    /// leaves the machine.
+    pub send_provenance: bool,
     /// How sure the model must be before Yardsort acts on an answer. See [`Thresholds`].
     #[serde(flatten)]
     pub thresholds: Thresholds,

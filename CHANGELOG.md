@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Assist can be told who wrote each file.** A new switch under Settings → Assist, off by
+  default and offered once the review is on, sends with each diff one sentence in the Changes
+  list's own words: _reported written by claude_, _last written while claude ran a command_,
+  or _not reported written by any agent_. Never a tool, a time or a command. A substantive
+  change no agent accounted for then earns an **unaccounted** badge, and every Assist badge's
+  tooltip ends with the exact sentence Assist was told. See
+  [Telling Assist who wrote each file](docs/guide/assist.md#telling-assist-who-wrote-each-file).
 - **Cursor and pi recorded.** The Cursor and pi adapters now rest on recordings of the real
   agents rather than their documentation. For Cursor that found tool durations being dropped
   (they are fractional), which is fixed, and that this Cursor build does not tell a plugin's

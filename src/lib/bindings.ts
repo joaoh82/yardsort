@@ -104,7 +104,7 @@ export const commands = {
 	assistForgetKey: () => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_forget_key")),
 	/**  Ask TypeSafe whether the key in force still works. */
 	assistTestKey: () => typedError<null, IpcError>(__TAURI_INVOKE("assist_test_key")),
-	assistSaveSettings: (reviewChanges: boolean, suggestInComposer: boolean, thresholds: ThresholdsDto) => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_save_settings", { reviewChanges, suggestInComposer, thresholds })),
+	assistSaveSettings: (reviewChanges: boolean, suggestInComposer: boolean, sendProvenance: boolean, thresholds: ThresholdsDto) => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_save_settings", { reviewChanges, suggestInComposer, sendProvenance, thresholds })),
 	/**
 	 *  Check a workspace's changed files against what was asked, and for risky edits. Sends the
 	 *  diffs of those files to TypeSafe.
@@ -323,6 +323,8 @@ export type AssistStatus = {
 	problem: string | null,
 	reviewChanges: boolean,
 	suggestInComposer: boolean,
+	/**  With the review, tell Jev who wrote each file, in the Changes list's words. */
+	sendProvenance: boolean,
 	/**  How sure Jev must be before an answer becomes a badge or a suggestion. */
 	thresholds: ThresholdsDto,
 	/**  The model every request names. */
@@ -513,6 +515,8 @@ export type FileReview = {
 	flags: ReviewFlag[],
 	/**  Why this file was not looked at, if it was not. */
 	notChecked: string | null,
+	/**  What Jev was told about who wrote the file, word for word, when that was sent. */
+	told: string | null,
 };
 
 /**  Which forge a host is, as far as the shape of its URLs goes. */
@@ -881,7 +885,12 @@ export type ReviewFlag =
 /**  Tests were removed, skipped, or made weaker. */
 "weakensTests" | 
 /**  A lint, type check or CI step was switched off. */
-"disablesChecks";
+"disablesChecks" | 
+/**
+ *  A substantive change no agent reported making, in a workspace whose agents were
+ *  reporting what they wrote. Only asked when the provenance facts are sent.
+ */
+"unaccounted";
 
 /**  One of the workspace's agent runs and how it was asked to report, or `None` if it was not. */
 export type RunCoverage = {

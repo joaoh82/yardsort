@@ -68,7 +68,9 @@ and its commands' windows still mark files, but no file of its is ever reported.
 With [Assist](assist.md) switched on, files carry small badges — **off-task**, **secret**,
 **tests**, **checks**, **credentials** — shortly after an agent stops writing, and a line above
 the list says when they were last checked. Assist is off by default and needs an API key of your
-own.
+own. A further switch tells Assist what the badges above say about who wrote each file, and adds
+an **unaccounted** badge for a substantive change no agent accounted for; every Assist badge's
+tooltip then ends with the exact sentence Assist was told.
 
 ## Files
 

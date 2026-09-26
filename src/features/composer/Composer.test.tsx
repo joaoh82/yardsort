@@ -44,6 +44,7 @@ const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
   problem: null,
   reviewChanges: true,
   suggestInComposer: true,
+  sendProvenance: false,
   thresholds: {
     flagAtPercent: 70,
     offTaskAtPercent: 60,

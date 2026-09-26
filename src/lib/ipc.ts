@@ -353,8 +353,12 @@ export const ipc = {
   assistSaveSettings: (
     reviewChanges: boolean,
     suggestInComposer: boolean,
+    sendProvenance: boolean,
     thresholds: ThresholdsDto,
-  ) => unwrap(commands.assistSaveSettings(reviewChanges, suggestInComposer, thresholds)),
+  ) =>
+    unwrap(
+      commands.assistSaveSettings(reviewChanges, suggestInComposer, sendProvenance, thresholds),
+    ),
   /** Judge a workspace.s changed files against its task. Sends those diffs to TypeSafe. */
   assistReview: (workspaceId: string) => unwrap(commands.assistReview(workspaceId)),
   /** A harness and an effort for a message being typed; empty fields mean "nothing to offer". */
