@@ -104,9 +104,14 @@ copies.
   report landing refreshes the join for the followed workspace only.
 - `ActivityPanel.test.tsx` (1): the **diff** button on a row naming a listed file, absent on
   rows that do not, absent when the Changes panel follows another workspace, and what it opens.
-- Live, first pass on Linux: Claude Code's hooks reported the session, the prompt, a Bash
-  tool and the turn — and no file, because the file was made by the command (§5). The
-  checklist now asks for the Write tool by name.
+- Live on Linux, 2026-09-26, Claude Code 2.1.280 through the dev build: asked plainly to
+  create a file, it ran one Bash command — a tool and a duration reported, no file, nothing
+  badged, and the line above the list naming a command the agent ran (§5). Asked to use its
+  Write tool for a second file, the `Write done · hello4.txt` row landed with its **diff**
+  button, that file gained the **claude** badge without a refresh, the shell-made file did not,
+  and the line read _Agents reported writing 1 of 2 changed files_. Checklist
+  [08 §18](08-manual-checklist.md#18--reported-writes-beside-the-diff) rows 1, 2 and the
+  button of 4 seen; the rest of the pass is owed.
 
 ## 5 · What this slice does not do, and the next
 
