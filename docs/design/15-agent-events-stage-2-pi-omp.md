@@ -28,7 +28,9 @@ its first prompt. Two differences from OMP came out of the full recording: Pi **
 `prompt.submitted` row on Pi and not on OMP; and Pi's `tool_execution_end` for `write` carries
 no `details.resolvedPath` — OMP's fork adds it — so on Pi the file is named by the tool's start
 and not its end. The provenance join ([17](17-agent-events-stage-3-review.md)) takes a completed
-write tool's file from its start when the end has none, for that reason.
+write tool's file from its start when the end has none, for that reason — within one run only,
+since an unlinked event's tool id is no identity across sessions, and never when the end says
+the write went outside the workspace.
 
 | Surface                                                               | Seen                                                                                                                                                                                                                                                                                                                  |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
