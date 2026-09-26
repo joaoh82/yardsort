@@ -163,8 +163,10 @@ styled as one, and ranked below a report.
 - **Words.** Badge: the agent's name in a dashed border. Tooltip: _This file was last written
   at 07:57:46, while claude was running Bash (07:57:46 to 07:57:47). Yardsort read the time on
   the file, not who wrote it: you or a script could have written it in that window, and no
-  agent reported it._ Note: _One was last written while an agent ran a command — seen on the
-  file's clock, not reported._ Header: _last written while claude ran Bash · 07:57_.
+  agent reported it._ A tool call that has not ended is an open window, carried as no end
+  rather than a far-off one, and read _from 07:57:46, still running_. Note: _One was last
+  written while an agent ran a command — seen on the file's clock, not reported._ Header:
+  _last written while claude ran Bash · 07:57_.
 
 Limits, stated: a file the agent made with a command and the user then edited carries the
 user's time and no badge — `mtime` is the last write only. A command that runs for minutes is

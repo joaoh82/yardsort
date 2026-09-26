@@ -58,7 +58,12 @@ export function describeObserved(observed: ObservedWrite): string {
     .map((m) => {
       const who = m.harnessId ?? "an agent";
       const tool = m.tool ? `was running ${m.tool}` : "was running a tool";
-      return `${who} ${tool} (${eventTime(m.from ?? 0)} to ${eventTime(m.to ?? 0)})`;
+      // An open window has no end: the tool call is still running.
+      const span =
+        m.to === null
+          ? `from ${eventTime(m.from ?? 0)}, still running`
+          : `${eventTime(m.from ?? 0)} to ${eventTime(m.to ?? 0)}`;
+      return `${who} ${tool} (${span})`;
     })
     .join(" and ");
   return `This file was last written at ${eventTime(at)}, while ${during}. Yardsort read the time on the file, not who wrote it: you or a script could have written it in that window, and no agent reported it.`;

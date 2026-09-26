@@ -55,7 +55,9 @@ pub struct ObservedMatch {
     /// The tool that was running, as the agent named it (`Bash`, `shell`, …).
     pub tool: Option<String>,
     pub from: i64,
-    pub to: i64,
+    /// `None` for a tool call that has not ended: the window is open, and the write fell after
+    /// its start.
+    pub to: Option<i64>,
 }
 
 /// The file's last write on disk fell inside the execution window of one or more tool calls.
@@ -354,7 +356,7 @@ pub fn join(
                         harness_id: harness.map(str::to_owned),
                         tool: window.tool.clone(),
                         from: window.from,
-                        to: window.to,
+                        to: (window.to != i64::MAX).then_some(window.to),
                     })
             })
             .collect();
@@ -879,8 +881,24 @@ mod tests {
                 m.from,
                 m.to
             ),
-            ("r1", Some("claude"), Some("Bash"), 2_000, 2_400)
+            ("r1", Some("claude"), Some("Bash"), 2_000, Some(2_400))
         );
+
+        // A command still running in a live run is an open window: a write after its start
+        // is inside it, and the match says so by having no end rather than a far-off one.
+        run(&store, &ws, "r2", "harness", Some("omp"), Some("extension"));
+        event(
+            &store,
+            &ws,
+            Some("r2"),
+            "omp",
+            "tool.started",
+            8_000,
+            json!({ "tool": "bash", "toolUseId": "x" }),
+        );
+        let p = of(&store, &ws, &[("live.txt".into(), 9_000)]).unwrap();
+        let m = &p.files[0].observed.as_ref().unwrap().matches[0];
+        assert_eq!((m.run_id.as_str(), m.from, m.to), ("r2", 8_000, None));
     }
 
     /// A tool that named its own file is a window for that file alone: hello4.txt written by
@@ -982,7 +1000,7 @@ mod tests {
         );
         assert_eq!(
             (matches[0].from, matches[0].to),
-            (1_500, 2_500),
+            (1_500, Some(2_500)),
             "from the duration"
         );
     }

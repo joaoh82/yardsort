@@ -36,11 +36,17 @@ export function ChangesPanel() {
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
-    // What the agents reported writing is joined to the list, so it follows once the list is in.
+    // What the agents reported writing is joined to the list, so it follows once the list is
+    // in — unless the user has moved on meanwhile, in which case the later workspace's own
+    // effect follows and this one must not pull the join back.
     void useChangesStore
       .getState()
       .follow(workspaceId)
-      .then(() => useProvenanceStore.getState().follow(workspaceId));
+      .then(() => {
+        if (useChangesStore.getState().workspaceId === workspaceId) {
+          void useProvenanceStore.getState().follow(workspaceId);
+        }
+      });
     // Assist, when it is on, checks the same workspace shortly after the writing stops.
     void useAssistStore.getState().load();
     useAssistStore.getState().follow(workspaceId);

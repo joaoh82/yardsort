@@ -260,7 +260,8 @@ pub struct ObservedMatch {
     pub harness_id: Option<String>,
     pub tool: Option<String>,
     pub from: f64,
-    pub to: f64,
+    /// `None` while the tool call is still running.
+    pub to: Option<f64>,
 }
 
 /// The file's last write, by its own clock, fell inside one or more tool calls' windows.
@@ -334,7 +335,7 @@ impl From<yardsort_core::activity::provenance::Provenance> for Provenance {
                                 harness_id: m.harness_id,
                                 tool: m.tool,
                                 from: m.from as f64,
-                                to: m.to as f64,
+                                to: m.to.map(|to| to as f64),
                             })
                             .collect(),
                     }),

@@ -34,6 +34,7 @@ import { useChangesStore } from "@/stores/changes";
 import { useProjectsStore } from "@/stores/projects";
 import { useProvenanceStore } from "@/stores/provenance";
 import { ChangesPanel } from "./ChangesPanel";
+import { describeObserved } from "./reported";
 
 const change = (path: string, extra: Partial<FileChange> = {}): FileChange => ({
   path,
@@ -595,6 +596,37 @@ describe("ChangesPanel with reported writes", () => {
     expect(screen.getByRole("region", { name: "Viewing notes.md" })).toHaveTextContent(
       "last written while claude ran Bash",
     );
+  });
+
+  it("does not pull the join back to a workspace the user has already left", async () => {
+    // w1's change list is slow; the user selects w2, which answers at once; then w1 answers.
+    let answerW1: (value: ChangeSet) => void = () => {};
+    core.workspaceChanges.mockImplementation((workspaceId: string) =>
+      workspaceId === "w1"
+        ? new Promise<ChangeSet>((resolve) => {
+            answerW1 = resolve;
+          })
+        : Promise.resolve({ uncommitted: [change("b.ts")], committed: [], base: "main" }),
+    );
+    render(<ChangesPanel />);
+    await waitFor(() => expect(core.workspaceChanges).toHaveBeenCalledWith("w1"));
+    act(() => useProjectsStore.setState({ selectedWorkspaceId: "w2" }));
+    await waitFor(() => expect(core.workspaceProvenance).toHaveBeenCalledWith("w2", ["b.ts"]));
+
+    act(() => answerW1({ uncommitted: [change("a.ts")], committed: [], base: "main" }));
+    await screen.findByTitle("b.ts");
+    expect(useProvenanceStore.getState().workspaceId).toBe("w2");
+    expect(core.workspaceProvenance).not.toHaveBeenCalledWith("w1", expect.anything());
+  });
+
+  it("says a tool call that has not ended is still running, rather than inventing its end", () => {
+    const tooltip = describeObserved({
+      at: at + 5_000,
+      matches: [{ runId: "run-1", harnessId: "claude", tool: "Bash", from: at + 4_000, to: null }],
+    });
+    expect(tooltip).toContain("while claude was running Bash (from");
+    expect(tooltip).toContain(", still running)");
+    expect(tooltip).not.toContain("Invalid");
   });
 
   it("asks again when a report lands, so a badge appears as the agent writes", async () => {

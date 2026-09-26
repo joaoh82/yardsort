@@ -679,6 +679,7 @@ export type ObservedMatch = {
 	harnessId: string | null,
 	tool: string | null,
 	from: number | null,
+	/**  `None` while the tool call is still running. */
 	to: number | null,
 };
 
