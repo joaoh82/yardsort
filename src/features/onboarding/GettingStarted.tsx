@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { openProjectFromDisk } from "@/features/sidebar/actions";
+import { YsCommand, ysIsCurrent, ysSummary } from "@/features/ys/YsCommand";
 import type { Preflight } from "@/lib/ipc";
 import { usePreflightStore } from "@/stores/preflight";
 import { useProjectsStore } from "@/stores/projects";
@@ -145,6 +146,14 @@ function Checklist({ report, hasProjects }: { report: Preflight; hasProjects: bo
             </p>
           </Step>
         )}
+
+        <Step
+          ok={ysIsCurrent(report.ys) ? true : null}
+          title={ysSummary(report.ys)}
+          detail={ysIsCurrent(report.ys) ? report.ys.version : "optional"}
+        >
+          {!ysIsCurrent(report.ys) && <YsCommand ys={report.ys} />}
+        </Step>
 
         {report.ready && !hasProjects && (
           <Step ok={null} title="Add your first project">

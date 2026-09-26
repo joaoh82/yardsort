@@ -74,7 +74,8 @@ To remove it again, delete those three files. Your projects and settings live el
 Yardsort looks for git and for the agents it knows, and the welcome screen tells you what it
 found. If something is missing it shows how to install it, with a command you can copy; install
 it, press **Check again** — no restart needed — and carry on. When everything is in place the
-screen points you at the next step: adding a project.
+screen points you at the next step: adding a project. It also offers to install the
+[`ys` command](guide/cli.md#installing), which is optional.
 
 ## 4. Add a project
 

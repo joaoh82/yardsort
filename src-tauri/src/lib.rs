@@ -17,6 +17,7 @@ mod sessions;
 mod state;
 mod terminal;
 mod updates;
+mod ys;
 
 // The core is its own crate, so the `ys` CLI can use it without linking a webview — see
 // `yardsort_core`. It is re-exported under the names this crate has always used, which is why
@@ -115,6 +116,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             preflight::preflight,
             updates::update_check,
             updates::update_install,
+            ys::ys_status,
+            ys::ys_install,
             terminal::env_info,
             commands::daemon_status,
             quit::app_quit,
@@ -314,9 +317,17 @@ pub fn run() {
             }
 
             // Warm the login-shell environment now, so the first terminal doesn't wait for it.
+            // Then bring a `ys` an older version installed up to this one. Not from a development
+            // build, which would put itself on the user's PATH, unless `YARDSORT_YS_DIR` says where.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                handle.state::<state::AppState>().env();
+                let env = handle.state::<state::AppState>().env();
+                if cfg!(debug_assertions) && legacy::env_var_os("YS_DIR").is_none() {
+                    return;
+                }
+                if let Some(what) = ys::refresh(&ys::Layout::detect(&env), &env) {
+                    eprintln!("ys: {what}");
+                }
             });
             Ok(())
         })

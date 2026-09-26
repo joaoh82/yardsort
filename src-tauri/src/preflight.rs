@@ -24,6 +24,8 @@ pub struct Preflight {
     pub env: EnvInfo,
     /// `linux`, `macos` or `windows`: install advice differs.
     pub os: String,
+    /// The `ys` command. Optional: it never stands in the way of `ready`.
+    pub ys: crate::ys::YsStatus,
     /// Nothing stands between the user and their first workspace.
     pub ready: bool,
 }
@@ -133,6 +135,7 @@ pub fn check(env: &ShellEnv, harnesses: Vec<HarnessDef>) -> Preflight {
         harnesses,
         env: EnvInfo::from(env),
         os: std::env::consts::OS.to_owned(),
+        ys: crate::ys::status(&crate::ys::Layout::detect(env), env),
     }
 }
 

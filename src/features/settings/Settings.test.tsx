@@ -22,6 +22,7 @@ const core = vi.hoisted(() => ({
   assistSaveSettings: vi.fn(),
   assistReview: vi.fn(),
   ptyClose: vi.fn(),
+  ysInstall: vi.fn(),
 }));
 const native = vi.hoisted(() => ({ pickFolder: vi.fn() }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -37,6 +38,7 @@ import { useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
 import { SettingsDialog } from "./SettingsDialog";
 import { useAppStore } from "@/stores/app";
+import { usePreflightStore } from "@/stores/preflight";
 
 const claude: HarnessInfo = {
   id: "claude",
@@ -415,6 +417,47 @@ describe("Settings", () => {
       expect.objectContaining({ notifyWhenQuiet: false, checkForUpdates: true }),
     );
     expect(useAppStore.getState().notifyWhenQuiet).toBe(false);
+  });
+
+  it("installs the ys command from General", async () => {
+    const ys = {
+      version: "0.10.0",
+      method: "link" as const,
+      bundled: "/Applications/Yardsort.app/Contents/MacOS/ys",
+      target: "/usr/local/bin/ys",
+      installed: false,
+      targetOnPath: true,
+      found: null,
+      foundVersion: null,
+      foundIsOurs: false,
+    };
+    usePreflightStore.setState({
+      report: {
+        git: { path: "/usr/bin/git", version: "git version 2.55.0" },
+        harnesses: [],
+        env: { source: "loginShell", shell: "/bin/zsh", pathEntries: 3, warning: null },
+        os: "macos",
+        ready: true,
+        ys,
+      },
+    });
+    core.ysInstall.mockResolvedValue({
+      ...ys,
+      installed: true,
+      found: ys.target,
+      foundVersion: ys.version,
+      foundIsOurs: true,
+    });
+    const { user } = await openSettings();
+    await user.click(screen.getByRole("tab", { name: "General" }));
+    const section = await screen.findByRole("region", { name: "Command line" });
+    expect(section).toHaveTextContent("macOS will ask for your password");
+
+    await user.click(within(section).getByRole("button", { name: "Install ys" }));
+    expect(core.ysInstall).toHaveBeenCalledWith(false);
+    expect(
+      await within(section).findByText(/It points into the app, so it is updated/),
+    ).toBeInTheDocument();
   });
 
   it("takes the keyboard when it opens and hands it back when it closes", async () => {

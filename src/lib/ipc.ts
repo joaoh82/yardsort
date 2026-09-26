@@ -63,6 +63,7 @@ import {
   type UpdateStatus,
   type Workspace,
   type WorkspaceSettingsDto,
+  type YsStatus,
 } from "./bindings";
 
 export type {
@@ -123,6 +124,7 @@ export type {
   UpdateStatus,
   Workspace,
   WorkspaceSettingsDto,
+  YsStatus,
 };
 
 /** Session labels: the workspace a session belongs to, and the harness it runs (if any). */
@@ -169,6 +171,11 @@ export const ipc = {
   envInfo: (reload = false) => unwrap(commands.envInfo(reload)),
   /** Is git here? Which agents? With `reload`, the login shell is asked again first. */
   preflight: (reload = false) => unwrap(commands.preflight(reload)),
+  /** Where `ys` is on `PATH`, and whether it is this version. */
+  ysStatus: () => unwrap(commands.ysStatus()),
+  /** Put `ys` on `PATH`. Rejects with `ys_exists` when a file that is not a `ys` is in the way,
+   *  unless `replace` is set — ask the user first. */
+  ysInstall: (replace = false) => unwrap(commands.ysInstall(replace)),
 
   projectsList: () => unwrap(commands.projectsList()),
   /** Rejects with code `not_a_git_repo` unless `initGit` is set. */

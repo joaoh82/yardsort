@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { errorMessage, ipc, type SettingsInfo } from "@/lib/ipc";
+import { YsCommand } from "@/features/ys/YsCommand";
 import { useAppStore } from "@/stores/app";
+import { usePreflightStore } from "@/stores/preflight";
 import { useUpdatesStore } from "@/stores/updates";
 import { ActivitySettings } from "./ActivitySettings";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
@@ -36,6 +38,18 @@ function UpdateNow() {
         status && <span className="text-ink-faint">You have the latest version.</span>
       )}
     </div>
+  );
+}
+
+/** The `ys` command: where it is, and a button to install or update it. */
+function CommandLine() {
+  const ys = usePreflightStore((s) => s.report?.ys);
+  useEffect(() => void usePreflightStore.getState().check(), []);
+  return (
+    <section aria-label="Command line" className="grid gap-1 rounded border border-line px-3 py-2">
+      <h3 className="text-ink-muted">Command line</h3>
+      {ys ? <YsCommand ys={ys} /> : <p className="text-ink-faint">Looking for ys…</p>}
+    </section>
   );
 }
 
@@ -144,6 +158,7 @@ export function GeneralSettings() {
         </span>
       </label>
       <UpdateNow />
+      <CommandLine />
       {error && (
         <p role="alert" className="text-red-400 select-text">
           {error}

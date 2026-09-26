@@ -10,7 +10,42 @@ watch it. That is the whole point of it.
 
 ## Installing
 
-`ys` is a separate download from the app: a single binary, in the assets of each
+`ys` comes with the app. Every copy of Yardsort carries it next to its own executable, built from
+the same commit, so the two always agree about the database. Whether it is on your `PATH` depends
+on how you installed Yardsort:
+
+| How you installed Yardsort               | Where `ys` is                                                                                                                                                                     | How it is updated                                                                                                                                     |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.deb`, `.rpm`, or the AUR package       | `/usr/bin/ys`, installed with the app. Nothing to do.                                                                                                                             | By your package manager, with the app.                                                                                                                |
+| Homebrew cask                            | Linked onto your `PATH` by Homebrew.                                                                                                                                              | With the app.                                                                                                                                         |
+| macOS app (`.dmg`)                       | **Install ys** makes `/usr/local/bin/ys`, a link into `Yardsort.app`. macOS asks for your password when that folder needs it.                                                     | With the app: the link points into it. Signed and notarized with it, too.                                                                             |
+| Linux AppImage                           | **Install ys** copies it to `~/.local/bin/ys`. An AppImage is mounted somewhere new every time it starts, so a link would stop working.                                           | When Yardsort starts and finds an older copy there, it replaces it.                                                                                   |
+| Windows installer (`-setup.exe`, `.msi`) | **Install ys** copies it to `%LOCALAPPDATA%\dev.yardsort.app\bin\ys.exe` and adds that folder to your user `PATH`. Terminals opened afterwards find it; ones already open do not. | When Yardsort starts and finds an older copy there, it replaces it. A `ys.exe` that is running at that moment is renamed aside and removed next time. |
+
+**Install ys** is in **Settings → General → Command line**. The first-run checklist on the welcome
+screen has it too, while `ys` is missing or out of date. Both say where your terminal finds `ys`
+and which version it is. It is optional: nothing in the app needs `ys`.
+
+- **Something else is called `ys`.** If there is already a file at the install location and it is
+  not Yardsort's `ys`, Yardsort asks before replacing it; **Cancel** leaves it alone. A `ys`
+  already there, of any version, is replaced without asking. So is a broken link left by a `Yardsort.app` that has since
+  moved; a broken link to anything else counts as something else.
+- **Another `ys` comes first.** If your terminal finds a `ys` somewhere else — one you unpacked
+  by hand, say — the panel names it. Installing then puts Yardsort's own copy at the install
+  location, but the other one keeps winning until you remove it.
+- **`~/.local/bin` is not on your `PATH`.** Most Linux distributions add it when it exists, but
+  not all. The panel says so; add it in your shell's startup file (for example
+  `export PATH="$HOME/.local/bin:$PATH"`) and press **Check again**.
+- **macOS says to move Yardsort first.** A link into an app that is still on its disk image, or
+  that macOS is running from a temporary copy, would break. Drag Yardsort into Applications and
+  open it from there.
+
+To remove it, delete the file or link at the install location, and on Windows the folder's
+entry in your user `PATH`.
+
+### Without the app
+
+`ys` is also a separate download: a single binary in the assets of each
 [release](https://github.com/joaoh82/yardsort/releases). Put it anywhere on your `PATH`.
 
 ```sh
@@ -23,16 +58,15 @@ tar -xzf ys-*-macos-universal.tar.gz && sudo install ys /usr/local/bin/
 
 On Windows, unzip `ys-*-windows-x86_64.zip` and put `ys.exe` in a folder on your `PATH`.
 
-On macOS `ys` is neither signed nor notarized — unlike the app, which is both. A copy downloaded
-with a browser is therefore quarantined and refused on first run. Either download it with `curl`,
-or clear the flag:
+This copy of `ys` is not signed or notarized on macOS, unlike the one inside the app. A copy
+downloaded with a browser is therefore quarantined and refused on first run. Either download it
+with `curl`, or clear the flag:
 
 ```sh
 xattr -d com.apple.quarantine ys
 ```
 
-No package manager ships `ys` yet, and it does not update itself — the app's
-[updater](updates.md) does not know about it.
+A copy installed this way does not update itself.
 
 ## Commands
 
