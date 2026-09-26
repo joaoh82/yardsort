@@ -101,6 +101,7 @@ const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
   problem: null,
   reviewChanges: false,
   suggestInComposer: false,
+  sendProvenance: false,
   thresholds: {
     flagAtPercent: 70,
     offTaskAtPercent: 60,
@@ -519,9 +520,37 @@ describe("Settings", () => {
       const { user } = await openAssist();
 
       await user.click(screen.getByRole("checkbox", { name: /Check changed files/ }));
-      expect(core.assistSaveSettings).toHaveBeenCalledWith(true, false, withKey().thresholds);
+      expect(core.assistSaveSettings).toHaveBeenCalledWith(
+        true,
+        false,
+        false,
+        withKey().thresholds,
+      );
       expect(screen.getByText(/Sends the diff of each changed file/)).toBeInTheDocument();
       expect(screen.getByText(/Sends the message you are typing/)).toBeInTheDocument();
+    });
+
+    it("offers to tell Assist who wrote each file only once the review is on, and says what that sends", async () => {
+      core.assistStatus.mockResolvedValue(withKey());
+      core.assistSaveSettings.mockResolvedValue(withKey({ reviewChanges: true }));
+      const { user } = await openAssist();
+      const tell = screen.getByRole("checkbox", { name: /Tell Assist what the agents reported/ });
+      expect(tell).toBeDisabled();
+      expect(screen.getByText(/sends one sentence in the Changes list/)).toBeInTheDocument();
+      expect(screen.getByText(/Never a tool, a time or a command/)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("checkbox", { name: /Check changed files/ }));
+      await waitFor(() => expect(tell).toBeEnabled());
+      core.assistSaveSettings.mockResolvedValue(
+        withKey({ reviewChanges: true, sendProvenance: true }),
+      );
+      await user.click(tell);
+      expect(core.assistSaveSettings).toHaveBeenLastCalledWith(
+        true,
+        false,
+        true,
+        withKey().thresholds,
+      );
     });
 
     it("saves the thresholds and re-reads what Jev already answered", async () => {
@@ -544,6 +573,7 @@ describe("Settings", () => {
 
       expect(core.assistSaveSettings).toHaveBeenCalledWith(
         true,
+        false,
         false,
         expect.objectContaining({ flagAtPercent: 40, offTaskAtPercent: 60 }),
       );

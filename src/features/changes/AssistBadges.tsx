@@ -28,6 +28,12 @@ const FLAGS: Record<ReviewFlag, { label: string; title: string; tone: string }> 
     title: "The change looks like it switches a lint, type check or CI step off.",
     tone: "border-amber-400/40 text-amber-300",
   },
+  unaccounted: {
+    label: "unaccounted",
+    title:
+      "No agent reported writing this file while the agents here were reporting, and the change looks substantive rather than formatting or generated output.",
+    tone: "border-amber-400/40 text-amber-300",
+  },
 };
 
 const OFF_TASK = {
@@ -49,7 +55,7 @@ export function AssistBadges({ review }: { review: FileReview | undefined }) {
       {badges.map((badge) => (
         <span
           key={badge.label}
-          title={`Assist: ${badge.title}`}
+          title={`Assist: ${badge.title}${review.told ? ` Assist was told: ${review.told}.` : ""}`}
           className={`rounded border px-1 text-[10px] leading-4 ${badge.tone}`}
         >
           {badge.label}

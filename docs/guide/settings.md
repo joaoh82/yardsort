@@ -94,7 +94,9 @@ built-in ones. **Delete** removes one.
 
 Optional AI help from TypeSafe's Jev model: badges on changed files, and suggestions in the
 composer. It is off until you enter your own API key and tick a feature, and each feature says
-exactly what it sends. The key is kept in your system credential store, never in this file.
+exactly what it sends. A third switch, under the review, tells Assist who wrote each changed
+file in the Changes list's own words; it is off by default because it changes what is sent. The
+key is kept in your system credential store, never in this file.
 
 See [Assist](assist.md) for the whole feature, including what happens when it is unavailable.
 

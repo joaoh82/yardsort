@@ -71,6 +71,8 @@ pub struct AssistStatus {
     pub problem: Option<String>,
     pub review_changes: bool,
     pub suggest_in_composer: bool,
+    /// With the review, tell Jev who wrote each file, in the Changes list's words.
+    pub send_provenance: bool,
     /// How sure Jev must be before an answer becomes a badge or a suggestion.
     pub thresholds: ThresholdsDto,
     /// The model every request names.
@@ -90,6 +92,7 @@ fn status(state: &AppState) -> AssistStatus {
         problem,
         review_changes: settings.review_changes,
         suggest_in_composer: settings.suggest_in_composer,
+        send_provenance: settings.send_provenance,
         thresholds: settings.thresholds.into(),
         model: super::jev::MODEL.to_owned(),
     }
@@ -168,6 +171,7 @@ pub async fn assist_save_settings(
     app: AppHandle,
     review_changes: bool,
     suggest_in_composer: bool,
+    send_provenance: bool,
     thresholds: ThresholdsDto,
 ) -> IpcResult<AssistStatus> {
     let thresholds = Thresholds::from(thresholds);
@@ -180,6 +184,7 @@ pub async fn assist_save_settings(
             .update(|settings| {
                 settings.assist.review_changes = review_changes;
                 settings.assist.suggest_in_composer = suggest_in_composer;
+                settings.assist.send_provenance = send_provenance;
                 settings.assist.thresholds = thresholds;
             })
             .map_err(|error| {
@@ -218,6 +223,22 @@ fn prepare_review(state: &AppState, workspace_id: &str) -> IpcResult<Prepared> {
         base_branch: row.base_branch.as_deref(),
     };
     let set = changes.list()?;
+    // Who wrote each file, when the user chose to tell Jev: the same join the Changes list
+    // shows, and only its words. Nothing when no agent run in the workspace was reporting.
+    let written = if state.settings.get().assist.send_provenance {
+        let paths: Vec<String> = set
+            .uncommitted
+            .iter()
+            .chain(&set.committed)
+            .map(|change| change.path.clone())
+            .collect();
+        let files = crate::activity::last_written(&root, &paths);
+        yardsort_core::activity::provenance::of(&state.store, workspace_id, &files)
+            .ok()
+            .filter(|p| p.reporting_runs() > 0)
+    } else {
+        None
+    };
     let mut inputs = Vec::with_capacity(set.uncommitted.len() + set.committed.len());
     for (scope, list) in [
         (Scope::Uncommitted, &set.uncommitted),
@@ -226,7 +247,11 @@ fn prepare_review(state: &AppState, workspace_id: &str) -> IpcResult<Prepared> {
         for change in list {
             // A file we cannot read a diff for is still listed, as "not checked".
             let patch = changes.patch(change, scope).unwrap_or(None);
-            inputs.push(FileInput::new(change, scope, patch));
+            let mut input = FileInput::new(change, scope, patch);
+            if let Some(provenance) = &written {
+                input.written = Some(written_for(provenance, &change.path));
+            }
+            inputs.push(input);
         }
     }
 
@@ -240,6 +265,47 @@ fn prepare_review(state: &AppState, workspace_id: &str) -> IpcResult<Prepared> {
         inputs,
         thresholds,
     })
+}
+
+/// The Changes list's word on one file, for Jev: who reported writing it, who was running a
+/// command when it was last written, or nobody.
+fn written_for(
+    provenance: &yardsort_core::activity::provenance::Provenance,
+    path: &str,
+) -> review::Written {
+    let Some(file) = provenance.files.iter().find(|file| file.path == path) else {
+        return review::Written::Unaccounted;
+    };
+    if !file.reports.is_empty() {
+        let mut agents: Vec<String> = file
+            .reports
+            .iter()
+            .map(|report| {
+                report
+                    .harness_id
+                    .clone()
+                    .unwrap_or_else(|| report.producer.clone())
+            })
+            .collect();
+        agents.dedup();
+        return review::Written::Reported(agents);
+    }
+    match &file.observed {
+        Some(observed) => {
+            let mut agents: Vec<String> = observed
+                .matches
+                .iter()
+                .map(|m| {
+                    m.harness_id
+                        .clone()
+                        .unwrap_or_else(|| "an agent".to_owned())
+                })
+                .collect();
+            agents.dedup();
+            review::Written::Observed(agents.join(" and "))
+        }
+        None => review::Written::Unaccounted,
+    }
 }
 
 /// Check a workspace's changed files against what was asked, and for risky edits. Sends the

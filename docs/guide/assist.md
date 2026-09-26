@@ -36,13 +36,14 @@ _Settings → Assist → "Check changed files against what the workspace was ask
 Shortly after an agent stops writing, the [Changes](changes-and-files.md) list is checked file by
 file, and flagged files get a badge:
 
-| Badge           | What it means                                                                        |
-| --------------- | ------------------------------------------------------------------------------------ |
-| **off-task**    | The change looks unrelated to what this workspace was asked to do.                   |
-| **secret**      | The change looks like it adds a literal key, token or password.                      |
-| **tests**       | The change looks like it deletes, skips or weakens a test.                           |
-| **checks**      | The change looks like it switches a lint, type check or CI step off.                 |
-| **credentials** | The file's _name_ says it holds credentials. Its contents were not sent (see below). |
+| Badge           | What it means                                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **off-task**    | The change looks unrelated to what this workspace was asked to do.                                                                      |
+| **secret**      | The change looks like it adds a literal key, token or password.                                                                         |
+| **tests**       | The change looks like it deletes, skips or weakens a test.                                                                              |
+| **checks**      | The change looks like it switches a lint, type check or CI step off.                                                                    |
+| **credentials** | The file's _name_ says it holds credentials. Its contents were not sent (see below).                                                    |
+| **unaccounted** | No agent reported writing this file while the agents here were reporting, and the change looks substantive. Only with the switch below. |
 
 The line above the list says when Assist last looked, and **Check now** asks again immediately.
 Hovering a badge explains it.
@@ -58,6 +59,28 @@ contents ever being sent — `.env.example` and friends are not treated as secre
 
 Answers are cached per file: watching an agent work re-asks only about the file whose diff
 actually changed.
+
+### Telling Assist who wrote each file
+
+_Settings → Assist → "Tell Assist what the agents reported about each file"._ Off by default,
+and only offered once the review above is on.
+
+The [Changes list](changes-and-files.md#who-wrote-it) already shows which files an agent reported
+writing, which were written while an agent ran a command, and which have no report. With this
+switch on, the same fact goes with each diff, as one sentence in the list's own words: _reported
+written by claude_, _last written while claude ran a command; no agent reported writing it_, or
+_not reported written by any agent, though the agents in this workspace were reporting what they
+wrote_. Never a tool's name, a time, or a command. When no agent run in the workspace was
+reporting, nothing is added at all.
+
+Two things come of it. The existing questions see the sentence, so a file the agent itself
+reported writing is judged with that in view. And a file no agent accounted for gets one more
+question — is the change substantive, rather than formatting, whitespace, generated output or a
+lock file? — whose answer is the **unaccounted** badge. Hover any badge on a file to see the
+exact sentence Assist was told about it.
+
+Needs an agent's **Capture what … reports** switch on in Settings → General, or there is nothing
+to tell. See [Activity](activity.md).
 
 ## Suggestions in the composer
 
@@ -117,6 +140,7 @@ Only the switches are stored, in `settings.toml`; the key never is.
 [assist]
 review_changes = true
 suggest_in_composer = true
+send_provenance = false
 flag_at_percent = 70
 off_task_at_percent = 60
 suggest_at_percent = 50

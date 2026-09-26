@@ -321,6 +321,7 @@ describe("ChangesPanel with Assist", () => {
     problem: null,
     reviewChanges: true,
     suggestInComposer: false,
+    sendProvenance: false,
     thresholds: {
       flagAtPercent: 70,
       offTaskAtPercent: 60,
@@ -337,6 +338,7 @@ describe("ChangesPanel with Assist", () => {
     relevance: "direct",
     flags: [],
     notChecked: null,
+    told: null,
     ...extra,
   });
 
@@ -380,6 +382,38 @@ describe("ChangesPanel with Assist", () => {
     expect(row(".env")).toContain("credentials");
     expect(row("src/app.ts")).not.toContain("off-task");
     expect(screen.getByText(/Assist flagged 2 of 3 files/)).toBeInTheDocument();
+  });
+
+  it("shows the unaccounted badge, and every badge's tooltip says what Assist was told", async () => {
+    useAssistStore.setState({
+      status: status({ sendProvenance: true }),
+      workspaceId: "w1",
+      reviewing: false,
+      error: null,
+      review: {
+        task: "Fix the login redirect",
+        model: "jev-1.13.0",
+        problem: null,
+        files: [
+          reviewed({ path: "src/app.ts", told: "reported written by claude" }),
+          reviewed({
+            path: "ci.yml",
+            flags: ["unaccounted", "disablesChecks"],
+            told: "not reported written by any agent, though the agents in this workspace were reporting what they wrote",
+          }),
+          reviewed({ path: ".env", relevance: null, flags: ["credentialsFile"] }),
+        ],
+      },
+    });
+    await renderPanel();
+    const row = (path: string) => screen.getByTitle(path);
+    expect(row("ci.yml")).toHaveTextContent("unaccounted");
+    const badge = within(row("ci.yml")).getByText("unaccounted");
+    expect(badge.title).toContain("No agent reported writing this file");
+    expect(badge.title).toContain("Assist was told: not reported written by any agent");
+    expect(within(row("ci.yml")).getByText("checks").title).toContain("Assist was told:");
+    expect(row("src/app.ts")).not.toHaveTextContent("unaccounted");
+    expect(within(row(".env")).getByText("credentials").title).not.toContain("Assist was told");
   });
 
   it("checks again on demand, and says what stopped it", async () => {

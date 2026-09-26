@@ -52,6 +52,9 @@ pub enum ReviewFlag {
     WeakensTests,
     /// A lint, type check or CI step was switched off.
     DisablesChecks,
+    /// A substantive change no agent reported making, in a workspace whose agents were
+    /// reporting what they wrote. Only asked when the provenance facts are sent.
+    Unaccounted,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
@@ -64,6 +67,8 @@ pub struct FileReview {
     pub flags: Vec<ReviewFlag>,
     /// Why this file was not looked at, if it was not.
     pub not_checked: Option<String>,
+    /// What Jev was told about who wrote the file, word for word, when that was sent.
+    pub told: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
@@ -87,6 +92,36 @@ pub struct FileInput {
     pub patch: Option<String>,
     /// The name alone is enough to flag it; the diff is not sent.
     pub credentials_file: bool,
+    /// What the agents reported about this file, in the Changes list's own words, when the
+    /// user chose to send that; `None` sends nothing new.
+    pub written: Option<Written>,
+}
+
+/// Who wrote a changed file, as far as the agents' reports say. The words sent to Jev are
+/// exactly the ones the Changes list shows; nothing about tools, times or commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Written {
+    /// One or more agents reported writing it.
+    Reported(Vec<String>),
+    /// No report, but its last write fell inside an agent's command.
+    Observed(String),
+    /// No report and no observation, while agents in the workspace were reporting.
+    Unaccounted,
+}
+
+impl Written {
+    /// The sentence Jev is given as `written`.
+    pub fn sentence(&self) -> String {
+        match self {
+            Written::Reported(agents) => format!("reported written by {}", agents.join(" and ")),
+            Written::Observed(agent) => {
+                format!("last written while {agent} ran a command; no agent reported writing it")
+            }
+            Written::Unaccounted => "not reported written by any agent, though the agents in \
+                                     this workspace were reporting what they wrote"
+                .to_owned(),
+        }
+    }
 }
 
 impl FileInput {
@@ -98,6 +133,7 @@ impl FileInput {
             kind: change.kind,
             patch: patch.filter(|_| !credentials_file).map(truncate),
             credentials_file,
+            written: None,
         }
     }
 }
@@ -136,6 +172,9 @@ fn state_for(input: &FileInput, task: Option<&str>) -> serde_json::Value {
         "diff".into(),
         input.patch.clone().unwrap_or_default().into(),
     );
+    if let Some(written) = &input.written {
+        state.insert("written".into(), written.sentence().into());
+    }
     serde_json::Value::Object(state)
 }
 
@@ -149,8 +188,22 @@ fn kind_word(kind: ChangeKind) -> &'static str {
     }
 }
 
-fn questions(task_known: bool) -> BTreeMap<String, Question> {
+fn questions(task_known: bool, unaccounted: bool) -> BTreeMap<String, Question> {
     let mut questions = BTreeMap::new();
+    if unaccounted {
+        questions.insert(
+            "unaccounted".to_owned(),
+            Question::Noul {
+                instructions: "`written` says no agent reported writing the file named by `file`, \
+                               although the agents in this workspace were reporting what they \
+                               wrote. Is the change in `diff` substantive — logic, configuration, \
+                               tests, dependencies or documentation, rather than formatting, \
+                               whitespace, generated output or a lock file — so that a reviewer \
+                               should know it came from outside what the agents reported?"
+                    .into(),
+            },
+        );
+    }
     if task_known {
         questions.insert(
             "relevance".to_owned(),
@@ -218,6 +271,7 @@ fn verdict(answers: &Answers, thresholds: Thresholds) -> (Option<Relevance>, Vec
     flag_if("secret", ReviewFlag::Secret);
     flag_if("tests", ReviewFlag::WeakensTests);
     flag_if("checks", ReviewFlag::DisablesChecks);
+    flag_if("unaccounted", ReviewFlag::Unaccounted);
 
     let relevance = answers.get("relevance").map(|answer| {
         let unrelated = answer.level(0).unwrap_or(0.0);
@@ -243,6 +297,12 @@ fn cache_key(input: &FileInput, task: Option<&str>) -> u64 {
     (QUESTIONS_VERSION, super::jev::MODEL).hash(&mut hasher);
     (task, &input.path, &input.patch).hash(&mut hasher);
     (input.kind as u8, input.scope as u8).hash(&mut hasher);
+    // What Jev was told about the writer is part of what it answered about.
+    input
+        .written
+        .as_ref()
+        .map(Written::sentence)
+        .hash(&mut hasher);
     hasher.finish()
 }
 
@@ -284,6 +344,7 @@ pub async fn review(
             relevance,
             flags,
             not_checked,
+            told: input.written.as_ref().map(Written::sentence),
         });
     }
 
@@ -293,7 +354,8 @@ pub async fn review(
         for (index, input) in batch.iter().cloned() {
             let (jev, task) = (Arc::clone(&jev), task.clone());
             running.spawn(async move {
-                let questions = questions(task.is_some());
+                let questions =
+                    questions(task.is_some(), input.written == Some(Written::Unaccounted));
                 let state = state_for(&input, task.as_deref());
                 (index, input, jev.ask(&state, &questions).await)
             });
@@ -386,6 +448,78 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    /// With the switch on, Jev is told who wrote the file in the Changes list's words and no
+    /// more; a file no agent accounted for gets the one extra question, and its answer the one
+    /// extra badge. With nothing to tell, nothing new is sent and nothing new is asked.
+    #[test]
+    fn who_wrote_the_file_is_told_in_the_lists_words_and_an_unaccounted_change_is_asked_about() {
+        let server = fake::answering(|id, _| match id {
+            "unaccounted" => fake::noul(0.9),
+            "relevance" => fake::score(&[0.1, 0.2, 0.7]),
+            _ => fake::noul(0.0),
+        });
+        let mut reported = input("src/login.rs", "-old\n+new\n");
+        reported.written = Some(Written::Reported(vec!["claude".into()]));
+        let mut observed = input("hello.txt", "+hello\n");
+        observed.written = Some(Written::Observed("claude".into()));
+        let mut stray = input("ci.yml", "-on: push\n");
+        stray.written = Some(Written::Unaccounted);
+        let silent = input("README.md", "+# hi\n");
+        let checked = block(review(
+            Arc::new(Jev::at(&server.url, "k")),
+            &Cache::default(),
+            Some("Fix the login redirect".to_owned()),
+            vec![reported, observed, stray, silent],
+            Thresholds::default(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            checked.files[0].told.as_deref(),
+            Some("reported written by claude")
+        );
+        assert_eq!(
+            checked.files[1].told.as_deref(),
+            Some("last written while claude ran a command; no agent reported writing it")
+        );
+        assert!(checked.files[2]
+            .told
+            .as_deref()
+            .unwrap()
+            .starts_with("not reported written by any agent"));
+        assert_eq!(checked.files[3].told, None);
+        assert_eq!(checked.files[2].flags, [ReviewFlag::Unaccounted]);
+        assert_eq!(checked.files[0].flags, [], "a reported file is not asked");
+        assert_eq!(checked.files[1].flags, []);
+
+        let sent = server.received.lock().unwrap();
+        let by = |file: &str| {
+            sent.iter()
+                .find(|r| r.body["state"]["file"] == file)
+                .unwrap()
+                .body
+                .clone()
+        };
+        assert_eq!(
+            by("src/login.rs")["state"]["written"],
+            "reported written by claude"
+        );
+        assert!(by("src/login.rs")["questions"]["unaccounted"].is_null());
+        assert!(by("hello.txt")["questions"]["unaccounted"].is_null());
+        assert!(!by("ci.yml")["questions"]["unaccounted"].is_null());
+        assert!(
+            by("README.md")["state"]["written"].is_null(),
+            "nothing to tell, nothing sent"
+        );
+        assert!(by("README.md")["questions"]["unaccounted"].is_null());
+        for request in sent.iter() {
+            let text = request.body.to_string();
+            for never in ["Bash", "toolUseId", "07:", "echo"] {
+                assert!(!text.contains(never), "sent {never}: {text}");
+            }
+        }
     }
 
     #[test]

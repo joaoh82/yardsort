@@ -1,6 +1,6 @@
 # 17 — Agent events, stage 3: review and provenance
 
-Status: **two slices shipped** · 25–26 September 2026 · Stage 3 of
+Status: **three slices shipped** · 25–26 September 2026 · Stage 3 of
 [09](09-agent-events-and-memory.md): _join event ranges to workspace diffs and Jev assessments;
 show evidence and uncertainty in a review panel_, with the exit gate _review can distinguish
 reported writes from Git-observed changes; no claim of line-level causality without exact
@@ -68,10 +68,11 @@ copies.
 - **The trace link runs both ways.** A timeline row that names a file on the change list gets a
   **Show diff** button that opens that file's diff in the Changes panel. The button's own words say
   the diff is everything that changed since the last commit, whoever changed it.
-- **Assist is not changed.** Stage 3's Jev row asks for "selected event-derived facts" beside
-  the diff. That changes what is sent to a third party under the user's key, which is an
-  opt-in decision of its own and a design pass on what those facts are; it is not folded into a
-  slice whose point is honesty about evidence. Recorded as the next step, not done.
+- **Assist is not changed in the first two slices.** Stage 3's Jev row asks for "selected
+  event-derived facts" beside the diff. That changes what is sent to a third party under the
+  user's key, which is an opt-in decision of its own and a design pass on what those facts are;
+  it was not folded into a slice whose point is honesty about evidence. The third slice (§7)
+  is that pass.
 
 ## 3 · What shipped
 
@@ -115,8 +116,7 @@ copies.
 
 ## 5 · What this slice does not do, and the next
 
-- **Jev with event-derived facts** (the Assist join above): the next slice of stage 3, with its
-  own opt-in.
+- ~~**Jev with event-derived facts**~~ (the Assist join above): the third slice, §7.
 - **Committed scope.** Reports are joined to a path whether it is uncommitted or on the branch;
   a file the agent wrote and then committed keeps its badge in the committed group. Reports
   are not attributed to a commit, and a file written by one run and committed by another says
@@ -177,3 +177,39 @@ file tool's window is for its file only and meets its report on one row; pairs, 
 starts, two agents at once, and never a shell); `last_written` in the app reads the file's clock
 and skips what it cannot; `ChangesPanel.test.tsx` gains one for the badge, the tooltip, the
 note's arithmetic, the header, and the report outranking the observation.
+
+## 7 · Third slice: the Jev half
+
+Four decisions, put to the user on 2026-09-26 and answered as proposed:
+
+- **Which facts.** Per file, only what the panel shows, as one sentence in its own words:
+  _reported written by claude_, _last written while claude ran a command; no agent reported
+  writing it_, or _not reported written by any agent, though the agents in this workspace were
+  reporting what they wrote_. No tool name, no time, no command. When no run in the workspace
+  was reporting, nothing is added: every file would carry the same uninteresting sentence.
+- **Where the switch lives.** Its own, under Assist, off by default, offered only once the
+  review is on: `send_provenance`. Existing users see no change in what is sent.
+- **What Jev may say with it.** The existing questions read the sentence from `state`, so
+  off-task is judged with the writer in view. One new question, asked only of a file whose
+  sentence is the third — is the change substantive rather than formatting, whitespace,
+  generated output or a lock file? — and one new badge, **unaccounted**, from its answer at
+  the same threshold as the other risk flags. No priority score: a ranking is a stronger claim
+  than a flag.
+- **Visibility.** The switch's copy, the guide and the settings-file section say exactly what
+  goes. Every Assist badge's tooltip on a file ends with the sentence Assist was told about it
+  (`FileReview.told`). No preview dialog: there is none for the diffs either.
+
+Mechanics: `prepare_review` computes the same join the panel shows (`provenance::of` over the
+change list's paths) when the switch is on and at least one run was reporting, and gives each
+`FileInput` a `Written`; `state_for` adds `written`; `questions` adds `unaccounted` for
+`Written::Unaccounted`; the cache key includes the sentence, so a file whose writer changes is
+asked again and one whose diff is unchanged is not. Tests: the review sends the sentence and
+no more (no tool, id, time or command in any request), asks the extra question of the
+unaccounted file only, flags it, and sends nothing new for a file with nothing to tell; the
+settings screen offers the switch only once the review is on and saves it; the panel shows the
+badge and every badge's tooltip carries what was told.
+
+Not measured: whether the sentence improves the off-task judgment. Like the thresholds
+([06 q17](06-open-questions.md)), it is a setting that costs nothing to switch back, and the
+tooltip shows what was sent; anyone who finds the badge noisy turns the switch off where they
+meet it.

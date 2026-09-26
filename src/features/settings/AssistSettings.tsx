@@ -56,10 +56,15 @@ function ThresholdFields({
 
   const save = async (percents: Percents) => {
     const done = await run("saving", () =>
-      ipc.assistSaveSettings(status.reviewChanges, status.suggestInComposer, {
-        ...status.thresholds,
-        ...percents,
-      }),
+      ipc.assistSaveSettings(
+        status.reviewChanges,
+        status.suggestInComposer,
+        status.sendProvenance,
+        {
+          ...status.thresholds,
+          ...percents,
+        },
+      ),
     );
     if (done) {
       setDraft(null);
@@ -165,11 +170,14 @@ export function AssistSettings() {
     }
   };
 
-  const toggle = (patch: Partial<Pick<AssistStatus, "reviewChanges" | "suggestInComposer">>) =>
+  const toggle = (
+    patch: Partial<Pick<AssistStatus, "reviewChanges" | "suggestInComposer" | "sendProvenance">>,
+  ) =>
     void run("saving", () =>
       ipc.assistSaveSettings(
         patch.reviewChanges ?? status.reviewChanges,
         patch.suggestInComposer ?? status.suggestInComposer,
+        patch.sendProvenance ?? status.sendProvenance,
         status.thresholds,
       ),
     );
@@ -285,6 +293,26 @@ export function AssistSettings() {
               the first message of the workspace&rsquo;s conversations to TypeSafe. Files whose name
               says they hold credentials (<code>.env</code>, <code>*.pem</code>) are flagged without
               being sent.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 pl-6">
+          <input
+            type="checkbox"
+            checked={status.sendProvenance}
+            disabled={!hasKey || !status.reviewChanges || busy !== null}
+            onChange={(event) => toggle({ sendProvenance: event.target.checked })}
+            className="mt-0.5 accent-(--color-accent)"
+          />
+          <span>
+            Tell Assist what the agents reported about each file
+            <span className="block text-ink-faint">
+              With each diff,{" "}
+              <strong>sends one sentence in the Changes list&rsquo;s own words</strong>:
+              <em>reported written by claude</em>, <em>last written while claude ran a command</em>,
+              or <em>not reported written by any agent</em>. Never a tool, a time or a command.
+              Needs an agent&rsquo;s capture switch on in General; a file no agent accounted for can
+              then earn an <strong>unaccounted</strong> badge. Hover any badge to see what was sent.
             </span>
           </span>
         </label>

@@ -16,6 +16,7 @@ const status = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
   problem: null,
   reviewChanges: true,
   suggestInComposer: true,
+  sendProvenance: false,
   thresholds: {
     flagAtPercent: 70,
     offTaskAtPercent: 60,
@@ -28,7 +29,16 @@ const status = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
 });
 
 const review = (extra: Partial<Review> = {}): Review => ({
-  files: [{ path: "a.ts", scope: "uncommitted", relevance: "direct", flags: [], notChecked: null }],
+  files: [
+    {
+      path: "a.ts",
+      scope: "uncommitted",
+      relevance: "direct",
+      flags: [],
+      notChecked: null,
+      told: null,
+    },
+  ],
   task: "Fix the login bug",
   model: "jev-1.13.0",
   problem: null,

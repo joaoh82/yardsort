@@ -579,8 +579,10 @@ The join of what the agents reported to what git shows, recorded in
   has no report, but its own modification time falls inside the command's window on the
   timeline; that is shown as an observation — a dashed badge, worded as what Yardsort read and
   what it did not — and ranked below a report. Only a tool call is a window, never a run.
-- Not done, by decision: event-derived facts for Assist's review — the Jev half of stage 3 —
-  which changes what is sent under the user's key and gets its own opt-in and design pass.
+- Third slice (2026-09-26): **the Jev half**, after a four-question design pass. A switch
+  under Assist, off by default, sends who wrote each file in the Changes list's own sentence
+  with each diff — never a tool, time or command — and a file no agent accounted for gets one
+  more question and an **unaccounted** badge. Every badge's tooltip ends with what was told.
 
 _Exit:_ reported writes are told apart from git-observed changes on the panel, with the
 alternatives named; no claim of line-level causality anywhere; the gates green. Owed: the
