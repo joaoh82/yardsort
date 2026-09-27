@@ -17,7 +17,7 @@ use serde_json::Value;
 use std::path::Path;
 
 use crate::activity::provenance::{self, Provenance};
-use crate::changes::{Changes, FileChange};
+use crate::changes::{Changes, FileChange, Scope};
 use crate::error::IpcResult;
 use crate::git::{Git, Head};
 use crate::store::{EventRow, RunRow, SessionRow, Store, StoreResult};
@@ -96,8 +96,10 @@ pub struct Facts {
     pub runs: Vec<RunSummary>,
     /// How many events stand behind the summary.
     pub events: usize,
-    /// Assist's judgment per changed file, when the caller has one. Empty otherwise.
-    pub rankings: BTreeMap<String, Ranking>,
+    /// Assist's judgment per changed file, when the caller has one; empty otherwise. Keyed by
+    /// scope and path: a file changed both on the branch and since the last commit has two
+    /// diffs, and two reviews.
+    pub rankings: BTreeMap<(Scope, String), Ranking>,
 }
 
 /// The whole of the facts: the store's half and git's — head, base, the commits since, the
@@ -318,9 +320,13 @@ pub fn render(facts: &Facts) -> String {
         }
     }
     let reporting = facts.provenance.reporting_runs() > 0;
-    for (title, files) in [
-        ("Uncommitted", &facts.uncommitted),
-        ("Committed on this branch", &facts.committed),
+    for (title, scope, files) in [
+        ("Uncommitted", Scope::Uncommitted, &facts.uncommitted),
+        (
+            "Committed on this branch",
+            Scope::Committed,
+            &facts.committed,
+        ),
     ] {
         if files.is_empty() {
             continue;
@@ -329,7 +335,7 @@ pub fn render(facts: &Facts) -> String {
         // With Assist's judgment in hand, the files it would look at first come first.
         let mut ordered: Vec<&ChangedFile> = files.iter().collect();
         if !facts.rankings.is_empty() {
-            ordered.sort_by_key(|file| rank(facts.rankings.get(&file.path)));
+            ordered.sort_by_key(|file| rank(facts.rankings.get(&(scope, file.path.clone()))));
         }
         for file in ordered.iter().take(MAX_FILES) {
             let stat = match (file.additions, file.deletions) {
@@ -343,7 +349,7 @@ pub fn render(facts: &Facts) -> String {
             };
             let judged = facts
                 .rankings
-                .get(&file.path)
+                .get(&(scope, file.path.clone()))
                 .map(judgment)
                 .filter(|j| !j.is_empty())
                 .map(|j| format!(" — {j}"))
@@ -1078,7 +1084,7 @@ mod tests {
         .into_iter()
         .map(|(path, relevance, flags)| {
             (
-                path.to_owned(),
+                (Scope::Uncommitted, path.to_owned()),
                 Ranking {
                     relevance: relevance.map(str::to_owned),
                     flags: flags.into_iter().map(str::to_owned).collect(),
@@ -1104,6 +1110,54 @@ mod tests {
         assert!(ranked.contains(
             "a judgment about relevance to the task and risk, not a fact about the file"
         ));
+    }
+
+    /// One path, two scopes, two diffs, two reviews: the uncommitted edit that adds a secret
+    /// keeps its flag though the committed change to the same file was judged clean.
+    #[test]
+    fn a_file_changed_in_both_scopes_keeps_each_scopes_judgment() {
+        let file = |path: &str| ChangedFile {
+            path: path.into(),
+            kind: "modified".into(),
+            additions: None,
+            deletions: None,
+        };
+        let mut facts = Facts {
+            workspace: "w".into(),
+            project: "p".into(),
+            uncommitted: vec![file("src/login.rs")],
+            committed: vec![file("src/login.rs")],
+            ..Facts::default()
+        };
+        facts.rankings.insert(
+            (Scope::Uncommitted, "src/login.rs".into()),
+            Ranking {
+                relevance: Some("direct".into()),
+                flags: vec!["secret".into()],
+            },
+        );
+        facts.rankings.insert(
+            (Scope::Committed, "src/login.rs".into()),
+            Ranking {
+                relevance: Some("direct".into()),
+                flags: vec![],
+            },
+        );
+        let text = render(&facts);
+        let uncommitted = text.find("- Uncommitted").unwrap();
+        let committed = text.find("- Committed on this branch").unwrap();
+        let flagged = text
+            .find("`src/login.rs` (modified) — on task; Assist flags: may add a secret")
+            .unwrap();
+        let clean = text.rfind("`src/login.rs` (modified) — on task\n").unwrap();
+        assert!(
+            uncommitted < flagged && flagged < committed,
+            "the flag stays uncommitted"
+        );
+        assert!(
+            clean > committed,
+            "the committed entry is judged on its own diff"
+        );
     }
 
     #[test]

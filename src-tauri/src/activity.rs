@@ -413,7 +413,7 @@ pub async fn workspace_handoff(app: AppHandle, workspace_id: String) -> IpcResul
                     .filter(|file| file.not_checked.is_none())
                     .map(|file| {
                         (
-                            file.path.clone(),
+                            (file.scope, file.path.clone()),
                             Ranking {
                                 relevance: file.relevance.as_ref().and_then(camel_word),
                                 flags: file.flags.iter().filter_map(camel_word).collect(),

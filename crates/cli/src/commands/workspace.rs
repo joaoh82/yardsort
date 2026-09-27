@@ -56,17 +56,19 @@ pub enum Command {
         #[arg(long)]
         no_agent: bool,
     },
-    /// Remove a workspace's folder and forget it. The branch, and its commits, are kept.
+    /// Print the handoff packet for a workspace, as the next agent's first message.
     ///
-    /// Uncommitted changes and untracked files are refused unless `--force` is given: they live
-    /// only in the folder this removes, so there is no way back to them.
-    /// Print the handoff packet for a workspace: what Yardsort recorded there, written as the
-    /// next agent's first message. The same text the app's Hand off… button starts from,
-    /// without Assist's ranking, which the command line has no key for.
+    /// What Yardsort recorded there — the task, where the branch stands, what each agent run
+    /// did, what is not known. The same text the app's Hand off… button starts from, without
+    /// Assist's ranking, which the command line has no key for.
     Handoff {
         /// The workspace, by name or id.
         workspace: String,
     },
+    /// Remove a workspace's folder and forget it. The branch, and its commits, are kept.
+    ///
+    /// Uncommitted changes and untracked files are refused unless `--force` is given: they live
+    /// only in the folder this removes, so there is no way back to them.
     Delete {
         /// Which one: a workspace name, or its id from `ys workspace list --json`.
         workspace: String,

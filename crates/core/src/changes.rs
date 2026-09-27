@@ -45,7 +45,7 @@ pub struct FileChange {
     pub deletions: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Scope {
     Uncommitted,
