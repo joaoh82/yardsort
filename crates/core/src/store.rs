@@ -175,6 +175,8 @@ pub struct OutcomeRow {
     pub label: Option<String>,
     pub labeled_at: Option<i64>,
     pub ahead_at: Option<i64>,
+    /// The branch's commit when last seen ahead of its base.
+    pub ahead_tip: Option<String>,
     pub merged_at: Option<i64>,
     pub pr_number: Option<i64>,
     pub pr_state: Option<String>,
@@ -860,21 +862,22 @@ impl Store {
         )? > 0)
     }
 
-    /// Git's evidence, each recorded once: the first time the branch was seen ahead of its base,
-    /// and the first time, after that, its work was seen in the base.
-    pub fn outcome_git(&self, id: &str, ahead: bool, merged: bool) -> StoreResult<()> {
+    /// Git's evidence: the branch seen ahead of its base with this tip (its first time kept,
+    /// its tip the latest), and — once — that tip found reachable from the base.
+    pub fn outcome_git(&self, id: &str, ahead_tip: Option<&str>, merged: bool) -> StoreResult<()> {
         let at = now_ms();
         let conn = self.conn();
-        if ahead {
+        if let Some(tip) = ahead_tip {
             conn.execute(
-                "UPDATE workspace_outcomes SET ahead_at = COALESCE(ahead_at, ?) WHERE id = ?",
-                params![at, id],
+                "UPDATE workspace_outcomes SET ahead_at = COALESCE(ahead_at, ?), ahead_tip = ?
+                 WHERE id = ?",
+                params![at, tip, id],
             )?;
         }
         if merged {
             conn.execute(
                 "UPDATE workspace_outcomes SET merged_at = COALESCE(merged_at, ?)
-                 WHERE id = ? AND ahead_at IS NOT NULL",
+                 WHERE id = ? AND ahead_tip IS NOT NULL",
                 params![at, id],
             )?;
         }
@@ -1499,8 +1502,8 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRow> {
 }
 
 const OUTCOME_COLUMNS: &str = "id, project_id, workspace_id, workspace_name, branch, base_branch, \
-     task, harnesses, label, labeled_at, ahead_at, merged_at, pr_number, pr_state, ended, ended_at, \
-     created_at, updated_at";
+     task, harnesses, label, labeled_at, ahead_at, ahead_tip, merged_at, pr_number, pr_state, ended, \
+     ended_at, created_at, updated_at";
 
 fn outcome_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutcomeRow> {
     Ok(OutcomeRow {
@@ -1515,13 +1518,14 @@ fn outcome_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutcomeRow> {
         label: row.get(8)?,
         labeled_at: row.get(9)?,
         ahead_at: row.get(10)?,
-        merged_at: row.get(11)?,
-        pr_number: row.get(12)?,
-        pr_state: row.get(13)?,
-        ended: row.get(14)?,
-        ended_at: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        ahead_tip: row.get(11)?,
+        merged_at: row.get(12)?,
+        pr_number: row.get(13)?,
+        pr_state: row.get(14)?,
+        ended: row.get(15)?,
+        ended_at: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
 }
 

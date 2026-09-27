@@ -89,36 +89,94 @@ pub fn snapshot(store: &Store, workspace_id: &str) -> StoreResult<bool> {
     Ok(true)
 }
 
-/// Git's evidence for one attempt, read in the project's repository: is the branch ahead of its
-/// base, and — once it has been — is its work now in the base? A branch that is gone, or a base
-/// git does not know, says nothing.
+/// Git's evidence for one attempt, read in the project's repository. While the branch has
+/// commits the base lacks, its tip is recorded; a merge is recorded only when that recorded tip
+/// is found reachable from the base. An empty `base..branch` proves nothing on its own: a branch
+/// reset to its base, or recreated, has one too — and its discarded work is not in the base.
+/// A branch deleted after a real merge still counts, since the tip is what is checked.
 pub fn observe_git(store: &Store, git: &Git, root: &Path, row: &OutcomeRow) -> StoreResult<()> {
     let (Some(branch), Some(base)) = (row.branch.as_deref(), row.base_branch.as_deref()) else {
         return Ok(());
     };
-    let range = format!("refs/heads/{base}..refs/heads/{branch}");
-    let Ok(count) = git.run(root, &["rev-list", "--count", &range]) else {
-        return Ok(());
-    };
-    let ahead = count.trim().parse::<u64>().unwrap_or(0) > 0;
-    store.outcome_git(&row.id, ahead, !ahead)
+    let base_ref = format!("refs/heads/{base}");
+    let branch_ref = format!("refs/heads/{branch}");
+    let mut tip = row.ahead_tip.clone();
+    if let Ok(count) = git.run(
+        root,
+        &["rev-list", "--count", &format!("{base_ref}..{branch_ref}")],
+    ) {
+        if count.trim().parse::<u64>().unwrap_or(0) > 0 {
+            if let Ok(head) = git.run(root, &["rev-parse", "--verify", &branch_ref]) {
+                let head = head.trim().to_owned();
+                store.outcome_git(&row.id, Some(&head), false)?;
+                tip = Some(head);
+            }
+        }
+    }
+    if row.merged_at.is_none() {
+        if let Some(tip) = tip {
+            let reached = git
+                .run(root, &["merge-base", "--is-ancestor", &tip, &base_ref])
+                .is_ok();
+            if reached {
+                store.outcome_git(&row.id, None, true)?;
+            }
+        }
+    }
+    Ok(())
 }
 
-/// The forge's evidence: the state of the pull request whose head is each attempt's branch.
-/// `pull_requests` is `(branch, number, state)`, newest first; the newest for a branch wins.
+/// A pull request as the forge last reported it, for matching to attempts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestSeen {
+    pub branch: String,
+    pub number: i64,
+    /// `open`, `merged` or `closed`.
+    pub state: String,
+    /// When it was opened, when the forge said.
+    pub created_at: Option<i64>,
+}
+
+/// How much earlier than an attempt's first record a pull request may have been opened and
+/// still be its own: the record is written when the workspace is first seen, not when it began.
+const OPENED_BEFORE_SLACK_MS: i64 = 10 * 60 * 1000;
+
+/// The forge's evidence. An attempt keeps the pull request it was first matched to and only
+/// follows that one's state; branch names are reused (`open_branch`), so a later pull request on
+/// the same branch never rewrites an earlier attempt. A new match needs the pull request to have
+/// been opened during the attempt's life — after it began, and before it was archived or deleted
+/// — or, when the forge gave no time, the attempt to be still going.
 pub fn observe_pull_requests(
     store: &Store,
     rows: &[OutcomeRow],
-    pull_requests: &[(String, i64, String)],
+    pull_requests: &[PullRequestSeen],
 ) -> StoreResult<()> {
     for row in rows {
+        if let Some(number) = row.pr_number {
+            if let Some(pr) = pull_requests.iter().find(|pr| pr.number == number) {
+                if row.pr_state.as_deref() != Some(pr.state.as_str()) {
+                    store.outcome_pull_request(&row.id, number, &pr.state)?;
+                }
+            }
+            continue;
+        }
         let Some(branch) = row.branch.as_deref() else {
             continue;
         };
-        if let Some((_, number, state)) = pull_requests.iter().find(|(b, _, _)| b == branch) {
-            if row.pr_number != Some(*number) || row.pr_state.as_deref() != Some(state) {
-                store.outcome_pull_request(&row.id, *number, state)?;
+        let during = |pr: &&PullRequestSeen| match pr.created_at {
+            Some(opened) => {
+                opened >= row.created_at - OPENED_BEFORE_SLACK_MS
+                    && row.ended_at.is_none_or(|ended| opened <= ended)
             }
+            None => row.ended.is_none(),
+        };
+        let newest = pull_requests
+            .iter()
+            .filter(|pr| pr.branch == branch)
+            .filter(during)
+            .max_by_key(|pr| (pr.created_at, pr.number));
+        if let Some(pr) = newest {
+            store.outcome_pull_request(&row.id, pr.number, &pr.state)?;
         }
     }
     Ok(())
@@ -326,23 +384,31 @@ mod tests {
         assert_eq!(outcome(&row), Outcome::Merged);
     }
 
+    fn seen(branch: &str, number: i64, state: &str, created_at: Option<i64>) -> PullRequestSeen {
+        PullRequestSeen {
+            branch: branch.into(),
+            number,
+            state: state.into(),
+            created_at,
+        }
+    }
+
     /// The forge's evidence covers the squash merge git cannot see; a closed pull request is
-    /// evidence, not an outcome; and the user's label always wins.
+    /// evidence, not an outcome; the attempt follows its own pull request's state; and the
+    /// user's label always wins.
     #[test]
     fn a_merged_pull_request_counts_as_kept_until_the_user_says_otherwise() {
         let (_dir, store, _git, _project, ws) = repo();
         snapshot(&store, &ws).unwrap();
         let rows = store.outcomes(None).unwrap();
-        observe_pull_requests(&store, &rows, &[("ys/fix".into(), 7, "closed".into())]).unwrap();
-        assert_eq!(
-            outcome(&store.outcome(&ws).unwrap().unwrap()),
-            Outcome::Unknown
-        );
-        observe_pull_requests(&store, &rows, &[("ys/fix".into(), 8, "merged".into())]).unwrap();
+        observe_pull_requests(&store, &rows, &[seen("ys/fix", 7, "open", None)]).unwrap();
+        let row = store.outcome(&ws).unwrap().unwrap();
+        assert_eq!((row.pr_number, outcome(&row)), (Some(7), Outcome::Unknown));
+        observe_pull_requests(&store, &[row], &[seen("ys/fix", 7, "merged", None)]).unwrap();
         let row = store.outcome(&ws).unwrap().unwrap();
         assert_eq!(
             (row.pr_number, row.pr_state.as_deref()),
-            (Some(8), Some("merged"))
+            (Some(7), Some("merged"))
         );
         assert_eq!(outcome(&row), Outcome::Merged);
         store.label_outcome(&ws, Some("partly")).unwrap();
@@ -355,6 +421,129 @@ mod tests {
             outcome(&store.outcome(&ws).unwrap().unwrap()),
             Outcome::Merged,
             "taken back"
+        );
+    }
+
+    /// Branch names are reused. An attempt keeps the pull request it was matched to, whatever a
+    /// later one on the same branch does; and a pull request opened after an attempt ended is
+    /// never matched to it.
+    #[test]
+    fn a_later_pull_request_on_a_reused_branch_never_rewrites_an_earlier_attempt() {
+        let (_dir, store, _git, project, first) = repo();
+        snapshot(&store, &first).unwrap();
+        let mut earlier = store.outcome(&first).unwrap().unwrap();
+        earlier.created_at = 1_000;
+        observe_pull_requests(
+            &store,
+            &[earlier],
+            &[seen("ys/fix", 7, "merged", Some(2_000))],
+        )
+        .unwrap();
+        store.outcome_ended(&first, Some("deleted")).unwrap();
+        let mut earlier = store.outcome(&first).unwrap().unwrap();
+        earlier.created_at = 1_000;
+        earlier.ended_at = Some(3_000);
+
+        // A second attempt on the same branch, and its own pull request, opened later.
+        let second = store
+            .add_worktree(
+                &project,
+                "fix-again",
+                "/wt/again",
+                Some("ys/fix"),
+                Some("main"),
+            )
+            .unwrap()
+            .id;
+        snapshot(&store, &second).unwrap();
+        let mut later = store.outcome(&second).unwrap().unwrap();
+        later.created_at = 4_000;
+        let prs = [
+            seen("ys/fix", 8, "open", Some(5_000)),
+            seen("ys/fix", 7, "merged", Some(2_000)),
+        ];
+        observe_pull_requests(&store, &[earlier.clone(), later], &prs).unwrap();
+        let first_row = store.outcome(&first).unwrap().unwrap();
+        assert_eq!(
+            (first_row.pr_number, first_row.pr_state.as_deref()),
+            (Some(7), Some("merged"))
+        );
+        assert_eq!(
+            outcome(&first_row),
+            Outcome::Merged,
+            "still its own pull request's merge"
+        );
+        let second_row = store.outcome(&second).unwrap().unwrap();
+        assert_eq!(
+            (second_row.pr_number, outcome(&second_row)),
+            (Some(8), Outcome::Unknown)
+        );
+
+        // An ended attempt with no pull request adopts none opened after it ended.
+        let third = store
+            .add_worktree(
+                &project,
+                "tried",
+                "/wt/tried",
+                Some("ys/other"),
+                Some("main"),
+            )
+            .unwrap()
+            .id;
+        snapshot(&store, &third).unwrap();
+        let mut gone = store.outcome(&third).unwrap().unwrap();
+        gone.created_at = 1_000;
+        gone.ended = Some("deleted".into());
+        gone.ended_at = Some(3_000);
+        observe_pull_requests(
+            &store,
+            &[gone],
+            &[seen("ys/other", 9, "merged", Some(9_000))],
+        )
+        .unwrap();
+        assert_eq!(store.outcome(&third).unwrap().unwrap().pr_number, None);
+    }
+
+    /// Work that was seen ahead and then thrown away — the branch reset to its base — is not a
+    /// merge; the same branch really merged later is. A branch deleted after a real merge still
+    /// counts, since the tip is what is checked.
+    #[test]
+    fn a_reset_branch_is_not_a_merge_and_a_deleted_merged_one_still_is() {
+        let (dir, store, git, project, ws) = repo();
+        let root = dir.path();
+        let run = |args: &[&str]| git.run(root, args).unwrap();
+        let commit = |file: &str| {
+            std::fs::write(root.join(file), "x\n").unwrap();
+            run(&["add", "-A"]);
+            run(&[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                file,
+            ]);
+        };
+        run(&["checkout", "-q", "ys/fix"]);
+        commit("thrown.rs");
+        refresh(&store, &git, &project, root).unwrap();
+        assert!(store.outcome(&ws).unwrap().unwrap().ahead_tip.is_some());
+        run(&["reset", "-q", "--hard", "main"]);
+        refresh(&store, &git, &project, root).unwrap();
+        let row = store.outcome(&ws).unwrap().unwrap();
+        assert_eq!(row.merged_at, None, "discarded work is not in the base");
+        assert_eq!(outcome(&row), Outcome::Unknown);
+
+        commit("kept.rs");
+        refresh(&store, &git, &project, root).unwrap();
+        run(&["checkout", "-q", "main"]);
+        run(&["merge", "-q", "--ff-only", "ys/fix"]);
+        run(&["branch", "-q", "-D", "ys/fix"]);
+        refresh(&store, &git, &project, root).unwrap();
+        assert_eq!(
+            outcome(&store.outcome(&ws).unwrap().unwrap()),
+            Outcome::Merged
         );
     }
 

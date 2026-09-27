@@ -43,10 +43,21 @@ Further decisions made in building:
   `workspace_id` only as a nullable link. `Workspaces::delete` and `archive` snapshot before
   removing anything, in the core, so `ys workspace delete` keeps outcomes too; a failed snapshot
   never blocks a delete. `restore` clears how it ended.
-- **Git merged means "ahead, then not".** `ahead_at` is set the first time `base..branch` has
-  commits; `merged_at` only after that, when it has none. An empty branch is never merged.
-- **The forge's state is read, never fetched for this.** `outcomes_get` reuses the pull requests
-  the app has cached for the project; the newest per branch wins.
+- **Git merged means "the tip seen ahead reached the base".** While `base..branch` has commits,
+  the branch's tip is recorded (`ahead_tip`); a merge is recorded only when that tip is found
+  reachable from the base (`merge-base --is-ancestor`). An empty `base..branch` proves nothing
+  alone: a branch reset to its base or recreated has one too, and its discarded work is not in
+  the base. A branch deleted after a real merge still counts. (Found in review: the first cut
+  read "ahead, then empty" as merged, so a reset counted as kept.)
+- **An attempt keeps its own pull request.** Branch names are reused (`open_branch`), so an
+  attempt follows the state of the pull request it was first matched to and is never re-matched
+  by branch name. A first match needs the pull request to have been opened during the attempt's
+  life — from its first record (less ten minutes) to its archive or delete — using `createdAt`
+  from `gh`, which the forge now asks for and never sends to the window. (Found in review: a later
+  pull request on a reused branch rewrote an earlier, deleted attempt.)
+- **The forge's state is read from the cache only.** `outcomes_get` uses `Forge::cached`, which
+  never fetches, whatever its age; the publish panel keeps it current. (Found in review: the first
+  cut's "not a refresh" still fetched on a stale cache, so opening Outcomes could wait on `gh`.)
 - **Shared work counts for each agent.** An attempt two agents worked in counts in both
   histories.
 - **Five outcomes before a history says anything** (`MIN_SAMPLE`); below that, "too few to say
@@ -66,11 +77,13 @@ Further decisions made in building:
 
 ## 4 · Verification
 
-- `outcomes` (4): a snapshot outlives its workspace, with name, branch, task and agents in
+- `outcomes` (6): a snapshot outlives its workspace, with name, branch, task and agents in
   first-seen order, and can be labelled afterwards; git's merge is seen only after the branch was
   ahead (empty, then ahead, then fast-forwarded, in a real repository); a merged pull request is
   kept until labelled otherwise, a closed one is not an outcome, and taking a label back returns
-  to the merge; history counts outcomes only, credits both agents of a handoff, counts kept by
+  to the merge; a later pull request on a reused branch never rewrites an earlier attempt, and
+  none opened after an attempt ended is matched to it; a branch reset to its base is not a merge,
+  and a branch deleted after a real merge still is; history counts outcomes only, credits both agents of a handoff, counts kept by
   merge, and is not enough below five. `workspaces`: deleting and archiving keep the outcome with
   how it ended; restoring clears it.
 - Frontend: the prompt appears only after a delete that happened, records the answer, can be

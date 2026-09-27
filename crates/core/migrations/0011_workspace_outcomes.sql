@@ -20,10 +20,13 @@ CREATE TABLE workspace_outcomes (
     -- What the user said: kept, partly, or discarded. NULL until they say.
     label           TEXT CHECK (label IN ('kept', 'partly', 'discarded')),
     labeled_at      INTEGER,
-    -- Git's evidence. `ahead_at`: the branch was seen with commits the base did not have.
-    -- `merged_at`: after that, all of them were seen reachable from the base — a merge or a
-    -- fast-forward. A squash merge never sets it; the pull request's state covers that.
+    -- Git's evidence. `ahead_at`: the branch was first seen with commits the base did not have;
+    -- `ahead_tip`: the branch's commit the last time it was seen so. `merged_at`: that commit
+    -- was later found reachable from the base — a merge or a fast-forward. A branch reset or
+    -- recreated leaves the tip unreachable, and a squash merge never sets it; the pull
+    -- request's state covers that.
     ahead_at        INTEGER,
+    ahead_tip       TEXT,
     merged_at       INTEGER,
     -- The forge's evidence, from the pull request whose head is this branch.
     pr_number       INTEGER,

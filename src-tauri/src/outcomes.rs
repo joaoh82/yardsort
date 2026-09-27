@@ -6,7 +6,7 @@ use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
 use yardsort_core::forge::PullRequestState;
-use yardsort_core::outcomes::{self, AgentHistory, Outcome};
+use yardsort_core::outcomes::{self, AgentHistory, Outcome, PullRequestSeen};
 use yardsort_core::store::OutcomeRow;
 
 use crate::error::{IpcError, IpcResult};
@@ -135,8 +135,9 @@ fn project_outcomes(state: &AppState, project_id: &str) -> IpcResult<ProjectOutc
 }
 
 /// A project's attempts, brought up to date first: every live workspace snapshotted, git asked
-/// whether each branch was ahead or merged, and the pull requests the app already knows —
-/// cached, never fetched for this — read for their state.
+/// whether each branch was ahead or merged, and the pull requests the app already has cached
+/// read for their state. Never a fetch: local history must not wait on the network, and the
+/// publish panel keeps the cache current.
 #[tauri::command]
 #[specta::specta]
 pub async fn outcomes_get(app: AppHandle, project_id: String) -> IpcResult<ProjectOutcomes> {
@@ -150,17 +151,22 @@ pub async fn outcomes_get(app: AppHandle, project_id: String) -> IpcResult<Proje
             let git = crate::git::Git::new(&state.env())?;
             outcomes::refresh(&state.store, &git, &project_id, &root)?;
         }
-        let known = crate::publish::commands::found(state, &project_id, false);
-        let pull_requests: Vec<(String, i64, String)> = known
-            .pull_requests
-            .iter()
-            .map(|pr| {
-                let state = match pr.state {
+        let pull_requests: Vec<PullRequestSeen> = state
+            .forge
+            .cached(&project_id)
+            .map(|known| known.pull_requests)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|pr| PullRequestSeen {
+                state: match pr.state {
                     PullRequestState::Open => "open",
                     PullRequestState::Merged => "merged",
                     PullRequestState::Closed => "closed",
-                };
-                (pr.branch.clone(), i64::from(pr.number), state.to_owned())
+                }
+                .to_owned(),
+                branch: pr.branch,
+                number: i64::from(pr.number),
+                created_at: pr.created_at,
             })
             .collect();
         let rows = state.store.outcomes(Some(&project_id))?;

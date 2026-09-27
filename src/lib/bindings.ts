@@ -158,8 +158,9 @@ export const commands = {
 	memoryCheck: (projectId: string) => typedError<MemoryCheck[], IpcError>(__TAURI_INVOKE("memory_check", { projectId })),
 	/**
 	 *  A project's attempts, brought up to date first: every live workspace snapshotted, git asked
-	 *  whether each branch was ahead or merged, and the pull requests the app already knows —
-	 *  cached, never fetched for this — read for their state.
+	 *  whether each branch was ahead or merged, and the pull requests the app already has cached
+	 *  read for their state. Never a fetch: local history must not wait on the network, and the
+	 *  publish panel keeps the cache current.
 	 */
 	outcomesGet: (projectId: string) => typedError<ProjectOutcomes, IpcError>(__TAURI_INVOKE("outcomes_get", { projectId })),
 	/**
