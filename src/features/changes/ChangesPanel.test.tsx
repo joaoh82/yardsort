@@ -663,6 +663,26 @@ describe("ChangesPanel with reported writes", () => {
     expect(tooltip).not.toContain("Invalid");
   });
 
+  it("says every one was written while a command ran, in the singular, when all of them were", async () => {
+    const seen = (path: string) => ({
+      path,
+      reports: [],
+      observed: {
+        at: at + 5_000,
+        matches: [
+          { runId: "run-1", harnessId: "claude", tool: "Bash", from: at + 4_000, to: at + 6_000 },
+        ],
+      },
+    });
+    setChanges({ uncommitted: [change("src/app.ts"), change("notes.md")], committed: [] });
+    core.workspaceProvenance.mockResolvedValue(
+      provenance({ files: [seen("src/app.ts"), seen("notes.md")] }),
+    );
+    await renderPanel();
+    const note = await screen.findByText(/Every one was last written while an agent ran a command/);
+    expect(note).not.toHaveTextContent("were");
+  });
+
   it("asks again when a report lands, so a badge appears as the agent writes", async () => {
     core.workspaceProvenance.mockResolvedValueOnce(provenance({ files: [] }));
     await renderPanel();

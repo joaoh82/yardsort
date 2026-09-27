@@ -147,7 +147,7 @@ function HandOff({ workspaceId }: { workspaceId: string }) {
       disabled={busy}
       title="Start another agent here, with what Yardsort recorded about this workspace as its first message — to read and edit before it is sent"
       onClick={() => void handOff()}
-      className="mr-1 rounded border border-line px-2 py-0.5 text-[11px] text-ink-faint hover:border-accent hover:text-ink disabled:opacity-40"
+      className="mr-1 shrink-0 rounded border border-line px-2 py-0.5 text-[11px] whitespace-nowrap text-ink-faint hover:border-accent hover:text-ink disabled:opacity-40"
     >
       Hand off…
     </button>
