@@ -3,50 +3,8 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.11.0
 
-- **`ys workspace handoff`, and Assist's order in the handoff.** The handoff packet can be
-  printed from the command line with `ys workspace handoff <workspace>` (`--json` for the text
-  with counts), the same text the app's button starts from. In the app, with Assist reviewing
-  changes, the packet lists the changed files in the order Assist would look at them — on task
-  first, unrelated last — with its word on each, from the review the Changes list already
-  shows; nothing new is sent, and the packet says it is a judgment, not a fact.
-- **Hand off a workspace to another agent.** A new **Hand off…** button in the tab bar writes
-  the next agent's first message from what Yardsort recorded: what the workspace was asked,
-  where the branch stands and who wrote each changed file, what each agent run did, and what
-  is not known — never the last agent's words, which Yardsort does not keep. It opens in the
-  composer to read and edit before it is sent; the new conversation's record keeps no first
-  message, so the task on record stays yours. See
-  [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent)
-  and the design note ([18](docs/design/18-agent-events-stage-4-handoff.md)).
-- **Assist can be told who wrote each file.** A new switch under Settings → Assist, off by
-  default and offered once the review is on, sends with each diff one sentence in the Changes
-  list's own words: _reported written by claude_, _last written while claude ran a command_,
-  or _not reported written by any agent_. Never a tool, a time or a command. A substantive
-  change no agent accounted for then earns an **unaccounted** badge, and every Assist badge's
-  tooltip ends with the exact sentence Assist was told. See
-  [Telling Assist who wrote each file](docs/guide/assist.md#telling-assist-who-wrote-each-file).
-- **Cursor and pi recorded.** The Cursor and pi adapters now rest on recordings of the real
-  agents rather than their documentation. For Cursor that found tool durations being dropped
-  (they are fractional), which is fixed, and that this Cursor build does not tell a plugin's
-  hooks when a turn ends. For pi it found that a `write` is named by its start and not its end,
-  which the Changes list's badges now allow for.
-- **A file an agent made with a shell command is marked too, as seen rather than reported.**
-  A command names no file, so it cannot be reported; but the file's own modification time says
-  when it was last written, and if that falls inside the command's run on the timeline the file
-  gets a dashed badge with the agent's name. Its tooltip says exactly that: the time on the file
-  was read, not who wrote it. A report, when there is one, is shown instead. Only a tool call
-  counts as a window, never the agent merely being open, so with no capture switched on nothing
-  changes. See [Who wrote it](docs/guide/changes-and-files.md#who-wrote-it).
-- **The Changes list says which files an agent reported writing.** With any _Capture what …
-  reports_ switch on, a changed file the agent said it wrote carries a badge with the agent's
-  name — hover it for how many times, when, and through what — and a line above the list counts
-  the files with a report and the files without one: you, a script, or a run that was not
-  reporting. The expanded diff's header says the same for the open file. The other way round, a
-  timeline row that names a listed file has a **Show diff** button. It never claims which lines came
-  from whom; git's diff is the whole change and no agent reports a line. Nothing new is
-  stored. See [Who wrote it](docs/guide/changes-and-files.md#who-wrote-it) and the design note
-  ([17](docs/design/17-agent-events-stage-3-review.md)).
 - **`ys` comes with the app, and stays up to date with it.** Every installer now carries the
   command-line client next to Yardsort. The `.deb`, `.rpm` and AUR packages put it in
   `/usr/bin`, and the Homebrew cask links it. Elsewhere, **Install ys** — in Settings → General
@@ -56,50 +14,6 @@ has the downloads and the full commit lists.
   starts and finds it older, and a file there that is not `ys` is replaced only after you
   confirm. On macOS the bundled `ys` is signed and notarized with the app. See
   [Installing `ys`](docs/guide/cli.md#installing).
-- **Every built-in agent can now report what it does.** Three more switches in Settings →
-  General, all off by default: **Capture what OMP reports** and **Capture what pi reports** give
-  those agents a small extension on the command line of each launch — never in your extension
-  folders — that reports each turn with its tokens and cost, each tool with its file or duration,
-  and, on OMP, each permission you answer. **Capture what Cursor reports** gives the Cursor agent
-  a plugin directory for that launch, whose hooks report each tool and file edit beside your own
-  hooks. Never a prompt, a command, a file or a reply, as before. Both are
-  recorded against the real agents. See [What OMP and pi report](docs/guide/activity.md#what-omp-and-pi-report),
-  [What Cursor reports](docs/guide/activity.md#what-cursor-reports) and the design notes
-  ([15](docs/design/15-agent-events-stage-2-pi-omp.md),
-  [16](docs/design/16-agent-events-stage-2-cursor.md)).
-- **Grok's own session log on the timeline.** Switch on **Read what Grok records** in Settings →
-  General and every Grok that Yardsort starts has its turns read from the log Grok keeps for
-  each session: which tool ran and how long it took, tools that failed, the permissions you were
-  actually asked for and how long you took to answer, each turn and its tokens. That log never
-  holds a command, a path or a message. Nothing is given to Grok and nothing in `~/.grok` is
-  written; Yardsort chose the session id, so it knows where to look. Off by default. See
-  [What Grok records](docs/guide/activity.md#what-grok-records) and the
-  [design note](docs/design/14-agent-events-stage-2-grok.md).
-- **OpenCode can report what it does.** Switch on **Capture what OpenCode reports** in Settings
-  → General and every OpenCode that Yardsort starts puts its work on the activity timeline as it
-  happens: each tool with its file or exit code, tools that failed, files it edited, permission
-  prompts, and the tokens each reply cost — never a message, a command, an output or a file's
-  contents. It works through a small plugin given to that launch alone through OpenCode's
-  environment; your `opencode.json` is not edited and your own plugins keep running. Off by
-  default. See [What OpenCode reports](docs/guide/activity.md#what-opencode-reports) and the
-  [design note](docs/design/13-agent-events-stage-2-opencode.md).
-- **Codex can report what it does.** Switch on **Capture what Codex reports** in Settings →
-  General and every Codex that Yardsort starts puts each turn on the activity timeline: the shell
-  commands it ran with their exit codes and durations, the files it added or changed, the tokens
-  the turn cost, and how long it took — never a command line, a file's contents or a message. It
-  works through Codex's `notify` program, given for that launch alone, plus Codex's own session
-  file; nothing in `~/.codex` is edited and a `notify` of your own keeps running. Off by default.
-  See [What Codex reports](docs/guide/activity.md#what-codex-reports) and the
-  [design note](docs/design/12-agent-events-stage-2-codex.md).
-- **Claude Code can report what it does.** Switch on **Capture what Claude Code reports** in
-  Settings → General and every Claude Code that Yardsort starts tells the activity timeline about
-  each prompt, tool call, permission prompt, turn and session end — as metadata: the tool's name
-  and the file's relative path, never the prompt, the command or the output. It rides on a
-  per-launch settings file, so your own Claude Code settings and hooks are never touched, and it
-  keeps working while the window is closed. The timeline moves as the agent works; `ys activity
-list` shows the same rows as `claude/hook`. Off by default. Other agents stay at what Yardsort
-  itself sees. See [What Claude Code reports](docs/guide/activity.md#what-claude-code-reports)
-  and the [design note](docs/design/11-agent-events-stage-2-claude.md).
 - **Activity: a local record of what ran.** Yardsort now notes when each agent, shell or run
   command starts in a workspace — fresh, resumed or forked, from the app or from `ys` — and how
   it ended, without reading anything the agent prints. An agent that finishes while the window
@@ -111,6 +25,92 @@ list` shows the same rows as `claude/hook`. Off by default. Other agents stay at
   is. Programs started in a workspace are given `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID` and
   `YARDSORT_SESSION_RECORD_ID`. Nothing leaves the machine. See [Activity](docs/guide/activity.md)
   and the [design note](docs/design/10-agent-events-stage-1.md).
+- **Claude Code can report what it does.** Switch on **Capture what Claude Code reports** in
+  Settings → General and every Claude Code that Yardsort starts tells the activity timeline about
+  each prompt, tool call, permission prompt, turn and session end — as metadata: the tool's name
+  and the file's relative path, never the prompt, the command or the output. It rides on a
+  per-launch settings file, so your own Claude Code settings and hooks are never touched, and it
+  keeps working while the window is closed. The timeline moves as the agent works; `ys activity
+list` shows the same rows as `claude/hook`. Off by default. Other agents stay at what Yardsort
+  itself sees. See [What Claude Code reports](docs/guide/activity.md#what-claude-code-reports)
+  and the [design note](docs/design/11-agent-events-stage-2-claude.md).
+- **Codex can report what it does.** Switch on **Capture what Codex reports** in Settings →
+  General and every Codex that Yardsort starts puts each turn on the activity timeline: the shell
+  commands it ran with their exit codes and durations, the files it added or changed, the tokens
+  the turn cost, and how long it took — never a command line, a file's contents or a message. It
+  works through Codex's `notify` program, given for that launch alone, plus Codex's own session
+  file; nothing in `~/.codex` is edited and a `notify` of your own keeps running. Off by default.
+  See [What Codex reports](docs/guide/activity.md#what-codex-reports) and the
+  [design note](docs/design/12-agent-events-stage-2-codex.md).
+- **OpenCode can report what it does.** Switch on **Capture what OpenCode reports** in Settings
+  → General and every OpenCode that Yardsort starts puts its work on the activity timeline as it
+  happens: each tool with its file or exit code, tools that failed, files it edited, permission
+  prompts, and the tokens each reply cost — never a message, a command, an output or a file's
+  contents. It works through a small plugin given to that launch alone through OpenCode's
+  environment; your `opencode.json` is not edited and your own plugins keep running. Off by
+  default. See [What OpenCode reports](docs/guide/activity.md#what-opencode-reports) and the
+  [design note](docs/design/13-agent-events-stage-2-opencode.md).
+- **Grok's own session log on the timeline.** Switch on **Read what Grok records** in Settings →
+  General and every Grok that Yardsort starts has its turns read from the log Grok keeps for
+  each session: which tool ran and how long it took, tools that failed, the permissions you were
+  actually asked for and how long you took to answer, each turn and its tokens. That log never
+  holds a command, a path or a message. Nothing is given to Grok and nothing in `~/.grok` is
+  written; Yardsort chose the session id, so it knows where to look. Off by default. See
+  [What Grok records](docs/guide/activity.md#what-grok-records) and the
+  [design note](docs/design/14-agent-events-stage-2-grok.md).
+- **Every built-in agent can now report what it does.** Three more switches in Settings →
+  General, all off by default: **Capture what OMP reports** and **Capture what pi reports** give
+  those agents a small extension on the command line of each launch — never in your extension
+  folders — that reports each turn with its tokens and cost, each tool with its file or duration,
+  and, on OMP, each permission you answer. **Capture what Cursor reports** gives the Cursor agent
+  a plugin directory for that launch, whose hooks report each tool and file edit beside your own
+  hooks. Never a prompt, a command, a file or a reply, as before. Both are
+  recorded against the real agents. See [What OMP and pi report](docs/guide/activity.md#what-omp-and-pi-report),
+  [What Cursor reports](docs/guide/activity.md#what-cursor-reports) and the design notes
+  ([15](docs/design/15-agent-events-stage-2-pi-omp.md),
+  [16](docs/design/16-agent-events-stage-2-cursor.md)).
+- **Cursor and pi recorded.** The Cursor and pi adapters now rest on recordings of the real
+  agents rather than their documentation. For Cursor that found tool durations being dropped
+  (they are fractional), which is fixed, and that this Cursor build does not tell a plugin's
+  hooks when a turn ends. For pi it found that a `write` is named by its start and not its end,
+  which the Changes list's badges now allow for.
+- **The Changes list says which files an agent reported writing.** With any _Capture what …
+  reports_ switch on, a changed file the agent said it wrote carries a badge with the agent's
+  name — hover it for how many times, when, and through what — and a line above the list counts
+  the files with a report and the files without one: you, a script, or a run that was not
+  reporting. The expanded diff's header says the same for the open file. The other way round, a
+  timeline row that names a listed file has a **Show diff** button. It never claims which lines came
+  from whom; git's diff is the whole change and no agent reports a line. Nothing new is
+  stored. See [Who wrote it](docs/guide/changes-and-files.md#who-wrote-it) and the design note
+  ([17](docs/design/17-agent-events-stage-3-review.md)).
+- **A file an agent made with a shell command is marked too, as seen rather than reported.**
+  A command names no file, so it cannot be reported; but the file's own modification time says
+  when it was last written, and if that falls inside the command's run on the timeline the file
+  gets a dashed badge with the agent's name. Its tooltip says exactly that: the time on the file
+  was read, not who wrote it. A report, when there is one, is shown instead. Only a tool call
+  counts as a window, never the agent merely being open, so with no capture switched on nothing
+  changes. See [Who wrote it](docs/guide/changes-and-files.md#who-wrote-it).
+- **Assist can be told who wrote each file.** A new switch under Settings → Assist, off by
+  default and offered once the review is on, sends with each diff one sentence in the Changes
+  list's own words: _reported written by claude_, _last written while claude ran a command_,
+  or _not reported written by any agent_. Never a tool, a time or a command. A substantive
+  change no agent accounted for then earns an **unaccounted** badge, and every Assist badge's
+  tooltip ends with the exact sentence Assist was told. See
+  [Telling Assist who wrote each file](docs/guide/assist.md#telling-assist-who-wrote-each-file).
+- **Hand off a workspace to another agent.** A new **Hand off…** button in the tab bar writes
+  the next agent's first message from what Yardsort recorded: what the workspace was asked,
+  where the branch stands and who wrote each changed file, what each agent run did, and what
+  is not known — never the last agent's words, which Yardsort does not keep. It opens in the
+  composer to read and edit before it is sent; the new conversation's record keeps no first
+  message, so the task on record stays yours. See
+  [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent)
+  and the design note ([18](docs/design/18-agent-events-stage-4-handoff.md)).
+- **`ys workspace handoff`, and Assist's order in the handoff.** The handoff packet can be
+  printed from the command line with `ys workspace handoff <workspace>` (`--json` for the text
+  with counts), the same text the app's button starts from. In the app, with Assist reviewing
+  changes, the packet lists the changed files in the order Assist would look at them — on task
+  first, unrelated last — with its word on each, from the review the Changes list already
+  shows; nothing new is sent, and the packet says it is a judgment, not a fact.
 
 ## 0.10.0
 

@@ -12,6 +12,10 @@ const BADGES = [
     badge: "credentials",
     body: "The file's name says it holds credentials — decided on your machine, contents never sent.",
   },
+  {
+    badge: "unaccounted",
+    body: "A substantive change no agent accounted for, while agents were reporting. Only if you tell Assist who wrote each file.",
+  },
 ];
 
 const code = "font-mono text-[13.5px] text-ink";
@@ -43,6 +47,12 @@ export function Assist() {
               <code className={code}>jev-1.13.0</code>) so a new version cannot move under them.
             </p>
             <p>
+              Switch on one more box and it is told who wrote each file, in the Changes list&apos;s
+              own words — reported by an agent, written while one ran a command, or by nobody the
+              record knows of. A substantive change no agent accounted for then earns its own badge,
+              and every badge says what Assist was told.
+            </p>
+            <p>
               In the composer it can also suggest a harness and an effort, built on{" "}
               <strong className="font-medium text-ink">your</strong> own &ldquo;Good at&rdquo;
               descriptions of your agents rather than on any opinion of ours. Nothing is ever picked
@@ -51,9 +61,10 @@ export function Assist() {
             <p>
               Optional and off by default: it does nothing until you enter your own TypeSafe API key
               — kept in your system credential store, never in a file — and tick a feature. What
-              leaves the machine is a changed file&apos;s diff and the task, or the message you are
-              typing. Never a terminal. With no key, switched off or offline, Yardsort works exactly
-              as it does otherwise, minus a few badges.
+              leaves the machine is a changed file&apos;s diff and the task — plus, only with that
+              box, the one sentence on who wrote it — or the message you are typing. Never a
+              terminal. With no key, switched off or offline, Yardsort works exactly as it does
+              otherwise, minus a few badges.
             </p>
             <p>
               <Link href={`${docUrl("guide/assist")}/`} className="link text-ink">
@@ -66,7 +77,7 @@ export function Assist() {
         <div className="md:order-1">
           <Shot
             name="assist"
-            alt="Settings → Assist: the API key, the two features and the three thresholds"
+            alt="Settings → Assist: the API key, its switches and the three thresholds"
           />
           <dl className="mt-6 grid gap-2.5 text-[15px]">
             {BADGES.map((item) => (

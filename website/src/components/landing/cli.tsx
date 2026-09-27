@@ -19,13 +19,18 @@ const LINES: { command: string; note: string }[] = [
   },
   { command: "ys workspace list --json", note: "every command takes --json, for scripts" },
   {
+    command: "ys workspace handoff fix-the-flaky-login-test",
+    note: "the next agent's first message, from what was recorded",
+  },
+  {
     command: "ys workspace delete fix-the-flaky-login-test",
     note: "the folder goes; the branch stays",
   },
 ];
 
-// `ys` is not in the app bundle — it is its own archive per platform, named after the release, so
-// the names are built from the version rather than written out and left to rot.
+// `ys` comes with the app; these are the standalone copies for machines without it — one archive
+// per platform, named after the release, so the names are built from the version rather than
+// written out and left to rot.
 const DOWNLOADS: { platform: Platform; name: string; file: (version: string) => string }[] = [
   { platform: "linux", name: "Linux", file: (v) => `ys-${v}-linux-x86_64.tar.gz` },
   { platform: "mac", name: "macOS", file: (v) => `ys-${v}-macos-universal.tar.gz` },
@@ -44,8 +49,10 @@ export function Cli() {
           <div className="mt-3.5 space-y-3 text-muted">
             <p>
               <code className="font-mono text-[13.5px] text-ink">ys</code> is a small command-line
-              client, a separate download in each release. It reads the same database as the app, so
-              each sees the other&apos;s work.
+              client that comes with the app, built from the same commit, and reads the same
+              database — so each sees the other&apos;s work. Package installs put it on your{" "}
+              <code className="font-mono text-[13.5px] text-ink">PATH</code>; elsewhere, one button
+              in Settings does, and keeps it current.
             </p>
             <p>
               The agent it starts belongs to the background process, not to the command — so it
@@ -74,7 +81,7 @@ export function Cli() {
           </ul>
           <div className="border-t border-line bg-raised px-4 py-3.5">
             <p className="text-[12.5px] text-muted">
-              Not in the app bundle — its own download in{" "}
+              Without the app, it is also its own download in{" "}
               <a href={RELEASES_URL} className="link text-ink">
                 each release
               </a>
@@ -90,8 +97,8 @@ export function Cli() {
               ))}
             </ul>
             <p className="mt-2.5 text-[12px] text-faint">
-              On macOS <code className="font-mono">ys</code> is unsigned, so a copy downloaded with
-              a browser is quarantined:{" "}
+              On macOS this standalone copy is unsigned — the one inside the app is not — so a copy
+              downloaded with a browser is quarantined:{" "}
               <code className="font-mono text-muted">xattr -d com.apple.quarantine ys</code>, or
               fetch it with <code className="font-mono text-muted">curl</code>.
             </p>
