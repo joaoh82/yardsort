@@ -600,7 +600,11 @@ The user story the design opened with, recorded in
   waits for use.
 - A handoff is not the task: its session record keeps no prompt, so `session_prompts` — what
   Assist and the next packet read — stays the user's own words.
-- Not built: `ys workspace handoff`, until the change list moves to the core.
+- Second slice (2026-09-27): the change list moved to the core (`yardsort_core::changes`),
+  and with it the packet's git half; **`ys workspace handoff <workspace>`** prints the packet;
+  and, from the review Assist already runs, the changed files come in the order Assist would
+  look at them with its word on each — a judgment, the packet says, not a fact. Nothing new is
+  sent, and no new switch.
 
 _Exit:_ the packet renders every part from a recorded run and leaks nothing; **Hand off…**
 opens the composer here with it; an edited packet spawns with `handoff: true` and creates no

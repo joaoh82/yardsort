@@ -199,14 +199,14 @@ pub async fn assist_save_settings(
 }
 
 /// What a review needs before anything is sent: the key, the task, and one entry per changed file.
-struct Prepared {
-    key: String,
-    task: Option<String>,
-    inputs: Vec<FileInput>,
-    thresholds: Thresholds,
+pub(crate) struct Prepared {
+    pub(crate) key: String,
+    pub(crate) task: Option<String>,
+    pub(crate) inputs: Vec<FileInput>,
+    pub(crate) thresholds: Thresholds,
 }
 
-fn prepare_review(state: &AppState, workspace_id: &str) -> IpcResult<Prepared> {
+pub(crate) fn prepare_review(state: &AppState, workspace_id: &str) -> IpcResult<Prepared> {
     if !state.settings.get().assist.review_changes {
         return Err(IpcError::new(
             "assist_off",
@@ -232,7 +232,7 @@ fn prepare_review(state: &AppState, workspace_id: &str) -> IpcResult<Prepared> {
             .chain(&set.committed)
             .map(|change| change.path.clone())
             .collect();
-        let files = crate::activity::last_written(&root, &paths);
+        let files = yardsort_core::activity::provenance::last_written(&root, &paths);
         yardsort_core::activity::provenance::of(&state.store, workspace_id, &files)
             .ok()
             .filter(|p| p.reporting_runs() > 0)

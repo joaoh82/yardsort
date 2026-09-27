@@ -25,6 +25,8 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use serde_json::Value;
 
+use std::path::Path;
+
 use crate::store::{EventRow, Store, StoreResult};
 
 /// What one run reported about one path, summed over its reports.
@@ -249,6 +251,24 @@ fn is_write(producer: &str, kind: &str, tool: Option<&str>, status: Option<&str>
         },
         _ => false,
     }
+}
+
+/// When each of `paths` (workspace-relative, from the change list) was last written, in epoch
+/// milliseconds, by the file system's own clock. A path that is gone — deleted, or renamed
+/// away — or that would leave the workspace is left out rather than guessed at.
+pub fn last_written(root: &Path, paths: &[String]) -> Vec<(String, i64)> {
+    paths
+        .iter()
+        .filter_map(|path| {
+            let full = crate::changes::resolve_inside(root, path).ok()?;
+            let modified = std::fs::metadata(full).ok()?.modified().ok()?;
+            let ms = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_millis();
+            Some((path.clone(), i64::try_from(ms).ok()?))
+        })
+        .collect()
 }
 
 /// The join for `workspace_id`, from the store as it is now.
@@ -1136,5 +1156,27 @@ mod tests {
             (1_500, Some(2_500)),
             "from the duration"
         );
+    }
+
+    /// The clock is the file's own; a file that is not there, or a path that would leave the
+    /// workspace, is left out.
+    #[test]
+    fn last_written_reads_the_files_own_clock_and_skips_what_it_cannot_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() {}").unwrap();
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let paths = [
+            "src/a.rs".to_owned(),
+            "gone.rs".to_owned(),
+            "../secret".to_owned(),
+        ];
+        let written = last_written(dir.path(), &paths);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "src/a.rs");
+        assert!(written[0].1 <= before + 1 && written[0].1 > before - 60_000);
     }
 }

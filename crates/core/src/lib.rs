@@ -12,6 +12,7 @@
 
 pub mod activity;
 pub mod assist;
+pub mod changes;
 pub mod daemon;
 pub mod draft;
 pub mod env;

@@ -618,6 +618,108 @@ fn activity_is_listed_as_a_table_as_json_and_exported_as_ndjson() {
 /// `ys` command that would ask the daemon drains it first, so the record stops saying `running`
 /// and says how the process really ended.
 #[test]
+fn the_handoff_packet_is_printed_from_the_record_and_git_together() {
+    use yardsort_core::activity::{Continuation, LaunchedBy, Recorder, RunDraft, RunKind};
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "Fix the login redirect");
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.id == made["id"].as_str().unwrap())
+        .unwrap();
+    // A file the user changed, and a recorded Claude run that reported writing another.
+    std::fs::write(
+        std::path::Path::new(&workspace.path).join("notes.md"),
+        "hello\n",
+    )
+    .unwrap();
+    // --no-agent recorded no conversation, so the task is written the way the app writes it.
+    store
+        .add_session(&yardsort_core::store::NewSession {
+            id: "rec-1",
+            workspace_id: &workspace.id,
+            harness_id: "claude",
+            model: Some("opus"),
+            title: "Fix the login redirect",
+            pty_session_id: "pty-1",
+            prompt: Some("Fix the login redirect"),
+            ..Default::default()
+        })
+        .unwrap();
+    let recorder = Recorder::new(&store, &Default::default(), LaunchedBy::Cli);
+    let draft = RunDraft {
+        workspace_id: workspace.id.clone(),
+        session_id: Some("rec-1".into()),
+        kind: RunKind::Harness,
+        harness_id: Some("claude".into()),
+        harness_session_id: None,
+        model: Some("opus".into()),
+        effort: None,
+        program: "claude".into(),
+        continuation: Continuation::Fresh,
+    };
+    let run = recorder.begin(&draft).unwrap();
+    recorder.spawned(&run, &draft, "pty-1", Some("hook"));
+    store
+        .add_event(&yardsort_core::store::NewEvent {
+            id: "e-write",
+            schema_version: 1,
+            workspace_id: &workspace.id,
+            session_id: None,
+            run_id: Some(&run),
+            occurred_at: 1_790_000_000_000,
+            kind: "tool.completed",
+            producer: "claude",
+            method: "hook",
+            fidelity: "reported",
+            source_key: None,
+            privacy_class: "metadata",
+            payload: r#"{"tool":"Write","toolUseId":"t","path":"src/login.rs"}"#,
+        })
+        .unwrap();
+    drop(store);
+
+    let name = made["name"].as_str().unwrap();
+    let text = fx.ys(&["workspace", "handoff", name]).ok();
+    assert!(
+        text.starts_with(&format!("# Handoff from Yardsort: workspace \"{name}\"")),
+        "{text}"
+    );
+    assert!(
+        text.contains("> Fix the login redirect"),
+        "the task, whole: {text}"
+    );
+    assert!(
+        text.contains("`notes.md` (untracked) — no agent reported writing it"),
+        "{text}"
+    );
+    assert!(text.contains("- **claude** (opus), started"), "{text}");
+    assert!(text.contains("**still running**"), "{text}");
+    assert!(
+        text.contains("  - Reported writing: `src/login.rs`.\n"),
+        "{text}"
+    );
+    assert!(text.contains("## What is not here"), "{text}");
+    assert!(!text.contains("Assist"), "no ranking from the command line");
+
+    let json = fx.ys(&["workspace", "handoff", name, "--json"]).ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["runs"], 1);
+    assert!(parsed["text"]
+        .as_str()
+        .unwrap()
+        .contains("## Where the work stands"));
+
+    let missing = fx.ys(&["workspace", "handoff", "nope"]).failed();
+    assert!(
+        missing.contains("No workspace called \"nope\""),
+        "{missing}"
+    );
+}
+
+#[test]
 fn a_spooled_exit_is_taken_into_the_records_before_sessions_are_listed() {
     use yardsort_core::activity::{Continuation, LaunchedBy, Recorder, RunDraft, RunKind};
     use yardsort_core::store::NewSession;

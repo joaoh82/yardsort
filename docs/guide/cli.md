@@ -153,6 +153,22 @@ the command returns. The branch is there either way. `ys` steps out of the folde
 it. On Windows a folder that is still some other program's current directory — the agent or shell
 that launched the command — cannot be removed, and nothing is deleted.
 
+### `ys workspace handoff <workspace>`
+
+Prints the handoff packet for a workspace: what Yardsort recorded there — the task, where the
+branch stands and who wrote each changed file, what each agent run did, and what is not known —
+written as the next agent's first message. The same text the app's **Hand off…** button starts
+from (see [handing work to another agent](terminals-and-sessions.md#handing-work-to-another-agent)),
+without Assist's ordering of the files, which the command line has no key for.
+
+```sh
+ys workspace handoff fix-the-flaky-login-test
+ys workspace handoff fix-the-flaky-login-test > handoff.md
+```
+
+The workspace can be named or given by id. `--json` gives `{ "text", "runs", "events" }`.
+Nothing is started: pipe the text where you want it, or paste it as an agent's first message.
+
 ### `ys session list`
 
 Agent conversations. Running ones by default; `--all` includes those that have ended, and
