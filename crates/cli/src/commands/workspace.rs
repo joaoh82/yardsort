@@ -292,6 +292,7 @@ fn new(
                 effort,
                 prompt: Some(prompt),
                 handoff: false,
+                skip_memory: false,
             }),
             DETACHED_SIZE,
         )?;

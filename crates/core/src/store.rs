@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_project_automation.sql"),
     include_str!("../migrations/0008_workspace_preparation.sql"),
     include_str!("../migrations/0009_agent_runs_and_events.sql"),
+    include_str!("../migrations/0010_project_memory.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -127,6 +128,60 @@ pub struct NewRun<'a> {
     pub harness_id: Option<&'a str>,
     pub harness_session_id: Option<&'a str>,
     pub launched_by: &'a str,
+}
+
+/// One memory entry. See `migrations/0010_project_memory.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryRow {
+    pub id: String,
+    pub project_id: String,
+    pub text: String,
+    /// `candidate`, `approved`, `rejected` or `revoked`.
+    pub state: String,
+    /// `user` or `agent`.
+    pub author: String,
+    pub harness_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_name: Option<String>,
+    pub run_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// One change to a memory entry. See `migrations/0010_project_memory.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryHistoryRow {
+    pub at: i64,
+    pub action: String,
+    /// `user` or `agent`.
+    pub by: String,
+    /// The text an edit replaced.
+    pub previous_text: Option<String>,
+}
+
+/// What a proposal came to, decided inside the transaction that would add it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryInsert {
+    Added(String),
+    /// The same text, ignoring ASCII case, is already in the project.
+    Known {
+        id: String,
+        state: String,
+    },
+    /// As many candidates as are allowed already wait.
+    Full,
+}
+
+/// A memory entry about to be written.
+pub struct NewMemory<'a> {
+    pub project_id: &'a str,
+    pub text: &'a str,
+    pub state: &'a str,
+    pub author: &'a str,
+    pub harness_id: Option<&'a str>,
+    pub workspace_id: Option<&'a str>,
+    pub workspace_name: Option<&'a str>,
+    pub run_id: Option<&'a str>,
 }
 
 /// One recorded fact. See `migrations/0009_agent_runs_and_events.sql`.
@@ -697,6 +752,203 @@ impl Store {
         Ok(())
     }
 
+    // --- memory ----------------------------------------------------------------------------
+
+    /// Write a new entry and its first history line, in one transaction. Returns its id.
+    pub fn add_memory(&self, new: &NewMemory<'_>, action: &str) -> StoreResult<String> {
+        let id = new_id();
+        let at = now_ms();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO memory_entries (id, project_id, text, state, author, harness_id,
+                                         workspace_id, workspace_name, run_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                id,
+                new.project_id,
+                new.text,
+                new.state,
+                new.author,
+                new.harness_id,
+                new.workspace_id,
+                new.workspace_name,
+                new.run_id,
+                at,
+                at
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO memory_history (entry_id, at, action, by, previous_text)
+             VALUES (?, ?, ?, ?, NULL)",
+            params![id, at, action, new.author],
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Add a candidate unless the same text is already in the project or the queue is full —
+    /// all three decided in one immediate transaction, so proposals racing from separate
+    /// processes cannot both pass the checks and then both insert.
+    pub fn propose_memory(
+        &self,
+        new: &NewMemory<'_>,
+        max_waiting: usize,
+    ) -> StoreResult<MemoryInsert> {
+        let at = now_ms();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let known: Option<(String, String)> = tx
+            .query_row(
+                "SELECT id, state FROM memory_entries
+                 WHERE project_id = ? AND text = ? COLLATE NOCASE LIMIT 1",
+                params![new.project_id, new.text],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((id, state)) = known {
+            return Ok(MemoryInsert::Known { id, state });
+        }
+        let waiting: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM memory_entries WHERE project_id = ? AND state = 'candidate'",
+            [new.project_id],
+            |r| r.get(0),
+        )?;
+        if usize::try_from(waiting).unwrap_or(usize::MAX) >= max_waiting {
+            return Ok(MemoryInsert::Full);
+        }
+        let id = new_id();
+        tx.execute(
+            "INSERT INTO memory_entries (id, project_id, text, state, author, harness_id,
+                                         workspace_id, workspace_name, run_id, created_at, updated_at)
+             VALUES (?, ?, ?, 'candidate', ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                id,
+                new.project_id,
+                new.text,
+                new.author,
+                new.harness_id,
+                new.workspace_id,
+                new.workspace_name,
+                new.run_id,
+                at,
+                at
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO memory_history (entry_id, at, action, by, previous_text)
+             VALUES (?, ?, 'proposed', ?, NULL)",
+            params![id, at, new.author],
+        )?;
+        tx.commit()?;
+        Ok(MemoryInsert::Added(id))
+    }
+
+    pub fn memory_entry(&self, id: &str) -> StoreResult<Option<MemoryRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {MEMORY_COLUMNS} FROM memory_entries WHERE id = ?"
+        ))?;
+        Ok(stmt.query_row([id], memory_from_row).optional()?)
+    }
+
+    /// A project's entries, oldest first.
+    pub fn memory_entries(&self, project_id: &str) -> StoreResult<Vec<MemoryRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {MEMORY_COLUMNS} FROM memory_entries WHERE project_id = ?
+             ORDER BY created_at, rowid"
+        ))?;
+        let rows = stmt.query_map([project_id], memory_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Change an entry's state and, optionally, its text, and write the history line for it.
+    /// An edit keeps the text it replaced.
+    pub fn change_memory(
+        &self,
+        id: &str,
+        state: &str,
+        text: Option<&str>,
+        action: &str,
+    ) -> StoreResult<bool> {
+        let at = now_ms();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let previous: Option<String> = tx
+            .query_row("SELECT text FROM memory_entries WHERE id = ?", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let Some(previous) = previous else {
+            return Ok(false);
+        };
+        tx.execute(
+            "UPDATE memory_entries SET state = ?, text = COALESCE(?, text), updated_at = ?
+             WHERE id = ?",
+            params![state, text, at, id],
+        )?;
+        let replaced = text.filter(|t| *t != previous).map(|_| previous);
+        tx.execute(
+            "INSERT INTO memory_history (entry_id, at, action, by, previous_text)
+             VALUES (?, ?, ?, 'user', ?)",
+            params![id, at, action, replaced],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// An entry's history, oldest first.
+    pub fn memory_history(&self, id: &str) -> StoreResult<Vec<MemoryHistoryRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT at, action, by, previous_text FROM memory_history WHERE entry_id = ?
+             ORDER BY seq",
+        )?;
+        let rows = stmt.query_map([id], |r| {
+            Ok(MemoryHistoryRow {
+                at: r.get(0)?,
+                action: r.get(1)?,
+                by: r.get(2)?,
+                previous_text: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Whether a project's approved entries go into its agents' first messages.
+    pub fn memory_shared(&self, project_id: &str) -> StoreResult<bool> {
+        let conn = self.conn();
+        Ok(conn
+            .query_row(
+                "SELECT share FROM project_memory WHERE project_id = ?",
+                [project_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_some_and(|share| share != 0))
+    }
+
+    pub fn set_memory_shared(&self, project_id: &str, share: bool) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO project_memory (project_id, share) VALUES (?, ?)
+             ON CONFLICT(project_id) DO UPDATE SET share = excluded.share",
+            params![project_id, i64::from(share)],
+        )?;
+        Ok(())
+    }
+
+    /// How many candidates wait in each project, for the counts on the project rows.
+    pub fn memory_waiting(&self) -> StoreResult<BTreeMap<String, u32>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT project_id, COUNT(*) FROM memory_entries WHERE state = 'candidate'
+             GROUP BY project_id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     // --- activity: runs, events, diagnostics --------------------------------------------------
 
     /// Record a run that is about to be spawned. Its PTY id arrives with [`Self::run_spawned`].
@@ -1095,6 +1347,25 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRow> {
         exit_code: row.get(10)?,
         end_reason: row.get(11)?,
         collection: row.get(12)?,
+    })
+}
+
+const MEMORY_COLUMNS: &str = "id, project_id, text, state, author, harness_id, workspace_id, \
+     workspace_name, run_id, created_at, updated_at";
+
+fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
+    Ok(MemoryRow {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        text: row.get(2)?,
+        state: row.get(3)?,
+        author: row.get(4)?,
+        harness_id: row.get(5)?,
+        workspace_id: row.get(6)?,
+        workspace_name: row.get(7)?,
+        run_id: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 

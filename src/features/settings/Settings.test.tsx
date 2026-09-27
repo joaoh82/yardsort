@@ -102,6 +102,7 @@ const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
   reviewChanges: false,
   suggestInComposer: false,
   sendProvenance: false,
+  checkMemory: false,
   thresholds: {
     flagAtPercent: 70,
     offTaskAtPercent: 60,
@@ -524,6 +525,7 @@ describe("Settings", () => {
         true,
         false,
         false,
+        false,
         withKey().thresholds,
       );
       expect(screen.getByText(/Sends the diff of each changed file/)).toBeInTheDocument();
@@ -547,6 +549,24 @@ describe("Settings", () => {
       await user.click(tell);
       expect(core.assistSaveSettings).toHaveBeenLastCalledWith(
         true,
+        false,
+        true,
+        false,
+        withKey().thresholds,
+      );
+    });
+
+    it("offers checking memory proposals as its own switch, and says what it sends", async () => {
+      core.assistStatus.mockResolvedValue(withKey());
+      core.assistSaveSettings.mockResolvedValue(withKey({ checkMemory: true }));
+      const { user } = await openAssist();
+      expect(
+        screen.getByText(/Sends the proposals and the project.s approved entries/),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("checkbox", { name: /Check memory proposals/ }));
+      expect(core.assistSaveSettings).toHaveBeenLastCalledWith(
+        false,
+        false,
         false,
         true,
         withKey().thresholds,
@@ -573,6 +593,7 @@ describe("Settings", () => {
 
       expect(core.assistSaveSettings).toHaveBeenCalledWith(
         true,
+        false,
         false,
         false,
         expect.objectContaining({ flagAtPercent: 40, offTaskAtPercent: 60 }),

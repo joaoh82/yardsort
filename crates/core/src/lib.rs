@@ -22,6 +22,7 @@ pub mod git;
 pub mod harness;
 pub mod launch;
 pub mod legacy;
+pub mod memory;
 pub mod paths;
 pub mod program;
 pub mod project_automation;

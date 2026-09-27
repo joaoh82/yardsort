@@ -73,6 +73,8 @@ pub struct AssistStatus {
     pub suggest_in_composer: bool,
     /// With the review, tell Jev who wrote each file, in the Changes list's words.
     pub send_provenance: bool,
+    /// Check memory proposals for repeats of, and contradictions with, approved entries.
+    pub check_memory: bool,
     /// How sure Jev must be before an answer becomes a badge or a suggestion.
     pub thresholds: ThresholdsDto,
     /// The model every request names.
@@ -93,6 +95,7 @@ fn status(state: &AppState) -> AssistStatus {
         review_changes: settings.review_changes,
         suggest_in_composer: settings.suggest_in_composer,
         send_provenance: settings.send_provenance,
+        check_memory: settings.check_memory,
         thresholds: settings.thresholds.into(),
         model: super::jev::MODEL.to_owned(),
     }
@@ -172,6 +175,7 @@ pub async fn assist_save_settings(
     review_changes: bool,
     suggest_in_composer: bool,
     send_provenance: bool,
+    check_memory: bool,
     thresholds: ThresholdsDto,
 ) -> IpcResult<AssistStatus> {
     let thresholds = Thresholds::from(thresholds);
@@ -185,6 +189,7 @@ pub async fn assist_save_settings(
                 settings.assist.review_changes = review_changes;
                 settings.assist.suggest_in_composer = suggest_in_composer;
                 settings.assist.send_provenance = send_provenance;
+                settings.assist.check_memory = check_memory;
                 settings.assist.thresholds = thresholds;
             })
             .map_err(|error| {

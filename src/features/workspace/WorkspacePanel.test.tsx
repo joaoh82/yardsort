@@ -16,6 +16,7 @@ const core = vi.hoisted(() => ({
   harnessesList: vi.fn(),
   uiStateSave: vi.fn(),
   workspaceHandoff: vi.fn(),
+  memoryGet: vi.fn(async () => ({ projectId: "p", shared: false, preview: null, entries: [] })),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),

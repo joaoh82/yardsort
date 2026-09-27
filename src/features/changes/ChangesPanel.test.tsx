@@ -322,6 +322,7 @@ describe("ChangesPanel with Assist", () => {
     reviewChanges: true,
     suggestInComposer: false,
     sendProvenance: false,
+    checkMemory: false,
     thresholds: {
       flagAtPercent: 70,
       offTaskAtPercent: 60,
@@ -709,6 +710,7 @@ describe("ChangesPanel with reported writes", () => {
           reviewChanges: true,
           suggestInComposer: false,
           sendProvenance,
+          checkMemory: false,
           thresholds: {
             flagAtPercent: 70,
             offTaskAtPercent: 60,

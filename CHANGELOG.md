@@ -5,6 +5,16 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Project memory.** Short lessons about a project for its agents — "the tests need
+  `TZ=UTC`". Write them in **Memory…** from a project's menu, where they are approved as you write
+  them; agents propose them with `ys memory propose`, and those wait for you, with a count on the
+  project's row. Tick **Give this project's agents its memory** and every agent you start there
+  with a first message gets the approved entries after it, cited, as notes rather than
+  instructions — never into what the workspace was asked — and handoffs carry them too. Agents
+  can run `ys memory search` any time. Nothing an agent proposes reaches another agent until you
+  approve it, and there is no command an agent could run to approve it. With Assist, a new switch
+  marks proposals that repeat or contradict an approved entry. See
+  [Memory](docs/guide/memory.md).
 - The composer's hint under a handoff said it runs "in the project's own checkout", which is only
   true of `local`; in a worktree it now says it runs in this workspace.
 

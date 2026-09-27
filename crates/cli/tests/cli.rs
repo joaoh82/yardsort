@@ -720,6 +720,109 @@ fn the_handoff_packet_is_printed_from_the_record_and_git_together() {
 }
 
 #[test]
+fn memory_is_proposed_by_agents_approved_only_in_the_app_and_read_by_anyone() {
+    use yardsort_core::store::NewRun;
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "Fix the login redirect");
+    let workspace_id = made["id"].as_str().unwrap().to_owned();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspace(&workspace_id).unwrap().unwrap();
+    store
+        .add_run(&NewRun {
+            id: "run-claude",
+            workspace_id: &workspace_id,
+            session_id: None,
+            kind: "harness",
+            harness_id: Some("claude"),
+            harness_session_id: None,
+            launched_by: "app",
+        })
+        .unwrap();
+    drop(store);
+
+    // As the agent Yardsort launched: its run id in the environment, standing in its worktree.
+    // The test's own environment is cleared of launch variables, so where it runs cannot leak in.
+    let as_agent = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+            .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+            .args(args)
+            .env_remove("YARDSORT_WORKSPACE_ID")
+            .env("YARDSORT_RUN_ID", "run-claude")
+            .env("YARDSORT_NO_DAEMON", "1")
+            .current_dir(&workspace.path)
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    let (code, said, _) = as_agent(&["memory", "propose", "The tests need TZ=UTC."]);
+    assert_eq!(code, Some(0));
+    assert!(said.contains("waits for the user to approve it"), "{said}");
+    let (_, again, _) = as_agent(&["memory", "propose", "the tests need tz=utc."]);
+    assert!(again.contains("Already there"), "{again}");
+
+    // Nothing is read while the project does not share its memory with its agents.
+    let (code, _, refused) = as_agent(&["memory", "list"]);
+    assert_eq!(code, Some(1));
+    assert!(
+        refused.contains("does not give its agents its memory"),
+        "{refused}"
+    );
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .set_memory_shared(&workspace.project_id, true)
+        .unwrap();
+    drop(store);
+    // And a candidate is nobody's to read until the user approves it.
+    let (_, listed, _) = as_agent(&["memory", "list"]);
+    assert!(listed.contains("No approved entries."), "{listed}");
+    // And there is nothing an agent could run to approve it.
+    for verb in ["approve", "edit", "reject", "revoke"] {
+        let (code, _, err) = as_agent(&["memory", verb, "x"]);
+        assert_ne!(code, Some(0), "`ys memory {verb}` must not exist: {err}");
+    }
+
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let entry = store
+        .memory_entries(&workspace.project_id)
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        (
+            entry.state.as_str(),
+            entry.author.as_str(),
+            entry.harness_id.as_deref(),
+            entry.run_id.as_deref()
+        ),
+        ("candidate", "agent", Some("claude"), Some("run-claude"))
+    );
+    yardsort_core::memory::decide(&store, &entry.id, yardsort_core::memory::Decision::Approve)
+        .unwrap();
+    drop(store);
+
+    let (_, found, _) = as_agent(&["memory", "search", "tz"]);
+    assert!(found.contains("The tests need TZ=UTC."), "{found}");
+    assert!(
+        found.contains(&format!("claude in {}", made["name"].as_str().unwrap())),
+        "{found}"
+    );
+    let json = fx
+        .ys(&["memory", "list", "--project", &fx.project_name, "--json"])
+        .ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed[0]["text"], "The tests need TZ=UTC.");
+    let nowhere = fx.ys(&["memory", "list"]).failed();
+    assert!(
+        nowhere.contains("Not inside a Yardsort workspace"),
+        "{nowhere}"
+    );
+}
+
+#[test]
 fn a_spooled_exit_is_taken_into_the_records_before_sessions_are_listed() {
     use yardsort_core::activity::{Continuation, LaunchedBy, Recorder, RunDraft, RunKind};
     use yardsort_core::store::NewSession;

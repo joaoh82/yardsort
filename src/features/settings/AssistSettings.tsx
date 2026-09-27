@@ -60,6 +60,7 @@ function ThresholdFields({
         status.reviewChanges,
         status.suggestInComposer,
         status.sendProvenance,
+        status.checkMemory,
         {
           ...status.thresholds,
           ...percents,
@@ -171,13 +172,16 @@ export function AssistSettings() {
   };
 
   const toggle = (
-    patch: Partial<Pick<AssistStatus, "reviewChanges" | "suggestInComposer" | "sendProvenance">>,
+    patch: Partial<
+      Pick<AssistStatus, "reviewChanges" | "suggestInComposer" | "sendProvenance" | "checkMemory">
+    >,
   ) =>
     void run("saving", () =>
       ipc.assistSaveSettings(
         patch.reviewChanges ?? status.reviewChanges,
         patch.suggestInComposer ?? status.suggestInComposer,
         patch.sendProvenance ?? status.sendProvenance,
+        patch.checkMemory ?? status.checkMemory,
         status.thresholds,
       ),
     );
@@ -330,6 +334,24 @@ export function AssistSettings() {
               <strong>Sends the message you are typing</strong> and the &ldquo;Good at&rdquo;
               descriptions from Settings → Harnesses. Suggestions are only ever offered; nothing is
               picked for you.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={status.checkMemory}
+            disabled={!hasKey || busy !== null}
+            onChange={(event) => toggle({ checkMemory: event.target.checked })}
+            className="mt-0.5 accent-(--color-accent)"
+          />
+          <span>
+            Check memory proposals for repeats and contradictions
+            <span className="block text-ink-faint">
+              In a project&rsquo;s Memory view, each proposal an agent made is marked when it says
+              what an approved entry already says, or the opposite of one.{" "}
+              <strong>Sends the proposals and the project&rsquo;s approved entries.</strong> Jev
+              never writes or approves an entry; you decide.
             </span>
           </span>
         </label>

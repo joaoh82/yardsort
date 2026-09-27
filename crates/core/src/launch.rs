@@ -35,6 +35,10 @@ pub struct HarnessRequest {
     /// user's words.
     #[serde(default)]
     pub handoff: bool,
+    /// Leave the project's memory out of this launch's first message, though the project shares
+    /// it. The composer's per-launch opt-out; see `crate::memory`.
+    #[serde(default)]
+    pub skip_memory: bool,
 }
 
 /// What to run in a workspace.
@@ -151,7 +155,23 @@ impl Launcher<'_> {
                 format!("{} does not exist any more.", workspace.path),
             ));
         }
-        let mut resolved = resolve_launch(launch, self.harnesses)?;
+        // A first message gets the project's approved memory after it, when the project shares
+        // it — except a handoff, whose packet carries it already, and a launch that opted out.
+        // It goes to the agent only: the record keeps the user's own words as the task.
+        let memory = match &launch {
+            Launch::Harness(request)
+                if !request.handoff
+                    && !request.skip_memory
+                    && request
+                        .prompt
+                        .as_deref()
+                        .is_some_and(|p| !p.trim().is_empty()) =>
+            {
+                crate::memory::prompt_section(self.store, &workspace.project_id)?
+            }
+            _ => None,
+        };
+        let mut resolved = resolve_launch_with(launch, self.harnesses, memory.as_deref())?;
         resolved
             .labels
             .insert(WORKSPACE_LABEL.to_owned(), workspace_id.to_owned());
@@ -412,6 +432,16 @@ const MAX_ARGV_PROMPT: usize = if cfg!(windows) { 24_000 } else { 100_000 };
 
 /// Turn a [`Launch`] into a program, its argv and the labels describing it.
 pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResult<ResolvedLaunch> {
+    resolve_launch_with(launch, overrides, None)
+}
+
+/// As [`resolve_launch`], with `context` added after a harness's first message — the project's
+/// memory. The agent receives both; the record keeps only the first message, as the task.
+pub fn resolve_launch_with(
+    launch: Launch,
+    overrides: &[HarnessOverride],
+    context: Option<&str>,
+) -> IpcResult<ResolvedLaunch> {
     let mut labels = Labels::new();
     Ok(match launch {
         Launch::Shell => ResolvedLaunch {
@@ -435,7 +465,12 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
                 IpcError::new("unknown_harness", "That harness is not configured.")
             })?;
             let prompt = request.prompt.filter(|p| !p.trim().is_empty());
-            if prompt.as_ref().is_some_and(|p| p.len() > MAX_ARGV_PROMPT) {
+            // What the agent is given: the first message, then the context after it.
+            let sent = match (&prompt, context) {
+                (Some(prompt), Some(context)) => Some(format!("{prompt}\n\n{context}")),
+                (prompt, _) => prompt.clone(),
+            };
+            if sent.as_ref().is_some_and(|p| p.len() > MAX_ARGV_PROMPT) {
                 def.prompt_transport = PromptTransport::Stdin;
             }
             let session_id = (def.session_id_mode == SessionIdMode::Assigned)
@@ -443,7 +478,7 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
             let given = |value: Option<String>| value.filter(|v| !v.trim().is_empty());
             let (model, effort) = (given(request.model), given(request.effort));
             let args = def.start_args(&LaunchValues {
-                prompt: prompt.clone(),
+                prompt: sent.clone(),
                 model: model.clone(),
                 effort: effort.clone(),
                 session_id: session_id.clone(),
@@ -470,7 +505,7 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
                 program: Some(def.command.clone()),
                 args,
                 labels,
-                paste_when_ready: prompt
+                paste_when_ready: sent
                     .filter(|_| def.prompt_transport == PromptTransport::Stdin)
                     .map(|text| PendingPrompt {
                         text,
@@ -606,6 +641,7 @@ mod tests {
             effort: None,
             prompt: Some("fix it".into()),
             handoff: false,
+            skip_memory: false,
         };
         let claude = resolve_launch(Launch::Harness(request("claude")), &[]).unwrap();
         assert_eq!(claude.program.as_deref(), Some("claude"));
@@ -641,6 +677,7 @@ mod tests {
             effort: None,
             prompt: Some(prompt),
             handoff: false,
+            skip_memory: false,
         };
         let stdin = [HarnessOverride {
             id: "claude".into(),
@@ -814,6 +851,68 @@ mod tests {
         }
     }
 
+    /// With the project sharing its memory, the agent's first message carries the approved
+    /// entries after the user's words; the record keeps the user's words alone, so the task on
+    /// record is unchanged. A handoff, an opt-out and a bare launch get nothing added.
+    #[test]
+    fn memory_goes_to_the_agent_after_the_message_and_never_into_the_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let project = store.workspace(&ws).unwrap().unwrap().project_id;
+        crate::memory::write(&store, &project, "The tests need TZ=UTC.").unwrap();
+        store.set_memory_shared(&project, true).unwrap();
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &harnesses, &activity, dir.path());
+        let start = |prompt: Option<&str>, handoff: bool, skip_memory: bool| {
+            launcher
+                .in_workspace(
+                    &ws,
+                    Launch::Harness(HarnessRequest {
+                        id: "sh-agent".into(),
+                        model: None,
+                        effort: None,
+                        prompt: prompt.map(str::to_owned),
+                        handoff,
+                        skip_memory,
+                    }),
+                    SIZE,
+                )
+                .unwrap();
+            host.plans.lock().unwrap().pop().unwrap().args.join(" ")
+        };
+
+        let sent = start(Some("exit 0"), false, false);
+        assert!(sent.contains("exit 0\n\n## Project memory"), "{sent}");
+        assert!(sent.contains("The tests need TZ=UTC."), "{sent}");
+        assert_eq!(
+            store.session_prompts(&ws).unwrap(),
+            ["exit 0"],
+            "the task on record is the user's words alone"
+        );
+
+        assert!(
+            !start(Some("exit 0"), true, false).contains("Project memory"),
+            "handoff"
+        );
+        assert!(
+            !start(Some("exit 0"), false, true).contains("Project memory"),
+            "opted out"
+        );
+        assert!(
+            !start(None, false, false).contains("Project memory"),
+            "no first message"
+        );
+        store.set_memory_shared(&project, false).unwrap();
+        assert!(
+            !start(Some("exit 0"), false, false).contains("Project memory"),
+            "not shared"
+        );
+    }
+
     #[test]
     fn a_workspace_launch_is_a_recorded_run_and_tells_the_program_which_one() {
         let dir = tempfile::tempdir().unwrap();
@@ -834,6 +933,7 @@ mod tests {
                     effort: None,
                     prompt: Some("exit 0".into()),
                     handoff: false,
+                    skip_memory: false,
                 }),
                 SIZE,
             )
@@ -1078,6 +1178,7 @@ mod tests {
                     effort: None,
                     prompt: Some("exit 3".into()),
                     handoff: false,
+                    skip_memory: false,
                 }),
                 SIZE,
             )
@@ -1181,6 +1282,7 @@ mod tests {
                     effort: None,
                     prompt: Some("exit 0".into()),
                     handoff: false,
+                    skip_memory: false,
                 }),
                 SIZE,
             )
@@ -1242,6 +1344,7 @@ mod tests {
                 effort: None,
                 prompt: Some("exit 0".into()),
                 handoff: false,
+                skip_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1305,6 +1408,7 @@ mod tests {
                     effort: None,
                     prompt: Some("exit 0".into()),
                     handoff: false,
+                    skip_memory: false,
                 }),
                 SIZE,
             )
@@ -1353,6 +1457,7 @@ mod tests {
                 effort: Some("high".into()),
                 prompt: Some("exit 0".into()),
                 handoff: false,
+                skip_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1432,6 +1537,7 @@ mod tests {
                 effort: None,
                 prompt: Some("exit 0".into()),
                 handoff: false,
+                skip_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1520,6 +1626,7 @@ mod tests {
                 effort: None,
                 prompt: Some("exit 0".into()),
                 handoff: false,
+                skip_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1596,6 +1703,7 @@ mod tests {
                 effort: None,
                 prompt: Some("exit 0".into()),
                 handoff: false,
+                skip_memory: false,
             })
         };
         let omp_only = ActivitySettings {
@@ -1660,6 +1768,7 @@ mod tests {
                 effort: None,
                 prompt: Some("exit 0".into()),
                 handoff: false,
+                skip_memory: false,
             })
         };
         let off = ActivitySettings::default();

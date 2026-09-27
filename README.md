@@ -84,6 +84,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   Grok, OMP, pi and Cursor — reports its own tool calls, file changes and turns to the same
   record, as metadata, with its own settings untouched. An experimental timeline shows it;
   `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
+- **Project memory, approved by you.** Short lessons about a project for its agents — "the tests
+  need `TZ=UTC`". You write them; agents propose them with `ys memory propose`, and those wait for
+  you. Only what you approve reaches an agent: after its first message, cited, and in handoffs.
+  See [Memory](docs/guide/memory.md).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client that comes with the app,
@@ -270,6 +274,7 @@ says no.
 | [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off |
 | [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                    |
 | [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file       |
+| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                     |
 | [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                 |
 | [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints              |

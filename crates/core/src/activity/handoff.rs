@@ -96,6 +96,9 @@ pub struct Facts {
     pub runs: Vec<RunSummary>,
     /// How many events stand behind the summary.
     pub events: usize,
+    /// The project's memory section, when the project shares it (see `crate::memory`). A
+    /// handoff launch gets no memory added at launch, so the packet carries it.
+    pub memory: Option<String>,
     /// Assist's judgment per changed file, when the caller has one; empty otherwise. Keyed by
     /// scope and path: a file changed both on the branch and since the last commit has two
     /// diffs, and two reviews.
@@ -176,6 +179,10 @@ pub fn from_store(
         uncommitted: vec![],
         committed: vec![],
         prompts: store.session_prompts(workspace_id)?,
+        memory: match &row {
+            Some(row) => crate::memory::prompt_section(store, &row.project_id).unwrap_or(None),
+            None => None,
+        },
         runs: summarize(&runs, &sessions, &events, &provenance),
         events: events.len(),
         provenance,
@@ -477,6 +484,11 @@ pub fn render(facts: &Facts) -> String {
         }
     }
     out.push('\n');
+
+    if let Some(memory) = &facts.memory {
+        out.push_str(memory);
+        out.push('\n');
+    }
 
     out.push_str("## What is not here\n\n");
     out.push_str(
@@ -1158,6 +1170,23 @@ mod tests {
             clean > committed,
             "the committed entry is judged on its own diff"
         );
+    }
+
+    /// A project that shares its memory has it in the packet, before what is not here; one that
+    /// does not, has none.
+    #[test]
+    fn the_packet_carries_the_projects_memory_when_it_is_shared() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let project = store.workspace(&ws).unwrap().unwrap().project_id;
+        crate::memory::write(&store, &project, "The tests need TZ=UTC.").unwrap();
+        let without = render(&from_store(&store, &ws, &[]).unwrap());
+        assert!(!without.contains("Project memory"));
+        store.set_memory_shared(&project, true).unwrap();
+        let with = render(&from_store(&store, &ws, &[]).unwrap());
+        let memory = with.find("## Project memory").unwrap();
+        assert!(memory < with.find("## What is not here").unwrap());
+        assert!(with.contains("- The tests need TZ=UTC. (memory "));
     }
 
     #[test]

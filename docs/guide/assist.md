@@ -101,6 +101,19 @@ that harness offers.
 **What is sent:** the message you are typing (once typing pauses, and only from about 15
 characters), and the "Good at" descriptions.
 
+## Checking memory proposals
+
+_Settings → Assist → "Check memory proposals for repeats and contradictions"._ Off by default.
+
+In a project's [Memory view](memory.md), each proposal an agent made is marked **repeats an
+entry** when Jev reads it as saying what an approved entry already says, and **may contradict an
+entry** when it reads it as saying the opposite of one. Two questions, one each, at the same
+threshold as the risk flags.
+
+**What is sent:** the proposals waiting in that project and its approved entries — nothing else.
+Answers are cached, so opening the view again asks nothing new. Jev never writes or approves an
+entry; the marks help you decide.
+
 ## Tuning what gets flagged
 
 _Settings → Assist → "How sure Jev must be"._
@@ -141,6 +154,7 @@ Only the switches are stored, in `settings.toml`; the key never is.
 review_changes = true
 suggest_in_composer = true
 send_provenance = false
+check_memory = false
 flag_at_percent = 70
 off_task_at_percent = 60
 suggest_at_percent = 50

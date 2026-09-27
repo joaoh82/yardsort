@@ -261,6 +261,23 @@ Any `ys` command that reads the daemon first takes the exits it kept while nothi
 connected into the database, so a `session list` after an agent finished on its own says `ended`
 rather than `gone`.
 
+### `ys memory`
+
+A project's [memory](memory.md): short lessons for its agents, which you approve in the app.
+Meant as much for the agents Yardsort starts as for you — any of them can run it.
+
+```sh
+ys memory list                          # approved entries, newest first
+ys memory search timezone tests         # approved entries containing every word
+ys memory propose "The tests need TZ=UTC."
+```
+
+Run inside a workspace, it is about that workspace's project; elsewhere, name it with
+`--project <project>`. `list` and `search` answer only in a project that shares its memory with its agents — the switch in the Memory view — and say so otherwise; `propose` works either way. `propose` adds a proposal for you to review in the Memory view and says
+so; when an agent Yardsort started runs it, the proposal records which agent and which
+workspace. There is no command to approve, edit, reject or revoke: those are yours, in the app,
+because an agent can run anything `ys` offers. `--json` works as everywhere.
+
 ### `ys activity export`
 
 Every recorded event as **NDJSON** on stdout — one JSON object per line, oldest first, with the
