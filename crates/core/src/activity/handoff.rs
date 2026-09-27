@@ -14,7 +14,12 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use std::path::Path;
+
 use crate::activity::provenance::{self, Provenance};
+use crate::changes::{Changes, FileChange};
+use crate::error::IpcResult;
+use crate::git::{Git, Head};
 use crate::store::{EventRow, RunRow, SessionRow, Store, StoreResult};
 
 /// How much of one task prompt goes in. A task is a paragraph or two; a pasted spec is not.
@@ -61,6 +66,19 @@ pub struct RunSummary {
     pub notifications: u32,
 }
 
+/// Assist's judgment of one changed file, from the review the Changes list already shows —
+/// a ranking of what deserves the next agent's attention, not a fact about the file. Only
+/// when the user has Assist reviewing changes; nothing new is sent for the packet.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Ranking {
+    /// `direct`, `supporting`, `unrelated` or `unsure`, as the review names them; `None`
+    /// when the task was not known or the file was not checked.
+    pub relevance: Option<String>,
+    /// The review's flags, as it names them: `secret`, `weakensTests`, `disablesChecks`,
+    /// `credentialsFile`, `unaccounted`.
+    pub flags: Vec<String>,
+}
+
 /// Everything the packet is written from.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Facts {
@@ -78,6 +96,55 @@ pub struct Facts {
     pub runs: Vec<RunSummary>,
     /// How many events stand behind the summary.
     pub events: usize,
+    /// Assist's judgment per changed file, when the caller has one. Empty otherwise.
+    pub rankings: BTreeMap<String, Ranking>,
+}
+
+/// The whole of the facts: the store's half and git's — head, base, the commits since, the
+/// change list with each file's clock for the observed join. What `ys` and the app both call.
+pub fn facts(
+    store: &Store,
+    git: &Git,
+    root: &Path,
+    workspace_id: &str,
+    base_branch: Option<&str>,
+) -> IpcResult<Facts> {
+    let set = Changes {
+        git,
+        root,
+        base_branch,
+    }
+    .list()?;
+    let file = |change: &FileChange| ChangedFile {
+        path: change.path.clone(),
+        kind: serde_json::to_value(change.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+        additions: change.additions,
+        deletions: change.deletions,
+    };
+    let paths: Vec<String> = set
+        .uncommitted
+        .iter()
+        .chain(&set.committed)
+        .map(|change| change.path.clone())
+        .collect();
+    let mut facts = from_store(store, workspace_id, &provenance::last_written(root, &paths))?;
+    facts.branch = match git.head(root) {
+        Ok(Head::Branch(name) | Head::Unborn(name)) => Some(name),
+        _ => None,
+    };
+    facts.base = set.base.clone();
+    if let Some(base) = &set.base {
+        facts.commits = git
+            .commits_since(root, base)
+            .map(|commits| commits.into_iter().map(|c| c.subject).collect())
+            .unwrap_or_default();
+    }
+    facts.uncommitted = set.uncommitted.iter().map(file).collect();
+    facts.committed = set.committed.iter().map(file).collect();
+    Ok(facts)
 }
 
 /// The parts of the facts the store holds: the task, the runs and what they did, the join.
@@ -110,6 +177,7 @@ pub fn from_store(
         runs: summarize(&runs, &sessions, &events, &provenance),
         events: events.len(),
         provenance,
+        rankings: BTreeMap::new(),
     })
 }
 
@@ -258,7 +326,12 @@ pub fn render(facts: &Facts) -> String {
             continue;
         }
         out.push_str(&format!("- {title}: {}\n", plural(files.len(), "file")));
-        for file in files.iter().take(MAX_FILES) {
+        // With Assist's judgment in hand, the files it would look at first come first.
+        let mut ordered: Vec<&ChangedFile> = files.iter().collect();
+        if !facts.rankings.is_empty() {
+            ordered.sort_by_key(|file| rank(facts.rankings.get(&file.path)));
+        }
+        for file in ordered.iter().take(MAX_FILES) {
             let stat = match (file.additions, file.deletions) {
                 (Some(a), Some(d)) => format!(", +{a} −{d}"),
                 _ => String::new(),
@@ -268,7 +341,17 @@ pub fn render(facts: &Facts) -> String {
             } else {
                 String::new()
             };
-            out.push_str(&format!("  - `{}` ({}{stat}){who}\n", file.path, file.kind));
+            let judged = facts
+                .rankings
+                .get(&file.path)
+                .map(judgment)
+                .filter(|j| !j.is_empty())
+                .map(|j| format!(" — {j}"))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "  - `{}` ({}{stat}){who}{judged}\n",
+                file.path, file.kind
+            ));
         }
         if files.len() > MAX_FILES {
             out.push_str(&format!("  - … and {} more\n", files.len() - MAX_FILES));
@@ -276,6 +359,13 @@ pub fn render(facts: &Facts) -> String {
     }
     if facts.uncommitted.is_empty() && facts.committed.is_empty() {
         out.push_str("- No changed files.\n");
+    }
+    if !facts.rankings.is_empty() {
+        out.push_str(
+            "- The files are in the order Assist would look at them, with its word on each, \
+             from the review the Changes list already shows: a judgment about relevance to the \
+             task and risk, not a fact about the file.\n",
+        );
     }
     out.push('\n');
 
@@ -400,6 +490,45 @@ pub fn render(facts: &Facts) -> String {
         plural(facts.events, "event")
     ));
     out
+}
+
+/// Where a file goes in the list: what the task asks for first, then what supports it, then
+/// what Assist could not place or was not asked about, then what looks unrelated.
+fn rank(ranking: Option<&Ranking>) -> u8 {
+    match ranking.and_then(|r| r.relevance.as_deref()) {
+        Some("direct") => 0,
+        Some("supporting") => 1,
+        Some("unrelated") => 3,
+        _ => 2,
+    }
+}
+
+/// Assist's word on a file, in the words the badges use.
+fn judgment(ranking: &Ranking) -> String {
+    let mut words: Vec<String> = vec![];
+    match ranking.relevance.as_deref() {
+        Some("direct") => words.push("on task".to_owned()),
+        Some("supporting") => words.push("supports the task".to_owned()),
+        Some("unrelated") => words.push("looks unrelated to the task".to_owned()),
+        Some("unsure") => words.push("Assist unsure of its relevance".to_owned()),
+        _ => {}
+    }
+    let flags: Vec<&str> = ranking
+        .flags
+        .iter()
+        .map(|flag| match flag.as_str() {
+            "secret" => "may add a secret",
+            "weakensTests" => "weakens a test",
+            "disablesChecks" => "switches a check off",
+            "credentialsFile" => "a credentials file",
+            "unaccounted" => "a substantive change no agent accounted for",
+            other => other,
+        })
+        .collect();
+    if !flags.is_empty() {
+        words.push(format!("Assist flags: {}", flags.join(", ")));
+    }
+    words.join("; ")
 }
 
 /// The Changes list's word on a file, for the packet.
@@ -891,6 +1020,90 @@ mod tests {
             !text.contains("capture was off"),
             "none of these runs is known silent"
         );
+    }
+
+    /// With Assist's review in hand, the changed files come in the order it would look at
+    /// them, each with its word — and the packet says that is a judgment. Without one, the
+    /// list is git's order and says nothing of the kind.
+    #[test]
+    fn assists_judgment_orders_the_files_and_is_named_as_a_judgment() {
+        let mut facts = Facts {
+            workspace: "w".into(),
+            project: "p".into(),
+            uncommitted: vec![
+                ChangedFile {
+                    path: "ci.yml".into(),
+                    kind: "modified".into(),
+                    additions: None,
+                    deletions: None,
+                },
+                ChangedFile {
+                    path: "src/login.rs".into(),
+                    kind: "modified".into(),
+                    additions: None,
+                    deletions: None,
+                },
+                ChangedFile {
+                    path: "notes.md".into(),
+                    kind: "untracked".into(),
+                    additions: None,
+                    deletions: None,
+                },
+                ChangedFile {
+                    path: "src/login_test.rs".into(),
+                    kind: "modified".into(),
+                    additions: None,
+                    deletions: None,
+                },
+            ],
+            ..Facts::default()
+        };
+        let plain = render(&facts);
+        let at = |text: &str, needle: &str| text.find(needle).unwrap();
+        assert!(
+            at(&plain, "`ci.yml`") < at(&plain, "`src/login.rs`"),
+            "git's order"
+        );
+        assert!(!plain.contains("Assist"));
+
+        facts.rankings = [
+            ("ci.yml", Some("unrelated"), vec!["disablesChecks"]),
+            ("src/login.rs", Some("direct"), vec![]),
+            (
+                "src/login_test.rs",
+                Some("supporting"),
+                vec!["weakensTests"],
+            ),
+        ]
+        .into_iter()
+        .map(|(path, relevance, flags)| {
+            (
+                path.to_owned(),
+                Ranking {
+                    relevance: relevance.map(str::to_owned),
+                    flags: flags.into_iter().map(str::to_owned).collect(),
+                },
+            )
+        })
+        .collect();
+        let ranked = render(&facts);
+        let login = at(&ranked, "`src/login.rs`");
+        let test = at(&ranked, "`src/login_test.rs`");
+        let notes = at(&ranked, "`notes.md`");
+        let ci = at(&ranked, "`ci.yml`");
+        assert!(
+            login < test && test < notes && notes < ci,
+            "direct, supporting, unjudged, unrelated"
+        );
+        assert!(ranked.contains("`src/login.rs` (modified) — on task\n"));
+        assert!(ranked.contains(
+            "`src/login_test.rs` (modified) — supports the task; Assist flags: weakens a test\n"
+        ));
+        assert!(ranked.contains("`ci.yml` (modified) — looks unrelated to the task; Assist flags: switches a check off\n"));
+        assert!(ranked.contains("`notes.md` (untracked)\n"));
+        assert!(ranked.contains(
+            "a judgment about relevance to the task and risk, not a fact about the file"
+        ));
     }
 
     #[test]

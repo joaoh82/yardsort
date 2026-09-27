@@ -357,24 +357,6 @@ impl From<yardsort_core::activity::provenance::Provenance> for Provenance {
     }
 }
 
-/// When each of `paths` (workspace-relative, from the change list) was last written, in epoch
-/// milliseconds, by the file system's own clock. A path that is gone — deleted, or renamed
-/// away — or that would leave the workspace is left out rather than guessed at.
-pub fn last_written(root: &Path, paths: &[String]) -> Vec<(String, i64)> {
-    paths
-        .iter()
-        .filter_map(|path| {
-            let full = crate::changes::resolve_inside(root, path).ok()?;
-            let modified = std::fs::metadata(full).ok()?.modified().ok()?;
-            let ms = modified
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()?
-                .as_millis();
-            Some((path.clone(), i64::try_from(ms).ok()?))
-        })
-        .collect()
-}
-
 /// A handoff packet: what Yardsort recorded about a workspace, as the opening prompt for the
 /// next agent there. See `yardsort_core::activity::handoff`.
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
@@ -387,58 +369,74 @@ pub struct HandoffPacket {
     pub events: u32,
 }
 
-/// Assemble the packet for a workspace: the store's facts, and git's — branch, commits since
-/// the base, the change list with each file's modification time for the observed join.
+/// Assemble the packet for a workspace: the core's facts — the store's and git's — and, when
+/// Assist is reviewing changes, its judgment of each file from the same review the Changes
+/// list shows. Nothing new is sent for the packet: a review that is switched off, has no
+/// key, or fails leaves the packet without a ranking, and the packet reads the same.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_handoff(app: AppHandle, workspace_id: String) -> IpcResult<HandoffPacket> {
-    use yardsort_core::activity::handoff::{self, ChangedFile};
-    blocking(app, move |state| {
-        let (row, root) = crate::changes::commands::workspace(state, &workspace_id)?;
-        let git = crate::git::Git::new(&state.env())?;
-        let set = crate::changes::Changes {
-            git: &git,
-            root: &root,
-            base_branch: row.base_branch.as_deref(),
+    use yardsort_core::activity::handoff::{self, Ranking};
+    let (mut facts, prepared) = blocking(app.clone(), {
+        let workspace_id = workspace_id.clone();
+        move |state| {
+            let (row, root) = crate::changes::commands::workspace(state, &workspace_id)?;
+            let git = crate::git::Git::new(&state.env())?;
+            let facts = handoff::facts(
+                &state.store,
+                &git,
+                &root,
+                &workspace_id,
+                row.base_branch.as_deref(),
+            )?;
+            // A review that cannot run is no ranking, not a failed packet.
+            let prepared = crate::assist::commands::prepare_review(state, &workspace_id).ok();
+            Ok((facts, prepared))
         }
-        .list()?;
-        let file = |change: &crate::changes::FileChange| ChangedFile {
-            path: change.path.clone(),
-            kind: serde_json::to_value(change.kind)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_owned))
-                .unwrap_or_default(),
-            additions: change.additions,
-            deletions: change.deletions,
-        };
-        let paths: Vec<String> = set
-            .uncommitted
-            .iter()
-            .chain(&set.committed)
-            .map(|change| change.path.clone())
-            .collect();
-        let mut facts =
-            handoff::from_store(&state.store, &workspace_id, &last_written(&root, &paths))?;
-        facts.branch = match git.head(&root) {
-            Ok(crate::git::Head::Branch(name) | crate::git::Head::Unborn(name)) => Some(name),
-            _ => None,
-        };
-        facts.base = set.base.clone();
-        if let Some(base) = &set.base {
-            facts.commits = git
-                .commits_since(&root, base)
-                .map(|commits| commits.into_iter().map(|c| c.subject).collect())
-                .unwrap_or_default();
-        }
-        facts.uncommitted = set.uncommitted.iter().map(file).collect();
-        facts.committed = set.committed.iter().map(file).collect();
-        Ok(HandoffPacket {
-            runs: facts.runs.len() as u32,
-            events: facts.events as u32,
-            text: handoff::render(&facts),
-        })
     })
-    .await
+    .await?;
+    if let Some(prepared) = prepared {
+        if let Ok(jev) = crate::assist::jev::Jev::new(&prepared.key) {
+            let state = app.state::<AppState>();
+            if let Ok(review) = crate::assist::review::review(
+                std::sync::Arc::new(jev),
+                &state.assist.reviews,
+                prepared.task,
+                prepared.inputs,
+                prepared.thresholds,
+            )
+            .await
+            {
+                facts.rankings = review
+                    .files
+                    .into_iter()
+                    .filter(|file| file.not_checked.is_none())
+                    .map(|file| {
+                        (
+                            file.path.clone(),
+                            Ranking {
+                                relevance: file.relevance.as_ref().and_then(camel_word),
+                                flags: file.flags.iter().filter_map(camel_word).collect(),
+                            },
+                        )
+                    })
+                    .collect();
+            }
+        }
+    }
+    Ok(HandoffPacket {
+        runs: facts.runs.len() as u32,
+        events: facts.events as u32,
+        text: handoff::render(&facts),
+    })
+}
+
+/// A serde-named enum value as the string its `rename_all` gives it — the same word the
+/// bindings and the badges use.
+fn camel_word<T: Serialize>(value: &T) -> Option<String> {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
 }
 
 /// The reported writes for a workspace, as they stand now, and for each of `paths` — the
@@ -452,37 +450,10 @@ pub async fn workspace_provenance(
 ) -> IpcResult<Provenance> {
     blocking(app, move |state| {
         let (_, root) = crate::changes::commands::workspace(state, &workspace_id)?;
-        let files = last_written(&root, &paths);
+        let files = yardsort_core::activity::provenance::last_written(&root, &paths);
         Ok(yardsort_core::activity::provenance::of(&state.store, &workspace_id, &files)?.into())
     })
     .await
-}
-
-#[cfg(test)]
-mod last_written_tests {
-    use super::*;
-
-    /// The clock is the file's own; a file that is not there, or a path that would leave the
-    /// workspace, is left out.
-    #[test]
-    fn last_written_reads_the_files_own_clock_and_skips_what_it_cannot_read() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/a.rs"), "fn a() {}").unwrap();
-        let before = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        let paths = [
-            "src/a.rs".to_owned(),
-            "gone.rs".to_owned(),
-            "../secret".to_owned(),
-        ];
-        let written = last_written(dir.path(), &paths);
-        assert_eq!(written.len(), 1);
-        assert_eq!(written[0].0, "src/a.rs");
-        assert!(written[0].1 <= before + 1 && written[0].1 > before - 60_000);
-    }
 }
 
 /// How many events a page holds at most, whatever is asked for.

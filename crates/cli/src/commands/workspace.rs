@@ -60,6 +60,13 @@ pub enum Command {
     ///
     /// Uncommitted changes and untracked files are refused unless `--force` is given: they live
     /// only in the folder this removes, so there is no way back to them.
+    /// Print the handoff packet for a workspace: what Yardsort recorded there, written as the
+    /// next agent's first message. The same text the app's Hand off… button starts from,
+    /// without Assist's ranking, which the command line has no key for.
+    Handoff {
+        /// The workspace, by name or id.
+        workspace: String,
+    },
     Delete {
         /// Which one: a workspace name, or its id from `ys workspace list --json`.
         workspace: String,
@@ -112,7 +119,43 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             ys, project, prompt, base, harness, model, effort, no_agent, out,
         ),
         Command::Delete { workspace, force } => delete(ys, &workspace, force, out),
+        Command::Handoff { workspace } => handoff(ys, &workspace, out),
     }
+}
+
+/// The packet, as text or, with `--json`, as `{ text, runs, events }`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Packet {
+    text: String,
+    runs: usize,
+    events: usize,
+}
+
+fn handoff(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
+    ys.drain_spool();
+    let workspace = find_workspace(ys, wanted)?;
+    let root = PathBuf::from(&workspace.path);
+    if !root.is_dir() {
+        return Err(Failure::new(format!(
+            "{} does not exist any more.",
+            workspace.path
+        )));
+    }
+    let git = ys.git()?;
+    let facts = yardsort_core::activity::handoff::facts(
+        &ys.store,
+        &git,
+        &root,
+        &workspace.id,
+        workspace.base_branch.as_deref(),
+    )?;
+    let packet = Packet {
+        runs: facts.runs.len(),
+        events: facts.events,
+        text: yardsort_core::activity::handoff::render(&facts),
+    };
+    out.emit(&packet, || print!("{}", packet.text))
 }
 
 fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Result<(), Failure> {

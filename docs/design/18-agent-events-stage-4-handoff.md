@@ -1,6 +1,6 @@
 # 18 — Agent events, stage 4: handoffs
 
-Status: **first slice shipped** · 27 September 2026 · Stage 4 of
+Status: **two slices shipped** · 27 September 2026 · Stage 4 of
 [09](09-agent-events-and-memory.md), and the user story the whole design opened with: _start
 Claude in a workspace, then launch Codex with a previewed, edited snapshot of the available
 Claude and worktree context; missing conversation content is labeled; Codex receives the packet
@@ -64,9 +64,8 @@ deterministic packet and no model in the loop.
   claude ran a command; not reported", "no agent reported writing it" are the sentences the
   panel and Assist already use; a reader who has seen one has seen them all. With no run
   reporting, no writer is named, and the closing section says why.
-- **Not built:** a `ys` command for the packet. The core has the store half; the git half
-  (`Changes`) is the app's. `ys workspace handoff <workspace>` printing the packet is a small
-  follow-up once the change list moves to the core, and is noted in [05](05-roadmap.md).
+- ~~**Not built:** a `ys` command for the packet.~~ Built in the second slice (§6), once the
+  change list moved to the core.
 
 ## 3 · What shipped
 
@@ -103,13 +102,47 @@ events)` per run, `render(&Facts)` for the text.
 
 ## 5 · What this slice does not do, and the next
 
-- **Jev ranking** of which facts matter (09's stage-4 row): after use, not before.
+- ~~**Jev ranking** of which facts matter (09's stage-4 row): after use, not before.~~ Second
+  slice, §6, from the review Assist already runs — no new judgment was invented for it.
 - **Test and error evidence** beyond failed tool calls: the adapters record no output, so a
   failing test run is a `Bash` that completed. If a run-output source ever exists (the daemon's
   run terminal for a project's run command is one), it belongs here.
 - **Excerpts with event ids.** The packet cites the count and the CLI line rather than ids per
   line: an agent cannot open an id, and a person has the timeline.
-- **`ys workspace handoff`.** See §2.
 - **Stage 5**, reviewed memory, is the next stage of [09](09-agent-events-and-memory.md); the
   packet is a one-off, and that document says a one-off handoff is useful before a memory
   engine exists. It is.
+
+## 6 · Second slice: `ys workspace handoff`, and Assist's ranking
+
+Two follow-ups the first slice named, done together because the first unblocked the second's
+shape.
+
+- **The change list moved to the core.** `src-tauri/src/changes/mod.rs` — `Changes::list`,
+  `diff`, `patch`, `combined_patch`, the content types and the path guard — became
+  `yardsort_core::changes`, tests included, with the app's module re-exporting it beside the
+  commands, the file tree and the watcher, which stay the app's. Nothing in it needed the app:
+  it read git and the file system. `last_written`, the file-clock read for the observed join,
+  moved with it into `activity::provenance`.
+- **The packet's git half is the core's too.** `handoff::facts(store, git, root, workspace,
+base)` does what the app command did — head, base, commits since, the change list with each
+  file's clock — so the app and `ys` build the same packet from the same code.
+- **`ys workspace handoff <workspace>`** prints it (`--json` for `{ text, runs, events }`),
+  after draining the exit spool as every `ys` read does. It starts nothing: the command line has
+  no composer, and the text goes where the user pipes it. It carries no Assist ranking, since
+  `ys` has no key; the guide says so.
+- **Assist's ranking, from the review it already runs.** 09's stage-4 row asks Jev to "rank
+  which facts are useful in a handoff". The review Assist runs for the Changes list already
+  judges each changed file's relevance to the task and its risks, and those answers are cached
+  per diff. So the packet's ranking is that review, read again: when the review switch is on
+  and a key is in force, the app command runs `prepare_review` and `review` — every answer
+  cached, nothing new sent unless a diff is new to it — and gives each changed file a
+  `Ranking { relevance, flags }`. `render` then orders the files _direct, supporting, unplaced,
+  unrelated_ and writes each file's word in the badges' own terms, and adds one line saying the
+  order is a judgment about relevance and risk, not a fact. A review that is off, has no key,
+  or fails is no ranking, and the packet reads as before. No new question was invented and no
+  new opt-in was needed: what leaves the machine is exactly what the review switch already
+  sends.
+
+Not measured, as with the review itself: whether the order helps the next agent. The line in
+the packet keeps it honest until there is use to learn from.

@@ -68,11 +68,22 @@ The message has four parts:
   they were, and how many events the summary rests on, with the `ys activity list` line that
   shows them.
 
-Two things to know. Nothing in it comes from a model or from the last agent's words: Yardsort
-keeps metadata, never a conversation, so the message says where it is blind and tells the agent
-to ask you. And a handoff is not the task: the new conversation's record keeps no first message,
-so what the workspace was asked stays what you first typed — for Assist, and for the next
-handoff. Times in the message are UTC, in case it travels.
+Two things to know. Nothing in it comes from the last agent's words: Yardsort keeps metadata,
+never a conversation, so the message says where it is blind and tells the agent to ask you. And
+a handoff is not the task: the new conversation's record keeps no first message, so what the
+workspace was asked stays what you first typed — for Assist, and for the next handoff. Times in
+the message are UTC, in case it travels.
+
+With [Assist](assist.md) reviewing changes, the changed files come in the order Assist would
+look at them — what the task asks for first, then what supports it, then what it could not
+place, then what looks unrelated — each with its word: _on task_, _supports the task_, _looks
+unrelated to the task_, and any flag (_may add a secret_, _weakens a test_, _a substantive
+change no agent accounted for_…). It is the same review the Changes list's badges come from,
+so nothing new is sent, and the message says it is a judgment, not a fact. Without Assist the
+files are in git's order and nothing of the kind appears.
+
+`ys workspace handoff <workspace>` prints the same message from the command line, without
+Assist's ordering — see the [CLI guide](cli.md#ys-workspace-handoff-workspace).
 
 ## Agents keep working when you close the window
 

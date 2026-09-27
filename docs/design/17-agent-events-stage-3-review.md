@@ -25,7 +25,8 @@ Every `path` is already workspace-relative, and a path outside the workspace was
 (`pathOutsideWorkspace: true` in its place). So the join needs no path handling at all, and no
 knowledge of where the worktree is: the Changes panel's `FileChange.path` is the same string.
 
-On the other side, the Changes panel lives in the app (`src-tauri/src/changes`), not the core:
+On the other side, the Changes panel lived in the app (`src-tauri/src/changes`), not the core — it
+moved to `yardsort_core::changes` with stage 4's second slice ([18 §6](18-agent-events-stage-4-handoff.md)):
 git's answer, two scopes, refreshed on every file-system signal. The CLI has no diff. Assist's
 review sits beside it, per file, advisory, with a note above the list — the shape this slice
 copies.

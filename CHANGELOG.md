@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **`ys workspace handoff`, and Assist's order in the handoff.** The handoff packet can be
+  printed from the command line with `ys workspace handoff <workspace>` (`--json` for the text
+  with counts), the same text the app's button starts from. In the app, with Assist reviewing
+  changes, the packet lists the changed files in the order Assist would look at them — on task
+  first, unrelated last — with its word on each, from the review the Changes list already
+  shows; nothing new is sent, and the packet says it is a judgment, not a fact.
 - **Hand off a workspace to another agent.** A new **Hand off…** button in the tab bar writes
   the next agent's first message from what Yardsort recorded: what the workspace was asked,
   where the branch stands and who wrote each changed file, what each agent run did, and what

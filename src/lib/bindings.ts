@@ -132,8 +132,10 @@ export const commands = {
 	 */
 	workspaceProvenance: (workspaceId: string, paths: string[]) => typedError<Provenance, IpcError>(__TAURI_INVOKE("workspace_provenance", { workspaceId, paths })),
 	/**
-	 *  Assemble the packet for a workspace: the store's facts, and git's — branch, commits since
-	 *  the base, the change list with each file's modification time for the observed join.
+	 *  Assemble the packet for a workspace: the core's facts — the store's and git's — and, when
+	 *  Assist is reviewing changes, its judgment of each file from the same review the Changes
+	 *  list shows. Nothing new is sent for the packet: a review that is switched off, has no
+	 *  key, or fails leaves the packet without a ranking, and the packet reads the same.
 	 */
 	workspaceHandoff: (workspaceId: string) => typedError<HandoffPacket, IpcError>(__TAURI_INVOKE("workspace_handoff", { workspaceId })),
 	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
