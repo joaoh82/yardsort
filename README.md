@@ -50,6 +50,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   screen is repainted where it got to. Closing with work in flight asks first.
 - **Pick up where you left off.** For conversations that really did end, press **Resume** — it is
   intact. **Fork** one to try a different approach without losing the first.
+- **Hand the work to another agent.** One click writes the next agent's first message from what
+  Yardsort recorded — your task, where the branch stands, who wrote each file, what every agent
+  run did and what is not known — for you to read and edit before it goes. Codex after Claude,
+  without retyping the story. [More below](#hand-the-work-to-another-agent).
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
   one click into your editor. With an agent reporting, each changed file says who wrote it: an
   agent that reported writing it, one that was running a command when it was last written, or
@@ -80,11 +84,6 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   Grok, OMP, pi and Cursor — reports its own tool calls, file changes and turns to the same
   record, as metadata, with its own settings untouched. An experimental timeline shows it;
   `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
-- **Hand work to another agent.** **Hand off…** writes the next agent's first message from that
-  record — what the workspace was asked, where the branch stands and who wrote each file, what
-  each agent did, and what is not known — for you to read and edit before it goes. Codex after
-  Claude, or a fresh start of the same agent, without retyping the story. See
-  [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client that comes with the app,
@@ -105,6 +104,51 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
     <td align="center"><sub>Come back later: Resume or Fork any conversation</sub></td>
   </tr>
 </table>
+
+## Hand the work to another agent
+
+One agent has worked in a workspace and you want another there — Codex after Claude, or the same
+agent from a clean start. The files and the diff carry over by themselves. What was asked, tried
+and found does not. **Hand off…**, in the tab bar, writes the next agent's first message from
+what Yardsort recorded and opens it in the composer, where you read it, edit it, pick the agent
+and press Enter.
+
+![Hand off: the composer holding the next agent's first message](docs/images/handoff.png)
+
+It is written from the record, not from the last agent's words — Yardsort never keeps a
+conversation — and no model writes it. An excerpt of a real one:
+
+```markdown
+## What this workspace was asked
+
+> Add an --imperial option that shows °F and mph
+
+## Where the work stands
+
+- Branch `ys/add-imperial-option-shows`, started from `main`: 0 commits on it since.
+- Uncommitted: 4 files
+  - `src/render.js` (modified, +10 −5) — last written while claude ran a command; not reported
+  - `tests/render.test.js` (modified, +8 −0) — last written while claude ran a command; not reported
+    …
+
+## What the agents did here
+
+- **claude**, started 2026-09-27 11:39 UTC, **still running**.
+  - 1 turn.
+  - Tools: Bash ×2.
+
+## What is not here
+
+- The conversations themselves: what the agents said, reasoned, tried and rejected. Yardsort
+  records metadata only. If that matters, ask the user before assuming.
+```
+
+It says where it is blind, and tells the next agent to ask you. With
+[Assist](#assist-judgment-from-jev-if-you-want-it) on, the changed files come in the order Assist
+would look at them. The handoff is not the task: the new conversation keeps your original words
+as what the workspace was asked. From a terminal, `ys workspace handoff <workspace>` prints the
+same message. See
+[Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent).
 
 ## Supported agents
 

@@ -42,7 +42,7 @@ export function Cli() {
     <section aria-labelledby="h-cli" className="mx-auto max-w-[1120px] px-5 pt-[120px] md:px-8">
       <div className="grid items-start gap-12 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div>
-          <p className="mb-2.5 font-mono text-[12.5px] text-accent">05 · Command line</p>
+          <p className="mb-2.5 font-mono text-[12.5px] text-accent">06 · Command line</p>
           <h3 id="h-cli" className="text-2xl leading-[1.2] font-medium tracking-[-0.015em]">
             Start an agent without opening the window
           </h3>

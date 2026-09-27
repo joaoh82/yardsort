@@ -440,7 +440,9 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               Enter to start · Shift+Enter for a new line · Esc to cancel · {formatShortcut("N")}{" "}
               opens this again.{" "}
               {runIn
-                ? "Runs in the project's own checkout, on the branch it has out. Nothing is created."
+                ? runIn.kind === "local"
+                  ? "Runs in the project's own checkout, on the branch it has out. Nothing is created."
+                  : "Runs in this workspace, on the branch it has out. Nothing is created."
                 : mode === "open"
                   ? `Opens the existing branch "${branch}" in a new git worktree.`
                   : "A new branch and git worktree are created when you start."}
