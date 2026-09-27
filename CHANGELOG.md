@@ -3,15 +3,8 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.12.0
 
-- **Outcomes: what became of each attempt.** After you archive or delete a workspace, the
-  sidebar asks how it went — kept, partly or discarded, one optional click. **Outcomes…** in a
-  project's menu lists every attempt, deleted ones included, with its task, agents, outcome and
-  evidence, and each agent's history. A merged pull request or a branch merged into its base
-  counts as kept until you say otherwise; nothing else is ever counted. The composer shows your
-  history with the agent you picked — "too few to say yet" until there are five outcomes. See
-  [Outcomes](docs/guide/outcomes.md).
 - **Project memory.** Short lessons about a project for its agents — "the tests need
   `TZ=UTC`". Write them in **Memory…** from a project's menu, where they are approved as you write
   them; agents propose them with `ys memory propose`, and those wait for you, with a count on the
@@ -22,6 +15,13 @@ has the downloads and the full commit lists.
   approve it, and there is no command an agent could run to approve it. With Assist, a new switch
   marks proposals that repeat or contradict an approved entry. See
   [Memory](docs/guide/memory.md).
+- **Outcomes: what became of each attempt.** After you archive or delete a workspace, the
+  sidebar asks how it went — kept, partly or discarded, one optional click. **Outcomes…** in a
+  project's menu lists every attempt, deleted ones included, with its task, agents, outcome and
+  evidence, and each agent's history. A merged pull request or a branch merged into its base
+  counts as kept until you say otherwise; nothing else is ever counted. The composer shows your
+  history with the agent you picked — "too few to say yet" until there are five outcomes. See
+  [Outcomes](docs/guide/outcomes.md).
 - The composer's hint under a handoff said it runs "in the project's own checkout", which is only
   true of `local`; in a worktree it now says it runs in this workspace.
 
