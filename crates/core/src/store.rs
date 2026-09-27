@@ -159,6 +159,19 @@ pub struct MemoryHistoryRow {
     pub previous_text: Option<String>,
 }
 
+/// What a proposal came to, decided inside the transaction that would add it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryInsert {
+    Added(String),
+    /// The same text, ignoring ASCII case, is already in the project.
+    Known {
+        id: String,
+        state: String,
+    },
+    /// As many candidates as are allowed already wait.
+    Full,
+}
+
 /// A memory entry about to be written.
 pub struct NewMemory<'a> {
     pub project_id: &'a str,
@@ -772,6 +785,63 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(id)
+    }
+
+    /// Add a candidate unless the same text is already in the project or the queue is full —
+    /// all three decided in one immediate transaction, so proposals racing from separate
+    /// processes cannot both pass the checks and then both insert.
+    pub fn propose_memory(
+        &self,
+        new: &NewMemory<'_>,
+        max_waiting: usize,
+    ) -> StoreResult<MemoryInsert> {
+        let at = now_ms();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let known: Option<(String, String)> = tx
+            .query_row(
+                "SELECT id, state FROM memory_entries
+                 WHERE project_id = ? AND text = ? COLLATE NOCASE LIMIT 1",
+                params![new.project_id, new.text],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((id, state)) = known {
+            return Ok(MemoryInsert::Known { id, state });
+        }
+        let waiting: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM memory_entries WHERE project_id = ? AND state = 'candidate'",
+            [new.project_id],
+            |r| r.get(0),
+        )?;
+        if usize::try_from(waiting).unwrap_or(usize::MAX) >= max_waiting {
+            return Ok(MemoryInsert::Full);
+        }
+        let id = new_id();
+        tx.execute(
+            "INSERT INTO memory_entries (id, project_id, text, state, author, harness_id,
+                                         workspace_id, workspace_name, run_id, created_at, updated_at)
+             VALUES (?, ?, ?, 'candidate', ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                id,
+                new.project_id,
+                new.text,
+                new.author,
+                new.harness_id,
+                new.workspace_id,
+                new.workspace_name,
+                new.run_id,
+                at,
+                at
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO memory_history (entry_id, at, action, by, previous_text)
+             VALUES (?, ?, 'proposed', ?, NULL)",
+            params![id, at, new.author],
+        )?;
+        tx.commit()?;
+        Ok(MemoryInsert::Added(id))
     }
 
     pub fn memory_entry(&self, id: &str) -> StoreResult<Option<MemoryRow>> {

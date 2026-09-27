@@ -35,7 +35,7 @@ Four put to the user on 2026-09-27; three answered as proposed, one otherwise.
 - **Delivery: the first message and `ys memory`.** With the project's **share** switch on, a
   launch with a first message gets a _Project memory_ section after it — at launch
   (`resolve_launch_with`), never in the record — and a handoff packet carries the same section.
-  `ys memory list` and `ys memory search` read approved entries for any agent, on demand. No MCP
+  `ys memory list` and `ys memory search` read approved entries for any agent, on demand, under the same switch. No MCP
   server: every agent runs a command, and not every agent takes MCP.
 - **Review: a Memory view per project**, from the project menu, with a count on the row.
 - **Jev now** (the user's choice over "later"): two typed questions per candidate against the
@@ -58,6 +58,17 @@ Further decisions made in building:
   the working directory. Names are stored beside ids, so a citation outlives its workspace.
 - **Per-launch opt-out**: the composer shows the section (**Show**) and a box to leave it out of
   one launch (`HarnessRequest.skip_memory`). A bare launch, with no message, gets nothing.
+- **Checked and inserted in one transaction.** Duplicate detection and the queue bound are
+  decided inside the immediate transaction that inserts a proposal (`Store::propose_memory`):
+  found in review, eight `ys` processes racing could otherwise all pass the checks. A test races
+  eight connections to one file.
+- **Reading follows the switch too.** `ys memory list` and `search` refuse while the project does
+  not share its memory, as a launch adds nothing then; `propose` works either way, since a
+  proposal reaches no agent. Found in review: the first cut read regardless, which contradicted
+  the premise the user answered the delivery question on.
+- **Jev's tags follow the approved list.** A verdict depends on the approved entries as much as on
+  the proposal, so the view asks again when either changes and shows an answer only while it
+  still matches what it was judged against.
 - **Waiting counts are polled**, on focus and on every activity event: `ys` writes the database
   without the window hearing of it.
 
@@ -77,7 +88,8 @@ Further decisions made in building:
 
 ## 4 · Verification
 
-- `memory` (6): a user's entry is approved and an agent's waits, with its history; revocation
+- `memory` (7): a user's entry is approved and an agent's waits, with its history; racing
+  proposals from separate connections neither duplicate nor overflow; revocation
   and restoration, and decisions refused out of state; an edit keeps the replaced text, and an
   entry is one bounded paragraph; the candidate queue is bounded; the section is cited, framed,
   newest first, and only when shared; a proposal is located by run, workspace or folder.

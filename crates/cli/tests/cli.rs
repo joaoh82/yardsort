@@ -765,7 +765,19 @@ fn memory_is_proposed_by_agents_approved_only_in_the_app_and_read_by_anyone() {
     let (_, again, _) = as_agent(&["memory", "propose", "the tests need tz=utc."]);
     assert!(again.contains("Already there"), "{again}");
 
-    // A candidate is nobody's to read until the user approves it.
+    // Nothing is read while the project does not share its memory with its agents.
+    let (code, _, refused) = as_agent(&["memory", "list"]);
+    assert_eq!(code, Some(1));
+    assert!(
+        refused.contains("does not give its agents its memory"),
+        "{refused}"
+    );
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .set_memory_shared(&workspace.project_id, true)
+        .unwrap();
+    drop(store);
+    // And a candidate is nobody's to read until the user approves it.
     let (_, listed, _) = as_agent(&["memory", "list"]);
     assert!(listed.contains("No approved entries."), "{listed}");
     // And there is nothing an agent could run to approve it.

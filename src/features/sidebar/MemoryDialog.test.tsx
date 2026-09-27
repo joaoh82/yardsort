@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MemoryEntry, ProjectMemory } from "@/lib/ipc";
+import type { MemoryCheck, MemoryEntry, ProjectMemory } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   memoryGet: vi.fn(),
@@ -161,5 +161,27 @@ describe("MemoryDialog", () => {
     expect(await screen.findByText("may contradict an entry")).toBeInTheDocument();
     expect(core.memoryCheck).toHaveBeenCalledWith("p-app");
     expect(screen.queryByText("repeats an entry")).not.toBeInTheDocument();
+  });
+
+  it("asks again when the approved entries change, and drops the old tags meanwhile", async () => {
+    core.memoryCheck.mockResolvedValue([{ id: "cand0001", repeats: false, contradicts: true }]);
+    core.assistStatus.mockResolvedValue(status(true));
+    useAssistStore.setState({ status: status(true) });
+    const user = await open();
+    expect(await screen.findByText("may contradict an entry")).toBeInTheDocument();
+    expect(core.memoryCheck).toHaveBeenCalledTimes(1);
+
+    // Revoking the only approved entry leaves nothing to contradict.
+    let answer: (value: MemoryCheck[]) => void = () => {};
+    core.memoryCheck.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    core.memoryDecide.mockResolvedValue(memory([{ ...kept, state: "revoked" }, proposal]));
+    const approved = screen.getByRole("region", { name: "Approved" });
+    await user.click(within(approved).getByRole("button", { name: "Revoke" }));
+    await waitFor(() => expect(core.memoryCheck).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("may contradict an entry")).not.toBeInTheDocument();
+    answer([{ id: "cand0001", repeats: false, contradicts: false }]);
+    await waitFor(() =>
+      expect(screen.queryByText("may contradict an entry")).not.toBeInTheDocument(),
+    );
   });
 });

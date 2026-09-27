@@ -51,7 +51,10 @@ ys memory search timezone tests    # approved entries containing every word
 ys memory propose "The tests need TZ=UTC."
 ```
 
-`propose` adds a proposal to **Waiting for you** and says so; the same text twice is recognised,
+`list` and `search` answer only while the project shares its memory — the same switch that adds
+it to first messages — and otherwise say that it is not shared. `propose` works either way, since a
+proposal reaches no agent until you approve it; it adds the proposal to **Waiting for you** and
+says so; the same text twice is recognised,
 not queued again. Yardsort knows which agent proposed it from the launch environment it gave that
 agent. At most 50 proposals wait in a project at once; past that, `propose` refuses and says why.
 

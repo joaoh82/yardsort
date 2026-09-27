@@ -1,7 +1,7 @@
 //! `ys memory …` — a project's memory, as an agent sees it.
 //!
-//! `list` and `search` read the approved entries; `propose` adds a candidate for the user to
-//! review in the app. There is no approve, edit, reject or revoke here, on purpose: an agent in
+//! `list` and `search` read the approved entries, when the project shares them with its agents;
+//! `propose` adds a candidate for the user to review in the app, shared or not. There is no approve, edit, reject or revoke here, on purpose: an agent in
 //! a Yardsort terminal can run anything `ys` offers, and no agent may approve what it proposed.
 //! The user decides in the app's Memory view. See `yardsort_core::memory`.
 
@@ -60,6 +60,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
     match command {
         Command::List { project } => {
             let (project, _) = locate(ys, project.as_deref())?;
+            shared(ys, &project)?;
             print(
                 &memory::approved(&ys.store, &project)?,
                 out,
@@ -68,6 +69,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
         }
         Command::Search { words, project } => {
             let (project, _) = locate(ys, project.as_deref())?;
+            shared(ys, &project)?;
             let found = memory::search(&ys.store, &project, &words.join(" "))?;
             print(&found, out, "Nothing approved matches.")
         }
@@ -106,6 +108,18 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             })
         }
     }
+}
+
+/// Reading memory is giving it to whoever runs this — most often an agent — so it follows the
+/// project's switch, as a launch does. Proposing does not: a proposal reaches no agent.
+fn shared(ys: &Yardsort, project: &str) -> Result<(), Failure> {
+    if ys.store.memory_shared(project)? {
+        return Ok(());
+    }
+    Err(Failure::new(
+        "This project does not give its agents its memory. The user turns that on in \
+         Yardsort: Memory… in the project's menu.",
+    ))
 }
 
 fn print(rows: &[MemoryRow], out: &Output, empty: &str) -> Result<(), Failure> {

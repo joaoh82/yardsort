@@ -27,7 +27,11 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState("");
-  const [checks, setChecks] = useState<Record<string, MemoryCheck>>({});
+  // Jev's answers, with what they were judged against: shown only while that still holds.
+  const [judged, setJudged] = useState<{ against: string; checks: Record<string, MemoryCheck> }>({
+    against: "",
+    checks: {},
+  });
   const checkMemory = useAssistStore((s) => s.status?.checkMemory ?? false);
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -44,20 +48,28 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
     void useAssistStore.getState().load();
   }, [project.id]);
 
-  // Jev's word on each proposal, when the switch is on: advisory, and silent when it fails.
+  // Jev's word on each proposal, when the switch is on: advisory, and silent when it fails. A
+  // verdict depends on the approved entries as much as on the proposal, so a change to either
+  // asks again, and an answer about an older list is not shown.
   const candidates = memory?.entries.filter((entry) => entry.state === "candidate") ?? [];
-  const candidateKey = candidates.map((entry) => `${entry.id}:${entry.text}`).join("|");
+  const against = (memory?.entries ?? [])
+    .filter((entry) => entry.state === "candidate" || entry.state === "approved")
+    .map((entry) => `${entry.state}:${entry.id}:${entry.text}`)
+    .join("|");
+  const hasCandidates = candidates.length > 0;
   useEffect(() => {
-    if (!checkMemory || candidateKey === "") return;
+    if (!checkMemory || !hasCandidates) return;
     let stale = false;
     ipc.memoryCheck(project.id).then(
-      (list) => !stale && setChecks(Object.fromEntries(list.map((c) => [c.id, c]))),
+      (list) =>
+        !stale && setJudged({ against, checks: Object.fromEntries(list.map((c) => [c.id, c])) }),
       () => {},
     );
     return () => {
       stale = true;
     };
-  }, [checkMemory, candidateKey, project.id]);
+  }, [checkMemory, hasCandidates, against, project.id]);
+  const checks = checkMemory && judged.against === against ? judged.checks : {};
 
   const run = async (action: () => Promise<ProjectMemory>) => {
     setBusy(true);

@@ -8,16 +8,18 @@
 //! and nothing here lets an agent approve — the command line has no such command, because an
 //! agent can run anything `ys` offers.
 //!
-//! Approved entries reach an agent two ways, both only when the user turns memory on for the
+//! Approved entries reach an agent two ways, both only when the user turns sharing on for the
 //! project: a cited section added to the first message at launch (never to the recorded task),
-//! and `ys memory search`, which any agent can run. Revoking an entry takes it out of both.
+//! and `ys memory list` / `search`, which any agent can run and which refuse while the project
+//! does not share. Revoking an entry takes it out of both. Proposing works either way: a
+//! proposal reaches no agent.
 //!
 //! See `docs/design/19-agent-events-stage-5-memory.md`.
 
 use std::path::Path;
 
 use crate::error::{IpcError, IpcResult};
-use crate::store::{MemoryRow, NewMemory, Store};
+use crate::store::{MemoryInsert, MemoryRow, NewMemory, Store};
 
 /// An entry is a note, not a document: one paragraph, at most this long.
 pub const MAX_CHARS: usize = 500;
@@ -112,27 +114,8 @@ pub fn propose(
     source: &Source,
 ) -> IpcResult<Proposed> {
     let text = clean(text)?;
-    let entries = store.memory_entries(project_id)?;
-    if let Some(known) = entries
-        .iter()
-        .find(|entry| entry.text.eq_ignore_ascii_case(&text))
-    {
-        return Ok(Proposed::Known {
-            id: known.id.clone(),
-            state: known.state.clone(),
-        });
-    }
-    let waiting = entries.iter().filter(|e| e.state == "candidate").count();
-    if waiting >= MAX_WAITING {
-        return Err(IpcError::new(
-            "memory_queue_full",
-            format!(
-                "{MAX_WAITING} proposals already wait for the user in this project. Nothing was \
-                 added; the user reviews them in Yardsort's Memory view."
-            ),
-        ));
-    }
-    Ok(Proposed::New(store.add_memory(
+    // Checked and inserted in one transaction: agents in parallel workspaces propose at once.
+    match store.propose_memory(
         &NewMemory {
             project_id,
             text: &text,
@@ -143,8 +126,18 @@ pub fn propose(
             workspace_name: source.workspace_name.as_deref(),
             run_id: source.run_id.as_deref(),
         },
-        "proposed",
-    )?))
+        MAX_WAITING,
+    )? {
+        MemoryInsert::Added(id) => Ok(Proposed::New(id)),
+        MemoryInsert::Known { id, state } => Ok(Proposed::Known { id, state }),
+        MemoryInsert::Full => Err(IpcError::new(
+            "memory_queue_full",
+            format!(
+                "{MAX_WAITING} proposals already wait for the user in this project. Nothing was \
+                 added; the user reviews them in Yardsort's Memory view."
+            ),
+        )),
+    }
 }
 
 /// The user decides about an entry. A decision that does not fit the entry's state — revoking a
@@ -474,6 +467,67 @@ mod tests {
         let refused = propose(&store, &p, "one more", &from_claude(&ws)).unwrap_err();
         assert_eq!(refused.code, "memory_queue_full");
         write(&store, &p, "the user can still write").unwrap();
+    }
+
+    /// Proposals racing from separate processes — here, separate connections to one file, as
+    /// `ys` in parallel workspaces would be — cannot both pass the duplicate check, nor push the
+    /// queue past its bound.
+    #[test]
+    fn racing_proposals_neither_duplicate_nor_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        let first = Store::open(&path).unwrap();
+        let (p, ws) = project(&first);
+        let stores: Vec<Store> = (0..8).map(|_| Store::open(&path).unwrap()).collect();
+
+        let same: Vec<Proposed> = std::thread::scope(|scope| {
+            let handles: Vec<_> = stores
+                .iter()
+                .map(|store| {
+                    let (p, source) = (p.clone(), from_claude(&ws));
+                    scope.spawn(move || propose(store, &p, "The tests need TZ=UTC.", &source))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap().unwrap())
+                .collect()
+        });
+        let added = same
+            .iter()
+            .filter(|r| matches!(r, Proposed::New(_)))
+            .count();
+        assert_eq!(
+            added, 1,
+            "one of eight identical proposals is added: {same:?}"
+        );
+        assert_eq!(first.memory_entries(&p).unwrap().len(), 1);
+
+        for n in 1..MAX_WAITING - 1 {
+            propose(&first, &p, &format!("lesson {n}"), &from_claude(&ws)).unwrap();
+        }
+        assert_eq!(first.memory_entries(&p).unwrap().len(), MAX_WAITING - 1);
+        let distinct: Vec<Result<Proposed, IpcError>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = stores
+                .iter()
+                .enumerate()
+                .map(|(n, store)| {
+                    let (p, source) = (p.clone(), from_claude(&ws));
+                    scope.spawn(move || propose(store, &p, &format!("race {n}"), &source))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert_eq!(
+            distinct.iter().filter(|r| r.is_ok()).count(),
+            1,
+            "one slot was left"
+        );
+        assert_eq!(
+            first.memory_entries(&p).unwrap().len(),
+            MAX_WAITING,
+            "never past the bound"
+        );
     }
 
     /// The section is framed as notes, each entry one cited item, and says how to ask for more
