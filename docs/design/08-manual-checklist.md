@@ -405,6 +405,19 @@ Needs one agent that can run a shell command (any built-in one) and `ys` on its 
 |     | **Assist**, with a key: switch on **Check memory proposals…**, have the agent propose "The tests need TZ=UTC set." — it is marked **repeats an entry**.                                                                                                                                                                                                       |
 |     | **macOS / Windows:** the first two rows; on Windows the agent's `ys` is `ys.exe` from Settings → General.                                                                                                                                                                                                                                                     |
 
+## 21 · Outcomes
+
+Needs a project with a few worktree workspaces; the GitHub CLI for the pull-request rows.
+
+| ✓   | Check                                                                                                                                                                                                                                                                      |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | Delete a workspace: the sidebar asks _How did fix-login go?_. **Partly**: the question goes. Archive another and press **×**: it goes, unanswered.                                                                                                                         |
+|     | **Outcomes…** from the project menu: both attempts are listed, the deleted one with its task and agents though the workspace is gone, one _partly_, one _no outcome yet_ and _archived_. Click **Kept** on the archived one, then **Kept** again: the label is taken back. |
+|     | In a workspace, commit something and look again: _ahead of main_. Fast-forward `main` to the branch by hand and look again: _merged into main_ and _kept — merged, not labelled_. A branch with no commits never reads as merged.                                          |
+|     | With `gh`: open and merge a pull request (squash) for a workspace's branch, then look again: _PR #N merged_, and kept from the merge. A closed, unmerged pull request shows and counts for nothing.                                                                        |
+|     | The composer, with Claude picked: _too few to say yet_ until Claude has five attempts with an outcome, then _kept N of M_. Pick an agent with no attempts: no line.                                                                                                        |
+|     | **macOS / Windows:** the first two rows.                                                                                                                                                                                                                                   |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:

@@ -212,6 +212,13 @@ impl Forge {
         answer
     }
 
+    /// Whatever is cached for a project, however old, and never a fetch: for readers that must
+    /// not wait on the network, like the Outcomes view. The publish panel keeps it current.
+    pub fn cached(&self, project_id: &str) -> Option<ProjectPullRequests> {
+        let cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
+        cached.get(project_id).map(|(_, answer)| answer.clone())
+    }
+
     fn cached_fresh(&self, project_id: &str) -> Option<ProjectPullRequests> {
         let cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
         let (at, answer) = cached.get(project_id)?;
@@ -401,6 +408,7 @@ mod tests {
             state,
             draft: false,
             checks: Checks::Passing,
+            created_at: None,
         }
     }
 

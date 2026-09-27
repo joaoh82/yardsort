@@ -11,12 +11,15 @@ import {
   type ActivityEvent,
   type ActivityPage,
   type ActivitySettingsDto,
+  type AgentOutcomes,
+  type Attempt,
   type FileReports,
   type MemoryCheck,
   type MemoryDecision,
   type MemoryEntry,
   type MemoryWaiting,
   type ProjectMemory,
+  type ProjectOutcomes,
   type HandoffPacket,
   type ObservedMatch,
   type ObservedWrite,
@@ -80,12 +83,15 @@ export type {
   ActivityEvent,
   ActivityPage,
   ActivitySettingsDto,
+  AgentOutcomes,
+  Attempt,
   FileReports,
   MemoryCheck,
   MemoryDecision,
   MemoryEntry,
   MemoryWaiting,
   ProjectMemory,
+  ProjectOutcomes,
   HandoffPacket,
   ObservedMatch,
   ObservedWrite,
@@ -394,6 +400,12 @@ export const ipc = {
   memoryWaiting: () => unwrap(commands.memoryWaiting()),
   /** Jev's word on each waiting proposal: repeats or contradicts an approved entry. */
   memoryCheck: (projectId: string) => unwrap(commands.memoryCheck(projectId)),
+  /** A project's attempts with their outcome and its evidence, brought up to date first. */
+  outcomesGet: (projectId: string) => unwrap(commands.outcomesGet(projectId)),
+  /** The user's word on an attempt — kept, partly, discarded — or null to take it back. */
+  outcomeLabel: (id: string, label: string | null) => unwrap(commands.outcomeLabel(id, label)),
+  /** Per-agent history across every project, from outcomes only. */
+  outcomesAgents: () => unwrap(commands.outcomesAgents()),
   /** Judge a workspace.s changed files against its task. Sends those diffs to TypeSafe. */
   assistReview: (workspaceId: string) => unwrap(commands.assistReview(workspaceId)),
   /** A harness and an effort for a message being typed; empty fields mean "nothing to offer". */

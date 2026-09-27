@@ -20,6 +20,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0008_workspace_preparation.sql"),
     include_str!("../migrations/0009_agent_runs_and_events.sql"),
     include_str!("../migrations/0010_project_memory.sql"),
+    include_str!("../migrations/0011_workspace_outcomes.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -157,6 +158,45 @@ pub struct MemoryHistoryRow {
     pub by: String,
     /// The text an edit replaced.
     pub previous_text: Option<String>,
+}
+
+/// One attempt's outcome and its evidence. See `migrations/0011_workspace_outcomes.sql`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OutcomeRow {
+    pub id: String,
+    pub project_id: String,
+    pub workspace_id: Option<String>,
+    pub workspace_name: String,
+    pub branch: Option<String>,
+    pub base_branch: Option<String>,
+    pub task: Option<String>,
+    /// Comma-separated, first-seen order.
+    pub harnesses: String,
+    pub label: Option<String>,
+    pub labeled_at: Option<i64>,
+    pub ahead_at: Option<i64>,
+    /// The branch's commit when last seen ahead of its base.
+    pub ahead_tip: Option<String>,
+    pub merged_at: Option<i64>,
+    pub pr_number: Option<i64>,
+    pub pr_state: Option<String>,
+    pub ended: Option<String>,
+    pub ended_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// What an outcome describes, copied from its workspace while the workspace is still there.
+#[derive(Debug, Clone, Copy)]
+pub struct OutcomeSnapshot<'a> {
+    pub id: &'a str,
+    pub project_id: &'a str,
+    pub workspace_name: &'a str,
+    pub branch: Option<&'a str>,
+    pub base_branch: Option<&'a str>,
+    pub task: Option<&'a str>,
+    /// Comma-separated harness ids, first-seen order; empty keeps what was recorded.
+    pub harnesses: &'a str,
 }
 
 /// What a proposal came to, decided inside the transaction that would add it.
@@ -748,6 +788,117 @@ impl Store {
             "INSERT INTO ui_state (key, value) VALUES (?, ?)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             [key, value],
+        )?;
+        Ok(())
+    }
+
+    // --- outcomes --------------------------------------------------------------------------
+
+    /// Write or refresh what an outcome describes, keeping everything already known about it: its
+    /// label, its evidence, how it ended. The first snapshot creates the row.
+    pub fn snapshot_outcome(&self, snapshot: &OutcomeSnapshot<'_>) -> StoreResult<()> {
+        let OutcomeSnapshot {
+            id,
+            project_id,
+            workspace_name,
+            branch,
+            base_branch,
+            task,
+            harnesses,
+        } = *snapshot;
+        let at = now_ms();
+        self.conn().execute(
+            "INSERT INTO workspace_outcomes (id, project_id, workspace_id, workspace_name, branch,
+                                             base_branch, task, harnesses, created_at, updated_at)
+             VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+                 workspace_name = excluded.workspace_name,
+                 branch = COALESCE(excluded.branch, branch),
+                 base_branch = COALESCE(excluded.base_branch, base_branch),
+                 task = COALESCE(excluded.task, task),
+                 harnesses = CASE WHEN excluded.harnesses = '' THEN harnesses
+                                  ELSE excluded.harnesses END,
+                 updated_at = excluded.updated_at",
+            params![
+                id,
+                project_id,
+                workspace_name,
+                branch,
+                base_branch,
+                task,
+                harnesses,
+                at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn outcome(&self, id: &str) -> StoreResult<Option<OutcomeRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {OUTCOME_COLUMNS} FROM workspace_outcomes WHERE id = ?"
+        ))?;
+        Ok(stmt.query_row([id], outcome_from_row).optional()?)
+    }
+
+    /// A project's outcomes, or every project's with `None`; newest first.
+    pub fn outcomes(&self, project_id: Option<&str>) -> StoreResult<Vec<OutcomeRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {OUTCOME_COLUMNS} FROM workspace_outcomes
+             WHERE ?1 IS NULL OR project_id = ?1 ORDER BY created_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map([project_id], outcome_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The user's word on an attempt, or `None` to take it back.
+    pub fn label_outcome(&self, id: &str, label: Option<&str>) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE workspace_outcomes SET label = ?, labeled_at = CASE WHEN ? IS NULL THEN NULL
+                                                                   ELSE ? END, updated_at = ?
+             WHERE id = ?",
+            params![label, label, now_ms(), now_ms(), id],
+        )? > 0)
+    }
+
+    /// Git's evidence: the branch seen ahead of its base with this tip (its first time kept,
+    /// its tip the latest), and — once — that tip found reachable from the base.
+    pub fn outcome_git(&self, id: &str, ahead_tip: Option<&str>, merged: bool) -> StoreResult<()> {
+        let at = now_ms();
+        let conn = self.conn();
+        if let Some(tip) = ahead_tip {
+            conn.execute(
+                "UPDATE workspace_outcomes SET ahead_at = COALESCE(ahead_at, ?), ahead_tip = ?
+                 WHERE id = ?",
+                params![at, tip, id],
+            )?;
+        }
+        if merged {
+            conn.execute(
+                "UPDATE workspace_outcomes SET merged_at = COALESCE(merged_at, ?)
+                 WHERE id = ? AND ahead_tip IS NOT NULL",
+                params![at, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The forge's evidence: the pull request whose head is the attempt's branch.
+    pub fn outcome_pull_request(&self, id: &str, number: i64, state: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "UPDATE workspace_outcomes SET pr_number = ?, pr_state = ?, updated_at = ? WHERE id = ?",
+            params![number, state, now_ms(), id],
+        )?;
+        Ok(())
+    }
+
+    /// How the workspace ended, once: archived or deleted. Restoring clears it.
+    pub fn outcome_ended(&self, id: &str, ended: Option<&str>) -> StoreResult<()> {
+        self.conn().execute(
+            "UPDATE workspace_outcomes SET ended = ?, ended_at = CASE WHEN ? IS NULL THEN NULL
+                                                                 ELSE ? END WHERE id = ?",
+            params![ended, ended, now_ms(), id],
         )?;
         Ok(())
     }
@@ -1347,6 +1498,34 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRow> {
         exit_code: row.get(10)?,
         end_reason: row.get(11)?,
         collection: row.get(12)?,
+    })
+}
+
+const OUTCOME_COLUMNS: &str = "id, project_id, workspace_id, workspace_name, branch, base_branch, \
+     task, harnesses, label, labeled_at, ahead_at, ahead_tip, merged_at, pr_number, pr_state, ended, \
+     ended_at, created_at, updated_at";
+
+fn outcome_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutcomeRow> {
+    Ok(OutcomeRow {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        workspace_id: row.get(2)?,
+        workspace_name: row.get(3)?,
+        branch: row.get(4)?,
+        base_branch: row.get(5)?,
+        task: row.get(6)?,
+        harnesses: row.get(7)?,
+        label: row.get(8)?,
+        labeled_at: row.get(9)?,
+        ahead_at: row.get(10)?,
+        ahead_tip: row.get(11)?,
+        merged_at: row.get(12)?,
+        pr_number: row.get(13)?,
+        pr_state: row.get(14)?,
+        ended: row.get(15)?,
+        ended_at: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
 }
 

@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Outcomes: what became of each attempt.** After you archive or delete a workspace, the
+  sidebar asks how it went — kept, partly or discarded, one optional click. **Outcomes…** in a
+  project's menu lists every attempt, deleted ones included, with its task, agents, outcome and
+  evidence, and each agent's history. A merged pull request or a branch merged into its base
+  counts as kept until you say otherwise; nothing else is ever counted. The composer shows your
+  history with the agent you picked — "too few to say yet" until there are five outcomes. See
+  [Outcomes](docs/guide/outcomes.md).
 - **Project memory.** Short lessons about a project for its agents — "the tests need
   `TZ=UTC`". Write them in **Memory…** from a project's menu, where they are approved as you write
   them; agents propose them with `ys memory propose`, and those wait for you, with a count on the

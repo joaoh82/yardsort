@@ -207,6 +207,10 @@ pub struct PullRequest {
     pub state: PullRequestState,
     pub draft: bool,
     pub checks: Checks,
+    /// When it was opened, in epoch milliseconds. Not sent to the window: it is how an attempt is
+    /// matched to the pull request opened during its life (see `crate::outcomes`).
+    #[serde(skip)]
+    pub created_at: Option<i64>,
 }
 
 /// The `gh` command line, found on the user's `PATH`.
@@ -260,7 +264,7 @@ impl Gh {
                 "--limit",
                 &limit,
                 "--json",
-                "number,url,title,headRefName,state,isDraft,statusCheckRollup",
+                "number,url,title,headRefName,state,isDraft,statusCheckRollup,createdAt",
             ],
         )?;
         let parsed: serde_json::Value =
@@ -318,6 +322,10 @@ fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
             .and_then(|d| d.as_bool())
             .unwrap_or(false),
         checks: roll_up(row.get("statusCheckRollup")),
+        created_at: row
+            .get("createdAt")
+            .and_then(|t| t.as_str())
+            .and_then(crate::activity::iso_to_ms),
     })
 }
 

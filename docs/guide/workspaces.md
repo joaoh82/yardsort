@@ -27,6 +27,8 @@ that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere)
 
 When the project [shares its memory](memory.md#giving-agents-the-memory), a line under the pickers says its approved entries go after your message — **Show** reads them, and unticking leaves them out of this one launch. Your message stays the task on record.
 
+Under the pickers, the composer also shows your history with the agent you picked, across your projects — _kept 3 of 5_, or _too few to say yet_ — from the [outcomes](outcomes.md) you have recorded. It is shown, never used to choose for you.
+
 Your last choices are remembered per project. With [Assist](assist.md) switched on, a line under
 the pickers may offer a harness and an effort for what you are typing; **Use** applies it, and
 ignoring it does nothing.
@@ -123,6 +125,12 @@ never throws away commits. Delete the branch yourself with git if you want it go
 
 `ys workspace delete <name>` does the same thing from a terminal, which is how a harness can
 remove a workspace it is finished with. See [the command line](cli.md#ys-workspace-delete-workspace).
+
+### How did it go?
+
+After an archive or a delete, the bottom of the sidebar asks how the attempt went: **Kept**,
+**Partly** or **Discarded**. One optional click; **×** leaves it for later. Deleting keeps the
+attempt's record, so it can be judged afterwards in **Outcomes…** — see [Outcomes](outcomes.md).
 
 ### Uncommitted work is protected
 

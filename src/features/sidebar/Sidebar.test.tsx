@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { added, project, record, worktree } from "@/test/fixtures";
@@ -24,6 +24,7 @@ const core = vi.hoisted(() => ({
   ptyClose: vi.fn(),
   memoryWaiting: vi.fn(),
   memoryGet: vi.fn(),
+  outcomeLabel: vi.fn(),
   onActivityChanged: vi.fn(),
 }));
 const native = vi.hoisted(() => ({
@@ -46,6 +47,7 @@ import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
 import { useMemoryStore } from "@/stores/memory";
+import { useOutcomesStore } from "@/stores/outcomes";
 import { Sidebar } from "./Sidebar";
 
 const shellIn = (workspace: string) => ({
@@ -94,6 +96,7 @@ describe("Sidebar", () => {
     core.memoryWaiting.mockResolvedValue([]);
     core.onActivityChanged.mockResolvedValue(() => {});
     useMemoryStore.setState({ waiting: {} });
+    useOutcomesStore.setState({ asking: null, error: null });
     opener.openUrl.mockResolvedValue(undefined);
     core.projectPullRequests.mockResolvedValue({
       gh: true,
@@ -469,6 +472,38 @@ describe("Sidebar", () => {
       );
       expect(core.workspaceDelete).toHaveBeenCalledWith("w-app-fix-login", false);
       expect(screen.queryByRole("treeitem", { name: "fix-login" })).not.toBeInTheDocument();
+    });
+
+    it("asks once how the attempt went, and records the answer", async () => {
+      native.confirm.mockResolvedValue(true);
+      core.workspaceDelete.mockResolvedValue(undefined);
+      core.outcomeLabel.mockResolvedValue({
+        projectId: "p-app",
+        attempts: [],
+        agents: [],
+        minSample: 5,
+      });
+      const user = await openDeleteMenu();
+
+      const prompt = await screen.findByRole("status", { name: "How did it go?" });
+      expect(prompt).toHaveTextContent("How did fix-login go?");
+      await user.click(within(prompt).getByRole("button", { name: "Partly" }));
+      expect(core.outcomeLabel).toHaveBeenCalledWith("w-app-fix-login", "partly");
+      await waitFor(() =>
+        expect(screen.queryByRole("status", { name: "How did it go?" })).not.toBeInTheDocument(),
+      );
+    });
+
+    it("does not ask when the delete did not happen, and can be dismissed", async () => {
+      core.workspaceDelete.mockRejectedValueOnce({ code: "worktree_dirty", message: "dirty" });
+      native.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      const user = await openDeleteMenu();
+      expect(screen.queryByRole("status", { name: "How did it go?" })).not.toBeInTheDocument();
+
+      useOutcomesStore.getState().ask("w-app-fix-login", "fix-login");
+      await user.click(await screen.findByRole("button", { name: "Not now" }));
+      expect(screen.queryByRole("status", { name: "How did it go?" })).not.toBeInTheDocument();
+      expect(core.outcomeLabel).not.toHaveBeenCalled();
     });
 
     it("never destroys uncommitted work without a second, explicit yes", async () => {

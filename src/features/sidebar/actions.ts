@@ -1,4 +1,5 @@
 import { native } from "@/lib/native";
+import { useOutcomesStore } from "@/stores/outcomes";
 import { errorMessage, type Workspace } from "@/lib/ipc";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
@@ -178,13 +179,17 @@ async function deleteWorkspaceUnguarded(workspace: Workspace) {
 
   await useTerminalStore.getState().closeWorkspaces([workspace.id]);
   const projects = useProjectsStore.getState();
-  if ((await projects.deleteWorkspace(workspace.id)) !== "dirty") return;
+  const deleted = await projects.deleteWorkspace(workspace.id);
+  if (deleted === "deleted") return askHowItWent(workspace);
+  if (deleted !== "dirty") return;
 
   const force = await native.confirm(
     `"${workspace.name}" has uncommitted changes or untracked files.\n\nDeleting it now destroys that work for good — it is in no commit and cannot be recovered.`,
     { title: "Uncommitted work will be lost", okLabel: "Delete anyway" },
   );
-  if (force) await projects.deleteWorkspace(workspace.id, true);
+  if (force && (await projects.deleteWorkspace(workspace.id, true)) === "deleted") {
+    askHowItWent(workspace);
+  }
 }
 
 /**
@@ -203,13 +208,23 @@ async function archiveWorkspaceUnguarded(workspace: Workspace) {
 
   await useTerminalStore.getState().closeWorkspaces([workspace.id]);
   const projects = useProjectsStore.getState();
-  if ((await projects.archiveWorkspace(workspace.id)) !== "dirty") return;
+  const archived = await projects.archiveWorkspace(workspace.id);
+  if (archived === "archived") return askHowItWent(workspace);
+  if (archived !== "dirty") return;
 
   const force = await native.confirm(
     `"${workspace.name}" has uncommitted changes or untracked files.\n\nArchiving removes the folder, and that work with it — it is in no commit and cannot be recovered. Commit it first if you want to keep it.`,
     { title: "Uncommitted work will be lost", okLabel: "Archive anyway" },
   );
-  if (force) await projects.archiveWorkspace(workspace.id, true);
+  if (force && (await projects.archiveWorkspace(workspace.id, true)) === "archived") {
+    askHowItWent(workspace);
+  }
+}
+
+/** An attempt just ended: ask, once and optionally, how it went. `local` is not an attempt. */
+function askHowItWent(workspace: Workspace) {
+  if (workspace.kind === "local") return;
+  useOutcomesStore.getState().ask(workspace.id, workspace.name);
 }
 
 /** Bring an archived or vanished workspace back and go to it. */
