@@ -131,6 +131,11 @@ export const commands = {
 	 *  change list's files — whether its last write fell inside a tool call.
 	 */
 	workspaceProvenance: (workspaceId: string, paths: string[]) => typedError<Provenance, IpcError>(__TAURI_INVOKE("workspace_provenance", { workspaceId, paths })),
+	/**
+	 *  Assemble the packet for a workspace: the store's facts, and git's — branch, commits since
+	 *  the base, the change list with each file's modification time for the observed join.
+	 */
+	workspaceHandoff: (workspaceId: string) => typedError<HandoffPacket, IpcError>(__TAURI_INVOKE("workspace_handoff", { workspaceId })),
 	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
@@ -533,6 +538,18 @@ export type GitStatus = {
 	version: string | null,
 };
 
+/**
+ *  A handoff packet: what Yardsort recorded about a workspace, as the opening prompt for the
+ *  next agent there. See `yardsort_core::activity::handoff`.
+ */
+export type HandoffPacket = {
+	/**  Markdown, for the composer's message box: the user reads and edits it before sending. */
+	text: string,
+	/**  How many agent runs and events stand behind it, for the line above the box. */
+	runs: number,
+	events: number,
+};
+
 export type HarnessDef = {
 	/**  Stable key, recorded with sessions. */
 	id: string,
@@ -602,6 +619,13 @@ export type HarnessRequest = {
 	effort: string | null,
 	/**  The first message. `None` or empty just opens the harness. */
 	prompt: string | null,
+	/**
+	 *  The first message is a handoff packet Yardsort assembled (see `activity::handoff`),
+	 *  not the user's own task: it is sent like any prompt, but the session's record keeps no
+	 *  prompt, so the workspace's task — what Assist and the next packet read — stays the
+	 *  user's words.
+	 */
+	handoff?: boolean,
 };
 
 export type HarnessStatus = {

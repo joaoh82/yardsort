@@ -22,6 +22,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 15  | [Agent events, stage 2: OMP and Pi](15-agent-events-stage-2-pi-omp.md)  | One extension for the two forks, given on the command line per launch                   |
 | 16  | [Agent events, stage 2: Cursor](16-agent-events-stage-2-cursor.md)      | Hooks through a per-launch plugin directory; recorded, and what the recording changed   |
 | 17  | [Agent events, stage 3: review](17-agent-events-stage-3-review.md)      | Reported writes joined to git's change list at read time; no line is ever claimed       |
+| 18  | [Agent events, stage 4: handoffs](18-agent-events-stage-4-handoff.md)   | The next agent's first message, written from the record and edited in the composer      |
 
 ## Vocabulary
 

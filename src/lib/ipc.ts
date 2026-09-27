@@ -12,6 +12,7 @@ import {
   type ActivityPage,
   type ActivitySettingsDto,
   type FileReports,
+  type HandoffPacket,
   type ObservedMatch,
   type ObservedWrite,
   type Provenance,
@@ -75,6 +76,7 @@ export type {
   ActivityPage,
   ActivitySettingsDto,
   FileReports,
+  HandoffPacket,
   ObservedMatch,
   ObservedWrite,
   Provenance,
@@ -239,6 +241,8 @@ export const ipc = {
   activityDiagnostics: () => unwrap(commands.activityDiagnostics()),
   /** Forget recorded activity: one workspace's, or all of it for `null`. */
   activityClear: (workspaceId: string | null) => done(commands.activityClear(workspaceId)),
+  /** The handoff packet for a workspace: what Yardsort recorded, as the next agent's prompt. */
+  workspaceHandoff: (workspaceId: string) => unwrap(commands.workspaceHandoff(workspaceId)),
   /**
    * Which of a workspace's files its agents reported writing, which runs could have, and for
    * each of `paths` (the change list's files) whether its last write fell inside a tool call.

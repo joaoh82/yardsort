@@ -48,7 +48,10 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const ui = useProjectsStore((s) => s.ui);
   const last = useMemo(() => recall<LastPicks>(ui, picksKey(project.id), {}), [ui, project.id]);
 
-  const [message, setMessage] = useState("");
+  // A handoff starts the message with the packet Yardsort assembled; the user edits it here.
+  // Read once, at mount: the composer is keyed by workspace, so a new handoff is a new mount.
+  const [handoff] = useState(() => (runIn ? useProjectsStore.getState().composingPrompt : null));
+  const [message, setMessage] = useState(handoff ?? "");
   const [harnessId, setHarnessId] = useState<string | null>(null);
   const [model, setModel] = useState(last.model ?? "");
   const [effort, setEffort] = useState(last.effort ?? "");
@@ -201,7 +204,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           args: [],
           cwd: null,
           workspaceId: runIn.id,
-          harness: request,
+          harness: { ...request, handoff: handoff !== null },
           size: useTerminalStore.getState().lastSize,
         });
         setBusy(false);
@@ -244,7 +247,8 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         <h1 className="mb-3 text-center text-ink-muted">
           {runIn ? (
             <>
-              Run in <span className="font-medium text-ink">{project.name}</span>
+              {handoff !== null ? "Hand off in " : "Run in "}
+              <span className="font-medium text-ink">{project.name}</span>
               {runIn.head && (
                 <>
                   {" on "}
@@ -258,12 +262,19 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             </>
           )}
         </h1>
+        {handoff !== null && (
+          <p className="mb-2 text-[12px] text-ink-faint">
+            This is what Yardsort recorded about the workspace, written as the next agent&rsquo;s
+            first message — never the last agent&rsquo;s words, which it does not keep. Read it,
+            change it, then start. The task on record stays what you first asked.
+          </p>
+        )}
         <textarea
           ref={messageRef}
           aria-label="What should the agent work on?"
           placeholder="What should the agent work on?"
           value={message}
-          rows={5}
+          rows={handoff !== null ? 18 : 5}
           disabled={busy}
           onChange={(event) => setMessage(event.target.value)}
           onKeyDown={(event) => {

@@ -14,13 +14,13 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 
 ![The composer](../images/composer.png)
 
-| Field       | What it does                                                                                                                                                      |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Message** | The agent's first prompt. `Enter` starts, `Shift+Enter` makes a new line. Leave it empty to just open the agent. Drop a file here to insert its path — see below. |
-| **Harness** | Which agent to run. The list comes from [settings](settings.md).                                                                                                  |
-| **Model**   | Free text with suggestions. Empty means "let the agent use its default" — no flag is passed at all.                                                               |
-| **Effort**  | Offered only for agents that have the concept.                                                                                                                    |
-| **Branch**  | Under _New branch from_, pick the branch to start from. Under _Open existing branch_, pick a branch to check out in a workspace as it is — no new branch is made. |
+| Field       | What it does                                                                                                                                                                                                                                                                                                                                  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Message** | The agent's first prompt. `Enter` starts, `Shift+Enter` makes a new line. Leave it empty to just open the agent. Drop a file here to insert its path — see below. After **Hand off…** it starts as what Yardsort recorded about the workspace — see [handing work to another agent](terminals-and-sessions.md#handing-work-to-another-agent). |
+| **Harness** | Which agent to run. The list comes from [settings](settings.md).                                                                                                                                                                                                                                                                              |
+| **Model**   | Free text with suggestions. Empty means "let the agent use its default" — no flag is passed at all.                                                                                                                                                                                                                                           |
+| **Effort**  | Offered only for agents that have the concept.                                                                                                                                                                                                                                                                                                |
+| **Branch**  | Under _New branch from_, pick the branch to start from. Under _Open existing branch_, pick a branch to check out in a workspace as it is — no new branch is made.                                                                                                                                                                             |
 
 Under the pickers, **Import worktrees…** opens the same dialog as the project menu, for worktrees
 that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere).

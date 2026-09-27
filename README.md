@@ -78,7 +78,7 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   Grok, OMP, pi and Cursor — reports its own tool calls, file changes and turns to the same
   record, as metadata, with its own settings untouched. The Changes list marks which files an
   agent reported writing, which were written while it ran a command, and which changed with no
-  report at all. An experimental timeline shows the
+  report at all — and **Hand off…** writes the next agent's first message from all of it. An experimental timeline shows the
   rest; `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.

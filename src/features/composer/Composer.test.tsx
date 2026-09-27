@@ -26,6 +26,7 @@ const core = vi.hoisted(() => ({
   assistSuggest: vi.fn(),
   projectUntrackedWorktrees: vi.fn(),
   workspacesImport: vi.fn(),
+  ptySpawn: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -430,6 +431,40 @@ describe("Composer with Assist", () => {
       "local",
       "old",
     ]);
+  });
+
+  it("starts from the handoff packet, says so, and sends it as a handoff rather than a task", async () => {
+    const packet = '# Handoff from Yardsort: workspace "local" in app\n\nYou are taking over.';
+    useProjectsStore.setState({
+      composingProjectId: null,
+      composingWorkspaceId: "w-app",
+      composingPrompt: packet,
+    });
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    await screen.findByRole("form", { name: "Run in local" });
+    expect(screen.getByRole("heading")).toHaveTextContent("Hand off in app");
+    expect(screen.getByText(/never the last agent.s words/)).toBeInTheDocument();
+    const box = screen.getByRole("textbox", { name: /work on/ });
+    expect(box).toHaveValue(packet);
+
+    await user.click(box);
+    await user.keyboard("{End} Start with src/login.rs.{Enter}");
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(core.ptySpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "w-app",
+        harness: {
+          id: "claude",
+          model: null,
+          effort: null,
+          prompt: `${packet} Start with src/login.rs.`,
+          handoff: true,
+        },
+      }),
+    );
+    expect(core.workspaceCreate).not.toHaveBeenCalled();
   });
 
   it("does not offer importing when running in an existing workspace", async () => {
