@@ -50,6 +50,14 @@ deterministic packet and no model in the loop.
   Assist would judge every later change against it, and the next packet would quote it back.
   The task on record stays the user's own words. The packet still goes over the wire exactly
   as any prompt, argv or paste.
+- **One classifier, not two.** What a run wrote, and whether it was reporting, come from the
+  provenance join rather than a second reading of the events: the join already knows that
+  Claude's `Write` is a write and Codex's failed patch is not, pairs pi's start with its end,
+  and knows a run was reporting by what it reported after its start event was cleared or
+  pruned. The summary only counts turns, tools, failures, permissions and notifications
+  itself. A run whose coverage is unknown says so and still lists what remains, rather than
+  claiming capture was off. (Found in review: the first cut re-derived both and got all three
+  wrong.)
 - **UTC in the packet.** It may be read on another machine or another day; a bare time is a
   guess. The timeline on screen stays local.
 - **The change list's words, not new ones.** "Reported written by claude", "last written while
@@ -79,11 +87,13 @@ events)` per run, `render(&Facts)` for the text.
 
 ## 4 · Verification
 
-- `activity::handoff` tests (3): a recorded Claude run renders every part — the task whole,
+- `activity::handoff` tests (4): a recorded Claude run renders every part — the task whole,
   the branch line, the commit, each file with its writer, the run with its model, duration,
   exit, turns, tools by count, failure with file, permission — and leaks no id, path or
   mechanism; an empty workspace and a silent run are described as such; dates and durations
-  read plainly. `launch` tests pass with the flag.
+  read plainly; writes and coverage agree with the provenance join — a tool-based write counts,
+  a failed patch does not, a run cleared while live keeps its later failure. `launch` tests
+  pass with the flag.
 - `Composer.test.tsx`: the packet fills the box, the heading and the note say handoff, an
   edit is kept, and the spawn carries the edited packet with `handoff: true` and creates no
   workspace. `WorkspacePanel.test.tsx`: **Hand off…** asks the core for the packet and opens the

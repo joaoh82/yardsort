@@ -45,14 +45,17 @@ pub struct RunSummary {
     pub ended_at: Option<i64>,
     pub exit_code: Option<i64>,
     pub end_reason: Option<String>,
-    /// How the run reported, or `None` when it did not.
+    /// How the run reported, or `None` when it did not — or when that is not known, which
+    /// `capture_known` tells apart (see `provenance::RunCoverage`).
     pub capture: Option<String>,
+    pub capture_known: bool,
     pub turns: u32,
     /// Tool name → how many times it completed.
     pub tools: BTreeMap<String, u32>,
     /// Tool calls that failed: "Read missing.txt", or just the tool.
     pub failed: Vec<String>,
-    /// Files the run reported writing, in first-write order.
+    /// Files the run reported writing, in first-write order: from the provenance join, so a
+    /// tool-based write (Claude's `Write`, pi's `write`) counts and a failed patch does not.
     pub wrote: Vec<String>,
     pub approvals: u32,
     pub notifications: u32,
@@ -94,6 +97,7 @@ pub fn from_store(
     let sessions = store.sessions(workspace_id)?;
     let runs = store.runs(workspace_id)?;
     let events = store.all_events(Some(workspace_id))?;
+    let provenance = provenance::of(store, workspace_id, files)?;
     Ok(Facts {
         workspace: row.as_ref().map(|row| row.name.clone()).unwrap_or_default(),
         project,
@@ -102,15 +106,23 @@ pub fn from_store(
         commits: vec![],
         uncommitted: vec![],
         committed: vec![],
-        provenance: provenance::of(store, workspace_id, files)?,
         prompts: store.session_prompts(workspace_id)?,
-        runs: summarize(&runs, &sessions, &events),
+        runs: summarize(&runs, &sessions, &events, &provenance),
         events: events.len(),
+        provenance,
     })
 }
 
-/// One summary per agent run that was spawned, oldest first, from that run's events.
-pub fn summarize(runs: &[RunRow], sessions: &[SessionRow], events: &[EventRow]) -> Vec<RunSummary> {
+/// One summary per agent run that was spawned, oldest first, from that run's events. What a
+/// run wrote and whether it was reporting come from the provenance join, which already knows
+/// which events are writes (a tool-based `Write` is, a failed patch is not) and which runs
+/// were reporting even after their start event is gone.
+pub fn summarize(
+    runs: &[RunRow],
+    sessions: &[SessionRow],
+    events: &[EventRow],
+    provenance: &Provenance,
+) -> Vec<RunSummary> {
     let mut summaries: Vec<(String, RunSummary)> = runs
         .iter()
         .filter(|run| run.kind == "harness" && run.pty_session_id.is_some())
@@ -120,6 +132,21 @@ pub fn summarize(runs: &[RunRow], sessions: &[SessionRow], events: &[EventRow]) 
                 .as_deref()
                 .and_then(|id| sessions.iter().find(|session| session.id == id))
                 .and_then(|session| session.model.clone());
+            let coverage = provenance
+                .runs
+                .iter()
+                .find(|coverage| coverage.run_id == run.id);
+            let mut wrote: Vec<(i64, String)> = provenance
+                .files
+                .iter()
+                .flat_map(|file| {
+                    file.reports
+                        .iter()
+                        .filter(|report| report.run_id.as_deref() == Some(run.id.as_str()))
+                        .map(|report| (report.first_at, file.path.clone()))
+                })
+                .collect();
+            wrote.sort();
             (
                 run.id.clone(),
                 RunSummary {
@@ -129,6 +156,9 @@ pub fn summarize(runs: &[RunRow], sessions: &[SessionRow], events: &[EventRow]) 
                     ended_at: run.ended_at,
                     exit_code: run.exit_code,
                     end_reason: run.end_reason.clone(),
+                    capture: coverage.and_then(|c| c.capture.clone()),
+                    capture_known: coverage.is_some_and(|c| c.capture_known),
+                    wrote: wrote.into_iter().map(|(_, path)| path).collect(),
                     ..RunSummary::default()
                 },
             )
@@ -146,7 +176,6 @@ pub fn summarize(runs: &[RunRow], sessions: &[SessionRow], events: &[EventRow]) 
         let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
         let text = |key: &str| payload.get(key).and_then(Value::as_str).map(str::to_owned);
         match event.kind.as_str() {
-            "process.started" => summary.capture = text("capture"),
             "turn.completed" | "turn.failed" => summary.turns += 1,
             "tool.completed" => {
                 let tool = text("tool").unwrap_or_else(|| "tool".to_owned());
@@ -159,21 +188,11 @@ pub fn summarize(runs: &[RunRow], sessions: &[SessionRow], events: &[EventRow]) 
                     None => tool,
                 });
             }
-            "file.reported_write" => {
-                if let Some(path) = text("path") {
-                    if !summary.wrote.contains(&path) {
-                        summary.wrote.push(path);
-                    }
-                }
-            }
             "approval.requested" => summary.approvals += 1,
             "agent.notified" => summary.notifications += 1,
             _ => {}
         }
     }
-    // A file tool that reported its path is a write too, for the adapters that report tool
-    // calls rather than file events; the provenance join knows which tools those are, and so
-    // does the reader of "Write ×2 (a.rs, b.rs)". Here, the report kinds are enough.
     summaries.into_iter().map(|(_, summary)| summary).collect()
 }
 
@@ -290,12 +309,18 @@ pub fn render(facts: &Facts) -> String {
             (None, _, _) => out.push_str(", **still running**"),
         }
         out.push_str(".\n");
-        if run.capture.is_none() {
+        if run.capture.is_none() && run.capture_known {
             out.push_str(
                 "  - It was not reporting what it did (capture was off), so only that it ran \
                  and how it ended is known.\n",
             );
             continue;
+        }
+        if run.capture.is_none() {
+            out.push_str(
+                "  - Whether it was reporting is not known: its start was cleared or has aged \
+                 out of the record. What follows is what remains.\n",
+            );
         }
         if run.turns > 0 {
             out.push_str(&format!("  - {}.\n", plural(run.turns as usize, "turn")));
@@ -501,6 +526,13 @@ mod tests {
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let id = format!("h-{n}");
         let payload = payload.to_string();
+        // The producer is the run's harness, and the method names its capture, as the
+        // adapters do; a Codex event says so even in a test.
+        let (producer, method) = if run == "codex" {
+            ("codex", "notify")
+        } else {
+            ("claude", "hook")
+        };
         store
             .add_event(&NewEvent {
                 id: &id,
@@ -510,8 +542,8 @@ mod tests {
                 run_id: Some(run),
                 occurred_at: at,
                 kind,
-                producer: "claude",
-                method: "hook",
+                producer,
+                method,
                 fidelity: "reported",
                 source_key: None,
                 privacy_class: "metadata",
@@ -718,6 +750,147 @@ mod tests {
             "no writer named when nobody was reporting"
         );
         assert!(silent.contains("Which files the agents wrote: no run here was reporting"));
+    }
+
+    /// Writes come from the provenance join, not a second reading of the events: Claude's
+    /// `Write` (a tool call, no file event) is a write; Codex's failed patch (a file event
+    /// with `status: "failed"`) is not; and a run whose start event was cleared while it was
+    /// live is still known to be reporting by what it reported, so its later failure shows.
+    #[test]
+    fn writes_and_coverage_agree_with_the_provenance_join() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        for (id, harness) in [
+            ("claude", "claude"),
+            ("codex", "codex"),
+            ("cleared", "claude"),
+        ] {
+            store
+                .add_run(&NewRun {
+                    id,
+                    workspace_id: &ws,
+                    session_id: None,
+                    kind: "harness",
+                    harness_id: Some(harness),
+                    harness_session_id: None,
+                    launched_by: "app",
+                })
+                .unwrap();
+            store.run_spawned(id, &format!("pty-{id}")).unwrap();
+        }
+        let t0 = 1_790_000_000_000;
+        event(
+            &store,
+            &ws,
+            "claude",
+            "process.started",
+            t0,
+            json!({ "capture": "hook" }),
+        );
+        event(
+            &store,
+            &ws,
+            "claude",
+            "tool.completed",
+            t0 + 1000,
+            json!({ "tool": "Write", "toolUseId": "w", "path": "written.rs" }),
+        );
+        event(
+            &store,
+            &ws,
+            "codex",
+            "process.started",
+            t0,
+            json!({ "capture": "notify" }),
+        );
+        event(
+            &store,
+            &ws,
+            "codex",
+            "file.reported_write",
+            t0 + 2000,
+            json!({ "path": "failed.rs", "kind": "update", "status": "failed" }),
+        );
+        event(
+            &store,
+            &ws,
+            "codex",
+            "file.reported_write",
+            t0 + 2500,
+            json!({ "path": "landed.rs", "kind": "update", "status": "completed" }),
+        );
+        event(
+            &store,
+            &ws,
+            "cleared",
+            "process.started",
+            t0,
+            json!({ "capture": "hook" }),
+        );
+        store.clear_activity(Some(&ws)).unwrap();
+        // After the clear, only what the runs report from here on exists.
+        event(
+            &store,
+            &ws,
+            "claude",
+            "tool.completed",
+            t0 + 3000,
+            json!({ "tool": "Edit", "toolUseId": "e", "path": "written.rs" }),
+        );
+        event(
+            &store,
+            &ws,
+            "codex",
+            "file.reported_write",
+            t0 + 3500,
+            json!({ "path": "later.rs", "kind": "add", "status": "completed" }),
+        );
+        event(
+            &store,
+            &ws,
+            "cleared",
+            "tool.failed",
+            t0 + 4000,
+            json!({ "tool": "Read", "path": "missing.txt" }),
+        );
+
+        let facts = from_store(&store, &ws, &[]).unwrap();
+        let by = |id: &str| {
+            facts
+                .runs
+                .iter()
+                .find(|r| r.harness == id || (id == "cleared" && r.failed.len() == 1))
+                .unwrap()
+        };
+        let claude = facts
+            .runs
+            .iter()
+            .find(|r| r.wrote.contains(&"written.rs".to_owned()))
+            .unwrap();
+        assert_eq!(claude.wrote, ["written.rs"], "a tool-based write, once");
+        let codex = by("codex");
+        assert_eq!(
+            codex.wrote,
+            ["later.rs"],
+            "after the clear only later.rs remains, and never failed.rs"
+        );
+        assert_eq!(
+            (codex.capture.as_deref(), codex.capture_known),
+            (Some("notify"), true)
+        );
+        let cleared = by("cleared");
+        assert_eq!(
+            (cleared.capture.as_deref(), cleared.capture_known),
+            (Some("hook"), true)
+        );
+        assert_eq!(cleared.failed, ["Read missing.txt"]);
+        let text = render(&facts);
+        assert!(!text.contains("failed.rs"));
+        assert!(text.contains("  - Failed: Read missing.txt.\n"));
+        assert!(
+            !text.contains("capture was off"),
+            "none of these runs is known silent"
+        );
     }
 
     #[test]
