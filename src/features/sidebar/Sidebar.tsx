@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useOutcomesStore } from "@/stores/outcomes";
 import { PanelHeader } from "@/features/shell/PanelHeader";
 import { hasCore } from "@/lib/ipc";
 import { formatShortcut } from "@/lib/platform";
@@ -100,6 +101,7 @@ export function Sidebar() {
         <ProjectTree />
       )}
 
+      <OutcomePrompt />
       {/* While the dialog is open it shows errors itself. */}
       {!adding && (error ?? notice) && (
         <div
@@ -157,5 +159,51 @@ function UpdatePill() {
       <span aria-hidden className="size-1.5 rounded-full bg-accent" />
       update
     </button>
+  );
+}
+
+/**
+ * Right after a workspace is archived or deleted: how did that attempt go? One optional click;
+ * dismissing leaves it unlabelled, and the project's Outcomes view can label it any time.
+ */
+function OutcomePrompt() {
+  const asking = useOutcomesStore((s) => s.asking);
+  const error = useOutcomesStore((s) => s.error);
+  if (!asking) return null;
+  const { answer, dismiss } = useOutcomesStore.getState();
+  const choice =
+    "rounded border border-line px-2 py-0.5 text-[11px] text-ink-muted hover:border-accent hover:text-ink";
+  return (
+    <div role="status" aria-label="How did it go?" className="border-t border-line p-3">
+      <div className="flex items-start gap-2">
+        <p className="min-w-0 flex-1 text-ink-muted">
+          How did <span className="text-ink">{asking.name}</span> go?
+        </p>
+        <button
+          type="button"
+          aria-label="Not now"
+          onClick={dismiss}
+          className="text-ink-faint hover:text-ink"
+        >
+          ×
+        </button>
+      </div>
+      <div className="mt-2 flex gap-1.5">
+        <button type="button" onClick={() => void answer("kept")} className={choice}>
+          Kept
+        </button>
+        <button type="button" onClick={() => void answer("partly")} className={choice}>
+          Partly
+        </button>
+        <button type="button" onClick={() => void answer("discarded")} className={choice}>
+          Discarded
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="mt-2 text-red-400 select-text">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

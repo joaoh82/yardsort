@@ -14,6 +14,10 @@ const POINTS = [
     body: "Short lessons about a project for its agents — the tests need TZ=UTC. You write them; agents propose them with ys memory propose, and those wait for you. Only what you approve reaches an agent, after its first message and in handoffs.",
   },
   {
+    title: "Outcomes, in your words",
+    body: "After you archive or delete a workspace, one optional click says how it went; a merged pull request counts as kept until you say otherwise. Each agent's history on your own work sits beside the composer's picker, and says too few to say until there is enough of it.",
+  },
+  {
     title: "Closing the window doesn't stop them",
     body: "Terminals live in a small background process, so agents keep working while Yardsort is closed — or after it crashes. Open it again and every screen is repainted where it got to.",
   },

@@ -156,6 +156,19 @@ export const commands = {
 	 *  entries, nothing else.
 	 */
 	memoryCheck: (projectId: string) => typedError<MemoryCheck[], IpcError>(__TAURI_INVOKE("memory_check", { projectId })),
+	/**
+	 *  A project's attempts, brought up to date first: every live workspace snapshotted, git asked
+	 *  whether each branch was ahead or merged, and the pull requests the app already knows —
+	 *  cached, never fetched for this — read for their state.
+	 */
+	outcomesGet: (projectId: string) => typedError<ProjectOutcomes, IpcError>(__TAURI_INVOKE("outcomes_get", { projectId })),
+	/**
+	 *  The user's word on an attempt — `kept`, `partly`, `discarded` — or `None` to take it back.
+	 *  A workspace not yet recorded is snapshotted first, so any live one can be labelled.
+	 */
+	outcomeLabel: (id: string, label: string | null) => typedError<ProjectOutcomes, IpcError>(__TAURI_INVOKE("outcome_label", { id, label })),
+	/**  Per-agent history across every project, for the composer: counted from outcomes only. */
+	outcomesAgents: () => typedError<AgentOutcomes[], IpcError>(__TAURI_INVOKE("outcomes_agents")),
 	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
@@ -329,6 +342,19 @@ export type AddedProject = {
 	revived: boolean,
 };
 
+export type AgentOutcomes = {
+	harness: string,
+	attempts: number,
+	kept: number,
+	keptByMerge: number,
+	partly: number,
+	discarded: number,
+	/**  Attempts with an outcome. */
+	known: number,
+	/**  Whether `known` reaches the sample size below which nothing is said. */
+	enough: boolean,
+};
+
 /**  Static facts about the running app, shown in the UI and useful in bug reports. */
 export type AppInfo = {
 	name: string,
@@ -356,6 +382,26 @@ export type AssistStatus = {
 	thresholds: ThresholdsDto,
 	/**  The model every request names. */
 	model: string,
+};
+
+export type Attempt = {
+	/**  The workspace's id when the attempt began; the workspace itself may be gone. */
+	id: string,
+	/**  Set while the workspace still exists. */
+	workspaceId: string | null,
+	workspaceName: string,
+	branch: string | null,
+	baseBranch: string | null,
+	task: string | null,
+	harnesses: string[],
+	/**  What the user said, if anything. */
+	label: string | null,
+	/**  The outcome that counts: the label, or `kept` from a merge; `None` when unknown. */
+	outcome: string | null,
+	/**  `you` or `merge`, beside `outcome`. */
+	outcomeSource: string | null,
+	evidence: Evidence,
+	createdAt: number | null,
 };
 
 export type AvailableUpdate = {
@@ -494,6 +540,19 @@ export type EnvSource =
 "loginShell" | 
 /**  This process's own environment: always on Windows, and the fallback elsewhere. */
 "process";
+
+/**  What an attempt's outcome rests on, beside the outcome itself. */
+export type Evidence = {
+	/**  The branch was seen with commits of its own. */
+	ahead: boolean,
+	/**  After that, its work was seen in the base branch: a merge or a fast-forward. */
+	mergedIntoBase: boolean,
+	prNumber: number | null,
+	/**  `open`, `merged` or `closed`. */
+	prState: string | null,
+	/**  `archived` or `deleted`, when the workspace ended. */
+	ended: string | null,
+};
 
 export type ExitInfo = {
 	code: number,
@@ -832,6 +891,15 @@ export type ProjectMemory = {
 	entries: MemoryEntry[],
 	/**  The section a first message would get now, or `None` when nothing would be added. */
 	preview: string | null,
+};
+
+export type ProjectOutcomes = {
+	projectId: string,
+	/**  Newest first. */
+	attempts: Attempt[],
+	agents: AgentOutcomes[],
+	/**  How many known outcomes an agent needs before its history says anything. */
+	minSample: number,
 };
 
 /**  What `gh` says about one project's pull requests. */

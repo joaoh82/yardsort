@@ -28,7 +28,7 @@ fn project_root(state: &AppState, project_id: &str) -> IpcResult<std::path::Path
     Ok(std::path::PathBuf::from(project.root_path))
 }
 
-fn found(state: &AppState, project_id: &str, refresh: bool) -> ProjectPullRequests {
+pub(crate) fn found(state: &AppState, project_id: &str, refresh: bool) -> ProjectPullRequests {
     let Ok(root) = project_root(state, project_id) else {
         return ProjectPullRequests::default();
     };

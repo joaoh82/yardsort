@@ -63,6 +63,8 @@ Hover a project and press **⋯**, or right-click it:
 - **Memory…** — lessons about the project for its agents: what you write, what agents propose
   for you to approve, and whether they are given it. A count on the project's row says when
   proposals wait. See [Memory](memory.md).
+- **Outcomes…** — every attempt in the project with what became of it, and each agent's
+  history. See [Outcomes](outcomes.md).
 - **New workspace** — same as the **+** on the row. See [Workspaces](workspaces.md).
 - **Import worktrees…** — make workspaces of worktrees that already exist in the repository, made
   by hand or by another tool. See

@@ -192,10 +192,14 @@ impl Workspaces<'_> {
     /// thrown away here. Without `force`, uncommitted work makes this fail with `worktree_dirty`.
     pub fn delete(&self, workspace_id: &str, force: bool) -> IpcResult<()> {
         let workspace = self.deletable(workspace_id)?;
+        // What the attempt was, kept before its row and sessions go: the moment an attempt is
+        // deleted is the moment it is most often judged. Never a reason not to delete.
+        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
         if !workspace.archived {
             self.remove_worktree(&workspace, force)?;
         }
         self.store.remove_worktree(&workspace.id)?;
+        let _ = self.store.outcome_ended(&workspace.id, Some("deleted"));
         Ok(())
     }
 
@@ -213,8 +217,10 @@ impl Workspaces<'_> {
                 "This workspace is not on a branch, so there would be nothing to restore it from. Delete it instead.",
             ));
         }
+        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
         self.remove_worktree(&workspace, force)?;
         self.store.set_workspace_archived(&workspace.id, true)?;
+        let _ = self.store.outcome_ended(&workspace.id, Some("archived"));
         Ok(())
     }
 
@@ -250,6 +256,7 @@ impl Workspaces<'_> {
         }
         self.git.worktree_add_existing(&root, &path, branch)?;
         self.store.set_workspace_archived(&workspace.id, false)?;
+        let _ = self.store.outcome_ended(&workspace.id, None);
         let restored = WorkspaceRow {
             archived: false,
             ..workspace
@@ -584,6 +591,28 @@ mod tests {
                 .map(|w| w.name)
                 .collect()
         }
+    }
+
+    /// Deleting or archiving an attempt keeps its outcome, with how it ended; restoring clears
+    /// the ending. The command line deletes through here too, so it keeps them as well.
+    #[test]
+    fn deleting_or_archiving_keeps_the_attempts_outcome() {
+        let fx = Fixture::new();
+        let ws = fx.workspaces();
+        let archived = ws.create(&fx.project_id, None, "Fix the login").unwrap();
+        let deleted = ws.create(&fx.project_id, None, "Try another way").unwrap();
+        ws.archive(&archived.id, false).unwrap();
+        ws.delete(&deleted.id, false).unwrap();
+        let gone = fx.store.outcome(&deleted.id).unwrap().unwrap();
+        assert_eq!(
+            (gone.ended.as_deref(), gone.workspace_id),
+            (Some("deleted"), None)
+        );
+        assert_eq!(gone.workspace_name, deleted.name);
+        let away = fx.store.outcome(&archived.id).unwrap().unwrap();
+        assert_eq!(away.ended.as_deref(), Some("archived"));
+        ws.restore(&archived.id).unwrap();
+        assert_eq!(fx.store.outcome(&archived.id).unwrap().unwrap().ended, None);
     }
 
     #[test]

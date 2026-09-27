@@ -11,6 +11,7 @@ mod commands;
 mod display;
 mod draft;
 mod memory;
+mod outcomes;
 mod preflight;
 mod publish;
 mod quit;
@@ -111,6 +112,9 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             memory::memory_share,
             memory::memory_waiting,
             memory::memory_check,
+            outcomes::outcomes_get,
+            outcomes::outcome_label,
+            outcomes::outcomes_agents,
             activity::settings_save_activity,
             sessions::sessions_list,
             sessions::session_resume,

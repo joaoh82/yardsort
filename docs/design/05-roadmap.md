@@ -629,6 +629,25 @@ _Exit:_ unapproved candidates never reach an agent (launch, handoff and `ys` tes
 and edits work with history; injection is opt-in per project and per launch; the gates green.
 Owed: the hands-on pass in [08 §20](08-manual-checklist.md#20--project-memory).
 
+## M21 — Agent events, stage 6: outcomes (first slice) ✅
+
+Recorded in [20-agent-events-stage-6-outcomes](20-agent-events-stage-6-outcomes.md), after a
+four-question design pass.
+
+- The decisions: a workspace is an attempt at its first message; the user labels it kept, partly
+  or discarded — prompted once after an archive or delete, and any time in an Outcomes view per
+  project; a merged pull request or a git merge counts as kept until labelled; nothing weaker is
+  ever an outcome. Per-agent history beside the composer's picker, across projects, and "too few
+  to say yet" below five outcomes. Jev later.
+- An outcome carries its own copy of what it describes, snapshotted in the core before a delete
+  removes the workspace and its sessions. Git's "merged" needs the branch to have been seen ahead
+  first; a squash merge is caught by the pull request's state.
+- Not built: Jev's judgment, suggestions from history, grouped attempts, test evidence.
+
+_Exit:_ labels, merges and weak evidence are kept apart in the data and the words; histories
+never speak below the sample size; the gates green. Owed: the hands-on pass in
+[08 §21](08-manual-checklist.md#21--outcomes).
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

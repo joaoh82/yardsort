@@ -7,7 +7,9 @@ import {
   type Project,
   type Suggestion,
   type Workspace,
+  type AgentOutcomes,
 } from "@/lib/ipc";
+import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
 import { useFileDrop } from "@/lib/useFileDrop";
@@ -163,6 +165,20 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       stale = true;
     };
   }, [project.id, handoff]);
+
+  // Your history with each agent, across projects: shown beside the picker, never used to pick.
+  const [histories, setHistories] = useState<AgentOutcomes[]>([]);
+  useEffect(() => {
+    if (!hasCore()) return;
+    let stale = false;
+    ipc.outcomesAgents().then(
+      (list) => !stale && setHistories(list),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, []);
 
   // Prefer what was used last here, then the first harness that is actually installed.
   const installed = harnesses.filter((h) => h.resolvedPath);
@@ -435,6 +451,8 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           </p>
         )}
 
+        {harness && <AgentHistoryLine history={histories.find((h) => h.harness === harness.id)} />}
+
         {memory && (
           <div className="mt-2 text-[12px] text-ink-faint">
             <label className="flex items-center gap-2">
@@ -509,5 +527,17 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       </form>
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
     </div>
+  );
+}
+
+/** How attempts with this agent went, from your outcomes across projects. Nothing until there
+ *  are attempts; "too few to say" until there are enough outcomes to mean anything. */
+function AgentHistoryLine({ history }: { history: AgentOutcomes | undefined }) {
+  if (!history || history.attempts === 0) return null;
+  return (
+    <p className="mt-2 text-[12px] text-ink-faint" aria-label="Your history with this agent">
+      Your history with this agent, across projects: {describeHistory(history)}. Shown, never used
+      to choose for you.
+    </p>
   );
 }

@@ -28,6 +28,7 @@ const core = vi.hoisted(() => ({
   workspacesImport: vi.fn(),
   ptySpawn: vi.fn(),
   memoryGet: vi.fn(),
+  outcomesAgents: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -97,6 +98,7 @@ describe("Composer", () => {
       harness("opencode"),
       harness("grok", { resolvedPath: null }),
     ]);
+    core.outcomesAgents.mockResolvedValue([]);
     core.memoryGet.mockResolvedValue({
       projectId: "p-app",
       shared: false,
@@ -526,6 +528,39 @@ describe("Composer with Assist", () => {
       prompt: "Fix it",
       skipMemory: true,
     });
+  });
+
+  it("shows your history with the chosen agent, and says when it is too little to go on", async () => {
+    core.outcomesAgents.mockResolvedValue([
+      {
+        harness: "claude",
+        attempts: 6,
+        kept: 3,
+        keptByMerge: 1,
+        partly: 1,
+        discarded: 1,
+        known: 5,
+        enough: true,
+      },
+      {
+        harness: "codex",
+        attempts: 2,
+        kept: 1,
+        keptByMerge: 0,
+        partly: 0,
+        discarded: 0,
+        known: 1,
+        enough: false,
+      },
+    ]);
+    const user = await renderComposer();
+    const line = await screen.findByLabelText("Your history with this agent");
+    expect(line).toHaveTextContent("kept 3 of 5 (1 by merge)");
+    expect(line).toHaveTextContent("never used to choose for you");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Harness" }), "codex");
+    expect(screen.getByLabelText("Your history with this agent")).toHaveTextContent(
+      "too few to say yet — 1 outcome so far",
+    );
   });
 
   it("does not offer importing when running in an existing workspace", async () => {

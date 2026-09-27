@@ -16,6 +16,7 @@ import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
 import { MemoryDialog } from "./MemoryDialog";
+import { OutcomesDialog } from "./OutcomesDialog";
 import { useMemoryStore } from "@/stores/memory";
 
 export function ProjectTree() {
@@ -59,6 +60,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   const [importing, setImporting] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [outcomesOpen, setOutcomesOpen] = useState(false);
   const waiting = useMemoryStore((s) => s.waiting[project.id] ?? 0);
 
   const items: MenuItem[] = [
@@ -67,6 +69,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
       label: waiting > 0 ? `Memory… (${waiting} waiting)` : "Memory…",
       onSelect: () => setMemoryOpen(true),
     },
+    { label: "Outcomes…", onSelect: () => setOutcomesOpen(true) },
     { label: "New workspace", disabled: project.missing, onSelect: () => compose(project.id) },
     {
       label: "Import worktrees…",
@@ -168,6 +171,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
       {removing && <RemoveProjectDialog project={project} onClose={() => setRemoving(false)} />}
       {memoryOpen && <MemoryDialog project={project} onClose={() => setMemoryOpen(false)} />}
+      {outcomesOpen && <OutcomesDialog project={project} onClose={() => setOutcomesOpen(false)} />}
     </li>
   );
 }
