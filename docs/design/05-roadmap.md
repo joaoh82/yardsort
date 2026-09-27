@@ -665,6 +665,39 @@ never speak below the sample size; the gates green. Owed: the hands-on pass in
 - Usage / cost view per workspace. MCP config management per harness.
 - Command palette; themes; Omarchy theme integration.
 
+### Deferred from the agent-events stages
+
+Each stage of [09](09-agent-events-and-memory.md) shipped a first slice and named what it left
+out. Gathered here so they are found in one place; each note says why it waited.
+
+- **Jev's judgment of an attempt.** Whether an attempt met its request, from its task and final
+  diff, shown beside the user's label and never counted as an outcome. Waits for labels to measure
+  it against. [20 §5](20-agent-events-stage-6-outcomes.md#5--not-in-this-slice)
+- **Suggestions from local history.** Ranking an agent and effort for a task from the user's own
+  outcomes, beside Assist's suggestion. Same wait. [20 §5](20-agent-events-stage-6-outcomes.md#5--not-in-this-slice)
+- **Try with several agents.** Start one task in two or three workspaces with different agents,
+  grouped as attempts at one task, for a head-to-head comparison.
+  [20 §2, §5](20-agent-events-stage-6-outcomes.md#5--not-in-this-slice)
+- **Test evidence.** No adapter records output, so a passing test run is not evidence of anything
+  yet — for outcomes or for handoffs. A pull request's check results are available and could be
+  shown beside an attempt. [18 §5](18-agent-events-stage-4-handoff.md#5--what-this-slice-does-not-do-and-the-next),
+  [20 §5](20-agent-events-stage-6-outcomes.md#5--not-in-this-slice)
+- **A read-only MCP server for memory**, for the agents that take one per launch. `ys memory`
+  covers every agent today. [19 §5](19-agent-events-stage-5-memory.md#5--not-in-this-slice)
+- **Model extraction of memory candidates** from a finished workspace — generative, with its own
+  opt-in. [19 §5](19-agent-events-stage-5-memory.md#5--not-in-this-slice)
+- **Directory and global memory scopes**, after project scope has proven itself.
+  [19 §5](19-agent-events-stage-5-memory.md#5--not-in-this-slice)
+- **Relevance ranking of memory for a task**, rather than newest first, 40 at most.
+  [19 §5](19-agent-events-stage-5-memory.md#5--not-in-this-slice)
+- **Reported writes attributed to commits.** A file an agent wrote and then committed keeps its
+  badge, but reports are not tied to a commit, so one written by one run and committed by another
+  says both. [17 §5](17-agent-events-stage-3-review.md#5--what-this-slice-does-not-do-and-the-next)
+- **Handoff excerpts cited by event id**, rather than a count and the `ys activity list` line.
+  [18 §5](18-agent-events-stage-4-handoff.md#5--what-this-slice-does-not-do-and-the-next)
+- **Stage 7, optional sync** — encrypted transport, identity, conflicts — only if users ask for
+  it; local operation stays complete offline. [09](09-agent-events-and-memory.md#product-stages-and-exit-gates)
+
 ### Measured against Superset
 
 [Superset](https://superset.sh) is the app Yardsort is modelled on and cannot run on Linux or
