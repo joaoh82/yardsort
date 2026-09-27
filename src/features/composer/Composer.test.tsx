@@ -467,6 +467,18 @@ describe("Composer with Assist", () => {
     expect(core.workspaceCreate).not.toHaveBeenCalled();
   });
 
+  it("says a run in a worktree runs in that workspace, and a run in local in the checkout", async () => {
+    const tree = worktree("app", "fix-login");
+    const { unmount } = render(<Composer project={app} runIn={tree} />);
+    expect(
+      await screen.findByText(/Runs in this workspace, on the branch it has out/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/project's own checkout/)).not.toBeInTheDocument();
+    unmount();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    expect(await screen.findByText(/Runs in the project's own checkout/)).toBeInTheDocument();
+  });
+
   it("does not offer importing when running in an existing workspace", async () => {
     render(<Composer project={app} runIn={app.workspaces[0]} />);
     await screen.findByRole("form", { name: "Run in local" });

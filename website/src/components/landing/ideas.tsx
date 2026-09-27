@@ -133,6 +133,35 @@ export function Ideas() {
             without losing the first.
           </p>
         </Idea>
+
+        <Idea
+          label="05 · Handoff"
+          title="Hand the work to another agent"
+          shot={
+            <Shot
+              name="handoff"
+              alt="Hand off: the composer holding the next agent's first message, written from what Yardsort recorded"
+            />
+          }
+        >
+          <p>
+            One agent has worked in a workspace and you want another there — Codex after Claude, or
+            the same agent from a clean start. The files and the diff carry over by themselves. What
+            was asked, tried and found does not.
+          </p>
+          <p>
+            <strong className={strong}>Hand off…</strong> writes the next agent&apos;s first message
+            from what Yardsort recorded: your task, word for word; the branch and its commits; each
+            changed file and who wrote it; what every agent run did — its tools, what failed, what
+            it wrote; and what is not known. It opens in the composer, where you read it, edit it,
+            pick the agent and press Enter.
+          </p>
+          <p>
+            None of it is the last agent&apos;s words — Yardsort never keeps a conversation — and no
+            model writes it. It says where it is blind, and tells the next agent to ask you. From a
+            terminal, <code className={code}>ys workspace handoff</code> prints the same message.
+          </p>
+        </Idea>
       </div>
     </section>
   );

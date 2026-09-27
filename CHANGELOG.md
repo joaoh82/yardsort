@@ -3,6 +3,11 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- The composer's hint under a handoff said it runs "in the project's own checkout", which is only
+  true of `local`; in a worktree it now says it runs in this workspace.
+
 ## 0.11.0
 
 - **`ys` comes with the app, and stays up to date with it.** Every installer now carries the
