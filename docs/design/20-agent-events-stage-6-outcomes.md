@@ -19,8 +19,9 @@ sizes do not imply a winner_.
   still catches true merges and fast-forwards.
 - **Deleting a workspace removes its row and cascades its sessions** — the moment an attempt is
   most often judged is the moment its record disappears. An outcome must carry its own copy.
-- **An empty branch looks merged.** `base..branch` is empty both for a branch whose work reached
-  the base and for one that never had any; only having seen it ahead tells them apart.
+- **An empty range proves nothing.** `base..branch` is empty for a branch whose work reached the
+  base, for one that never had any, and for one reset or recreated since; only the commit seen
+  ahead, checked against the base, tells them apart.
 
 ## 2 · Decisions
 
@@ -83,9 +84,9 @@ Further decisions made in building:
   kept until labelled otherwise, a closed one is not an outcome, and taking a label back returns
   to the merge; a later pull request on a reused branch never rewrites an earlier attempt, and
   none opened after an attempt ended is matched to it; a branch reset to its base is not a merge,
-  and a branch deleted after a real merge still is; history counts outcomes only, credits both agents of a handoff, counts kept by
-  merge, and is not enough below five. `workspaces`: deleting and archiving keep the outcome with
-  how it ended; restoring clears it.
+  and a branch deleted after a real merge still is; history counts outcomes only, credits both
+  agents of a handoff, counts kept by merge, and is not enough below five. `workspaces`: deleting
+  and archiving keep the outcome with how it ended; restoring clears it.
 - Frontend: the prompt appears only after a delete that happened, records the answer, can be
   dismissed; the Outcomes view's histories, outcome words, evidence and labelling (and taking a
   label back); the composer's history line and its "too few" wording.

@@ -20,12 +20,12 @@ it back.
 - **Your label** always counts, and wins over anything else.
 - **A merge** counts as **kept** while you have said nothing: a pull request merged on the forge
   (seen through the [GitHub CLI](commits-and-pull-requests.md)), or a branch whose commits were
-  later found in its base branch — a merge or a fast-forward. Resetting a branch back to its base
-  throws its work away and is not a merge. An attempt keeps the pull request opened while it was
-  going; a later one on the same branch belongs to the attempt that opened it. The Outcomes view
-  reads pull requests Yardsort already knows about from the publish panel, and never waits on the
-  network. The view marks these _merged, not
+  later found in its base branch — a merge or a fast-forward. The view marks these _merged, not
   labelled_. A squash merge leaves no trace in git, which is why the pull request is read too.
+  Resetting a branch back to its base throws its work away, and is not a merge. An attempt keeps
+  the pull request opened while it was going; a later one on the same branch belongs to the
+  attempt that opened it. The view reads the pull requests Yardsort already knows about from the
+  publish panel, and never waits on the network.
 - **Nothing else.** A closed pull request, a branch ahead of its base, an archived or deleted
   workspace, an agent that exited with an error — each is shown as evidence beside the attempt,
   and none is ever counted as an outcome. An attempt with no label and no merge has no outcome.
