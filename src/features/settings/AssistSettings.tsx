@@ -308,7 +308,7 @@ export function AssistSettings() {
             Tell Assist what the agents reported about each file
             <span className="block text-ink-faint">
               With each diff,{" "}
-              <strong>sends one sentence in the Changes list&rsquo;s own words</strong>:
+              <strong>sends one sentence in the Changes list&rsquo;s own words</strong>:{" "}
               <em>reported written by claude</em>, <em>last written while claude ran a command</em>,
               or <em>not reported written by any agent</em>. Never a tool, a time or a command.
               Needs an agent&rsquo;s capture switch on in General; a file no agent accounted for can

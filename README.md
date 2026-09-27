@@ -51,7 +51,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Pick up where you left off.** For conversations that really did end, press **Resume** — it is
   intact. **Fork** one to try a different approach without losing the first.
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
-  one click into your editor.
+  one click into your editor. With an agent reporting, each changed file says who wrote it: an
+  agent that reported writing it, one that was running a command when it was last written, or
+  nobody the record knows of.
 - **Send it on without leaving.** Commit what an agent wrote, push it, and open the pull request
   from the panel you reviewed it in — the title written from the commits. With the
   [GitHub CLI](https://cli.github.com) the pull request opens from here and its number and check
@@ -76,16 +78,20 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   workspace and how it ended — even if it ended while the window was closed — without reading a
   word the agent printed. Turn it on, and every built-in agent — Claude Code, Codex, OpenCode,
   Grok, OMP, pi and Cursor — reports its own tool calls, file changes and turns to the same
-  record, as metadata, with its own settings untouched. The Changes list marks which files an
-  agent reported writing, which were written while it ran a command, and which changed with no
-  report at all — and **Hand off…** writes the next agent's first message from all of it. An experimental timeline shows the
-  rest; `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
+  record, as metadata, with its own settings untouched. An experimental timeline shows it;
+  `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
+- **Hand work to another agent.** **Hand off…** writes the next agent's first message from that
+  record — what the workspace was asked, where the branch stands and who wrote each file, what
+  each agent did, and what is not known — for you to read and edit before it goes. Codex after
+  Claude, or a fresh start of the same agent, without retyping the story. See
+  [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
-- **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client, starts a workspace and
-  an agent without opening the window: `ys workspace new <project> "<prompt>"`. The agent belongs
-  to the background process, so it carries on after the command returns — and `ys attach` puts it
-  back on your terminal, `ys logs` prints what a session ended up with. `ys workspace delete`
+- **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client that comes with the app,
+  starts a workspace and an agent without opening the window: `ys workspace new <project>
+"<prompt>"`. The agent belongs to the background process, so it carries on after the command
+  returns — and `ys attach` puts it back on your terminal, `ys logs` prints what a session ended
+  up with, `ys workspace handoff` prints the next agent's first message. `ys workspace delete`
   removes one when the work is done, keeping the branch. Every command takes `--json`.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
@@ -170,18 +176,25 @@ what the number means. That keeps the interesting part in code: the questions ar
 property each), the thresholds live in your settings, and the model is pinned (`jev-1.13.0`) so a
 new version cannot quietly move under them.
 
-![Settings → Assist, with the API key, the two features and the three thresholds](docs/images/assist.png)
+![Settings → Assist, with the API key, its switches and the three thresholds](docs/images/assist.png)
 
 **On the changes list**, shortly after an agent stops writing, each changed file is checked
 against what the workspace was asked to do, and flagged files get a badge:
 
-| Badge           | What it means                                                                       |
-| --------------- | ----------------------------------------------------------------------------------- |
-| **off-task**    | The change looks unrelated to what this workspace was asked to do.                  |
-| **secret**      | The change looks like it adds a literal key, token or password.                     |
-| **tests**       | The change looks like it deletes, skips or weakens a test.                          |
-| **checks**      | The change looks like it switches a lint, type check or CI step off.                |
-| **credentials** | The file's _name_ says it holds credentials — decided locally, contents never sent. |
+| Badge           | What it means                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| **off-task**    | The change looks unrelated to what this workspace was asked to do.                                    |
+| **secret**      | The change looks like it adds a literal key, token or password.                                       |
+| **tests**       | The change looks like it deletes, skips or weakens a test.                                            |
+| **checks**      | The change looks like it switches a lint, type check or CI step off.                                  |
+| **credentials** | The file's _name_ says it holds credentials — decided locally, contents never sent.                   |
+| **unaccounted** | A substantive change no agent accounted for, while agents were reporting. Only with the switch above. |
+
+**Who wrote each file**, if you switch it on too: with each diff, Assist is told in one sentence
+what the Changes list already says — reported written by an agent, written while one ran a
+command, or by nobody the record knows of — never a tool, a time or a command. A substantive
+change no agent accounted for then gets one more badge, **unaccounted**, and every badge's
+tooltip ends with the sentence Assist was told.
 
 **In the composer**, while you type the first message, Assist can offer a harness and an effort
 level, built on **your** own "Good at" descriptions of your harnesses rather than on any opinion
@@ -195,8 +208,9 @@ said: no new requests, no waiting.
 **What it costs you:** Assist is off until you enter your own TypeSafe API key and tick a feature.
 The key goes to your system credential store (Keychain, Credential Manager, Secret Service), never
 into `settings.toml`, and requests are billed to your account. What leaves the machine is the diff
-and path of a changed file plus the task, or the message you are typing plus your "Good at" texts
-— nothing else, and never a terminal. Files whose names say they hold credentials are badged
+and path of a changed file plus the task — and, only with that switch, the one sentence on who
+wrote it — or the message you are typing plus your "Good at" texts. Nothing else, and never a
+terminal. Files whose names say they hold credentials are badged
 without their contents being read. Nothing here is load-bearing: with no key, switched off,
 offline or rate-limited, Yardsort behaves exactly as it does otherwise, minus a few badges.
 
@@ -205,18 +219,19 @@ says no.
 
 ## Documentation
 
-|                                                                                                  |                                                      |
-| ------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes              |
-| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving         |
-| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork    |
-| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                          |
-| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                           |
-| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                       |
-| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints    |
-| [The `ys` command line](docs/guide/cli.md)                                                       | Workspaces, agents, `attach` and `logs` from a shell |
-| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                      |
-| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions |
+|                                                                                                  |                                                                |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                        |
+| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                   |
+| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off |
+| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                    |
+| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file       |
+| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                     |
+| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                 |
+| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints              |
+| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs  |
+| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                |
+| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions           |
 
 ## Build from source
 

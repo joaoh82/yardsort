@@ -90,7 +90,7 @@ export function ProvenanceNote({ changes }: { changes: ChangeSet }) {
         ? "No changed file was reported written by an agent."
         : `Agents reported writing ${reported} of ${paths.size} changed files.`,
     observed > 0
-      ? `${observed === paths.size ? "Every one" : observed === 1 ? "One" : String(observed)} ${observed === 1 ? "was" : "were"} last written while an agent ran a command — seen on the file's clock, not reported.`
+      ? `${observed === paths.size ? "Every one" : observed === 1 ? "One" : String(observed)} ${observed === 1 || observed === paths.size ? "was" : "were"} last written while an agent ran a command — seen on the file's clock, not reported.`
       : null,
     rest > 0
       ? `${reported + observed === 0 ? "The changes" : rest === 1 ? "One more" : `${rest} more`} came from ${alternatives}.`
