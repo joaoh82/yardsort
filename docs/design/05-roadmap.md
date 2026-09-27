@@ -611,6 +611,24 @@ opens the composer here with it; an edited packet spawns with `handoff: true` an
 workspace; the gates green. Owed: the live story in
 [08 §19](08-manual-checklist.md#19--handing-off).
 
+## M20 — Agent events, stage 5: reviewed memory (first slice) ✅
+
+Recorded in [19-agent-events-stage-5-memory](19-agent-events-stage-5-memory.md), after a
+four-question design pass.
+
+- The decisions: the user writes entries (approved as written) and agents propose them with
+  `ys memory propose` (always candidates); approved entries reach agents after a first message
+  at launch — never in the record — and in handoff packets, when the project shares them, and
+  through `ys memory list | search`; review in a Memory view per project; Jev's repeat and
+  contradiction checks behind their own Assist switch.
+- No approve command anywhere an agent can reach: that is how "no agent approves its own
+  candidate" is enforced. No MCP server: every agent runs `ys`, not every agent takes MCP.
+- Not built: model extraction of candidates, an MCP server, directory and global scopes.
+
+_Exit:_ unapproved candidates never reach an agent (launch, handoff and `ys` tests); revocation
+and edits work with history; injection is opt-in per project and per launch; the gates green.
+Owed: the hands-on pass in [08 §20](08-manual-checklist.md#20--project-memory).
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

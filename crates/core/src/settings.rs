@@ -77,6 +77,9 @@ pub struct AssistSettings {
     /// words the Changes list shows; no tool, time or command. Off by default: it changes what
     /// leaves the machine.
     pub send_provenance: bool,
+    /// Ask Jev whether each memory proposal repeats or contradicts an approved entry. Sends the
+    /// proposal and the project's approved entries. Off by default, for the same reason.
+    pub check_memory: bool,
     /// How sure the model must be before Yardsort acts on an answer. See [`Thresholds`].
     #[serde(flatten)]
     pub thresholds: Thresholds,

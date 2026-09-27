@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
+  hasCore,
   ipc,
   type BranchList,
   type HarnessInfo,
@@ -142,6 +143,27 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     };
   }, [project.id, runIn]);
 
+  // The project's memory, when it shares it: what goes after the message, and a way to leave it
+  // out of this one launch. A handoff's packet carries it already.
+  const [memory, setMemory] = useState<{ preview: string; count: number } | null>(null);
+  const [skipMemory, setSkipMemory] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
+  useEffect(() => {
+    if (handoff !== null || !hasCore()) return;
+    let stale = false;
+    ipc.memoryGet(project.id).then(
+      (loaded) => {
+        if (stale || !loaded.preview) return;
+        const count = loaded.entries.filter((entry) => entry.state === "approved").length;
+        setMemory({ preview: loaded.preview, count });
+      },
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [project.id, handoff]);
+
   // Prefer what was used last here, then the first harness that is actually installed.
   const installed = harnesses.filter((h) => h.resolvedPath);
   const harness: HarnessInfo | undefined =
@@ -187,6 +209,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       model: model.trim() || null,
       effort: effortChoice || null,
       prompt: message.trim() || null,
+      ...(memory && skipMemory ? { skipMemory: true } : {}),
     };
     const remember = () =>
       projects.remember(picksKey(project.id), {
@@ -410,6 +433,40 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               Use
             </button>
           </p>
+        )}
+
+        {memory && (
+          <div className="mt-2 text-[12px] text-ink-faint">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!skipMemory}
+                disabled={busy}
+                onChange={(event) => setSkipMemory(!event.target.checked)}
+                className="accent-(--color-accent)"
+              />
+              <span>
+                Add this project&rsquo;s memory after the message —{" "}
+                {memory.count === 1 ? "1 approved entry" : `${memory.count} approved entries`}. Your
+                message stays the task on record.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowMemory((shown) => !shown)}
+                className="ml-auto text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+              >
+                {showMemory ? "Hide" : "Show"}
+              </button>
+            </label>
+            {showMemory && (
+              <pre
+                aria-label="Project memory to be added"
+                className="mt-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-[11px] whitespace-pre-wrap select-text"
+              >
+                {memory.preview}
+              </pre>
+            )}
+          </div>
         )}
 
         {!runIn && (

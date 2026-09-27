@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { Project, Workspace } from "@/lib/ipc";
+import { useEffect, useState } from "react";
+import { hasCore, ipc, type Project, type Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { pullRequestFor, usePublishStore } from "@/stores/publish";
@@ -15,9 +15,24 @@ import { PullRequestBadge } from "./PullRequestBadge";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
+import { MemoryDialog } from "./MemoryDialog";
+import { useMemoryStore } from "@/stores/memory";
 
 export function ProjectTree() {
   const projects = useProjectsStore((s) => s.projects);
+  // Memory proposals arrive through `ys`, which the window does not hear: ask again on focus
+  // and whenever activity lands, which is when an agent at work would propose.
+  useEffect(() => {
+    if (!hasCore()) return;
+    const refresh = () => void useMemoryStore.getState().refreshWaiting();
+    refresh();
+    window.addEventListener("focus", refresh);
+    const unlisten = ipc.onActivityChanged(refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
   return (
     <ul role="tree" aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto py-1">
       {projects.map((project, index) => (
@@ -43,9 +58,15 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const waiting = useMemoryStore((s) => s.waiting[project.id] ?? 0);
 
   const items: MenuItem[] = [
     { label: "Project settings…", onSelect: () => setSettingsOpen(true) },
+    {
+      label: waiting > 0 ? `Memory… (${waiting} waiting)` : "Memory…",
+      onSelect: () => setMemoryOpen(true),
+    },
     { label: "New workspace", disabled: project.missing, onSelect: () => compose(project.id) },
     {
       label: "Import worktrees…",
@@ -90,6 +111,17 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
           </span>
           {project.missing && <span className="text-[11px] text-red-400">missing</span>}
         </button>
+        {waiting > 0 && (
+          <button
+            type="button"
+            onClick={() => setMemoryOpen(true)}
+            title={`${waiting} memory ${waiting === 1 ? "proposal waits" : "proposals wait"} for you`}
+            aria-label={`${waiting} memory ${waiting === 1 ? "proposal" : "proposals"} waiting in ${project.name}`}
+            className="mr-1 shrink-0 rounded-full border border-accent/50 px-1.5 text-[10px] leading-4 text-accent hover:bg-raised"
+          >
+            {waiting}
+          </button>
+        )}
         <RowButton
           label={`More actions for ${project.name}`}
           onClick={(event) => {
@@ -135,6 +167,7 @@ function ProjectNode(props: { project: Project; isFirst: boolean; isLast: boolea
       )}
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
       {removing && <RemoveProjectDialog project={project} onClose={() => setRemoving(false)} />}
+      {memoryOpen && <MemoryDialog project={project} onClose={() => setMemoryOpen(false)} />}
     </li>
   );
 }

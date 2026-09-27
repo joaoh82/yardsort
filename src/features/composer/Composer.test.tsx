@@ -27,9 +27,11 @@ const core = vi.hoisted(() => ({
   projectUntrackedWorktrees: vi.fn(),
   workspacesImport: vi.fn(),
   ptySpawn: vi.fn(),
+  memoryGet: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
+  hasCore: () => true,
   ipc: core,
 }));
 
@@ -46,6 +48,7 @@ const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
   reviewChanges: true,
   suggestInComposer: true,
   sendProvenance: false,
+  checkMemory: false,
   thresholds: {
     flagAtPercent: 70,
     offTaskAtPercent: 60,
@@ -94,6 +97,12 @@ describe("Composer", () => {
       harness("opencode"),
       harness("grok", { resolvedPath: null }),
     ]);
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-app",
+      shared: false,
+      preview: null,
+      entries: [],
+    });
     useHarnessStore.setState({ harnesses: [], loaded: false });
     useProjectsStore.setState({
       projects: [app],
@@ -477,6 +486,46 @@ describe("Composer with Assist", () => {
     unmount();
     render(<Composer project={app} runIn={app.workspaces[0]} />);
     expect(await screen.findByText(/Runs in the project's own checkout/)).toBeInTheDocument();
+  });
+
+  it("adds the project's memory after the message unless told not to, and can show it", async () => {
+    const preview =
+      "## Project memory\n\n- The tests need TZ=UTC. (memory ab12cd34, from the user)\n";
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-app",
+      shared: true,
+      preview,
+      entries: [
+        {
+          id: "ab12cd34-0000",
+          shortId: "ab12cd34",
+          text: "The tests need TZ=UTC.",
+          state: "approved",
+          author: "user",
+          from: "the user",
+          createdAt: 0,
+          updatedAt: 0,
+          history: [],
+        },
+      ],
+    });
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    const add = await screen.findByRole("checkbox", { name: /Add this project.s memory/ });
+    expect(add).toBeChecked();
+    expect(screen.getByText(/1 approved entry/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show" }));
+    expect(screen.getByLabelText("Project memory to be added")).toHaveTextContent("TZ=UTC");
+
+    await user.click(add);
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix it{Enter}");
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(core.ptySpawn.mock.calls[0]![0].harness).toMatchObject({
+      prompt: "Fix it",
+      skipMemory: true,
+    });
   });
 
   it("does not offer importing when running in an existing workspace", async () => {

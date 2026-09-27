@@ -104,7 +104,7 @@ export const commands = {
 	assistForgetKey: () => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_forget_key")),
 	/**  Ask TypeSafe whether the key in force still works. */
 	assistTestKey: () => typedError<null, IpcError>(__TAURI_INVOKE("assist_test_key")),
-	assistSaveSettings: (reviewChanges: boolean, suggestInComposer: boolean, sendProvenance: boolean, thresholds: ThresholdsDto) => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_save_settings", { reviewChanges, suggestInComposer, sendProvenance, thresholds })),
+	assistSaveSettings: (reviewChanges: boolean, suggestInComposer: boolean, sendProvenance: boolean, checkMemory: boolean, thresholds: ThresholdsDto) => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_save_settings", { reviewChanges, suggestInComposer, sendProvenance, checkMemory, thresholds })),
 	/**
 	 *  Check a workspace's changed files against what was asked, and for risky edits. Sends the
 	 *  diffs of those files to TypeSafe.
@@ -138,6 +138,24 @@ export const commands = {
 	 *  key, or fails leaves the packet without a ranking, and the packet reads the same.
 	 */
 	workspaceHandoff: (workspaceId: string) => typedError<HandoffPacket, IpcError>(__TAURI_INVOKE("workspace_handoff", { workspaceId })),
+	memoryGet: (projectId: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_get", { projectId })),
+	/**  The user writes an entry: approved as written. */
+	memoryWrite: (projectId: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_write", { projectId, text })),
+	memoryEdit: (id: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_edit", { id, text })),
+	memoryDecide: (id: string, decision: MemoryDecision) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_decide", { id, decision })),
+	/**  Turn sharing a project's approved entries with its agents on or off. */
+	memoryShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_share", { projectId, shared })),
+	/**
+	 *  How many proposals wait, per project that has any. Agents propose through `ys`, which writes
+	 *  the database directly, so the window asks again when it regains focus and when activity lands.
+	 */
+	memoryWaiting: () => typedError<MemoryWaiting[], IpcError>(__TAURI_INVOKE("memory_waiting")),
+	/**
+	 *  Ask Jev whether each proposal waiting in a project repeats or contradicts an approved entry.
+	 *  Only with the Assist switch on and a key in force; sends the proposals and the approved
+	 *  entries, nothing else.
+	 */
+	memoryCheck: (projectId: string) => typedError<MemoryCheck[], IpcError>(__TAURI_INVOKE("memory_check", { projectId })),
 	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
@@ -332,6 +350,8 @@ export type AssistStatus = {
 	suggestInComposer: boolean,
 	/**  With the review, tell Jev who wrote each file, in the Changes list's words. */
 	sendProvenance: boolean,
+	/**  Check memory proposals for repeats of, and contradictions with, approved entries. */
+	checkMemory: boolean,
 	/**  How sure Jev must be before an answer becomes a badge or a suggestion. */
 	thresholds: ThresholdsDto,
 	/**  The model every request names. */
@@ -628,6 +648,11 @@ export type HarnessRequest = {
 	 *  user's words.
 	 */
 	handoff?: boolean,
+	/**
+	 *  Leave the project's memory out of this launch's first message, though the project shares
+	 *  it. The composer's per-launch opt-out; see `crate::memory`.
+	 */
+	skipMemory?: boolean,
 };
 
 export type HarnessStatus = {
@@ -693,6 +718,50 @@ export type KeySource = "none" |
 /**  `TYPESAFE_API_KEY`, from the environment Yardsort runs in. */
 "environment";
 
+/**  What Jev said about one proposal. */
+export type MemoryCheck = {
+	id: string,
+	/**  It says what an approved entry already says. */
+	repeats: boolean,
+	/**  It says the opposite of an approved entry, or something that cannot also be true. */
+	contradicts: boolean,
+};
+
+export type MemoryDecision = "approve" | "reject" | "revoke" | "restore";
+
+export type MemoryEntry = {
+	id: string,
+	/**  The first 8 characters of the id, as agents see it cited. */
+	shortId: string,
+	text: string,
+	/**  `candidate`, `approved`, `rejected` or `revoked`. */
+	state: string,
+	/**  `user` or `agent`. */
+	author: string,
+	/**  Where it came from, in words: "the user", or "claude in fix-login". */
+	from: string,
+	createdAt: number | null,
+	updatedAt: number | null,
+	history: MemoryHistoryItem[],
+};
+
+/**  One change to an entry. */
+export type MemoryHistoryItem = {
+	at: number | null,
+	/**  `proposed`, `written`, `approved`, `edited`, `rejected`, `revoked` or `restored`. */
+	action: string,
+	/**  `user` or `agent`. */
+	by: string,
+	/**  The text an edit replaced. */
+	previousText: string | null,
+};
+
+/**  How many proposals wait in a project. */
+export type MemoryWaiting = {
+	projectId: string,
+	count: number,
+};
+
 export type NewWorkspace = {
 	projectId: string,
 	/**  `None` starts from the project's default branch. */
@@ -752,6 +821,17 @@ export type ProjectAutomation = {
 export type ProjectCommand = {
 	program: string,
 	args: string[],
+};
+
+/**  A project's memory, as the view shows it. */
+export type ProjectMemory = {
+	projectId: string,
+	/**  Whether approved entries go into this project's agents' first messages. */
+	shared: boolean,
+	/**  Oldest first. */
+	entries: MemoryEntry[],
+	/**  The section a first message would get now, or `None` when nothing would be added. */
+	preview: string | null,
 };
 
 /**  What `gh` says about one project's pull requests. */

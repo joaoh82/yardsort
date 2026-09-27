@@ -82,6 +82,9 @@ change no agent accounted for_…). It is the same review the Changes list's bad
 so nothing new is sent, and the message says it is a judgment, not a fact. Without Assist the
 files are in git's order and nothing of the kind appears.
 
+When the project [shares its memory](memory.md#giving-agents-the-memory), the message carries it
+too, under _Project memory_, where you can edit it with the rest.
+
 `ys workspace handoff <workspace>` prints the same message from the command line, without
 Assist's ordering — see the [CLI guide](cli.md#ys-workspace-handoff-workspace).
 

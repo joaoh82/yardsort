@@ -60,6 +60,9 @@ Yardsort's window gets focus.
 Hover a project and press **⋯**, or right-click it:
 
 - **Project settings…** — files to copy into new worktrees, a setup command, and a run/dev-server command. See [Project automation](#project-automation).
+- **Memory…** — lessons about the project for its agents: what you write, what agents propose
+  for you to approve, and whether they are given it. A count on the project's row says when
+  proposals wait. See [Memory](memory.md).
 - **New workspace** — same as the **+** on the row. See [Workspaces](workspaces.md).
 - **Import worktrees…** — make workspaces of worktrees that already exist in the repository, made
   by hand or by another tool. See

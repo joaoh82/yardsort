@@ -10,6 +10,10 @@ const POINTS = [
     body: "A local note of when each agent started in a workspace and how it ended — even while the window was closed — without reading a word it printed. Opt in, and every built-in agent reports its own tool calls and turns to it as metadata, its own settings untouched, and each changed file says who wrote it — which is what Hand off is written from. An experimental timeline shows it; ys activity export writes it out.",
   },
   {
+    title: "Project memory, approved by you",
+    body: "Short lessons about a project for its agents — the tests need TZ=UTC. You write them; agents propose them with ys memory propose, and those wait for you. Only what you approve reaches an agent, after its first message and in handoffs.",
+  },
+  {
     title: "Closing the window doesn't stop them",
     body: "Terminals live in a small background process, so agents keep working while Yardsort is closed — or after it crashes. Open it again and every screen is repainted where it got to.",
   },

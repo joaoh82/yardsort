@@ -22,6 +22,9 @@ const core = vi.hoisted(() => ({
   projectPullRequests: vi.fn(),
   ptySpawn: vi.fn(),
   ptyClose: vi.fn(),
+  memoryWaiting: vi.fn(),
+  memoryGet: vi.fn(),
+  onActivityChanged: vi.fn(),
 }));
 const native = vi.hoisted(() => ({
   pickFolder: vi.fn(),
@@ -42,6 +45,7 @@ import { usePublishStore } from "@/stores/publish";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
+import { useMemoryStore } from "@/stores/memory";
 import { Sidebar } from "./Sidebar";
 
 const shellIn = (workspace: string) => ({
@@ -87,6 +91,9 @@ describe("Sidebar", () => {
     }
     core.ptySpawn.mockImplementation(async ({ workspaceId }) => shellIn(workspaceId));
     core.sessionsList.mockResolvedValue([]);
+    core.memoryWaiting.mockResolvedValue([]);
+    core.onActivityChanged.mockResolvedValue(() => {});
+    useMemoryStore.setState({ waiting: {} });
     opener.openUrl.mockResolvedValue(undefined);
     core.projectPullRequests.mockResolvedValue({
       gh: true,
@@ -820,5 +827,31 @@ describe("Sidebar", () => {
     expect(
       within(screen.getByRole("treeitem", { name: "local" })).getByRole("button"),
     ).toBeDisabled();
+  });
+
+  it("counts memory proposals on the project row, and opens the Memory view from it", async () => {
+    const user = userEvent.setup();
+    core.memoryWaiting.mockResolvedValue([{ projectId: "p-alpha", count: 2 }]);
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-alpha",
+      shared: false,
+      preview: null,
+      entries: [],
+    });
+    await renderSidebar("alpha", "beta");
+    const count = await screen.findByRole("button", {
+      name: "2 memory proposals waiting in alpha",
+    });
+    expect(
+      screen.queryByRole("button", { name: /memory proposals? waiting in beta/ }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "More actions for alpha" }));
+    expect(screen.getByRole("menuitem", { name: "Memory… (2 waiting)" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await user.click(count);
+    expect(await screen.findByRole("dialog", { name: "Memory — alpha" })).toBeInTheDocument();
+    expect(core.memoryGet).toHaveBeenCalledWith("p-alpha");
   });
 });

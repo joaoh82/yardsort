@@ -10,6 +10,7 @@ mod commands;
 #[cfg(target_os = "linux")]
 mod display;
 mod draft;
+mod memory;
 mod preflight;
 mod publish;
 mod quit;
@@ -103,6 +104,13 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::activity_clear,
             activity::workspace_provenance,
             activity::workspace_handoff,
+            memory::memory_get,
+            memory::memory_write,
+            memory::memory_edit,
+            memory::memory_decide,
+            memory::memory_share,
+            memory::memory_waiting,
+            memory::memory_check,
             activity::settings_save_activity,
             sessions::sessions_list,
             sessions::session_resume,

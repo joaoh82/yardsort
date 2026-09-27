@@ -12,6 +12,7 @@
 pub mod commands;
 pub mod jev;
 pub mod key;
+pub mod memory;
 pub mod review;
 pub mod suggest;
 
@@ -61,6 +62,8 @@ impl<T: Clone> Cache<T> {
 pub struct Assist {
     store: Box<dyn KeyStore>,
     pub reviews: Cache<jev::Answers>,
+    /// Answers about memory proposals, keyed by the proposal and the entries it was read against.
+    pub memory_checks: Cache<jev::Answers>,
 }
 
 impl Default for Assist {
@@ -74,6 +77,7 @@ impl Assist {
         Self {
             store,
             reviews: Cache::default(),
+            memory_checks: Cache::default(),
         }
     }
 

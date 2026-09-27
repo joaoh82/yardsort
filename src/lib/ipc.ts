@@ -12,6 +12,11 @@ import {
   type ActivityPage,
   type ActivitySettingsDto,
   type FileReports,
+  type MemoryCheck,
+  type MemoryDecision,
+  type MemoryEntry,
+  type MemoryWaiting,
+  type ProjectMemory,
   type HandoffPacket,
   type ObservedMatch,
   type ObservedWrite,
@@ -76,6 +81,11 @@ export type {
   ActivityPage,
   ActivitySettingsDto,
   FileReports,
+  MemoryCheck,
+  MemoryDecision,
+  MemoryEntry,
+  MemoryWaiting,
+  ProjectMemory,
   HandoffPacket,
   ObservedMatch,
   ObservedWrite,
@@ -358,11 +368,32 @@ export const ipc = {
     reviewChanges: boolean,
     suggestInComposer: boolean,
     sendProvenance: boolean,
+    checkMemory: boolean,
     thresholds: ThresholdsDto,
   ) =>
     unwrap(
-      commands.assistSaveSettings(reviewChanges, suggestInComposer, sendProvenance, thresholds),
+      commands.assistSaveSettings(
+        reviewChanges,
+        suggestInComposer,
+        sendProvenance,
+        checkMemory,
+        thresholds,
+      ),
     ),
+  /** A project's memory: its entries with their history, and whether its agents are given it. */
+  memoryGet: (projectId: string) => unwrap(commands.memoryGet(projectId)),
+  /** The user writes an entry; it is approved as written. */
+  memoryWrite: (projectId: string, text: string) => unwrap(commands.memoryWrite(projectId, text)),
+  memoryEdit: (id: string, text: string) => unwrap(commands.memoryEdit(id, text)),
+  memoryDecide: (id: string, decision: MemoryDecision) =>
+    unwrap(commands.memoryDecide(id, decision)),
+  /** Whether a project's approved entries go into its agents' first messages. */
+  memoryShare: (projectId: string, shared: boolean) =>
+    unwrap(commands.memoryShare(projectId, shared)),
+  /** How many proposals wait, per project that has any. */
+  memoryWaiting: () => unwrap(commands.memoryWaiting()),
+  /** Jev's word on each waiting proposal: repeats or contradicts an approved entry. */
+  memoryCheck: (projectId: string) => unwrap(commands.memoryCheck(projectId)),
   /** Judge a workspace.s changed files against its task. Sends those diffs to TypeSafe. */
   assistReview: (workspaceId: string) => unwrap(commands.assistReview(workspaceId)),
   /** A harness and an effort for a message being typed; empty fields mean "nothing to offer". */

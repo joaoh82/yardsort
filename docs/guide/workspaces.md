@@ -25,6 +25,8 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 Under the pickers, **Import worktrees…** opens the same dialog as the project menu, for worktrees
 that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere).
 
+When the project [shares its memory](memory.md#giving-agents-the-memory), a line under the pickers says its approved entries go after your message — **Show** reads them, and unticking leaves them out of this one launch. Your message stays the task on record.
+
 Your last choices are remembered per project. With [Assist](assist.md) switched on, a line under
 the pickers may offer a harness and an effort for what you are typing; **Use** applies it, and
 ignoring it does nothing.
