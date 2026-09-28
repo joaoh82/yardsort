@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOutcomesStore } from "@/stores/outcomes";
 import { PanelHeader } from "@/features/shell/PanelHeader";
 import { hasCore } from "@/lib/ipc";
@@ -58,6 +58,18 @@ export function Sidebar() {
   const notice = useProjectsStore((s) => s.notice);
   const dismiss = useProjectsStore((s) => s.dismiss);
   const [adding, setAdding] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchButton = useRef<HTMLButtonElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const closeSearch = () => {
+    setQuery("");
+    setSearching(false);
+    requestAnimationFrame(() => searchButton.current?.focus());
+  };
+  useEffect(() => {
+    if (searching) searchInput.current?.focus();
+  }, [searching]);
   usePullRequests();
 
   useEffect(() => {
@@ -74,16 +86,71 @@ export function Sidebar() {
 
   return (
     <aside aria-label="Projects" className="flex h-full flex-col bg-surface">
-      <PanelHeader title="Projects">
-        <button
-          type="button"
-          aria-label="Add project"
-          title={`Add project (open a folder: ${formatShortcut("O")})`}
-          onClick={() => setAdding(true)}
-          className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
-        >
-          +
-        </button>
+      <PanelHeader
+        title="Projects"
+        search={
+          searching ? (
+            <div className="mr-2 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-full bg-raised px-2 focus-within:ring-1 focus-within:ring-accent">
+              <SearchIcon />
+              <input
+                ref={searchInput}
+                type="text"
+                aria-label="Filter projects"
+                placeholder="Filter projects…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeSearch();
+                  }
+                }}
+                className="min-w-0 flex-1 bg-transparent text-ink outline-none placeholder:text-ink-faint"
+              />
+              <button
+                type="button"
+                aria-label={query ? "Clear project filter" : "Close project search"}
+                title={query ? "Clear project filter" : "Close project search"}
+                onClick={() => {
+                  if (query) {
+                    setQuery("");
+                    searchInput.current?.focus();
+                  } else {
+                    closeSearch();
+                  }
+                }}
+                className="size-5 shrink-0 rounded text-ink-muted hover:text-ink"
+              >
+                ×
+              </button>
+            </div>
+          ) : null
+        }
+      >
+        <div className="flex shrink-0 items-center gap-1">
+          {!searching && (
+            <button
+              ref={searchButton}
+              type="button"
+              aria-label="Search projects"
+              title="Search projects"
+              onClick={() => setSearching(true)}
+              className="flex size-6 items-center justify-center rounded text-ink-muted hover:bg-raised hover:text-ink"
+            >
+              <SearchIcon />
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Add project"
+            title={`Add project (open a folder: ${formatShortcut("O")})`}
+            onClick={() => setAdding(true)}
+            className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
+          >
+            +
+          </button>
+        </div>
       </PanelHeader>
 
       {loaded && empty ? (
@@ -98,7 +165,7 @@ export function Sidebar() {
           </button>
         </div>
       ) : (
-        <ProjectTree />
+        <ProjectTree query={query} />
       )}
 
       <OutcomePrompt />
@@ -136,6 +203,23 @@ export function Sidebar() {
       </div>
       {adding && <AddProjectDialog onClose={() => setAdding(false)} />}
     </aside>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      className="size-4 shrink-0 text-ink-muted"
+    >
+      <circle cx="10.5" cy="10.5" r="7" />
+      <path d="m16 16 5 5" />
+    </svg>
   );
 }
 

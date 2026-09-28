@@ -3,6 +3,21 @@
 A **project** is a git repository on your computer that Yardsort knows about. Projects live in
 the left panel; everything else hangs off them.
 
+## Finding a project
+
+Click the search icon next to **Projects** to open **Filter projects…**. Type part of a
+project's name to filter the list as you type; matching ignores case and surrounding spaces.
+Matching projects keep their workspace rows and collapsed state. Filtering does not change
+your selected workspace or stop its terminals. The project containing the selected workspace
+always stays visible, even if its name does not match — including when you add a project or
+select a workspace through a shortcut while filtering.
+
+Click **×** to clear the filter and show all projects again. Press **Escape** in the field to
+clear it and return to the Projects heading. If nothing matches, the panel says so. The **+**
+button remains available while searching. When the field is empty, **×** closes it.
+
+![Searching five demo projects for weather shows weather-cli and weather-api, with a workspace open](../images/projects-search.png)
+
 ## Adding a project
 
 Press **+** next to _Projects_.

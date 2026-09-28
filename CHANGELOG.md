@@ -5,6 +5,9 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Project search.** Click the search icon beside Projects to filter by name. Clear the filter
+  with **×**, or press **Escape** to close it; **×** also closes an empty field. The selected
+  workspace's project stays visible, including projects added while filtering.
 - Workspace previews open on hover or keyboard focus without popping over clicks or menus.
   They only say no PR was found after the forge has answered successfully.
 

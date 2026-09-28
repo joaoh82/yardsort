@@ -21,8 +21,16 @@ import { MemoryDialog } from "./MemoryDialog";
 import { OutcomesDialog } from "./OutcomesDialog";
 import { useMemoryStore } from "@/stores/memory";
 
-export function ProjectTree() {
+export function ProjectTree({ query = "" }: { query?: string }) {
   const projects = useProjectsStore((s) => s.projects);
+  const selectedWorkspaceId = useProjectsStore((s) => s.selectedWorkspaceId);
+  const filter = query.trim().toLowerCase();
+  const matching = projects.filter(
+    (project) =>
+      project.name.toLowerCase().includes(filter) ||
+      project.workspaces.some((workspace) => workspace.id === selectedWorkspaceId),
+  );
+  const noMatches = filter !== "" && matching.length === 0;
   // Memory proposals arrive through `ys`, which the window does not hear: ask again on focus
   // and whenever activity lands, which is when an agent at work would propose.
   useEffect(() => {
@@ -37,16 +45,25 @@ export function ProjectTree() {
     };
   }, []);
   return (
-    <ul role="tree" aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto py-1">
-      {projects.map((project, index) => (
-        <ProjectNode
-          key={project.id}
-          project={project}
-          isFirst={index === 0}
-          isLast={index === projects.length - 1}
-        />
-      ))}
-    </ul>
+    <>
+      <p
+        role="status"
+        aria-label="Project search results"
+        className={noMatches ? "p-3 text-ink-faint" : "sr-only"}
+      >
+        {noMatches ? "No projects match your search." : ""}
+      </p>
+      <ul role="tree" aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto py-1">
+        {matching.map((project) => (
+          <ProjectNode
+            key={project.id}
+            project={project}
+            isFirst={project.id === projects[0]?.id}
+            isLast={project.id === projects[projects.length - 1]?.id}
+          />
+        ))}
+      </ul>
+    </>
   );
 }
 
