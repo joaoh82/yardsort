@@ -13,6 +13,7 @@ pub mod commands;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -20,7 +21,7 @@ use serde::Serialize;
 use specta::Type;
 
 use crate::error::IpcResult;
-use crate::forge::{parse_remote, Gh, PullRequest, PullRequestState, Repo};
+use crate::forge::{parse_remote, pull_request_for, Gh, PullRequest, PullRequestState, Repo};
 use crate::git::{Commit, Git, Head};
 use crate::store::WorkspaceRow;
 
@@ -147,13 +148,9 @@ pub fn state(
         None => vec![],
     };
 
-    let pull_request = branch.as_ref().and_then(|branch| {
-        found
-            .pull_requests
-            .iter()
-            .find(|pr| &pr.branch == branch)
-            .cloned()
-    });
+    let pull_request = branch
+        .as_ref()
+        .and_then(|branch| pull_request_for(&found.pull_requests, branch).cloned());
 
     // Somewhere to open it, and nothing open there already. A merged or closed one does not
     // stand in the way: the branch may well have moved on since.
@@ -184,6 +181,8 @@ pub fn state(
 #[derive(Default)]
 pub struct Forge {
     cached: Mutex<HashMap<String, (Instant, ProjectPullRequests)>>,
+    requests: Mutex<HashMap<String, u64>>,
+    next_request: AtomicU64,
 }
 
 impl Forge {
@@ -199,16 +198,34 @@ impl Forge {
         project_id: &str,
         refresh: bool,
     ) -> ProjectPullRequests {
+        self.load(project_id, refresh, || ask(gh, root))
+    }
+
+    fn load(
+        &self,
+        project_id: &str,
+        refresh: bool,
+        fetch: impl FnOnce() -> ProjectPullRequests,
+    ) -> ProjectPullRequests {
         if !refresh {
             if let Some(fresh) = self.cached_fresh(project_id) {
                 return fresh;
             }
         }
-        let answer = ask(gh, root);
-        self.cached
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(project_id.to_owned(), (Instant::now(), answer.clone()));
+        let request = {
+            let mut requests = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+            let request = self.next_request.fetch_add(1, Ordering::Relaxed);
+            requests.insert(project_id.to_owned(), request);
+            request
+        };
+        let answer = fetch();
+        let requests = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        if requests.get(project_id) == Some(&request) {
+            self.cached
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(project_id.to_owned(), (Instant::now(), answer.clone()));
+        }
         answer
     }
 
@@ -228,6 +245,8 @@ impl Forge {
     /// Drop what is remembered about a project, so the next look asks again. Called after
     /// anything that changes the answer — a push, a pull request being opened.
     pub fn forget(&self, project_id: &str) {
+        let mut requests = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        requests.remove(project_id);
         self.cached
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -409,6 +428,7 @@ mod tests {
             draft: false,
             checks: Checks::Passing,
             created_at: None,
+            details: None,
         }
     }
 
@@ -431,6 +451,72 @@ mod tests {
             Some("ys/feature")
         );
         assert!(!state.can_open, "it is already open");
+    }
+
+    #[test]
+    fn late_fetches_cannot_replace_a_newer_answer_or_undo_invalidation() {
+        use std::sync::{mpsc, Arc};
+        for invalidate in [false, true] {
+            let forge = Arc::new(Forge::default());
+            let worker_forge = Arc::clone(&forge);
+            let (started, started_rx) = mpsc::channel();
+            let (finish, finish_rx) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                worker_forge.load("p1", true, || {
+                    started.send(()).unwrap();
+                    finish_rx.recv().unwrap();
+                    ProjectPullRequests {
+                        pull_requests: vec![pr("ys/feature", PullRequestState::Merged)],
+                        ..Default::default()
+                    }
+                })
+            });
+            started_rx.recv().unwrap();
+            if invalidate {
+                forge.forget("p1");
+            } else {
+                forge.load("p1", true, || ProjectPullRequests {
+                    pull_requests: vec![pr("ys/feature", PullRequestState::Open)],
+                    ..Default::default()
+                });
+            }
+            finish.send(()).unwrap();
+            worker.join().unwrap();
+            if invalidate {
+                assert!(forge.cached("p1").is_none());
+            } else {
+                assert_eq!(
+                    forge.cached("p1").unwrap().pull_requests[0].state,
+                    PullRequestState::Open
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_reused_branch_prefers_open_then_newest_regardless_of_response_order() {
+        let (git, repo, remote, trees) = fixture();
+        pretend_origin_is_on_github(&git, repo.path(), remote.path());
+        let tree = trees.path().join("feature");
+        let mut old = pr("ys/feature", PullRequestState::Merged);
+        old.number = 9;
+        let mut open = pr("ys/feature", PullRequestState::Open);
+        open.number = 8;
+        let mut found = ProjectPullRequests {
+            gh: true,
+            pull_requests: vec![old, open],
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            let state = state(&git, &tree, &row(&tree, Some("trunk")), &found).unwrap();
+            assert_eq!(state.pull_request.unwrap().number, 8);
+            assert!(!state.can_open);
+            found.pull_requests.reverse();
+        }
+        found.pull_requests[1].state = PullRequestState::Closed;
+        let state = state(&git, &tree, &row(&tree, Some("trunk")), &found).unwrap();
+        assert_eq!(state.pull_request.unwrap().number, 9);
+        assert!(state.can_open);
     }
 
     #[test]

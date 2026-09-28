@@ -198,6 +198,148 @@ describe("Sidebar", () => {
     expect(core.ptySpawn).not.toHaveBeenCalled();
   });
 
+  it("previews the workspace PR on hover without selecting it", async () => {
+    core.projectPullRequests.mockResolvedValue({
+      gh: true,
+      loggedOut: false,
+      problem: null,
+      pullRequests: [
+        {
+          number: 42,
+          url: "https://github.com/demo/app/pull/42",
+          title: "Fix the login redirect",
+          branch: "ys/feature",
+          state: "open",
+          draft: false,
+          checks: "passing",
+          details: null,
+        },
+      ],
+    });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.hover(rowButton("feature"));
+    const preview = await screen.findByRole("region", { name: "feature details" });
+    expect(within(preview).getByText("Fix the login redirect")).toBeVisible();
+    expect(useProjectsStore.getState().selectedWorkspaceId).not.toBe("w-alpha-feature");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+  });
+
+  it("keeps previews closed after clicking a row, but opens them when tabbing to it", async () => {
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(rowButton("feature"));
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+    await user.click(rowButton("local"));
+    await user.tab();
+    expect(rowButton("feature")).toHaveFocus();
+    expect(screen.getByRole("region", { name: "feature details" })).toBeVisible();
+  });
+
+  it("does not reopen the workspace preview over its action menu", async () => {
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.hover(rowButton("feature"));
+    await screen.findByRole("region", { name: "feature details" });
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    expect(screen.getByRole("menu")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+  });
+
+  it.each(["loading", "not installed", "logged out", "forge error", "IPC error"])(
+    "does not claim no PR was found when the forge is %s",
+    async (status) => {
+      if (status === "loading")
+        core.projectPullRequests.mockImplementationOnce(() => new Promise(() => {}));
+      else if (status === "IPC error")
+        core.projectPullRequests.mockRejectedValueOnce(new Error("Could not fetch PRs"));
+      else
+        core.projectPullRequests.mockResolvedValueOnce({
+          gh: status !== "not installed",
+          pullRequests: [],
+          loggedOut: status === "logged out",
+          problem: status === "forge error" ? "Network unavailable" : null,
+        });
+      await renderWithWorktree();
+      await userEvent.setup().hover(rowButton("feature"));
+      const preview = await screen.findByRole("region", { name: "feature details" });
+      expect(within(preview).getByText("ys/feature")).toBeVisible();
+      expect(within(preview).queryByText("No pull request found")).not.toBeInTheDocument();
+    },
+  );
+
+  it("says no PR was found after a successful empty response", async () => {
+    await renderWithWorktree();
+    await userEvent.setup().hover(rowButton("feature"));
+    const preview = await screen.findByRole("region", { name: "feature details" });
+    expect(within(preview).getByText("No pull request found")).toBeVisible();
+  });
+
+  it("counts open harness tabs, shows names and activity, and switches to the chosen one", async () => {
+    await renderWithWorktree();
+    act(() => {
+      useSessionsStore.setState({
+        byWorkspace: {
+          "w-alpha-feature": [
+            record("r1", { harnessId: "claude", harnessLabel: "Claude Code" }),
+            record("r2", { harnessId: "codex", harnessLabel: "Codex" }),
+          ],
+        },
+      });
+      useTerminalStore.setState({
+        tabs: [
+          {
+            id: "t1",
+            workspaceId: "w-alpha-feature",
+            title: "claude",
+            recordId: "r1",
+            exit: null,
+            busy: true,
+            attention: false,
+          },
+          {
+            id: "t2",
+            workspaceId: "w-alpha-feature",
+            title: "codex",
+            recordId: "r2",
+            exit: null,
+            busy: false,
+            attention: true,
+          },
+          {
+            id: "t3",
+            workspaceId: "w-alpha-feature",
+            title: "bash",
+            recordId: null,
+            exit: null,
+            busy: false,
+            attention: false,
+          },
+        ],
+      });
+    });
+    const user = userEvent.setup();
+    await user.hover(screen.getByRole("button", { name: "2 open harnesses" }));
+    const preview = await screen.findByRole("region", { name: "Workspace harnesses" });
+    expect(within(preview).getByText("Claude Code")).toBeVisible();
+    expect(within(preview).getByText("Working")).toBeVisible();
+    expect(within(preview).getByText("Waiting")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+    await user.click(within(preview).getByRole("button", { name: /Codex/ }));
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha-feature");
+    expect(useTerminalStore.getState().active["w-alpha-feature"]).toBe("t2");
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+  });
+
   it("says a pull request was merged instead of showing its number", async () => {
     core.projectPullRequests.mockResolvedValue({
       gh: true,

@@ -3,6 +3,21 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- Workspace previews open on hover or keyboard focus without popping over clicks or menus.
+  They only say no PR was found after the forge has answered successfully.
+
+- PR badges and the toolbar dropdown share status colours: green for open PRs, yellow for
+  drafts or pending checks/reviews, red for failures, requested changes or closed PRs, and
+  purple for merged PRs. Open PRs without CI no longer fall back to grey.
+- Workspace rows now preview pull request details on hover or keyboard focus, including branches,
+  review status, line counts and individual checks. Open harnesses have a count and a preview of
+  their names and activity. The workspace toolbar adds the same PR preview with actions to open,
+  copy, refresh, or merge by squash, merge commit or rebase after confirmation.
+- Reused branches prefer an open pull request over an older merged or closed one. Slower refresh
+  responses no longer replace newer PR data in the sidebar or the core cache.
+
 ## 0.12.0
 
 - **Project memory.** Short lessons about a project for its agents — "the tests need

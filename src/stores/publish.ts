@@ -54,10 +54,17 @@ export function pullRequestFor(
   branch: string | undefined,
 ): PullRequest | undefined {
   if (!found || !branch) return undefined;
-  return found.pullRequests.find((pr) => pr.branch === branch);
+  return found.pullRequests
+    .filter((pr) => pr.branch === branch)
+    .reduce<PullRequest | undefined>((best, pr) => {
+      if (!best) return pr;
+      if ((pr.state === "open") !== (best.state === "open")) return pr.state === "open" ? pr : best;
+      return pr.number > best.number ? pr : best;
+    }, undefined);
 }
 
 export const usePublishStore = create<PublishStore>((set, get) => {
+  const projectRequests = new Map<string, number>();
   /**
    * Run one of the three actions, keeping the panel honest about what is happening.
    *
@@ -138,12 +145,20 @@ export const usePublishStore = create<PublishStore>((set, get) => {
     },
 
     async loadProject(projectId, refresh = false) {
+      const request = (projectRequests.get(projectId) ?? 0) + 1;
+      projectRequests.set(projectId, request);
       try {
         const found = await ipc.projectPullRequests(projectId, refresh);
+        if (projectRequests.get(projectId) !== request) return;
         set((s) => ({ byProject: { ...s.byProject, [projectId]: found } }));
-      } catch {
-        // Nothing to say: no pull requests simply means no badges on those rows.
-        set((s) => ({ byProject: { ...s.byProject, [projectId]: NO_PULL_REQUESTS } }));
+      } catch (error) {
+        if (projectRequests.get(projectId) !== request) return;
+        set((s) => ({
+          byProject: {
+            ...s.byProject,
+            [projectId]: { ...NO_PULL_REQUESTS, problem: errorMessage(error) },
+          },
+        }));
       }
     },
 

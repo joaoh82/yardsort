@@ -207,10 +207,48 @@ pub struct PullRequest {
     pub state: PullRequestState,
     pub draft: bool,
     pub checks: Checks,
+    pub details: Option<PullRequestDetails>,
     /// When it was opened, in epoch milliseconds. Not sent to the window: it is how an attempt is
     /// matched to the pull request opened during its life (see `crate::outcomes`).
     #[serde(skip)]
     pub created_at: Option<i64>,
+}
+
+/// Detail shared by the sidebar card and toolbar, from the same project-wide query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDetails {
+    pub base: String,
+    pub head_oid: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub review: String,
+    pub updated_at: String,
+    pub checks: Vec<PullRequestCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub name: String,
+    pub state: Checks,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeMethod {
+    Squash,
+    Merge,
+    Rebase,
+}
+
+/// Branches may be reused. An open PR wins; otherwise show the newest number,
+/// independently of the order returned by the forge.
+pub fn pull_request_for<'a>(requests: &'a [PullRequest], branch: &str) -> Option<&'a PullRequest> {
+    requests
+        .iter()
+        .filter(|pr| pr.branch == branch)
+        .max_by_key(|pr| (pr.state == PullRequestState::Open, pr.number))
 }
 
 /// The `gh` command line, found on the user's `PATH`.
@@ -264,7 +302,7 @@ impl Gh {
                 "--limit",
                 &limit,
                 "--json",
-                "number,url,title,headRefName,state,isDraft,statusCheckRollup,createdAt",
+                "number,url,title,headRefName,state,isDraft,statusCheckRollup,createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt",
             ],
         )?;
         let parsed: serde_json::Value =
@@ -273,6 +311,33 @@ impl Gh {
             .as_array()
             .ok_or_else(|| ForgeError::Unreadable("expected a list of pull requests".to_owned()))?;
         Ok(rows.iter().filter_map(pull_request).collect())
+    }
+
+    /// Merge exactly the head the user confirmed. Never delete branches or bypass protections.
+    pub fn merge_pull_request(
+        &self,
+        root: &Path,
+        number: u32,
+        head: &str,
+        method: MergeMethod,
+    ) -> ForgeResult<()> {
+        let flag = match method {
+            MergeMethod::Squash => "--squash",
+            MergeMethod::Merge => "--merge",
+            MergeMethod::Rebase => "--rebase",
+        };
+        self.run(
+            root,
+            &[
+                "pr",
+                "merge",
+                &number.to_string(),
+                flag,
+                "--match-head-commit",
+                head,
+            ],
+        )?;
+        Ok(())
     }
 
     /// Open a pull request for the branch checked out at `root`, and return its URL.
@@ -322,11 +387,49 @@ fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
             .and_then(|d| d.as_bool())
             .unwrap_or(false),
         checks: roll_up(row.get("statusCheckRollup")),
+        details: Some(PullRequestDetails {
+            base: string_field(row, "baseRefName"),
+            head_oid: string_field(row, "headRefOid"),
+            additions: row
+                .get("additions")
+                .and_then(|v| v.as_u64())
+                .and_then(|v| u32::try_from(v).ok())
+                .unwrap_or(0),
+            deletions: row
+                .get("deletions")
+                .and_then(|v| v.as_u64())
+                .and_then(|v| u32::try_from(v).ok())
+                .unwrap_or(0),
+            review: string_field(row, "reviewDecision"),
+            updated_at: string_field(row, "updatedAt"),
+            checks: row
+                .get("statusCheckRollup")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .map(|check| PullRequestCheck {
+                    name: check
+                        .get("name")
+                        .or_else(|| check.get("context"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Check")
+                        .to_owned(),
+                    state: roll_up(Some(&serde_json::json!([check]))),
+                })
+                .collect(),
+        }),
         created_at: row
             .get("createdAt")
             .and_then(|t| t.as_str())
             .and_then(crate::activity::iso_to_ms),
     })
+}
+
+fn string_field(row: &serde_json::Value, key: &str) -> String {
+    row.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// Reduce every check on the head commit to one verdict.
@@ -515,7 +618,9 @@ mod tests {
         let rows: serde_json::Value = serde_json::from_str(
             r#"[{"number":42,"url":"https://github.com/o/r/pull/42","title":"Fix login",
                  "headRefName":"ys/fix-login","state":"OPEN","isDraft":true,
-                 "statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}]}]"#,
+                 "baseRefName":"main","headRefOid":"abc123","additions":12,"deletions":3,
+                 "reviewDecision":"APPROVED","updatedAt":"2026-09-28T10:00:00Z",
+                 "statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]}]"#,
         )
         .expect("json");
         let pr = pull_request(&rows[0]).expect("a pull request");
@@ -524,6 +629,19 @@ mod tests {
         assert_eq!(pr.state, PullRequestState::Open);
         assert!(pr.draft);
         assert_eq!(pr.checks, Checks::Passing);
+        let details = pr.details.unwrap();
+        assert_eq!(details.base, "main");
+        assert_eq!(details.head_oid, "abc123");
+        assert_eq!((details.additions, details.deletions), (12, 3));
+        assert_eq!(details.review, "APPROVED");
+        assert_eq!(details.updated_at, "2026-09-28T10:00:00Z");
+        assert_eq!(
+            details.checks,
+            vec![PullRequestCheck {
+                name: "test".into(),
+                state: Checks::Passing
+            }]
+        );
     }
 
     /// Against the real `gh`, the real network and this repository — so the field names above

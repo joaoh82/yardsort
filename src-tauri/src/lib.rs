@@ -85,6 +85,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             publish::commands::workspace_commit,
             publish::commands::workspace_push,
             publish::commands::workspace_open_pull_request,
+            publish::commands::workspace_merge_pull_request,
             publish::commands::project_pull_requests,
             draft::commands::draft_status,
             draft::commands::draft_commit_message,
