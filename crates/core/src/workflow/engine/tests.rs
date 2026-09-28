@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::workflow::parse;
+use crate::workflow::{parse, PrActivity};
 
 const WORKFLOW: &str = r#"id: t
 name: T
@@ -36,6 +36,9 @@ steps:
 struct Fake {
     now: i64,
     sessions: HashMap<String, SessionFacts>,
+    origin: Option<String>,
+    /// Reviews and comments on the pull request since the run started.
+    posts: Vec<PrActivity>,
 }
 
 impl World for Fake {
@@ -46,7 +49,25 @@ impl World for Fake {
         self.sessions.get(pty_id).copied().unwrap_or_default()
     }
     fn var(&self, path: &[String]) -> Option<String> {
-        (path.join(".") == "workspace.branch").then(|| "fix-login".to_owned())
+        match path.join(".").as_str() {
+            "workspace.branch" => Some("fix-login".to_owned()),
+            "pr.number" => Some("42".to_owned()),
+            _ => None,
+        }
+    }
+    fn origin(&self) -> Option<String> {
+        self.origin.clone()
+    }
+    fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen> {
+        let count = self
+            .posts
+            .iter()
+            .filter(|posted| kind == PrActivity::Any || **posted == kind)
+            .count() as u32;
+        Some(PrSeen {
+            count,
+            latest_url: (count > 0).then(|| "https://example.test/pull/42".to_owned()),
+        })
     }
 }
 
@@ -85,6 +106,8 @@ impl Run {
             world: Fake {
                 now: 1_000_000,
                 sessions: HashMap::new(),
+                origin: None,
+                posts: Vec::new(),
             },
             finished: None,
         }
@@ -441,4 +464,119 @@ fn a_prompt_that_places_the_memory_itself_does_not_get_it_twice() {
         ),
         "without it, the launcher appends the memory as it always does"
     );
+}
+
+/// The shape of the built-in review: an agent reviews, the forge is watched for what it posted,
+/// then the author's own agent is told.
+const REVIEW: &str = r##"id: r
+name: R
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: review
+    action: start_session
+    harness: claude
+    prompt: "Review #{{ pr.number }}"
+  - id: posted
+    action: wait_pr_activity
+    needs: [review]
+    kind: review
+    timeout: 15m
+  - id: tell_author
+    action: send_to_session
+    needs: [posted]
+    session: origin
+    prompt: "#{{ pr.number }} has a review: {{ steps.posted.latest_url }}"
+"##;
+
+fn review_run(origin: Option<&str>) -> Run {
+    let mut run = Run::new();
+    run.workflow = parse(REVIEW).unwrap();
+    run.rows = run
+        .workflow
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(i, step)| WorkflowStepRow {
+            run_id: "run".into(),
+            step_id: step.id.clone(),
+            position: i as i64,
+            action: step.action.name().into(),
+            status: "pending".into(),
+            started_at: None,
+            ended_at: None,
+            outputs: "{}".into(),
+            note: None,
+        })
+        .collect();
+    run.world.origin = origin.map(str::to_owned);
+    match &run.advance()[0] {
+        Effect::Start { prompt, .. } => assert_eq!(prompt.as_deref(), Some("Review #42")),
+        other => panic!("{other:?}"),
+    }
+    run.apply(&done(
+        "review",
+        &[("session".to_owned(), "pty-r".to_owned())].into(),
+    ));
+    run
+}
+
+#[test]
+fn the_forge_is_watched_until_a_post_of_the_kind_asked_for_appears() {
+    let mut run = review_run(Some("pty-author"));
+    run.session(
+        "pty-author",
+        SessionFacts {
+            alive: true,
+            busy: false,
+            settled_at: None,
+        },
+    );
+    assert!(run.advance().is_empty());
+    assert_eq!(run.status("posted"), "waiting");
+    run.world.posts.push(PrActivity::Comment);
+    assert!(
+        run.advance().is_empty(),
+        "a comment is not the review asked for"
+    );
+    run.world.posts.push(PrActivity::Review);
+    let effects = run.advance();
+    assert_eq!(run.status("posted"), "succeeded");
+    assert_eq!(
+        effects,
+        vec![Effect::Paste {
+            step: "tell_author".into(),
+            pty_id: "pty-author".into(),
+            text: "#42 has a review: https://example.test/pull/42".into(),
+        }],
+        "the author's own agent is told, and where the review is"
+    );
+}
+
+#[test]
+fn a_review_that_never_comes_fails_the_wait_saying_so() {
+    let mut run = review_run(Some("pty-author"));
+    run.advance();
+    run.later(15 * 60_000);
+    run.advance();
+    assert_eq!(run.status("posted"), "failed");
+    assert_eq!(
+        run.note("posted"),
+        Some("No review appeared on the pull request within 15m.")
+    );
+    assert_eq!(run.status("tell_author"), "skipped");
+}
+
+#[test]
+fn with_no_agent_of_its_own_in_the_workspace_the_author_step_is_skipped_saying_why() {
+    let mut run = review_run(None);
+    run.world.posts.push(PrActivity::Review);
+    run.advance();
+    assert_eq!(run.status("tell_author"), "skipped");
+    assert_eq!(
+        run.note("tell_author"),
+        Some("Skipped: no agent was running in the workspace when the run started.")
+    );
+    assert_eq!(run.finished, Some(Finish::Succeeded));
 }

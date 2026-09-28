@@ -1488,6 +1488,18 @@ fn copying_the_built_in_review_gives_a_file_that_is_used_instead() {
     fx.ys(&["workflow", "show", "quick-review"]).ok();
 }
 
+/// Works with the workspace's pull request; needs no agent.
+const PR_NOTE: &str = "id: pr-note
+name: PR note
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: tell
+    action: notify
+    title: \"#{{ pr.number }}\"
+";
+
 /// A workflow that needs no agent, so these tests need none on PATH either.
 const PING: &str = "id: ping
 name: Ping
@@ -1593,19 +1605,20 @@ fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
         .ys_from(Some(&path), &["workflow", "run", "ping", "--input", "note"])
         .failed();
     assert!(no_equals.contains("needs an `=`"), "{no_equals}");
-    let later = fx
-        .ys_from(
-            Some(&path),
-            &[
-                "workflow",
-                "run",
-                "code-review",
-                "--input",
-                "reviewer=claude",
-            ],
-        )
+    // A workflow that works with the workspace's pull request, and starts no agent, so what
+    // is installed on this machine does not matter. This repository has no GitHub remote, so
+    // there is no pull request to be found, gh or no gh, and nothing is queued.
+    write_workflow(&fx, "pr-note.yaml", PR_NOTE);
+    let refused = fx
+        .ys_from(Some(&path), &["workflow", "run", "pr-note"])
         .failed();
-    assert!(later.contains("cannot do yet"), "{later}");
+    assert!(refused.contains("pull request"), "{refused}");
+    assert!(
+        !refused.contains("--json"),
+        "not gh's command line: {refused}"
+    );
+    let listed = fx.ys(&["workflow", "runs", "--json"]).ok();
+    assert_eq!(listed.trim(), "[]", "the refusal queued nothing");
 
     let queued = fx.ys_from(Some(&path), &["workflow", "run", "ping"]).ok();
     assert!(queued.contains(made["name"].as_str().unwrap()), "{queued}");

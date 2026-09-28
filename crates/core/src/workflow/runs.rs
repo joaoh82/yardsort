@@ -2,16 +2,73 @@
 //!
 //! [`queue`] is the one door for a run, whoever asks — `ys` today, the app's Run dialog later.
 //! Everything that can be checked before anything happens is checked here, and a refusal writes
-//! nothing: the workflow must be ready, this version must be able to carry out every step, the
-//! workspace must be there, and every input must be given and make sense.
+//! nothing: the workflow must be ready, the workspace must be there, every input must be given
+//! and make sense, and a workflow that works with the pull request needs the workspace to have
+//! one open.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use super::engine::Inputs;
 use super::{find, template, Action, InputKind, SessionRef, Workflow};
 use crate::error::{IpcError, IpcResult};
+use crate::forge::PullRequest;
 use crate::store::{NewWorkflowRun, ProjectRow, Queued, Store, WorkspaceRow};
+
+/// What queuing has to find out from outside: whoever asks for a run answers these.
+pub trait Look {
+    /// Whether an agent can be started: its id as Yardsort spells it, or why not.
+    fn harness(&self, wanted: &str) -> Result<String, String>;
+    /// The workspace's open pull request, `None` when it has none, or why the forge could not
+    /// be asked.
+    fn pull_request(&self, workspace: &WorkspaceRow) -> Result<Option<PullRequest>, String>;
+}
+
+/// What a run found out about where it runs, kept with it (`workflow_runs.context`). A run's
+/// `{{ pr.… }}` and `session: origin` mean these for as long as it runs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Facts {
+    /// The workspace's open pull request when the run was queued.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<PrFacts>,
+    /// The terminal id of the workspace's own agent when the run started: its newest live
+    /// harness session, before the run started any of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrFacts {
+    pub number: u32,
+    pub url: String,
+    pub title: String,
+}
+
+impl Facts {
+    pub fn parse(json: &str) -> Self {
+        serde_json::from_str(json).unwrap_or_default()
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_owned())
+    }
+
+    /// A `pr.…` variable.
+    pub fn var(&self, path: &[String]) -> Option<String> {
+        let pr = self.pr.as_ref()?;
+        match path {
+            [namespace, field] if namespace == "pr" => match field.as_str() {
+                "number" => Some(pr.number.to_string()),
+                "url" => Some(pr.url.clone()),
+                "title" => Some(pr.title.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
 
 /// A request for a run.
 #[derive(Debug, Clone)]
@@ -24,13 +81,12 @@ pub struct Request<'a> {
     pub requested_by: &'a str,
 }
 
-/// Queue a run and return its id. `harness` checks that an agent can be started: it returns the
-/// harness's id as Yardsort spells it, or why not.
+/// Queue a run and return its id.
 pub fn queue(
     store: &Store,
     data_dir: &Path,
     request: &Request<'_>,
-    harness: &dyn Fn(&str) -> Result<String, String>,
+    look: &dyn Look,
 ) -> IpcResult<String> {
     let entry = find(data_dir, request.workflow_id).ok_or_else(|| {
         IpcError::new(
@@ -47,9 +103,6 @@ pub fn queue(
             ),
         ));
     };
-    if let Some(why) = unsupported(workflow) {
-        return Err(IpcError::new("workflow_unsupported", why));
-    }
     let workspace = store
         .workspace(request.workspace_id)?
         .filter(|w| !w.forgotten)
@@ -63,14 +116,40 @@ pub fn queue(
             ),
         ));
     }
-    let inputs = check_inputs(workflow, request.inputs, harness)
+    let harness = |wanted: &str| look.harness(wanted);
+    let inputs = check_inputs(workflow, request.inputs, &harness)
         .map_err(|why| IpcError::new("workflow_inputs", why))?;
     for step in &workflow.steps {
         if let Action::StartSession { harness: named, .. } = &step.action {
             if !named.contains("{{") {
-                harness(named).map_err(|why| IpcError::new("harness_not_found", why))?;
+                look.harness(named)
+                    .map_err(|why| IpcError::new("harness_not_found", why))?;
             }
         }
+    }
+    // Last, because it asks the forge over the network.
+    let mut facts = Facts::default();
+    if needs_pull_request(workflow) {
+        let found = look
+            .pull_request(&workspace)
+            .map_err(|why| IpcError::new("pull_request_unknown", why))?;
+        let pr = found
+            .filter(|pr| pr.state == crate::forge::PullRequestState::Open)
+            .ok_or_else(|| {
+                IpcError::new(
+                    "pull_request_missing",
+                    format!(
+                        "`{}` works with the workspace's pull request, and `{}` has no open one. \
+                         Open one first.",
+                        workflow.id, workspace.name
+                    ),
+                )
+            })?;
+        facts.pr = Some(PrFacts {
+            number: pr.number,
+            url: pr.url,
+            title: pr.title,
+        });
     }
 
     let id = uuid::Uuid::new_v4().to_string();
@@ -89,6 +168,7 @@ pub fn queue(
         workspace_id: &workspace.id,
         workspace_name: &workspace.name,
         inputs: &inputs_json,
+        context: &facts.to_json(),
         requested_by: request.requested_by,
         steps: &steps,
     })?;
@@ -106,39 +186,69 @@ pub fn queue(
     }
 }
 
-/// Why this version cannot carry out `workflow`, when it cannot. Pull requests and the
-/// workspace's own agent come in the next version.
-pub fn unsupported(workflow: &Workflow) -> Option<String> {
-    let later = |what: &str| {
-        Some(format!(
-            "`{}` {what}, which this version of Yardsort cannot do yet.",
-            workflow.id
-        ))
+/// The open pull request for the branch `workspace` has checked out: the branch as git says,
+/// the pull request as `gh` says when asked about that branch, the newest when there are more.
+/// For [`Look::pull_request`] implementations.
+pub fn pull_request_of(
+    gh: Option<&crate::forge::Gh>,
+    git: &crate::git::Git,
+    workspace: &WorkspaceRow,
+) -> Result<Option<PullRequest>, String> {
+    let gh = gh.ok_or_else(|| {
+        "Finding the workspace's pull request needs the GitHub CLI (`gh`) on your PATH.".to_owned()
+    })?;
+    let root = Path::new(&workspace.path);
+    let branch = match git.head(root).map_err(|e| e.to_string())? {
+        crate::git::Head::Branch(name) => name,
+        crate::git::Head::Unborn(_) | crate::git::Head::Detached(_) => {
+            return Err(format!(
+                "`{}` is not on a branch, so it has no pull request.",
+                workspace.name
+            ))
+        }
     };
-    for step in &workflow.steps {
-        match &step.action {
-            Action::WaitPrActivity { .. } => {
-                return later("waits for activity on a pull request");
+    let listed = gh.open_pull_requests_for(root, &branch).map_err(|error| {
+        let asked = format!(
+            "Could not ask GitHub for `{}`'s pull request",
+            workspace.name
+        );
+        match &error {
+            _ if error.is_logged_out() => {
+                format!("{asked}: gh is not logged in. Run `gh auth login`.")
             }
+            crate::forge::ForgeError::Failed { stderr, .. } => format!("{asked}: gh says {stderr}"),
+            other => format!("{asked}: {other}"),
+        }
+    })?;
+    Ok(crate::forge::pull_request_for(&listed, &branch).cloned())
+}
+
+/// Whether a run of `workflow` needs the workspace's pull request: it waits for activity on it,
+/// or names it in a `{{ pr.… }}`.
+pub fn needs_pull_request(workflow: &Workflow) -> bool {
+    workflow.steps.iter().any(|step| {
+        matches!(step.action, Action::WaitPrActivity { .. })
+            || texts(&step.action)
+                .iter()
+                .flat_map(|text| template::placeholders(text))
+                .any(|var| var.path.first().is_some_and(|n| n == "pr"))
+    })
+}
+
+/// Whether a run of `workflow` talks to the workspace's own agent (`session: origin`).
+pub fn needs_origin(workflow: &Workflow) -> bool {
+    workflow.steps.iter().any(|step| {
+        matches!(
+            step.action,
             Action::WaitSession {
                 session: SessionRef::Origin,
                 ..
-            }
-            | Action::SendToSession {
+            } | Action::SendToSession {
                 session: SessionRef::Origin,
                 ..
-            } => return later("talks to the workspace's own agent (`session: origin`)"),
-            _ => {}
-        }
-        if texts(&step.action)
-            .iter()
-            .flat_map(|text| template::placeholders(text))
-            .any(|var| var.path.first().is_some_and(|n| n == "pr"))
-        {
-            return later("uses the workspace's pull request (`{{ pr.… }}`)");
-        }
-    }
-    None
+            }
+        )
+    })
 }
 
 /// Every piece of template text a step has.
@@ -269,6 +379,25 @@ impl Place {
             ["workspace", "task"] => self.task.clone(),
             _ => None,
         }
+    }
+}
+
+/// For tests elsewhere in the crate: any agent is there, and the workspace's pull request is
+/// `pr`.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct Accepting {
+    pub pr: Option<PullRequest>,
+}
+
+#[cfg(test)]
+impl Look for Accepting {
+    fn harness(&self, wanted: &str) -> Result<String, String> {
+        Ok(wanted.to_owned())
+    }
+
+    fn pull_request(&self, _workspace: &WorkspaceRow) -> Result<Option<PullRequest>, String> {
+        Ok(self.pr.clone())
     }
 }
 

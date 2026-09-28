@@ -3,7 +3,7 @@
 //! see exactly what was typed into it. Unix-only, as the host's own tests that wait on output
 //! mid-run are.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -132,6 +132,10 @@ impl Hands for ScriptHands {
     fn handoff(&self, _workspace_id: &str) -> Option<String> {
         None
     }
+
+    fn pr_posts(&self, _workspace_id: &str, _number: u32) -> PrAsk {
+        Box::new(|| Ok(Vec::new()))
+    }
 }
 
 struct Fixture {
@@ -139,9 +143,8 @@ struct Fixture {
     store: Store,
     workspace_id: String,
     host: Arc<PtyHost>,
-    settled: Arc<Settled>,
+    driver: Arc<Driver>,
     hands: ScriptHands,
-    recovered: HashSet<String>,
 }
 
 impl Fixture {
@@ -165,8 +168,8 @@ impl Fixture {
 
         // The host's events reach the driver as the app wires them. Quiet comes sooner than in
         // the app, and so does "settled", so the test takes seconds, not minutes.
-        let settled = Arc::new(Settled::new(200));
-        let hearing = Arc::clone(&settled);
+        let driver = Arc::new(Driver::new(200, Duration::ZERO));
+        let hearing = Arc::clone(&driver);
         let host = Arc::new(
             PtyHost::new(Arc::new(move |event| {
                 hearing.observe(&event);
@@ -186,9 +189,8 @@ impl Fixture {
             store,
             workspace_id: workspace.id,
             host,
-            settled,
+            driver,
             hands,
-            recovered: HashSet::new(),
         }
     }
 
@@ -210,20 +212,15 @@ impl Fixture {
                 inputs: &inputs,
                 requested_by: "cli",
             },
-            &|id| Ok(id.to_owned()),
+            &crate::workflow::runs::Accepting::default(),
         )
         .unwrap()
     }
 
     fn tick(&mut self) {
-        tick(
-            &self.store,
-            self.host.as_ref(),
-            &self.hands,
-            &self.settled,
-            &mut self.recovered,
-        )
-        .unwrap();
+        self.driver
+            .tick(&self.store, self.host.as_ref(), &self.hands)
+            .unwrap();
     }
 
     /// Tick, as the app's thread does, until `done` holds.
@@ -363,7 +360,7 @@ fn a_step_left_running_by_a_previous_app_fails_and_is_not_done_twice() {
     let mut fx = Fixture::new();
     let run = fx.queue();
     // The last app took the run and started the agent, then quit before recording it.
-    assert!(fx.store.start_workflow_run(&run).unwrap());
+    assert!(fx.store.start_workflow_run(&run, None).unwrap());
     assert!(fx
         .store
         .move_workflow_step(
@@ -419,4 +416,105 @@ fn two_messages_due_at_once_are_typed_one_quiet_moment_at_a_time() {
         !fx.store.workflow_run(&run).unwrap().unwrap().active()
     });
     assert_eq!(fx.run_status(&run), "succeeded");
+}
+
+/// The review's last word goes to the workspace's own agent.
+const TELL_THE_AUTHOR: &str = r#"id: tell-author
+name: Tell the author
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: review
+    action: start_session
+    harness: shell
+  - id: settle
+    action: wait_session
+    needs: [review]
+    session: "{{ steps.review.session }}"
+    timeout: 1m
+  - id: tell_author
+    action: send_to_session
+    needs: [settle]
+    session: origin
+    prompt: the review is in
+    timeout: 1m
+"#;
+
+/// Waits for a line and keeps it in `$HEARD`.
+const LISTENER: &str = r#"read line
+printf '%s' "$line" > "$HEARD"
+sleep 30"#;
+
+#[test]
+fn the_workspaces_own_agent_is_told_not_a_shell_and_not_the_runs_own_reviewer() {
+    let mut fx = Fixture::new();
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    std::fs::write(folder.join("tell-author.yaml"), TELL_THE_AUTHOR).unwrap();
+    let spawn = |labels: &[(&str, &str)], heard: &std::path::Path| {
+        fx.host
+            .spawn(LaunchPlan {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), LISTENER.into()],
+                cwd: None,
+                env: vec![("HEARD".into(), heard.display().to_string())],
+                clear_env: false,
+                size: TermSize { cols: 80, rows: 24 },
+                labels: labels
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                    .collect(),
+                prompt: None,
+            })
+            .unwrap()
+    };
+    // The author: an agent conversation Yardsort recorded in this workspace.
+    let author_heard = fx.dir.path().join("author.txt");
+    let author = spawn(
+        &[
+            (WORKSPACE_LABEL, fx.workspace_id.as_str()),
+            (crate::launch::HARNESS_LABEL, "claude"),
+            (crate::launch::RECORD_LABEL, "record-author"),
+        ],
+        &author_heard,
+    );
+    fx.store
+        .add_session(&crate::store::NewSession {
+            id: "record-author",
+            workspace_id: &fx.workspace_id,
+            harness_id: "claude",
+            model: None,
+            effort: None,
+            harness_session_id: None,
+            title: "Fix the login",
+            forked_from: None,
+            pty_session_id: &author.id.0,
+            prompt: Some("Fix the login"),
+        })
+        .unwrap();
+    // A shell opened after it, in the same workspace: newer, but not an agent.
+    let shell_heard = fx.dir.path().join("shell.txt");
+    spawn(&[(WORKSPACE_LABEL, fx.workspace_id.as_str())], &shell_heard);
+
+    let run = fx.queue_workflow("tell-author", &[]);
+    fx.until("the run ends", |fx| {
+        !fx.store.workflow_run(&run).unwrap().unwrap().active()
+    });
+    assert_eq!(
+        fx.run_status(&run),
+        "succeeded",
+        "{:?}",
+        fx.store.workflow_steps(&run)
+    );
+    let facts = Facts::parse(&fx.store.workflow_run(&run).unwrap().unwrap().context);
+    assert_eq!(facts.origin.as_deref(), Some(author.id.0.as_str()));
+    assert_eq!(
+        std::fs::read_to_string(&author_heard).unwrap(),
+        "the review is in"
+    );
+    assert!(!shell_heard.exists(), "the shell was not told");
+    assert!(
+        !fx.hands.kept.exists(),
+        "the reviewer the run started, the newest agent of all, was not told either"
+    );
 }

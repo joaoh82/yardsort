@@ -22,6 +22,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0010_project_memory.sql"),
     include_str!("../migrations/0011_workspace_outcomes.sql"),
     include_str!("../migrations/0012_workflow_runs.sql"),
+    include_str!("../migrations/0013_workflow_run_context.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -295,6 +296,9 @@ pub struct WorkflowRunRow {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
+    /// What the run found out about where it runs, as a JSON object. See
+    /// `workflow::runs::Facts`.
+    pub context: String,
 }
 
 impl WorkflowRunRow {
@@ -330,6 +334,8 @@ pub struct NewWorkflowRun<'a> {
     pub workspace_id: &'a str,
     pub workspace_name: &'a str,
     pub inputs: &'a str,
+    /// What was found out before queuing, as a JSON object.
+    pub context: &'a str,
     pub requested_by: &'a str,
     pub steps: &'a [(&'a str, &'a str)],
 }
@@ -1615,8 +1621,8 @@ impl Store {
         tx.execute(
             "INSERT INTO workflow_runs (id, workflow_id, workflow_name, definition, project_id,
                                         workspace_id, workspace_name, inputs, status,
-                                        requested_by, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
+                                        requested_by, created_at, context)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
             params![
                 new.id,
                 new.workflow_id,
@@ -1627,7 +1633,8 @@ impl Store {
                 new.workspace_name,
                 new.inputs,
                 new.requested_by,
-                now
+                now,
+                new.context
             ],
         )?;
         for (position, (step_id, action)) in new.steps.iter().enumerate() {
@@ -1705,12 +1712,14 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// A queued run starts. False when it was not queued any more — cancelled in between.
-    pub fn start_workflow_run(&self, id: &str) -> StoreResult<bool> {
+    /// A queued run starts, with `context` replacing what it knew, when given. False when it was
+    /// not queued any more — cancelled in between.
+    pub fn start_workflow_run(&self, id: &str, context: Option<&str>) -> StoreResult<bool> {
         Ok(self.conn().execute(
-            "UPDATE workflow_runs SET status = 'running', started_at = ?
+            "UPDATE workflow_runs SET status = 'running', started_at = ?,
+                                      context = COALESCE(?, context)
              WHERE id = ? AND status = 'queued'",
-            params![now_ms(), id],
+            params![now_ms(), context, id],
         )? > 0)
     }
 
@@ -1799,7 +1808,7 @@ impl Store {
 
 const WORKFLOW_RUN_COLUMNS: &str = "id, workflow_id, workflow_name, definition, project_id, \
      workspace_id, workspace_name, inputs, status, requested_by, error, created_at, started_at, \
-     ended_at";
+     ended_at, context";
 
 fn workflow_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowRunRow> {
     Ok(WorkflowRunRow {
@@ -1817,6 +1826,7 @@ fn workflow_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowRu
         created_at: row.get(11)?,
         started_at: row.get(12)?,
         ended_at: row.get(13)?,
+        context: row.get(14)?,
     })
 }
 

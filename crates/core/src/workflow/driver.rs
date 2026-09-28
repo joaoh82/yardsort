@@ -16,10 +16,12 @@ use std::time::Duration;
 
 use pty_host::{HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
 
-use super::engine::{self, Effect, Finish, Inputs, Move, Outputs, SessionFacts, World};
-use super::runs::Place;
+use super::engine::{self, Effect, Finish, Inputs, Move, Outputs, PrSeen, SessionFacts, World};
+use super::runs::{self, Facts, Place};
+use super::PrActivity;
 use crate::error::IpcResult;
-use crate::launch::{HarnessRequest, RUN_LABEL};
+use crate::forge::{PrPost, PrPostKind};
+use crate::launch::{HarnessRequest, HARNESS_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
 use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow};
 
 /// A quiet after at least this much output counts as an agent having settled. The same bar the
@@ -30,6 +32,10 @@ pub const SETTLE_BUSY_MS: u32 = 8_000;
 /// does.
 const SUBMIT_DELAY: Duration = Duration::from_millis(150);
 
+/// How often a run waiting on its pull request asks the forge. A review takes minutes to write;
+/// asking every second would only spend the user's API allowance.
+pub const FORGE_EVERY: Duration = Duration::from_secs(30);
+
 /// What the driver cannot do by itself.
 pub trait Hands {
     /// Start a harness in a workspace, as the app would from its composer.
@@ -38,34 +44,142 @@ pub trait Hands {
     fn notify(&self, title: &str, body: Option<&str>) -> Result<(), String>;
     /// The workspace's handoff packet, as `ys workspace handoff` prints it.
     fn handoff(&self, workspace_id: &str) -> Option<String>;
+    /// A job that asks the forge for the reviews and comments on the workspace's pull request
+    /// `number`. Called on the driver's thread, so it must return at once: the job it returns is
+    /// what does the asking, on a thread of its own, and must give up by itself — the app's
+    /// stops `gh` after [`FORGE_LIMIT`].
+    fn pr_posts(&self, workspace_id: &str, number: u32) -> PrAsk;
 }
 
-/// When each session last went quiet after real work, from the host's events. Kept in memory:
-/// after a restart, a session that settled while nobody watched is known by the turn it
-/// reported, when its harness reports turns.
+/// Asking the forge, as a job for a thread of its own.
+pub type PrAsk = Box<dyn FnOnce() -> Result<Vec<PrPost>, String> + Send + 'static>;
+
+/// How long one question to the forge may take before it is given up on.
+pub const FORGE_LIMIT: Duration = Duration::from_secs(60);
+
+/// What the forge last said about one run's pull request.
+#[derive(Debug, Default)]
+struct Asked {
+    /// When it was last asked.
+    at: i64,
+    /// A question is out and not answered yet.
+    waiting: bool,
+    /// The last answer; `None` until there is one.
+    posts: Option<Vec<PrPost>>,
+}
+
+/// What a driver keeps between ticks. The app holds one for as long as it runs.
 #[derive(Debug)]
-pub struct Settled {
-    threshold_ms: u32,
-    at: Mutex<HashMap<String, i64>>,
+pub struct Driver {
+    settled: Settled,
+    /// Runs whose interrupted steps were dealt with since this driver started.
+    recovered: Mutex<HashSet<String>>,
+    /// What the forge last said about each run's pull request. Shared with the threads that
+    /// ask it, which put their answers here.
+    forge: std::sync::Arc<Mutex<HashMap<String, Asked>>>,
+    forge_every_ms: i64,
 }
 
-impl Default for Settled {
+impl Default for Driver {
     fn default() -> Self {
-        Self::new(SETTLE_BUSY_MS)
+        Self::new(SETTLE_BUSY_MS, FORGE_EVERY)
     }
 }
 
-impl Settled {
-    pub fn new(threshold_ms: u32) -> Self {
+impl Driver {
+    /// A driver that counts a quiet after `settle_busy_ms` of output as settled, and asks the
+    /// forge at most every `forge_every`. Tests shorten both.
+    pub fn new(settle_busy_ms: u32, forge_every: Duration) -> Self {
         Self {
-            threshold_ms,
-            at: Mutex::new(HashMap::new()),
+            settled: Settled::new(settle_busy_ms),
+            recovered: Mutex::new(HashSet::new()),
+            forge: std::sync::Arc::new(Mutex::new(HashMap::new())),
+            forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
         }
     }
 
     /// Take in a host event. True when it could move a run on — a quiet or an exit — so the
     /// driver should look now rather than at its next tick.
     pub fn observe(&self, event: &HostEvent) -> bool {
+        self.settled.observe(event)
+    }
+
+    /// Move every active run on as far as it goes now.
+    pub fn tick(&self, store: &Store, host: &dyn TerminalHost, hands: &dyn Hands) -> IpcResult<()> {
+        let runs = store.active_workflow_runs()?;
+        for run in &runs {
+            if let Err(error) = move_on(self, store, host, hands, run) {
+                eprintln!("workflows: run {}: {}", run.id, error.message);
+            }
+        }
+        // What the forge said about runs that have ended is no longer wanted.
+        self.forge
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|id, _| runs.iter().any(|run| &run.id == id));
+        Ok(())
+    }
+
+    /// What is known of the posts on a run's pull request, without waiting for the forge.
+    ///
+    /// When the last answer is old and no question is out, `ask` makes one, and it goes to a
+    /// thread of its own: a slow or stalled forge must not hold up other runs, their messages
+    /// and notifications, or the timeouts that are checked on this thread. Its answer is here
+    /// for a later tick. At most one question per run is ever out.
+    fn pr_posts(&self, run_id: &str, ask: impl FnOnce() -> PrAsk) -> Option<Vec<PrPost>> {
+        let now = now_ms();
+        let mut forge = self.forge.lock().unwrap_or_else(PoisonError::into_inner);
+        let asked = forge.entry(run_id.to_owned()).or_default();
+        let due = asked.posts.is_none() || now - asked.at >= self.forge_every_ms;
+        if due && !asked.waiting {
+            asked.at = now;
+            asked.waiting = true;
+            let job = ask();
+            let answers = std::sync::Arc::clone(&self.forge);
+            let run = run_id.to_owned();
+            let spawned = std::thread::Builder::new()
+                .name("workflow-forge".into())
+                .spawn(move || {
+                    let answer = job();
+                    let mut forge = answers.lock().unwrap_or_else(PoisonError::into_inner);
+                    let Some(asked) = forge.get_mut(&run) else {
+                        return; // The run ended meanwhile.
+                    };
+                    asked.waiting = false;
+                    match answer {
+                        Ok(posts) => asked.posts = Some(posts),
+                        // Asked again at the next interval; the step's timeout gives up.
+                        Err(why) => {
+                            eprintln!("workflows: run {run}: cannot read the pull request: {why}");
+                        }
+                    }
+                });
+            if spawned.is_err() {
+                asked.waiting = false;
+            }
+        }
+        asked.posts.clone()
+    }
+}
+
+/// When each session last went quiet after real work, from the host's events. Kept in memory:
+/// after a restart, a session that settled while nobody watched is known by the turn it
+/// reported, when its harness reports turns.
+#[derive(Debug)]
+struct Settled {
+    threshold_ms: u32,
+    at: Mutex<HashMap<String, i64>>,
+}
+
+impl Settled {
+    fn new(threshold_ms: u32) -> Self {
+        Self {
+            threshold_ms,
+            at: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn observe(&self, event: &HostEvent) -> bool {
         match event {
             HostEvent::Quiet { id, busy_ms } => {
                 if *busy_ms >= self.threshold_ms {
@@ -90,34 +204,13 @@ impl Settled {
     }
 }
 
-/// Move every active run on as far as it goes now. `recovered` remembers the runs whose
-/// interrupted steps were dealt with since the driver started; keep it between calls.
-pub fn tick(
-    store: &Store,
-    host: &dyn TerminalHost,
-    hands: &dyn Hands,
-    settled: &Settled,
-    recovered: &mut HashSet<String>,
-) -> IpcResult<()> {
-    for run in store.active_workflow_runs()? {
-        if let Err(error) = move_on(store, host, hands, settled, &run, recovered) {
-            eprintln!("workflows: run {}: {}", run.id, error.message);
-        }
-    }
-    Ok(())
-}
-
 fn move_on(
+    driver: &Driver,
     store: &Store,
     host: &dyn TerminalHost,
     hands: &dyn Hands,
-    settled: &Settled,
     run: &WorkflowRunRow,
-    recovered: &mut HashSet<String>,
 ) -> IpcResult<()> {
-    if run.status == "queued" && !store.start_workflow_run(&run.id)? {
-        return Ok(()); // Cancelled between the read and now.
-    }
     let Ok(workflow) = super::parse(&run.definition) else {
         store.finish_workflow_run(
             &run.id,
@@ -134,7 +227,25 @@ fn move_on(
         store.finish_workflow_run(&run.id, "failed", Some("The workspace is gone."))?;
         return Ok(());
     };
-    if recovered.insert(run.id.clone()) {
+    let mut facts = Facts::parse(&run.context);
+    let mut started_at = run.started_at;
+    if run.status == "queued" {
+        // The workspace's own agent is whichever was newest when the run began: found now,
+        // before the run has started any of its own for it to be mistaken for.
+        if runs::needs_origin(&workflow) {
+            facts.origin = origin_session(store, host, &place.workspace.id);
+        }
+        if !store.start_workflow_run(&run.id, Some(&facts.to_json()))? {
+            return Ok(()); // Cancelled between the read and now.
+        }
+        started_at = Some(now_ms());
+    }
+    if driver
+        .recovered
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(run.id.clone())
+    {
         for change in engine::recover(&store.workflow_steps(&run.id)?) {
             apply(store, &run.id, &change)?;
         }
@@ -150,10 +261,13 @@ fn move_on(
     for _ in 0..=workflow.steps.len() * 3 {
         let steps = store.workflow_steps(&run.id)?;
         let world = Seen {
+            driver,
             store,
             host,
             hands,
-            settled,
+            run_id: &run.id,
+            started_at: started_at.unwrap_or(run.created_at),
+            facts: &facts,
             place: &place,
             now: now_ms(),
             memory: OnceCell::new(),
@@ -319,10 +433,14 @@ fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Result<Outp
 
 /// The world as the engine sees it from a driver.
 struct Seen<'a> {
+    driver: &'a Driver,
     store: &'a Store,
     host: &'a dyn TerminalHost,
     hands: &'a dyn Hands,
-    settled: &'a Settled,
+    run_id: &'a str,
+    /// When the run started: pull request activity counts from here.
+    started_at: i64,
+    facts: &'a Facts,
     place: &'a Place,
     now: i64,
     memory: OnceCell<Option<String>>,
@@ -341,7 +459,11 @@ impl World for Seen<'_> {
         SessionFacts {
             alive: matches!(info.state, SessionState::Running),
             busy: info.busy,
-            settled_at: self.settled.get(pty_id).max(self.turn_completed_at(pty_id)),
+            settled_at: self
+                .driver
+                .settled
+                .get(pty_id)
+                .max(self.turn_completed_at(pty_id)),
         }
     }
 
@@ -359,9 +481,56 @@ impl World for Seen<'_> {
                 .handoff
                 .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
                 .clone(),
+            [namespace, _] if namespace == "pr" => self.facts.var(path),
             _ => self.place.var(path),
         }
     }
+
+    fn origin(&self) -> Option<String> {
+        self.facts.origin.clone()
+    }
+
+    fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen> {
+        let number = self.facts.pr.as_ref()?.number;
+        let posts = self.driver.pr_posts(self.run_id, || {
+            self.hands.pr_posts(&self.place.workspace.id, number)
+        })?;
+        // The forge keeps whole seconds; a post in the second the run started counts.
+        let since = self.started_at - self.started_at.rem_euclid(1000);
+        let wanted: Vec<&PrPost> = posts
+            .iter()
+            .filter(|post| post.at_ms >= since)
+            .filter(|post| match kind {
+                PrActivity::Any => true,
+                PrActivity::Review => post.kind == PrPostKind::Review,
+                PrActivity::Comment => post.kind == PrPostKind::Comment,
+            })
+            .collect();
+        Some(PrSeen {
+            count: u32::try_from(wanted.len()).unwrap_or(u32::MAX),
+            latest_url: wanted.last().and_then(|post| post.url.clone()),
+        })
+    }
+}
+
+/// The workspace's newest live harness session: the conversation records newest first, matched
+/// to the sessions the host is running. Shells and programs are not agents.
+fn origin_session(store: &Store, host: &dyn TerminalHost, workspace_id: &str) -> Option<String> {
+    let records = store.sessions(workspace_id).ok()?;
+    let live: Vec<SessionInfo> = host
+        .list()
+        .into_iter()
+        .filter(|session| {
+            matches!(session.state, SessionState::Running)
+                && session.labels.get(WORKSPACE_LABEL).map(String::as_str) == Some(workspace_id)
+                && session.labels.contains_key(HARNESS_LABEL)
+        })
+        .collect();
+    records.iter().find_map(|record| {
+        live.iter()
+            .find(|session| session.labels.get(RECORD_LABEL) == Some(&record.id))
+            .map(|session| session.id.0.clone())
+    })
 }
 
 impl Seen<'_> {
@@ -380,6 +549,6 @@ impl Seen<'_> {
 }
 
 #[cfg(test)]
-mod cancel_tests;
+mod portable_tests;
 #[cfg(all(test, unix))]
 mod tests;

@@ -316,10 +316,10 @@ its own.
    workflow that starts a shell-backed "harness", waits for it to settle, pastes into it,
    notifies. `ys workflow run | runs | cancel`, the app presence check, a restart mid-run. See
    [slice 2](#slice-2-what-shipped) below.
-3. **The forge step and the built-in end to end.** `wait_pr_activity` over `gh pr view --json
-reviews,comments` (and `gh api` for review threads), the `pr` variables and resolving
-   `session: origin`. The code-review workflow run against a real PR on a throwaway
-   repository, on each platform, recorded in [08](08-manual-checklist.md).
+3. **The forge step and the built-in end to end.** ✅ `wait_pr_activity` over `gh pr view
+--json url,reviews,comments`, the `pr` variables and resolving `session: origin`. The
+   code-review workflow run against a real pull request is the hands-on pass in
+   [08 §22](08-manual-checklist.md#22--workflow-runs). See [slice 3](#slice-3-what-shipped).
 4. **The UI.** Sidebar section, the workflows view, chart, editor, runs, the run dialog, the
    workspace menu entry. Testing Library for the list, the dialog's input rules and the run
    history; the chart's layout as a pure function with tests of its own.
@@ -398,6 +398,43 @@ Runs, from `ys`, carried out by the app. [The run](#the-run) and
   is in front waits for the Workflows view.
 - **Refused at the door for now:** `wait_pr_activity`, `{{ pr.… }}` and `session: origin`, which
   are slice 3. The built-in code review uses all three, so it cannot run yet.
+
+## Slice 3: what shipped
+
+The pull request and the workspace's own agent; the built-in code review runs.
+
+- **A run keeps what it found out** in a `context` column (migration 0013, not an edit of 0012,
+  which had shipped): the workspace's open pull request when the run was queued — number, link,
+  title — and its own agent when it started. `{{ pr.… }}` and `session: origin` mean those for
+  the whole run, however long the review takes and whatever opens meanwhile.
+- **The pull request is looked up when the run is queued,** through `runs::Look`, the queue's
+  one way of asking the outside world, which `ys` answers with `gh` and the app's Run dialog will
+  answer the same way. The branch is git's checked-out one, as the publish panel finds it, so
+  `local` works too. No open pull request, no `gh`, or `gh` logged out: refused before anything
+  is written, saying which.
+- **The origin is resolved when the run starts,** not when its step comes: the workspace's newest
+  conversation record whose session is still running with a harness label. Resolving it later
+  would find the reviewer the run had started itself, the newest agent of all. None running then:
+  the step is skipped, saying so.
+- **`wait_pr_activity`** counts reviews and comments posted since the run started, to the second
+  GitHub keeps. The driver asks `gh pr view --json url,reviews,comments` at most every 30 s per
+  run, on a thread of its own, and keeps the last answer between ticks; a failed or stopped ask
+  is logged and asked again next interval, and the step's timeout is what gives up.
+- **From review:** the pull request is looked up by branch (`gh pr list --head <branch> --state
+open`), not found among the repository's fifty newest: an open pull request with fifty newer
+  merged ones was reported missing. And the forge is asked off the driver's thread. A question
+  goes to a thread of its own, one per run at a time, and its answer is there for a later tick;
+  `gh` itself is stopped after 60 s. Asked on the driver's thread, a slow `gh` held up every
+  other run, its messages, notifications and timeouts, for as long as it took.
+- **What `gh` says about reviews,** checked against a real pull request: replying in a review
+  thread appears as a review of its own, with an empty body. So a person replying to an old
+  thread while the reviewer works would end a `review` wait early. A review with only line
+  comments has an empty body too, so the body cannot tell them apart; left as it is.
+- **The built-in's prompt** now tells the reviewer that GitHub refuses an author's approval or
+  request for changes, and to post as a comment when it is posting as the author — as it is when
+  both agents use the same `gh` login. And the author is given the review's link.
+- **A code review against a real pull request** was not run here: it posts to GitHub. It is the
+  hands-on pass in [08 §22](08-manual-checklist.md#22--workflow-runs).
 
 ## Not in v1, on purpose
 

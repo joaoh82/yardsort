@@ -38,7 +38,9 @@ steps:
 
       When you are done, post your review on the pull request with `gh pr review
       {{ pr.number }}` — approve, comment or request changes — and put each finding that is
-      about particular lines on those lines. Say what is wrong, why, and how you know. Then stop.
+      about particular lines on those lines. Say what is wrong, why, and how you know. GitHub
+      does not let the author of a pull request approve it or request changes on it; if you are
+      posting as its author, post the same review with `--comment`. Then stop.
 
   - id: settled
     action: wait_session
@@ -65,7 +67,8 @@ steps:
     session: origin
     timeout: 1h
     prompt: |
-      Pull request #{{ pr.number }} has a new review from another agent. Read it with
+      Pull request #{{ pr.number }} has a new review from another agent
+      ({{ steps.posted.latest_url }}). Read it with
       `gh pr view {{ pr.number }} --comments` and the review comments with
       `gh api repos/{owner}/{repo}/pulls/{{ pr.number }}/comments`. Fix what is right, push,
       and answer each comment saying what you did or why you did not.

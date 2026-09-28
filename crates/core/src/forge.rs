@@ -16,6 +16,7 @@
 //! and that is a supported state rather than an error to report.
 
 use std::path::Path;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -251,6 +252,68 @@ pub fn pull_request_for<'a>(requests: &'a [PullRequest], branch: &str) -> Option
         .max_by_key(|pr| (pr.state == PullRequestState::Open, pr.number))
 }
 
+/// A review or a comment on a pull request: what a workflow waiting on one looks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrPost {
+    pub kind: PrPostKind,
+    /// When it was posted, in epoch milliseconds.
+    pub at_ms: i64,
+    /// Where to read it, when the forge says.
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrPostKind {
+    /// A review: approve, comment or request changes, with any line comments in it.
+    Review,
+    /// A comment on the pull request's conversation.
+    Comment,
+}
+
+/// Reviews and comments out of `gh pr view --json reviews,comments,url`. A review that is still
+/// pending — started, not submitted — has no time and is not a post yet.
+pub fn pr_posts(json: &str) -> ForgeResult<Vec<PrPost>> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+    let pr_url = parsed.get("url").and_then(|v| v.as_str());
+    let list = |key: &str| {
+        parsed
+            .get(key)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    };
+    let mut posts = Vec::new();
+    for review in list("reviews") {
+        let at = review.get("submittedAt").and_then(|t| t.as_str());
+        let Some(at_ms) = at.and_then(crate::activity::iso_to_ms) else {
+            continue;
+        };
+        posts.push(PrPost {
+            kind: PrPostKind::Review,
+            at_ms,
+            url: pr_url.map(str::to_owned),
+        });
+    }
+    for comment in list("comments") {
+        let at = comment.get("createdAt").and_then(|t| t.as_str());
+        let Some(at_ms) = at.and_then(crate::activity::iso_to_ms) else {
+            continue;
+        };
+        posts.push(PrPost {
+            kind: PrPostKind::Comment,
+            at_ms,
+            url: comment
+                .get("url")
+                .and_then(|v| v.as_str())
+                .or(pr_url)
+                .map(str::to_owned),
+        });
+    }
+    posts.sort_by_key(|post| post.at_ms);
+    Ok(posts)
+}
+
 /// The `gh` command line, found on the user's `PATH`.
 pub struct Gh {
     program: Program,
@@ -261,20 +324,88 @@ impl Gh {
         Program::find(env, "gh").map(|program| Self { program })
     }
 
+    /// The `gh` at `path`, rather than the one on `PATH`.
+    pub fn at(path: std::path::PathBuf, env: &ShellEnv) -> Self {
+        Self {
+            program: Program::at(path, env),
+        }
+    }
+
     pub fn path(&self) -> &Path {
         self.program.path()
     }
 
-    fn run(&self, cwd: &Path, args: &[&str]) -> ForgeResult<String> {
-        let output = self
-            .program
-            .command(cwd)
+    fn command(&self, cwd: &Path, args: &[&str]) -> std::process::Command {
+        let mut command = self.program.command(cwd);
+        command
             .args(args)
             // gh dresses its output up for a terminal otherwise, and asks questions.
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
-            .env("CLICOLOR", "0")
-            .output()?;
+            .env("CLICOLOR", "0");
+        command
+    }
+
+    fn run(&self, cwd: &Path, args: &[&str]) -> ForgeResult<String> {
+        let output = self.command(cwd, args).output()?;
+        Self::answer(args, &output)
+    }
+
+    /// As [`Gh::run`], but `gh` gets `limit` to answer and is stopped after that, so nothing
+    /// waiting on it waits for ever on a network that went away.
+    fn run_within(&self, cwd: &Path, args: &[&str], limit: Duration) -> ForgeResult<String> {
+        use std::io::Read;
+        let mut child = self
+            .command(cwd, args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        // Read both pipes as the program writes, or a full pipe would stop it before it ends.
+        let drain = |pipe: Option<Box<dyn Read + Send>>| {
+            std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                if let Some(mut pipe) = pipe {
+                    let _ = pipe.read_to_end(&mut bytes);
+                }
+                bytes
+            })
+        };
+        let stdout = drain(
+            child
+                .stdout
+                .take()
+                .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        );
+        let stderr = drain(
+            child
+                .stderr
+                .take()
+                .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        );
+        let deadline = std::time::Instant::now() + limit;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ForgeError::Failed {
+                    command: args.join(" "),
+                    stderr: format!("no answer within {} s", limit.as_secs()),
+                });
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let output = std::process::Output {
+            status,
+            stdout: stdout.join().unwrap_or_default(),
+            stderr: stderr.join().unwrap_or_default(),
+        };
+        Self::answer(args, &output)
+    }
+
+    fn answer(args: &[&str], output: &std::process::Output) -> ForgeResult<String> {
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
         } else {
@@ -302,15 +433,55 @@ impl Gh {
                 "--limit",
                 &limit,
                 "--json",
-                "number,url,title,headRefName,state,isDraft,statusCheckRollup,createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt",
+                PULL_REQUEST_FIELDS,
             ],
         )?;
-        let parsed: serde_json::Value =
-            serde_json::from_str(&out).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
-        let rows = parsed
-            .as_array()
-            .ok_or_else(|| ForgeError::Unreadable("expected a list of pull requests".to_owned()))?;
-        Ok(rows.iter().filter_map(pull_request).collect())
+        pull_requests(&out)
+    }
+
+    /// The open pull requests whose head is `branch`, asked of the forge by branch.
+    ///
+    /// Where [`Gh::pull_requests`] is a bounded overview for the sidebar, this is the answer to
+    /// "does this branch have one": an older pull request behind fifty newer ones is still
+    /// found.
+    pub fn open_pull_requests_for(
+        &self,
+        root: &Path,
+        branch: &str,
+    ) -> ForgeResult<Vec<PullRequest>> {
+        let out = self.run(
+            root,
+            &[
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--limit",
+                "20",
+                "--json",
+                PULL_REQUEST_FIELDS,
+            ],
+        )?;
+        pull_requests(&out)
+    }
+
+    /// The reviews and comments on pull request `number`, oldest first.
+    /// `limit` is how long `gh` may take; after that it is stopped and this is an error.
+    pub fn pr_posts(&self, root: &Path, number: u32, limit: Duration) -> ForgeResult<Vec<PrPost>> {
+        let out = self.run_within(
+            root,
+            &[
+                "pr",
+                "view",
+                &number.to_string(),
+                "--json",
+                "url,reviews,comments",
+            ],
+            limit,
+        )?;
+        pr_posts(&out)
     }
 
     /// Merge exactly the head the user confirmed. Never delete branches or bypass protections.
@@ -365,6 +536,19 @@ impl Gh {
             .trim()
             .to_owned())
     }
+}
+
+/// What is asked of `gh` about each pull request.
+const PULL_REQUEST_FIELDS: &str = "number,url,title,headRefName,state,isDraft,statusCheckRollup,\
+createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt";
+
+fn pull_requests(out: &str) -> ForgeResult<Vec<PullRequest>> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(out).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+    let rows = parsed
+        .as_array()
+        .ok_or_else(|| ForgeError::Unreadable("expected a list of pull requests".to_owned()))?;
+    Ok(rows.iter().filter_map(pull_request).collect())
 }
 
 fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
@@ -475,6 +659,95 @@ fn roll_up(rollup: Option<&serde_json::Value>) -> Checks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_gh_that_never_answers_is_stopped_at_the_limit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("gh");
+        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let gh = Gh::at(script, &env);
+        let started = std::time::Instant::now();
+        let error = gh
+            .pr_posts(dir.path(), 7, Duration::from_millis(300))
+            .unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "waited {:?}",
+            started.elapsed()
+        );
+        assert!(error.to_string().contains("no answer within"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_gh_that_answers_in_time_is_read_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("gh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho '{\"url\":\"u\",\"reviews\":[{\"submittedAt\":\"2026-09-28T16:17:20Z\"}],\"comments\":[]}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let posts = Gh::at(script, &env)
+            .pr_posts(dir.path(), 7, Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].kind, PrPostKind::Review);
+    }
+
+    #[test]
+    fn reviews_and_comments_come_back_with_their_times_oldest_first() {
+        let json = r#"{
+            "url": "https://github.com/o/r/pull/7",
+            "reviews": [
+                {"author": {"login": "bot"}, "state": "COMMENTED", "body": "Two things.",
+                 "submittedAt": "2026-09-28T16:17:20Z"},
+                {"author": {"login": "bot"}, "state": "PENDING", "body": "", "submittedAt": null}
+            ],
+            "comments": [
+                {"author": {"login": "me"}, "body": "Thanks", "createdAt": "2026-09-28T16:10:00Z",
+                 "url": "https://github.com/o/r/pull/7#issuecomment-1"}
+            ]
+        }"#;
+        let posts = pr_posts(json).unwrap();
+        assert_eq!(
+            posts.len(),
+            2,
+            "a pending review is not posted yet: {posts:?}"
+        );
+        assert_eq!(posts[0].kind, PrPostKind::Comment);
+        assert_eq!(
+            posts[0].url.as_deref(),
+            Some("https://github.com/o/r/pull/7#issuecomment-1")
+        );
+        assert_eq!(posts[1].kind, PrPostKind::Review);
+        assert_eq!(
+            posts[1].url.as_deref(),
+            Some("https://github.com/o/r/pull/7")
+        );
+        assert_eq!(
+            posts[1].at_ms - posts[0].at_ms,
+            7 * 60_000 + 20_000,
+            "times are exact to the second"
+        );
+        assert!(pr_posts("{}").unwrap().is_empty());
+        assert!(pr_posts("not json").is_err());
+    }
 
     #[test]
     fn reads_the_shapes_git_hands_out() {
