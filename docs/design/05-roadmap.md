@@ -654,6 +654,29 @@ _Exit:_ labels, merges and weak evidence are kept apart in the data and the word
 never speak below the sample size; the gates green. Owed: the hands-on pass in
 [08 §21](08-manual-checklist.md#21--outcomes), on all three platforms.
 
+## M22 — Workflows
+
+Proposed in [21-workflows](21-workflows.md), after an eight-question design pass on 2026-09-28.
+
+- Named sequences of agent work in YAML under the user's data directory, never a repository's:
+  inputs, a DAG of steps (`start_session`, `wait_session`, `send_to_session`, `wait_pr_activity`,
+  `notify`), `{{ variables }}` checked at load time, one trigger — manual. A built-in
+  **Request code review**: a second agent reviews the workspace's pull request in the same
+  worktree, posts with `gh`, and when the forge shows the review the user is told and so is the
+  agent that wrote the PR, once it is quiet.
+- The engine is a pure `advance` in the core over rows in SQLite; the app drives it and executes
+  the effects. `ys workflow list | show | validate | run | runs | cancel`; a run from `ys` needs
+  the app open and reaches it through the activity inbox.
+- WORKFLOWS above PROJECTS in the sidebar; a view with a read-only flow chart, a YAML editor with
+  the validator's errors, and run history. **Describe it** writes a draft through Drafting, never
+  Jev, and never saves without the user.
+- Six slices, each its own pull request: core and file; engine and CLI; forge step and the
+  built-in end to end; UI; Describe it; docs and pictures.
+
+_Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
+window and from `ys`; a busy agent is never written to; every validation error has a failing
+fixture; the docs list every action and variable that exists and none that does not.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
