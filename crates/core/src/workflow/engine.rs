@@ -256,6 +256,29 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
     }
 }
 
+/// The driver found the step's effect no longer made sense, and why.
+pub fn skipped(step: &str, why: &str) -> Move {
+    Move {
+        step: step.to_owned(),
+        from: vec![StepStatus::Running],
+        to: StepStatus::Skipped,
+        outputs: None,
+        note: Some(format!("Skipped: {why}.")),
+    }
+}
+
+/// The driver found the moment wrong — a session busy again — and put the step back to wait.
+/// It keeps the time it first waited from, so its timeout still counts from then.
+pub fn not_yet(step: &str) -> Move {
+    Move {
+        step: step.to_owned(),
+        from: vec![StepStatus::Running],
+        to: StepStatus::Waiting,
+        outputs: None,
+        note: None,
+    }
+}
+
 /// The driver could not carry out a step's effect.
 pub fn failed(step: &str, why: &str) -> Move {
     Move {

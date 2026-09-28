@@ -54,9 +54,48 @@ sleep 30"#;
 
 const LIMIT: Duration = Duration::from_secs(20);
 
+/// Busy for about 600ms, then keeps two lines, working for a moment after the first.
+const TWO_LINES: &str = r#"for i in 1 2 3 4 5 6; do echo "working $i"; sleep 0.1; done
+read one
+printf '%s\n' "$one" >> "$KEPT"
+for i in 1 2 3 4 5 6; do echo "on it $i"; sleep 0.1; done
+read two
+printf '%s\n' "$two" >> "$KEPT"
+sleep 30"#;
+
+/// Two messages for one agent, both due the moment it settles.
+const TWO_SENDS: &str = r#"id: two-sends
+name: Two sends
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: start
+    action: start_session
+    harness: shell
+  - id: settle
+    action: wait_session
+    needs: [start]
+    session: "{{ steps.start.session }}"
+    timeout: 1m
+  - id: one
+    action: send_to_session
+    needs: [settle]
+    session: "{{ steps.start.session }}"
+    prompt: first
+    timeout: 1m
+  - id: two
+    action: send_to_session
+    needs: [settle]
+    session: "{{ steps.start.session }}"
+    prompt: second
+    timeout: 1m
+"#;
+
 /// Starts the script instead of an agent, and remembers what it was asked.
 struct ScriptHands {
     host: Arc<PtyHost>,
+    script: &'static str,
     kept: PathBuf,
     fail_with: Option<String>,
     started: Mutex<Vec<HarnessRequest>>,
@@ -74,7 +113,7 @@ impl Hands for ScriptHands {
         self.host
             .spawn(LaunchPlan {
                 program: "/bin/sh".into(),
-                args: vec!["-c".into(), AGENT.into()],
+                args: vec!["-c".into(), self.script.into()],
                 cwd: None,
                 env: vec![("KEPT".into(), self.kept.display().to_string())],
                 clear_env: false,
@@ -122,6 +161,7 @@ impl Fixture {
         let folder = crate::workflow::user_dir(dir.path());
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("shell-demo.yaml"), WORKFLOW).unwrap();
+        std::fs::write(folder.join("two-sends.yaml"), TWO_SENDS).unwrap();
 
         // The host's events reach the driver as the app wires them. Quiet comes sooner than in
         // the app, and so does "settled", so the test takes seconds, not minutes.
@@ -135,6 +175,7 @@ impl Fixture {
         );
         let hands = ScriptHands {
             host: Arc::clone(&host),
+            script: AGENT,
             kept: dir.path().join("kept.txt"),
             fail_with: None,
             started: Mutex::new(Vec::new()),
@@ -152,12 +193,19 @@ impl Fixture {
     }
 
     fn queue(&self) -> String {
-        let inputs: BTreeMap<String, String> = [("who".to_owned(), "shell".to_owned())].into();
+        self.queue_workflow("shell-demo", &[("who", "shell")])
+    }
+
+    fn queue_workflow(&self, workflow: &str, given: &[(&str, &str)]) -> String {
+        let inputs: BTreeMap<String, String> = given
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
         queue(
             &self.store,
             self.dir.path(),
             &Request {
-                workflow_id: "shell-demo",
+                workflow_id: workflow,
                 workspace_id: &self.workspace_id,
                 inputs: &inputs,
                 requested_by: "cli",
@@ -337,4 +385,38 @@ fn a_step_left_running_by_a_previous_app_fails_and_is_not_done_twice() {
         fx.hands.started.lock().unwrap().is_empty(),
         "no second agent"
     );
+}
+
+#[test]
+fn two_messages_due_at_once_are_typed_one_quiet_moment_at_a_time() {
+    let mut fx = Fixture::new();
+    fx.hands.script = TWO_LINES;
+    let run = fx.queue_workflow("two-sends", &[]);
+    fx.until("the agent settles", |fx| {
+        fx.step(&run, "settle").status == "succeeded"
+    });
+    // Both messages were due in the tick the agent settled. The first went; the second must
+    // not have gone on the strength of the same look at a quiet agent.
+    assert_eq!(fx.step(&run, "one").status, "succeeded");
+    assert_eq!(fx.step(&run, "two").status, "waiting");
+
+    fx.until("the second message is typed", |fx| {
+        fx.step(&run, "two").status == "succeeded"
+    });
+    assert_eq!(
+        std::fs::read_to_string(&fx.hands.kept).unwrap(),
+        "first\nsecond\n",
+        "each message arrived whole, in order"
+    );
+    let one_ended = fx.step(&run, "one").ended_at.unwrap();
+    let two_ended = fx.step(&run, "two").ended_at.unwrap();
+    assert!(
+        two_ended - one_ended >= 600,
+        "the second waited out the agent's work on the first ({}ms)",
+        two_ended - one_ended
+    );
+    fx.until("the run ends", |fx| {
+        !fx.store.workflow_run(&run).unwrap().unwrap().active()
+    });
+    assert_eq!(fx.run_status(&run), "succeeded");
 }

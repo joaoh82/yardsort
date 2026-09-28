@@ -62,6 +62,15 @@ impl Fixture {
             .args(args)
             .env("YARDSORT_WORKTREE_ROOT", &self.worktree_root)
             .env("YARDSORT_NO_DAEMON", "1");
+        // Run from inside an agent Yardsort started, `ys` would find that agent's workspace in
+        // its environment before the folder it stands in; these tests mean the folder.
+        for name in [
+            yardsort_core::activity::RUN_ENV,
+            yardsort_core::activity::WORKSPACE_ENV,
+            yardsort_core::activity::RECORD_ENV,
+        ] {
+            command.env_remove(name);
+        }
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }

@@ -219,7 +219,13 @@ second, which removed the inbox file the proposal had.
   ignores the echo of a paste), or a `turn.completed` event for the agent's run, whichever is
   later, and it must come after the waiting step began. Quiets are remembered in memory, so
   after a restart only reported turns are known.
-- **Typing** is the first-prompt delivery's method: paste, 150 ms, then Enter.
+- **Typing** is the first-prompt delivery's method: paste, 150 ms, then Enter. The session is
+  looked at again at that moment, not only when the step was planned: busy by then, the step goes
+  back to waiting, and a session typed to once in a tick is not typed to again in that tick,
+  because the host sees it busy only once output comes back.
+- **A step is claimed just before its effect,** through the same conditional update as every
+  move, not with the rest of the plan. A cancel that lands while one effect is under way (a slow
+  agent start, say) stops every effect after it.
 - **A restart** fails any step found `running`, with a note saying Yardsort stopped during it:
   whether the agent started or the text was typed cannot be known, and doing it twice is worse
   than saying so. The proposal would have checked the activity table instead; a run row carries
@@ -381,6 +387,11 @@ Runs, from `ys`, carried out by the app. [The run](#the-run) and
   own to get wrong, and a crashed app cannot look alive.
 - **Steps found running after a restart fail,** rather than being checked against the activity
   table, because nothing yet links a run's step to the launch it made.
+- **From review:** claims and readiness are both checked at the moment of acting, as described
+  under [the run](#the-run). The first version claimed a whole plan's steps before acting on any,
+  so a cancel mid-plan still let the later effects happen; and it trusted the planning-time look
+  at a session, so two messages due at once could both be typed into an agent the first had
+  just set working.
 - **Sessions started by a run needed a new event.** The window only listed sessions once, when
   it loaded, so an agent a run started would have had no tab until a restart.
 - **`notify` is a system notification, always.** Showing it in the window instead when the window

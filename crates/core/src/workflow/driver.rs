@@ -141,6 +141,10 @@ fn move_on(
     }
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
 
+    // Sessions typed to during this tick. The host marks a session busy only once output comes
+    // back, so a second message moments after the first would find it looking quiet still.
+    let mut typed_to: HashSet<String> = HashSet::new();
+
     // Each pass may finish effects that let later steps start. A step moves at most a few times,
     // so this bound is never what stops a healthy run.
     for _ in 0..=workflow.steps.len() * 3 {
@@ -156,24 +160,37 @@ fn move_on(
             handoff: OnceCell::new(),
         };
         let plan = engine::advance(&workflow, &inputs, &steps, &world);
-        let mut running = HashSet::new();
+        // A step is claimed for its effect only just before the effect is carried out, not with
+        // the rest of the plan: the store takes the claim only while the run is still running,
+        // so a cancel that lands while an earlier effect is under way stops the ones after it.
+        let acting: HashSet<&str> = plan.effects.iter().map(step_of).collect();
+        let mut claims: HashMap<String, Move> = HashMap::new();
         for change in &plan.moves {
-            if apply(store, &run.id, change)? && change.to == StepStatus::Running {
-                running.insert(change.step.clone());
+            if change.to == StepStatus::Running && acting.contains(change.step.as_str()) {
+                claims.insert(change.step.clone(), change.clone());
+            } else {
+                apply(store, &run.id, change)?;
             }
         }
-        let acted = !plan.effects.is_empty();
+        let mut delivered = false;
         for effect in plan.effects {
             let step = step_of(&effect).to_owned();
-            // A move that did not apply means the run was cancelled or the step moved on without
-            // us: either way, this effect is no longer wanted.
-            if !running.contains(&step) {
+            let Some(claim) = claims.remove(&step) else {
                 continue;
-            }
-            let change = match carry_out(host, hands, &place, effect) {
-                Ok(outputs) => engine::done(&step, &outputs),
-                Err(why) => engine::failed(&step, &why),
             };
+            if !apply(store, &run.id, &claim)? {
+                if !still_running(store, &run.id)? {
+                    return Ok(()); // Cancelled: nothing more of this run happens.
+                }
+                continue; // The step moved on without us.
+            }
+            let change = match carry_out(host, hands, &place, effect, &mut typed_to) {
+                Outcome::Done(outputs) => engine::done(&step, &outputs),
+                Outcome::Failed(why) => engine::failed(&step, &why),
+                Outcome::Skipped(why) => engine::skipped(&step, &why),
+                Outcome::NotYet => engine::not_yet(&step),
+            };
+            delivered |= change.to != StepStatus::Waiting;
             apply(store, &run.id, &change)?;
         }
         if let Some(finish) = plan.finish {
@@ -184,11 +201,29 @@ fn move_on(
             store.finish_workflow_run(&run.id, status, error.as_deref())?;
             return Ok(());
         }
-        if !acted {
+        // Only an effect that happened can let another step start. One put back to wait would
+        // come straight back from the engine, and be put back again.
+        if !delivered {
             return Ok(());
         }
     }
     Ok(())
+}
+
+fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
+    Ok(store
+        .workflow_run(run_id)?
+        .is_some_and(|run| run.status == "running"))
+}
+
+/// How carrying out one effect went.
+enum Outcome {
+    Done(Outputs),
+    Failed(String),
+    /// It no longer made sense: the session it was for had ended.
+    Skipped(String),
+    /// Not now: the session was busy when the moment came. The step waits again.
+    NotYet,
 }
 
 fn apply(store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
@@ -216,7 +251,12 @@ fn carry_out(
     hands: &dyn Hands,
     place: &Place,
     effect: Effect,
-) -> Result<Outputs, String> {
+    typed_to: &mut HashSet<String>,
+) -> Outcome {
+    let done = |result: Result<Outputs, String>| match result {
+        Ok(outputs) => Outcome::Done(outputs),
+        Err(why) => Outcome::Failed(why),
+    };
     match effect {
         Effect::Start {
             harness,
@@ -234,28 +274,47 @@ fn carry_out(
                 handoff: false,
                 skip_memory,
             };
-            let session = hands.start(&place.workspace.id, request)?;
-            let mut outputs = Outputs::new();
-            outputs.insert("session".into(), session.id.0.clone());
-            if let Some(run) = session.labels.get(RUN_LABEL) {
-                outputs.insert("run".into(), run.clone());
-            }
-            Ok(outputs)
+            done(hands.start(&place.workspace.id, request).map(|session| {
+                let mut outputs = Outputs::new();
+                outputs.insert("session".into(), session.id.0.clone());
+                if let Some(run) = session.labels.get(RUN_LABEL) {
+                    outputs.insert("run".into(), run.clone());
+                }
+                outputs
+            }))
         }
         Effect::Paste { pty_id, text, .. } => {
-            let id = SessionId(pty_id);
-            host.paste(&id, &text)
-                .map_err(|error| format!("Could not type into the session: {error}"))?;
-            std::thread::sleep(SUBMIT_DELAY);
-            host.write(&id, b"\r")
-                .map_err(|error| format!("Could not submit the message: {error}"))?;
-            Ok(Outputs::new())
+            // The engine saw the session quiet when it planned this, but the plan is carried
+            // out step by step: an earlier message, or the user typing, may have set the agent
+            // working since. Look again now, and never type into a busy agent.
+            let id = SessionId(pty_id.clone());
+            match host.info(&id) {
+                Ok(info) if !matches!(info.state, SessionState::Running) => {
+                    return Outcome::Skipped("the session ended before it was quiet".into());
+                }
+                Err(_) => return Outcome::Skipped("the session ended before it was quiet".into()),
+                Ok(info) if info.busy || typed_to.contains(&pty_id) => return Outcome::NotYet,
+                Ok(_) => {}
+            }
+            typed_to.insert(pty_id);
+            done(type_into(host, &id, &text))
         }
-        Effect::Notify { title, body, .. } => {
-            hands.notify(&title, body.as_deref())?;
-            Ok(Outputs::new())
-        }
+        Effect::Notify { title, body, .. } => done(
+            hands
+                .notify(&title, body.as_deref())
+                .map(|()| Outputs::new()),
+        ),
     }
+}
+
+/// Type `text` into a session and submit it, as the first-prompt delivery does.
+fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Result<Outputs, String> {
+    host.paste(id, text)
+        .map_err(|error| format!("Could not type into the session: {error}"))?;
+    std::thread::sleep(SUBMIT_DELAY);
+    host.write(id, b"\r")
+        .map_err(|error| format!("Could not submit the message: {error}"))?;
+    Ok(Outputs::new())
 }
 
 /// The world as the engine sees it from a driver.
@@ -320,5 +379,7 @@ impl Seen<'_> {
     }
 }
 
+#[cfg(test)]
+mod cancel_tests;
 #[cfg(all(test, unix))]
 mod tests;
