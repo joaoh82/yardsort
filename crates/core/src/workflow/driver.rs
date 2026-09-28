@@ -16,10 +16,12 @@ use std::time::Duration;
 
 use pty_host::{HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
 
-use super::engine::{self, Effect, Finish, Inputs, Move, Outputs, SessionFacts, World};
-use super::runs::Place;
+use super::engine::{self, Effect, Finish, Inputs, Move, Outputs, PrSeen, SessionFacts, World};
+use super::runs::{self, Facts, Place};
+use super::PrActivity;
 use crate::error::IpcResult;
-use crate::launch::{HarnessRequest, RUN_LABEL};
+use crate::forge::{PrPost, PrPostKind};
+use crate::launch::{HarnessRequest, HARNESS_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
 use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow};
 
 /// A quiet after at least this much output counts as an agent having settled. The same bar the
@@ -30,6 +32,10 @@ pub const SETTLE_BUSY_MS: u32 = 8_000;
 /// does.
 const SUBMIT_DELAY: Duration = Duration::from_millis(150);
 
+/// How often a run waiting on its pull request asks the forge. A review takes minutes to write;
+/// asking every second would only spend the user's API allowance.
+pub const FORGE_EVERY: Duration = Duration::from_secs(30);
+
 /// What the driver cannot do by itself.
 pub trait Hands {
     /// Start a harness in a workspace, as the app would from its composer.
@@ -38,34 +44,101 @@ pub trait Hands {
     fn notify(&self, title: &str, body: Option<&str>) -> Result<(), String>;
     /// The workspace's handoff packet, as `ys workspace handoff` prints it.
     fn handoff(&self, workspace_id: &str) -> Option<String>;
+    /// The reviews and comments on the workspace's pull request `number`, from the forge.
+    fn pr_posts(&self, workspace_id: &str, number: u32) -> Result<Vec<PrPost>, String>;
 }
 
-/// When each session last went quiet after real work, from the host's events. Kept in memory:
-/// after a restart, a session that settled while nobody watched is known by the turn it
-/// reported, when its harness reports turns.
+/// What a driver keeps between ticks. The app holds one for as long as it runs.
 #[derive(Debug)]
-pub struct Settled {
-    threshold_ms: u32,
-    at: Mutex<HashMap<String, i64>>,
+pub struct Driver {
+    settled: Settled,
+    /// Runs whose interrupted steps were dealt with since this driver started.
+    recovered: Mutex<HashSet<String>>,
+    /// What the forge last said about each run's pull request, and when it was asked.
+    forge: Mutex<HashMap<String, (i64, Vec<PrPost>)>>,
+    forge_every_ms: i64,
 }
 
-impl Default for Settled {
+impl Default for Driver {
     fn default() -> Self {
-        Self::new(SETTLE_BUSY_MS)
+        Self::new(SETTLE_BUSY_MS, FORGE_EVERY)
     }
 }
 
-impl Settled {
-    pub fn new(threshold_ms: u32) -> Self {
+impl Driver {
+    /// A driver that counts a quiet after `settle_busy_ms` of output as settled, and asks the
+    /// forge at most every `forge_every`. Tests shorten both.
+    pub fn new(settle_busy_ms: u32, forge_every: Duration) -> Self {
         Self {
-            threshold_ms,
-            at: Mutex::new(HashMap::new()),
+            settled: Settled::new(settle_busy_ms),
+            recovered: Mutex::new(HashSet::new()),
+            forge: Mutex::new(HashMap::new()),
+            forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
         }
     }
 
     /// Take in a host event. True when it could move a run on — a quiet or an exit — so the
     /// driver should look now rather than at its next tick.
     pub fn observe(&self, event: &HostEvent) -> bool {
+        self.settled.observe(event)
+    }
+
+    /// Move every active run on as far as it goes now.
+    pub fn tick(&self, store: &Store, host: &dyn TerminalHost, hands: &dyn Hands) -> IpcResult<()> {
+        for run in store.active_workflow_runs()? {
+            if let Err(error) = move_on(self, store, host, hands, &run) {
+                eprintln!("workflows: run {}: {}", run.id, error.message);
+            }
+        }
+        Ok(())
+    }
+
+    /// Posts on a run's pull request, asking the forge again only when the last answer is old.
+    fn pr_posts(
+        &self,
+        run_id: &str,
+        ask: impl FnOnce() -> Result<Vec<PrPost>, String>,
+    ) -> Vec<PrPost> {
+        let now = now_ms();
+        let mut seen = self.forge.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((asked, posts)) = seen.get(run_id) {
+            if now - asked < self.forge_every_ms {
+                return posts.clone();
+            }
+        }
+        let posts = match ask() {
+            Ok(posts) => posts,
+            Err(why) => {
+                // Asked again at the next interval; the step's timeout is what gives up.
+                eprintln!("workflows: run {run_id}: cannot read the pull request: {why}");
+                seen.get(run_id)
+                    .map(|(_, old)| old.clone())
+                    .unwrap_or_default()
+            }
+        };
+        seen.insert(run_id.to_owned(), (now, posts.clone()));
+        posts
+    }
+}
+
+/// When each session last went quiet after real work, from the host's events. Kept in memory:
+/// after a restart, a session that settled while nobody watched is known by the turn it
+/// reported, when its harness reports turns.
+#[derive(Debug)]
+struct Settled {
+    threshold_ms: u32,
+    at: Mutex<HashMap<String, i64>>,
+}
+
+impl Settled {
+    fn new(threshold_ms: u32) -> Self {
+        Self {
+            threshold_ms,
+            at: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn observe(&self, event: &HostEvent) -> bool {
         match event {
             HostEvent::Quiet { id, busy_ms } => {
                 if *busy_ms >= self.threshold_ms {
@@ -90,34 +163,13 @@ impl Settled {
     }
 }
 
-/// Move every active run on as far as it goes now. `recovered` remembers the runs whose
-/// interrupted steps were dealt with since the driver started; keep it between calls.
-pub fn tick(
-    store: &Store,
-    host: &dyn TerminalHost,
-    hands: &dyn Hands,
-    settled: &Settled,
-    recovered: &mut HashSet<String>,
-) -> IpcResult<()> {
-    for run in store.active_workflow_runs()? {
-        if let Err(error) = move_on(store, host, hands, settled, &run, recovered) {
-            eprintln!("workflows: run {}: {}", run.id, error.message);
-        }
-    }
-    Ok(())
-}
-
 fn move_on(
+    driver: &Driver,
     store: &Store,
     host: &dyn TerminalHost,
     hands: &dyn Hands,
-    settled: &Settled,
     run: &WorkflowRunRow,
-    recovered: &mut HashSet<String>,
 ) -> IpcResult<()> {
-    if run.status == "queued" && !store.start_workflow_run(&run.id)? {
-        return Ok(()); // Cancelled between the read and now.
-    }
     let Ok(workflow) = super::parse(&run.definition) else {
         store.finish_workflow_run(
             &run.id,
@@ -134,7 +186,25 @@ fn move_on(
         store.finish_workflow_run(&run.id, "failed", Some("The workspace is gone."))?;
         return Ok(());
     };
-    if recovered.insert(run.id.clone()) {
+    let mut facts = Facts::parse(&run.context);
+    let mut started_at = run.started_at;
+    if run.status == "queued" {
+        // The workspace's own agent is whichever was newest when the run began: found now,
+        // before the run has started any of its own for it to be mistaken for.
+        if runs::needs_origin(&workflow) {
+            facts.origin = origin_session(store, host, &place.workspace.id);
+        }
+        if !store.start_workflow_run(&run.id, Some(&facts.to_json()))? {
+            return Ok(()); // Cancelled between the read and now.
+        }
+        started_at = Some(now_ms());
+    }
+    if driver
+        .recovered
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(run.id.clone())
+    {
         for change in engine::recover(&store.workflow_steps(&run.id)?) {
             apply(store, &run.id, &change)?;
         }
@@ -150,10 +220,13 @@ fn move_on(
     for _ in 0..=workflow.steps.len() * 3 {
         let steps = store.workflow_steps(&run.id)?;
         let world = Seen {
+            driver,
             store,
             host,
             hands,
-            settled,
+            run_id: &run.id,
+            started_at: started_at.unwrap_or(run.created_at),
+            facts: &facts,
             place: &place,
             now: now_ms(),
             memory: OnceCell::new(),
@@ -319,10 +392,14 @@ fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Result<Outp
 
 /// The world as the engine sees it from a driver.
 struct Seen<'a> {
+    driver: &'a Driver,
     store: &'a Store,
     host: &'a dyn TerminalHost,
     hands: &'a dyn Hands,
-    settled: &'a Settled,
+    run_id: &'a str,
+    /// When the run started: pull request activity counts from here.
+    started_at: i64,
+    facts: &'a Facts,
     place: &'a Place,
     now: i64,
     memory: OnceCell<Option<String>>,
@@ -341,7 +418,11 @@ impl World for Seen<'_> {
         SessionFacts {
             alive: matches!(info.state, SessionState::Running),
             busy: info.busy,
-            settled_at: self.settled.get(pty_id).max(self.turn_completed_at(pty_id)),
+            settled_at: self
+                .driver
+                .settled
+                .get(pty_id)
+                .max(self.turn_completed_at(pty_id)),
         }
     }
 
@@ -359,9 +440,56 @@ impl World for Seen<'_> {
                 .handoff
                 .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
                 .clone(),
+            [namespace, _] if namespace == "pr" => self.facts.var(path),
             _ => self.place.var(path),
         }
     }
+
+    fn origin(&self) -> Option<String> {
+        self.facts.origin.clone()
+    }
+
+    fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen> {
+        let number = self.facts.pr.as_ref()?.number;
+        let posts = self.driver.pr_posts(self.run_id, || {
+            self.hands.pr_posts(&self.place.workspace.id, number)
+        });
+        // The forge keeps whole seconds; a post in the second the run started counts.
+        let since = self.started_at - self.started_at.rem_euclid(1000);
+        let wanted: Vec<&PrPost> = posts
+            .iter()
+            .filter(|post| post.at_ms >= since)
+            .filter(|post| match kind {
+                PrActivity::Any => true,
+                PrActivity::Review => post.kind == PrPostKind::Review,
+                PrActivity::Comment => post.kind == PrPostKind::Comment,
+            })
+            .collect();
+        Some(PrSeen {
+            count: u32::try_from(wanted.len()).unwrap_or(u32::MAX),
+            latest_url: wanted.last().and_then(|post| post.url.clone()),
+        })
+    }
+}
+
+/// The workspace's newest live harness session: the conversation records newest first, matched
+/// to the sessions the host is running. Shells and programs are not agents.
+fn origin_session(store: &Store, host: &dyn TerminalHost, workspace_id: &str) -> Option<String> {
+    let records = store.sessions(workspace_id).ok()?;
+    let live: Vec<SessionInfo> = host
+        .list()
+        .into_iter()
+        .filter(|session| {
+            matches!(session.state, SessionState::Running)
+                && session.labels.get(WORKSPACE_LABEL).map(String::as_str) == Some(workspace_id)
+                && session.labels.contains_key(HARNESS_LABEL)
+        })
+        .collect();
+    records.iter().find_map(|record| {
+        live.iter()
+            .find(|session| session.labels.get(RECORD_LABEL) == Some(&record.id))
+            .map(|session| session.id.0.clone())
+    })
 }
 
 impl Seen<'_> {
@@ -380,6 +508,6 @@ impl Seen<'_> {
 }
 
 #[cfg(test)]
-mod cancel_tests;
+mod portable_tests;
 #[cfg(all(test, unix))]
 mod tests;

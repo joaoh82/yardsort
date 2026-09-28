@@ -679,6 +679,10 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
       a background thread in the app that starts agents, waits for them to settle, types to them and
       notifies; the app lock that tells `ys` the app is running; `ys workflow run | runs | cancel`.
       Recorded in [21 § slice 2](21-workflows.md#slice-2-what-shipped).
+- [x] Slice 3: the pull request and the workspace's own agent. Migration 0013 keeps what a run
+      found out; `wait_pr_activity` asks `gh` every 30 s; `session: origin` is resolved when the
+      run starts. The built-in code review runs end to end. Recorded in
+      [21 § slice 3](21-workflows.md#slice-3-what-shipped).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing

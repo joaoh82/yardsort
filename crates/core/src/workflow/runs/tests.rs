@@ -1,4 +1,5 @@
 use super::*;
+use crate::forge::PullRequestState;
 use crate::store::StepStatus;
 
 const DEMO: &str = r#"id: demo
@@ -31,6 +32,7 @@ struct Fixture {
     dir: tempfile::TempDir,
     store: Store,
     workspace: WorkspaceRow,
+    look: Looks,
 }
 
 impl Fixture {
@@ -54,6 +56,7 @@ impl Fixture {
             dir,
             store,
             workspace,
+            look: Looks::default(),
         }
     }
 
@@ -71,18 +74,50 @@ impl Fixture {
                 inputs: &inputs,
                 requested_by: "cli",
             },
-            &harness,
+            &self.look,
         )
     }
 }
 
-/// Two agents are installed; ids are matched without regard to case, as `ys` does.
-fn harness(wanted: &str) -> Result<String, String> {
-    ["claude", "codex"]
-        .into_iter()
-        .find(|id| id.eq_ignore_ascii_case(wanted))
-        .map(str::to_owned)
-        .ok_or_else(|| format!("No harness called {wanted:?}."))
+/// Two agents are installed; ids are matched without regard to case, as `ys` does. The forge
+/// answers with `pr`, or `forge_down` as its error.
+#[derive(Default)]
+struct Looks {
+    pr: Option<PullRequest>,
+    forge_down: Option<String>,
+    asked: std::cell::Cell<u32>,
+}
+
+impl Look for Looks {
+    fn harness(&self, wanted: &str) -> Result<String, String> {
+        ["claude", "codex"]
+            .into_iter()
+            .find(|id| id.eq_ignore_ascii_case(wanted))
+            .map(str::to_owned)
+            .ok_or_else(|| format!("No harness called {wanted:?}."))
+    }
+
+    fn pull_request(&self, _workspace: &WorkspaceRow) -> Result<Option<PullRequest>, String> {
+        self.asked.set(self.asked.get() + 1);
+        match &self.forge_down {
+            Some(why) => Err(why.clone()),
+            None => Ok(self.pr.clone()),
+        }
+    }
+}
+
+fn pull_request(number: u32, state: crate::forge::PullRequestState) -> PullRequest {
+    PullRequest {
+        number,
+        url: format!("https://github.com/o/r/pull/{number}"),
+        title: "Fix the login".into(),
+        branch: "fix-login".into(),
+        state,
+        draft: false,
+        checks: crate::forge::Checks::None,
+        details: None,
+        created_at: None,
+    }
 }
 
 #[test]
@@ -155,25 +190,62 @@ fn a_named_harness_in_a_step_is_checked_too() {
 }
 
 #[test]
-fn what_this_version_cannot_do_is_refused_at_the_door() {
-    let fx = Fixture::new();
+fn a_workflow_that_uses_the_pull_request_needs_one_open_and_keeps_it() {
+    let mut fx = Fixture::new();
     let error = fx
         .queue("code-review", &[("reviewer", "claude")])
         .unwrap_err();
-    assert_eq!(error.code, "workflow_unsupported");
-    assert!(error.message.contains("pull request"), "{}", error.message);
-    let folder = crate::workflow::user_dir(fx.dir.path());
-    let origin = DEMO.replace("id: demo", "id: nudge").replace(
-        "  - id: tell\n    action: notify\n    needs: [start]\n    title: Started\n",
-        "  - id: tell\n    action: send_to_session\n    session: origin\n    prompt: Hi\n",
-    );
-    std::fs::write(folder.join("nudge.yaml"), origin).unwrap();
-    let error = fx.queue("nudge", &[("who", "claude")]).unwrap_err();
+    assert_eq!(error.code, "pull_request_missing");
     assert!(
-        error.message.contains("session: origin"),
+        error.message.contains("has no open one"),
         "{}",
         error.message
     );
+
+    fx.look.pr = Some(pull_request(7, PullRequestState::Merged));
+    let error = fx
+        .queue("code-review", &[("reviewer", "claude")])
+        .unwrap_err();
+    assert_eq!(
+        error.code, "pull_request_missing",
+        "a merged one is not open"
+    );
+
+    fx.look.forge_down = Some("gh is not logged in.".into());
+    let error = fx
+        .queue("code-review", &[("reviewer", "claude")])
+        .unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.message.as_str()),
+        ("pull_request_unknown", "gh is not logged in.")
+    );
+    assert!(fx.store.workflow_runs(None, 10).unwrap().is_empty());
+
+    fx.look.forge_down = None;
+    fx.look.pr = Some(pull_request(7, PullRequestState::Open));
+    let id = fx.queue("code-review", &[("reviewer", "claude")]).unwrap();
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    let facts = Facts::parse(&run.context);
+    assert_eq!(
+        facts.pr,
+        Some(PrFacts {
+            number: 7,
+            url: "https://github.com/o/r/pull/7".into(),
+            title: "Fix the login".into(),
+        })
+    );
+    let var = |path: &str| facts.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
+    assert_eq!(var("pr.number").as_deref(), Some("7"));
+    assert_eq!(var("pr.title").as_deref(), Some("Fix the login"));
+}
+
+#[test]
+fn the_forge_is_not_asked_when_a_workflow_does_not_need_it() {
+    let fx = Fixture::new();
+    fx.queue("demo", &[("who", "claude")]).unwrap();
+    assert_eq!(fx.look.asked.get(), 0);
+    let run = &fx.store.workflow_runs(None, 1).unwrap()[0];
+    assert_eq!(run.context, "{}");
 }
 
 #[test]
@@ -220,7 +292,7 @@ fn one_run_at_a_time_per_workflow_and_workspace() {
 fn a_cancelled_run_cannot_be_moved_on_by_a_driver_that_had_not_heard() {
     let fx = Fixture::new();
     let id = fx.queue("demo", &[("who", "claude")]).unwrap();
-    assert!(fx.store.start_workflow_run(&id).unwrap());
+    assert!(fx.store.start_workflow_run(&id, None).unwrap());
     assert!(fx
         .store
         .move_workflow_step(
@@ -268,7 +340,7 @@ fn a_cancelled_run_cannot_be_moved_on_by_a_driver_that_had_not_heard() {
 fn a_step_move_keeps_its_first_start_time_and_records_what_it_left() {
     let fx = Fixture::new();
     let id = fx.queue("demo", &[("who", "claude")]).unwrap();
-    fx.store.start_workflow_run(&id).unwrap();
+    fx.store.start_workflow_run(&id, None).unwrap();
     let moved = |from, to, outputs| {
         fx.store
             .move_workflow_step(&id, "start", &[from], to, outputs, None)

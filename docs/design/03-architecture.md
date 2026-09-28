@@ -405,7 +405,7 @@ documentation and owed a recording. See [16-agent-events-stage-2-cursor](16-agen
 
 ### Workflow runs
 
-Migration 0012 adds the runs of [workflows](21-workflows.md): named sequences of agent work,
+Migrations 0012 and 0013 add the runs of [workflows](21-workflows.md): named sequences of agent work,
 written as YAML files in the data directory's `workflows` folder or built in
 (`crates/core/src/workflow/`).
 
@@ -413,7 +413,9 @@ written as YAML files in the data directory's `workflows` folder or built in
 workflow_runs       id, workflow_id, workflow_name, definition (the file, as it was), project_id,
                     workspace_id (set null), workspace_name, inputs (JSON), status ('queued' |
                     'running' | 'succeeded' | 'failed' | 'cancelled'), requested_by ('app' | 'cli'),
-                    error, created_at, started_at, ended_at
+                    error, created_at, started_at, ended_at,
+                    context (JSON: the pull request when queued, the workspace's own agent when
+                    started; migration 0013)
                     -- unique (workflow_id, workspace_id) while queued or running
 workflow_step_runs  run_id → workflow_runs (cascade), step_id, position, action, status
                     ('pending' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped' |

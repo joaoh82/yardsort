@@ -301,8 +301,11 @@ written. `list` also prints where the `workflows` folder is.
 `run` checks the workflow, the workspace and every input before it queues anything, and refuses
 while Yardsort is closed, because the app is what carries runs out. Inside a workspace's folder,
 or in an agent's terminal there, `--workspace` can be left out. It prints the run's id and
-returns at once. A run id can be shortened to its first characters, as `runs` prints it.
-`--json` works as everywhere. See [Running a workflow](workflows.md#running-a-workflow).
+returns at once. A workflow that uses the pull request needs the GitHub CLI (`gh`), logged in,
+and an open pull request for the workspace's branch. A run id can be shortened to its first
+characters, as `runs` prints it. `--json` works as everywhere. See
+[Running a workflow](workflows.md#running-a-workflow) and
+[Requesting a code review](workflows.md#requesting-a-code-review).
 
 ### `ys activity export`
 

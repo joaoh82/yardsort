@@ -12,8 +12,12 @@ has the downloads and the full commit lists.
   line and column of every mistake, including every `{{ variable }}`; `list`, `show` and `copy`
   manage them. With Yardsort open, `ys workflow run` queues a run and the app carries it out in
   the background, with the agents it starts as tabs; `ys workflow runs` follows it and `cancel`
-  stops it, never the agents. A built-in **Request code review** is included; it needs the pull
-  request steps that come next, so it cannot run yet. See [Workflows](docs/guide/workflows.md).
+  stops it, never the agents. Steps can wait for a review or comment on the workspace's pull
+  request, use its number and link, and talk to the workspace's own agent. The built-in
+  **Request code review** puts it together: `ys workflow run code-review --input
+reviewer=codex` has a second agent review the pull request and post on GitHub, then tells you,
+  and tells the agent that wrote it to address the review. See
+  [Workflows](docs/guide/workflows.md).
 - **Project search.** Click the search icon beside Projects to filter by name. Clear the filter
   with **×**, or press **Escape** to close it; **×** also closes an empty field. The selected
   workspace's project stays visible, including projects added while filtering.

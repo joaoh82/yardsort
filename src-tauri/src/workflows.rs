@@ -9,7 +9,6 @@
 //! is also how `ys` knows the app is running, and it keeps two apps on one profile from driving
 //! the same run twice.
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, PoisonError};
@@ -21,9 +20,10 @@ use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
+use yardsort_core::forge::{Gh, PrPost};
 use yardsort_core::launch::{HarnessRequest, Launch};
 use yardsort_core::presence::AppLock;
-use yardsort_core::workflow::driver::{self, Hands, Settled};
+use yardsort_core::workflow::driver::{self, Hands};
 
 use crate::state::AppState;
 
@@ -48,14 +48,14 @@ pub struct SessionStarted {
 /// Managed by Tauri while the driver runs.
 pub struct Driver {
     wake: Mutex<Sender<()>>,
-    settled: Settled,
+    driver: driver::Driver,
     _lock: AppLock,
 }
 
 impl Driver {
     /// Every host event passes through here. A quiet or an exit is a reason to look now.
     pub fn observe(&self, event: &HostEvent) {
-        if self.settled.observe(event) {
+        if self.driver.observe(event) {
             let _ = self
                 .wake
                 .lock()
@@ -82,7 +82,7 @@ pub fn start(app: &AppHandle, data_dir: &Path) {
     let (wake, woken) = mpsc::channel();
     app.manage(Driver {
         wake: Mutex::new(wake),
-        settled: Settled::default(),
+        driver: driver::Driver::default(),
         _lock: lock,
     });
     let handle = app.clone();
@@ -95,7 +95,6 @@ pub fn start(app: &AppHandle, data_dir: &Path) {
 }
 
 fn drive(handle: &AppHandle, woken: &Receiver<()>) {
-    let mut recovered = HashSet::new();
     loop {
         match woken.recv_timeout(TICK) {
             Ok(()) | Err(RecvTimeoutError::Timeout) => {}
@@ -112,13 +111,10 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
             handle,
             state: &state,
         };
-        if let Err(error) = driver::tick(
-            &state.store,
-            state.host.as_ref(),
-            &hands,
-            &driver.settled,
-            &mut recovered,
-        ) {
+        if let Err(error) = driver
+            .driver
+            .tick(&state.store, state.host.as_ref(), &hands)
+        {
             eprintln!("workflows: cannot read runs: {}", error.message);
         }
     }
@@ -170,5 +166,14 @@ impl Hands for AppHands<'_> {
         )
         .ok()?;
         Some(handoff::render(&facts))
+    }
+
+    fn pr_posts(&self, workspace_id: &str, number: u32) -> Result<Vec<PrPost>, String> {
+        let (_, root) = crate::changes::commands::workspace(self.state, workspace_id)
+            .map_err(|error| error.message)?;
+        let gh = Gh::find(&self.state.env())
+            .ok_or_else(|| "The GitHub CLI (`gh`) is not on your PATH.".to_owned())?;
+        gh.pr_posts(&root, number)
+            .map_err(|error| error.to_string())
     }
 }

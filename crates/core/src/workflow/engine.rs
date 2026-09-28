@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use super::template;
-use super::{Action, SessionRef, Until, Workflow};
+use super::{Action, PrActivity, SessionRef, Until, Workflow};
 use crate::store::{StepStatus, WorkflowStepRow};
 
 /// What a session is doing, as the driver sees it.
@@ -34,6 +34,20 @@ pub trait World {
     fn session(&self, pty_id: &str) -> SessionFacts;
     /// The value of a variable outside `inputs` and `steps`: `workspace.branch`, `memory`, ….
     fn var(&self, path: &[String]) -> Option<String>;
+    /// The terminal id of the workspace's own agent, found when the run started.
+    fn origin(&self) -> Option<String>;
+    /// Reviews or comments of `kind` on the workspace's pull request since the run started, as
+    /// the forge last said. `None` while nothing is known yet.
+    fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen>;
+}
+
+/// Activity found on a pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrSeen {
+    /// How many reviews and comments, of the kind asked for.
+    pub count: u32,
+    /// Where to read the newest.
+    pub latest_url: Option<String>,
 }
 
 /// A change to one step, to be applied only if the step is still in one of `from`.
@@ -141,9 +155,7 @@ pub fn advance(
                     .get(from.as_str())
                     .and_then(|o| o.get("session"))
                     .cloned(),
-                // The workspace's own agent is found by the driver before a run starts, in a
-                // later version; until then a run that needs it is refused at the door.
-                SessionRef::Origin => None,
+                SessionRef::Origin => world.origin(),
             };
             let moved = match current {
                 StepStatus::Pending => {
@@ -368,6 +380,11 @@ fn begin(
         Action::SendToSession {
             session, prompt, ..
         } => match session_of(session) {
+            None if *session == SessionRef::Origin => skip(
+                id,
+                StepStatus::Pending,
+                "no agent was running in the workspace when the run started",
+            ),
             None => skip(id, StepStatus::Pending, "there is no session to send to"),
             Some(pty) => {
                 let facts = world.session(&pty);
@@ -386,11 +403,7 @@ fn begin(
                 }
             }
         },
-        Action::WaitPrActivity { .. } => fail(
-            id,
-            StepStatus::Pending,
-            "Waiting for pull request activity is not in this version of Yardsort.",
-        ),
+        Action::WaitPrActivity { .. } => to(id, StepStatus::Pending, StepStatus::Waiting),
     }
 }
 
@@ -437,6 +450,33 @@ fn wait(
                 None => None,
             }
         }
+        Action::WaitPrActivity { kind, timeout_secs } => match world.pr_activity(*kind) {
+            Some(seen) if seen.count > 0 => {
+                let mut left = Outputs::new();
+                left.insert("count".into(), seen.count.to_string());
+                if let Some(url) = seen.latest_url {
+                    left.insert("latest_url".into(), url);
+                }
+                Some(Move {
+                    outputs: Some(serde_json::to_string(&left).unwrap_or_else(|_| "{}".into())),
+                    ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
+                })
+            }
+            _ if timed_out(timeout_secs) => Some(fail(
+                id,
+                StepStatus::Waiting,
+                &format!(
+                    "No {} appeared on the pull request within {}.",
+                    match kind {
+                        PrActivity::Review => "review",
+                        PrActivity::Comment => "comment",
+                        PrActivity::Any => "review or comment",
+                    },
+                    duration(timeout_secs.unwrap_or(0))
+                ),
+            )),
+            _ => None,
+        },
         Action::SendToSession {
             session,
             prompt,

@@ -251,6 +251,68 @@ pub fn pull_request_for<'a>(requests: &'a [PullRequest], branch: &str) -> Option
         .max_by_key(|pr| (pr.state == PullRequestState::Open, pr.number))
 }
 
+/// A review or a comment on a pull request: what a workflow waiting on one looks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrPost {
+    pub kind: PrPostKind,
+    /// When it was posted, in epoch milliseconds.
+    pub at_ms: i64,
+    /// Where to read it, when the forge says.
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrPostKind {
+    /// A review: approve, comment or request changes, with any line comments in it.
+    Review,
+    /// A comment on the pull request's conversation.
+    Comment,
+}
+
+/// Reviews and comments out of `gh pr view --json reviews,comments,url`. A review that is still
+/// pending — started, not submitted — has no time and is not a post yet.
+pub fn pr_posts(json: &str) -> ForgeResult<Vec<PrPost>> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+    let pr_url = parsed.get("url").and_then(|v| v.as_str());
+    let list = |key: &str| {
+        parsed
+            .get(key)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    };
+    let mut posts = Vec::new();
+    for review in list("reviews") {
+        let at = review.get("submittedAt").and_then(|t| t.as_str());
+        let Some(at_ms) = at.and_then(crate::activity::iso_to_ms) else {
+            continue;
+        };
+        posts.push(PrPost {
+            kind: PrPostKind::Review,
+            at_ms,
+            url: pr_url.map(str::to_owned),
+        });
+    }
+    for comment in list("comments") {
+        let at = comment.get("createdAt").and_then(|t| t.as_str());
+        let Some(at_ms) = at.and_then(crate::activity::iso_to_ms) else {
+            continue;
+        };
+        posts.push(PrPost {
+            kind: PrPostKind::Comment,
+            at_ms,
+            url: comment
+                .get("url")
+                .and_then(|v| v.as_str())
+                .or(pr_url)
+                .map(str::to_owned),
+        });
+    }
+    posts.sort_by_key(|post| post.at_ms);
+    Ok(posts)
+}
+
 /// The `gh` command line, found on the user's `PATH`.
 pub struct Gh {
     program: Program,
@@ -311,6 +373,21 @@ impl Gh {
             .as_array()
             .ok_or_else(|| ForgeError::Unreadable("expected a list of pull requests".to_owned()))?;
         Ok(rows.iter().filter_map(pull_request).collect())
+    }
+
+    /// The reviews and comments on pull request `number`, oldest first.
+    pub fn pr_posts(&self, root: &Path, number: u32) -> ForgeResult<Vec<PrPost>> {
+        let out = self.run(
+            root,
+            &[
+                "pr",
+                "view",
+                &number.to_string(),
+                "--json",
+                "url,reviews,comments",
+            ],
+        )?;
+        pr_posts(&out)
     }
 
     /// Merge exactly the head the user confirmed. Never delete branches or bypass protections.
@@ -475,6 +552,45 @@ fn roll_up(rollup: Option<&serde_json::Value>) -> Checks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviews_and_comments_come_back_with_their_times_oldest_first() {
+        let json = r#"{
+            "url": "https://github.com/o/r/pull/7",
+            "reviews": [
+                {"author": {"login": "bot"}, "state": "COMMENTED", "body": "Two things.",
+                 "submittedAt": "2026-09-28T16:17:20Z"},
+                {"author": {"login": "bot"}, "state": "PENDING", "body": "", "submittedAt": null}
+            ],
+            "comments": [
+                {"author": {"login": "me"}, "body": "Thanks", "createdAt": "2026-09-28T16:10:00Z",
+                 "url": "https://github.com/o/r/pull/7#issuecomment-1"}
+            ]
+        }"#;
+        let posts = pr_posts(json).unwrap();
+        assert_eq!(
+            posts.len(),
+            2,
+            "a pending review is not posted yet: {posts:?}"
+        );
+        assert_eq!(posts[0].kind, PrPostKind::Comment);
+        assert_eq!(
+            posts[0].url.as_deref(),
+            Some("https://github.com/o/r/pull/7#issuecomment-1")
+        );
+        assert_eq!(posts[1].kind, PrPostKind::Review);
+        assert_eq!(
+            posts[1].url.as_deref(),
+            Some("https://github.com/o/r/pull/7")
+        );
+        assert_eq!(
+            posts[1].at_ms - posts[0].at_ms,
+            7 * 60_000 + 20_000,
+            "times are exact to the second"
+        );
+        assert!(pr_posts("{}").unwrap().is_empty());
+        assert!(pr_posts("not json").is_err());
+    }
 
     #[test]
     fn reads_the_shapes_git_hands_out() {

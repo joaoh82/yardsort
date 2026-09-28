@@ -216,9 +216,6 @@ fn start_run(
              Nothing was queued.",
         ));
     }
-    let harness = |wanted: &str| {
-        super::workspace::choose_harness(ys, Some(wanted)).map_err(Failure::into_message)
-    };
     let run_id = runs::queue(
         &ys.store,
         &ys.data_dir,
@@ -228,7 +225,7 @@ fn start_run(
             inputs: &inputs,
             requested_by: "cli",
         },
-        &harness,
+        &Looking(ys),
     )?;
 
     #[derive(Serialize)]
@@ -248,6 +245,25 @@ fn start_run(
         println!("Queued `{id}` in {} as run {short}.", workspace.name);
         println!("Follow it with: ys workflow runs --run {short}");
     })
+}
+
+/// What `ys` answers when a run is queued: agents from the settings and `PATH`, the pull
+/// request from `gh`.
+struct Looking<'a>(&'a Yardsort);
+
+impl runs::Look for Looking<'_> {
+    fn harness(&self, wanted: &str) -> Result<String, String> {
+        super::workspace::choose_harness(self.0, Some(wanted)).map_err(Failure::into_message)
+    }
+
+    fn pull_request(
+        &self,
+        workspace: &WorkspaceRow,
+    ) -> Result<Option<yardsort_core::forge::PullRequest>, String> {
+        let git = self.0.git().map_err(Failure::into_message)?;
+        let gh = yardsort_core::forge::Gh::find(self.0.env());
+        runs::pull_request_of(gh.as_ref(), &git, workspace)
+    }
 }
 
 /// The workspace this is run in: the agent's own, from its launch environment, or the folder.

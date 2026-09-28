@@ -1593,7 +1593,9 @@ fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
         .ys_from(Some(&path), &["workflow", "run", "ping", "--input", "note"])
         .failed();
     assert!(no_equals.contains("needs an `=`"), "{no_equals}");
-    let later = fx
+    // The built-in review works with the workspace's pull request. This repository has no
+    // GitHub remote, so there is none to be found, gh or no gh, and nothing is queued.
+    let review = fx
         .ys_from(
             Some(&path),
             &[
@@ -1605,7 +1607,11 @@ fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
             ],
         )
         .failed();
-    assert!(later.contains("cannot do yet"), "{later}");
+    assert!(review.contains("pull request"), "{review}");
+    assert!(
+        !review.contains("--json"),
+        "not gh's command line: {review}"
+    );
 
     let queued = fx.ys_from(Some(&path), &["workflow", "run", "ping"]).ok();
     assert!(queued.contains(made["name"].as_str().unwrap()), "{queued}");
