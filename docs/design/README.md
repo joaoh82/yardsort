@@ -13,7 +13,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 06  | [Open questions](06-open-questions.md)                                  | Decisions still to make                                                                    |
 | 07  | [Terminal benchmarks](07-terminal-benchmarks.md)                        | M1 go/no-go on webview terminal rendering, with numbers                                    |
 | 08  | [Manual checklist](08-manual-checklist.md)                              | The per-OS pass CI cannot do, and the record of having done it                             |
-| 09  | [Agent events & memory](09-agent-events-and-memory.md)                  | Proposal: a local event layer beside the PTY, handoffs, reviewed memory                    |
+| 09  | [Agent events & memory](09-agent-events-and-memory.md)                  | Implemented through stage 6: a local event layer, handoffs, reviewed memory, outcomes      |
 | 10  | [Agent events, stage 0–1](10-agent-events-stage-1.md)                   | The fit report against the live tree, the decisions, and what shipped                      |
 | 11  | [Agent events, stage 2: Claude Code](11-agent-events-stage-2-claude.md) | Recorded hook fixtures, the per-launch settings file, the inbox, coverage                  |
 | 12  | [Agent events, stage 2: Codex](12-agent-events-stage-2-codex.md)        | Why not its hooks; `notify` as the trigger, the session file as the substance              |

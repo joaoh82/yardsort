@@ -97,8 +97,9 @@ events)` per run, `render(&Facts)` for the text.
   edit is kept, and the spawn carries the edited packet with `handoff: true` and creates no
   workspace. `WorkspacePanel.test.tsx`: **Hand off…** asks the core for the packet and opens the
   composer here with it, spawning nothing.
-- Live: owed — [08 §19](08-manual-checklist.md#19--handing-off), the story itself: Claude, then
-  Codex from the packet.
+- Live, on Linux: **Hand off…** and the packet in the composer, seen in the window. Owed — the
+  story itself, Claude then Codex from the packet, and the rest of
+  [08 §19](08-manual-checklist.md#19--handing-off) on every platform.
 
 ## 5 · What this slice does not do, and the next
 
