@@ -10,6 +10,7 @@ import { useUpdatesStore } from "@/stores/updates";
 import { reviewVanishedWorkspaces } from "./actions";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
+import { WorkflowsSection } from "@/features/workflows/WorkflowsSection";
 
 /**
  * How often the forge is asked again what became of each project's pull requests, while the
@@ -86,6 +87,7 @@ export function Sidebar() {
 
   return (
     <aside aria-label="Projects" className="flex h-full flex-col bg-surface">
+      <WorkflowsSection />
       <PanelHeader
         title="Projects"
         search={

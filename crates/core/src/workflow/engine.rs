@@ -418,9 +418,8 @@ fn wait(
     effects: &mut Vec<Effect>,
 ) -> Option<Move> {
     let id = step.id.as_str();
-    let timed_out = |limit: &Option<u64>| {
-        limit.is_some_and(|secs| now - since >= i64::try_from(secs).unwrap_or(i64::MAX) * 1000)
-    };
+    let timed_out =
+        |limit: &Option<u32>| limit.is_some_and(|secs| now - since >= i64::from(secs) * 1000);
     match &step.action {
         Action::WaitSession {
             session,
@@ -539,7 +538,7 @@ fn skip(step: &str, from: StepStatus, why: &str) -> Move {
 }
 
 /// `2h`, `45m`, `90s`: the way a file writes it.
-fn duration(secs: u64) -> String {
+fn duration(secs: u32) -> String {
     if secs.is_multiple_of(3600) {
         format!("{}h", secs / 3600)
     } else if secs.is_multiple_of(60) {

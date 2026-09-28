@@ -683,6 +683,9 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
       found out; `wait_pr_activity` asks `gh` every 30 s; `session: origin` is resolved when the
       run starts. The built-in code review runs end to end. Recorded in
       [21 § slice 3](21-workflows.md#slice-3-what-shipped).
+- [x] Slice 4: the Workflows section above Projects, the view (chart, editor with the
+      validator's marks, runs) and the Run dialog, also from a workspace's menu. Recorded in
+      [21 § slice 4](21-workflows.md#slice-4-what-shipped).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing

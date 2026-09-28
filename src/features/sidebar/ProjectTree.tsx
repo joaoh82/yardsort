@@ -17,6 +17,7 @@ import { PullRequestBadge } from "./PullRequestBadge";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
+import { RunWorkflowDialog } from "@/features/workflows/RunWorkflowDialog";
 import { MemoryDialog } from "./MemoryDialog";
 import { OutcomesDialog } from "./OutcomesDialog";
 import { useMemoryStore } from "@/stores/memory";
@@ -240,7 +241,10 @@ function WorkspaceNode({
   disabled: boolean;
 }) {
   const selected = useProjectsStore(
-    (s) => s.selectedWorkspaceId === workspace.id && s.composingProjectId === null,
+    (s) =>
+      s.selectedWorkspaceId === workspace.id &&
+      s.composingProjectId === null &&
+      s.workflowId === null,
   );
   // Select the project's own entry, never a derived object: a selector that built one would
   // hand back a new value on every render and re-render for ever.
@@ -252,6 +256,8 @@ function WorkspaceNode({
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [forgetting, setForgetting] = useState(false);
+  // The Run dialog: `undefined` closed, `null` to choose a workflow, or the one to run.
+  const [runWorkflow, setRunWorkflow] = useState<string | null | undefined>(undefined);
   const isWorktree = workspace.kind === "worktree";
   const gone = workspace.missing || workspace.archived;
   const unusable = disabled || gone;
@@ -274,6 +280,16 @@ function WorkspaceNode({
                 onSelect: () =>
                   void native.revealInFileManager(workspace.path).catch(console.error),
               },
+        ]),
+    ...(gone
+      ? []
+      : [
+          {
+            label: "Request code review…",
+            disabled,
+            onSelect: () => setRunWorkflow("code-review"),
+          },
+          { label: "Run workflow…", disabled, onSelect: () => setRunWorkflow(null) },
         ]),
     ...(isWorktree
       ? [
@@ -392,6 +408,13 @@ function WorkspaceNode({
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
       {renaming && <RenameDialog workspace={workspace} onClose={() => setRenaming(false)} />}
       {forgetting && <ForgetDialog workspace={workspace} onClose={() => setForgetting(false)} />}
+      {runWorkflow !== undefined && (
+        <RunWorkflowDialog
+          workspace={workspace}
+          workflowId={runWorkflow ?? undefined}
+          onClose={() => setRunWorkflow(undefined)}
+        />
+      )}
     </li>
   );
 }

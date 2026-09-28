@@ -371,3 +371,25 @@ fn a_forge_that_is_slow_to_answer_holds_up_no_other_run() {
     release.send(()).unwrap();
     profile.until(&driver, &forge, || forge.asked() >= 1);
 }
+
+#[test]
+fn a_tick_says_when_a_run_changed_so_the_window_only_looks_when_there_is_something_new() {
+    let profile = Profile::new(&[("right-away", RIGHT_AWAY)]);
+    let forge = Forge::new(Vec::new());
+    let driver = Driver::default();
+    let host = PtyHost::new(Arc::new(|_| {}));
+    assert!(
+        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        "nothing to do"
+    );
+    let run = profile.queue("right-away");
+    assert!(
+        driver.tick(&profile.store, &host, &forge).unwrap(),
+        "it started and finished"
+    );
+    assert_eq!(profile.status(&run), "succeeded");
+    assert!(
+        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        "and then nothing moved"
+    );
+}

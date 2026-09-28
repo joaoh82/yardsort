@@ -5,9 +5,46 @@ agent review this workspace's pull request, then tell me and the agent that wrot
 one as a short YAML file. Yardsort checks every name and every `{{ variable }}` in it before it
 runs anything, and names the line and column of each mistake.
 
-In this version you run a workflow from the command line, with `ys workflow run`, while Yardsort
-is open. The **Workflows** section of the sidebar arrives next; the
-[roadmap](../design/05-roadmap.md) has the plan.
+Workflows have their own section at the top of the sidebar. Open one to see its steps as a chart,
+edit its file, and follow its runs; **Run…** starts it. `ys workflow run` starts one from a
+terminal, with Yardsort open, because the app is what carries runs out.
+
+## The Workflows section
+
+**Workflows**, above **Projects** in the sidebar, lists every workflow: the built-in ones and
+yours, by name. A number on a row is how many of its runs are going now; a red **!** means the file
+has problems and cannot run; an orange dot means unsaved changes. Click a row to open it in the
+center panel. **+** starts a new one.
+
+The center panel shows three things:
+
+- **The chart.** Every step as a box, top to bottom, with an arrow from each step to the ones
+  that need it. Steps that need the same ones sit side by side. The chart is drawn from the file
+  and follows it as you type; it is not something you edit. With a run open in the list on the
+  right, each box shows how that step went in it.
+- **The file.** A YAML editor. Every pause in typing checks the file, and each problem is marked
+  where it is and listed under the editor. A built-in is read-only: **Customize** copies it into
+  your folder under the same id, so your copy is used instead of it, and **Duplicate** copies it
+  under a new id, as a second workflow. Your own file has **Save**, **Revert** while there are
+  unsaved changes, **Duplicate**, and **Delete**, or **Reset to built-in** for a copy that
+  replaces one, which deletes your copy and brings the built-in back. Deleting asks first.
+  Unsaved changes are kept while Yardsort is open, so you can look at another workflow and come
+  back; they are gone when it quits.
+- **Runs.** This workflow's runs, newest first, with the workspace and when each was asked for.
+  Open one for its steps, what each left or why it failed or was skipped, and the pull request it
+  is about. A run still going has **Cancel run**.
+
+**Run…** opens a dialog. It asks for the workspace and for each of the workflow's inputs; an agent
+is picked from the same list as the composer's, with those not installed greyed out. If the
+workflow works with the pull request, the dialog looks it up and shows it, or says why there is
+none to use. The run starts when you press **Run**, and appears at the top of the runs at once.
+
+A workspace's menu has **Run workflow…**, which opens the same dialog for that workspace, and
+**Request code review…**, which opens it on the built-in review.
+
+**+** in the sidebar starts a new workflow from a short example, with every part a file needs.
+Give it an `id` and **Save**: it is written as `<id>.yaml` in your folder, and never over a file
+already there.
 
 ## Where workflows come from
 
@@ -87,7 +124,9 @@ together.
 
 ## Running a workflow
 
-Yardsort must be open: the app carries runs out, in the background, while you keep working. Then:
+**Run…** on the workflow, or **Run workflow…** in a workspace's menu, asks the same questions as
+the command line and starts the run. From a terminal, with Yardsort open, because the app is what
+carries runs out in the background while you keep working:
 
 ```sh
 ys workflow run fix-tests --workspace fix-login --input fixer=claude

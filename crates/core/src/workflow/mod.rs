@@ -121,18 +121,18 @@ pub enum Action {
     WaitSession {
         session: SessionRef,
         until: Until,
-        timeout_secs: Option<u64>,
+        timeout_secs: Option<u32>,
     },
     /// Paste a message into a live session once it is quiet. A busy agent is never written to.
     SendToSession {
         session: SessionRef,
         prompt: String,
-        timeout_secs: Option<u64>,
+        timeout_secs: Option<u32>,
     },
     /// Wait for a review or a comment on the workspace's pull request, newer than the run.
     WaitPrActivity {
         kind: PrActivity,
-        timeout_secs: Option<u64>,
+        timeout_secs: Option<u32>,
     },
     /// Tell the person who started the run.
     Notify { title: String, body: Option<String> },
@@ -466,6 +466,105 @@ pub fn copy(data_dir: &Path, id: &str, as_id: Option<&str>) -> IpcResult<PathBuf
     std::io::Write::write_all(&mut file, text.as_bytes())
         .map_err(|e| IpcError::new("io", format!("Cannot write {}: {e}", path.display())))?;
     Ok(path)
+}
+
+/// Save a workflow file and return where it went.
+///
+/// `path` is the file being edited, which must be one of the user's own: it is replaced whole,
+/// through a temporary file, so a crash never leaves half of it. With no `path` this is a new
+/// workflow, written as `<id>.yaml` beside the others, and nothing already there is ever
+/// overwritten. Either way the text must say its `id`, and no other file of the user's may
+/// already claim it. A file with problems is saved as it is: the catalog lists it, with them.
+pub fn save(data_dir: &Path, path: Option<&Path>, text: &str) -> IpcResult<PathBuf> {
+    if text.len() as u64 > MAX_FILE_BYTES {
+        return Err(IpcError::new(
+            "workflow_too_big",
+            format!("A workflow file may be at most {MAX_FILE_BYTES} bytes."),
+        ));
+    }
+    let id = match parse(text) {
+        Ok(workflow) => Some(workflow.id),
+        Err(invalid) => invalid.id,
+    }
+    .filter(|id| parse::is_id(id))
+    .ok_or_else(|| {
+        IpcError::new(
+            "workflow_invalid_id",
+            "Give the workflow an `id:` first: lowercase letters, digits and `-`, like `fix-ci`.",
+        )
+    })?;
+    let editing = match path {
+        Some(path) => Some(own_file(data_dir, path)?),
+        None => None,
+    };
+    let clash = load(data_dir)
+        .into_iter()
+        .find_map(|(entry, _)| match entry.source {
+            Source::File { path, .. }
+                if entry.id == id && editing.as_deref() != Some(Path::new(&path)) =>
+            {
+                Some(path)
+            }
+            _ => None,
+        });
+    if let Some(other) = clash {
+        return Err(IpcError::new(
+            "workflow_exists",
+            format!("{other} already has the id `{id}`. Give this one an id of its own."),
+        ));
+    }
+    let folder = user_dir(data_dir);
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", folder.display())))?;
+    let written = |path: &Path, e: std::io::Error| {
+        IpcError::new("io", format!("Cannot write {}: {e}", path.display()))
+    };
+    match editing {
+        Some(path) => {
+            let temporary = path.with_extension("yaml.saving");
+            std::fs::write(&temporary, text).map_err(|e| written(&temporary, e))?;
+            std::fs::rename(&temporary, &path).map_err(|e| {
+                let _ = std::fs::remove_file(&temporary);
+                written(&path, e)
+            })?;
+            Ok(path)
+        }
+        None => {
+            let path = folder.join(format!("{id}.yaml"));
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(|e| match e.kind() {
+                    std::io::ErrorKind::AlreadyExists => IpcError::new(
+                        "workflow_exists",
+                        format!("{} is already there. Nothing was saved.", path.display()),
+                    ),
+                    _ => written(&path, e),
+                })?;
+            std::io::Write::write_all(&mut file, text.as_bytes()).map_err(|e| written(&path, e))?;
+            Ok(path)
+        }
+    }
+}
+
+/// Delete one of the user's workflow files. A built-in it replaced is used again.
+pub fn remove(data_dir: &Path, path: &Path) -> IpcResult<()> {
+    let path = own_file(data_dir, path)?;
+    std::fs::remove_file(&path)
+        .map_err(|e| IpcError::new("io", format!("Cannot delete {}: {e}", path.display())))
+}
+
+/// `path`, when it is a workflow file directly in the user's folder, as the catalog lists it.
+/// Nothing outside that folder is ever written or removed through a workflow.
+fn own_file(data_dir: &Path, path: &Path) -> IpcResult<PathBuf> {
+    let listed = user_files(&user_dir(data_dir));
+    listed.into_iter().find(|own| own == path).ok_or_else(|| {
+        IpcError::new(
+            "workflow_not_yours",
+            format!("{} is not one of your workflow files.", path.display()),
+        )
+    })
 }
 
 /// `text` with its top-level `id:` line saying `id`, or `None` when it has no such line.

@@ -32,6 +32,9 @@ interface ProjectsState {
   /** A handoff packet to start the composer's message with, when composing to run in a
    *  workspace that already has history. Cleared with the composer. */
   composingPrompt: string | null;
+  /** The workflow open in the center panel, which it takes over like the composer. Selecting
+   *  a workspace or composing closes it; the selected workspace is kept to go back to. */
+  workflowId: string | null;
   /** Raw persisted UI state, for features that remember small things (see `remember`). */
   ui: Record<string, string>;
   /** Projects are expanded unless listed here, so new ones start open. */
@@ -52,6 +55,8 @@ interface ProjectsState {
   move: (id: string, by: -1 | 1) => Promise<void>;
   select: (workspaceId: string | null) => void;
   compose: (projectId: string | null) => void;
+  /** Show a workflow in the center panel; `null` closes it. */
+  openWorkflow: (workflowId: string | null) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
   composeIn: (workspace: Workspace, prompt?: string) => void;
   /**
@@ -128,6 +133,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     composingProjectId: null,
     composingWorkspaceId: null,
     composingPrompt: null,
+    workflowId: null,
     ui: {},
     collapsed: [],
     lastParentDir: null,
@@ -228,6 +234,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           composingProjectId: null,
           composingWorkspaceId: null,
           composingPrompt: null,
+          workflowId: null,
         });
       }
       set({
@@ -235,6 +242,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
+        workflowId: null,
       });
       save(KEYS.selected, workspaceId);
     },
@@ -244,9 +252,19 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingProjectId: projectId,
         composingWorkspaceId: null,
         composingPrompt: null,
+        workflowId: null,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
+    },
+
+    openWorkflow(workflowId) {
+      set({
+        workflowId,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+      });
     },
 
     composeIn(workspace, prompt) {
@@ -255,6 +273,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingProjectId: null,
         composingWorkspaceId: workspace.id,
         composingPrompt: prompt ?? null,
+        workflowId: null,
       });
       save(KEYS.selected, workspace.id);
     },

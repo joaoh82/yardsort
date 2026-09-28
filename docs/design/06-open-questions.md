@@ -179,6 +179,8 @@ From the design pass in [21-workflows](21-workflows.md).
     end the step early. The forge check behind it catches the false end; whether `wait_session`
     should require _both_ quiet and no `turn.started` since, where hooks exist, is a slice 3
     finding.
-23. **Should a `harness` input show only harnesses that are installed?** The composer does; the
-    run dialog should match. The `ys` half is done: since slice 2, `ys workflow run` refuses an
-    agent that is not set up or not on `PATH`, by the check `ys workspace new` uses.
+23. ~~**Should a `harness` input show only harnesses that are installed?**~~ **Settled
+    2026-09-28, in slice 4.** The Run dialog lists the same agents as the composer: the enabled
+    ones, with those not on `PATH` shown greyed as "not installed" rather than hidden, so a
+    missing agent is a thing to notice, not a mystery. A required agent starts on the first one
+    installed. `ys workflow run` refuses one that is not set up or not on `PATH` (slice 2).

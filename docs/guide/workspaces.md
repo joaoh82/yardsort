@@ -94,6 +94,13 @@ touching its folder or its branch.
 
 Hover a workspace and press **⋯**, or right-click it.
 
+### Run workflow… and Request code review…
+
+Start a [workflow](workflows.md) in this workspace: **Run workflow…** asks which, **Request code
+review…** goes straight to the built-in review. Both open the same dialog, which asks the
+workflow's inputs and shows the pull request it will use. The `local` workspace has them too,
+from its right-click menu.
+
 ### Rename…
 
 Changes the **label only**. The folder and the branch keep their names on purpose: agents file

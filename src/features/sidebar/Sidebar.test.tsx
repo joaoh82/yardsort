@@ -26,6 +26,9 @@ const core = vi.hoisted(() => ({
   memoryGet: vi.fn(),
   outcomeLabel: vi.fn(),
   onActivityChanged: vi.fn(),
+  workflowList: vi.fn(),
+  workflowPreview: vi.fn(),
+  harnessesList: vi.fn(),
 }));
 const native = vi.hoisted(() => ({
   pickFolder: vi.fn(),
@@ -88,6 +91,8 @@ describe("Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     core.uiStateLoad.mockResolvedValue({});
+    core.workflowList.mockResolvedValue([]);
+    core.harnessesList.mockResolvedValue([]);
     for (const fn of [core.uiStateSave, core.projectRemove, core.projectsReorder, core.ptyClose]) {
       fn.mockResolvedValue(undefined);
     }
@@ -346,6 +351,26 @@ describe("Sidebar", () => {
     } finally {
       focusVisible.mockRestore();
     }
+  });
+
+  it("offers a code review from a workspace's menu, in the Run dialog for that workspace", async () => {
+    core.workflowList.mockResolvedValue([]);
+    core.harnessesList.mockResolvedValue([]);
+    core.workflowPreview.mockResolvedValue({
+      needsPullRequest: true,
+      pullRequest: null,
+      pullRequestProblem: "`feature` has no open pull request.",
+      needsOrigin: true,
+    });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    expect(screen.getByRole("menuitem", { name: "Run workflow…" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Request code review…" }));
+    const dialog = await screen.findByRole("dialog", { name: /Run/ });
+    expect(within(dialog).queryByRole("combobox", { name: "Workspace" })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("does not reopen the workspace preview over its action menu", async () => {

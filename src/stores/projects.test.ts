@@ -35,7 +35,28 @@ describe("projects store", () => {
       lastParentDir: null,
       error: null,
       notice: null,
+      workflowId: null,
+      composingProjectId: null,
+      composingWorkspaceId: null,
     });
+  });
+
+  it("a workflow and a workspace take the center panel from each other, keeping the selection", () => {
+    store().select("w-app");
+    store().compose("p-app");
+    store().openWorkflow("code-review");
+    expect(store().workflowId).toBe("code-review");
+    expect(store().composingProjectId).toBeNull();
+    expect(store().selectedWorkspaceId).toBe("w-app");
+
+    // Clicking the workspace that is still selected comes back to it.
+    store().select("w-app");
+    expect(store().workflowId).toBeNull();
+
+    store().openWorkflow("code-review");
+    store().compose("p-app");
+    expect(store().workflowId).toBeNull();
+    expect(store().composingProjectId).toBe("p-app");
   });
 
   it("restores selection, collapsed projects and the last parent folder", async () => {

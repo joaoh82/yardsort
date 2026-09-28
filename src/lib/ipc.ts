@@ -76,9 +76,33 @@ import {
   type Workspace,
   type WorkspaceSettingsDto,
   type YsStatus,
+  type WorkflowItem,
+  type WorkflowCheck,
+  type WorkflowRun,
+  type WorkflowStepRun,
+  type RunPreview,
+  type Workflow,
+  type Step,
+  type Input,
+  type InputKind,
+  type Problem,
+  type Source,
+  type PrFacts,
 } from "./bindings";
 
 export type {
+  WorkflowItem,
+  WorkflowCheck,
+  WorkflowRun,
+  WorkflowStepRun,
+  RunPreview,
+  Workflow,
+  Step,
+  Input,
+  InputKind,
+  Problem,
+  Source,
+  PrFacts,
   ActivityCounter,
   ActivityDiagnostics,
   ActivityEvent,
@@ -441,6 +465,32 @@ export const ipc = {
     channel.onmessage = (buffer) => onOutput(new Uint8Array(buffer));
     return unwrap(commands.ptyAttach(id, channel as unknown as Channel<number[]>));
   },
+
+  // --- workflows ----------------------------------------------------------------------------
+
+  /** Every workflow, built in and the user's, with how many runs of each are going now. */
+  workflowList: () => unwrap(commands.workflowList()),
+  /** Check a file's text as it is written: problems for the editor, the workflow for the chart. */
+  workflowCheck: (text: string): Promise<WorkflowCheck> => commands.workflowCheck(text),
+  /** Save a file: `path` is the user's file being edited, `null` for a new one. Its id back. */
+  workflowSave: (path: string | null, text: string) => unwrap(commands.workflowSave(path, text)),
+  /** Copy into the user's folder; with no `asId`, a built-in's copy replaces it. The copy's id. */
+  workflowCopy: (id: string, asId: string | null = null) => unwrap(commands.workflowCopy(id, asId)),
+  /** Delete one of the user's files. Ask first. */
+  workflowRemove: (path: string) => done(commands.workflowRemove(path)),
+  workflowRuns: (workflowId: string | null, limit = 50) =>
+    unwrap(commands.workflowRuns(workflowId, limit)),
+  workflowRunSteps: (runId: string) => unwrap(commands.workflowRunSteps(runId)),
+  /** What a run would find: the pull request, and whether it needs one. */
+  workflowPreview: (workflowId: string, workspaceId: string) =>
+    unwrap(commands.workflowPreview(workflowId, workspaceId)),
+  /** Start a run; its id back. Rejects with what is wrong, as `ys workflow run` does. */
+  workflowStart: (workflowId: string, workspaceId: string, inputs: Record<string, string>) =>
+    unwrap(commands.workflowStart(workflowId, workspaceId, inputs)),
+  workflowCancel: (runId: string) => unwrap(commands.workflowCancel(runId)),
+  /** A run was queued, moved on, finished or cancelled. */
+  onWorkflowRunsChanged: (handler: () => void) =>
+    events.workflowRunsChanged.listen(() => handler()),
 
   onHostEvent: (handler: (event: HostEvent) => void) =>
     events.ptyHostEvent.listen((event) => handler(event.payload)),
