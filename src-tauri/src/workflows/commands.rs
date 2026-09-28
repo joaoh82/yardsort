@@ -216,20 +216,11 @@ pub async fn workflow_runs(
     limit: u32,
 ) -> IpcResult<Vec<WorkflowRun>> {
     blocking(app, move |state| {
-        // The store lists by workspace; a workflow's runs are picked from a wider page.
-        let rows = state
-            .store
-            .workflow_runs(None, (limit as usize).saturating_mul(4).max(200))?;
-        Ok(rows
-            .into_iter()
-            .filter(|run| {
-                workflow_id
-                    .as_deref()
-                    .is_none_or(|id| run.workflow_id == id)
-            })
-            .take(limit as usize)
-            .map(run_from)
-            .collect())
+        let rows = match workflow_id.as_deref() {
+            Some(id) => state.store.workflow_runs_of(id, limit as usize)?,
+            None => state.store.workflow_runs(None, limit as usize)?,
+        };
+        Ok(rows.into_iter().map(run_from).collect())
     })
     .await
 }

@@ -91,9 +91,19 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
 
   const save = () =>
     act(async () => {
-      const id = await ipc.workflowSave(path, text);
+      // The editor stays open while the file is written. Anything typed meanwhile is newer
+      // than what was saved, and stays the draft — under the new id, when saving gave it one.
+      const submitted = text;
+      const id = await ipc.workflowSave(path, submitted);
       const store = useWorkflowStore.getState();
-      store.setDraft(workflowId, null);
+      const latest = store.drafts[workflowId];
+      const typedMeanwhile = latest !== undefined && latest !== submitted;
+      if (!typedMeanwhile) {
+        store.setDraft(workflowId, null);
+      } else if (id !== workflowId) {
+        store.setDraft(id, latest);
+        store.setDraft(workflowId, null);
+      }
       await store.load();
       if (id !== workflowId) useProjectsStore.getState().openWorkflow(id);
     });

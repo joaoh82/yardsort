@@ -129,6 +129,30 @@ describe("WorkflowView", () => {
     await waitFor(() => expect(useWorkflowStore.getState().drafts.demo).toBeUndefined());
   });
 
+  it("keeps what is typed while a save is still being written", async () => {
+    const path = "/wf/demo.yaml";
+    useWorkflowStore.setState({
+      items: [item("demo", { kind: "file", path, replacesBuiltIn: false })],
+    });
+    let finish: (id: string) => void = () => {};
+    core.workflowSave.mockReturnValue(new Promise<string>((resolve) => (finish = resolve)));
+    core.workflowList.mockResolvedValue([
+      item("demo", { kind: "file", path, replacesBuiltIn: false }, { text: `${TEXT}# one\n` }),
+    ]);
+    const user = userEvent.setup();
+    render(<WorkflowView workflowId="demo" />);
+    const file = await screen.findByLabelText("Workflow file");
+    await user.type(file, "# one\n");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(core.workflowSave).toHaveBeenCalledWith(path, `${TEXT}# one\n`);
+    await user.type(file, "# two\n");
+    finish("demo");
+    await waitFor(() => expect(core.workflowList).toHaveBeenCalled());
+    expect(screen.getByLabelText("Workflow file")).toHaveValue(`${TEXT}# one\n# two\n`);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    expect(useWorkflowStore.getState().drafts.demo).toBe(`${TEXT}# one\n# two\n`);
+  });
+
   it("keeps unsaved text when the workflow is left and opened again", async () => {
     const path = "/wf/demo.yaml";
     useWorkflowStore.setState({

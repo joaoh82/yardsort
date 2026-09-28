@@ -460,6 +460,13 @@ them. What changed on the way:
 - **Timeouts became `u32`** (a week is 604 800 s), because the generated bindings refuse `u64`.
 - **Chart and editor are loaded when first shown,** as the diff viewer is; in tests they are
   stood in for, and the layout is tested on its own.
+- **From review:** a save no longer drops what was typed while the file was being written —
+  the draft is cleared only when it still is what was saved, and follows the new id when saving
+  gave one; a required `choice` starts on its first option, so what the control shows is the
+  answer; the driver's tick compares the active runs to what was active after its last tick, so
+  a run cancelled from `ys` between ticks is a change the window is told about; and a
+  workflow's run history is the workflow's own query with its own limit, not the newest two
+  hundred of every workflow filtered afterwards.
 - **Owed:** screenshots of the section, the view and the Run dialog with the throwaway profile
   (slice 6), and the hands-on pass in [08 §22](08-manual-checklist.md#22--workflow-runs).
 

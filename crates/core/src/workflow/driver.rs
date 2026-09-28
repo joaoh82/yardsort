@@ -80,6 +80,9 @@ pub struct Driver {
     forge_every_ms: i64,
     /// Something about a run changed during the current tick.
     touched: std::sync::atomic::AtomicBool,
+    /// The runs that were active at the last tick. One that is gone since was ended from
+    /// outside — `ys workflow cancel` — which is a change too.
+    active: Mutex<HashSet<String>>,
 }
 
 impl Default for Driver {
@@ -98,6 +101,7 @@ impl Driver {
             forge: std::sync::Arc::new(Mutex::new(HashMap::new())),
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
             touched: std::sync::atomic::AtomicBool::new(false),
+            active: Mutex::new(HashSet::new()),
         }
     }
 
@@ -118,6 +122,12 @@ impl Driver {
         self.touched
             .store(false, std::sync::atomic::Ordering::Relaxed);
         let runs = store.active_workflow_runs()?;
+        // A run that was active after the last tick and is not now ended without this driver:
+        // cancelled from `ys`, say. A new one is a change as well, whether or not it can start.
+        let ids: HashSet<String> = runs.iter().map(|run| run.id.clone()).collect();
+        if *self.active.lock().unwrap_or_else(PoisonError::into_inner) != ids {
+            self.touch();
+        }
         for run in &runs {
             if let Err(error) = move_on(self, store, host, hands, run) {
                 eprintln!("workflows: run {}: {}", run.id, error.message);
@@ -128,6 +138,13 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|id, _| runs.iter().any(|run| &run.id == id));
+        // What is active now, after this tick's own moves, is what the next tick compares to:
+        // a run this tick finished is not news then.
+        *self.active.lock().unwrap_or_else(PoisonError::into_inner) = store
+            .active_workflow_runs()?
+            .into_iter()
+            .map(|run| run.id)
+            .collect();
         Ok(self.touched.load(std::sync::atomic::Ordering::Relaxed))
     }
 

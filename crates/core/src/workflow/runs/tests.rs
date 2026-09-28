@@ -461,3 +461,30 @@ fn without_gh_the_pull_request_cannot_be_looked_for_and_it_says_so() {
     let error = pull_request_of(None, &git, &fx.workspace).unwrap_err();
     assert!(error.contains("GitHub CLI (`gh`)"), "{error}");
 }
+
+#[test]
+fn a_workflows_own_runs_are_listed_however_many_newer_ones_other_workflows_have() {
+    let fx = Fixture::new();
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    let other = DEMO.replace("id: demo", "id: other");
+    std::fs::write(folder.join("other.yaml"), other).unwrap();
+    let old = fx.queue("other", &[("who", "claude")]).unwrap();
+    fx.store.cancel_workflow_run(&old, "done").unwrap();
+    // Many newer runs of `demo`, each ended so the next may start.
+    for _ in 0..5 {
+        let id = fx.queue("demo", &[("who", "claude")]).unwrap();
+        fx.store.cancel_workflow_run(&id, "done").unwrap();
+    }
+    let listed = fx.store.workflow_runs_of("other", 3).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, old);
+    let demos = fx.store.workflow_runs_of("demo", 3).unwrap();
+    assert_eq!(demos.len(), 3, "the limit is the workflow's own");
+    assert!(demos.iter().all(|run| run.workflow_id == "demo"));
+    assert!(
+        demos
+            .windows(2)
+            .all(|pair| pair[0].created_at >= pair[1].created_at),
+        "newest first"
+    );
+}

@@ -121,6 +121,39 @@ describe("RunWorkflowDialog", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("answers a required choice with the option it shows", async () => {
+    const workflow = review.workflow!;
+    useWorkflowStore.setState({
+      items: [
+        {
+          ...review,
+          workflow: {
+            ...workflow,
+            inputs: [
+              {
+                id: "depth",
+                kind: "choice",
+                label: "How deep",
+                required: true,
+                default: null,
+                options: ["safe"],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    core.workflowPreview.mockResolvedValue({ ...withPr, needsPullRequest: false });
+    core.workflowStart.mockResolvedValue("run-2");
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
+    expect(screen.getByRole("combobox", { name: "How deep" })).toHaveValue("safe");
+    const run = screen.getByRole("button", { name: "Run" });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, { depth: "safe" });
+  });
+
   it("will not start without the pull request a workflow needs, and says why", async () => {
     core.workflowPreview.mockResolvedValue({
       ...withPr,

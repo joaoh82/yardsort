@@ -393,3 +393,34 @@ fn a_tick_says_when_a_run_changed_so_the_window_only_looks_when_there_is_somethi
         "and then nothing moved"
     );
 }
+
+#[test]
+fn a_run_cancelled_from_ys_between_ticks_is_a_change_the_window_is_told_about() {
+    let profile = Profile::new(&[("wait-review", WAIT_FOR_A_REVIEW)]);
+    let run = profile.queue("wait-review");
+    let forge = Forge::new(Vec::new());
+    let driver = Driver::default();
+    let host = PtyHost::new(Arc::new(|_| {}));
+    assert!(
+        driver.tick(&profile.store, &host, &forge).unwrap(),
+        "it started, and waits"
+    );
+    assert!(
+        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        "still waiting: no change"
+    );
+
+    // `ys workflow cancel`, from a connection of its own.
+    let elsewhere = Store::open(&profile.dir.path().join("yardsort.db")).unwrap();
+    assert!(elsewhere
+        .cancel_workflow_run(&run, "Cancelled from ys.")
+        .unwrap());
+    assert!(
+        driver.tick(&profile.store, &host, &forge).unwrap(),
+        "the run is gone from the active ones, which is a change"
+    );
+    assert!(
+        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        "and said once"
+    );
+}

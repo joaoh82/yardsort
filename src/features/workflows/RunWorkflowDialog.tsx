@@ -59,15 +59,18 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
   const runnable = items.filter((item) => item.problems.length === 0 && item.workflow);
   const workflow = items.find((item) => item.id === chosenWorkflow)?.workflow ?? null;
   const inputs: Input[] = useMemo(() => workflow?.inputs ?? [], [workflow]);
-  // Every input starts from its default; a required agent, from the first one installed.
+  // Every input starts from its default. A required agent starts on the first one installed,
+  // and a required choice on its first option: what the control shows must be the answer.
   const firstAgent = harnesses.find((h) => h.resolvedPath)?.id ?? "";
+  const startsOn = (input: Input): string => {
+    if (input.default) return input.default;
+    if (!input.required) return "";
+    if (input.kind === "harness") return firstAgent;
+    if (input.kind === "choice") return input.options[0] ?? "";
+    return "";
+  };
   const answers: Record<string, string> = Object.fromEntries(
-    inputs.map((input) => [
-      input.id,
-      chosen[chosenWorkflow]?.[input.id] ??
-        input.default ??
-        (input.kind === "harness" && input.required ? firstAgent : ""),
-    ]),
+    inputs.map((input) => [input.id, chosen[chosenWorkflow]?.[input.id] ?? startsOn(input)]),
   );
   const answer = (id: string, value: string) =>
     setChosen((all) => ({ ...all, [chosenWorkflow]: { ...all[chosenWorkflow], [id]: value } }));
