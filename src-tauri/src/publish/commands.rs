@@ -9,7 +9,7 @@ use tauri::AppHandle;
 use super::{state, ProjectPullRequests, PublishState};
 use crate::changes::commands::workspace;
 use crate::error::{IpcError, IpcResult};
-use crate::forge::{ForgeError, Gh};
+use crate::forge::{ForgeError, Gh, MergeMethod, PullRequestState};
 use crate::git::Git;
 use crate::state::{blocking, AppState};
 use crate::store::WorkspaceRow;
@@ -218,4 +218,48 @@ fn push(git: &Git, root: &Path, publishable: &PublishState) -> IpcResult<()> {
 /// neither decision needs it and both would pay for the round trip.
 fn publishable(git: &Git, root: &Path, row: &WorkspaceRow) -> IpcResult<PublishState> {
     state(git, root, row, &ProjectPullRequests::default())
+}
+
+/// Merge a confirmed PR only if it is still the open PR for this workspace and head.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_merge_pull_request(
+    app: AppHandle,
+    workspace_id: String,
+    number: u32,
+    head_oid: String,
+    method: MergeMethod,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        let (row, root) = workspace(state, &workspace_id)?;
+        let current = publish_state(state, &row, &root, true)?;
+        let pr = current
+            .pull_request
+            .as_ref()
+            .filter(|pr| {
+                pr.number == number
+                    && pr.state == PullRequestState::Open
+                    && !pr.draft
+                    && !head_oid.is_empty()
+                    && pr
+                        .details
+                        .as_ref()
+                        .is_some_and(|details| details.head_oid == head_oid)
+            })
+            .ok_or_else(|| {
+                IpcError::new("pull_request_changed",
+            "The pull request changed or is no longer ready to merge. Refresh and review it again.")
+            })?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        // Use the same repository context as the project-wide query.
+        let result = gh.merge_pull_request(
+            &project_root(state, &row.project_id)?,
+            pr.number,
+            &head_oid,
+            method,
+        );
+        state.forge.forget(&row.project_id);
+        result.map_err(failed)
+    })
+    .await
 }

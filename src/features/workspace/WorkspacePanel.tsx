@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PullRequestToolbar } from "@/features/pull-requests/PullRequestToolbar";
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
 import { Composer } from "@/features/composer/Composer";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
@@ -283,13 +284,12 @@ function ProjectRun({ project, workspace }: { project: Project; workspace: Works
         >
           {busy ? "Starting…" : "▶ Run"}
         </button>
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="ml-auto hover:text-ink"
-        >
-          Project settings
-        </button>
+        <div className="ml-auto flex items-center gap-3">
+          <PullRequestToolbar key={workspace.id} workspace={workspace} projectId={project.id} />
+          <button type="button" onClick={() => setSettingsOpen(true)} className="hover:text-ink">
+            Project settings
+          </button>
+        </div>
       </div>
       {error && (
         <p role="alert" className="px-3 py-2 text-red-400">

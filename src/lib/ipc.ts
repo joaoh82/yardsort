@@ -58,6 +58,7 @@ import {
   type PublishState,
   type PullRequest,
   type PullRequestOpened,
+  type MergeMethod,
   type Relevance,
   type Review,
   type ReviewFlag,
@@ -130,6 +131,7 @@ export type {
   PublishState,
   PullRequest,
   PullRequestOpened,
+  MergeMethod,
   Relevance,
   Review,
   ReviewFlag,
@@ -343,6 +345,13 @@ export const ipc = {
     pr: { title: string; body: string; draft: boolean },
   ) => unwrap(commands.workspaceOpenPullRequest(workspaceId, pr.title, pr.body, pr.draft)),
   /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
+  workspaceMergePullRequest: (
+    workspaceId: string,
+    number: number,
+    headOid: string,
+    method: MergeMethod,
+  ) => unwrap(commands.workspaceMergePullRequest(workspaceId, number, headOid, method)),
+
   projectPullRequests: (projectId: string, refresh = false) =>
     unwrap(commands.projectPullRequests(projectId, refresh)),
 

@@ -266,7 +266,17 @@ rather than an error to report.
 **Pull requests are fetched per _project_, not per workspace.** One `gh pr list` answers for every
 row, cached for 30 seconds in `publish::Forge`, and a workspace finds its own by head branch. The
 obvious shape — ask about this branch — costs one network round trip per workspace every time the
-window regains focus.
+window regains focus. The response includes base branch, head OID, review decision, line counts,
+update time and individual checks for the shared sidebar/toolbar preview. Matching a reused branch
+prefers an open PR, then the highest PR number, independently of response order. Request generations
+keep a slower earlier fetch from overwriting a later one in the core cache and frontend project
+store; invalidation also fences out fetches started before a push or merge.
+
+Merging is a separate workspace command. After the user confirms a method, number and head, the
+core rechecks the workspace's PR and calls `gh pr merge` with an argv array and
+`--match-head-commit`. It never requests branch deletion or administrator bypass. GitHub remains
+responsible for permissions, branch protections and merge queues. The project cache is invalidated
+even if the command fails, and the toolbar refreshes the PR list.
 
 ## Data model (SQLite)
 

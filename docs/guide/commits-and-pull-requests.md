@@ -115,24 +115,32 @@ too. A remote that is a path on disk is not a forge, so the button does not appe
 ## On the workspace row
 
 Once a workspace has a pull request, its number appears on its row in the sidebar, coloured by
-what CI made of it:
+its status. The toolbar button, its dropdown arrow and the preview use the same colours:
 
-| On the row | Means                                                        |
-| ---------- | ------------------------------------------------------------ |
-| **#42**    | Open. Grey — no checks configured, or none has reported yet. |
-| **#42**    | Green — every check finished and passed.                     |
-| **#42**    | Amber — at least one check is still running.                 |
-| **#42**    | Red — at least one check failed.                             |
-| **merged** | Merged. The workspace is done with; archive or delete it.    |
-| **closed** | Closed without merging.                                      |
-| dimmed     | It is a draft.                                               |
+| On the row         | Means                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| **#42**, green     | Open with no pending or failing status. CI may have passed or may not be configured. |
+| **#42**, yellow    | Draft, checks running, or review required.                                           |
+| **#42**, red       | At least one check failed, or changes were requested in review.                      |
+| **merged**, purple | Merged. The workspace can be archived or deleted.                                    |
+| **closed**, red    | Closed without merging.                                                              |
 
-One failure outranks everything, and anything still running outranks success — so green always
-means _finished_ and passing. Hovering gives the whole story, including the title.
+For open PRs, failures and requested changes take precedence over pending statuses. Green does
+not claim that CI ran: the preview says **No checks reported** when no result is available, and
+the toolbar only shows a success tick when checks actually passed. Hover or keyboard-focus a
+workspace row to preview its pull request: number, title, state, head and base branches, review
+decision, added and removed lines, check summary, and last update time. **Show checks** expands
+the individual check names and results. You can move the pointer into the card to use it;
+Escape dismisses it. From a focused trigger, Arrow Down moves into the card's controls.
 
 **Press the badge to open the pull request in your browser.** It sits beside the row rather than
 on it, so pressing it opens the pull request while pressing the row still opens the workspace. The
 same summary sits at the right of the panel foot for the selected workspace, and does the same.
+
+The workspace toolbar also shows the PR number and check status. Hover or focus it for the same
+details, or use its arrow menu for **View on GitHub**, **Copy PR link**, and **Refresh pull
+request**. A merged or closed PR stays visible until another PR replaces it on that branch.
+When a branch has several PRs, an open one takes precedence; otherwise Yardsort shows the newest.
 
 **This needs `gh`.** Without it there is no number and no check result anywhere in the app, and
 nothing complains about that: it is a supported way to use Yardsort, not a fault. Logged out of
@@ -143,8 +151,24 @@ Yardsort asks the forge once per project, not once per workspace, and reuses the
 a minute. It asks again when you come back to the window, every minute while it is open, and
 straight after anything you do that changes the answer.
 
+![Workspace pull request preview with review status and checks](../images/pull-request-preview.png)
+
+## Merge a pull request
+
+The toolbar menu offers **Squash and merge**, **Create a merge commit**, and **Rebase and merge**
+for an open, non-draft PR. Each asks for confirmation naming the PR and both branches. Cancelling
+leaves it alone. The merge uses `gh` and your existing GitHub permissions; repository restrictions
+still apply. A failure appears beside the toolbar with GitHub's explanation.
+
+Yardsort checks the PR again and merges only the head commit shown when you confirmed. If someone
+pushes another commit meanwhile, refresh and review it before trying again. The workspace and
+local branch are kept. Repositories requiring a merge queue may queue the request or enable auto-merge;
+the toolbar reports that the request was sent and refreshes the status, rather than claiming that
+it has already merged. You can refresh again from the menu.
+
+![Pull request actions in the workspace toolbar](../images/pull-request-actions.png)
+
 ## What it does not do
 
-No merging, no rebasing, no review comments, no CI logs — and no staging area. Those are on the
-[roadmap](../design/05-roadmap.md) or deliberately left to the tools that do them well. Yardsort
-gets the work out of the workspace; the forge takes it from there.
+No review comments, CI logs, local rebasing or staging area. Those remain with the forge or your
+git tools; the toolbar's rebase option is GitHub's PR merge method.

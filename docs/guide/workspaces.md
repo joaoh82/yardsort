@@ -155,3 +155,14 @@ comes back into focus — and asks whether to delete the workspace from the app 
 **Delete workspace** forgets the workspace and its session history; nothing on disk is touched,
 because there is nothing left there. Saying **Keep** leaves the entry alone and is remembered, so
 you are not asked about the same workspace twice.
+
+## Workspace previews
+
+Hover or keyboard-focus a workspace row for its name, branch and pull request details. The PR
+preview includes review status, line counts and expandable checks; see
+[Commits & pull requests](commits-and-pull-requests.md).
+
+The harness pill counts open harness tabs, including finished tabs whose output is still open;
+shell tabs are excluded. Hover or focus the pill to see each harness and whether it is working,
+waiting, finished or failed. Select a harness in the preview to open that workspace and its
+existing terminal. Escape dismisses the preview; Arrow Down from the focused pill enters it.
