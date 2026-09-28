@@ -273,33 +273,38 @@ its workspace.
 
 ## The UI
 
-**Sidebar.** `WORKFLOWS` above `PROJECTS`, one row per workflow, a count of running runs on the
-row, **+** for a new one. Rows are the store's array; anything derived is derived outside the
-selector.
+**Sidebar.** `WORKFLOWS` above `PROJECTS`, one row per workflow with a count of running runs, a
+mark for problems and one for unsaved changes, **+** for a new one. The list is the store's
+array; anything derived is derived outside the selector.
 
-**Main panel, `view: workflows`** in the layout store, holding the selected workflow. Three parts:
+**Center panel.** The open workflow lives in the projects store beside the composer's fields
+(`workflowId`), because one `set` must clear both: selecting a workspace or composing closes the
+workflow, opening a workflow closes the composer, and the selected workspace is kept to come back
+to. Three parts:
 
-- **Chart.** The steps as nodes, `needs` as edges, laid out top-down. Each node shows the action,
-  the id and, when a run is selected, that step's status and timing. React Flow (`@xyflow/react`)
-  renders and pans; `@dagrejs/dagre` lays out. The chart is read-only in v1 — the YAML is the
-  source of truth and the chart is a view of it, which is what keeps the frontend from holding
-  truth. Dragging nodes to edit YAML is a later item.
-- **YAML.** A CodeMirror editor (the YAML mode is already in `language-data`) with the validator's
-  errors as gutter marks, from the core's `workflow_validate` command on every pause in typing.
-  **Save** writes the file through the core. A built-in shows read-only with **Duplicate**, which
-  copies it under a new id; a user file that shadows a built-in has **Reset to built-in**.
-- **Runs.** Every run of this workflow, newest first, each expanding to its steps; a running one
-  has **Cancel**. Selecting a run colours the chart.
+- **Chart.** The steps as nodes, `needs` as edges, laid out top-down by `@dagrejs/dagre` and
+  drawn by `@xyflow/react`, read-only: the YAML is what runs and the chart is a view of it. With
+  a run open, each node shows that step's status. The layout is a pure function with tests of
+  its own.
+- **File.** A CodeMirror editor (`@codemirror/lang-yaml`, `@codemirror/lint`). Every pause in
+  typing goes to `workflow_check`, which is `workflow::parse`: the problems become gutter marks
+  and a list under the editor, and the last shape that checked out stays on the chart. Unsaved
+  text is kept in the store, per workflow, while the app runs. A built-in is read-only with
+  **Customize** (a copy under the same id, used instead) and **Duplicate** (a copy under a new
+  id); a user file has **Save**, **Revert**, **Duplicate**, and **Delete** or **Reset to
+  built-in**, which asks first through the OS dialog.
+- **Runs.** Newest first, each opening to its steps, notes and pull request; **Cancel run** on
+  one still going. `WorkflowRunsChanged`, emitted by the driver after any tick that changed a
+  run, reloads what is on screen.
 
-**Run…** opens a dialog: pick the workspace (or it is preselected from the workspace's own menu
-and toolbar, where **Request code review** also appears directly), fill the inputs (a `harness`
-input is the same picker the composer uses), see the resolved pull request, start.
+**Run…** is one dialog, opened from the workflow, from a workspace's menu (**Run workflow…**,
+and **Request code review…** straight onto the built-in), or from either with the other still
+to choose. It asks the workflow's inputs, an agent from the composer's list, and shows the pull
+request a run would use through `workflow_preview`, or why there is none. `workflow_start` goes
+through the same `runs::queue` as `ys workflow run`, and the app answers `Look` the way `ys`
+does.
 
-**Describe it.** **+** offers a blank file or a description box. The description goes to Drafting
-with a system prompt that carries the schema, the actions table and one built-in as an example;
-the reply is validated, and if it fails once, sent back with the errors for a single retry. The
-result opens in the editor unsaved. This is the only place a model writes a workflow, and it never
-runs one.
+**Describe it**, a description written into a workflow by a model, is slice 5.
 
 ## Slices
 
@@ -320,9 +325,10 @@ its own.
 --json url,reviews,comments`, the `pr` variables and resolving `session: origin`. The
    code-review workflow run against a real pull request is the hands-on pass in
    [08 §22](08-manual-checklist.md#22--workflow-runs). See [slice 3](#slice-3-what-shipped).
-4. **The UI.** Sidebar section, the workflows view, chart, editor, runs, the run dialog, the
+4. **The UI.** ✅ Sidebar section, the workflows view, chart, editor, runs, the run dialog, the
    workspace menu entry. Testing Library for the list, the dialog's input rules and the run
-   history; the chart's layout as a pure function with tests of its own.
+   history; the chart's layout as a pure function with tests of its own. See
+   [slice 4](#slice-4-what-shipped).
 5. **Describe it.** `Want::Workflow` in Drafting, the `draft_workflow` command, the validate-and-
    retry loop, the editor hand-off. Tests with a fake writer that returns bad YAML once.
 6. **Docs and pictures.** The guide's sections on running (the file format's went with slice 1),
@@ -435,6 +441,34 @@ open`), not found among the repository's fifty newest: an open pull request with
   both agents use the same `gh` login. And the author is given the review's link.
 - **A code review against a real pull request** was not run here: it posts to GitHub. It is the
   hands-on pass in [08 §22](08-manual-checklist.md#22--workflow-runs).
+
+## Slice 4: what shipped
+
+The Workflows section, the view and the Run dialog, as [the UI](#the-ui) above now describes
+them. What changed on the way:
+
+- **The open workflow is in the projects store,** not the layout store the proposal named. The
+  composer's fields live there, and the rule "one thing takes the center panel" is one `set`.
+- **Customize, not Duplicate, is the built-in's first button.** The proposal had one button that
+  copied under a new id. Replacing the built-in under its own id is what most people want ("the
+  review, but with my prompt"), so that is **Customize**; **Duplicate** makes a second workflow.
+- **`workflow::save` never overwrites,** and only writes to a file the catalog lists as the
+  user's, found by path; a path outside the folder is refused. A new file goes through
+  `create_new`. Deleting is the same check.
+- **The driver's tick says whether anything changed,** so the window is told only then; a run
+  that is waiting costs it nothing.
+- **Timeouts became `u32`** (a week is 604 800 s), because the generated bindings refuse `u64`.
+- **Chart and editor are loaded when first shown,** as the diff viewer is; in tests they are
+  stood in for, and the layout is tested on its own.
+- **From review:** a save no longer drops what was typed while the file was being written —
+  the draft is cleared only when it still is what was saved, and follows the new id when saving
+  gave one; a required `choice` starts on its first option, so what the control shows is the
+  answer; the driver's tick compares the active runs to what was active after its last tick, so
+  a run cancelled from `ys` between ticks is a change the window is told about; and a
+  workflow's run history is the workflow's own query with its own limit, not the newest two
+  hundred of every workflow filtered afterwards.
+- **Owed:** screenshots of the section, the view and the Run dialog with the throwaway profile
+  (slice 6), and the hands-on pass in [08 §22](08-manual-checklist.md#22--workflow-runs).
 
 ## Not in v1, on purpose
 

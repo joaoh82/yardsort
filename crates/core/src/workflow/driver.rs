@@ -78,6 +78,11 @@ pub struct Driver {
     /// ask it, which put their answers here.
     forge: std::sync::Arc<Mutex<HashMap<String, Asked>>>,
     forge_every_ms: i64,
+    /// Something about a run changed during the current tick.
+    touched: std::sync::atomic::AtomicBool,
+    /// The runs that were active at the last tick. One that is gone since was ended from
+    /// outside — `ys workflow cancel` — which is a change too.
+    active: Mutex<HashSet<String>>,
 }
 
 impl Default for Driver {
@@ -95,6 +100,8 @@ impl Driver {
             recovered: Mutex::new(HashSet::new()),
             forge: std::sync::Arc::new(Mutex::new(HashMap::new())),
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
+            touched: std::sync::atomic::AtomicBool::new(false),
+            active: Mutex::new(HashSet::new()),
         }
     }
 
@@ -104,9 +111,23 @@ impl Driver {
         self.settled.observe(event)
     }
 
-    /// Move every active run on as far as it goes now.
-    pub fn tick(&self, store: &Store, host: &dyn TerminalHost, hands: &dyn Hands) -> IpcResult<()> {
+    /// Move every active run on as far as it goes now. True when anything about a run changed,
+    /// so whoever shows runs knows to look again.
+    pub fn tick(
+        &self,
+        store: &Store,
+        host: &dyn TerminalHost,
+        hands: &dyn Hands,
+    ) -> IpcResult<bool> {
+        self.touched
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         let runs = store.active_workflow_runs()?;
+        // A run that was active after the last tick and is not now ended without this driver:
+        // cancelled from `ys`, say. A new one is a change as well, whether or not it can start.
+        let ids: HashSet<String> = runs.iter().map(|run| run.id.clone()).collect();
+        if *self.active.lock().unwrap_or_else(PoisonError::into_inner) != ids {
+            self.touch();
+        }
         for run in &runs {
             if let Err(error) = move_on(self, store, host, hands, run) {
                 eprintln!("workflows: run {}: {}", run.id, error.message);
@@ -117,7 +138,19 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|id, _| runs.iter().any(|run| &run.id == id));
-        Ok(())
+        // What is active now, after this tick's own moves, is what the next tick compares to:
+        // a run this tick finished is not news then.
+        *self.active.lock().unwrap_or_else(PoisonError::into_inner) = store
+            .active_workflow_runs()?
+            .into_iter()
+            .map(|run| run.id)
+            .collect();
+        Ok(self.touched.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    fn touch(&self) {
+        self.touched
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// What is known of the posts on a run's pull request, without waiting for the forge.
@@ -212,6 +245,7 @@ fn move_on(
     run: &WorkflowRunRow,
 ) -> IpcResult<()> {
     let Ok(workflow) = super::parse(&run.definition) else {
+        driver.touch();
         store.finish_workflow_run(
             &run.id,
             "failed",
@@ -224,6 +258,7 @@ fn move_on(
         None => None,
     };
     let Some(place) = place else {
+        driver.touch();
         store.finish_workflow_run(&run.id, "failed", Some("The workspace is gone."))?;
         return Ok(());
     };
@@ -238,6 +273,7 @@ fn move_on(
         if !store.start_workflow_run(&run.id, Some(&facts.to_json()))? {
             return Ok(()); // Cancelled between the read and now.
         }
+        driver.touch();
         started_at = Some(now_ms());
     }
     if driver
@@ -247,7 +283,7 @@ fn move_on(
         .insert(run.id.clone())
     {
         for change in engine::recover(&store.workflow_steps(&run.id)?) {
-            apply(store, &run.id, &change)?;
+            apply(driver, store, &run.id, &change)?;
         }
     }
     let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap_or_default();
@@ -283,7 +319,7 @@ fn move_on(
             if change.to == StepStatus::Running && acting.contains(change.step.as_str()) {
                 claims.insert(change.step.clone(), change.clone());
             } else {
-                apply(store, &run.id, change)?;
+                apply(driver, store, &run.id, change)?;
             }
         }
         let mut delivered = false;
@@ -292,7 +328,7 @@ fn move_on(
             let Some(claim) = claims.remove(&step) else {
                 continue;
             };
-            if !apply(store, &run.id, &claim)? {
+            if !apply(driver, store, &run.id, &claim)? {
                 if !still_running(store, &run.id)? {
                     return Ok(()); // Cancelled: nothing more of this run happens.
                 }
@@ -305,13 +341,14 @@ fn move_on(
                 Outcome::NotYet => engine::not_yet(&step),
             };
             delivered |= change.to != StepStatus::Waiting;
-            apply(store, &run.id, &change)?;
+            apply(driver, store, &run.id, &change)?;
         }
         if let Some(finish) = plan.finish {
             let (status, error) = match finish {
                 Finish::Succeeded => ("succeeded", None),
                 Finish::Failed(why) => ("failed", Some(why)),
             };
+            driver.touch();
             store.finish_workflow_run(&run.id, status, error.as_deref())?;
             return Ok(());
         }
@@ -340,15 +377,19 @@ enum Outcome {
     NotYet,
 }
 
-fn apply(store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
-    Ok(store.move_workflow_step(
+fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResult<bool> {
+    let moved = store.move_workflow_step(
         run_id,
         &change.step,
         &change.from,
         change.to,
         change.outputs.as_deref(),
         change.note.as_deref(),
-    )?)
+    )?;
+    if moved {
+        driver.touch();
+    }
+    Ok(moved)
 }
 
 fn step_of(effect: &Effect) -> &str {

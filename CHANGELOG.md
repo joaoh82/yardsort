@@ -5,7 +5,9 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
-- **Workflows: named agent work, run from `ys`.** Write a workflow as a short YAML file in your
+- **Workflows: named agent work, in the sidebar and from `ys`.** A **Workflows** section above
+  Projects lists them; open one to see its steps as a chart, edit its file with every mistake
+  marked where it is, follow its runs, and **Run…** it. A workflow is a short YAML file in your
   profile's `workflows` folder: the inputs to ask for, and steps that start an agent, wait for it
   to settle, type to it once it is quiet, and notify you. Steps run as soon as the ones they
   need succeed, so they can run side by side. `ys workflow validate` checks a file and names the
@@ -14,9 +16,9 @@ has the downloads and the full commit lists.
   the background, with the agents it starts as tabs; `ys workflow runs` follows it and `cancel`
   stops it, never the agents. Steps can wait for a review or comment on the workspace's pull
   request, use its number and link, and talk to the workspace's own agent. The built-in
-  **Request code review** puts it together: `ys workflow run code-review --input
-reviewer=codex` has a second agent review the pull request and post on GitHub, then tells you,
-  and tells the agent that wrote it to address the review. See
+  **Request code review** puts it together, from a workspace's menu or as `ys workflow run
+code-review --input reviewer=codex`: a second agent reviews the pull request and posts on
+  GitHub, then you are told, and the agent that wrote it is told to address the review. See
   [Workflows](docs/guide/workflows.md).
 - **Project search.** Click the search icon beside Projects to filter by name. Clear the filter
   with **×**, or press **Escape** to close it; **×** also closes an empty field. The selected

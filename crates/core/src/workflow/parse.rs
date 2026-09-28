@@ -809,10 +809,11 @@ impl Checker<'_> {
         SessionRef::Step(var.path[1].clone())
     }
 
-    fn timeout(&mut self, step: &RawStep) -> Option<u64> {
+    fn timeout(&mut self, step: &RawStep) -> Option<u32> {
         let field = step.timeout.as_ref()?;
+        // At most a week, so it always fits.
         match duration(&field.value) {
-            Ok(secs) => Some(secs),
+            Ok(secs) => u32::try_from(secs).ok(),
             Err(message) => {
                 self.problem(&field.referenced, message);
                 None

@@ -239,6 +239,32 @@ export const commands = {
 	/**  Kill (if needed) and forget a session. */
 	ptyClose: (id: SessionId) => typedError<null, IpcError>(__TAURI_INVOKE("pty_close", { id })),
 	ptyList: () => typedError<SessionInfo[], IpcError>(__TAURI_INVOKE("pty_list")),
+	/**  Every workflow, built in and the user's, with how many runs of each are going now. */
+	workflowList: () => typedError<WorkflowItem[], IpcError>(__TAURI_INVOKE("workflow_list")),
+	/**  Check a file's text as it is being written: the editor's marks and the chart come from this. */
+	workflowCheck: (text: string) => __TAURI_INVOKE<WorkflowCheck>("workflow_check", { text }),
+	/**
+	 *  Save a file: `path` is the user's file being edited, or `None` for a new one. Returns the id
+	 *  it was saved under.
+	 */
+	workflowSave: (path: string | null, text: string) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_save", { path, text })),
+	/**
+	 *  Copy a workflow into the user's folder. With no `asId`, a built-in's copy replaces it.
+	 *  Returns the copy's id.
+	 */
+	workflowCopy: (id: string, asId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_copy", { id, asId })),
+	/**  Delete one of the user's workflow files. The window asks first. */
+	workflowRemove: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_remove", { path })),
+	/**  Runs, newest first: of one workflow, or of all. */
+	workflowRuns: (workflowId: string | null, limit: number) => typedError<WorkflowRun[], IpcError>(__TAURI_INVOKE("workflow_runs", { workflowId, limit })),
+	/**  A run's steps, in file order. */
+	workflowRunSteps: (runId: string) => typedError<WorkflowStepRun[], IpcError>(__TAURI_INVOKE("workflow_run_steps", { runId })),
+	/**  What a run of `workflowId` in `workspaceId` would find, for the Run dialog to show. */
+	workflowPreview: (workflowId: string, workspaceId: string) => typedError<RunPreview, IpcError>(__TAURI_INVOKE("workflow_preview", { workflowId, workspaceId })),
+	/**  Start a run. The same checks as `ys workflow run`; the driver picks it up at once. */
+	workflowStart: (workflowId: string, workspaceId: string, inputs: { [key in string]: string }) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_start", { workflowId, workspaceId, inputs })),
+	/**  Cancel a run. Agents it started keep running. */
+	workflowCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workflow_cancel", { runId })),
 };
 
 /** Events */
@@ -247,10 +273,24 @@ export const events = {
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
+	workflowRunsChanged: makeEvent<WorkflowRunsChanged>("workflow-runs-changed"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
 };
 
 /* Types */
+/**  What a step does. Every string here may hold `{{ variables }}`; see [`template`]. */
+export type Action = 
+/**  Start a harness in the run's workspace, with a first message. */
+{ action: "start_session"; harness: string; prompt: string | null; model: string | null; effort: string | null; skipMemory: boolean } | 
+/**  Wait for a session to settle or to end. */
+{ action: "wait_session"; session: SessionRef; until: Until; timeoutSecs: number | null } | 
+/**  Paste a message into a live session once it is quiet. A busy agent is never written to. */
+{ action: "send_to_session"; session: SessionRef; prompt: string; timeoutSecs: number | null } | 
+/**  Wait for a review or a comment on the workspace's pull request, newer than the run. */
+{ action: "wait_pr_activity"; kind: PrActivity; timeoutSecs: number | null } | 
+/**  Tell the person who started the run. */
+{ action: "notify"; title: string; body: string | null };
+
 /**  New events were recorded for these workspaces; a timeline showing one should ask again. */
 export type ActivityChanged = {
 	workspaceIds: string[],
@@ -531,6 +571,20 @@ export type DraftedPullRequest = {
 	body: string,
 };
 
+/**  One workflow as the catalog lists it: runnable, or not, and why. */
+export type Entry = {
+	id: string,
+	name: string,
+	description: string | null,
+	source: Source,
+	/**  Empty when the workflow can run. */
+	problems: Problem[],
+	/**  The checked workflow; `None` when there are problems. */
+	workflow: Workflow | null,
+	/**  The file exactly as written. */
+	text: string,
+};
+
 /**  What the launch environment looks like, for the status bar and for bug reports. */
 export type EnvInfo = {
 	source: EnvSource,
@@ -750,6 +804,22 @@ export type HostEvent =
  */
 { type: "quiet"; id: SessionId; busyMs: number };
 
+/**  Something asked of the person starting a run, before it starts. */
+export type Input = {
+	id: string,
+	kind: InputKind,
+	/**  What the question says. The id when the file gives none. */
+	label: string,
+	required: boolean,
+	default: string | null,
+	/**  The choices of a `choice` input; empty for the others. */
+	options: string[],
+};
+
+export type InputKind = 
+/**  One of the harnesses set up in Yardsort, picked the way the composer picks one. */
+"harness" | "text" | "choice";
+
 export type InstallHint = {
 	/**  An install command for the current OS; shown for the user to copy, never executed. */
 	command: string,
@@ -853,6 +923,14 @@ export type ObservedWrite = {
 	matches: ObservedMatch[],
 };
 
+export type PrActivity = "review" | "comment" | "any";
+
+export type PrFacts = {
+	number: number,
+	url: string,
+	title: string,
+};
+
 export type Preflight = {
 	git: GitStatus,
 	harnesses: HarnessStatus[],
@@ -863,6 +941,14 @@ export type Preflight = {
 	ys: YsStatus,
 	/**  Nothing stands between the user and their first workspace. */
 	ready: boolean,
+};
+
+/**  One thing wrong with a file, where it is. */
+export type Problem = {
+	/**  1-based. `None` when the problem is the file as a whole. */
+	line: number | null,
+	column: number | null,
+	message: string,
 };
 
 export type Project = {
@@ -1089,6 +1175,9 @@ export type ReviewFlag =
  */
 "unaccounted";
 
+/**  What a run is about. A workspace run knows the workspace, its branch and its pull request. */
+export type RunContext = "workspace";
+
 /**  One of the workspace's agent runs and how it was asked to report, or `None` if it was not. */
 export type RunCoverage = {
 	runId: string,
@@ -1098,6 +1187,18 @@ export type RunCoverage = {
 	capture: string | null,
 	/**  Whether a `None` capture is known to mean the run was not reporting. */
 	captureKnown: boolean,
+};
+
+/**  What the Run dialog shows before starting: what the run would find. */
+export type RunPreview = {
+	/**  The workflow works with the workspace's pull request. */
+	needsPullRequest: boolean,
+	/**  Found: the workspace's open pull request. */
+	pullRequest: PrFacts | null,
+	/**  Why there is none to use, when one is needed. */
+	pullRequestProblem: string | null,
+	/**  The workflow talks to the workspace's own agent. */
+	needsOrigin: boolean,
 };
 
 export type Scope = "uncommitted" | "committed";
@@ -1162,6 +1263,13 @@ export type SessionRecord = {
 	unavailableReason: string | null,
 };
 
+/**  Which session a step means. */
+export type SessionRef = 
+/**  The workspace's most recent live harness session: the agent whose work the run is about. */
+"origin" | 
+/**  The session an earlier `start_session` step started, by that step's id. */
+{ step: string };
+
 /**  A workflow run started a session in a workspace: the window should show it as a tab. */
 export type SessionStarted = {
 	workspaceId: string,
@@ -1185,6 +1293,18 @@ export type SettingsInfo = {
 	activity: ActivitySettingsDto,
 };
 
+/**  Where a workflow came from. */
+export type Source = 
+/**  Compiled into Yardsort. Read-only; duplicate it to change it. */
+{ kind: "builtIn" } | 
+/**  A file in the user's workflows directory. */
+{ kind: "file"; path: string; 
+/**
+ *  This file's id is a built-in's, so it is used instead. Removing it brings the
+ *  built-in back.
+ */
+replacesBuiltIn: boolean };
+
 export type SpawnRequest = {
 	/**  Program to run. `None` starts the user's shell. */
 	program: string | null,
@@ -1200,6 +1320,16 @@ export type SpawnRequest = {
 	harness: HarnessRequest | null,
 	size: TermSize,
 };
+
+/**  One node of the graph. */
+export type Step = {
+	id: string,
+	/**
+	 *  The steps that must have succeeded before this one starts. Steps whose needs are all met
+	 *  run together.
+	 */
+	needs: string[],
+} & Action;
 
 export type Suggestion = {
 	/**  The harness whose "Good at" fits best, when one clearly does. */
@@ -1227,6 +1357,19 @@ export type ThresholdsDto = {
 	range: [number, number],
 };
 
+/**  What starts a run, and what a run is about. */
+export type Trigger = {
+	kind: TriggerKind,
+	context: RunContext,
+};
+
+/**  Only a person starts a run in this version. Schedules and forge events come later. */
+export type TriggerKind = "manual";
+
+export type Until = 
+/**  Quiet, or a finished turn where the harness reports turns. */
+"settled" | "exited";
+
 /**
  *  A worktree git knows about that is not a workspace: made by hand, by another tool, or
  *  forgotten here. What the import dialog lists.
@@ -1242,6 +1385,68 @@ export type UpdateStatus = {
 	installKind: InstallKind,
 	/**  The newer release, if there is one. */
 	available: AvailableUpdate | null,
+};
+
+/**  A workflow file, checked and ready to run. */
+export type Workflow = {
+	id: string,
+	name: string,
+	description: string | null,
+	version: number,
+	trigger: Trigger,
+	inputs: Input[],
+	steps: Step[],
+};
+
+/**  What checking a file's text found. */
+export type WorkflowCheck = {
+	/**  The workflow, when the text checks out. */
+	workflow: Workflow | null,
+	id: string | null,
+	problems: Problem[],
+};
+
+/**  A workflow as the sidebar and the view list it. */
+export type WorkflowItem = {
+	/**  Its runs queued or running now, in any workspace. */
+	activeRuns: number,
+} & Entry;
+
+/**  One run, as the view lists it. */
+export type WorkflowRun = {
+	id: string,
+	workflowId: string,
+	workflowName: string,
+	workspaceId: string | null,
+	workspaceName: string,
+	/**  `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
+	status: string,
+	/**  `app` or `cli`. */
+	requestedBy: string,
+	error: string | null,
+	inputs: { [key in string]: string },
+	pullRequest: PrFacts | null,
+	createdAt: number | null,
+	startedAt: number | null,
+	endedAt: number | null,
+};
+
+/**
+ *  Runs changed: one was queued, moved on, finished or cancelled. The window reloads what it
+ *  shows of them.
+ */
+export type WorkflowRunsChanged = Record<string, never>;
+
+/**  One step of a run. */
+export type WorkflowStepRun = {
+	stepId: string,
+	action: string,
+	/**  `pending`, `running`, `waiting`, `succeeded`, `failed`, `skipped` or `cancelled`. */
+	status: string,
+	startedAt: number | null,
+	endedAt: number | null,
+	outputs: { [key in string]: string },
+	note: string | null,
 };
 
 export type Workspace = {

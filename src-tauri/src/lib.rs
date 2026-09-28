@@ -145,13 +145,24 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             terminal::pty_kill,
             terminal::pty_close,
             terminal::pty_list,
+            workflows::commands::workflow_list,
+            workflows::commands::workflow_check,
+            workflows::commands::workflow_save,
+            workflows::commands::workflow_copy,
+            workflows::commands::workflow_remove,
+            workflows::commands::workflow_runs,
+            workflows::commands::workflow_run_steps,
+            workflows::commands::workflow_preview,
+            workflows::commands::workflow_start,
+            workflows::commands::workflow_cancel,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,
             changes::commands::WorkspaceFilesChanged,
             activity::ActivityChanged,
             quit::QuitRequested,
-            workflows::SessionStarted
+            workflows::SessionStarted,
+            workflows::commands::WorkflowRunsChanged
         ])
 }
 

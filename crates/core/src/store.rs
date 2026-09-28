@@ -1678,6 +1678,26 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// One workflow's runs, newest first, at most `limit` of them: the workflow's own history,
+    /// however many runs other workflows have had since.
+    pub fn workflow_runs_of(
+        &self,
+        workflow_id: &str,
+        limit: usize,
+    ) -> StoreResult<Vec<WorkflowRunRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {WORKFLOW_RUN_COLUMNS} FROM workflow_runs
+             WHERE workflow_id = ?1
+             ORDER BY created_at DESC, rowid DESC LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(
+            params![workflow_id, i64::try_from(limit).unwrap_or(i64::MAX)],
+            workflow_run_from_row,
+        )?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Queued and running runs, oldest first: what the driver has to move on.
     pub fn active_workflow_runs(&self) -> StoreResult<Vec<WorkflowRunRow>> {
         let conn = self.conn();

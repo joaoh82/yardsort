@@ -27,6 +27,8 @@ use yardsort_core::workflow::driver::{self, Hands, PrAsk};
 
 use crate::state::AppState;
 
+pub mod commands;
+
 /// How often the driver looks when nothing wakes it sooner: queued runs start within this, and
 /// timeouts are this precise.
 const TICK: Duration = Duration::from_secs(1);
@@ -56,12 +58,17 @@ impl Driver {
     /// Every host event passes through here. A quiet or an exit is a reason to look now.
     pub fn observe(&self, event: &HostEvent) {
         if self.driver.observe(event) {
-            let _ = self
-                .wake
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .send(());
+            self.wake();
         }
+    }
+
+    /// Look at the runs now rather than at the next tick: one was just queued, say.
+    pub fn wake(&self) {
+        let _ = self
+            .wake
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send(());
     }
 }
 
@@ -111,11 +118,15 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
             handle,
             state: &state,
         };
-        if let Err(error) = driver
+        match driver
             .driver
             .tick(&state.store, state.host.as_ref(), &hands)
         {
-            eprintln!("workflows: cannot read runs: {}", error.message);
+            Ok(true) => {
+                let _ = commands::WorkflowRunsChanged {}.emit(handle);
+            }
+            Ok(false) => {}
+            Err(error) => eprintln!("workflows: cannot read runs: {}", error.message),
         }
     }
 }

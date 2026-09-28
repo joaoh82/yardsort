@@ -39,7 +39,8 @@ pub struct Facts {
     pub origin: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct PrFacts {
     pub number: u32,
     pub url: String,

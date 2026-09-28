@@ -15,6 +15,7 @@ import { useHarnessStore } from "@/stores/harnesses";
 import { useLayoutStore, type SidePanel } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { listenForQuitRequests } from "@/stores/quit";
+import { listenForWorkflowRuns } from "@/stores/workflows";
 import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
 import { StatusBar } from "./StatusBar";
@@ -62,7 +63,11 @@ export function AppShell() {
     void useAppStore.getState().load().catch(console.error);
     if (hasCore()) void useHarnessStore.getState().load();
     const listening = listenForQuitRequests();
-    return () => void listening.then((stop) => stop());
+    const runs = listenForWorkflowRuns();
+    return () => {
+      void listening.then((stop) => stop());
+      void runs.then((stop) => stop());
+    };
   }, []);
 
   // Mod+B / Mod+Alt+B toggle the side panels, Mod+O opens a project, Mod+N composes a new

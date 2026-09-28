@@ -857,3 +857,73 @@ fn a_users_own_file_is_copied_only_under_a_new_id() {
         "workflow_not_found"
     );
 }
+
+#[test]
+fn a_new_workflow_is_saved_under_its_id_and_never_over_anything() {
+    let dir = data_dir();
+    let path = save(dir.path(), None, BASE).unwrap();
+    assert_eq!(path, user_dir(dir.path()).join("demo.yaml"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BASE);
+    let again = save(dir.path(), None, BASE).unwrap_err();
+    assert_eq!(again.code, "workflow_exists");
+    let nameless = save(dir.path(), None, "name: No id\n").unwrap_err();
+    assert_eq!(nameless.code, "workflow_invalid_id");
+}
+
+#[test]
+fn an_edit_replaces_its_own_file_even_with_problems_and_only_its_own() {
+    let dir = data_dir();
+    let path = write(dir.path(), "mine.yml", BASE);
+    let broken = BASE.replace("prompt: Hello", "prompt: \"{{ nope }}\"");
+    assert_eq!(save(dir.path(), Some(&path), &broken).unwrap(), path);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        broken,
+        "saved as written"
+    );
+    let listed = find(dir.path(), "demo").unwrap();
+    assert!(!listed.runnable(), "listed with its problem");
+    assert!(
+        !user_dir(dir.path()).join("mine.yaml.saving").exists(),
+        "the temporary file is gone"
+    );
+
+    let elsewhere = dir.path().join("settings.toml");
+    std::fs::write(&elsewhere, "keep me").unwrap();
+    let refused = save(dir.path(), Some(&elsewhere), BASE).unwrap_err();
+    assert_eq!(refused.code, "workflow_not_yours");
+    assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "keep me");
+    let refused = remove(dir.path(), &elsewhere).unwrap_err();
+    assert_eq!(refused.code, "workflow_not_yours");
+    assert!(elsewhere.exists());
+}
+
+#[test]
+fn an_id_another_file_has_is_refused() {
+    let dir = data_dir();
+    write(dir.path(), "a.yaml", BASE);
+    let b = write(dir.path(), "b.yaml", &BASE.replace("id: demo", "id: other"));
+    let error = save(dir.path(), Some(&b), BASE).unwrap_err();
+    assert_eq!(error.code, "workflow_exists");
+    assert!(error.message.contains("a.yaml"), "{}", error.message);
+    assert!(
+        std::fs::read_to_string(&b).unwrap().contains("id: other"),
+        "unchanged"
+    );
+}
+
+#[test]
+fn removing_a_replacement_brings_the_built_in_back() {
+    let dir = data_dir();
+    let path = copy(dir.path(), "code-review", None).unwrap();
+    assert!(matches!(
+        find(dir.path(), "code-review").unwrap().source,
+        Source::File { .. }
+    ));
+    remove(dir.path(), &path).unwrap();
+    assert!(!path.exists());
+    assert_eq!(
+        find(dir.path(), "code-review").unwrap().source,
+        Source::BuiltIn
+    );
+}
