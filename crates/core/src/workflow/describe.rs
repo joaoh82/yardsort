@@ -99,7 +99,12 @@ pub fn scratch_dir(data_dir: &Path, git: &Git) -> IpcResult<PathBuf> {
     let dir = data_dir.join("drafting");
     std::fs::create_dir_all(&dir)
         .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", dir.display())))?;
-    let is_repo = git.repo_root(&dir)?.is_some_and(|root| root == dir);
+    // Git spells a root as it really is — a symlink followed, a short name expanded — so the
+    // two are compared normalised, or a folder that is already the repository would be taken
+    // for one inside another and set up again every time.
+    let is_repo = git
+        .repo_root(&dir)?
+        .is_some_and(|root| crate::git::normalize(&root) == crate::git::normalize(&dir));
     if !is_repo {
         git.init(&dir)?;
     }
@@ -203,7 +208,11 @@ mod tests {
         let git = crate::git::testing::git();
         let scratch = scratch_dir(dir.path(), &git).unwrap();
         assert_eq!(scratch, dir.path().join("drafting"));
-        assert_eq!(git.repo_root(&scratch).unwrap(), Some(scratch.clone()));
+        let root = git.repo_root(&scratch).unwrap().expect("a repository");
+        assert_eq!(
+            crate::git::normalize(&root),
+            crate::git::normalize(&scratch)
+        );
         let files: Vec<_> = std::fs::read_dir(&scratch)
             .unwrap()
             .map(|e| e.unwrap().file_name())
@@ -215,6 +224,29 @@ mod tests {
         );
         let again = scratch_dir(dir.path(), &git).unwrap();
         assert_eq!(again, scratch, "the same folder, not another init");
+    }
+
+    /// macOS keeps its temporary folders behind a symlink and Windows spells them short, so
+    /// git names the repository differently from the path it was asked about.
+    #[cfg(unix)]
+    #[test]
+    fn a_data_dir_reached_through_a_symlink_is_still_its_own_repository() {
+        let real = tempfile::tempdir().unwrap();
+        let link_holder = tempfile::tempdir().unwrap();
+        let link = link_holder.path().join("data");
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+        let git = crate::git::testing::git();
+        let scratch = scratch_dir(&link, &git).unwrap();
+        let head = std::fs::metadata(scratch.join(".git").join("HEAD")).unwrap();
+        let made = head.modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        scratch_dir(&link, &git).unwrap();
+        let again = std::fs::metadata(scratch.join(".git").join("HEAD")).unwrap();
+        assert_eq!(
+            again.modified().unwrap(),
+            made,
+            "not initialised a second time"
+        );
     }
 
     #[test]
