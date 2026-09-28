@@ -76,6 +76,9 @@ enum Command {
     /// A project's memory: approved lessons for its agents, and proposals for the user.
     #[command(subcommand)]
     Memory(commands::memory::Command),
+    /// Named sequences of agent work, written in YAML: the built-in ones and yours.
+    #[command(subcommand)]
+    Workflow(commands::workflow::Command),
     /// Put a running session on this terminal. Detaching leaves it running.
     Attach {
         /// Which one: a workspace name, or the start of an id from `ys session list`. With one
@@ -126,6 +129,8 @@ fn main() {
                 .and_then(|ys| commands::activity::run(&ys, command, &out)),
             Command::Memory(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::memory::run(&ys, command, &out)),
+            // `validate` needs no profile, so this one opens it only when it has to.
+            Command::Workflow(command) => commands::workflow::run(cli.data_dir, command, &out),
         };
     if let Err(Failure(message)) = result {
         eprintln!("{message}");

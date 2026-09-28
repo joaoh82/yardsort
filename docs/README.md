@@ -18,6 +18,7 @@ few minutes.
 | [Activity](guide/activity.md)                                 | The local record of what ran, what each agent reports, and the experimental timeline        |
 | [Memory](guide/memory.md)                                     | Lessons about a project for its agents: written by you, proposed by agents, approved by you |
 | [Outcomes](guide/outcomes.md)                                 | What became of each attempt, and each agent's history on your work                          |
+| [Workflows](guide/workflows.md)                               | Named, reusable agent work in YAML: the built-in code review, writing and checking your own |
 | [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                          |
 | [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                                           |
 | [The `ys` command line](guide/cli.md)                         | Installing it; starting, deleting and handing off workspaces from a terminal or a script    |

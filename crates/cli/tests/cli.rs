@@ -1273,3 +1273,208 @@ fn the_binary_as_a_cursor_hook_leaves_an_entry_the_next_command_takes_in() {
     let table = fx.ys(&["activity", "list"]).ok();
     assert!(table.contains("cursor/hook"), "{table}");
 }
+
+/// A workflow file with one mistake: a variable naming a field the pull request does not have.
+const WORKFLOW_WITH_A_TYPO: &str = "id: fix-ci
+name: Fix CI
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: fix
+    action: start_session
+    harness: claude
+    prompt: CI failed on {{ pr.nubmer }}.
+";
+
+fn write_workflow(fx: &Fixture, name: &str, text: &str) -> PathBuf {
+    let folder = fx.data_dir.join("workflows");
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join(name);
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+#[test]
+fn workflows_are_listed_with_the_built_ins_and_where_yours_go() {
+    let fx = Fixture::new();
+    let table = fx.ys(&["workflow", "list"]).ok();
+    assert!(table.contains("code-review"), "{table}");
+    assert!(table.contains("ready"), "{table}");
+    assert!(table.contains("built in"), "{table}");
+    let folder = fx.data_dir.join("workflows").display().to_string();
+    assert!(
+        table.contains(&folder),
+        "the folder should be named: {table}"
+    );
+
+    write_workflow(&fx, "fix-ci.yaml", WORKFLOW_WITH_A_TYPO);
+    let json = fx.ys(&["workflow", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let fix = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == "fix-ci")
+        .expect("the user's file is listed");
+    assert_eq!(fix["runnable"], false);
+    assert_eq!(fix["problems"][0]["line"], 10);
+    assert_eq!(fix["source"]["kind"], "file");
+    assert_eq!(fix["source"]["replacesBuiltIn"], false);
+    let table = fx.ys(&["workflow", "list"]).ok();
+    assert!(table.contains("1 problem"), "{table}");
+}
+
+#[test]
+fn a_file_with_a_built_ins_id_is_listed_in_its_place() {
+    let fx = Fixture::new();
+    let mine = WORKFLOW_WITH_A_TYPO
+        .replace("id: fix-ci", "id: code-review")
+        .replace("pr.nubmer", "pr.number");
+    write_workflow(&fx, "code-review.yaml", &mine);
+    let json = fx.ys(&["workflow", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let reviews: Vec<&serde_json::Value> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["id"] == "code-review")
+        .collect();
+    assert_eq!(reviews.len(), 1, "{json}");
+    assert_eq!(reviews[0]["source"]["replacesBuiltIn"], true);
+    let shown = fx.ys(&["workflow", "show", "code-review"]).ok();
+    assert_eq!(shown, mine, "show prints the file that is used, exactly");
+}
+
+#[test]
+fn show_prints_the_file_and_its_problems_apart() {
+    let fx = Fixture::new();
+    let shown = fx.ys(&["workflow", "show", "code-review"]).ok();
+    assert!(shown.starts_with("# Built into Yardsort."), "{shown}");
+
+    let path = write_workflow(&fx, "fix-ci.yaml", WORKFLOW_WITH_A_TYPO);
+    let run = fx.ys(&["workflow", "show", "fix-ci"]);
+    assert_eq!(run.stdout, WORKFLOW_WITH_A_TYPO, "stdout is the file alone");
+    let expected = format!("{}:10:26: `{{{{ pr.nubmer }}}}`", path.display());
+    assert!(run.stderr.contains(&expected), "{}", run.stderr);
+    assert_eq!(run.code, Some(0), "showing a broken file is not a failure");
+
+    let json = fx.ys(&["workflow", "show", "fix-ci", "--json"]).ok();
+    let entry: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(entry["text"], WORKFLOW_WITH_A_TYPO);
+    assert!(entry["workflow"].is_null());
+}
+
+#[test]
+fn an_unknown_workflow_says_which_ones_there_are() {
+    let fx = Fixture::new();
+    let error = fx.ys(&["workflow", "show", "nope"]).failed();
+    assert!(error.contains("There is no workflow `nope`"), "{error}");
+    assert!(error.contains("code-review"), "{error}");
+}
+
+#[test]
+fn validate_names_each_problem_by_file_line_and_column_and_exits_1() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fix-ci.yaml");
+    std::fs::write(&path, WORKFLOW_WITH_A_TYPO).unwrap();
+    // No profile at all: checking a file must not need one.
+    let nowhere = dir.path().join("no-profile");
+    let validate = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ys"))
+            .args(["--data-dir", &nowhere.to_string_lossy()])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = validate(&["workflow", "validate", &path.to_string_lossy()]);
+    assert_eq!(output.status.code(), Some(1));
+    let error = String::from_utf8_lossy(&output.stderr);
+    let expected = format!(
+        "{}:10:26: `{{{{ pr.nubmer }}}}`: `pr` has no `nubmer`.",
+        path.display()
+    );
+    assert!(error.starts_with(&expected), "{error}");
+
+    let output = validate(&["--json", "workflow", "validate", &path.to_string_lossy()]);
+    assert_eq!(output.status.code(), Some(1));
+    let checked: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(checked["valid"], false);
+    assert_eq!(checked["id"], "fix-ci");
+    assert_eq!(checked["problems"][0]["column"], 26);
+
+    std::fs::write(&path, WORKFLOW_WITH_A_TYPO.replace("nubmer", "number")).unwrap();
+    let output = validate(&["workflow", "validate", &path.to_string_lossy()]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("a valid workflow, `fix-ci`"));
+    assert!(!nowhere.exists(), "validating made no profile");
+}
+
+#[test]
+fn validate_reads_standard_input_for_a_dash() {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .args(["workflow", "validate", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(WORKFLOW_WITH_A_TYPO.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.starts_with("<stdin>:10:26:"), "{error}");
+}
+
+/// The procedure the guide gives for changing a built-in, end to end in a fresh profile.
+#[test]
+fn copying_the_built_in_review_gives_a_file_that_is_used_instead() {
+    let fx = Fixture::new();
+    let copied = fx.ys(&["workflow", "copy", "code-review"]).ok();
+    let path = fx.data_dir.join("workflows").join("code-review.yaml");
+    assert!(copied.contains(&path.display().to_string()), "{copied}");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("id: code-review"), "{text}");
+
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "list", "--json"]).ok()).unwrap();
+    let review = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == "code-review")
+        .unwrap();
+    assert_eq!(review["source"]["replacesBuiltIn"], true);
+    assert_eq!(review["runnable"], true, "{review}");
+    fx.ys(&["workflow", "validate", &path.to_string_lossy()])
+        .ok();
+    assert_eq!(fx.ys(&["workflow", "show", "code-review"]).ok(), text);
+
+    // Again: refused, and the copy is untouched.
+    std::fs::write(&path, format!("{text}# mine\n")).unwrap();
+    let error = fx.ys(&["workflow", "copy", "code-review"]).failed();
+    assert!(error.contains("already your file"), "{error}");
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .ends_with("# mine\n"));
+
+    let json = fx
+        .ys(&[
+            "workflow",
+            "copy",
+            "code-review",
+            "--as",
+            "quick-review",
+            "--json",
+        ])
+        .ok();
+    let copied: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(copied["id"], "quick-review");
+    fx.ys(&["workflow", "show", "quick-review"]).ok();
+}

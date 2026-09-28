@@ -7,4 +7,5 @@ pub mod logs;
 pub mod memory;
 pub mod project;
 pub mod session;
+pub mod workflow;
 pub mod workspace;

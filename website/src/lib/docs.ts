@@ -31,6 +31,7 @@ export const DOCS_NAV: DocSection[] = [
       { slug: "guide/activity", title: "Activity" },
       { slug: "guide/memory", title: "Memory" },
       { slug: "guide/outcomes", title: "Outcomes" },
+      { slug: "guide/workflows", title: "Workflows" },
       { slug: "guide/updates", title: "Updates" },
       { slug: "guide/shortcuts", title: "Shortcuts" },
       { slug: "guide/cli", title: "The ys command line" },
