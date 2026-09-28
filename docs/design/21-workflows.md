@@ -48,77 +48,80 @@ Eight questions were put to the user on 2026-09-28. The answers, and what follow
 
 ## The file
 
+The built-in, exactly as `crates/core/src/workflow/builtin/code-review.yaml` has it:
+
 ```yaml
-# <data dir>/workflows/code-review.yaml
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
 id: code-review
 name: Request code review
 description: >
-  A second agent reviews this workspace's pull request and posts its findings on GitHub.
-  When it has, you are told, and so is the agent that wrote the PR.
+  A second agent reviews this workspace's pull request and posts its review on GitHub.
+  When the review is there, you are told, and so is the agent that wrote the pull request.
 version: 1
 
 trigger:
   kind: manual
-  context: workspace # runs against one workspace; `project` is the other value
+  context: workspace
 
 inputs:
   - id: reviewer
-    kind: harness # harness | text | choice
+    kind: harness
     label: Who reviews
     required: true
   - id: focus
     kind: text
     label: Anything to look at in particular
-    required: false
 
 steps:
   - id: review
     action: start_session
     harness: "{{ inputs.reviewer }}"
     prompt: |
-      You are reviewing pull request #{{ pr.number }} ({{ pr.url }}) for the branch
-      `{{ workspace.branch }}`, based on `{{ workspace.base_branch }}`. Another agent wrote it;
-      its task was:
+      Review pull request #{{ pr.number }} ({{ pr.url }}), "{{ pr.title }}". It is the branch
+      `{{ workspace.branch }}`, based on `{{ workspace.base_branch }}`, and you are in its
+      worktree. Another agent wrote it. Its task was:
 
       {{ workspace.task }}
 
       {{ inputs.focus }}
 
-      Read the diff against the base and run the project's checks. Do not edit any file. When you
-      are done, post your review with `gh pr review {{ pr.number }}` (approve, comment or request
-      changes) and put line-level findings on with `gh pr comment` or review comments. Then stop.
+      Read the whole diff against `{{ workspace.base_branch }}` and run the project's checks.
+      Do not edit, commit or push anything: the author is working in this same folder.
 
-      {{ memory }}
+      When you are done, post your review on the pull request with `gh pr review
+      {{ pr.number }}` — approve, comment or request changes — and put each finding that is
+      about particular lines on those lines. Say what is wrong, why, and how you know. Then stop.
 
   - id: settled
     action: wait_session
     needs: [review]
     session: "{{ steps.review.session }}"
-    until: settled # settled (quiet, or turn.completed where hooks exist) | exited
-    timeout: 45m
+    until: settled
+    timeout: 2h
 
   - id: posted
     action: wait_pr_activity
     needs: [settled]
-    kind: any # review | comment | any
-    timeout: 10m
+    kind: any
+    timeout: 15m
 
   - id: tell_user
     action: notify
     needs: [posted]
     title: "Review posted on #{{ pr.number }}"
-    body: "{{ inputs.reviewer }} reviewed {{ workspace.name }}. Open the PR to read it."
+    body: "{{ inputs.reviewer }} reviewed {{ workspace.name }}. The pull request has it."
 
   - id: tell_author
     action: send_to_session
     needs: [posted]
-    session: origin # the workspace's live harness session that produced the branch
-    when: quiet # never interrupt a working agent; wait for it to go quiet
-    timeout: 30m
+    session: origin
+    timeout: 1h
     prompt: |
-      Pull request #{{ pr.number }} has a new review from another agent. Read the comments with
-      `gh pr view {{ pr.number }} --comments` and `gh api`, address what is right, push, and reply
-      to each thread saying what you did.
+      Pull request #{{ pr.number }} has a new review from another agent. Read it with
+      `gh pr view {{ pr.number }} --comments` and the review comments with
+      `gh api repos/{owner}/{repo}/pulls/{{ pr.number }}/comments`. Fix what is right, push,
+      and answer each comment saying what you did or why you did not.
 ```
 
 The last two steps both need `posted` and nothing else, so they run together — the first parallel
@@ -126,15 +129,15 @@ branch, in the first built-in.
 
 ### Schema
 
-| Key           | Rule                                                                                                                                                   |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`          | `[a-z0-9-]+`, unique across built-ins and user files; the file name should match                                                                       |
-| `name`        | Required, shown in the sidebar                                                                                                                         |
-| `description` | Optional, shown under the name                                                                                                                         |
-| `version`     | The schema version, `1`. A file with a higher version than the app knows is listed, not runnable                                                       |
-| `trigger`     | `kind: manual` only in v1; `context: workspace \| project` says what the run is about and which variables exist                                        |
-| `inputs[]`    | `id`, `kind` (`harness`, `text`, `choice` with `options`), `label`, `required`, `default`. Collected before the run starts, in the app or as `--input` |
-| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. A step id is `[a-z0-9_-]+`                                                             |
+| Key           | Rule                                                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`          | `[a-z0-9-]+`, unique across built-ins and user files; the file name should match                                                                                         |
+| `name`        | Required, shown in the sidebar                                                                                                                                           |
+| `description` | Optional, shown under the name                                                                                                                                           |
+| `version`     | The schema version, `1`. A file with a higher version than the app knows is listed, not runnable                                                                         |
+| `trigger`     | `kind: manual` only in v1; `context: workspace`, the default and the only value in v1, says what the run is about and which variables exist                              |
+| `inputs[]`    | `id`, `kind` (`harness`, `text`, `choice` with `options`), `label`, `required` (default `false`), `default`. Collected before the run starts, in the app or as `--input` |
+| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. A step id is `[a-z0-9_-]+`                                                                               |
 
 ### Actions in v1
 
@@ -142,7 +145,7 @@ branch, in the first built-in.
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------- |
 | `start_session`    | Starts a harness in the run's workspace through the shared launcher, with a first message. `harness`, optional `model`, `effort`, `skip_memory`    | The process has been spawned                             | `session`, `run`      |
 | `wait_session`     | Watches one session. `until: settled` is PTY quiet past the attention threshold or a `turn.completed` event; `until: exited` is the process ending | The condition holds, or `timeout` → step fails           | `outcome`             |
-| `send_to_session`  | Pastes a message into a live session — one this run started, or `origin`. `when: quiet` (default) waits for the session to be quiet first          | The paste was written, or the session was gone → skipped |                       |
+| `send_to_session`  | Pastes a message into a live session — one this run started, or `origin` — once it is quiet. There is no key to change that                        | The paste was written, or the session was gone → skipped |                       |
 | `wait_pr_activity` | Polls the forge for a review or comment on the workspace's pull request newer than the run started. `kind: review \| comment \| any`               | Activity exists, or `timeout` → step fails               | `count`, `latest_url` |
 | `notify`           | An OS notification when the window is unfocused, a toast in the app otherwise; also a line in the run's log                                        | Immediately                                              |                       |
 
@@ -154,8 +157,8 @@ and the run is recorded in activity like any other.
 
 `{{ path }}` with dotted lookup, nothing else — no filters, no logic. Whitespace inside the braces
 is ignored. A `{{` that is not a known variable is a validation error, so a typo cannot reach an
-agent as literal text. Names are checked when the file is loaded, against the namespaces the
-trigger's `context` allows:
+agent as literal text. `\{{` writes a literal `{{`. Names are checked when the file is loaded,
+against the namespaces the trigger's `context` allows:
 
 | Namespace   | Fields                                                                                                          | Available            |
 | ----------- | --------------------------------------------------------------------------------------------------------------- | -------------------- |
@@ -166,7 +169,10 @@ trigger's `context` allows:
 | `steps`     | `<step id>.<produced field>`; only steps named in `needs`, transitively                                         | always               |
 | `memory`    | The project's approved memory, rendered as the launcher renders it, or empty when the project does not share it | always               |
 | `handoff`   | The workspace's handoff packet, as `ys workspace handoff` prints it                                             | `context: workspace` |
-| `origin`    | `session` — the workspace's most recent live harness session, or empty                                          | `context: workspace` |
+
+A step's `session` is not a variable but a reference: `origin`, the workspace's most recent live
+harness session, or exactly `{{ steps.<id>.session }}` for an earlier `start_session` step among
+its needs. A `harness` is a harness id or exactly one `{{ inputs.<id> }}` of kind `harness`.
 
 ## The run
 
@@ -267,29 +273,59 @@ runs one.
 Each is one pull request with its docs, tests and changelog line, in this order. Each stands on
 its own.
 
-1. **The file and the core.** Schema types, YAML loading through a maintained serde YAML crate
-   (`serde_yaml` is archived; pick its maintained successor and record why), the validator with
-   line numbers, the variable checker, the built-in `code-review`, the user directory, migration
-   0012 and the store. `ys workflow list | show | validate`. Tests: every validation error has a
-   fixture that fails without it.
-2. **The engine and the driver.** `advance` with a fake world; the driver with real sessions in a
+1. **The file and the core.** ✅ Schema types, YAML loading, the validator with line numbers,
+   the variable checker, the built-in `code-review`, the user directory, `ys workflow list | show
+| validate`, and the guide for the file format. See [slice 1](#slice-1-what-shipped) below.
+2. **The engine and the driver.** Migration 0012 and the run store, moved here from slice 1: a
+   migration ships once and cannot be edited, so it waits for the code that writes its rows.
+   `advance` with a fake world; the driver with real sessions in a
    temp data directory: a workflow that starts a shell-backed "harness", waits for it to settle,
    pastes into it, notifies. `ys workflow run | runs | cancel`, the inbox handoff, the app
    presence check on the three platforms. Resume after the app restarts.
 3. **The forge step and the built-in end to end.** `wait_pr_activity` over `gh pr view --json
-reviews,comments` (and `gh api` for review threads), the `pr` and `origin` variables,
-   `send_to_session: origin`. The code-review workflow run against a real PR on a throwaway
+reviews,comments` (and `gh api` for review threads), the `pr` variables and resolving
+   `session: origin`. The code-review workflow run against a real PR on a throwaway
    repository, on each platform, recorded in [08](08-manual-checklist.md).
 4. **The UI.** Sidebar section, the workflows view, chart, editor, runs, the run dialog, the
    workspace menu entry. Testing Library for the list, the dialog's input rules and the run
    history; the chart's layout as a pure function with tests of its own.
 5. **Describe it.** `Want::Workflow` in Drafting, the `draft_workflow` command, the validate-and-
    retry loop, the editor hand-off. Tests with a fake writer that returns bad YAML once.
-6. **Docs and pictures.** `docs/guide/workflows.md`, the CLI guide's new section, the `website`
-   nav, README highlights, screenshots of the chart and the run dialog with the throwaway profile.
+6. **Docs and pictures.** The guide's sections on running (the file format's went with slice 1),
+   README highlights, the changelog, screenshots of the chart and the run dialog with the throwaway profile.
 
 Everything in slices 1–3 works with no window, which is what makes triggers other than manual a
 matter of adding a producer of queued runs later.
+
+## Slice 1: what shipped
+
+`yardsort_core::workflow` reads and checks files; nothing runs yet. What changed from the proposal
+above, and why:
+
+- **The YAML crate is `serde-saphyr`.** `serde_yaml` is archived and `serde_yml` is deprecated.
+  `serde-saphyr` is maintained, has no unsafe parser underneath, and has `Spanned<T>`, which keeps
+  the line and column of any value through deserialising. That is what puts a line on a mistake
+  deep in a file: an unknown variable on the third line of a block-scalar prompt is reported at
+  that line and column, found by searching for its text from where the value starts, because
+  YAML folding moves offsets. serde's own errors (shape, types, unknown and duplicate keys) come
+  first and stop at the first; everything else is collected and reported sorted.
+- **Every step is one raw struct with every key optional,** then checked against its action. An
+  internally tagged enum would have been shorter, but serde buffers such values and loses the
+  spans, and a key on the wrong action would read as unknown rather than misplaced.
+- **`send_to_session` has no `when`.** The only value that was ever safe was `quiet`, and the
+  engine enforces that whatever a file says, so the key would only have been a way to be wrong.
+- **`origin` is a value of `session`, not a variable,** and `session` is `origin` or exactly
+  `{{ steps.<id>.session }}`. A session reference inside prose meant nothing.
+- **Only `context: workspace`.** `project` had no answer for where a `start_session` would run,
+  so it waits for the triggers that need it.
+- **A file that fails to parse still has an id**: its own when YAML is well-formed, else its file
+  name. So a broken `code-review.yaml` replaces the built-in and shows its problems, instead of
+  the built-in running in its place without a word. Two files with one id: the first by name is
+  used and the second is listed with the clash.
+- **A file from a later schema version** is reported as such before its unknown keys are, by a
+  lenient first read of `version`.
+- **`ys workflow validate` needs no profile,** so it runs in CI or on a file an agent has just
+  written, and takes `-` for standard input.
 
 ## Not in v1, on purpose
 
@@ -302,18 +338,10 @@ matter of adding a producer of queued runs later.
 - Reviewing in a fresh worktree; headless reviewers.
 - Jev's judgment of a review, or of a workflow a model wrote.
 
-## Open questions (new)
+## Open questions
 
-21. **How does `ys` know the app is running?** A lock file the app keeps open is the proposal; on
-    Windows an open file cannot be deleted, on Unix a stale one can be detected by trying the lock.
-    To be verified in slice 2 on all three.
-22. **What is `settled` for a harness without native events?** PTY quiet past the attention
-    threshold is the only signal, and a reviewer that pauses to think for longer than that would
-    end the step early. The forge check behind it catches the false end; whether `wait_session`
-    should require _both_ quiet and no `turn.started` since, where hooks exist, is a slice 3
-    finding.
-23. **Should a `harness` input show only harnesses that are installed?** The composer does; the
-    run dialog should match, and `ys` should refuse an id that is not found.
+[21–23 in open questions](06-open-questions.md#workflows): how `ys` knows the app is running,
+what `settled` means without native events, and which harnesses a `harness` input offers.
 
 ## Documentation this touches
 

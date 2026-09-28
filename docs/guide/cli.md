@@ -278,6 +278,22 @@ so; when an agent Yardsort started runs it, the proposal records which agent and
 workspace. There is no command to approve, edit, reject or revoke: those are yours, in the app,
 because an agent can run anything `ys` offers. `--json` works as everywhere.
 
+### `ys workflow`
+
+The [workflows](workflows.md) Yardsort knows: the built-in ones and the files in your profile's
+`workflows` folder.
+
+```sh
+ys workflow list                 # every workflow, whether it is ready, and where it comes from
+ys workflow show code-review     # the file that would be used, then any problems on stderr
+ys workflow validate fix-ci.yaml # each problem as file:line:column: message; exit 1 if any
+ys workflow validate -           # the same, reading the file from standard input
+```
+
+`validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just
+written. `list` also prints where the `workflows` folder is. `--json` works as everywhere. Running
+a workflow is not in this version yet.
+
 ### `ys activity export`
 
 Every recorded event as **NDJSON** on stdout — one JSON object per line, oldest first, with the

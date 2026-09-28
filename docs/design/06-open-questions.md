@@ -163,3 +163,18 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
     pi family through one extension given with `-e`, the plugin pattern again; Cursor through
     `--plugin-dir`, the settings-file pattern again with a directory. Every built-in harness now
     has a native source, each recorded against the real agent.
+
+## Workflows
+
+From the design pass in [21-workflows](21-workflows.md).
+
+21. **How does `ys` know the app is running?** A lock file the app keeps open is the proposal; on
+    Windows an open file cannot be deleted, on Unix a stale one can be detected by trying the lock.
+    To be verified in slice 2 on all three.
+22. **What is `settled` for a harness without native events?** PTY quiet past the attention
+    threshold is the only signal, and a reviewer that pauses to think for longer than that would
+    end the step early. The forge check behind it catches the false end; whether `wait_session`
+    should require _both_ quiet and no `turn.started` since, where hooks exist, is a slice 3
+    finding.
+23. **Should a `harness` input show only harnesses that are installed?** The composer does; the
+    run dialog should match, and `ys` should refuse an id that is not found.

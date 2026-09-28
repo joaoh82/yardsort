@@ -1,0 +1,71 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: code-review
+name: Request code review
+description: >
+  A second agent reviews this workspace's pull request and posts its review on GitHub.
+  When the review is there, you are told, and so is the agent that wrote the pull request.
+version: 1
+
+trigger:
+  kind: manual
+  context: workspace
+
+inputs:
+  - id: reviewer
+    kind: harness
+    label: Who reviews
+    required: true
+  - id: focus
+    kind: text
+    label: Anything to look at in particular
+
+steps:
+  - id: review
+    action: start_session
+    harness: "{{ inputs.reviewer }}"
+    prompt: |
+      Review pull request #{{ pr.number }} ({{ pr.url }}), "{{ pr.title }}". It is the branch
+      `{{ workspace.branch }}`, based on `{{ workspace.base_branch }}`, and you are in its
+      worktree. Another agent wrote it. Its task was:
+
+      {{ workspace.task }}
+
+      {{ inputs.focus }}
+
+      Read the whole diff against `{{ workspace.base_branch }}` and run the project's checks.
+      Do not edit, commit or push anything: the author is working in this same folder.
+
+      When you are done, post your review on the pull request with `gh pr review
+      {{ pr.number }}` — approve, comment or request changes — and put each finding that is
+      about particular lines on those lines. Say what is wrong, why, and how you know. Then stop.
+
+  - id: settled
+    action: wait_session
+    needs: [review]
+    session: "{{ steps.review.session }}"
+    until: settled
+    timeout: 2h
+
+  - id: posted
+    action: wait_pr_activity
+    needs: [settled]
+    kind: any
+    timeout: 15m
+
+  - id: tell_user
+    action: notify
+    needs: [posted]
+    title: "Review posted on #{{ pr.number }}"
+    body: "{{ inputs.reviewer }} reviewed {{ workspace.name }}. The pull request has it."
+
+  - id: tell_author
+    action: send_to_session
+    needs: [posted]
+    session: origin
+    timeout: 1h
+    prompt: |
+      Pull request #{{ pr.number }} has a new review from another agent. Read it with
+      `gh pr view {{ pr.number }} --comments` and the review comments with
+      `gh api repos/{owner}/{repo}/pulls/{{ pr.number }}/comments`. Fix what is right, push,
+      and answer each comment saying what you did or why you did not.

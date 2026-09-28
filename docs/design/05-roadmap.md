@@ -672,6 +672,9 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
   Jev, and never saves without the user.
 - Six slices, each its own pull request: core and file; engine and CLI; forge step and the
   built-in end to end; UI; Describe it; docs and pictures.
+- [x] Slice 1: the file format, the validator with a line and column on every problem, the
+      built-in, the catalog of built-ins and user files, `ys workflow list | show | validate`, and
+      the guide to the format. Recorded in [21 § slice 1](21-workflows.md#slice-1-what-shipped).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing
