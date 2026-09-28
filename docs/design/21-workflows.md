@@ -274,8 +274,9 @@ Each is one pull request with its docs, tests and changelog line, in this order.
 its own.
 
 1. **The file and the core.** ✅ Schema types, YAML loading, the validator with line numbers,
-   the variable checker, the built-in `code-review`, the user directory, `ys workflow list | show
-| validate`, and the guide for the file format. See [slice 1](#slice-1-what-shipped) below.
+   the variable checker, the built-in `code-review`, the user directory, the guide for the file
+   format, and `ys workflow list | show | copy | validate`. See
+   [slice 1](#slice-1-what-shipped) below.
 2. **The engine and the driver.** Migration 0012 and the run store, moved here from slice 1: a
    migration ships once and cannot be edited, so it waits for the code that writes its rows.
    `advance` with a fake world; the driver with real sessions in a
@@ -326,6 +327,16 @@ above, and why:
   lenient first read of `version`.
 - **`ys workflow validate` needs no profile,** so it runs in CI or on a file an agent has just
   written, and takes `-` for standard input.
+- **`ys workflow copy <id> [--as <new-id>]`**, added after review. The guide first said to copy a
+  built-in with `ys workflow show code-review > <folder>/code-review.yaml`, which cannot work: the
+  shell makes the empty file before `ys` runs, the catalog finds it claiming the id, and `show`
+  prints it instead of the built-in. Windows PowerShell's `>` writes UTF-16 besides. `copy` is
+  `workflow::copy` in the core, so the app's **Duplicate** in slice 4 is the same code; it never
+  overwrites.
+- **Also from review:** a timeout's unit is matched as a suffix, not sliced by byte count, which
+  panicked on a multi-byte last character; and a mistake's position is found by _occurrence_ —
+  the second `{{ pr.nubmer }}` in a value is the second in the file, and an escaped `\{{` is
+  counted in neither — where it used to point every repeat, and an escaped literal, at the first.
 
 ## Not in v1, on purpose
 

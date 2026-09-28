@@ -1431,3 +1431,50 @@ fn validate_reads_standard_input_for_a_dash() {
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(error.starts_with("<stdin>:10:26:"), "{error}");
 }
+
+/// The procedure the guide gives for changing a built-in, end to end in a fresh profile.
+#[test]
+fn copying_the_built_in_review_gives_a_file_that_is_used_instead() {
+    let fx = Fixture::new();
+    let copied = fx.ys(&["workflow", "copy", "code-review"]).ok();
+    let path = fx.data_dir.join("workflows").join("code-review.yaml");
+    assert!(copied.contains(&path.display().to_string()), "{copied}");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("id: code-review"), "{text}");
+
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "list", "--json"]).ok()).unwrap();
+    let review = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == "code-review")
+        .unwrap();
+    assert_eq!(review["source"]["replacesBuiltIn"], true);
+    assert_eq!(review["runnable"], true, "{review}");
+    fx.ys(&["workflow", "validate", &path.to_string_lossy()])
+        .ok();
+    assert_eq!(fx.ys(&["workflow", "show", "code-review"]).ok(), text);
+
+    // Again: refused, and the copy is untouched.
+    std::fs::write(&path, format!("{text}# mine\n")).unwrap();
+    let error = fx.ys(&["workflow", "copy", "code-review"]).failed();
+    assert!(error.contains("already your file"), "{error}");
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .ends_with("# mine\n"));
+
+    let json = fx
+        .ys(&[
+            "workflow",
+            "copy",
+            "code-review",
+            "--as",
+            "quick-review",
+            "--json",
+        ])
+        .ok();
+    let copied: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(copied["id"], "quick-review");
+    fx.ys(&["workflow", "show", "quick-review"]).ok();
+}

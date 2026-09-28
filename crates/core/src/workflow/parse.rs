@@ -277,7 +277,7 @@ fn is_name(text: &str) -> bool {
 }
 
 /// A workflow's id: what its file is called.
-fn is_id(text: &str) -> bool {
+pub(super) fn is_id(text: &str) -> bool {
     text.len() <= 64
         && text.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
         && text
@@ -289,16 +289,18 @@ fn is_id(text: &str) -> bool {
 fn duration(text: &str) -> Result<u64, String> {
     let text = text.trim();
     let usage = "Write a timeout as a whole number and s, m or h, like `45m`.";
-    let (number, unit) = text.split_at(text.len().saturating_sub(1));
-    let scale = match unit {
-        "s" => 1,
-        "m" => 60,
-        "h" => 60 * 60,
-        _ => return Err(format!("`{text}` is not a timeout. {usage}")),
-    };
-    let count: u64 = number
-        .parse()
-        .map_err(|_| format!("`{text}` is not a timeout. {usage}"))?;
+    let not_a_timeout = || format!("`{text}` is not a timeout. {usage}");
+    // Matched as suffixes, never sliced by byte count: the last character of a file's text can be
+    // any width, and a slice through the middle of one panics.
+    let (number, scale) = [("s", 1), ("m", 60), ("h", 60 * 60)]
+        .into_iter()
+        .find_map(|(unit, scale)| text.strip_suffix(unit).map(|number| (number, scale)))
+        .ok_or_else(not_a_timeout)?;
+    // Digits only: `u64::from_str` would also take a leading `+`.
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(not_a_timeout());
+    }
+    let count: u64 = number.parse().map_err(|_| not_a_timeout())?;
     let secs = count.saturating_mul(scale);
     if secs == 0 {
         return Err("A timeout of zero would fail the step at once.".into());
@@ -802,7 +804,7 @@ impl Checker<'_> {
                 ),
             );
         } else {
-            self.variable(var, &field.referenced, scope);
+            self.variable(var, &field.referenced, value, scope);
         }
         SessionRef::Step(var.path[1].clone())
     }
@@ -824,12 +826,13 @@ impl Checker<'_> {
         match template::parse(&field.value) {
             Ok(_) => {
                 for var in template::placeholders(&field.value) {
-                    self.variable(&var, &field.referenced, scope);
+                    self.variable(&var, &field.referenced, &field.value, scope);
                 }
             }
             Err(malformed) => {
                 for bad in malformed {
-                    let (line, column) = self.find(&field.referenced, &bad.raw);
+                    let (line, column) =
+                        self.find(&field.referenced, &field.value, &bad.raw, bad.start);
                     self.problems.push(Problem::at(line, column, bad.message));
                 }
             }
@@ -837,27 +840,40 @@ impl Checker<'_> {
         Some(field.value.clone())
     }
 
-    fn variable(&mut self, var: &Placeholder, field: &Location, scope: &Scope) {
+    /// Report `var` if it names nothing. `value` is the text it was found in.
+    fn variable(&mut self, var: &Placeholder, field: &Location, value: &str, scope: &Scope) {
         let Err(message) = resolve(var, scope) else {
             return;
         };
-        let (line, column) = self.find(field, &var.raw);
+        let (line, column) = self.find(field, value, &var.raw, var.start);
         self.problems.push(Problem::at(line, column, message));
     }
 
-    /// Where `raw` is written, searching from where its value starts. YAML may fold or indent a
-    /// value, so the offset in the value is not the offset in the file; the text itself is.
-    fn find(&self, field: &Location, raw: &str) -> (usize, usize) {
+    /// Where in the file the placeholder `raw`, at byte `start` of `value`, is written.
+    ///
+    /// YAML may fold, indent or unescape a value, so an offset in the value is not an offset in
+    /// the file; the placeholder's own text is the same in both. The same text can appear more
+    /// than once, so this finds the same *occurrence*: the second `{{ pr.nubmer }}` in the value
+    /// is the second in the file. Escaped ones, `\{{`, are literals and are counted in neither.
+    fn find(&self, field: &Location, value: &str, raw: &str, start: usize) -> (usize, usize) {
         let fallback = (field.line() as usize, field.column() as usize);
         let Some(from) = offset_of(self.source, field.line() as usize, field.column() as usize)
         else {
             return fallback;
         };
-        let Some(found) = self.source[from..].find(raw) else {
-            return fallback;
-        };
-        position_of(self.source, from + found)
+        let nth = unescaped(value, raw).take_while(|&at| at < start).count();
+        match unescaped(&self.source[from..], raw).nth(nth) {
+            Some(found) => position_of(self.source, from + found),
+            None => fallback,
+        }
     }
+}
+
+/// Where `needle` occurs in `hay`, leaving out occurrences escaped with a backslash.
+fn unescaped<'a>(hay: &'a str, needle: &'a str) -> impl Iterator<Item = usize> + 'a {
+    hay.match_indices(needle)
+        .map(|(at, _)| at)
+        .filter(move |&at| !hay[..at].ends_with('\\'))
 }
 
 /// What is wrong with `var` in this scope, if anything.
@@ -1070,7 +1086,9 @@ mod tests {
         assert_eq!(duration("45m"), Ok(45 * 60));
         assert_eq!(duration("30s"), Ok(30));
         assert_eq!(duration(" 2h "), Ok(7200));
-        for bad in ["45", "m", "1h30m", "-5m", "4.5h", "10d", ""] {
+        for bad in [
+            "45", "m", "1h30m", "-5m", "+5m", "4.5h", "10d", "", "1秒", "秒", "5 m",
+        ] {
             assert!(duration(bad).is_err(), "{bad}");
         }
         assert!(duration("0m").unwrap_err().contains("zero"));

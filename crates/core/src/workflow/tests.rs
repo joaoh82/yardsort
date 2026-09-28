@@ -469,6 +469,21 @@ fn what_to_wait_for_is_one_of_the_known_things() {
     );
 }
 
+#[test]
+fn a_timeout_ending_in_a_wide_character_is_a_problem_not_a_panic() {
+    let text = with_steps("  - id: w\n    action: wait_pr_activity\n    timeout: 1秒\n");
+    let found = problem(&text);
+    assert!(
+        found.starts_with("18:14: `1秒` is not a timeout."),
+        "{found}"
+    );
+    // The catalog parses every file it lists, so one such file must not take the listing down.
+    let dir = data_dir();
+    write(dir.path(), "wide.yaml", &text);
+    let listed = catalog(dir.path());
+    assert!(!listed.iter().find(|e| e.id == "demo").unwrap().runnable());
+}
+
 // Variables.
 
 #[test]
@@ -566,6 +581,40 @@ fn a_malformed_placeholder_is_reported_where_it_opens() {
         found[1].starts_with("17:40: `{{` is never closed"),
         "{}",
         found[1]
+    );
+}
+
+#[test]
+fn the_same_mistake_twice_is_reported_twice_each_at_its_own_line() {
+    let text = BASE.replace(
+        "prompt: Hello",
+        "prompt: |\n      One {{ pr.nubmer }}.\n      Two {{ pr.nubmer }}.",
+    );
+    let found = problems(&text);
+    let places: Vec<&str> = found.iter().map(|p| &p[..p.find(": ").unwrap()]).collect();
+    assert_eq!(places, vec!["16:11", "17:11"], "{found:#?}");
+}
+
+#[test]
+fn an_escaped_literal_is_not_blamed_for_the_real_mistake_after_it() {
+    let text = BASE.replace(
+        "prompt: Hello",
+        "prompt: |\n      Literal \\{{ pr.nubmer }} here.\n      Real {{ pr.nubmer }} here.",
+    );
+    assert!(
+        problem(&text).starts_with("17:12: `{{ pr.nubmer }}`"),
+        "{}",
+        problem(&text)
+    );
+    // In a double-quoted scalar the file has `\\{{` for the value's `\{{`; still a literal.
+    let quoted = BASE.replace(
+        "prompt: Hello",
+        r#"prompt: "\\{{ pr.nubmer }} and {{ pr.nubmer }}""#,
+    );
+    assert!(
+        problem(&quoted).starts_with("15:36: `{{ pr.nubmer }}`"),
+        "{}",
+        problem(&quoted)
     );
 }
 
@@ -719,5 +768,92 @@ fn a_file_that_is_too_big_or_not_text_is_listed_with_why() {
         binary.problems[0].message.contains("not UTF-8"),
         "{:?}",
         binary.problems
+    );
+}
+
+#[test]
+fn copying_a_built_in_makes_the_file_that_replaces_it() {
+    let dir = data_dir();
+    let path = copy(dir.path(), "code-review", None).unwrap();
+    assert_eq!(path, user_dir(dir.path()).join("code-review.yaml"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.starts_with("# Copied from Yardsort's built-in `code-review`.\n"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("To change it, duplicate it"),
+        "the built-in's own note is dropped"
+    );
+    assert_eq!(
+        parse(&text).unwrap(),
+        parse(BUILT_IN[0].1).unwrap(),
+        "the copy is the same workflow"
+    );
+    let found = find(dir.path(), "code-review").unwrap();
+    assert!(matches!(
+        found.source,
+        Source::File {
+            replaces_built_in: true,
+            ..
+        }
+    ));
+    assert!(found.runnable());
+}
+
+#[test]
+fn a_copy_never_overwrites_and_a_refusal_leaves_the_file_alone() {
+    let dir = data_dir();
+    let path = copy(dir.path(), "code-review", None).unwrap();
+    std::fs::write(&path, "edited by hand\n").unwrap();
+    let again = copy(dir.path(), "code-review", None).unwrap_err();
+    assert_eq!(again.code, "workflow_exists", "{}", again.message);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "edited by hand\n");
+    // Another file already claiming the id is caught before any file is made.
+    write(
+        dir.path(),
+        "mine.yaml",
+        &BASE.replace("id: demo", "id: taken"),
+    );
+    let clash = copy(dir.path(), "code-review", Some("taken")).unwrap_err();
+    assert!(clash.message.contains("mine.yaml"), "{}", clash.message);
+    assert!(!user_dir(dir.path()).join("taken.yaml").exists());
+}
+
+#[test]
+fn a_copy_under_a_new_id_sits_beside_the_original() {
+    let dir = data_dir();
+    let path = copy(dir.path(), "code-review", Some("careful-review")).unwrap();
+    assert!(path.ends_with("careful-review.yaml"));
+    assert_eq!(
+        parse(&std::fs::read_to_string(&path).unwrap()).unwrap().id,
+        "careful-review"
+    );
+    let ids: Vec<String> = catalog(dir.path()).into_iter().map(|e| e.id).collect();
+    assert_eq!(ids.len(), 2, "{ids:?}");
+    assert_eq!(
+        find(dir.path(), "code-review").unwrap().source,
+        Source::BuiltIn
+    );
+}
+
+#[test]
+fn a_users_own_file_is_copied_only_under_a_new_id() {
+    let dir = data_dir();
+    write(dir.path(), "demo.yaml", BASE);
+    let same = copy(dir.path(), "demo", None).unwrap_err();
+    assert!(
+        same.message.contains("already your file"),
+        "{}",
+        same.message
+    );
+    let path = copy(dir.path(), "demo", Some("demo-two")).unwrap();
+    let copied = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(copied, BASE.replace("id: demo", "id: demo-two"));
+    let bad = copy(dir.path(), "demo", Some("Demo Two")).unwrap_err();
+    assert_eq!(bad.code, "workflow_invalid_id");
+    assert_eq!(
+        copy(dir.path(), "nope", None).unwrap_err().code,
+        "workflow_not_found"
     );
 }

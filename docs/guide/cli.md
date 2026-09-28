@@ -286,11 +286,13 @@ The [workflows](workflows.md) Yardsort knows: the built-in ones and the files in
 ```sh
 ys workflow list                 # every workflow, whether it is ready, and where it comes from
 ys workflow show code-review     # the file that would be used, then any problems on stderr
+ys workflow copy code-review     # your own copy to edit, used instead of the built-in
 ys workflow validate fix-ci.yaml # each problem as file:line:column: message; exit 1 if any
 ys workflow validate -           # the same, reading the file from standard input
 ```
 
-`validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just
+`copy` writes into the `workflows` folder and never overwrites; `--as <new-id>` makes a second
+workflow instead of a replacement. `validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just
 written. `list` also prints where the `workflows` folder is. `--json` works as everywhere. Running
 a workflow is not in this version yet.
 

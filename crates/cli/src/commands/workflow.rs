@@ -20,6 +20,15 @@ pub enum Command {
         /// The workflow's id, from `ys workflow list`.
         id: String,
     },
+    /// Copy a workflow into your folder to edit. A built-in copied under its own id is then
+    /// used instead of the built-in; delete the copy to go back.
+    Copy {
+        /// The workflow to copy, from `ys workflow list`.
+        id: String,
+        /// Give the copy an id of its own, so it sits beside the original.
+        #[arg(long = "as", value_name = "NEW_ID")]
+        as_id: Option<String>,
+    },
     /// Check a workflow file. Prints each problem with its line and column; exits 1 if there
     /// are any. Needs no Yardsort profile, so it works anywhere.
     Validate {
@@ -50,6 +59,10 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::Show { id } => {
             let ys = Yardsort::open(data_dir)?;
             show(&ys.data_dir, &id, out)
+        }
+        Command::Copy { id, as_id } => {
+            let ys = Yardsort::open(data_dir)?;
+            copy(&ys.data_dir, &id, as_id.as_deref(), out)
         }
     }
 }
@@ -115,6 +128,30 @@ fn show(data_dir: &Path, id: &str, out: &Output) -> Result<(), Failure> {
                 eprintln!("{}", located(&name, problem));
             }
         }
+    })
+}
+
+fn copy(data_dir: &Path, id: &str, as_id: Option<&str>, out: &Output) -> Result<(), Failure> {
+    let path = workflow::copy(data_dir, id, as_id)?;
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Copied {
+        id: String,
+        path: String,
+    }
+    let copied = Copied {
+        id: as_id.unwrap_or(id).to_owned(),
+        path: path.display().to_string(),
+    };
+    out.emit(&copied, || {
+        println!("Copied to {}", copied.path);
+        if as_id.is_none() {
+            println!("It is used instead of the built-in. Delete it to go back.");
+        }
+        println!(
+            "Check it after editing: ys workflow validate {}",
+            copied.path
+        );
     })
 }
 

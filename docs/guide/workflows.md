@@ -5,10 +5,10 @@ agent review this workspace's pull request, then tell me and the agent that wrot
 one as a short YAML file. Yardsort checks every name and every `{{ variable }}` in it before it
 runs anything, and names the line and column of each mistake.
 
-This version reads and checks workflow files: `ys workflow list`, `show` and `validate`. Running
-them, from the app and from `ys`, and the **Workflows** section of the sidebar are being built;
-the [roadmap](../design/05-roadmap.md) has the plan. Until then, what this page says a step
-_does_ is what it is for. The checks are all real now.
+This version reads, copies and checks workflow files: `ys workflow list`, `show`, `copy` and
+`validate`. Running them, from the app and from `ys`, and the **Workflows** section of the sidebar
+are being built; the [roadmap](../design/05-roadmap.md) has the plan. Until then, what this page
+says a step _does_ is what it is for. The checks are all real now.
 
 ## Where workflows come from
 
@@ -21,10 +21,21 @@ _does_ is what it is for. The checks are all real now.
   [Where Yardsort keeps things](troubleshooting.md#where-yardsort-keeps-things) says where that
   is on your system, and `ys workflow list` prints it.
 
-A file with a built-in's `id` is used instead of that built-in. That is how you change one: copy
-it with `ys workflow show code-review > <folder>/code-review.yaml`, then edit the copy. Delete
-the file and the built-in comes back. If your copy has a mistake, it is listed with its problems
-and does not run. The built-in does not quietly run in its place.
+A file with a built-in's `id` is used instead of that built-in. That is how you change one:
+
+```sh
+ys workflow copy code-review                       # your copy, used instead of the built-in
+ys workflow copy code-review --as careful-review   # or a second workflow beside it
+```
+
+`copy` writes the file into your folder, prints where, and never overwrites a file that is
+already there. Edit the copy, then check it with `ys workflow validate`. Delete the file and the
+built-in comes back. If your copy has a mistake, it is listed with its problems and does not run.
+The built-in does not quietly run in its place.
+
+Use `copy` rather than redirecting `ys workflow show` into the folder. The shell creates the
+empty file before `ys` runs, so `ys` finds that empty file under the built-in's id and prints
+nothing useful. Windows PowerShell's `>` also writes UTF-16, which is not a workflow file.
 
 If two of your files have the same `id`, the first by file name is used. The other is listed with
 a problem saying which file it clashes with.

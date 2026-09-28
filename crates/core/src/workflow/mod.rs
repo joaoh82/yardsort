@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use specta::Type;
 
+use crate::error::{IpcError, IpcResult};
+
 pub use parse::parse;
 
 /// The schema version this build reads. A file asking for a later one is listed, not run.
@@ -373,6 +375,111 @@ fn load(data_dir: &Path) -> Vec<(Entry, bool)> {
 
 fn is_built_in(id: &str) -> bool {
     BUILT_IN.iter().any(|(built_in, _)| *built_in == id)
+}
+
+/// Copy a workflow into the user's folder as `<id>.yaml`, ready to edit, and say where.
+///
+/// With no `as_id`, the copy keeps the id, which only makes sense for a built-in: the copy is
+/// then used instead of it. With `as_id`, the copy is a new workflow beside the original.
+///
+/// This is the only safe way to start from a built-in. A shell redirect into the folder,
+/// `ys workflow show code-review > …/code-review.yaml`, makes the empty file before `ys` runs,
+/// so `ys` finds that empty file claiming the id and prints it instead of the built-in; and
+/// PowerShell's `>` writes UTF-16, which is not a workflow file. Never overwrites anything.
+pub fn copy(data_dir: &Path, id: &str, as_id: Option<&str>) -> IpcResult<PathBuf> {
+    let source = find(data_dir, id).ok_or_else(|| {
+        IpcError::new(
+            "workflow_not_found",
+            format!("There is no workflow `{id}`."),
+        )
+    })?;
+    let target = as_id.unwrap_or(id);
+    if !parse::is_id(target) {
+        return Err(IpcError::new(
+            "workflow_invalid_id",
+            format!(
+                "`{target}` cannot be an id. Use lowercase letters, digits and `-`, like \
+                 `my-review`."
+            ),
+        ));
+    }
+    if let Source::File { path, .. } = &source.source {
+        if target == id {
+            return Err(IpcError::new(
+                "workflow_exists",
+                format!("`{id}` is already your file, {path}. Give the copy an id of its own."),
+            ));
+        }
+    }
+    let claimed = load(data_dir)
+        .into_iter()
+        .find(|(entry, _)| entry.id == target && matches!(entry.source, Source::File { .. }));
+    if let Some((entry, _)) = claimed {
+        let Source::File { path, .. } = entry.source else {
+            unreachable!("only files are looked for")
+        };
+        return Err(IpcError::new(
+            "workflow_exists",
+            format!("You already have a workflow `{target}`: {path}."),
+        ));
+    }
+
+    let mut text = source.text.clone();
+    if source.source == Source::BuiltIn {
+        // The built-in's opening comment explains how to copy it, which a copy no longer needs.
+        let body = text
+            .lines()
+            .skip_while(|line| line.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        text = format!("# Copied from Yardsort's built-in `{id}`.\n{body}\n");
+    }
+    if target != id {
+        text = with_id(&text, target).ok_or_else(|| {
+            IpcError::new(
+                "workflow_invalid",
+                format!(
+                    "Cannot find the `id:` line of `{id}` to change it. Copy the file by hand."
+                ),
+            )
+        })?;
+    }
+
+    let folder = user_dir(data_dir);
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", folder.display())))?;
+    let path = folder.join(format!("{target}.yaml"));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => IpcError::new(
+                "workflow_exists",
+                format!("{} is already there. Nothing was copied.", path.display()),
+            ),
+            _ => IpcError::new("io", format!("Cannot write {}: {e}", path.display())),
+        })?;
+    std::io::Write::write_all(&mut file, text.as_bytes())
+        .map_err(|e| IpcError::new("io", format!("Cannot write {}: {e}", path.display())))?;
+    Ok(path)
+}
+
+/// `text` with its top-level `id:` line saying `id`, or `None` when it has no such line.
+fn with_id(text: &str, id: &str) -> Option<String> {
+    let mut found = false;
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if !found && line.starts_with("id:") {
+                found = true;
+                format!("id: {id}")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect();
+    found.then(|| lines.join("\n") + "\n")
 }
 
 /// Read a workflow file as text, refusing ones too big or not text.
