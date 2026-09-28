@@ -321,6 +321,75 @@ pub async fn workflow_start(
     Ok(run)
 }
 
+/// A workflow a model wrote from a description, checked, for the editor. Nothing is saved.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Described {
+    pub text: String,
+    /// What is still wrong with it, marked in the editor; empty when it checks out.
+    pub problems: Vec<Problem>,
+    /// How many answers it took: one, or two when the first had problems.
+    pub tries: u32,
+    /// Who wrote it, in words.
+    pub writer: String,
+}
+
+/// Have a model write a workflow from `description`, through Drafting: the agent the user has
+/// in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
+/// is, and sent back once with its problems when it has any.
+///
+/// The agent runs in an empty folder of the profile's, not in any repository: a description is
+/// not a change to describe, and nothing here should read or touch the user's projects.
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult<Described> {
+    use yardsort_core::workflow::describe;
+    if description.trim().is_empty() {
+        return Err(IpcError::new(
+            "workflow_no_description",
+            "Say what the workflow should do first.",
+        ));
+    }
+    let handle = app.clone();
+    let (agent, key, root, writer) = blocking(app, |state| {
+        let (agent, key) = crate::draft::commands::writers(state, None)?;
+        let root = state.data_dir.join("drafting");
+        std::fs::create_dir_all(&root)
+            .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", root.display())))?;
+        let writer = crate::draft::commands::writer_label(state, agent.as_ref());
+        Ok((agent, key, root, writer))
+    })
+    .await?;
+
+    let mut so_far: Option<describe::Described> = None;
+    while let Some(prompt) = describe::next_prompt(&description, so_far.as_ref()) {
+        // An agent in its non-interactive mode gets one prompt, so the standing instruction —
+        // the file format, without which it cannot answer — goes in front of the question. The
+        // key's path is given it as the system prompt, as Drafting does.
+        let prompt = match agent {
+            Some(_) => format!("{}\n\n{prompt}", describe::SYSTEM),
+            None => prompt,
+        };
+        let prepared = crate::draft::commands::Prepared {
+            agent: agent.clone(),
+            key: key.clone(),
+            root: root.clone(),
+            system: describe::SYSTEM,
+            prompt,
+        };
+        let answer = crate::draft::commands::run(handle.clone(), prepared).await?;
+        let tries = so_far.as_ref().map_or(0, |d| d.tries) + 1;
+        so_far = Some(describe::finish(&answer, tries));
+    }
+    let done = so_far.expect("the first prompt is always asked");
+    Ok(Described {
+        text: done.text,
+        problems: done.problems,
+        tries: done.tries,
+        writer,
+    })
+}
+
 /// Cancel a run. Agents it started keep running.
 #[tauri::command]
 #[specta::specta]

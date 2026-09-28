@@ -265,6 +265,15 @@ export const commands = {
 	workflowStart: (workflowId: string, workspaceId: string, inputs: { [key in string]: string }) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_start", { workflowId, workspaceId, inputs })),
 	/**  Cancel a run. Agents it started keep running. */
 	workflowCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workflow_cancel", { runId })),
+	/**
+	 *  Have a model write a workflow from `description`, through Drafting: the agent the user has
+	 *  in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
+	 *  is, and sent back once with its problems when it has any.
+	 * 
+	 *  The agent runs in an empty folder of the profile's, not in any repository: a description is
+	 *  not a change to describe, and nothing here should read or touch the user's projects.
+	 */
+	workflowDescribe: (description: string) => typedError<Described, IpcError>(__TAURI_INVOKE("workflow_describe", { description })),
 };
 
 /** Events */
@@ -522,6 +531,17 @@ export type DaemonStatus = {
 	 *  rather than stopped behind the user's back.
 	 */
 	strandedSessions: number | null,
+};
+
+/**  A workflow a model wrote from a description, checked, for the editor. Nothing is saved. */
+export type Described = {
+	text: string,
+	/**  What is still wrong with it, marked in the editor; empty when it checks out. */
+	problems: Problem[],
+	/**  How many answers it took: one, or two when the first had problems. */
+	tries: number,
+	/**  Who wrote it, in words. */
+	writer: string,
 };
 
 /**

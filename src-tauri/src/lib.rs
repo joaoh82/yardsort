@@ -155,6 +155,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::workflow_preview,
             workflows::commands::workflow_start,
             workflows::commands::workflow_cancel,
+            workflows::commands::workflow_describe,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,

@@ -7,7 +7,9 @@ has the downloads and the full commit lists.
 
 - **Workflows: named agent work, in the sidebar and from `ys`.** A **Workflows** section above
   Projects lists them; open one to see its steps as a chart, edit its file with every mistake
-  marked where it is, follow its runs, and **Run…** it. A workflow is a short YAML file in your
+  marked where it is, follow its runs, and **Run…** it. A new one can be written for you: say
+  what it should do and press **Write it**, and the agent you already have, or your Anthropic
+  key, writes the file, checked like any other and never saved until you say so. A workflow is a short YAML file in your
   profile's `workflows` folder: the inputs to ask for, and steps that start an agent, wait for it
   to settle, type to it once it is quiet, and notify you. Steps run as soon as the ones they
   need succeed, so they can run side by side. `ys workflow validate` checks a file and names the

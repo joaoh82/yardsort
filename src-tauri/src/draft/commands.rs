@@ -126,13 +126,48 @@ pub async fn draft_save_settings(
 }
 
 /// What a draft needs before anything leaves the machine: who writes, what they are told, and
-/// the diff itself.
-struct Prepared {
-    agent: Option<(Program, HarnessDef)>,
-    key: Option<String>,
-    root: std::path::PathBuf,
-    system: &'static str,
-    prompt: String,
+/// where the agent stands while it writes.
+pub(crate) struct Prepared {
+    pub(crate) agent: Option<(Program, HarnessDef)>,
+    pub(crate) key: Option<String>,
+    pub(crate) root: std::path::PathBuf,
+    pub(crate) system: &'static str,
+    pub(crate) prompt: String,
+}
+
+/// An agent that can write, found on `PATH`, and the Anthropic key in force.
+pub(crate) type Writers = (Option<(Program, HarnessDef)>, Option<String>);
+
+/// Who can write here: the agent, the key, or neither — in which case this is the error that
+/// says so. The switch in settings is checked first: off means nobody.
+pub(crate) fn writers(state: &AppState, harness_id: Option<&str>) -> IpcResult<Writers> {
+    if !state.settings.get().draft.enabled {
+        return Err(IpcError::new(
+            "draft_off",
+            "Writing with a model is switched off in Settings → Assist.",
+        ));
+    }
+    let all = harnesses(state);
+    let env = state.env();
+    let agent = writer(&all, harness_id)
+        .and_then(|def| Program::find(&env, &def.command).map(|program| (program, def.clone())));
+    let (key, _) = anthropic_key(state);
+    if agent.is_none() && key.is_none() {
+        return Err(IpcError::new(
+            "draft_nobody_can_write",
+            "No agent here can write one, and there is no Anthropic API key. Give a harness its \
+             non-interactive arguments in Settings → Harnesses, or add a key in Settings → Assist.",
+        ));
+    }
+    Ok((agent, key))
+}
+
+/// Who a draft would be written by, in words: the agent's label, or the model the key asks.
+pub(crate) fn writer_label(state: &AppState, agent: Option<&(Program, HarnessDef)>) -> String {
+    match agent {
+        Some((_, def)) => def.label.clone(),
+        None => state.settings.get().draft.model,
+    }
 }
 
 /// Gather it all on the blocking side — settings, git, the credential store — so the async half
@@ -143,12 +178,7 @@ fn prepare(
     harness_id: Option<&str>,
     want: Want,
 ) -> IpcResult<Prepared> {
-    if !state.settings.get().draft.enabled {
-        return Err(IpcError::new(
-            "draft_off",
-            "Writing with a model is switched off in Settings → Assist.",
-        ));
-    }
+    let (agent, key) = writers(state, harness_id)?;
     let (row, root) = workspace(state, workspace_id)?;
     let git = Git::new(&state.env())?;
     let changes = Changes {
@@ -178,20 +208,6 @@ fn prepare(
     let task = state.store.session_prompts(workspace_id)?.join("\n\n");
     let task = Some(task).filter(|task| !task.trim().is_empty());
     let (system, prompt) = ask(want, task.as_deref(), &diff);
-
-    let all = harnesses(state);
-    let env = state.env();
-    let agent = writer(&all, harness_id)
-        .and_then(|def| Program::find(&env, &def.command).map(|program| (program, def.clone())));
-    let (key, _) = anthropic_key(state);
-
-    if agent.is_none() && key.is_none() {
-        return Err(IpcError::new(
-            "draft_nobody_can_write",
-            "No agent here can write one, and there is no Anthropic API key. Give a harness its \
-             non-interactive arguments in Settings → Harnesses, or add a key in Settings → Assist.",
-        ));
-    }
     Ok(Prepared {
         agent,
         key,
@@ -206,7 +222,7 @@ fn prepare(
 /// A failing agent falls through to the key rather than ending there — an agent that is not
 /// logged in is exactly when the other path earns its place — and if there is no key, the
 /// agent's own complaint is what the user sees.
-async fn run(app: AppHandle, prepared: Prepared) -> IpcResult<String> {
+pub(crate) async fn run(app: AppHandle, prepared: Prepared) -> IpcResult<String> {
     let Prepared {
         agent,
         key,

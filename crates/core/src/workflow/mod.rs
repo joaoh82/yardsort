@@ -9,6 +9,7 @@
 //! sent to the user's agents. That is the line project automation drew too. See
 //! `docs/design/21-workflows.md`.
 
+pub mod describe;
 pub mod driver;
 pub mod engine;
 mod parse;
