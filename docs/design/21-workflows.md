@@ -418,8 +418,14 @@ The pull request and the workspace's own agent; the built-in code review runs.
   the step is skipped, saying so.
 - **`wait_pr_activity`** counts reviews and comments posted since the run started, to the second
   GitHub keeps. The driver asks `gh pr view --json url,reviews,comments` at most every 30 s per
-  run, through `Hands`, and keeps the last answer between ticks; a failed ask is logged and asked
-  again next interval, and the step's timeout is what gives up.
+  run, on a thread of its own, and keeps the last answer between ticks; a failed or stopped ask
+  is logged and asked again next interval, and the step's timeout is what gives up.
+- **From review:** the pull request is looked up by branch (`gh pr list --head <branch> --state
+open`), not found among the repository's fifty newest: an open pull request with fifty newer
+  merged ones was reported missing. And the forge is asked off the driver's thread. A question
+  goes to a thread of its own, one per run at a time, and its answer is there for a later tick;
+  `gh` itself is stopped after 60 s. Asked on the driver's thread, a slow `gh` held up every
+  other run, its messages, notifications and timeouts, for as long as it took.
 - **What `gh` says about reviews,** checked against a real pull request: replying in a review
   thread appears as a review of its own, with an empty body. So a person replying to an old
   thread while the reviewer works would end a `review` wait early. A review with only line

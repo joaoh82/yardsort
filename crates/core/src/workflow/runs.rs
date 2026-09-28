@@ -186,9 +186,9 @@ pub fn queue(
     }
 }
 
-/// The pull request for the branch `workspace` has checked out, found the way the app's
-/// publish panel finds it: by the branch git says is checked out, among what `gh` lists. For
-/// [`Look::pull_request`] implementations.
+/// The open pull request for the branch `workspace` has checked out: the branch as git says,
+/// the pull request as `gh` says when asked about that branch, the newest when there are more.
+/// For [`Look::pull_request`] implementations.
 pub fn pull_request_of(
     gh: Option<&crate::forge::Gh>,
     git: &crate::git::Git,
@@ -207,7 +207,7 @@ pub fn pull_request_of(
             ))
         }
     };
-    let listed = gh.pull_requests(root, 50).map_err(|error| {
+    let listed = gh.open_pull_requests_for(root, &branch).map_err(|error| {
         let asked = format!(
             "Could not ask GitHub for `{}`'s pull request",
             workspace.name

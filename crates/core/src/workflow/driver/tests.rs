@@ -133,8 +133,8 @@ impl Hands for ScriptHands {
         None
     }
 
-    fn pr_posts(&self, _workspace_id: &str, _number: u32) -> Result<Vec<PrPost>, String> {
-        Ok(Vec::new())
+    fn pr_posts(&self, _workspace_id: &str, _number: u32) -> PrAsk {
+        Box::new(|| Ok(Vec::new()))
     }
 }
 

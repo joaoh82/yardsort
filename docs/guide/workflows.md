@@ -134,7 +134,9 @@ What each step does while it runs:
   session that was running when the run started. A shell is not an agent, and neither is an
   agent the run starts itself. With none running then, the step is skipped, saying so.
 - **`wait_pr_activity`** waits for a review or a comment, as `kind` says, posted on the pull
-  request after the run started. It asks GitHub every 30 seconds.
+  request after the run started. It asks GitHub every 30 seconds, in the background, so a slow
+  answer holds up no other step; a question GitHub has not answered within a minute is dropped
+  and asked again.
 - **`notify`** shows a system notification.
 
 A step runs only when every step in its `needs` succeeded. When one fails, the steps after it are

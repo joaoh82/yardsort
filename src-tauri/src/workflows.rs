@@ -20,10 +20,10 @@ use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
-use yardsort_core::forge::{Gh, PrPost};
+use yardsort_core::forge::Gh;
 use yardsort_core::launch::{HarnessRequest, Launch};
 use yardsort_core::presence::AppLock;
-use yardsort_core::workflow::driver::{self, Hands};
+use yardsort_core::workflow::driver::{self, Hands, PrAsk};
 
 use crate::state::AppState;
 
@@ -168,12 +168,19 @@ impl Hands for AppHands<'_> {
         Some(handoff::render(&facts))
     }
 
-    fn pr_posts(&self, workspace_id: &str, number: u32) -> Result<Vec<PrPost>, String> {
-        let (_, root) = crate::changes::commands::workspace(self.state, workspace_id)
-            .map_err(|error| error.message)?;
-        let gh = Gh::find(&self.state.env())
-            .ok_or_else(|| "The GitHub CLI (`gh`) is not on your PATH.".to_owned())?;
-        gh.pr_posts(&root, number)
-            .map_err(|error| error.to_string())
+    fn pr_posts(&self, workspace_id: &str, number: u32) -> PrAsk {
+        // Found here, quickly; `gh` itself runs in the job, on the driver's forge thread.
+        let found = crate::changes::commands::workspace(self.state, workspace_id)
+            .map_err(|error| error.message)
+            .and_then(|(_, root)| {
+                Gh::find(&self.state.env())
+                    .map(|gh| (gh, root))
+                    .ok_or_else(|| "The GitHub CLI (`gh`) is not on your PATH.".to_owned())
+            });
+        Box::new(move || {
+            let (gh, root) = found?;
+            gh.pr_posts(&root, number, driver::FORGE_LIMIT)
+                .map_err(|error| error.to_string())
+        })
     }
 }

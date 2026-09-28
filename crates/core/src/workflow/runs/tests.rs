@@ -393,3 +393,71 @@ fn a_run_knows_its_project_and_workspace() {
     );
     assert_eq!(var("memory"), None, "not a place variable");
 }
+
+/// A `gh` that answers from a script: asked about `fix-login`'s open pull requests, the one
+/// open #3; asked for the repository's recent ones, fifty-one newer ones, every one merged.
+#[cfg(unix)]
+#[test]
+fn an_open_pull_request_behind_fifty_newer_ones_is_still_found() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let git = crate::git::testing::git();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git.init(&repo).unwrap();
+    git.initial_commit(&repo).unwrap();
+    git.run(&repo, &["checkout", "-b", "fix-login"]).unwrap();
+
+    let pr = |number: u32, branch: &str, state: &str| {
+        format!(
+            r#"{{"number":{number},"url":"https://github.com/o/r/pull/{number}","title":"PR {number}","headRefName":"{branch}","state":"{state}","isDraft":false,"statusCheckRollup":[],"createdAt":"2026-09-01T00:00:00Z","baseRefName":"main","headRefOid":"abc","additions":1,"deletions":1,"reviewDecision":"","updatedAt":"2026-09-01T00:00:00Z"}}"#
+        )
+    };
+    let newer: Vec<String> = (100..151)
+        .map(|n| pr(n, &format!("other-{n}"), "MERGED"))
+        .collect();
+    std::fs::write(
+        dir.path().join("recent.json"),
+        format!("[{}]", newer.join(",")),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("head.json"),
+        format!("[{}]", pr(3, "fix-login", "OPEN")),
+    )
+    .unwrap();
+    let script = dir.path().join("gh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in\n  *\"--head fix-login\"*\"--state open\"*) cat '{}' ;;\n  *) cat '{}' ;;\nesac\n",
+            dir.path().join("head.json").display(),
+            dir.path().join("recent.json").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let env = crate::env::ShellEnv {
+        vars: std::env::vars().collect(),
+        source: crate::env::EnvSource::Process,
+        warning: None,
+    };
+    let gh = crate::forge::Gh::at(script, &env);
+
+    let store = Store::in_memory();
+    store
+        .add_project("app", &repo.display().to_string())
+        .unwrap();
+    // The project's own checkout: its branch is whatever git has checked out there.
+    let workspace = store.workspaces().unwrap().remove(0);
+    let found = pull_request_of(Some(&gh), &git, &workspace).unwrap();
+    assert_eq!(found.map(|pr| pr.number), Some(3));
+}
+
+#[test]
+fn without_gh_the_pull_request_cannot_be_looked_for_and_it_says_so() {
+    let fx = Fixture::new();
+    let git = crate::git::testing::git();
+    let error = pull_request_of(None, &git, &fx.workspace).unwrap_err();
+    assert!(error.contains("GitHub CLI (`gh`)"), "{error}");
+}

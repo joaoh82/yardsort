@@ -44,8 +44,28 @@ pub trait Hands {
     fn notify(&self, title: &str, body: Option<&str>) -> Result<(), String>;
     /// The workspace's handoff packet, as `ys workspace handoff` prints it.
     fn handoff(&self, workspace_id: &str) -> Option<String>;
-    /// The reviews and comments on the workspace's pull request `number`, from the forge.
-    fn pr_posts(&self, workspace_id: &str, number: u32) -> Result<Vec<PrPost>, String>;
+    /// A job that asks the forge for the reviews and comments on the workspace's pull request
+    /// `number`. Called on the driver's thread, so it must return at once: the job it returns is
+    /// what does the asking, on a thread of its own, and must give up by itself — the app's
+    /// stops `gh` after [`FORGE_LIMIT`].
+    fn pr_posts(&self, workspace_id: &str, number: u32) -> PrAsk;
+}
+
+/// Asking the forge, as a job for a thread of its own.
+pub type PrAsk = Box<dyn FnOnce() -> Result<Vec<PrPost>, String> + Send + 'static>;
+
+/// How long one question to the forge may take before it is given up on.
+pub const FORGE_LIMIT: Duration = Duration::from_secs(60);
+
+/// What the forge last said about one run's pull request.
+#[derive(Debug, Default)]
+struct Asked {
+    /// When it was last asked.
+    at: i64,
+    /// A question is out and not answered yet.
+    waiting: bool,
+    /// The last answer; `None` until there is one.
+    posts: Option<Vec<PrPost>>,
 }
 
 /// What a driver keeps between ticks. The app holds one for as long as it runs.
@@ -54,8 +74,9 @@ pub struct Driver {
     settled: Settled,
     /// Runs whose interrupted steps were dealt with since this driver started.
     recovered: Mutex<HashSet<String>>,
-    /// What the forge last said about each run's pull request, and when it was asked.
-    forge: Mutex<HashMap<String, (i64, Vec<PrPost>)>>,
+    /// What the forge last said about each run's pull request. Shared with the threads that
+    /// ask it, which put their answers here.
+    forge: std::sync::Arc<Mutex<HashMap<String, Asked>>>,
     forge_every_ms: i64,
 }
 
@@ -72,7 +93,7 @@ impl Driver {
         Self {
             settled: Settled::new(settle_busy_ms),
             recovered: Mutex::new(HashSet::new()),
-            forge: Mutex::new(HashMap::new()),
+            forge: std::sync::Arc::new(Mutex::new(HashMap::new())),
             forge_every_ms: i64::try_from(forge_every.as_millis()).unwrap_or(i64::MAX),
         }
     }
@@ -85,39 +106,59 @@ impl Driver {
 
     /// Move every active run on as far as it goes now.
     pub fn tick(&self, store: &Store, host: &dyn TerminalHost, hands: &dyn Hands) -> IpcResult<()> {
-        for run in store.active_workflow_runs()? {
-            if let Err(error) = move_on(self, store, host, hands, &run) {
+        let runs = store.active_workflow_runs()?;
+        for run in &runs {
+            if let Err(error) = move_on(self, store, host, hands, run) {
                 eprintln!("workflows: run {}: {}", run.id, error.message);
             }
         }
+        // What the forge said about runs that have ended is no longer wanted.
+        self.forge
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|id, _| runs.iter().any(|run| &run.id == id));
         Ok(())
     }
 
-    /// Posts on a run's pull request, asking the forge again only when the last answer is old.
-    fn pr_posts(
-        &self,
-        run_id: &str,
-        ask: impl FnOnce() -> Result<Vec<PrPost>, String>,
-    ) -> Vec<PrPost> {
+    /// What is known of the posts on a run's pull request, without waiting for the forge.
+    ///
+    /// When the last answer is old and no question is out, `ask` makes one, and it goes to a
+    /// thread of its own: a slow or stalled forge must not hold up other runs, their messages
+    /// and notifications, or the timeouts that are checked on this thread. Its answer is here
+    /// for a later tick. At most one question per run is ever out.
+    fn pr_posts(&self, run_id: &str, ask: impl FnOnce() -> PrAsk) -> Option<Vec<PrPost>> {
         let now = now_ms();
-        let mut seen = self.forge.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((asked, posts)) = seen.get(run_id) {
-            if now - asked < self.forge_every_ms {
-                return posts.clone();
+        let mut forge = self.forge.lock().unwrap_or_else(PoisonError::into_inner);
+        let asked = forge.entry(run_id.to_owned()).or_default();
+        let due = asked.posts.is_none() || now - asked.at >= self.forge_every_ms;
+        if due && !asked.waiting {
+            asked.at = now;
+            asked.waiting = true;
+            let job = ask();
+            let answers = std::sync::Arc::clone(&self.forge);
+            let run = run_id.to_owned();
+            let spawned = std::thread::Builder::new()
+                .name("workflow-forge".into())
+                .spawn(move || {
+                    let answer = job();
+                    let mut forge = answers.lock().unwrap_or_else(PoisonError::into_inner);
+                    let Some(asked) = forge.get_mut(&run) else {
+                        return; // The run ended meanwhile.
+                    };
+                    asked.waiting = false;
+                    match answer {
+                        Ok(posts) => asked.posts = Some(posts),
+                        // Asked again at the next interval; the step's timeout gives up.
+                        Err(why) => {
+                            eprintln!("workflows: run {run}: cannot read the pull request: {why}");
+                        }
+                    }
+                });
+            if spawned.is_err() {
+                asked.waiting = false;
             }
         }
-        let posts = match ask() {
-            Ok(posts) => posts,
-            Err(why) => {
-                // Asked again at the next interval; the step's timeout is what gives up.
-                eprintln!("workflows: run {run_id}: cannot read the pull request: {why}");
-                seen.get(run_id)
-                    .map(|(_, old)| old.clone())
-                    .unwrap_or_default()
-            }
-        };
-        seen.insert(run_id.to_owned(), (now, posts.clone()));
-        posts
+        asked.posts.clone()
     }
 }
 
@@ -453,7 +494,7 @@ impl World for Seen<'_> {
         let number = self.facts.pr.as_ref()?.number;
         let posts = self.driver.pr_posts(self.run_id, || {
             self.hands.pr_posts(&self.place.workspace.id, number)
-        });
+        })?;
         // The forge keeps whole seconds; a post in the second the run started counts.
         let since = self.started_at - self.started_at.rem_euclid(1000);
         let wanted: Vec<&PrPost> = posts
