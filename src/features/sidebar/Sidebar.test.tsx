@@ -119,6 +119,56 @@ describe("Sidebar", () => {
     useUpdatesStore.setState({ status: null, open: false });
   });
 
+  it("filters project names, clears the query, and closes search with Escape", async () => {
+    await renderSidebar("alpha", "beta");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Search projects" }));
+    const input = screen.getByRole("textbox", { name: "Filter projects" });
+    expect(input).toHaveFocus();
+    await user.type(input, " ALP ");
+    expect(screen.getByRole("treeitem", { name: "alpha" })).toBeInTheDocument();
+    expect(screen.queryByRole("treeitem", { name: "beta" })).not.toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "local" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add project" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear project filter" }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("");
+    expect(screen.getByRole("treeitem", { name: "beta" })).toBeInTheDocument();
+    await user.type(input, "nonexistent");
+    expect(screen.getByRole("status")).toHaveTextContent("No projects match your search.");
+    expect(screen.queryByText("No projects yet.")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("textbox", { name: "Filter projects" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Search projects" })).toHaveFocus(),
+    );
+    expect(screen.getByRole("treeitem", { name: "beta" })).toBeInTheDocument();
+  });
+
+  it("preserves selection, collapsed projects and global reorder boundaries while filtering", async () => {
+    await renderSidebar("alpha", "beta", "gamma");
+    const user = userEvent.setup();
+    act(() => useProjectsStore.setState({ selectedWorkspaceId: "w-alpha", collapsed: ["p-beta"] }));
+    await user.click(screen.getByRole("button", { name: "Search projects" }));
+    await user.type(screen.getByRole("textbox", { name: "Filter projects" }), "beta");
+    expect(screen.getByRole("treeitem", { name: "beta" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
+    await user.pointer({ target: rowButton("beta"), keys: "[MouseRight]" });
+    expect(screen.getByRole("menuitem", { name: "Move up" })).not.toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Move down" })).not.toBeDisabled();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Clear project filter" }));
+    expect(screen.getByRole("treeitem", { name: "alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "beta" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
+  });
+
   it("shows a waiting update beside Settings, and opens the dialog when pressed", async () => {
     await renderSidebar("alpha");
     expect(screen.queryByRole("button", { name: /^Update to/ })).not.toBeInTheDocument();

@@ -19,8 +19,10 @@ import { MemoryDialog } from "./MemoryDialog";
 import { OutcomesDialog } from "./OutcomesDialog";
 import { useMemoryStore } from "@/stores/memory";
 
-export function ProjectTree() {
+export function ProjectTree({ query = "" }: { query?: string }) {
   const projects = useProjectsStore((s) => s.projects);
+  const filter = query.trim().toLowerCase();
+  const matching = projects.filter((project) => project.name.toLowerCase().includes(filter));
   // Memory proposals arrive through `ys`, which the window does not hear: ask again on focus
   // and whenever activity lands, which is when an agent at work would propose.
   useEffect(() => {
@@ -34,14 +36,21 @@ export function ProjectTree() {
       void unlisten.then((stop) => stop());
     };
   }, []);
+  if (filter && matching.length === 0) {
+    return (
+      <p role="status" className="min-h-0 flex-1 p-3 text-ink-faint">
+        No projects match your search.
+      </p>
+    );
+  }
   return (
     <ul role="tree" aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto py-1">
-      {projects.map((project, index) => (
+      {matching.map((project) => (
         <ProjectNode
           key={project.id}
           project={project}
-          isFirst={index === 0}
-          isLast={index === projects.length - 1}
+          isFirst={project.id === projects[0]?.id}
+          isLast={project.id === projects[projects.length - 1]?.id}
         />
       ))}
     </ul>

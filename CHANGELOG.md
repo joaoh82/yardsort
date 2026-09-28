@@ -3,6 +3,11 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Project search.** Click the search icon beside Projects to filter by name. Clear the filter
+  with **×**, or press **Escape** to close it; your selected workspace stays open.
+
 ## 0.12.0
 
 - **Project memory.** Short lessons about a project for its agents — "the tests need
