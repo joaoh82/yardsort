@@ -6,7 +6,8 @@ has the downloads and the full commit lists.
 ## Unreleased
 
 - **Project search.** Click the search icon beside Projects to filter by name. Clear the filter
-  with **×**, or press **Escape** to close it; your selected workspace stays open.
+  with **×**, or press **Escape** to close it; **×** also closes an empty field. The selected
+  workspace's project stays visible, including projects added while filtering.
 
 ## 0.12.0
 

@@ -62,6 +62,11 @@ export function Sidebar() {
   const [query, setQuery] = useState("");
   const searchButton = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const closeSearch = () => {
+    setQuery("");
+    setSearching(false);
+    requestAnimationFrame(() => searchButton.current?.focus());
+  };
   useEffect(() => {
     if (searching) searchInput.current?.focus();
   }, [searching]);
@@ -82,7 +87,8 @@ export function Sidebar() {
   return (
     <aside aria-label="Projects" className="flex h-full flex-col bg-surface">
       <PanelHeader
-        title={
+        title="Projects"
+        search={
           searching ? (
             <div className="mr-2 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-full bg-raised px-2 focus-within:ring-1 focus-within:ring-accent">
               <SearchIcon />
@@ -97,31 +103,29 @@ export function Sidebar() {
                   if (event.key === "Escape") {
                     event.preventDefault();
                     event.stopPropagation();
-                    setQuery("");
-                    setSearching(false);
-                    requestAnimationFrame(() => searchButton.current?.focus());
+                    closeSearch();
                   }
                 }}
                 className="min-w-0 flex-1 bg-transparent text-ink outline-none placeholder:text-ink-faint"
               />
-              {query && (
-                <button
-                  type="button"
-                  aria-label="Clear project filter"
-                  title="Clear project filter"
-                  onClick={() => {
+              <button
+                type="button"
+                aria-label={query ? "Clear project filter" : "Close project search"}
+                title={query ? "Clear project filter" : "Close project search"}
+                onClick={() => {
+                  if (query) {
                     setQuery("");
                     searchInput.current?.focus();
-                  }}
-                  className="size-5 shrink-0 rounded text-ink-muted hover:text-ink"
-                >
-                  ×
-                </button>
-              )}
+                  } else {
+                    closeSearch();
+                  }
+                }}
+                className="size-5 shrink-0 rounded text-ink-muted hover:text-ink"
+              >
+                ×
+              </button>
             </div>
-          ) : (
-            "Projects"
-          )
+          ) : null
         }
       >
         <div className="flex shrink-0 items-center gap-1">

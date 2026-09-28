@@ -21,8 +21,14 @@ import { useMemoryStore } from "@/stores/memory";
 
 export function ProjectTree({ query = "" }: { query?: string }) {
   const projects = useProjectsStore((s) => s.projects);
+  const selectedWorkspaceId = useProjectsStore((s) => s.selectedWorkspaceId);
   const filter = query.trim().toLowerCase();
-  const matching = projects.filter((project) => project.name.toLowerCase().includes(filter));
+  const matching = projects.filter(
+    (project) =>
+      project.name.toLowerCase().includes(filter) ||
+      project.workspaces.some((workspace) => workspace.id === selectedWorkspaceId),
+  );
+  const noMatches = filter !== "" && matching.length === 0;
   // Memory proposals arrive through `ys`, which the window does not hear: ask again on focus
   // and whenever activity lands, which is when an agent at work would propose.
   useEffect(() => {
@@ -36,24 +42,26 @@ export function ProjectTree({ query = "" }: { query?: string }) {
       void unlisten.then((stop) => stop());
     };
   }, []);
-  if (filter && matching.length === 0) {
-    return (
-      <p role="status" className="min-h-0 flex-1 p-3 text-ink-faint">
-        No projects match your search.
-      </p>
-    );
-  }
   return (
-    <ul role="tree" aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto py-1">
-      {matching.map((project) => (
-        <ProjectNode
-          key={project.id}
-          project={project}
-          isFirst={project.id === projects[0]?.id}
-          isLast={project.id === projects[projects.length - 1]?.id}
-        />
-      ))}
-    </ul>
+    <>
+      <p
+        role="status"
+        aria-label="Project search results"
+        className={noMatches ? "p-3 text-ink-faint" : "sr-only"}
+      >
+        {noMatches ? "No projects match your search." : ""}
+      </p>
+      <ul role="tree" aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto py-1">
+        {matching.map((project) => (
+          <ProjectNode
+            key={project.id}
+            project={project}
+            isFirst={project.id === projects[0]?.id}
+            isLast={project.id === projects[projects.length - 1]?.id}
+          />
+        ))}
+      </ul>
+    </>
   );
 }
 

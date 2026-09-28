@@ -145,6 +145,50 @@ describe("Sidebar", () => {
     expect(screen.getByRole("treeitem", { name: "beta" })).toBeInTheDocument();
   });
 
+  it("lets a mouse user close an empty search field, including after clearing it", async () => {
+    await renderSidebar("alpha");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Search projects" }));
+    await user.click(screen.getByRole("button", { name: "Close project search" }));
+    expect(screen.queryByRole("textbox", { name: "Filter projects" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Search projects" }));
+    await user.type(screen.getByRole("textbox", { name: "Filter projects" }), "alpha");
+    await user.click(screen.getByRole("button", { name: "Clear project filter" }));
+    await user.click(screen.getByRole("button", { name: "Close project search" }));
+    expect(screen.queryByRole("textbox", { name: "Filter projects" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Search projects" })).toHaveFocus(),
+    );
+  });
+
+  it("keeps a project added through the dialog visible with a non-matching filter", async () => {
+    await renderSidebar("alpha");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Search projects" }));
+    await user.type(screen.getByRole("textbox", { name: "Filter projects" }), "missing");
+    native.pickFolder.mockResolvedValue("/code/fresh");
+    core.projectOpen.mockResolvedValue(added("fresh"));
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Open a folder/ }));
+    expect(await screen.findByRole("treeitem", { name: "fresh" })).toBeInTheDocument();
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-fresh");
+    expect(screen.queryByText("No projects match your search.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("treeitem", { name: "alpha" })).not.toBeInTheDocument();
+  });
+
+  it("updates an already mounted live region when no projects match", async () => {
+    await renderSidebar("alpha");
+    const user = userEvent.setup();
+    const status = screen.getByRole("status", { name: "Project search results" });
+    expect(status).toBeEmptyDOMElement();
+    await user.click(screen.getByRole("button", { name: "Search projects" }));
+    await user.type(screen.getByRole("textbox", { name: "Filter projects" }), "missing");
+    expect(screen.getByRole("status", { name: "Project search results" })).toBe(status);
+    expect(status).toHaveTextContent("No projects match your search.");
+    await user.click(screen.getByRole("button", { name: "Clear project filter" }));
+    expect(status).toBeEmptyDOMElement();
+  });
+
   it("preserves selection, collapsed projects and global reorder boundaries while filtering", async () => {
     await renderSidebar("alpha", "beta", "gamma");
     const user = userEvent.setup();
@@ -156,6 +200,8 @@ describe("Sidebar", () => {
       "false",
     );
     expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
+    expect(screen.getByRole("treeitem", { name: "alpha" })).toBeInTheDocument();
+    expect(screen.queryByRole("treeitem", { name: "gamma" })).not.toBeInTheDocument();
     await user.pointer({ target: rowButton("beta"), keys: "[MouseRight]" });
     expect(screen.getByRole("menuitem", { name: "Move up" })).not.toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Move down" })).not.toBeDisabled();
