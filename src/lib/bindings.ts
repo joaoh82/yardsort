@@ -270,8 +270,9 @@ export const commands = {
 	 *  in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
 	 *  is, and sent back once with its problems when it has any.
 	 * 
-	 *  The agent runs in an empty folder of the profile's, not in any repository: a description is
-	 *  not a change to describe, and nothing here should read or touch the user's projects.
+	 *  The agent runs in an empty git repository of the profile's own, not in any project of the
+	 *  user's: a description is not a change to describe, and nothing here should read or touch
+	 *  their work. A repository, not a bare folder, because Codex refuses to run outside one.
 	 */
 	workflowDescribe: (description: string) => typedError<Described, IpcError>(__TAURI_INVOKE("workflow_describe", { description })),
 };

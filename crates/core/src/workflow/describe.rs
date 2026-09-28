@@ -10,7 +10,11 @@
 //! The loop is [`next_prompt`] and [`finish`]: the app asks whichever writer it has and calls
 //! `finish` on the answer, until `next_prompt` has nothing more to ask.
 
+use std::path::{Path, PathBuf};
+
 use super::{parse, Problem};
+use crate::error::{IpcError, IpcResult};
+use crate::git::Git;
 
 /// How much of a description is sent. A workflow is described in a paragraph, not a document.
 pub const MAX_DESCRIPTION_CHARS: usize = 4_000;
@@ -73,15 +77,33 @@ pub fn first_prompt(description: &str) -> String {
     format!("Write a workflow that does this:\n\n{description}")
 }
 
-/// What the model is asked again, with what was wrong with its answer.
-pub fn retry_prompt(text: &str, problems: &[Problem]) -> String {
+/// What the model is asked again: what was asked the first time, since a second answer is a
+/// fresh conversation with no memory of it, then what it wrote and what is wrong with that.
+pub fn retry_prompt(description: &str, text: &str, problems: &[Problem]) -> String {
     let listed: Vec<String> = problems.iter().map(|p| format!("- {p}")).collect();
     format!(
-        "The workflow you wrote has these problems, each at its line and column:\n\n{}\n\n\
-         Here is what you wrote:\n\n{}\n\nReply with the whole corrected file.",
+        "{}\n\nYour first answer has these problems, each at its line and column:\n\n{}\n\n\
+         Here is what you wrote:\n\n{}\n\nReply with the whole corrected file, still doing \
+         what was asked.",
+        first_prompt(description),
         listed.join("\n"),
         text.trim_end()
     )
+}
+
+/// Where an agent stands while it writes: an empty git repository of the profile's own, made
+/// once. Empty, because a description is not a change to describe and no project of the
+/// user's should be read for it; a repository, because some agents will not run outside one —
+/// Codex refuses a folder that is not a trusted git checkout.
+pub fn scratch_dir(data_dir: &Path, git: &Git) -> IpcResult<PathBuf> {
+    let dir = data_dir.join("drafting");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", dir.display())))?;
+    let is_repo = git.repo_root(&dir)?.is_some_and(|root| root == dir);
+    if !is_repo {
+        git.init(&dir)?;
+    }
+    Ok(dir)
 }
 
 /// What a model wrote, checked.
@@ -100,7 +122,7 @@ pub fn next_prompt(description: &str, so_far: Option<&Described>) -> Option<Stri
     match so_far {
         None => Some(first_prompt(description)),
         Some(done) if done.problems.is_empty() || done.tries >= MAX_TRIES => None,
-        Some(again) => Some(retry_prompt(&again.text, &again.problems)),
+        Some(again) => Some(retry_prompt(description, &again.text, &again.problems)),
     }
 }
 
@@ -155,15 +177,44 @@ mod tests {
     }
 
     #[test]
-    fn a_retry_names_each_problem_where_it_is_and_shows_the_answer() {
-        let bad = finish("id: x\nname: X\n", 1);
+    fn a_retry_repeats_what_was_asked_then_names_each_problem_and_shows_the_answer() {
+        let asked = "Run the tests with Codex. Never post a review.";
+        // A first answer that lost the whole task: a second writer starts from nothing.
+        let bad = finish("id: draft\nname: Draft\n", 1);
         assert!(!bad.problems.is_empty());
-        let again = retry_prompt(&bad.text, &bad.problems);
+        let again = retry_prompt(asked, &bad.text, &bad.problems);
+        assert!(again.starts_with(&first_prompt(asked)), "{again}");
+        assert!(again.contains("Never post a review."));
         for problem in &bad.problems {
             assert!(again.contains(&format!("- {problem}")), "{again}");
         }
-        assert!(again.contains("id: x\nname: X"));
-        assert!(again.ends_with("Reply with the whole corrected file."));
+        assert!(again.contains("id: draft\nname: Draft"));
+        assert!(again.ends_with("still doing what was asked."));
+        assert_eq!(
+            next_prompt(asked, Some(&bad)).as_deref(),
+            Some(again.as_str()),
+            "the loop asks exactly this"
+        );
+    }
+
+    #[test]
+    fn the_scratch_folder_is_an_empty_repository_made_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = crate::git::testing::git();
+        let scratch = scratch_dir(dir.path(), &git).unwrap();
+        assert_eq!(scratch, dir.path().join("drafting"));
+        assert_eq!(git.repo_root(&scratch).unwrap(), Some(scratch.clone()));
+        let files: Vec<_> = std::fs::read_dir(&scratch)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            files,
+            vec![std::ffi::OsString::from(".git")],
+            "nothing else in it"
+        );
+        let again = scratch_dir(dir.path(), &git).unwrap();
+        assert_eq!(again, scratch, "the same folder, not another init");
     }
 
     #[test]

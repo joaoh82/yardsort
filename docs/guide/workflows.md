@@ -53,8 +53,8 @@ or your Anthropic API key does — the same writers, and the same switch in Sett
 model is told the file format and shown the built-in review as an example. What it writes is
 checked like any file; when it has problems it is sent back once, with them, and whatever comes
 back goes into the editor unsaved, with anything still wrong marked where it is. Nothing a model
-wrote is a workflow until you save it. The agent runs in an empty folder of the profile's, never
-in one of your projects.
+wrote is a workflow until you save it. The agent runs in an empty repository of the profile's
+own, never in one of your projects; a repository because some agents will not run outside one.
 
 ## Where workflows come from
 

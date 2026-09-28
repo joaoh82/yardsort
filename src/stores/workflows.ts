@@ -22,6 +22,10 @@ interface WorkflowsState {
   /** Text being edited and not saved, by workflow id. Kept while the app runs, so going to
    *  another workflow and back loses nothing. */
   drafts: Record<string, string | undefined>;
+  /** Goes up with every change to the new workflow's text. A generation remembers the number
+   *  it started under, and its answer is kept only if nothing changed meanwhile: a slower answer
+   *  never replaces a newer one, or what was typed, or a discard. */
+  newSerial: number;
   error: string | null;
 
   load: () => Promise<void>;
@@ -31,6 +35,10 @@ interface WorkflowsState {
   refresh: () => Promise<void>;
   /** Keep `text` as `workflowId`'s unsaved text; `null` drops it (saved, or reverted). */
   setDraft: (workflowId: string, text: string | null) => void;
+  /** A generation of the new workflow begins; the number its answer must present. */
+  beginDescribe: () => number;
+  /** A generation's answer, kept only if `serial` is still current. Says whether it was. */
+  finishDescribe: (serial: number, text: string) => boolean;
   dismissError: () => void;
 }
 
@@ -40,6 +48,7 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   runs: {},
   steps: {},
   drafts: {},
+  newSerial: 0,
   error: null,
 
   async load() {
@@ -81,7 +90,22 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   },
 
   setDraft: (workflowId, text) =>
-    set((state) => ({ drafts: { ...state.drafts, [workflowId]: text ?? undefined } })),
+    set((state) => ({
+      drafts: { ...state.drafts, [workflowId]: text ?? undefined },
+      newSerial: workflowId === NEW_WORKFLOW ? state.newSerial + 1 : state.newSerial,
+    })),
+
+  beginDescribe() {
+    const serial = get().newSerial + 1;
+    set({ newSerial: serial });
+    return serial;
+  },
+
+  finishDescribe(serial, text) {
+    if (get().newSerial !== serial) return false;
+    set((state) => ({ drafts: { ...state.drafts, [NEW_WORKFLOW]: text } }));
+    return true;
+  },
 
   dismissError: () => set({ error: null }),
 }));

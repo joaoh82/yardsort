@@ -338,8 +338,9 @@ pub struct Described {
 /// in its non-interactive mode, or their Anthropic key. The answer is checked as a typed file
 /// is, and sent back once with its problems when it has any.
 ///
-/// The agent runs in an empty folder of the profile's, not in any repository: a description is
-/// not a change to describe, and nothing here should read or touch the user's projects.
+/// The agent runs in an empty git repository of the profile's own, not in any project of the
+/// user's: a description is not a change to describe, and nothing here should read or touch
+/// their work. A repository, not a bare folder, because Codex refuses to run outside one.
 #[tauri::command]
 #[specta::specta]
 pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult<Described> {
@@ -353,9 +354,8 @@ pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult
     let handle = app.clone();
     let (agent, key, root, writer) = blocking(app, |state| {
         let (agent, key) = crate::draft::commands::writers(state, None)?;
-        let root = state.data_dir.join("drafting");
-        std::fs::create_dir_all(&root)
-            .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", root.display())))?;
+        let git = crate::git::Git::new(&state.env())?;
+        let root = describe::scratch_dir(&state.data_dir, &git)?;
         let writer = crate::draft::commands::writer_label(state, agent.as_ref());
         Ok((agent, key, root, writer))
     })
@@ -428,5 +428,60 @@ impl Look for AppLook<'_> {
         let env = self.0.env();
         let git = crate::git::Git::new(&env).map_err(|e| e.to_string())?;
         runs::pull_request_of(Gh::find(&env).as_ref(), &git, workspace)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use yardsort_core::env::{EnvSource, ShellEnv};
+    use yardsort_core::git::testing::git;
+    use yardsort_core::harness::HarnessDef;
+    use yardsort_core::program::Program;
+    use yardsort_core::workflow::describe;
+
+    /// Stands in for a writer that refuses to run outside a repository, as Codex does: it
+    /// checks, then prints a workflow.
+    fn writer_needing_a_repository(dir: &std::path::Path) -> (Program, HarnessDef) {
+        let script = dir.join("picky-writer");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\ngit rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo 'Not inside a trusted directory' >&2; exit 1; }\nprintf 'id: picky\\nname: Picky\\nversion: 1\\ntrigger:\\n  kind: manual\\nsteps:\\n  - id: tell\\n    action: notify\\n    title: Hi\\n'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let env = ShellEnv {
+            vars: std::env::vars().collect(),
+            source: EnvSource::Process,
+            warning: None,
+        };
+        let mut def = HarnessDef::custom("picky");
+        def.write_args = vec!["{prompt}".into()];
+        (Program::at(script, &env), def)
+    }
+
+    #[test]
+    fn a_writer_that_needs_a_repository_writes_in_the_scratch_one_and_not_in_a_bare_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let (program, def) = writer_needing_a_repository(dir.path());
+        let bare = dir.path().join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        let refused = crate::draft::ask_agent(&program, &def, &bare, "write").unwrap_err();
+        assert!(
+            refused.message.contains("Not inside a trusted directory"),
+            "{}",
+            refused.message
+        );
+
+        let scratch = describe::scratch_dir(dir.path(), &git()).unwrap();
+        let written = crate::draft::ask_agent(&program, &def, &scratch, "write").unwrap();
+        let done = describe::finish(&written, 1);
+        assert!(done.problems.is_empty(), "{:?}", done.problems);
+        assert_eq!(
+            std::fs::read_dir(&scratch).unwrap().count(),
+            1,
+            "the writer left nothing beside .git"
+        );
     }
 }

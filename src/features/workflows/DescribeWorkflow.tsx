@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { errorMessage, ipc } from "@/lib/ipc";
 import { useDraftStore } from "@/stores/draft";
-import { NEW_WORKFLOW, useWorkflowStore } from "@/stores/workflows";
+import { useWorkflowStore } from "@/stores/workflows";
 
 /**
  * A description, in the person's own words, written into a workflow by a model: the agent they
@@ -28,9 +28,15 @@ export function DescribeWorkflow() {
     setBusy(true);
     setError(null);
     setNote(null);
+    // The answer takes a while, and the person may type, discard, or ask again meanwhile. It
+    // is kept only if the new workflow is as it was when the question went out.
+    const serial = useWorkflowStore.getState().beginDescribe();
     try {
       const written = await ipc.workflowDescribe(description);
-      useWorkflowStore.getState().setDraft(NEW_WORKFLOW, written.text);
+      if (!useWorkflowStore.getState().finishDescribe(serial, written.text)) {
+        setNote("The workflow changed while this was being written, so it was set aside.");
+        return;
+      }
       setNote(
         written.problems.length === 0
           ? `Written by ${written.writer}. Look it over, then save it.`

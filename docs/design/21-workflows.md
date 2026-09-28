@@ -311,9 +311,10 @@ its non-interactive mode, or their Anthropic key — never Jev. The standing ins
 variables, and the built-in review whole as the example. The answer is checked as a typed file
 is; with problems it is sent back once, with them at their lines, for one more answer. Whatever
 comes back is the new workflow's unsaved text, with what is still wrong marked in the editor.
-The agent runs in an empty folder of the profile's (`<data dir>/drafting`), not in a project:
-a description is not a change to describe, and nothing here should read the user's
-repositories.
+The agent runs in an empty git repository of the profile's (`<data dir>/drafting`, made once),
+not in a project: a description is not a change to describe, and nothing here should read the
+user's repositories. A repository rather than a bare folder because Codex refuses to run in a
+folder that is not a trusted checkout.
 
 ## Slices
 
@@ -492,9 +493,15 @@ Describe it, as [the UI](#the-ui) above now describes it. What changed on the wa
 - **The loop is the core's** — `next_prompt` and `finish` — and the app only runs it, so the
   fake-writer test (bad YAML once, then good; bad twice, problems left) is a core test with no
   agent. `MAX_TRIES` is two.
-- **The agent stands in an empty folder,** not the project root the proposal had. There is no
-  project chosen in the Workflows view, and an agent reading a repository to write a workflow
-  file would be reading it for nothing.
+- **The agent stands in an empty repository of the profile's,** not the project root the
+  proposal had. There is no project chosen in the Workflows view, and an agent reading a
+  repository to write a workflow file would be reading it for nothing.
+- **From review:** the scratch folder is a git repository, because Codex's `exec` refuses a
+  folder that is not a trusted checkout and would have failed every time it was the writer; the
+  retry repeats what was asked before showing the problems, since a second answer is a fresh
+  conversation and a first answer that lost the task left the second writer nothing to go on;
+  and a generation's answer is kept only if the new workflow is as it was when the question went
+  out, so a slower answer never replaces a newer one, what was typed meanwhile, or a discard.
 - **Who wrote it is said in words** (the agent's label, or the model the key asks), from the
   same answer the commit-message button shows, so the person knows what they are trusting.
 - **The agent path gets the standing instruction in front of its prompt.** Drafting gives an
