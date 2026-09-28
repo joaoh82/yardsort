@@ -62,6 +62,15 @@ impl Fixture {
             .args(args)
             .env("YARDSORT_WORKTREE_ROOT", &self.worktree_root)
             .env("YARDSORT_NO_DAEMON", "1");
+        // Run from inside an agent Yardsort started, `ys` would find that agent's workspace in
+        // its environment before the folder it stands in; these tests mean the folder.
+        for name in [
+            yardsort_core::activity::RUN_ENV,
+            yardsort_core::activity::WORKSPACE_ENV,
+            yardsort_core::activity::RECORD_ENV,
+        ] {
+            command.env_remove(name);
+        }
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
@@ -1477,4 +1486,127 @@ fn copying_the_built_in_review_gives_a_file_that_is_used_instead() {
     let copied: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(copied["id"], "quick-review");
     fx.ys(&["workflow", "show", "quick-review"]).ok();
+}
+
+/// A workflow that needs no agent, so these tests need none on PATH either.
+const PING: &str = "id: ping
+name: Ping
+version: 1
+trigger:
+  kind: manual
+inputs:
+  - id: note
+    kind: text
+steps:
+  - id: tell
+    action: notify
+    title: \"{{ inputs.note }}\"
+";
+
+#[test]
+fn a_run_is_refused_while_yardsort_is_closed_and_nothing_is_queued() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let error = fx
+        .ys(&["workflow", "run", "ping", "--workspace", name])
+        .failed();
+    assert!(error.contains("Yardsort is not running"), "{error}");
+    assert!(error.contains("Nothing was queued"), "{error}");
+    let listed = fx.ys(&["workflow", "runs", "--json"]).ok();
+    assert_eq!(listed.trim(), "[]");
+}
+
+#[test]
+fn a_run_is_queued_followed_and_cancelled_while_the_app_holds_its_lock() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    // This test stands in for the running app. Nothing drives the run, so it stays queued.
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("nobody else holds it");
+
+    let json = fx
+        .ys(&[
+            "workflow",
+            "run",
+            "ping",
+            "--workspace",
+            name,
+            "--input",
+            "note=Hi there",
+            "--json",
+        ])
+        .ok();
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = queued["run"].as_str().unwrap().to_owned();
+    let short = &run[..8];
+
+    let again = fx
+        .ys(&["workflow", "run", "ping", "--workspace", name])
+        .failed();
+    assert!(again.contains("already running"), "{again}");
+    assert!(again.contains(short), "{again}");
+
+    let table = fx.ys(&["workflow", "runs"]).ok();
+    assert!(table.contains(short) && table.contains("queued"), "{table}");
+    let shown: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--run", short, "--json"]).ok()).unwrap();
+    assert_eq!(shown["status"], "queued");
+    assert_eq!(shown["inputs"]["note"], "Hi there");
+    assert_eq!(shown["steps"][0]["id"], "tell");
+    assert_eq!(shown["steps"][0]["status"], "pending");
+
+    let cancelled = fx.ys(&["workflow", "cancel", short]).ok();
+    assert!(
+        cancelled.contains("Agents it started keep running"),
+        "{cancelled}"
+    );
+    let steps = fx.ys(&["workflow", "runs", "--run", short]).ok();
+    assert!(steps.contains("cancelled"), "{steps}");
+    assert!(steps.contains("Cancelled from ys."), "{steps}");
+    let twice = fx.ys(&["workflow", "cancel", short]).failed();
+    assert!(twice.contains("already ended"), "{twice}");
+}
+
+#[test]
+fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .unwrap();
+
+    let unknown = fx
+        .ys_from(
+            Some(&path),
+            &["workflow", "run", "ping", "--input", "colour=red"],
+        )
+        .failed();
+    assert!(unknown.contains("has no input `colour`"), "{unknown}");
+    let no_equals = fx
+        .ys_from(Some(&path), &["workflow", "run", "ping", "--input", "note"])
+        .failed();
+    assert!(no_equals.contains("needs an `=`"), "{no_equals}");
+    let later = fx
+        .ys_from(
+            Some(&path),
+            &[
+                "workflow",
+                "run",
+                "code-review",
+                "--input",
+                "reviewer=claude",
+            ],
+        )
+        .failed();
+    assert!(later.contains("cannot do yet"), "{later}");
+
+    let queued = fx.ys_from(Some(&path), &["workflow", "run", "ping"]).ok();
+    assert!(queued.contains(made["name"].as_str().unwrap()), "{queued}");
 }

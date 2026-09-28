@@ -289,12 +289,20 @@ ys workflow show code-review     # the file that would be used, then any problem
 ys workflow copy code-review     # your own copy to edit, used instead of the built-in
 ys workflow validate fix-ci.yaml # each problem as file:line:column: message; exit 1 if any
 ys workflow validate -           # the same, reading the file from standard input
+ys workflow run ping --workspace fix-login --input note=hi   # queue a run; Yardsort must be open
+ys workflow runs                 # runs, newest first; --run <id> shows one step by step
+ys workflow cancel 3f2a9c1e      # stop a run; agents it started keep running
 ```
 
 `copy` writes into the `workflows` folder and never overwrites; `--as <new-id>` makes a second
 workflow instead of a replacement. `validate` needs no profile, so it works on any machine, in CI, or on a file an agent has just
-written. `list` also prints where the `workflows` folder is. `--json` works as everywhere. Running
-a workflow is not in this version yet.
+written. `list` also prints where the `workflows` folder is.
+
+`run` checks the workflow, the workspace and every input before it queues anything, and refuses
+while Yardsort is closed, because the app is what carries runs out. Inside a workspace's folder,
+or in an agent's terminal there, `--workspace` can be left out. It prints the run's id and
+returns at once. A run id can be shortened to its first characters, as `runs` prints it.
+`--json` works as everywhere. See [Running a workflow](workflows.md#running-a-workflow).
 
 ### `ys activity export`
 

@@ -1,0 +1,323 @@
+use super::*;
+use crate::store::StepStatus;
+
+const DEMO: &str = r#"id: demo
+name: Demo
+version: 1
+trigger:
+  kind: manual
+inputs:
+  - id: who
+    kind: harness
+    required: true
+  - id: depth
+    kind: choice
+    options: [quick, deep]
+    default: quick
+  - id: note
+    kind: text
+steps:
+  - id: start
+    action: start_session
+    harness: "{{ inputs.who }}"
+    prompt: "{{ inputs.note }}"
+  - id: tell
+    action: notify
+    needs: [start]
+    title: Started
+"#;
+
+struct Fixture {
+    dir: tempfile::TempDir,
+    store: Store,
+    workspace: WorkspaceRow,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let project = store.add_project("app", "/code/app").unwrap();
+        let workspace = store
+            .add_worktree(
+                &project.id,
+                "fix-login",
+                "/code/app-wt/fix-login",
+                Some("fix-login"),
+                Some("main"),
+            )
+            .unwrap();
+        let folder = crate::workflow::user_dir(dir.path());
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("demo.yaml"), DEMO).unwrap();
+        Self {
+            dir,
+            store,
+            workspace,
+        }
+    }
+
+    fn queue(&self, workflow: &str, inputs: &[(&str, &str)]) -> IpcResult<String> {
+        let inputs: BTreeMap<String, String> = inputs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        queue(
+            &self.store,
+            self.dir.path(),
+            &Request {
+                workflow_id: workflow,
+                workspace_id: &self.workspace.id,
+                inputs: &inputs,
+                requested_by: "cli",
+            },
+            &harness,
+        )
+    }
+}
+
+/// Two agents are installed; ids are matched without regard to case, as `ys` does.
+fn harness(wanted: &str) -> Result<String, String> {
+    ["claude", "codex"]
+        .into_iter()
+        .find(|id| id.eq_ignore_ascii_case(wanted))
+        .map(str::to_owned)
+        .ok_or_else(|| format!("No harness called {wanted:?}."))
+}
+
+#[test]
+fn a_run_is_queued_with_its_inputs_its_file_and_every_step_pending() {
+    let fx = Fixture::new();
+    let id = fx
+        .queue("demo", &[("who", "Claude"), ("note", "  hi  ")])
+        .unwrap();
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    assert_eq!(run.status, "queued");
+    assert_eq!(run.workflow_id, "demo");
+    assert_eq!(run.definition, DEMO, "the file is kept as it was");
+    assert_eq!(run.workspace_name, "fix-login");
+    assert_eq!(run.requested_by, "cli");
+    let inputs: Inputs = serde_json::from_str(&run.inputs).unwrap();
+    assert_eq!(inputs["who"], "claude", "the harness as Yardsort spells it");
+    assert_eq!(inputs["depth"], "quick", "the default");
+    assert_eq!(inputs["note"], "hi");
+    let steps = fx.store.workflow_steps(&id).unwrap();
+    let listed: Vec<(&str, &str, &str)> = steps
+        .iter()
+        .map(|s| (s.step_id.as_str(), s.action.as_str(), s.status.as_str()))
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            ("start", "start_session", "pending"),
+            ("tell", "notify", "pending")
+        ]
+    );
+}
+
+#[test]
+fn inputs_are_checked_before_anything_is_written() {
+    let fx = Fixture::new();
+    let cases: &[(&[(&str, &str)], &str)] = &[
+        (&[], "`demo` needs `who` (who)."),
+        (
+            &[("who", "claude"), ("colour", "red")],
+            "`demo` has no input `colour`.",
+        ),
+        (
+            &[("who", "claude"), ("depth", "medium")],
+            "`medium` is not one of the answers",
+        ),
+        (&[("who", "gemini")], "No harness called \"gemini\"."),
+    ];
+    for (inputs, expected) in cases {
+        let error = fx.queue("demo", inputs).unwrap_err();
+        assert_eq!(error.code, "workflow_inputs");
+        assert!(
+            error.message.contains(expected),
+            "{inputs:?}: {}",
+            error.message
+        );
+    }
+    assert!(fx.store.workflow_runs(None, 10).unwrap().is_empty());
+}
+
+#[test]
+fn a_named_harness_in_a_step_is_checked_too() {
+    let fx = Fixture::new();
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    let fixed = DEMO
+        .replace("id: demo", "id: fixed")
+        .replace("\"{{ inputs.who }}\"", "gemini");
+    std::fs::write(folder.join("fixed.yaml"), fixed).unwrap();
+    let error = fx.queue("fixed", &[("who", "claude")]).unwrap_err();
+    assert_eq!(error.code, "harness_not_found");
+}
+
+#[test]
+fn what_this_version_cannot_do_is_refused_at_the_door() {
+    let fx = Fixture::new();
+    let error = fx
+        .queue("code-review", &[("reviewer", "claude")])
+        .unwrap_err();
+    assert_eq!(error.code, "workflow_unsupported");
+    assert!(error.message.contains("pull request"), "{}", error.message);
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    let origin = DEMO.replace("id: demo", "id: nudge").replace(
+        "  - id: tell\n    action: notify\n    needs: [start]\n    title: Started\n",
+        "  - id: tell\n    action: send_to_session\n    session: origin\n    prompt: Hi\n",
+    );
+    std::fs::write(folder.join("nudge.yaml"), origin).unwrap();
+    let error = fx.queue("nudge", &[("who", "claude")]).unwrap_err();
+    assert!(
+        error.message.contains("session: origin"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn a_broken_or_missing_workflow_or_an_archived_workspace_is_refused() {
+    let fx = Fixture::new();
+    assert_eq!(
+        fx.queue("nope", &[]).unwrap_err().code,
+        "workflow_not_found"
+    );
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    std::fs::write(folder.join("broken.yaml"), "id: broken\n").unwrap();
+    assert_eq!(
+        fx.queue("broken", &[]).unwrap_err().code,
+        "workflow_invalid"
+    );
+    fx.store
+        .set_workspace_archived(&fx.workspace.id, true)
+        .unwrap();
+    let error = fx.queue("demo", &[("who", "claude")]).unwrap_err();
+    assert_eq!(error.code, "workspace_archived");
+}
+
+#[test]
+fn one_run_at_a_time_per_workflow_and_workspace() {
+    let fx = Fixture::new();
+    let first = fx.queue("demo", &[("who", "claude")]).unwrap();
+    let error = fx.queue("demo", &[("who", "claude")]).unwrap_err();
+    assert_eq!(error.code, "workflow_already_running");
+    assert!(
+        error.message.contains(crate::memory::short_id(&first)),
+        "{}",
+        error.message
+    );
+    fx.store
+        .cancel_workflow_run(&first, "changed my mind")
+        .unwrap();
+    assert!(
+        fx.queue("demo", &[("who", "claude")]).is_ok(),
+        "once it ends, another may start"
+    );
+}
+
+#[test]
+fn a_cancelled_run_cannot_be_moved_on_by_a_driver_that_had_not_heard() {
+    let fx = Fixture::new();
+    let id = fx.queue("demo", &[("who", "claude")]).unwrap();
+    assert!(fx.store.start_workflow_run(&id).unwrap());
+    assert!(fx
+        .store
+        .move_workflow_step(
+            &id,
+            "start",
+            &[StepStatus::Pending],
+            StepStatus::Running,
+            None,
+            None
+        )
+        .unwrap());
+    assert!(fx
+        .store
+        .cancel_workflow_run(&id, "cancelled from ys")
+        .unwrap());
+    let run = fx.store.workflow_run(&id).unwrap().unwrap();
+    assert_eq!(run.status, "cancelled");
+    assert_eq!(run.error.as_deref(), Some("cancelled from ys"));
+    let steps = fx.store.workflow_steps(&id).unwrap();
+    assert!(steps.iter().all(|s| s.status == "cancelled"), "{steps:?}");
+    // The driver finishes what it was doing and reports it: too late, nothing changes.
+    assert!(!fx
+        .store
+        .move_workflow_step(
+            &id,
+            "start",
+            &[StepStatus::Running],
+            StepStatus::Succeeded,
+            None,
+            None
+        )
+        .unwrap());
+    assert!(!fx
+        .store
+        .finish_workflow_run(&id, "succeeded", None)
+        .unwrap());
+    assert!(!fx.store.cancel_workflow_run(&id, "again").unwrap());
+    assert_eq!(
+        fx.store.workflow_run(&id).unwrap().unwrap().status,
+        "cancelled"
+    );
+}
+
+#[test]
+fn a_step_move_keeps_its_first_start_time_and_records_what_it_left() {
+    let fx = Fixture::new();
+    let id = fx.queue("demo", &[("who", "claude")]).unwrap();
+    fx.store.start_workflow_run(&id).unwrap();
+    let moved = |from, to, outputs| {
+        fx.store
+            .move_workflow_step(&id, "start", &[from], to, outputs, None)
+            .unwrap()
+    };
+    assert!(moved(StepStatus::Pending, StepStatus::Running, None));
+    let started = fx.store.workflow_steps(&id).unwrap()[0].started_at;
+    assert!(started.is_some());
+    assert!(
+        !moved(StepStatus::Pending, StepStatus::Running, None),
+        "not pending any more"
+    );
+    assert!(moved(
+        StepStatus::Running,
+        StepStatus::Succeeded,
+        Some(r#"{"session":"pty-1"}"#)
+    ));
+    let step = &fx.store.workflow_steps(&id).unwrap()[0];
+    assert_eq!(step.started_at, started);
+    assert!(step.ended_at.is_some());
+    assert_eq!(step.outputs, r#"{"session":"pty-1"}"#);
+    // A step skipped straight from pending never started.
+    assert!(fx
+        .store
+        .move_workflow_step(
+            &id,
+            "tell",
+            &[StepStatus::Pending],
+            StepStatus::Skipped,
+            None,
+            Some("x")
+        )
+        .unwrap());
+    let tell = &fx.store.workflow_steps(&id).unwrap()[1];
+    assert_eq!((tell.started_at, tell.note.as_deref()), (None, Some("x")));
+}
+
+#[test]
+fn a_run_knows_its_project_and_workspace() {
+    let fx = Fixture::new();
+    let place = Place::load(&fx.store, &fx.workspace.id).unwrap().unwrap();
+    let var = |path: &str| place.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
+    assert_eq!(var("project.name").as_deref(), Some("app"));
+    assert_eq!(var("workspace.branch").as_deref(), Some("fix-login"));
+    assert_eq!(var("workspace.base_branch").as_deref(), Some("main"));
+    assert_eq!(
+        var("workspace.task"),
+        None,
+        "no agent has been started there yet"
+    );
+    assert_eq!(var("memory"), None, "not a place variable");
+}

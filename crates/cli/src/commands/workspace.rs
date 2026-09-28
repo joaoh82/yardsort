@@ -491,7 +491,7 @@ fn same_component(left: &Component<'_>, right: &Component<'_>) -> bool {
 
 /// A workspace by id, or by name when that is unambiguous. Archived ones are included: deleting
 /// is how an archived workspace is removed for good.
-fn find_workspace(ys: &Yardsort, wanted: &str) -> Result<WorkspaceRow, Failure> {
+pub(crate) fn find_workspace(ys: &Yardsort, wanted: &str) -> Result<WorkspaceRow, Failure> {
     let workspaces = ys.store.workspaces()?;
     if let Some(exact) = workspaces.iter().find(|w| w.id == wanted) {
         return Ok(exact.clone());
@@ -548,7 +548,7 @@ fn known_workspaces(ys: &Yardsort, workspaces: &[WorkspaceRow]) -> Result<String
 }
 
 /// The harness to run: the one asked for, or the first that is actually installed.
-fn choose_harness(ys: &Yardsort, wanted: Option<&str>) -> Result<String, Failure> {
+pub(crate) fn choose_harness(ys: &Yardsort, wanted: Option<&str>) -> Result<String, Failure> {
     let all = yardsort_core::harness::resolve_all(&ys.settings.harnesses);
     let cwd = std::env::current_dir().unwrap_or_default();
     let installed = |command: &str| ys.env().find_program(command, &cwd).is_some();

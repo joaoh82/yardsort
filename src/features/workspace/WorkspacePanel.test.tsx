@@ -12,6 +12,7 @@ const core = vi.hoisted(() => ({
   ptyList: vi.fn(),
   sessionsList: vi.fn(),
   onHostEvent: vi.fn(),
+  onSessionStarted: vi.fn(),
   appInfo: vi.fn(),
   harnessesList: vi.fn(),
   uiStateSave: vi.fn(),
@@ -45,6 +46,7 @@ beforeEach(() => {
   core.ptyList.mockResolvedValue([]);
   core.sessionsList.mockResolvedValue([]);
   core.onHostEvent.mockResolvedValue(() => {});
+  core.onSessionStarted.mockResolvedValue(() => {});
   core.uiStateSave.mockResolvedValue(undefined);
   core.ptySpawn.mockImplementation(async ({ workspaceId }: { workspaceId: string }) => ({
     id: `s-${workspaceId}`,

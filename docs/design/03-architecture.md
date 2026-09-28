@@ -403,6 +403,31 @@ string, the one place in the tree, because that is the only form Cursor takes; t
 are single-quoted. Passive events only. Producer `cursor`, method `hook`. Built from the
 documentation and owed a recording. See [16-agent-events-stage-2-cursor](16-agent-events-stage-2-cursor.md).
 
+### Workflow runs
+
+Migration 0012 adds the runs of [workflows](21-workflows.md): named sequences of agent work,
+written as YAML files in the data directory's `workflows` folder or built in
+(`crates/core/src/workflow/`).
+
+```
+workflow_runs       id, workflow_id, workflow_name, definition (the file, as it was), project_id,
+                    workspace_id (set null), workspace_name, inputs (JSON), status ('queued' |
+                    'running' | 'succeeded' | 'failed' | 'cancelled'), requested_by ('app' | 'cli'),
+                    error, created_at, started_at, ended_at
+                    -- unique (workflow_id, workspace_id) while queued or running
+workflow_step_runs  run_id → workflow_runs (cascade), step_id, position, action, status
+                    ('pending' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped' |
+                    'cancelled'), started_at, ended_at, outputs (JSON), note
+```
+
+A run is rows, not a thread. `ys workflow run` queues one, after `workflow::runs::queue` has
+checked everything; the app carries it out. `workflow::engine::advance` is a pure function from a
+run's rows and a view of the world to conditional step moves and effects. `workflow::driver::tick`
+applies them, on a thread of the app's own (`src-tauri/src/workflows.rs`) that ticks every second
+and wakes when the host reports a session quiet or exited. The app holds `app.lock` in the data
+directory for as long as it runs (`presence`), which is how `ys` knows it is there and why only
+one app drives a profile's runs.
+
 ## Assist (optional, off by default)
 
 Where ordinary code cannot tell what a change _means_, Assist asks TypeSafe's **Jev** — a model

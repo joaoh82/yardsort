@@ -105,6 +105,23 @@ pub fn placeholders(text: &str) -> Vec<Placeholder> {
     }
 }
 
+/// `text` with each placeholder replaced by what `lookup` gives for its path, or nothing when it
+/// gives nothing. A file is checked before it runs, so a malformed `text` is only returned as it
+/// is, never half-filled.
+pub fn render(text: &str, lookup: impl Fn(&[String]) -> Option<String>) -> String {
+    let Ok(parts) = parse(text) else {
+        return text.to_owned();
+    };
+    let mut out = String::with_capacity(text.len());
+    for part in parts {
+        match part {
+            Part::Text(literal) => out.push_str(&literal),
+            Part::Var(var) => out.push_str(&lookup(&var.path).unwrap_or_default()),
+        }
+    }
+    out
+}
+
 /// Whether one path segment is a name: letters, digits, `_` and `-`.
 pub fn is_segment(segment: &str) -> bool {
     !segment.is_empty()
@@ -194,6 +211,22 @@ mod tests {
         let problems = parse("{{ a b }} fine {{ ok }} {{ c d }}").unwrap_err();
         assert_eq!(problems.len(), 2);
         assert_eq!(problems[1].start, 24);
+    }
+
+    #[test]
+    fn rendering_fills_each_placeholder_and_keeps_escaped_braces() {
+        let lookup = |path: &[String]| match path.join(".").as_str() {
+            "pr.number" => Some("42".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            render(
+                r"PR #{{ pr.number }}, \{{ literal }}, [{{ inputs.missing }}]",
+                lookup
+            ),
+            "PR #42, {{ literal }}, []"
+        );
+        assert_eq!(render("broken {{ a b }}", lookup), "broken {{ a b }}");
     }
 
     #[test]

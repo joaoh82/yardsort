@@ -9,7 +9,10 @@
 //! sent to the user's agents. That is the line project automation drew too. See
 //! `docs/design/21-workflows.md`.
 
+pub mod driver;
+pub mod engine;
 mod parse;
+pub mod runs;
 pub mod template;
 
 use std::path::{Path, PathBuf};

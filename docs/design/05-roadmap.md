@@ -675,6 +675,10 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
 - [x] Slice 1: the file format, the validator with a line and column on every problem, the
       built-in, the catalog of built-ins and user files, `ys workflow list | show | copy | validate`, and
       the guide to the format. Recorded in [21 § slice 1](21-workflows.md#slice-1-what-shipped).
+- [x] Slice 2: runs. Migration 0012; the engine, a pure function over the run's rows; the driver,
+      a background thread in the app that starts agents, waits for them to settle, types to them and
+      notifies; the app lock that tells `ys` the app is running; `ys workflow run | runs | cancel`.
+      Recorded in [21 § slice 2](21-workflows.md#slice-2-what-shipped).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing

@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Workflows: named agent work, run from `ys`.** Write a workflow as a short YAML file in your
+  profile's `workflows` folder: the inputs to ask for, and steps that start an agent, wait for it
+  to settle, type to it once it is quiet, and notify you. Steps run as soon as the ones they
+  need succeed, so they can run side by side. `ys workflow validate` checks a file and names the
+  line and column of every mistake, including every `{{ variable }}`; `list`, `show` and `copy`
+  manage them. With Yardsort open, `ys workflow run` queues a run and the app carries it out in
+  the background, with the agents it starts as tabs; `ys workflow runs` follows it and `cancel`
+  stops it, never the agents. A built-in **Request code review** is included; it needs the pull
+  request steps that come next, so it cannot run yet. See [Workflows](docs/guide/workflows.md).
 - **Project search.** Click the search icon beside Projects to filter by name. Clear the filter
   with **×**, or press **Escape** to close it; **×** also closes an empty field. The selected
   workspace's project stays visible, including projects added while filtering.

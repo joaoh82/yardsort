@@ -5,18 +5,18 @@ agent review this workspace's pull request, then tell me and the agent that wrot
 one as a short YAML file. Yardsort checks every name and every `{{ variable }}` in it before it
 runs anything, and names the line and column of each mistake.
 
-This version reads, copies and checks workflow files: `ys workflow list`, `show`, `copy` and
-`validate`. Running them, from the app and from `ys`, and the **Workflows** section of the sidebar
-are being built; the [roadmap](../design/05-roadmap.md) has the plan. Until then, what this page
-says a step _does_ is what it is for. The checks are all real now.
+In this version you run a workflow from the command line, with `ys workflow run`, while Yardsort
+is open. The **Workflows** section of the sidebar, steps that work with pull requests, and the
+built-in code review arrive next; the [roadmap](../design/05-roadmap.md) has the plan.
 
 ## Where workflows come from
 
 - **Built in.** Yardsort ships with one: **Request code review** (`code-review`). It is for
   having a second agent, one you pick, review the workspace's pull request in the same worktree
   and post its review on GitHub with `gh`. When the review is on the pull request, you get a
-  notification, and the agent that wrote the pull request is told once it is not busy. `ys workflow show code-review`
-  prints the whole file.
+  notification, and the agent that wrote the pull request is told once it is not busy. It cannot
+  run in this version: it waits on the pull request, which comes next. `ys workflow show
+code-review` prints the whole file.
 - **Yours.** Every `.yaml` or `.yml` file in the `workflows` folder of Yardsort's data directory.
   [Where Yardsort keeps things](troubleshooting.md#where-yardsort-keeps-things) says where that
   is on your system, and `ys workflow list` prints it.
@@ -46,9 +46,9 @@ what is sent to your agents. A repository you cloned should not get to decide th
 ## An example
 
 ```yaml
-id: fix-ci
-name: Fix the failing checks
-description: An agent reads the failed checks on this workspace's pull request and fixes them.
+id: fix-tests
+name: Fix the failing tests
+description: An agent runs the tests on this workspace's branch and fixes what fails.
 version: 1
 
 trigger:
@@ -65,8 +65,7 @@ steps:
     action: start_session
     harness: "{{ inputs.fixer }}"
     prompt: |
-      The checks on pull request #{{ pr.number }} ({{ pr.url }}) are failing. Read them with
-      `gh pr checks {{ pr.number }}`, fix the cause on `{{ workspace.branch }}`, and push.
+      Run this project's tests on `{{ workspace.branch }}`. Fix what fails, and commit the fix.
 
       {{ memory }}
 
@@ -79,12 +78,71 @@ steps:
   - id: tell_me
     action: notify
     needs: [done]
-    title: "{{ workspace.name }}: the fix is pushed"
+    title: "{{ workspace.name }}: the tests are fixed"
 ```
 
-Steps run as soon as every step in their `needs` has finished, so steps can run side by side.
+Steps run as soon as every step in their `needs` has succeeded, so steps can run side by side.
 `tell_me` waits for `done`, and `done` waits for `fix`. Two steps that both need `done` would run
 together.
+
+## Running a workflow
+
+Yardsort must be open: the app carries runs out, in the background, while you keep working. Then:
+
+```sh
+ys workflow run fix-tests --workspace fix-login --input fixer=claude
+```
+
+`--workspace` takes a workspace's name or id. Run it inside a workspace's folder, or in an
+agent's terminal there, and it can be left out. Give each input as `--input id=value`. `ys`
+checks everything before anything is queued:
+
+- the workflow is ready to run, and this version can do every step in it
+- the workspace is there and not archived
+- every required input is given, there are no inputs the workflow does not ask for, a `choice` is
+  one of its options, and an agent named by a `harness` input or a step is set up in Yardsort and
+  on your `PATH`
+
+Optional inputs left out take their `default`, or are empty. A workflow runs once at a time in a
+workspace: asking again while it runs is refused, naming the run. With Yardsort closed, `ys` says
+so and queues nothing.
+
+`ys workflow run` prints the run's id and returns at once. The app picks the run up within a
+second, and moves each step on as soon as it can: every second, and the moment an agent goes
+quiet or ends. To follow it:
+
+```sh
+ys workflow runs                  # every run, newest first
+ys workflow runs --run 3f2a9c1e   # one run, step by step, with why a step failed or was skipped
+ys workflow cancel 3f2a9c1e       # stop it
+```
+
+What each step does while it runs:
+
+- **`start_session`** starts the agent exactly as the composer would, and it opens as a new tab in
+  that workspace. The tab you were looking at stays in front. From then on it is an ordinary
+  session: you can watch it, type to it, or close it.
+- **`wait_session`** waits until the agent has **settled**: it has gone quiet after at least 8
+  seconds of output, or its harness reported that it finished its turn. With `until: exited` it
+  waits for the program to end. An agent that ends while it is waited on ends the wait too.
+- **`send_to_session`** waits until the agent is quiet, then types the message and presses Enter.
+  If the agent ends first, the step is skipped.
+- **`notify`** shows a system notification.
+
+A step runs only when every step in its `needs` succeeded. When one fails, the steps after it are
+skipped, and the run fails with that step's reason.
+
+**Cancelling** stops the run. Agents it started keep running as ordinary sessions: close them as
+you would any other.
+
+**If Yardsort quits during a run,** the run carries on when you open it again. A step that was
+waiting keeps waiting. A step Yardsort was in the middle of, such as starting an agent, fails
+saying so rather than being done twice. An agent that settled while Yardsort was closed is only
+noticed if its harness reported the finished turn.
+
+**Not in this version yet:** steps that use the workspace's pull request (`{{ pr.… }}` and
+`wait_pr_activity`), or its own agent (`session: origin`). A workflow with any of them is refused
+before it is queued. The built-in code review is one of those workflows.
 
 ## The file
 
@@ -118,13 +176,13 @@ Every step has an `id`, named the same way as an input, and an `action`. `needs`
 steps that must finish first. A step cannot need itself. Steps that wait for each other in a
 circle are reported, because none of them could ever start.
 
-| Action             | Keys                                                             | What it does                                                                                                                                                                                            |
-| ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`. |
-| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet or finished its turn. `until: exited` means the program has ended.                                                          |
-| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                            |
-| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request. `kind` is `review`, `comment` or `any`, the default.                                                                                 |
-| `notify`           | `title` (required), `body`                                       | Tells you: a notification when Yardsort is in the background, a message in the window otherwise.                                                                                                        |
+| Action             | Keys                                                             | What it does                                                                                                                                                                                                                     |
+| ------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`. |
+| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended.                            |
+| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                     |
+| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request. `kind` is `review`, `comment` or `any`, the default.                                                                                                          |
+| `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                           |
 
 A key that belongs to another action is reported as misplaced. `title` on a `start_session` step
 is an example.
@@ -141,15 +199,15 @@ out of time fails.
 Any text in a step can use `{{ name }}`. Only these names exist. A name is a dotted path and
 nothing else: no filters, no expressions. Anything else is reported where it is written.
 
-| Variable                                                                                          | What it is                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project.name`, `project.root`                                                                    | The project, and the folder of its own checkout.                                                                                                                                                  |
-| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with.                                                                                                                  |
-| `pr.number`, `pr.url`, `pr.title`                                                                 | The open pull request for the workspace's branch.                                                                                                                                                 |
-| `inputs.<id>`                                                                                     | What was given for that input.                                                                                                                                                                    |
-| `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`. The step must be among this step's `needs`. |
-| `memory`                                                                                          | The project's [memory](memory.md), as an agent is given it, when the project shares it. Empty otherwise.                                                                                          |
-| `handoff`                                                                                         | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                            |
+| Variable                                                                                          | What it is                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `project.name`, `project.root`                                                                    | The project, and the folder of its own checkout.                                                                                                                                                                                                       |
+| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with.                                                                                                                                                                       |
+| `pr.number`, `pr.url`, `pr.title`                                                                 | The open pull request for the workspace's branch.                                                                                                                                                                                                      |
+| `inputs.<id>`                                                                                     | What was given for that input.                                                                                                                                                                                                                         |
+| `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`. The step must be among this step's `needs`.                                                      |
+| `memory`                                                                                          | The project's [memory](memory.md), as an agent is given it, when the project shares it. Empty otherwise. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
+| `handoff`                                                                                         | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                 |
 
 To write `{{` literally, for example in a prompt about a template language, write `\{{`.
 
@@ -159,13 +217,13 @@ To write `{{` literally, for example in a prompt about a template language, writ
 It prints each problem as `file:line:column: message` and exits 1 if there are any:
 
 ```text
-$ ys workflow validate fix-ci.yaml
-fix-ci.yaml:20:35: `{{ pr.nubmer }}`: `pr` has no `nubmer`. It has `number`, `url`, `title`.
-fix-ci.yaml:27:13: There is no step `fx`. Did you mean `fix`?
-fix-ci.yaml:28:15: `{{ steps.fix.session }}` is used before step `fix` is sure to have run. Add `fix` to this step's `needs`.
+$ ys workflow validate fix-tests.yaml
+fix-tests.yaml:20:36: `{{ workspace.brnch }}`: `workspace` has no `brnch`. It has `name`, `branch`, `base_branch`, `path`, `task`.
+fix-tests.yaml:26:13: There is no step `fx`. Did you mean `fix`?
+fix-tests.yaml:27:15: `{{ steps.fix.session }}` is used before step `fix` is sure to have run. Add `fix` to this step's `needs`.
 ```
 
-That is the example above with `pr.number` misspelt and `needs: [fix]` written `[fx]`.
+That is the example above with `workspace.branch` misspelt and `needs: [fix]` written `[fx]`.
 
 `-` reads the file from standard input. `--json` prints `{ valid, id, problems }`.
 
