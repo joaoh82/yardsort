@@ -102,13 +102,21 @@ pub fn scratch_dir(data_dir: &Path, git: &Git) -> IpcResult<PathBuf> {
     // Git spells a root as it really is — a symlink followed, a short name expanded — so the
     // two are compared normalised, or a folder that is already the repository would be taken
     // for one inside another and set up again every time.
-    let is_repo = git
-        .repo_root(&dir)?
-        .is_some_and(|root| crate::git::normalize(&root) == crate::git::normalize(&dir));
-    if !is_repo {
+    if !is_own_repository(&dir, git)? {
         git.init(&dir)?;
     }
     Ok(dir)
+}
+
+/// Whether `dir` is a repository's own root, rather than a folder inside some other one.
+///
+/// Git spells a root as it really is — a symlink followed, a short name expanded — so the two
+/// are compared normalised, or a folder that is already the repository would be taken for one
+/// inside another and set up again every time.
+fn is_own_repository(dir: &Path, git: &Git) -> IpcResult<bool> {
+    Ok(git
+        .repo_root(dir)?
+        .is_some_and(|root| crate::git::normalize(&root) == crate::git::normalize(dir)))
 }
 
 /// What a model wrote, checked.
@@ -237,15 +245,14 @@ mod tests {
         std::os::unix::fs::symlink(real.path(), &link).unwrap();
         let git = crate::git::testing::git();
         let scratch = scratch_dir(&link, &git).unwrap();
-        let head = std::fs::metadata(scratch.join(".git").join("HEAD")).unwrap();
-        let made = head.modified().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        scratch_dir(&link, &git).unwrap();
-        let again = std::fs::metadata(scratch.join(".git").join("HEAD")).unwrap();
-        assert_eq!(
-            again.modified().unwrap(),
-            made,
-            "not initialised a second time"
+        assert_ne!(
+            git.repo_root(&scratch).unwrap().unwrap(),
+            scratch,
+            "git spells the root differently from the path it was asked about"
+        );
+        assert!(
+            is_own_repository(&scratch, &git).unwrap(),
+            "and still it is recognised as its own repository, not set up again"
         );
     }
 
