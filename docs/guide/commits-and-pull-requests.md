@@ -132,6 +132,9 @@ workspace row to preview its pull request: number, title, state, head and base b
 decision, added and removed lines, check summary, and last update time. **Show checks** expands
 the individual check names and results. You can move the pointer into the card to use it;
 Escape dismisses it. From a focused trigger, Arrow Down moves into the card's controls.
+Clicking a row or its menu dismisses the preview without reopening it through mouse focus.
+If `gh` has not answered successfully, the workspace preview shows its name and branch without
+claiming that no PR exists.
 
 **Press the badge to open the pull request in your browser.** It sits beside the row rather than
 on it, so pressing it opens the pull request while pressing the row still opens the workspace. The
@@ -162,9 +165,14 @@ still apply. A failure appears beside the toolbar with GitHub's explanation.
 
 Yardsort checks the PR again and merges only the head commit shown when you confirmed. If someone
 pushes another commit meanwhile, refresh and review it before trying again. The workspace and
-local branch are kept. Repositories requiring a merge queue may queue the request or enable auto-merge;
-the toolbar reports that the request was sent and refreshes the status, rather than claiming that
-it has already merged. You can refresh again from the menu.
+local branch are kept.
+
+Yardsort does not pass `--auto`. On a branch without a required merge queue, unmet requirements
+cause the command to fail and the toolbar shows the reason. For branches that require a merge
+queue, the [GitHub CLI](https://cli.github.com/manual/gh_pr_merge) handles queueing: it adds eligible
+PRs to the queue, or enables auto-merge while required checks are pending. The toolbar reports
+that the request was sent and refreshes the status, rather than claiming it has already merged.
+You can refresh again from the menu.
 
 ![Pull request actions in the workspace toolbar](../images/pull-request-actions.png)
 

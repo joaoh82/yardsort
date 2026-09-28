@@ -21,6 +21,7 @@ export function HoverCard({
   const anchor = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pointerDown = useRef(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const cancel = () => clearTimeout(timer.current);
   const close = () => {
@@ -66,17 +67,21 @@ export function HoverCard({
     const scroll = (event: Event) => {
       if (!card.current?.contains(event.target as Node)) dismiss();
     };
+    const blur = (event: FocusEvent) => {
+      // Focus moving from the document into a card control is still inside this window.
+      if (!(event.relatedTarget instanceof Node)) dismiss();
+    };
     window.addEventListener("keydown", key);
     window.addEventListener("pointerdown", pointer);
     window.addEventListener("resize", dismiss);
     window.addEventListener("scroll", scroll, true);
-    window.addEventListener("blur", dismiss);
+    window.addEventListener("blur", blur);
     return () => {
       window.removeEventListener("keydown", key);
       window.removeEventListener("pointerdown", pointer);
       window.removeEventListener("resize", dismiss);
       window.removeEventListener("scroll", scroll, true);
-      window.removeEventListener("blur", dismiss);
+      window.removeEventListener("blur", blur);
     };
   }, [position]);
   return (
@@ -84,6 +89,18 @@ export function HoverCard({
       ref={anchor}
       data-hover-card="trigger"
       className={className}
+      onPointerDownCapture={(event) => {
+        if (!anchor.current?.contains(event.target as Node)) return;
+        // Cancel even a pending hover before the browser focuses a clicked button.
+        pointerDown.current = true;
+        close();
+      }}
+      onPointerUpCapture={() => {
+        pointerDown.current = false;
+      }}
+      onPointerCancel={() => {
+        pointerDown.current = false;
+      }}
       onContextMenu={(event) => {
         close();
         onContextMenu?.(event);
@@ -107,9 +124,15 @@ export function HoverCard({
           (event.target as Element).closest("[data-hover-card]") !== anchor.current
         )
           close();
-        else if (!event.currentTarget.contains(event.relatedTarget)) show();
+        else if (
+          !pointerDown.current &&
+          (event.target as Element).matches(":focus-visible") &&
+          !event.currentTarget.contains(event.relatedTarget)
+        )
+          show();
       }}
       onBlur={(event) => {
+        pointerDown.current = false;
         if (
           !anchor.current?.contains(event.relatedTarget) &&
           !card.current?.contains(event.relatedTarget)

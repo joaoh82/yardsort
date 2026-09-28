@@ -109,8 +109,10 @@ as you normally would.
 - The **middle** is the agent's own terminal UI. Type to it exactly as you would anywhere else.
 - The **right** lists every file the agent has touched, updating live. Click one for the diff.
 - The **left** shows all your workspaces. Start another — in the same project or a different
-  one — and they run side by side. A pulsing dot means an agent is working; a number at the end of
-  the row is how many agents there are waiting for you, and a **✓** means they have all finished.
+  one — and they run side by side. A pulsing dot means an agent is working. The harness pill counts
+  all open agent tabs, including finished ones; its amber tint means an agent is waiting for you.
+  A **✓** means they have all finished successfully. Hover or keyboard-focus the pill to see each
+  agent's name and activity, then select one to open its terminal.
 
 When the work is done, it is an ordinary git branch: review it, push it, open a pull request —
 from the agent, from a shell tab (`Ctrl+Shift+T`), or from your usual tools.

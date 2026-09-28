@@ -5,6 +5,9 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- Workspace previews open on hover or keyboard focus without popping over clicks or menus.
+  They only say no PR was found after the forge has answered successfully.
+
 - PR badges and the toolbar dropdown share status colours: green for open PRs, yellow for
   drafts or pending checks/reviews, red for failures, requested changes or closed PRs, and
   purple for merged PRs. Open PRs without CI no longer fall back to grey.

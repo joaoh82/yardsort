@@ -288,9 +288,9 @@ function WorkspaceNode({
             {workspace.archived && <p className="text-ink-faint">Archived workspace</p>}
             {pr ? (
               <PullRequestDetails pr={pr} />
-            ) : (
+            ) : found?.gh && !found.loggedOut && !found.problem ? (
               <p className="text-ink-faint">No pull request found</p>
-            )}
+            ) : null}
           </div>
         }
         className={`group flex h-7 items-center pr-1 ${

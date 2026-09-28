@@ -226,6 +226,64 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
   });
 
+  it("keeps previews closed after clicking a row, but opens them when tabbing to it", async () => {
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(rowButton("feature"));
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+    await user.click(rowButton("local"));
+    await user.tab();
+    expect(rowButton("feature")).toHaveFocus();
+    expect(screen.getByRole("region", { name: "feature details" })).toBeVisible();
+  });
+
+  it("does not reopen the workspace preview over its action menu", async () => {
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.hover(rowButton("feature"));
+    await screen.findByRole("region", { name: "feature details" });
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    expect(screen.getByRole("menu")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(screen.queryByRole("region", { name: "feature details" })).not.toBeInTheDocument();
+  });
+
+  it.each(["loading", "not installed", "logged out", "forge error", "IPC error"])(
+    "does not claim no PR was found when the forge is %s",
+    async (status) => {
+      if (status === "loading")
+        core.projectPullRequests.mockImplementationOnce(() => new Promise(() => {}));
+      else if (status === "IPC error")
+        core.projectPullRequests.mockRejectedValueOnce(new Error("Could not fetch PRs"));
+      else
+        core.projectPullRequests.mockResolvedValueOnce({
+          gh: status !== "not installed",
+          pullRequests: [],
+          loggedOut: status === "logged out",
+          problem: status === "forge error" ? "Network unavailable" : null,
+        });
+      await renderWithWorktree();
+      await userEvent.setup().hover(rowButton("feature"));
+      const preview = await screen.findByRole("region", { name: "feature details" });
+      expect(within(preview).getByText("ys/feature")).toBeVisible();
+      expect(within(preview).queryByText("No pull request found")).not.toBeInTheDocument();
+    },
+  );
+
+  it("says no PR was found after a successful empty response", async () => {
+    await renderWithWorktree();
+    await userEvent.setup().hover(rowButton("feature"));
+    const preview = await screen.findByRole("region", { name: "feature details" });
+    expect(within(preview).getByText("No pull request found")).toBeVisible();
+  });
+
   it("counts open harness tabs, shows names and activity, and switches to the chosen one", async () => {
     await renderWithWorktree();
     act(() => {

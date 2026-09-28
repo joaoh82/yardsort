@@ -344,7 +344,7 @@ export const ipc = {
     workspaceId: string,
     pr: { title: string; body: string; draft: boolean },
   ) => unwrap(commands.workspaceOpenPullRequest(workspaceId, pr.title, pr.body, pr.draft)),
-  /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
+  /** Merge a confirmed PR only if it is still the open PR for this workspace and head. */
   workspaceMergePullRequest: (
     workspaceId: string,
     number: number,
@@ -352,6 +352,7 @@ export const ipc = {
     method: MergeMethod,
   ) => unwrap(commands.workspaceMergePullRequest(workspaceId, number, headOid, method)),
 
+  /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
   projectPullRequests: (projectId: string, refresh = false) =>
     unwrap(commands.projectPullRequests(projectId, refresh)),
 
