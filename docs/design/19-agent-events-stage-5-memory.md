@@ -101,7 +101,8 @@ Further decisions made in building:
 - `assist::memory`: the two questions per candidate, the flag threshold, the cache, and nothing
   sent with nothing approved. Frontend: the Memory view's lists, decisions, writing, editing,
   sharing, refusal and Jev tags; the row count and menu label; the composer's line and opt-out.
-- Live: owed — [08 §20](08-manual-checklist.md#20--project-memory).
+- Live, on Linux: writing an entry, an agent's proposal through `ys`, approving it. Owed — the
+  rest of [08 §20](08-manual-checklist.md#20--project-memory), and macOS and Windows.
 
 ## 5 · Not in this slice
 

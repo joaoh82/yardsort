@@ -526,9 +526,9 @@ One adapter for the two forks, recorded in [15-agent-events-stage-2-pi-omp](15-a
 - Settings → General **Capture what OMP reports** and **Capture what pi reports** (off);
   `capture: "extension"` on the run's start; producers `omp` and `pi`.
 
-_Exit:_ every OMP fixture maps and leaks nothing; Pi's partial recording carries the assigned
-id; arming for either, refusing `--trusted-extension`; the real `ys` as the hook; `just check`,
-`just bindings-check`, `just lint-windows` green; a real OMP launched through `ys` on Linux
+_Exit:_ every OMP fixture maps and leaks nothing; Pi's recording (partial at first, in full on
+2026-09-26) carries the assigned id; arming for either, refusing `--trusted-extension`; the real
+`ys` as the hook; `just check`, `just bindings-check`, `just lint-windows` green; a real OMP launched through `ys` on Linux
 reporting live. Hands-on rows in [08 §16](08-manual-checklist.md#16--omp-and-pi-reporting).
 
 _Result:_ 2026-09-25, Linux. Rust: `activity::pi` (6 tests), `launch::tests` (1), a `ys`
@@ -559,8 +559,10 @@ The last built-in harness, recorded in [16-agent-events-stage-2-cursor](16-agent
 - Settings → General **Capture what Cursor reports** (off); `capture: "hook"`; producer `cursor`.
 
 _Exit:_ the documented shapes map and leak nothing; arming writes the plugin and names it before
-`--`, only when asked; the real `ys` as the hook; the gates green. Owed: the recording, and the
-hands-on rows in [08 §17](08-manual-checklist.md#17--cursor-reporting).
+`--`, only when asked; the real `ys` as the hook; the gates green. The recording was made on
+2026-09-26 (#52), and the Linux hands-on rows of
+[08 §17](08-manual-checklist.md#17--cursor-reporting) were run the same day. Owed: macOS and
+Windows.
 
 ## M18 — Agent events, stage 3: review and provenance (first slice) ✅
 
@@ -585,8 +587,9 @@ The join of what the agents reported to what git shows, recorded in
   more question and an **unaccounted** badge. Every badge's tooltip ends with what was told.
 
 _Exit:_ reported writes are told apart from git-observed changes on the panel, with the
-alternatives named; no claim of line-level causality anywhere; the gates green. Owed: the
-hands-on pass in [08 §18](08-manual-checklist.md#18--reported-writes-beside-the-diff).
+alternatives named; no claim of line-level causality anywhere; the gates green. The Linux
+hands-on pass of [08 §18](08-manual-checklist.md#18--reported-writes-beside-the-diff) was run on
+2026-09-26 and 27, observed writes included. Owed: macOS and Windows.
 
 ## M19 — Agent events, stage 4: handoffs (first slice) ✅
 
@@ -608,8 +611,9 @@ The user story the design opened with, recorded in
 
 _Exit:_ the packet renders every part from a recorded run and leaks nothing; **Hand off…**
 opens the composer here with it; an edited packet spawns with `handoff: true` and creates no
-workspace; the gates green. Owed: the live story in
-[08 §19](08-manual-checklist.md#19--handing-off).
+workspace; the gates green. On Linux, **Hand off…** and the packet in the composer were seen in the
+window (they are the 0.11.0 screenshot); sending it on to a second agent has not been run by hand.
+Owed: that, the rest of [08 §19](08-manual-checklist.md#19--handing-off), and macOS and Windows.
 
 ## M20 — Agent events, stage 5: reviewed memory (first slice) ✅
 
@@ -627,7 +631,9 @@ four-question design pass.
 
 _Exit:_ unapproved candidates never reach an agent (launch, handoff and `ys` tests); revocation
 and edits work with history; injection is opt-in per project and per launch; the gates green.
-Owed: the hands-on pass in [08 §20](08-manual-checklist.md#20--project-memory).
+On Linux, writing an entry, an agent's proposal through `ys` and approving it were tried by hand.
+Owed: the rest of [08 §20](08-manual-checklist.md#20--project-memory) — sharing into a launch,
+the opt-out, revoke and restore, the handoff section, Jev's tags — and macOS and Windows.
 
 ## M21 — Agent events, stage 6: outcomes (first slice) ✅
 
@@ -646,7 +652,7 @@ four-question design pass.
 
 _Exit:_ labels, merges and weak evidence are kept apart in the data and the words; histories
 never speak below the sample size; the gates green. Owed: the hands-on pass in
-[08 §21](08-manual-checklist.md#21--outcomes).
+[08 §21](08-manual-checklist.md#21--outcomes), on all three platforms.
 
 ## Later (unordered)
 
