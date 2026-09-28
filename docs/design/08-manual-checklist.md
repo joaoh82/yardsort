@@ -418,6 +418,52 @@ Needs a project with a few worktree workspaces; the GitHub CLI for the pull-requ
 |     | The composer, with Claude picked: _too few to say yet_ until Claude has five attempts with an outcome, then _kept N of M_. Pick an agent with no attempts: no line.                                                                                                        |
 |     | **macOS / Windows:** the first two rows.                                                                                                                                                                                                                                   |
 
+## 22 · Workflow runs
+
+Needs `ys` on your `PATH`, a project with a worktree workspace, and Claude or another agent. Save
+this as `ping-agent.yaml` in the profile's `workflows` folder (`ys workflow list` prints where):
+
+```yaml
+id: ping-agent
+name: Ping an agent
+version: 1
+trigger:
+  kind: manual
+inputs:
+  - id: who
+    kind: harness
+    required: true
+steps:
+  - id: start
+    action: start_session
+    harness: "{{ inputs.who }}"
+    prompt: List the files in this folder, then wait.
+  - id: settle
+    action: wait_session
+    needs: [start]
+    session: "{{ steps.start.session }}"
+    timeout: 10m
+  - id: nudge
+    action: send_to_session
+    needs: [settle]
+    session: "{{ steps.start.session }}"
+    prompt: Now count them.
+  - id: tell
+    action: notify
+    needs: [nudge]
+    title: "{{ inputs.who }} counted the files in {{ workspace.name }}"
+```
+
+| ✓   | Check                                                                                                                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+|     | With Yardsort closed, `ys workflow run ping-agent --workspace <name> --input who=claude`: _Yardsort is not running_, and `ys workflow runs` lists nothing.                                 |
+|     | Open Yardsort, with another tab in front in that workspace, and run it again. Within a second a new Claude tab appears there; the tab in front stays in front.                             |
+|     | When Claude has listed the files and gone quiet, _Now count them._ is typed into it and submitted, never while it is still printing; then a system notification says it counted the files. |
+|     | `ys workflow runs --run <id>`: every step _succeeded_. Run it again at once: refused, naming the run.                                                                                      |
+|     | Run it again and `ys workflow cancel <id>` while it waits: the run is _cancelled_, nothing is typed into Claude afterwards, and Claude keeps running.                                      |
+|     | Run it again and quit Yardsort while `settle` waits (**Keep running**). Open it again: the run carries on, and finishes when Claude reports its turn.                                      |
+|     | **macOS / Windows:** the first three rows, and that the notification shows.                                                                                                                |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:

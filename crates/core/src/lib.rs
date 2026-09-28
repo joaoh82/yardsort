@@ -25,6 +25,7 @@ pub mod legacy;
 pub mod memory;
 pub mod outcomes;
 pub mod paths;
+pub mod presence;
 pub mod program;
 pub mod project_automation;
 pub mod projects;

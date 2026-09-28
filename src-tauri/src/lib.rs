@@ -19,6 +19,7 @@ mod sessions;
 mod state;
 mod terminal;
 mod updates;
+mod workflows;
 mod ys;
 
 // The core is its own crate, so the `ys` CLI can use it without linking a webview — see
@@ -149,7 +150,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             terminal::PtyHostEvent,
             changes::commands::WorkspaceFilesChanged,
             activity::ActivityChanged,
-            quit::QuitRequested
+            quit::QuitRequested,
+            workflows::SessionStarted
         ])
 }
 
@@ -271,6 +273,10 @@ pub fn run() {
                             activity::drain_inbox(&handle, &state.store, &spool_root);
                         }
                     }
+                    // A workflow waiting for an agent to settle hears it here, before the window.
+                    if let Some(driver) = handle.try_state::<workflows::Driver>() {
+                        driver.observe(&event);
+                    }
                     let _ = terminal::PtyHostEvent(event).emit(&handle);
                 }),
             );
@@ -329,6 +335,9 @@ pub fn run() {
                 }
                 Err(error) => eprintln!("not watching the activity inbox: {error}"),
             }
+
+            // Workflow runs, queued here or by `ys`, are moved on by a thread of their own.
+            workflows::start(app.handle(), &data_dir);
 
             // Warm the login-shell environment now, so the first terminal doesn't wait for it.
             // Then bring a `ys` an older version installed up to this one. Not from a development

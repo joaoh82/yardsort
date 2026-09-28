@@ -22,6 +22,9 @@ there, so choosing a workspace always lands you somewhere useful.
 Terminals keep running when you look elsewhere. Switch workspaces or tabs freely; when you come
 back the screen is repainted exactly as it was, scrollback included.
 
+A [workflow](workflows.md) can start an agent too. It opens as a new tab in its workspace, and the
+tab you were looking at stays in front.
+
 ### Copy, paste, links
 
 |                    | Linux / Windows | macOS     |
@@ -154,7 +157,8 @@ When an agent has been busy for a while (eight seconds or more), goes quiet, and
 **not** the window you are looking at, you get a desktop notification: _"claude is waiting —
 project / workspace"_. Shells never notify, and neither does anything you are watching.
 
-Turn it off in [Settings → General](settings.md#general).
+Turn it off in [Settings → General](settings.md#general). That switch is for agents going quiet
+only: a workflow's `notify` step always shows its notification, because you wrote it to.
 
 ## Sessions: resume and fork
 

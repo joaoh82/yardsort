@@ -59,8 +59,14 @@ export function handleHostEvent(event: HostEvent) {
 export function useTerminalSessions() {
   useEffect(() => {
     if (!hasCore()) return;
-    void useTerminalStore.getState().hydrate().catch(console.error);
+    const hydrate = () => void useTerminalStore.getState().hydrate().catch(console.error);
+    hydrate();
     const unlisten = ipc.onHostEvent(handleHostEvent);
-    return () => void unlisten.then((stop) => stop());
+    // A session a workflow started joins the tabs without taking over the one on screen.
+    const unlistenStarted = ipc.onSessionStarted(hydrate);
+    return () => {
+      void unlisten.then((stop) => stop());
+      void unlistenStarted.then((stop) => stop());
+    };
   }, []);
 }

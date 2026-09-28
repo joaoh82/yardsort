@@ -176,67 +176,94 @@ its needs. A `harness` is a harness id or exactly one `{{ inputs.<id> }}` of kin
 
 ## The run
 
-A run is rows, not a process. Migration `0012_workflows.sql`:
+A run is rows, not a process. Migration `0012_workflow_runs.sql`:
 
-- `workflow_runs`: id, workflow id, a **snapshot of the YAML** as it was when the run started (a
-  run must not change under an edit), project id, workspace id, `status`
-  (`queued`, `running`, `succeeded`, `failed`, `cancelled`), `requested_by` (`app`, `cli`), the
-  resolved inputs as JSON, `created_at`, `started_at`, `ended_at`, `error`.
-- `workflow_step_runs`: run id, step id, `status` (`pending`, `ready`, `running`, `waiting`,
-  `succeeded`, `failed`, `skipped`), `started_at`, `ended_at`, the produced fields as JSON, `error`.
+- `workflow_runs`: id, workflow id and name, the **file as it was** when the run was asked for (a
+  run must not change under an edit), project id, workspace id and a copy of its name (history
+  reads the same after the workspace is deleted), the inputs as JSON, `status` (`queued`,
+  `running`, `succeeded`, `failed`, `cancelled`), `requested_by` (`app`, `cli`), `error`,
+  `created_at`, `started_at`, `ended_at`. A partial unique index on `(workflow_id,
+workspace_id)` over queued and running rows is what makes "one at a time" hold across two
+  processes.
+- `workflow_step_runs`: run id, step id, its place in the file, its action, `status` (`pending`,
+  `running`, `waiting`, `succeeded`, `failed`, `skipped`, `cancelled`), `started_at`,
+  `ended_at`, what it left for later steps as JSON, and a `note` saying why it failed or was
+  skipped.
+
+Every step change is conditional: it applies only if the run is still `running` and the step is
+in the state the mover expects. So a cancel from `ys` can never be undone by an app that had not
+heard of it, and nothing is moved twice.
 
 Nothing about a run blocks the app. A step that waits — for an agent to settle, for a review to
 appear — is a row marked `waiting`, not a thread asleep; the window stays a view that reads rows
 and refreshes on an event, and any number of runs can be in flight at once.
 
-The engine in `yardsort_core::workflow::engine` is a function, not a thread:
-`advance(run, world) -> Vec<Effect>`, which returns in milliseconds. It reads the two tables and a small view of the world
-(session activity states, `turn.completed` events since a timestamp, forge activity, the clock)
-and returns what should happen next: `Spawn`, `Paste`, `PollForge`, `Notify`, `Mark(step,
-status)`. That makes the whole state machine testable with a fake world and real SQLite in a temp
-directory — no PTY needed to prove that a cycle never runs, that a failed need skips its
-dependents, that a timeout fails a step exactly once.
+**The engine** (`yardsort_core::workflow::engine`) is a function, not a thread: `advance(workflow,
+inputs, steps, world) -> Plan`, which returns at once. `World` answers the clock, what a session
+is doing (alive, busy, when it last settled) and the variables outside `inputs` and `steps`. A
+`Plan` is conditional step moves, effects for the driver (`Start`, `Paste`, `Notify`), and whether
+the run is finished. Steps start as soon as every need has succeeded, so side-by-side steps start
+in the same call; a need that ended any other way skips the step, saying which. Tested with a fake
+world: no terminal, no database.
 
-The driver in `src-tauri/src/workflows.rs` owns the effects. It wakes on: a new queued run (an
-inbox file from `ys`, or the app's own command), every `PtyHostEvent` quiet or exit, every
-`ActivityChanged`, and a 15-second timer for the forge polls and timeouts. On each wake it loads
-the active runs, calls `advance`, executes the effects with the launcher, the terminal host, `gh`
-and the notification path, writes the rows, and emits a `WorkflowChanged` event the frontend uses
-to refresh. The driver is a background task on the Rust side, never the UI thread; calls that can
-take seconds — `gh`, a spawn — go to blocking workers, the way pull-request polling already does,
-so a slow forge never delays the handling of a terminal event. A run whose app quit mid-way is found `running` on the next start; steps that were
-`waiting` resume waiting, steps that were `running` a spawn are checked against the activity
-table (the run row exists before the spawn, as it does everywhere) and either continue or fail.
+**The driver** (`yardsort_core::workflow::driver::tick`) applies plans to the store and effects
+to sessions, until a run can go no further for now. What only the app can do comes in through a
+`Hands` trait: start an agent exactly as the composer does, show a notification, and write the
+handoff packet, which needs git and the login environment. The app's side
+(`src-tauri/src/workflows.rs`) is a thread of its own, never the UI's. It calls `tick` every
+second, and at once when the host reports a session quiet or exited: those events pass through
+the driver on their way to the window. `ys` does not poke the app. A queued row is found within a
+second, which removed the inbox file the proposal had.
+
+- **Settled** is a quiet after at least 8 seconds of output (the window's own bar, which also
+  ignores the echo of a paste), or a `turn.completed` event for the agent's run, whichever is
+  later, and it must come after the waiting step began. Quiets are remembered in memory, so
+  after a restart only reported turns are known.
+- **Typing** is the first-prompt delivery's method: paste, 150 ms, then Enter.
+- **A restart** fails any step found `running`, with a note saying Yardsort stopped during it:
+  whether the agent started or the text was typed cannot be known, and doing it twice is worse
+  than saying so. The proposal would have checked the activity table instead; a run row carries
+  no link to its launch yet, so that waits.
+- **A session the driver starts** is announced to the window with a `SessionStarted` event, and
+  the window adds it as a tab without changing the one in front. The window had only ever listed
+  sessions when it loaded.
+
+**Presence** (`yardsort_core::presence`, open question 21): the app holds an exclusive OS lock on
+`app.lock` in the data directory for as long as it runs, with the standard library's file
+locking (flock on Unix, `LockFileEx` on Windows). `ys` tries the same lock without waiting. The
+lock dies with the process, so a crash cannot leave a stale "running", and a second app on the
+same profile does not get it, so it does not drive runs.
 
 Rules the engine enforces regardless of what a file says:
 
-- **A busy agent is never written to.** `send_to_session` waits for quiet, and `origin` resolves
-  to nothing when there is no live session, in which case the step is `skipped`, not failed, and
-  the run says so.
+- **A busy agent is never written to.** `send_to_session` waits for quiet. A session that ended
+  skips the step rather than failing it.
 - **One run per workspace per workflow at a time.** Starting a second is refused with the first's
-  id, in the app and in `ys`.
+  id.
 - **Cancel stops the run, not the agents.** Sessions a run started keep running as ordinary
-  sessions; the run's remaining steps become `cancelled`. Nothing a workflow starts is ever
-  killed without the same confirmation an ordinary session gets.
+  sessions; the run's remaining steps become `cancelled`.
+- **Memory once.** A `start_session` prompt that places `{{ memory }}` itself starts the agent
+  with `skip_memory`, so the launcher does not append the memory a second time.
 
 ## The command line
 
 ```
 ys workflow list                          # built-ins and yours, with where each comes from
 ys workflow show <id>                     # the YAML, or --json the parsed form
+ys workflow copy <id> [--as <new-id>]     # a copy in your folder to edit
 ys workflow validate <file>               # exit 0 or the errors, one per line, with line numbers
-ys workflow run <id> --workspace <name> [--input reviewer=claude --input focus="…"]
+ys workflow run <id> [--workspace <name>] [--input reviewer=claude --input focus="…"]
 ys workflow runs [--workspace <name>] [--run <id>]   # history, or one run step by step
 ys workflow cancel <run>
 ```
 
-`run` resolves the workspace and the pull request, checks every required input is given (the
-missing ones are listed by id and label — there is no prompt in the terminal), refuses if the app
-is not running, inserts the `queued` row and drops a file in the inbox. The app's presence is a
-lock file the app holds open under the data directory; the mechanism is verified against all three
-platforms in the first slice, because a stale file after a crash must not read as "running". An
-agent inside a workspace can run `ys workflow run code-review` with no `--workspace`, found from
-the environment the way `ys memory propose` finds its workspace today.
+`run` refuses while the app is not running, then goes through `workflow::runs::queue`, the one
+door for a run, which the app's Run dialog will use too. It checks the workflow, that this
+version can do every step, the workspace, and every input; an agent named by an input or a step
+must be set up and on `PATH`, by the same check `ys workspace new` uses. Refusals write nothing.
+Missing inputs are listed by id and label: there is no prompt in the terminal. Inside a workspace,
+or in an agent's terminal there, `--workspace` can be left out, found as `ys memory propose` finds
+its workspace.
 
 ## The UI
 
@@ -277,12 +304,12 @@ its own.
    the variable checker, the built-in `code-review`, the user directory, the guide for the file
    format, and `ys workflow list | show | copy | validate`. See
    [slice 1](#slice-1-what-shipped) below.
-2. **The engine and the driver.** Migration 0012 and the run store, moved here from slice 1: a
+2. **The engine and the driver.** ✅ Migration 0012 and the run store, moved here from slice 1: a
    migration ships once and cannot be edited, so it waits for the code that writes its rows.
-   `advance` with a fake world; the driver with real sessions in a
-   temp data directory: a workflow that starts a shell-backed "harness", waits for it to settle,
-   pastes into it, notifies. `ys workflow run | runs | cancel`, the inbox handoff, the app
-   presence check on the three platforms. Resume after the app restarts.
+   `advance` with a fake world; the driver with real sessions in a temp data directory: a
+   workflow that starts a shell-backed "harness", waits for it to settle, pastes into it,
+   notifies. `ys workflow run | runs | cancel`, the app presence check, a restart mid-run. See
+   [slice 2](#slice-2-what-shipped) below.
 3. **The forge step and the built-in end to end.** `wait_pr_activity` over `gh pr view --json
 reviews,comments` (and `gh api` for review threads), the `pr` variables and resolving
    `session: origin`. The code-review workflow run against a real PR on a throwaway
@@ -338,6 +365,29 @@ above, and why:
   the second `{{ pr.nubmer }}` in a value is the second in the file, and an escaped `\{{` is
   counted in neither — where it used to point every repeat, and an escaped literal, at the first.
 
+## Slice 2: what shipped
+
+Runs, from `ys`, carried out by the app. [The run](#the-run) and
+[the command line](#the-command-line) above describe what was built; what changed on the way:
+
+- **The driver's loop is in the core,** behind `Hands`, rather than in `src-tauri`. That is what
+  let it be tested against a real program in a real PTY, a shell script standing in for the
+  agent, from start to settle to typed message to notification, and through a cancel, a failed
+  start and a restart. That test is Unix-only, as the PTY host's own tests that wait on output
+  are; the engine, store and queue tests run everywhere.
+- **No inbox handoff.** The driver ticks every second and finds queued rows itself; a queued run
+  starts within a second without `ys` reaching the app at all.
+- **The presence lock is the standard library's** file lock, so there is no platform code of our
+  own to get wrong, and a crashed app cannot look alive.
+- **Steps found running after a restart fail,** rather than being checked against the activity
+  table, because nothing yet links a run's step to the launch it made.
+- **Sessions started by a run needed a new event.** The window only listed sessions once, when
+  it loaded, so an agent a run started would have had no tab until a restart.
+- **`notify` is a system notification, always.** Showing it in the window instead when the window
+  is in front waits for the Workflows view.
+- **Refused at the door for now:** `wait_pr_activity`, `{{ pr.… }}` and `session: origin`, which
+  are slice 3. The built-in code review uses all three, so it cannot run yet.
+
 ## Not in v1, on purpose
 
 - Schedules and forge-event triggers. The roadmap's "automations" item lists the questions those
@@ -351,8 +401,9 @@ above, and why:
 
 ## Open questions
 
-[21–23 in open questions](06-open-questions.md#workflows): how `ys` knows the app is running,
-what `settled` means without native events, and which harnesses a `harness` input offers.
+[21–23 in open questions](06-open-questions.md#workflows): how `ys` knows the app is running
+(settled in slice 2), what `settled` means without native events, and which harnesses a
+`harness` input offers.
 
 ## Documentation this touches
 

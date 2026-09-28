@@ -168,13 +168,17 @@ claude …` with the worktree on the WSL filesystem — which M4's harness model
 
 From the design pass in [21-workflows](21-workflows.md).
 
-21. **How does `ys` know the app is running?** A lock file the app keeps open is the proposal; on
-    Windows an open file cannot be deleted, on Unix a stale one can be detected by trying the lock.
-    To be verified in slice 2 on all three.
+21. ~~**How does `ys` know the app is running?**~~ **Settled 2026-09-28, in slice 2.** The app
+    holds an exclusive lock on `app.lock` in the data directory while it runs, with the standard
+    library's file locking (flock on Unix, `LockFileEx` on Windows), and `ys` tries the same lock
+    without waiting. The operating system drops the lock with the process, so a crash cannot leave
+    a stale "running"; no file that merely exists is trusted. A second app on the same profile
+    does not get the lock, and so does not drive runs. See `yardsort_core::presence`.
 22. **What is `settled` for a harness without native events?** PTY quiet past the attention
     threshold is the only signal, and a reviewer that pauses to think for longer than that would
     end the step early. The forge check behind it catches the false end; whether `wait_session`
     should require _both_ quiet and no `turn.started` since, where hooks exist, is a slice 3
     finding.
 23. **Should a `harness` input show only harnesses that are installed?** The composer does; the
-    run dialog should match, and `ys` should refuse an id that is not found.
+    run dialog should match. The `ys` half is done: since slice 2, `ys workflow run` refuses an
+    agent that is not set up or not on `PATH`, by the check `ys workspace new` uses.

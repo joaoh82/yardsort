@@ -246,6 +246,7 @@ export const events = {
 	activityChanged: makeEvent<ActivityChanged>("activity-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
+	sessionStarted: makeEvent<SessionStarted>("session-started"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
 };
 
@@ -1159,6 +1160,12 @@ export type SessionRecord = {
 	resumable: boolean,
 	forkable: boolean,
 	unavailableReason: string | null,
+};
+
+/**  A workflow run started a session in a workspace: the window should show it as a tab. */
+export type SessionStarted = {
+	workspaceId: string,
+	sessionId: string,
 };
 
 export type SessionState = { status: "running" } | { status: "exited"; exit: ExitInfo };

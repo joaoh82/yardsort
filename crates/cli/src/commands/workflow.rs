@@ -6,9 +6,15 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-use yardsort_core::workflow::{self, Entry, Problem, Source};
+use std::collections::BTreeMap;
 
+use serde::Serialize;
+use yardsort_core::memory;
+use yardsort_core::presence;
+use yardsort_core::store::{WorkflowRunRow, WorkspaceRow};
+use yardsort_core::workflow::{self, runs, Entry, Problem, Source};
+
+use super::activity::when;
 use crate::{table, Failure, Output, Yardsort};
 
 #[derive(clap::Subcommand)]
@@ -28,6 +34,35 @@ pub enum Command {
         /// Give the copy an id of its own, so it sits beside the original.
         #[arg(long = "as", value_name = "NEW_ID")]
         as_id: Option<String>,
+    },
+    /// Run a workflow in a workspace. Yardsort must be open: the app carries runs out. Prints
+    /// the run's id and returns at once; `ys workflow runs --run <id>` follows it.
+    Run {
+        /// The workflow, from `ys workflow list`.
+        id: String,
+        /// Which workspace, by name or id. Default: the one this is run in.
+        #[arg(long, value_name = "WORKSPACE")]
+        workspace: Option<String>,
+        /// An answer to one of the workflow's inputs. Repeat for each.
+        #[arg(long = "input", value_name = "ID=VALUE")]
+        inputs: Vec<String>,
+    },
+    /// Runs, newest first, or one run step by step.
+    Runs {
+        /// Only this workspace's runs, by name or id.
+        #[arg(long, value_name = "WORKSPACE")]
+        workspace: Option<String>,
+        /// Show this run's steps: its id, or the start of it.
+        #[arg(long, value_name = "RUN")]
+        run: Option<String>,
+        /// How many runs to list.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Stop a queued or running run. Agents it started keep running.
+    Cancel {
+        /// The run: its id, or the start of it.
+        run: String,
     },
     /// Check a workflow file. Prints each problem with its line and column; exits 1 if there
     /// are any. Needs no Yardsort profile, so it works anywhere.
@@ -59,6 +94,29 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::Show { id } => {
             let ys = Yardsort::open(data_dir)?;
             show(&ys.data_dir, &id, out)
+        }
+        Command::Run {
+            id,
+            workspace,
+            inputs,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            start_run(&ys, &id, workspace.as_deref(), &inputs, out)
+        }
+        Command::Runs {
+            workspace,
+            run,
+            limit,
+        } => {
+            let ys = Yardsort::open(data_dir)?;
+            match run {
+                Some(run) => show_run(&ys, &run, out),
+                None => runs(&ys, workspace.as_deref(), limit, out),
+            }
+        }
+        Command::Cancel { run } => {
+            let ys = Yardsort::open(data_dir)?;
+            cancel(&ys, &run, out)
         }
         Command::Copy { id, as_id } => {
             let ys = Yardsort::open(data_dir)?;
@@ -129,6 +187,263 @@ fn show(data_dir: &Path, id: &str, out: &Output) -> Result<(), Failure> {
             }
         }
     })
+}
+
+fn start_run(
+    ys: &Yardsort,
+    id: &str,
+    workspace: Option<&str>,
+    given: &[String],
+    out: &Output,
+) -> Result<(), Failure> {
+    let workspace = match workspace {
+        Some(wanted) => super::workspace::find_workspace(ys, wanted)?,
+        None => here(ys)?,
+    };
+    let mut inputs = BTreeMap::new();
+    for pair in given {
+        let Some((key, value)) = pair.split_once('=') else {
+            return Err(Failure::new(format!(
+                "`--input {pair}` needs an `=`: `--input id=value`."
+            )));
+        };
+        inputs.insert(key.trim().to_owned(), value.to_owned());
+    }
+    // The app carries runs out. Queued with nobody to run it, a run would only sit there.
+    if !presence::app_running(&ys.data_dir) {
+        return Err(Failure::new(
+            "Yardsort is not running. Workflows run in the app: open it, then run this again. \
+             Nothing was queued.",
+        ));
+    }
+    let harness = |wanted: &str| {
+        super::workspace::choose_harness(ys, Some(wanted)).map_err(Failure::into_message)
+    };
+    let run_id = runs::queue(
+        &ys.store,
+        &ys.data_dir,
+        &runs::Request {
+            workflow_id: id,
+            workspace_id: &workspace.id,
+            inputs: &inputs,
+            requested_by: "cli",
+        },
+        &harness,
+    )?;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Queued<'a> {
+        run: &'a str,
+        workflow: &'a str,
+        workspace: &'a str,
+    }
+    let queued = Queued {
+        run: &run_id,
+        workflow: id,
+        workspace: &workspace.name,
+    };
+    out.emit(&queued, || {
+        let short = memory::short_id(&run_id);
+        println!("Queued `{id}` in {} as run {short}.", workspace.name);
+        println!("Follow it with: ys workflow runs --run {short}");
+    })
+}
+
+/// The workspace this is run in: the agent's own, from its launch environment, or the folder.
+fn here(ys: &Yardsort) -> Result<WorkspaceRow, Failure> {
+    let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let cwd = std::env::current_dir().map_err(|e| Failure::new(format!("cwd: {e}")))?;
+    let located = memory::locate(
+        &ys.store,
+        env(yardsort_core::activity::RUN_ENV).as_deref(),
+        env(yardsort_core::activity::WORKSPACE_ENV).as_deref(),
+        &cwd,
+    )?;
+    let id = located
+        .and_then(|(_, source)| source.workspace_id)
+        .ok_or_else(|| {
+            Failure::new(
+                "Not inside a Yardsort workspace. Run this in one, or name it with --workspace.",
+            )
+        })?;
+    super::workspace::find_workspace(ys, &id)
+}
+
+/// A run as `runs` lists it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunListed {
+    id: String,
+    workflow: String,
+    workspace: String,
+    status: String,
+    requested_by: String,
+    created_at: i64,
+    started_at: Option<i64>,
+    ended_at: Option<i64>,
+    error: Option<String>,
+}
+
+impl From<&WorkflowRunRow> for RunListed {
+    fn from(run: &WorkflowRunRow) -> Self {
+        Self {
+            id: run.id.clone(),
+            workflow: run.workflow_id.clone(),
+            workspace: run.workspace_name.clone(),
+            status: run.status.clone(),
+            requested_by: run.requested_by.clone(),
+            created_at: run.created_at,
+            started_at: run.started_at,
+            ended_at: run.ended_at,
+            error: run.error.clone(),
+        }
+    }
+}
+
+fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> Result<(), Failure> {
+    let workspace_id = match workspace {
+        Some(wanted) => Some(super::workspace::find_workspace(ys, wanted)?.id),
+        None => None,
+    };
+    let rows = ys.store.workflow_runs(workspace_id.as_deref(), limit)?;
+    let listed: Vec<RunListed> = rows.iter().map(RunListed::from).collect();
+    out.emit(&listed, || {
+        if listed.is_empty() {
+            println!("No workflow runs yet.");
+            return;
+        }
+        let mut lines = vec![vec![
+            "RUN".to_owned(),
+            "WORKFLOW".to_owned(),
+            "WORKSPACE".to_owned(),
+            "STATUS".to_owned(),
+            "ASKED".to_owned(),
+        ]];
+        lines.extend(listed.iter().map(|run| {
+            vec![
+                memory::short_id(&run.id).to_owned(),
+                run.workflow.clone(),
+                run.workspace.clone(),
+                run.status.clone(),
+                when(run.created_at),
+            ]
+        }));
+        table(&lines);
+    })
+}
+
+fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
+    let run = find_run(ys, wanted)?;
+    let steps = ys.store.workflow_steps(&run.id)?;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Step<'a> {
+        id: &'a str,
+        action: &'a str,
+        status: &'a str,
+        started_at: Option<i64>,
+        ended_at: Option<i64>,
+        outputs: serde_json::Value,
+        note: Option<&'a str>,
+    }
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Shown<'a> {
+        #[serde(flatten)]
+        run: RunListed,
+        inputs: serde_json::Value,
+        steps: Vec<Step<'a>>,
+    }
+    let shown = Shown {
+        run: RunListed::from(&run),
+        inputs: serde_json::from_str(&run.inputs).unwrap_or_default(),
+        steps: steps
+            .iter()
+            .map(|s| Step {
+                id: &s.step_id,
+                action: &s.action,
+                status: &s.status,
+                started_at: s.started_at,
+                ended_at: s.ended_at,
+                outputs: serde_json::from_str(&s.outputs).unwrap_or_default(),
+                note: s.note.as_deref(),
+            })
+            .collect(),
+    };
+    out.emit(&shown, || {
+        println!(
+            "Run {} of `{}` in {}: {}",
+            memory::short_id(&run.id),
+            run.workflow_id,
+            run.workspace_name,
+            run.status
+        );
+        if let Some(error) = &run.error {
+            println!("{error}");
+        }
+        println!();
+        let mut lines = vec![vec![
+            "STEP".to_owned(),
+            "ACTION".to_owned(),
+            "STATUS".to_owned(),
+            "NOTE".to_owned(),
+        ]];
+        lines.extend(steps.iter().map(|s| {
+            vec![
+                s.step_id.clone(),
+                s.action.clone(),
+                s.status.clone(),
+                s.note.clone().unwrap_or_default(),
+            ]
+        }));
+        table(&lines);
+    })
+}
+
+fn cancel(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
+    let run = find_run(ys, wanted)?;
+    if !ys
+        .store
+        .cancel_workflow_run(&run.id, "Cancelled from ys.")?
+    {
+        return Err(Failure::new(format!(
+            "Run {} has already ended: {}.",
+            memory::short_id(&run.id),
+            run.status
+        )));
+    }
+    #[derive(Serialize)]
+    struct Cancelled<'a> {
+        run: &'a str,
+    }
+    out.emit(&Cancelled { run: &run.id }, || {
+        println!(
+            "Cancelled run {}. Agents it started keep running.",
+            memory::short_id(&run.id)
+        );
+    })
+}
+
+/// A run by its id or the start of one, as `runs` prints it.
+fn find_run(ys: &Yardsort, wanted: &str) -> Result<WorkflowRunRow, Failure> {
+    let wanted = wanted.trim();
+    let matches: Vec<WorkflowRunRow> = ys
+        .store
+        .workflow_runs(None, usize::MAX)?
+        .into_iter()
+        .filter(|run| !wanted.is_empty() && run.id.starts_with(wanted))
+        .collect();
+    match matches.len() {
+        1 => Ok(matches.into_iter().next().expect("one")),
+        0 => Err(Failure::new(format!(
+            "No run {wanted:?}. `ys workflow runs` lists them."
+        ))),
+        n => Err(Failure::new(format!(
+            "{n} runs start with {wanted:?}. Give more of the id."
+        ))),
+    }
 }
 
 fn copy(data_dir: &Path, id: &str, as_id: Option<&str>, out: &Output) -> Result<(), Failure> {

@@ -154,7 +154,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
 
 /// Epoch milliseconds as a local-looking clock time, without a timezone dependency: the date
 /// and time in UTC, which is enough to read a table.
-fn when(ms: i64) -> String {
+pub(crate) fn when(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);

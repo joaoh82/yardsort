@@ -21,6 +21,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0009_agent_runs_and_events.sql"),
     include_str!("../migrations/0010_project_memory.sql"),
     include_str!("../migrations/0011_workspace_outcomes.sql"),
+    include_str!("../migrations/0012_workflow_runs.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -270,6 +271,123 @@ pub struct DiagnosticRow {
     pub count: i64,
     pub last_at: i64,
     pub last_detail: Option<String>,
+}
+
+/// One time a workflow was asked to run. See `migrations/0012_workflow_runs.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowRunRow {
+    pub id: String,
+    pub workflow_id: String,
+    pub workflow_name: String,
+    /// The workflow file as it was when the run was asked for.
+    pub definition: String,
+    pub project_id: Option<String>,
+    /// `None` once the workspace is deleted; `workspace_name` keeps what it was called.
+    pub workspace_id: Option<String>,
+    pub workspace_name: String,
+    /// A JSON object of strings.
+    pub inputs: String,
+    /// `queued`, `running`, `succeeded`, `failed` or `cancelled`.
+    pub status: String,
+    /// `app` or `cli`.
+    pub requested_by: String,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+}
+
+impl WorkflowRunRow {
+    pub fn active(&self) -> bool {
+        matches!(self.status.as_str(), "queued" | "running")
+    }
+}
+
+/// One step of a workflow run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowStepRow {
+    pub run_id: String,
+    pub step_id: String,
+    pub position: i64,
+    pub action: String,
+    /// `pending`, `running`, `waiting`, `succeeded`, `failed`, `skipped` or `cancelled`.
+    pub status: String,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    /// A JSON object of strings.
+    pub outputs: String,
+    pub note: Option<String>,
+}
+
+/// A run about to be queued, with its steps in file order as `(step id, action)`.
+#[derive(Debug, Clone)]
+pub struct NewWorkflowRun<'a> {
+    pub id: &'a str,
+    pub workflow_id: &'a str,
+    pub workflow_name: &'a str,
+    pub definition: &'a str,
+    pub project_id: &'a str,
+    pub workspace_id: &'a str,
+    pub workspace_name: &'a str,
+    pub inputs: &'a str,
+    pub requested_by: &'a str,
+    pub steps: &'a [(&'a str, &'a str)],
+}
+
+/// Whether a run was queued, or refused because the same workflow is already running there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Queued {
+    Queued,
+    AlreadyRunning(String),
+}
+
+/// What a step moves to. Terminal states set its end time; the others its start time, once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepStatus {
+    Pending,
+    Running,
+    Waiting,
+    Succeeded,
+    Failed,
+    Skipped,
+    Cancelled,
+}
+
+impl StepStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StepStatus::Pending => "pending",
+            StepStatus::Running => "running",
+            StepStatus::Waiting => "waiting",
+            StepStatus::Succeeded => "succeeded",
+            StepStatus::Failed => "failed",
+            StepStatus::Skipped => "skipped",
+            StepStatus::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "pending" => StepStatus::Pending,
+            "running" => StepStatus::Running,
+            "waiting" => StepStatus::Waiting,
+            "succeeded" => StepStatus::Succeeded,
+            "failed" => StepStatus::Failed,
+            "skipped" => StepStatus::Skipped,
+            "cancelled" => StepStatus::Cancelled,
+            _ => return None,
+        })
+    }
+
+    pub fn is_final(self) -> bool {
+        matches!(
+            self,
+            StepStatus::Succeeded
+                | StepStatus::Failed
+                | StepStatus::Skipped
+                | StepStatus::Cancelled
+        )
+    }
 }
 
 pub struct Store {
@@ -1475,9 +1593,231 @@ impl Store {
             .unwrap();
     }
 
+    // --- workflow runs --------------------------------------------------------------------
+
+    /// Queue a run and its steps, unless this workflow is already queued or running in this
+    /// workspace. One transaction, and a unique index behind it, so two processes cannot both.
+    pub fn queue_workflow_run(&self, new: &NewWorkflowRun<'_>) -> StoreResult<Queued> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let running: Option<String> = tx
+            .query_row(
+                "SELECT id FROM workflow_runs WHERE workflow_id = ? AND workspace_id = ?
+                   AND status IN ('queued', 'running')",
+                params![new.workflow_id, new.workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = running {
+            return Ok(Queued::AlreadyRunning(id));
+        }
+        let now = now_ms();
+        tx.execute(
+            "INSERT INTO workflow_runs (id, workflow_id, workflow_name, definition, project_id,
+                                        workspace_id, workspace_name, inputs, status,
+                                        requested_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
+            params![
+                new.id,
+                new.workflow_id,
+                new.workflow_name,
+                new.definition,
+                new.project_id,
+                new.workspace_id,
+                new.workspace_name,
+                new.inputs,
+                new.requested_by,
+                now
+            ],
+        )?;
+        for (position, (step_id, action)) in new.steps.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO workflow_step_runs (run_id, step_id, position, action, status)
+                 VALUES (?, ?, ?, ?, 'pending')",
+                params![new.id, step_id, position as i64, action],
+            )?;
+        }
+        tx.commit()?;
+        Ok(Queued::Queued)
+    }
+
+    pub fn workflow_run(&self, id: &str) -> StoreResult<Option<WorkflowRunRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!("SELECT {WORKFLOW_RUN_COLUMNS} FROM workflow_runs WHERE id = ?"),
+                [id],
+                workflow_run_from_row,
+            )
+            .optional()?)
+    }
+
+    /// Runs, newest first: all of them, or one workspace's.
+    pub fn workflow_runs(
+        &self,
+        workspace_id: Option<&str>,
+        limit: usize,
+    ) -> StoreResult<Vec<WorkflowRunRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {WORKFLOW_RUN_COLUMNS} FROM workflow_runs
+             WHERE ?1 IS NULL OR workspace_id = ?1
+             ORDER BY created_at DESC, rowid DESC LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(
+            params![workspace_id, i64::try_from(limit).unwrap_or(i64::MAX)],
+            workflow_run_from_row,
+        )?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Queued and running runs, oldest first: what the driver has to move on.
+    pub fn active_workflow_runs(&self) -> StoreResult<Vec<WorkflowRunRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {WORKFLOW_RUN_COLUMNS} FROM workflow_runs
+             WHERE status IN ('queued', 'running') ORDER BY created_at, rowid"
+        ))?;
+        let rows = stmt.query_map([], workflow_run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// A run's steps in file order.
+    pub fn workflow_steps(&self, run_id: &str) -> StoreResult<Vec<WorkflowStepRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT run_id, step_id, position, action, status, started_at, ended_at, outputs, note
+             FROM workflow_step_runs WHERE run_id = ? ORDER BY position",
+        )?;
+        let rows = stmt.query_map([run_id], |row| {
+            Ok(WorkflowStepRow {
+                run_id: row.get(0)?,
+                step_id: row.get(1)?,
+                position: row.get(2)?,
+                action: row.get(3)?,
+                status: row.get(4)?,
+                started_at: row.get(5)?,
+                ended_at: row.get(6)?,
+                outputs: row.get(7)?,
+                note: row.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// A queued run starts. False when it was not queued any more — cancelled in between.
+    pub fn start_workflow_run(&self, id: &str) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE workflow_runs SET status = 'running', started_at = ?
+             WHERE id = ? AND status = 'queued'",
+            params![now_ms(), id],
+        )? > 0)
+    }
+
+    /// Move a step on, only if its run is still running and the step is in one of `from`. False
+    /// otherwise, and nothing changes: the run was cancelled, or someone else moved it first.
+    /// `outputs`, when given, replaces the step's outputs.
+    pub fn move_workflow_step(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        from: &[StepStatus],
+        to: StepStatus,
+        outputs: Option<&str>,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let now = now_ms();
+        let marks = from.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE workflow_step_runs
+             SET status = ?1,
+                 started_at = CASE WHEN ?2 THEN started_at ELSE COALESCE(started_at, ?3) END,
+                 ended_at = CASE WHEN ?2 THEN ?3 ELSE ended_at END,
+                 outputs = COALESCE(?4, outputs),
+                 note = COALESCE(?5, note)
+             WHERE run_id = ?6 AND step_id = ?7 AND status IN ({marks})
+               AND EXISTS (SELECT 1 FROM workflow_runs WHERE id = ?6 AND status = 'running')"
+        );
+        // A step that goes straight from pending to an end, skipped say, never started, and
+        // keeps no start time.
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            to.as_str().to_owned().into(),
+            i64::from(to.is_final()).into(),
+            now.into(),
+            outputs.map(str::to_owned).into(),
+            note.map(str::to_owned).into(),
+            run_id.to_owned().into(),
+            step_id.to_owned().into(),
+        ];
+        values.extend(from.iter().map(|s| s.as_str().to_owned().into()));
+        Ok(self
+            .conn()
+            .execute(&sql, rusqlite::params_from_iter(values))?
+            > 0)
+    }
+
+    /// A running run ends as `succeeded` or `failed`. False when it was not running any more.
+    pub fn finish_workflow_run(
+        &self,
+        id: &str,
+        status: &str,
+        error: Option<&str>,
+    ) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE workflow_runs SET status = ?, error = ?, ended_at = ?
+             WHERE id = ? AND status IN ('queued', 'running')",
+            params![status, error, now_ms(), id],
+        )? > 0)
+    }
+
+    /// Cancel a queued or running run: the run and every step not yet finished. Sessions it
+    /// started are not touched. False when the run had already ended.
+    pub fn cancel_workflow_run(&self, id: &str, reason: &str) -> StoreResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let changed = tx.execute(
+            "UPDATE workflow_runs SET status = 'cancelled', error = ?, ended_at = ?
+             WHERE id = ? AND status IN ('queued', 'running')",
+            params![reason, now, id],
+        )? > 0;
+        if changed {
+            tx.execute(
+                "UPDATE workflow_step_runs SET status = 'cancelled', ended_at = ?
+                 WHERE run_id = ? AND status IN ('pending', 'running', 'waiting')",
+                params![now, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+const WORKFLOW_RUN_COLUMNS: &str = "id, workflow_id, workflow_name, definition, project_id, \
+     workspace_id, workspace_name, inputs, status, requested_by, error, created_at, started_at, \
+     ended_at";
+
+fn workflow_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowRunRow> {
+    Ok(WorkflowRunRow {
+        id: row.get(0)?,
+        workflow_id: row.get(1)?,
+        workflow_name: row.get(2)?,
+        definition: row.get(3)?,
+        project_id: row.get(4)?,
+        workspace_id: row.get(5)?,
+        workspace_name: row.get(6)?,
+        inputs: row.get(7)?,
+        status: row.get(8)?,
+        requested_by: row.get(9)?,
+        error: row.get(10)?,
+        created_at: row.get(11)?,
+        started_at: row.get(12)?,
+        ended_at: row.get(13)?,
+    })
 }
 
 const RUN_COLUMNS: &str = "id, workspace_id, session_id, kind, harness_id, harness_session_id, \

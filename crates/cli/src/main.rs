@@ -22,6 +22,11 @@ impl Failure {
     pub fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
+
+    /// What it says, for handing to the core where it wants a reason.
+    pub fn into_message(self) -> String {
+        self.0
+    }
 }
 
 impl From<yardsort_core::error::IpcError> for Failure {
