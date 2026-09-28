@@ -490,12 +490,11 @@ mod tests {
 
     #[test]
     fn no_server_means_unavailable() {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let jev = Jev::at(&format!("http://127.0.0.1:{port}"), "k");
+        // Port 0 is never listened on, so the connection fails at once on every platform. This
+        // used to bind a free port and let it go, but another test's fake server, started in
+        // parallel, could be handed that same port and receive this test's request — failing
+        // both tests.
+        let jev = Jev::at("http://127.0.0.1:0", "k");
         assert!(matches!(
             block(jev.check_key()),
             Err(JevError::Unavailable(_))
