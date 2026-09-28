@@ -735,5 +735,8 @@ rediscovering later. None of them is committed to; the point is to know what is 
 Two further Superset ideas are already covered elsewhere: richer per-workspace status ("running",
 "blocked", "ready for review") is what [open question 16](06-open-questions.md) decided to build
 with Assist, and its PR view is the first item in the list above — now done, as far as a pull
-request's number and its checks go. What Superset still has and this does not is the review
-itself: comments, files reviewed, merging from the app.
+request's number and its checks go. Workspace and toolbar hover previews now include branches,
+review status, line counts and individual checks; the toolbar offers confirmed squash, merge-commit
+and rebase merges. Open harness tabs have their own count and preview. Reused branches prefer an
+open PR, and refresh generations prevent older responses from replacing newer data. What Superset
+still has and this does not is the review itself: comments and files reviewed.

@@ -82,6 +82,8 @@ export const commands = {
 	 *  pull request; without it, on the forge's form with both branches already filled in.
 	 */
 	workspaceOpenPullRequest: (workspaceId: string, title: string, body: string, draft: boolean) => typedError<PullRequestOpened, IpcError>(__TAURI_INVOKE("workspace_open_pull_request", { workspaceId, title, body, draft })),
+	/**  Merge a confirmed PR only if it is still the open PR for this workspace and head. */
+	workspaceMergePullRequest: (workspaceId: string, number: number, headOid: string, method: MergeMethod) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_merge_pull_request", { workspaceId, number, headOid, method })),
 	/**  Every pull request `gh` knows for a project, so each workspace row can show its own. */
 	projectPullRequests: (projectId: string, refresh: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh })),
 	/**  Who would write, for this workspace. `harnessId` is the agent the workspace is using. */
@@ -822,6 +824,8 @@ export type MemoryWaiting = {
 	count: number,
 };
 
+export type MergeMethod = "squash" | "merge" | "rebase";
+
 export type NewWorkspace = {
 	projectId: string,
 	/**  `None` starts from the project's default branch. */
@@ -995,6 +999,23 @@ export type PullRequest = {
 	state: PullRequestState,
 	draft: boolean,
 	checks: Checks,
+	details: PullRequestDetails | null,
+};
+
+export type PullRequestCheck = {
+	name: string,
+	state: Checks,
+};
+
+/**  Detail shared by the sidebar card and toolbar, from the same project-wide query. */
+export type PullRequestDetails = {
+	base: string,
+	headOid: string,
+	additions: number,
+	deletions: number,
+	review: string,
+	updatedAt: string,
+	checks: PullRequestCheck[],
 };
 
 /**  A pull request that now exists, or the form to fill in to make one. */

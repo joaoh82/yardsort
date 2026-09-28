@@ -5,8 +5,10 @@ import { recall, useProjectsStore } from "@/stores/projects";
 import { pullRequestFor, usePublishStore } from "@/stores/publish";
 import { useTerminalStore } from "@/stores/terminals";
 import { archiveWorkspace, deleteWorkspace, enterWorkspace, restoreWorkspace } from "./actions";
-import { harnessState, summarise } from "@/features/terminal/activity";
-import { HarnessBadge } from "@/features/terminal/HarnessBadge";
+import { summarise } from "@/features/terminal/activity";
+import { HoverCard } from "@/lib/HoverCard";
+import { PullRequestDetails } from "@/features/pull-requests/PullRequestDetails";
+import { WorkspaceHarnesses } from "./WorkspaceHarnesses";
 import { StatusDot } from "@/features/terminal/StatusDot";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { ForgetDialog } from "./ForgetDialog";
@@ -291,7 +293,23 @@ function WorkspaceNode({
 
   return (
     <li role="treeitem" aria-selected={selected} aria-label={workspace.name}>
-      <div
+      <HoverCard
+        label={`${workspace.name} details`}
+        side="right"
+        content={
+          <div className="space-y-3">
+            <p className="text-sm font-medium break-words">{workspace.name}</p>
+            {!pr && (
+              <p className="font-mono break-all text-ink-muted">{head?.label ?? "No branch"}</p>
+            )}
+            {workspace.archived && <p className="text-ink-faint">Archived workspace</p>}
+            {pr ? (
+              <PullRequestDetails pr={pr} />
+            ) : found?.gh && !found.loggedOut && !found.problem ? (
+              <p className="text-ink-faint">No pull request found</p>
+            ) : null}
+          </div>
+        }
         className={`group flex h-7 items-center pr-1 ${
           selected ? "bg-raised text-ink" : "text-ink-muted hover:bg-raised"
         }`}
@@ -351,12 +369,9 @@ function WorkspaceNode({
                 {head.detached ? `@${head.label}` : head.label}
               </span>
             )}
-            <HarnessBadge
-              state={harnessState(tabs)}
-              attention={tabs.some((tab) => tab.attention)}
-            />
           </span>
         </button>
+        <WorkspaceHarnesses tabs={tabs} workspaceId={workspace.id} />
         {pr && (
           <span className="flex h-full shrink-0 items-center pr-0.5 pl-1">
             <PullRequestBadge pr={pr} />
@@ -373,7 +388,7 @@ function WorkspaceNode({
             ⋯
           </RowButton>
         )}
-      </div>
+      </HoverCard>
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
       {renaming && <RenameDialog workspace={workspace} onClose={() => setRenaming(false)} />}
       {forgetting && <ForgetDialog workspace={workspace} onClose={() => setForgetting(false)} />}

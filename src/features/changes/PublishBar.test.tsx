@@ -70,6 +70,7 @@ const pr = (extra: Partial<PullRequest> = {}): PullRequest => ({
   state: "open",
   draft: false,
   checks: "passing",
+  details: null,
   ...extra,
 });
 
