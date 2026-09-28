@@ -28,7 +28,7 @@ vi.mock("./WorkflowEditor", () => ({
   }) => (
     <textarea
       aria-label="Workflow file"
-      defaultValue={props.text}
+      value={props.text}
       readOnly={props.readOnly}
       onChange={(event) => props.onChange?.(event.target.value)}
     />
@@ -140,7 +140,10 @@ describe("WorkflowView", () => {
     unmount();
     render(<WorkflowView workflowId="demo" />);
     expect(await screen.findByLabelText("Workflow file")).toHaveValue(`${TEXT}# mine\n`);
-    expect(screen.getByRole("button", { name: "Revert" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Revert" }));
+    expect(screen.getByLabelText("Workflow file")).toHaveValue(TEXT);
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
+    expect(useWorkflowStore.getState().drafts.demo).toBeUndefined();
   });
 
   it("deletes the user's file only when they say yes", async () => {
