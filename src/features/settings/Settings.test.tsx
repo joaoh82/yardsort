@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistStatus, HarnessDef, HarnessInfo, SettingsInfo } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
+  workflowWriterStatus: vi.fn().mockResolvedValue({ harnessId: null, status: { problem: null } }),
   harnessesList: vi.fn(),
   harnessSave: vi.fn(),
   harnessReset: vi.fn(),

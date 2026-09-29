@@ -16,13 +16,15 @@ yours, by name. A number on a row is how many of its runs are going now; a red *
 has problems and cannot run; an orange dot means unsaved changes. Click a row to open it in the
 center panel. **+** starts a new one.
 
-![The built-in code review open: its steps as a chart, the file, and its runs](../images/workflows.png)
+![The built-in code review with a selected step and its YAML source highlighted](../images/workflows.png)
 
 The center panel shows three things:
 
 - **The chart.** Every step as a box, top to bottom, with an arrow from each step to the ones
   that need it. Steps that need the same ones sit side by side. The chart is drawn from the file
-  and follows it as you type; it is not something you edit. With a run open in the list on the
+  and follows it as you type. Click a box (or focus it and press **Enter** or **Space**) to select
+  that step and scroll the YAML editor to its highlighted `id` line, including in read-only
+  built-ins. Click the chart background to clear the selection. With a run open in the list on the
   right, each box shows how that step went in it.
 - **The file.** A YAML editor. Every pause in typing checks the file, and each problem is marked
   where it is and listed under the editor. A built-in is read-only: **Customize** copies it into
@@ -56,7 +58,13 @@ already there.
 
 **Or describe it.** A new workflow has a box above the editor: say what it should do, in your own
 words, and press **Write it**. The agent you already have writes it, in its non-interactive mode,
-or your Anthropic API key does — the same writers, and the same switch in Settings → Assist, as
+or your Anthropic API key does. Choose **Settings → Assist → Workflow writer** to use Claude
+Code, Codex, or any installed, enabled harness with **Write args**, including a custom harness.
+**Automatic** chooses the first installed writer; the optional Anthropic key is the fallback
+when no agent can write or an agent fails. An explicitly selected writer that becomes unavailable
+is reported: install or enable it, configure its Write args, or choose another writer. This
+preference is saved across restarts and only applies to workflow files. The enable switch is
+shared with
 [having a commit message written](commits-and-pull-requests.md#have-it-written-for-you). The
 model is told the file format and shown the built-in review as an example. What it writes is
 checked like any file; when it has problems it is sent back once, with them, and whatever comes

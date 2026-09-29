@@ -386,6 +386,8 @@ export const ipc = {
    * Whether a model can write a commit message or a pull request here, and which one would.
    * `harnessId` is the agent the workspace is using, which gets first refusal.
    */
+  workflowWriterStatus: () => unwrap(commands.workflowWriterStatus()),
+  workflowSaveWriter: (harnessId: string | null) => unwrap(commands.workflowSaveWriter(harnessId)),
   draftStatus: (harnessId: string | null = null) => unwrap(commands.draftStatus(harnessId)),
   /** Have a model write a commit message for what is uncommitted. Sends that diff. */
   draftCommitMessage: (workspaceId: string, harnessId: string | null = null) =>

@@ -5,6 +5,10 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- Workflow generation now has a **Workflow writer** choice in Settings → Assist, including
+  Codex and custom harnesses with Write args. Automatic selection skips harnesses that are not
+  installed. Select a chart node to highlight it and jump to its YAML source line.
+
 - **Workflows: named agent work, in the sidebar and from `ys`.** A **Workflows** section above
   Projects lists them; open one to see its steps as a chart, edit its file with every mistake
   marked where it is, follow its runs, and **Run…** it. A new one can be written for you: say

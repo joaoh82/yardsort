@@ -11,7 +11,7 @@ const core = vi.hoisted(() => ({
   workflowRemove: vi.fn(),
   workflowRuns: vi.fn(),
   workflowRunSteps: vi.fn(),
-  draftStatus: vi.fn(),
+  workflowWriterStatus: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -26,9 +26,13 @@ vi.mock("./WorkflowEditor", () => ({
     text: string;
     onChange?: (text: string) => void;
     readOnly?: boolean;
+    selection?: { id: string | null } | null;
+    stepLines?: Record<string, number>;
   }) => (
     <textarea
       aria-label="Workflow file"
+      data-selected-step={props.selection?.id}
+      data-line={props.stepLines?.[props.selection?.id ?? ""]}
       value={props.text}
       readOnly={props.readOnly}
       onChange={(event) => props.onChange?.(event.target.value)}
@@ -36,7 +40,17 @@ vi.mock("./WorkflowEditor", () => ({
   ),
 }));
 vi.mock("./WorkflowChart", () => ({
-  WorkflowChart: () => <div role="figure" aria-label="Steps" />,
+  WorkflowChart: ({
+    selectedStep,
+    onSelect,
+  }: {
+    selectedStep: string | null;
+    onSelect: (id: string) => void;
+  }) => (
+    <button aria-pressed={selectedStep === "tell"} onClick={() => onSelect("tell")}>
+      Select step tell
+    </button>
+  ),
 }));
 
 import { useProjectsStore } from "@/stores/projects";
@@ -76,6 +90,7 @@ function item(id: string, source: WorkflowItem["source"], extra: Partial<Workflo
 }
 
 const valid = (text: string): WorkflowCheck => ({
+  stepLines: { tell: 2 },
   workflow: item("demo", { kind: "builtIn" }).workflow,
   id: "demo",
   problems: text.includes("oops") ? [{ line: 2, column: 1, message: "Unknown field `oops`" }] : [],
@@ -87,13 +102,16 @@ describe("WorkflowView", () => {
     core.workflowCheck.mockImplementation(async (text: string) => valid(text));
     core.workflowRuns.mockResolvedValue([]);
     core.workflowList.mockResolvedValue([]);
-    core.draftStatus.mockResolvedValue({
-      enabled: true,
-      available: false,
-      harness: null,
-      key: false,
-      model: "claude-opus-5",
-      problem: "No agent here can write one.",
+    core.workflowWriterStatus.mockResolvedValue({
+      harnessId: null,
+      status: {
+        enabled: true,
+        available: false,
+        harness: null,
+        key: false,
+        model: "claude-opus-5",
+        problem: "No agent here can write one.",
+      },
     });
     useWorkflowStore.setState({ items: [], loaded: true, runs: {}, steps: {}, drafts: {} });
     useProjectsStore.setState({ workflowId: null });
@@ -113,6 +131,16 @@ describe("WorkflowView", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Customize" }));
     expect(core.workflowCopy).toHaveBeenCalledWith("code-review");
     expect(await screen.findByText(/Your copy, used instead of the built-in/)).toBeInTheDocument();
+  });
+
+  it("selects a chart node and passes its current YAML location to the editor", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    render(<WorkflowView workflowId="demo" />);
+    const step = await screen.findByRole("button", { name: "Select step tell" });
+    await userEvent.setup().click(step);
+    expect(step).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Workflow file")).toHaveAttribute("data-selected-step", "tell");
+    expect(screen.getByLabelText("Workflow file")).toHaveAttribute("data-line", "2");
   });
 
   it("saves an edit to the user's own file and shows the core's problems as they are typed", async () => {

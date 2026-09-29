@@ -10,14 +10,14 @@ import { useWorkflowStore } from "@/stores/workflows";
  * problems marked in the editor. Nothing a model wrote is a workflow until it is saved.
  */
 export function DescribeWorkflow() {
-  const status = useDraftStore((s) => s.status);
+  const status = useDraftStore((s) => s.workflowWriter?.status);
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
-    void useDraftStore.getState().load();
+    void useDraftStore.getState().loadWorkflowWriter();
   }, []);
 
   const writer = status?.harness ?? (status?.key ? status.model : null);
@@ -86,7 +86,9 @@ export function DescribeWorkflow() {
           </p>
         )}
         {status?.available && !busy && !note && !error && writer && (
-          <p className="text-ink-faint">Written by {writer}; the file is checked like any other.</p>
+          <p className="text-ink-faint">
+            Written by {writer}; choose the Workflow writer in Settings → Assist.
+          </p>
         )}
         {note && <p className="text-ink-muted">{note}</p>}
         {error && (

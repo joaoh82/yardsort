@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const core = vi.hoisted(() => ({
-  draftStatus: vi.fn(),
+  workflowWriterStatus: vi.fn(),
   workflowDescribe: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -28,12 +28,12 @@ const canWrite = {
 describe("DescribeWorkflow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useDraftStore.setState({ status: null, busy: null, error: null });
+    useDraftStore.setState({ status: null, workflowWriter: null, busy: null, error: null });
     useWorkflowStore.setState({ drafts: {} });
   });
 
   it("asks the model, and what it wrote becomes the new workflow's unsaved text", async () => {
-    core.draftStatus.mockResolvedValue(canWrite);
+    core.workflowWriterStatus.mockResolvedValue({ harnessId: null, status: canWrite });
     core.workflowDescribe.mockResolvedValue({
       text: "id: review\nname: Review\n",
       problems: [],
@@ -54,8 +54,35 @@ describe("DescribeWorkflow", () => {
     expect(screen.getByText(/Written by Claude Code\. Look it over/)).toBeInTheDocument();
   });
 
+  it("shows the configured workflow writer independently of workspace drafting", async () => {
+    core.workflowWriterStatus.mockResolvedValue({
+      harnessId: "codex",
+      status: { ...canWrite, harness: "Codex" },
+    });
+    useDraftStore.setState({ status: canWrite });
+    core.workflowDescribe.mockReturnValue(new Promise(() => {}));
+    render(<DescribeWorkflow />);
+    expect(await screen.findByText(/Written by Codex/)).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox"), "Review it");
+    await user.click(screen.getByRole("button", { name: "Write it" }));
+    expect(screen.getByRole("button", { name: "Asking Codex…" })).toBeDisabled();
+  });
+
+  it("refreshes the displayed writer when settings changes while the workflow is open", async () => {
+    core.workflowWriterStatus.mockResolvedValue({ harnessId: null, status: canWrite });
+    render(<DescribeWorkflow />);
+    expect(await screen.findByText(/Written by Claude Code/)).toBeInTheDocument();
+    act(() =>
+      useDraftStore.setState({
+        workflowWriter: { harnessId: "codex", status: { ...canWrite, harness: "Codex" } },
+      }),
+    );
+    expect(screen.getByText(/Written by Codex/)).toBeInTheDocument();
+  });
+
   it("says how many problems were left, and shows what went wrong", async () => {
-    core.draftStatus.mockResolvedValue(canWrite);
+    core.workflowWriterStatus.mockResolvedValue({ harnessId: null, status: canWrite });
     core.workflowDescribe.mockResolvedValueOnce({
       text: "id: x\n",
       problems: [{ line: 1, column: 1, message: "Missing field `name`" }],
@@ -78,7 +105,7 @@ describe("DescribeWorkflow", () => {
   });
 
   it("a slower answer never replaces a newer one, or a discard", async () => {
-    core.draftStatus.mockResolvedValue(canWrite);
+    core.workflowWriterStatus.mockResolvedValue({ harnessId: null, status: canWrite });
     let finishA: (v: unknown) => void = () => {};
     let finishB: (v: unknown) => void = () => {};
     core.workflowDescribe
@@ -120,11 +147,14 @@ describe("DescribeWorkflow", () => {
   });
 
   it("says why nothing can write, and offers nothing to press", async () => {
-    core.draftStatus.mockResolvedValue({
-      ...canWrite,
-      available: false,
-      harness: null,
-      problem: "No agent here can write one, and there is no Anthropic API key.",
+    core.workflowWriterStatus.mockResolvedValue({
+      harnessId: "codex",
+      status: {
+        ...canWrite,
+        available: false,
+        harness: null,
+        problem: "No agent here can write one, and there is no Anthropic API key.",
+      },
     });
     render(<DescribeWorkflow />);
     expect(await screen.findByText(/No agent here can write one/)).toBeInTheDocument();

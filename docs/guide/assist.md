@@ -163,7 +163,7 @@ suggest_at_percent = 50
 Only what differs from the defaults is written, so a value you never touched keeps following
 Yardsort's default if that ever changes.
 
-## Writing commit messages and pull requests
+## Writing commit messages, pull requests and workflows
 
 Assist does not write text. Jev answers typed questions — a probability, a choice, a score — and
 that is all it does; there is no wording anywhere in this page that came from a model.
@@ -174,3 +174,11 @@ coding agent you already have, or your own Anthropic API key. See
 [Commits & pull requests](commits-and-pull-requests.md#have-it-written-for-you). The same
 switch and the same writers are behind **Write it** on a new [workflow](workflows.md), which
 turns a description into a workflow file for you to check and save.
+
+**Workflow writer** chooses which harness writes workflow files: Claude Code, Codex, or any
+installed, enabled harness with **Write args**, including your custom ones. **Automatic** uses
+the first available writer. Harnesses that are disabled, missing, or have no Write args are
+shown but cannot be selected. If your saved choice later becomes unavailable, the description
+box explains how to fix it; choosing **Automatic** clears the preference. The optional API key
+remains a fallback if an available agent fails, or no agent is available in Automatic mode.
+Commit and pull request drafting still prefers the workspace's own agent.
