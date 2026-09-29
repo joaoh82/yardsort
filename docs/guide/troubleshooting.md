@@ -1,5 +1,43 @@
 # Troubleshooting
 
+## Yardsort cannot start
+
+If something goes wrong before the window can open, Yardsort shows a **Yardsort cannot start**
+dialog that says what, and quits when you close it. Started from a terminal, it prints the same
+text there.
+
+The one you are most likely to see says your projects and workspaces **were last opened by a
+newer version of Yardsort**. Each release may upgrade the database the first time it opens it, and
+an older release cannot read what a newer one wrote. That happens when you go back to an older
+download, or have two installs of different versions (an AppImage and a package, say). Install
+the latest release from the [Releases page](https://github.com/joaoh82/yardsort/releases/latest)
+and everything is where you left it: the older version refused before writing anything.
+
+### Going back to the older version instead
+
+Before a release upgrades the database, Yardsort keeps a copy of it as it was:
+`yardsort.db.before-upgrade`, beside the database (see [where](#where-yardsort-keeps-things)).
+The version you had before that upgrade can open the copy. The dialog names the copy when there
+is one this version can read. The copy has nothing you did after the upgrade: projects,
+workspaces, session records and activity since then are not in it. Your repositories and worktrees
+are on disk either way.
+
+To use it, quit Yardsort and anything running `ys`, then in the database's folder:
+
+1. Rename `yardsort.db` to `yardsort-newer.db`. If `yardsort.db-wal` and `yardsort.db-shm` are
+   there, rename them to `yardsort-newer.db-wal` and `yardsort-newer.db-shm`. They belong to the
+   newer database, and left beside the copy they would damage it.
+2. Rename `yardsort.db.before-upgrade` to `yardsort.db`.
+
+Nothing is deleted this way. To go forward again later, undo the renames before starting the
+newer version, or it will upgrade the older copy instead and `yardsort-newer.db` stays unused.
+
+Yardsort keeps one copy, from the most recent upgrade. Each upgrade replaces it.
+
+Versions up to 0.13.0 did not show the dialog. They closed a second or two after launch, every
+time, with nothing on screen. If an older Yardsort does that, this is the most likely reason; run
+it from a terminal to see the message.
+
 ## "`claude` was not found on PATH"
 
 Yardsort launches programs with the environment of your **login shell**, which it reads once at
@@ -47,7 +85,9 @@ section above. Agents you have switched off in Settings → Harnesses do not cou
   launcher asks for X11. Yardsort overrides that, because under XWayland typing lags and dictation
   tools that type for you, such as Omarchy's, drop or garble characters.) If a Wayland start of
   the AppImage ever fails before the window appears, the next start uses X11 for that version by
-  itself. To choose, set `YARDSORT_GDK_BACKEND=wayland` or `YARDSORT_GDK_BACKEND=x11`.
+  itself (a start that [stopped with a dialog](#yardsort-cannot-start) does not count). To choose,
+  set `YARDSORT_GDK_BACKEND=wayland` or `YARDSORT_GDK_BACKEND=x11`. To let a version try Wayland
+  again, delete the `wayland-failed` file beside the database.
 
 ## macOS
 
@@ -144,6 +184,9 @@ a Yardsort you had never used.
 | Database (projects, workspaces, session records) | `~/.local/share/dev.yardsort.app/`         | `~/Library/Application Support/dev.yardsort.app/` | `%APPDATA%\dev.yardsort.app\` |
 | Settings                                         | `~/.config/dev.yardsort.app/settings.toml` | same folder as above                              | same folder as above          |
 | Worktrees                                        | `~/yardsort/` (configurable)               |                                                   |                               |
+
+`yardsort.db.before-upgrade`, when it is there, is the database as it was before the last
+upgrade — the way back to the version before it ([above](#going-back-to-the-older-version-instead)).
 
 `daemon.log` sits beside the database and holds the last run of the background process that owns
 your terminals. It is replaced each time one starts.

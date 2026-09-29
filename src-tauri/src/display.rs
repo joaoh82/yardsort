@@ -112,8 +112,21 @@ pub fn choose_backend() {
 /// The page has loaded, so whichever backend we chose works.
 pub fn window_is_up() {
     if let Some(dir) = data_dir() {
-        let _ = std::fs::remove_file(dir.join(PENDING));
+        clear_pending(&dir);
     }
+}
+
+/// The app gave up during its own start — a database it cannot open, say — before the page could
+/// load. The display server did nothing wrong, so the next start must not read the leftover
+/// marker as a failed Wayland start and pin this version to X11.
+pub fn start_failed() {
+    if let Some(dir) = data_dir() {
+        clear_pending(&dir);
+    }
+}
+
+fn clear_pending(dir: &Path) {
+    let _ = std::fs::remove_file(dir.join(PENDING));
 }
 
 #[cfg(test)]
@@ -175,6 +188,23 @@ mod tests {
         for facts in [not_appimage, x11_session, own_choice] {
             assert_eq!(decide(&facts), Decision::Keep);
         }
+    }
+
+    /// A start that failed for its own reasons once left the marker behind, and the next start
+    /// blamed Wayland for it: the version then ran under XWayland for good.
+    #[test]
+    fn a_start_that_failed_on_its_own_does_not_count_against_wayland() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(PENDING), "").unwrap();
+
+        clear_pending(dir.path());
+
+        let next = Facts {
+            pending: dir.path().join(PENDING).exists(),
+            ..appimage_on_wayland()
+        };
+        assert_eq!(decide(&next), Decision::Wayland);
+        assert!(!dir.path().join(FAILED).exists());
     }
 
     #[test]
