@@ -19,7 +19,7 @@ it("keeps the editor and undo history while typing, preserving CRLF", () => {
   const editor = EditorView.findFromDOM(view.container.querySelector(".cm-editor")!)!;
   act(() => editor.dispatch({ changes: { from: 0, to: 3, insert: "new" } }));
   expect(changed).toHaveBeenLastCalledWith("new\r\nline\r\n");
-  view.rerender(<CodeView {...props} text="new\r\nline\r\n" />);
+  view.rerender(<CodeView {...props} text={"new\r\nline\r\n"} />);
   expect(EditorView.findFromDOM(view.container.querySelector(".cm-editor")!)).toBe(editor);
   act(() => {
     undo(editor);
@@ -31,5 +31,26 @@ it("updates a clean editor from disk without treating the update as typing", () 
   const view = render(<CodeView path="plain.txt" text="old" onChange={changed} />);
   view.rerender(<CodeView path="plain.txt" text="external edit" onChange={changed} />);
   expect(view.container.querySelector(".cm-content")).toHaveTextContent("external edit");
+  expect(changed).not.toHaveBeenCalled();
+  const editor = EditorView.findFromDOM(view.container.querySelector(".cm-editor")!)!;
+  act(() => {
+    expect(undo(editor)).toBe(false);
+  });
+  expect(view.container.querySelector(".cm-content")).toHaveTextContent("external edit");
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("clears old undo entries when an external version replaces the document", () => {
+  const changed = vi.fn();
+  const view = render(<CodeView path="plain.txt" text="old" onChange={changed} />);
+  const editor = EditorView.findFromDOM(view.container.querySelector(".cm-editor")!)!;
+  act(() => editor.dispatch({ changes: { from: 0, to: 3, insert: "saved edit" } }));
+  view.rerender(<CodeView path="plain.txt" text="saved edit" onChange={changed} />);
+  view.rerender(<CodeView path="plain.txt" text="external edit" onChange={changed} />);
+  changed.mockClear();
+  act(() => {
+    expect(undo(editor)).toBe(false);
+  });
+  expect(editor.state.sliceDoc()).toBe("external edit");
   expect(changed).not.toHaveBeenCalled();
 });

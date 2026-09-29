@@ -92,7 +92,15 @@ closing the viewer, and app restarts. They do not change the working file until 
 **Save**. If an agent or another editor changes the file, your draft stays visible and saving
 refuses to overwrite that newer version. Copy any edits you want to keep, then **Discard**
 the draft to reload the disk version. Save errors keep the draft too. Git internals and symbolic
-links cannot be saved from this editor.
+links cannot be saved from this editor. Symbolic links show an explanation instead of opening
+an editor. Read-only files must be made writable before saving; a failed save keeps both the
+draft and the original file permissions.
+
+While a draft is reopening, the panel says it is loading until the disk version arrives. Missing,
+non-text and unreadable files have their own messages; only a different loaded text version is
+reported as a conflict. Reloading from disk or discarding a draft clears the editor’s undo history
+so Undo cannot restore an older disk version. Mixed image/text changes show both the preview
+and the text.
 
 By default the tree shows what git would: `.git`, and everything ignored by `.gitignore` —
 `node_modules`, build output, `.env` files — is left out, which keeps a big repository quick to

@@ -116,3 +116,19 @@ it("clears a saved draft so later disk updates appear", async () => {
   view.rerender(<FileEditor workspaceId="w1" path="app.ts" text="later disk edit" />);
   expect(screen.getByRole("textbox")).toHaveValue("later disk edit");
 });
+
+it("keeps a reopening draft without claiming a conflict while the read is pending", async () => {
+  useProjectsStore.setState({
+    ui: { 'fileDraft:["w1","app.ts"]': JSON.stringify({ expected: "old", text: "draft" }) },
+  });
+  const view = render(<FileEditor workspaceId="w1" path="app.ts" text={null} />);
+  expect(await screen.findByRole("textbox")).toHaveValue("draft");
+  expect(screen.getByRole("status")).toHaveTextContent("Loading the file from disk");
+  expect(screen.queryByText(/file changed on disk/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  view.rerender(<FileEditor workspaceId="w1" path="app.ts" text="old" />);
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  view.rerender(<FileEditor workspaceId="w1" path="app.ts" text="external" />);
+  expect(screen.getByRole("status")).toHaveTextContent("file changed on disk");
+});

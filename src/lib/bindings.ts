@@ -508,7 +508,7 @@ export type Commit = {
 
 export type Content = 
 /**  The file does not exist on this side (added, or deleted). */
-{ type: "absent" } | { type: "text"; text: string } | { type: "image"; mime: string; data: string } | { type: "binary" } | { type: "tooLarge"; bytes: number };
+{ type: "absent" } | { type: "text"; text: string } | { type: "image"; mime: string; data: string } | { type: "notEditable"; reason: string } | { type: "binary" } | { type: "tooLarge"; bytes: number };
 
 export type CreatedWorkspace = {
 	workspace: Workspace,

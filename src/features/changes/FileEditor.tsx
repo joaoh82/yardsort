@@ -22,10 +22,13 @@ export function FileEditor({
   workspaceId,
   path,
   text,
+  unavailable,
 }: {
   workspaceId: string;
   path: string;
   text: string | null;
+  /** Loaded file cannot be edited, or its read failed. Null text alone means loading. */
+  unavailable?: string;
 }) {
   const key = `fileDraft:${JSON.stringify([workspaceId, path])}`;
   const raw = useProjectsStore((s) => s.ui[key]);
@@ -35,11 +38,11 @@ export function FileEditor({
   const [error, setError] = useState<string | null>(null);
   const current = draft?.text ?? text ?? "";
   const dirty = draft !== null && current !== draft.expected;
-  const changed = draft !== null && draft.expected !== text;
+  const changed = draft !== null && text !== null && draft.expected !== text;
   const keep = (next: Draft | null) =>
     remember(key, next).catch((reason) => setError(errorMessage(reason)));
   const save = async () => {
-    if (!draft || busy) return;
+    if (!draft || busy || text === null || unavailable) return;
     setBusy(true);
     setError(null);
     try {
@@ -89,7 +92,7 @@ export function FileEditor({
         <span className="mr-auto text-ink-faint">{dirty ? "Unsaved edits" : "Text editor"}</span>
         <button
           type="button"
-          disabled={!dirty || busy}
+          disabled={!dirty || busy || text === null || !!unavailable}
           onClick={() => void save()}
           className="rounded px-2 py-1 text-accent disabled:opacity-40"
         >
@@ -104,7 +107,16 @@ export function FileEditor({
           Discard
         </button>
       </div>
-      {changed && (
+      {unavailable ? (
+        <p role="status" className="px-2 py-1 text-ink-muted">
+          {unavailable} Your draft is kept.
+        </p>
+      ) : text === null ? (
+        <p role="status" className="px-2 py-1 text-ink-muted">
+          Loading the file from disk… Your draft is kept.
+        </p>
+      ) : null}
+      {changed && !unavailable && (
         <p role="status" className="px-2 py-1 text-ink-muted">
           The file changed on disk. Your draft is kept; copy your edits before discarding to reload.
         </p>

@@ -6,7 +6,13 @@ import {
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
-import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  Transaction,
+  type Extension,
+} from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { useEffect, useRef } from "react";
@@ -59,6 +65,7 @@ const theme = EditorView.theme({
 export function CodeView({ path, text, original, split, onChange }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
 
+  const historyRef = useRef<Compartment | null>(null);
   const editorRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const textRef = useRef(text);
@@ -75,6 +82,8 @@ export function CodeView({ path, text, original, split, onChange }: Props) {
     if (!host) return;
     const dark = !window.matchMedia("(prefers-color-scheme: light)").matches;
     const language = new Compartment();
+    const undoHistory = new Compartment();
+    historyRef.current = editable ? undoHistory : null;
 
     const base: Extension[] = [
       lineNumbers(),
@@ -82,7 +91,7 @@ export function CodeView({ path, text, original, split, onChange }: Props) {
       EditorState.readOnly.of(!editable),
       ...(editable
         ? [
-            history(),
+            undoHistory.of(history()),
             keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
             EditorView.updateListener.of((update) => {
               if (update.docChanged && !update.transactions.some((t) => t.annotation(fromOutside)))
@@ -146,6 +155,7 @@ export function CodeView({ path, text, original, split, onChange }: Props) {
 
     return () => {
       disposed = true;
+      historyRef.current = null;
       editorRef.current = null;
       destroy();
     };
@@ -154,10 +164,15 @@ export function CodeView({ path, text, original, split, onChange }: Props) {
   useEffect(() => {
     const view = editorRef.current;
     if (view && view.state.sliceDoc() !== text) {
+      // A disk reload/discard starts a new baseline. Mapping old undo entries through a
+      // whole-document replacement can otherwise resurrect text from the previous version.
+      const undoHistory = historyRef.current;
       view.dispatch({
-        annotations: fromOutside.of(true),
+        effects: undoHistory ? undoHistory.reconfigure([]) : [],
+        annotations: [fromOutside.of(true), Transaction.addToHistory.of(false)],
         changes: { from: 0, to: view.state.doc.length, insert: text },
       });
+      if (undoHistory) view.dispatch({ effects: undoHistory.reconfigure(history()) });
     }
   }, [text]);
 

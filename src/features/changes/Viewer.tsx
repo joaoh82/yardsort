@@ -17,6 +17,7 @@ const asText = (content: Content) => (content.type === "text" ? content.text : "
 
 /** Why a side cannot be shown as text, if it cannot. */
 function obstacle(content: Content): string | null {
+  if (content.type === "notEditable") return content.reason;
   if (content.type === "binary") return "Binary file — not shown.";
   if (content.type === "tooLarge") {
     return `File too large to show (${(content.bytes / 1_048_576).toFixed(1)} MB).`;
@@ -148,6 +149,16 @@ function Body(props: {
         workspaceId={workspaceId}
         path={path}
         text={file?.type === "text" ? file.text : null}
+        unavailable={
+          error ??
+          (file?.type === "absent"
+            ? "This file no longer exists."
+            : file?.type === "image"
+              ? "This file is now an image."
+              : file
+                ? (obstacle(file) ?? undefined)
+                : undefined)
+        }
       />
     );
   }
@@ -188,13 +199,23 @@ function Body(props: {
               ["After", diff.new],
             ] as const
           ).map(([label, content]) => (
-            <figure key={label} className="min-w-0 flex-1">
+            <figure key={label} className="flex min-h-0 min-w-0 flex-1 flex-col">
               <figcaption className="text-ink-faint">{label}</figcaption>
-              {content.type === "image" ? (
-                <ImagePreview content={content} path={`${path} — ${label}`} />
-              ) : (
-                note(content.type === "absent" ? "No file" : (obstacle(content) ?? "Text file"))
-              )}
+              <div className="min-h-0 flex-1">
+                {content.type === "image" ? (
+                  <ImagePreview content={content} path={`${path} — ${label}`} />
+                ) : content.type === "text" ? (
+                  <Suspense fallback={note("Loading…")}>
+                    <CodeView path={path} text={content.text} />
+                  </Suspense>
+                ) : (
+                  note(
+                    content.type === "absent"
+                      ? "No file"
+                      : (obstacle(content) ?? "Cannot display this file."),
+                  )
+                )}
+              </div>
             </figure>
           ))}
         </div>

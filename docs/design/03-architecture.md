@@ -508,7 +508,8 @@ The existing CodeMirror view is editable for working files; diff views remain re
 
 `workspace_save_file` resolves the workspace from its id, checks path containment and the original
 text, and replaces the file through a temporary file in the same directory, preserving permissions.
-It refuses symlinks, git internals, binary files and text over 1 MiB. It rechecks disk contents before
+It refuses symlinks, git internals, read-only files, binary files and text over 1 MiB. It rechecks
+path containment, the resolved destination and disk contents before
 replacement; this is not a filesystem transaction with external writers, so another process can
 still race the final check and rename. Drafts, including their original text for conflict detection,
 are retained through the core's SQLite UI state under workspace/path keys. Frontend writes to these

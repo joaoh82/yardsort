@@ -74,6 +74,9 @@ pub enum Content {
         mime: String,
         data: String,
     },
+    NotEditable {
+        reason: String,
+    },
     Binary,
     TooLarge {
         bytes: u32,
@@ -280,6 +283,11 @@ pub fn read_working_file(root: &Path, relative: &str) -> IpcResult<Content> {
             ))
         }
     };
+    if metadata.file_type().is_symlink() {
+        return Ok(Content::NotEditable {
+            reason: "Symbolic links cannot be edited here. Open the target file instead.".into(),
+        });
+    }
     if metadata.is_dir() {
         return Ok(Content::Absent);
     }
@@ -296,6 +304,14 @@ pub fn read_working_file(root: &Path, relative: &str) -> IpcResult<Content> {
 
 fn classify(bytes: Vec<u8>) -> Content {
     use base64::Engine;
+    // Text can start with an image signature (for example "BM25 notes").
+    if !bytes.iter().take(8000).any(|&b| b == 0) {
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            return Content::Text {
+                text: text.to_owned(),
+            };
+        }
+    }
     let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("image/png")
     } else if bytes.starts_with(b"\xff\xd8\xff") {
@@ -304,7 +320,12 @@ fn classify(bytes: Vec<u8>) -> Content {
         Some("image/gif")
     } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
         Some("image/webp")
-    } else if bytes.starts_with(b"BM") {
+    } else if bytes.starts_with(b"BM")
+        && bytes.len() >= 14
+        && bytes[6..10] == [0; 4]
+        && u32::from_le_bytes(bytes[10..14].try_into().unwrap()) >= 14
+        && (u32::from_le_bytes(bytes[10..14].try_into().unwrap()) as usize) < bytes.len()
+    {
         Some("image/bmp")
     } else if bytes.starts_with(b"\0\0\x01\0") {
         Some("image/x-icon")
@@ -318,18 +339,21 @@ fn classify(bytes: Vec<u8>) -> Content {
         };
     }
 
-    // Git's own rule of thumb: a NUL in the first 8000 bytes means binary.
-    if bytes.iter().take(8000).any(|&b| b == 0) {
-        return Content::Binary;
-    }
-    match String::from_utf8(bytes) {
-        Ok(text) => Content::Text { text },
-        Err(_) => Content::Binary,
-    }
+    Content::Binary
 }
 
 /// Save only the UTF-8 version the user actually opened. Never replace an agent's newer edits.
 pub fn save_working_file(root: &Path, relative: &str, expected: &str, text: &str) -> IpcResult<()> {
+    save_working_file_before_replace(root, relative, expected, text, || {})
+}
+
+fn save_working_file_before_replace(
+    root: &Path,
+    relative: &str,
+    expected: &str,
+    text: &str,
+    before_replace: impl FnOnce(),
+) -> IpcResult<()> {
     use std::io::Write;
     // Two app commands saving the same baseline must not both pass the comparison.
     static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -342,6 +366,58 @@ pub fn save_working_file(root: &Path, relative: &str, expected: &str, text: &str
             "Only text files up to 1 MiB can be saved.",
         ));
     }
+    let path = editable_path(root, relative)?;
+    let io = |error| IpcError::new("io", format!("Cannot save {relative}: {error}"));
+    let metadata = std::fs::metadata(&path).map_err(io)?;
+    if metadata.permissions().readonly() {
+        return Err(IpcError::new(
+            "not_editable",
+            "This file is read-only. Make it writable before saving; your draft is kept.",
+        ));
+    }
+    if !metadata.is_file() || metadata.len() > MAX_VIEW_BYTES as u64 {
+        return Err(IpcError::new(
+            "not_editable",
+            "Only text files up to 1 MiB can be saved.",
+        ));
+    }
+    let current = std::fs::read(&path).map_err(io)?;
+    if current != expected.as_bytes() || !matches!(classify(current), Content::Text { .. }) {
+        return Err(IpcError::new("file_changed", "This file changed on disk. Copy your edits, then discard the draft to reload before saving."));
+    }
+    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap()).map_err(io)?;
+    temporary.write_all(text.as_bytes()).map_err(io)?;
+    temporary.as_file().sync_all().map_err(io)?;
+    temporary
+        .as_file()
+        .set_permissions(metadata.permissions())
+        .map_err(io)?;
+    before_replace();
+    // Check again after preparing the replacement; failed writes leave the original untouched.
+    if editable_path(root, relative)? != path {
+        return Err(IpcError::new(
+            "bad_path",
+            "The file's location changed while saving. Your draft is kept.",
+        ));
+    }
+    if std::fs::read(&path).map_err(io)? != expected.as_bytes() {
+        return Err(IpcError::new(
+            "file_changed",
+            "This file changed on disk. Your draft has been kept.",
+        ));
+    }
+    if editable_path(root, relative)? != path {
+        return Err(IpcError::new(
+            "bad_path",
+            "The file's location changed while saving. Your draft is kept.",
+        ));
+    }
+    temporary.persist(&path).map_err(|error| io(error.error))?;
+    Ok(())
+}
+
+/// Resolve again at replacement time, rejecting symlinks and git internals each time.
+fn editable_path(root: &Path, relative: &str) -> IpcResult<PathBuf> {
     let path = resolve_inside(root, relative)?;
     // Do not replace symlinks, including dangling ones, or write into git's internal files.
     if path
@@ -359,9 +435,10 @@ pub fn save_working_file(root: &Path, relative: &str, expected: &str, text: &str
     let io = |error| IpcError::new("io", format!("Cannot save {relative}: {error}"));
     let canonical = dunce::canonicalize(&path).map_err(io)?;
     let canonical_root = dunce::canonicalize(root).map_err(io)?;
-    if canonical
+    let inside = canonical
         .strip_prefix(&canonical_root)
-        .unwrap_or(&canonical)
+        .map_err(|_| IpcError::new("bad_path", "The file is outside the workspace."))?;
+    if inside
         .components()
         .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
     {
@@ -370,33 +447,7 @@ pub fn save_working_file(root: &Path, relative: &str, expected: &str, text: &str
             "Git internals cannot be edited here.",
         ));
     }
-    let metadata = std::fs::metadata(&path).map_err(io)?;
-    if !metadata.is_file() || metadata.len() > MAX_VIEW_BYTES as u64 {
-        return Err(IpcError::new(
-            "not_editable",
-            "Only text files up to 1 MiB can be saved.",
-        ));
-    }
-    let current = std::fs::read(&path).map_err(io)?;
-    if current != expected.as_bytes() || !matches!(classify(current), Content::Text { .. }) {
-        return Err(IpcError::new("file_changed", "This file changed on disk. Copy your edits, then discard the draft to reload before saving."));
-    }
-    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap()).map_err(io)?;
-    temporary
-        .as_file()
-        .set_permissions(std::fs::metadata(&path).map_err(io)?.permissions())
-        .map_err(io)?;
-    temporary.write_all(text.as_bytes()).map_err(io)?;
-    temporary.as_file().sync_all().map_err(io)?;
-    // Check again after preparing the replacement; failed writes leave the original untouched.
-    if std::fs::read(&path).map_err(io)? != expected.as_bytes() {
-        return Err(IpcError::new(
-            "file_changed",
-            "This file changed on disk. Your draft has been kept.",
-        ));
-    }
-    temporary.persist(&path).map_err(|error| io(error.error))?;
-    Ok(())
+    Ok(canonical)
 }
 
 /// A path from a client is untrusted: it must be relative and must not climb out.
@@ -820,6 +871,96 @@ mod tests {
             repo.diff("huge.log", None, Scope::Uncommitted).old,
             Content::TooLarge { .. }
         ));
+    }
+
+    #[test]
+    fn image_like_text_stays_editable_and_malformed_bmp_is_binary() {
+        let repo = Repo::new();
+        for text in [
+            "BM25 notes\n",
+            "BMP files start with…",
+            "GIF87a notes\n",
+            "GIF89a notes\n",
+            "RIFF1234WEBP notes\n",
+        ] {
+            repo.write("notes.txt", text);
+            assert_eq!(
+                read_working_file(repo.path(), "notes.txt").unwrap(),
+                Content::Text { text: text.into() }
+            );
+            save_working_file(repo.path(), "notes.txt", text, "updated").unwrap();
+        }
+        assert_eq!(classify(b"BM\0".to_vec()), Content::Binary);
+        let mut bmp = vec![0; 58];
+        bmp[..2].copy_from_slice(b"BM");
+        bmp[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        assert!(
+            matches!(classify(bmp.clone()), Content::Image { mime, .. } if mime == "image/bmp")
+        );
+        bmp[10..14].copy_from_slice(&100_u32.to_le_bytes());
+        assert_eq!(classify(bmp), Content::Binary);
+    }
+
+    #[test]
+    fn read_only_files_are_rejected_without_changing_contents_or_permissions() {
+        let repo = Repo::new();
+        repo.write("readonly.txt", "old");
+        let path = repo.path().join("readonly.txt");
+        let original = std::fs::metadata(&path).unwrap().permissions();
+        let mut readonly = original.clone();
+        readonly.set_readonly(true);
+        std::fs::set_permissions(&path, readonly).unwrap();
+        let result = save_working_file(repo.path(), "readonly.txt", "old", "new");
+        let still_readonly = std::fs::metadata(&path).unwrap().permissions().readonly();
+        // Restore the original permissions so the Windows temp directory can be removed.
+        std::fs::set_permissions(&path, original).unwrap();
+        assert_eq!(result.unwrap_err().code, "not_editable");
+        assert!(still_readonly);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "old");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_retargeted_during_save_cannot_replace_an_outside_file() {
+        let repo = Repo::new();
+        let outside = tempfile::tempdir().unwrap();
+        repo.write("folder/file.txt", "old");
+        std::fs::write(outside.path().join("file.txt"), "old").unwrap();
+        let result =
+            save_working_file_before_replace(repo.path(), "folder/file.txt", "old", "new", || {
+                std::fs::rename(repo.path().join("folder"), repo.path().join("original")).unwrap();
+                std::os::unix::fs::symlink(outside.path(), repo.path().join("folder")).unwrap();
+            });
+        assert_eq!(result.unwrap_err().code, "bad_path");
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("file.txt")).unwrap(),
+            "old"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("original/file.txt")).unwrap(),
+            "old"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn internal_symlinks_are_explained_instead_of_opened_for_editing() {
+        let repo = Repo::new();
+        repo.write("target.txt", "old");
+        std::os::unix::fs::symlink("target.txt", repo.path().join("link.txt")).unwrap();
+        assert!(
+            matches!(read_working_file(repo.path(), "link.txt").unwrap(), Content::NotEditable { reason } if reason.contains("Symbolic links"))
+        );
+        assert_eq!(
+            save_working_file(repo.path(), "link.txt", "old", "new")
+                .unwrap_err()
+                .code,
+            "not_editable"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("target.txt")).unwrap(),
+            "old"
+        );
     }
 
     #[test]
