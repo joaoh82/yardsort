@@ -9,6 +9,7 @@ use std::time::Duration;
 use pty_host::{PtyHost, SessionInfo};
 
 use super::*;
+use crate::git::testing::git;
 use crate::store::Store;
 use crate::workflow::runs::{queue, Request};
 
@@ -99,7 +100,9 @@ fn a_cancel_during_one_effect_stops_the_effects_after_it() {
         notified: Mutex::new(Vec::new()),
     };
     let host = PtyHost::new(Arc::new(|_| {}));
-    Driver::default().tick(&store, &host, &hands).unwrap();
+    Driver::default()
+        .tick(&store, &host, &hands, &git())
+        .unwrap();
 
     assert_eq!(
         *hands.notified.lock().unwrap(),
@@ -274,7 +277,7 @@ impl Profile {
         let start = std::time::Instant::now();
         while !done() {
             assert!(start.elapsed() < Duration::from_secs(10), "timed out");
-            driver.tick(&self.store, &host, hands).unwrap();
+            driver.tick(&self.store, &host, hands, &git()).unwrap();
             std::thread::sleep(Duration::from_millis(20));
         }
     }
@@ -300,7 +303,7 @@ fn a_review_posted_after_the_run_began_ends_the_wait_and_the_forge_is_not_asked_
     profile.until(&patient, &forge, || forge.asked() == 1);
     let host = PtyHost::new(Arc::new(|_| {}));
     for _ in 0..5 {
-        patient.tick(&profile.store, &host, &forge).unwrap();
+        patient.tick(&profile.store, &host, &forge, &git()).unwrap();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(profile.step(&run, "posted").status, "waiting");
@@ -347,10 +350,10 @@ fn a_forge_that_is_slow_to_answer_holds_up_no_other_run() {
     let host = PtyHost::new(Arc::new(|_| {}));
 
     // The first run's question to the forge goes out, and hangs.
-    driver.tick(&profile.store, &host, &forge).unwrap();
+    driver.tick(&profile.store, &host, &forge, &git()).unwrap();
     let other = profile.queue("right-away");
     let started = std::time::Instant::now();
-    driver.tick(&profile.store, &host, &forge).unwrap();
+    driver.tick(&profile.store, &host, &forge, &git()).unwrap();
     assert!(
         started.elapsed() < Duration::from_secs(1),
         "the tick waited {:?} on the forge",
@@ -379,17 +382,17 @@ fn a_tick_says_when_a_run_changed_so_the_window_only_looks_when_there_is_somethi
     let driver = Driver::default();
     let host = PtyHost::new(Arc::new(|_| {}));
     assert!(
-        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        !driver.tick(&profile.store, &host, &forge, &git()).unwrap(),
         "nothing to do"
     );
     let run = profile.queue("right-away");
     assert!(
-        driver.tick(&profile.store, &host, &forge).unwrap(),
+        driver.tick(&profile.store, &host, &forge, &git()).unwrap(),
         "it started and finished"
     );
     assert_eq!(profile.status(&run), "succeeded");
     assert!(
-        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        !driver.tick(&profile.store, &host, &forge, &git()).unwrap(),
         "and then nothing moved"
     );
 }
@@ -402,11 +405,11 @@ fn a_run_cancelled_from_ys_between_ticks_is_a_change_the_window_is_told_about() 
     let driver = Driver::default();
     let host = PtyHost::new(Arc::new(|_| {}));
     assert!(
-        driver.tick(&profile.store, &host, &forge).unwrap(),
+        driver.tick(&profile.store, &host, &forge, &git()).unwrap(),
         "it started, and waits"
     );
     assert!(
-        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        !driver.tick(&profile.store, &host, &forge, &git()).unwrap(),
         "still waiting: no change"
     );
 
@@ -416,11 +419,11 @@ fn a_run_cancelled_from_ys_between_ticks_is_a_change_the_window_is_told_about() 
         .cancel_workflow_run(&run, "Cancelled from ys.")
         .unwrap());
     assert!(
-        driver.tick(&profile.store, &host, &forge).unwrap(),
+        driver.tick(&profile.store, &host, &forge, &git()).unwrap(),
         "the run is gone from the active ones, which is a change"
     );
     assert!(
-        !driver.tick(&profile.store, &host, &forge).unwrap(),
+        !driver.tick(&profile.store, &host, &forge, &git()).unwrap(),
         "and said once"
     );
 }

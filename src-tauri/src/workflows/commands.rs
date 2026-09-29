@@ -283,7 +283,8 @@ pub async fn workflow_preview(
         } else {
             (None, None)
         };
-        let empty = match runs::Place::load(&state.store, &workspace.id)? {
+        let git = crate::git::Git::new(&state.env())?;
+        let empty = match runs::Place::load(&state.store, &workspace.id, &git)? {
             Some(place) => {
                 let shared = state.store.memory_shared(&workspace.project_id)?;
                 runs::empty_variables(&workflow, &place, shared)

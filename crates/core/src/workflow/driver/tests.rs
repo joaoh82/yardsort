@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use pty_host::{LaunchPlan, PtyHost, SessionId, SessionInfo, TermSize};
 
 use super::*;
+use crate::git::testing::git;
 use crate::launch::WORKSPACE_LABEL;
 use crate::store::Store;
 use crate::workflow::runs::{queue, Request};
@@ -219,7 +220,7 @@ impl Fixture {
 
     fn tick(&mut self) {
         self.driver
-            .tick(&self.store, self.host.as_ref(), &self.hands)
+            .tick(&self.store, self.host.as_ref(), &self.hands, &git())
             .unwrap();
     }
 

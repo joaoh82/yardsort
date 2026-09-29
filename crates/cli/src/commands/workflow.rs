@@ -231,7 +231,7 @@ fn start_run(
     // What the run will find nothing for: said, not refused.
     let empty = match (
         workflow::find(&ys.data_dir, id).and_then(|e| e.workflow),
-        runs::Place::load(&ys.store, &workspace.id)?,
+        runs::Place::load(&ys.store, &workspace.id, &ys.git()?)?,
     ) {
         (Some(found), Some(place)) => {
             let shared = ys.store.memory_shared(&workspace.project_id)?;

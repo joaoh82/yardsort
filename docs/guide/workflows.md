@@ -39,8 +39,8 @@ is picked from the same list as the composer's, with those not installed greyed 
 workflow works with the pull request, the dialog looks it up and shows it, or says why there is
 none to use. It also says what the run would find nothing for: a prompt that uses
 `{{ workspace.task }}` in a workspace started without a first message, `{{ memory }}` in a
-project that does not share it, or the branch of the project's own checkout. Those are notes,
-not refusals; the line renders empty. The run starts when you press **Run**, and appears at the
+project that does not share it, or `{{ workspace.base_branch }}` on the default branch, which is
+based on nothing. Those are notes, not refusals; the line renders empty. The run starts when you press **Run**, and appears at the
 top of the runs at once.
 
 A workspace's menu has **Run workflow…**, which opens the same dialog for that workspace, and
@@ -290,7 +290,7 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | Variable                                                                                          | What it is                                                                                                                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `project.name`, `project.root`                                                                    | The project, and the folder of its own checkout.                                                                                                                                                                                                       |
-| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with.                                                                                                                                                                       |
+| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.         |
 | `pr.number`, `pr.url`, `pr.title`                                                                 | The open pull request for the workspace's branch, found when the run is queued.                                                                                                                                                                        |
 | `inputs.<id>`                                                                                     | What was given for that input.                                                                                                                                                                                                                         |
 | `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`. The step must be among this step's `needs`.                                                      |

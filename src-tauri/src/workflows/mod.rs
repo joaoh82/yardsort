@@ -118,9 +118,18 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
             handle,
             state: &state,
         };
+        // Git answers what a workspace row does not know: the branch of the project's own
+        // checkout. Without git nothing here could have started anyway.
+        let git = match crate::git::Git::new(&state.env()) {
+            Ok(git) => git,
+            Err(error) => {
+                eprintln!("workflows: {error}");
+                continue;
+            }
+        };
         match driver
             .driver
-            .tick(&state.store, state.host.as_ref(), &hands)
+            .tick(&state.store, state.host.as_ref(), &hands, &git)
         {
             Ok(true) => {
                 let _ = commands::WorkflowRunsChanged {}.emit(handle);
