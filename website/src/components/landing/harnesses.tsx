@@ -87,7 +87,7 @@ export function Harnesses() {
     >
       <div className="grid items-center gap-12 md:grid-cols-[minmax(0,6fr)_minmax(0,5fr)]">
         <div>
-          <p className="mb-2.5 font-mono text-[12.5px] text-accent">08 · Harnesses</p>
+          <p className="mb-2.5 font-mono text-[12.5px] text-accent">09 · Harnesses</p>
           <h3 id="h-harnesses" className="text-2xl leading-[1.2] font-medium tracking-[-0.015em]">
             Switch agents. Keep the workflow.
           </h3>

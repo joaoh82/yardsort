@@ -117,6 +117,10 @@ as you normally would.
 When the work is done, it is an ordinary git branch: review it, push it, open a pull request —
 from the agent, from a shell tab (`Ctrl+Shift+T`), or from your usual tools.
 
+With the pull request open, **Request code review…** in the workspace's menu has a second agent
+review it and post on GitHub, then tells you and the agent that wrote it. That is a
+[workflow](guide/workflows.md); the **Workflows** section above Projects has it and any you write.
+
 ## 7. Come back later
 
 Quit whenever you like. When you return, pick the workspace and press **Resume** — the agent
@@ -128,5 +132,6 @@ reopens with the whole conversation intact.
 
 - [Workspaces](guide/workspaces.md) — branches, archiving, cleaning up
 - [Terminals & sessions](guide/terminals-and-sessions.md) — resume, fork, notifications
+- [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review
 - [Settings & harnesses](guide/settings.md) — make an agent start the way you like
 - [Keyboard shortcuts](guide/shortcuts.md)

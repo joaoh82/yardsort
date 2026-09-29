@@ -40,7 +40,7 @@ export function Also() {
     <section aria-labelledby="h-also" className="mx-auto max-w-[1120px] px-5 pt-[120px] md:px-8">
       <div className="grid items-start gap-12 md:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         <div className="md:order-2">
-          <p className="mb-2.5 font-mono text-[12.5px] text-accent">09 · Also</p>
+          <p className="mb-2.5 font-mono text-[12.5px] text-accent">10 · Also</p>
           <h3 id="h-also" className="text-2xl leading-[1.2] font-medium tracking-[-0.015em]">
             Quiet about the rest
           </h3>

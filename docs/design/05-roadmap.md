@@ -689,6 +689,9 @@ Proposed in [21-workflows](21-workflows.md), after an eight-question design pass
 - [x] Slice 5: Describe it. A description written into a workflow by the agent the user has or
       their Anthropic key, through Drafting, checked and sent back once with its problems, into
       the editor unsaved. Recorded in [21 § slice 5](21-workflows.md#slice-5-what-shipped).
+- [x] Slice 6: docs and pictures. The README's highlight and section, the website's section, the
+      quick start, and screenshots of the view and the Run dialog. Recorded in
+      [21 § slice 6](21-workflows.md#slice-6-what-shipped).
 
 _Exit:_ the code-review workflow runs against a real pull request on all three platforms from the
 window and from `ys`; a busy agent is never written to; every validation error has a failing

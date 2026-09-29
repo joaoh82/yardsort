@@ -64,11 +64,30 @@ mod tests {
             "a second app on the same profile does not get it"
         );
         drop(held);
-        assert!(!app_running(dir.path()));
+        assert!(
+            free_within_a_moment(dir.path()),
+            "released once the holder is gone"
+        );
         assert!(
             lock_path(dir.path()).exists(),
             "the file stays; only the lock matters"
         );
+    }
+
+    /// The lock goes with the file description, and a child another test forks in the same
+    /// moment inherits that description until it execs, so a just-dropped lock can be seen held
+    /// for a few microseconds. Look again, briefly, rather than fail on that.
+    fn free_within_a_moment(dir: &Path) -> bool {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if !app_running(dir) {
+                return true;
+            }
+            if std::time::Instant::now() > until {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     #[test]

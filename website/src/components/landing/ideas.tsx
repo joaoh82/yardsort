@@ -162,6 +162,41 @@ export function Ideas() {
             terminal, <code className={code}>ys workspace handoff</code> prints the same message.
           </p>
         </Idea>
+
+        <Idea
+          shotFirst
+          label="06 · Workflows"
+          title="Named agent work, in steps"
+          shot={
+            <Shot
+              name="workflows"
+              alt="Workflows: the built-in code review as a chart, with its file and its runs beside it"
+            />
+          }
+        >
+          <p>
+            A workflow is a short YAML file: the inputs to ask for, and steps that start an agent,
+            wait for it to settle, type to it once it is quiet, wait for a review on the pull
+            request, and notify you. A step names the steps it needs, so the ones that need nothing
+            of each other run side by side. Every name and every{" "}
+            <code className={code}>{"{{ variable }}"}</code> is checked before anything runs, with
+            the line and column of each mistake.
+          </p>
+          <p>
+            <strong className={strong}>Workflows</strong>, above Projects, lists the built-in ones
+            and yours: the steps as a chart, the file in an editor with every problem marked where
+            it is, and the runs. Rather not write the file? Say what it should do and press{" "}
+            <strong className={strong}>Write it</strong> — the agent you already have, or your
+            Anthropic key, writes it, checked like any other and never saved until you say so.
+          </p>
+          <p>
+            The built-in <strong className={strong}>Request code review</strong> is in every
+            workspace&apos;s menu: a second agent reviews the pull request in the same worktree and
+            posts on GitHub, then you are told, and the agent that wrote it is told to address the
+            review. <code className={code}>ys workflow run</code> does the same from a terminal, and
+            the open app carries it out in the background.
+          </p>
+        </Idea>
       </div>
     </section>
   );

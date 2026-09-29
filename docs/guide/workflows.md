@@ -16,6 +16,8 @@ yours, by name. A number on a row is how many of its runs are going now; a red *
 has problems and cannot run; an orange dot means unsaved changes. Click a row to open it in the
 center panel. **+** starts a new one.
 
+![The built-in code review open: its steps as a chart, the file, and its runs](../images/workflows.png)
+
 The center panel shows three things:
 
 - **The chart.** Every step as a box, top to bottom, with an arrow from each step to the ones
@@ -40,8 +42,10 @@ workflow works with the pull request, the dialog looks it up and shows it, or sa
 none to use. It also says what the run would find nothing for: a prompt that uses
 `{{ workspace.task }}` in a workspace started without a first message, `{{ memory }}` in a
 project that does not share it, or `{{ workspace.base_branch }}` on the default branch, which is
-based on nothing. Those are notes, not refusals; the line renders empty. The run starts when you press **Run**, and appears at the
-top of the runs at once.
+based on nothing. Those are notes, not refusals; the line renders empty. The run starts when you
+press **Run**, and appears at the top of the runs at once.
+
+![The Run dialog: the workspace, the reviewer to use, what to focus on, and the pull request it found](../images/workflow-run.png)
 
 A workspace's menu has **Run workflow…**, which opens the same dialog for that workspace, and
 **Request code review…**, which opens it on the built-in review.
