@@ -11,6 +11,7 @@ const core = vi.hoisted(() => ({
   workflowRemove: vi.fn(),
   workflowRuns: vi.fn(),
   workflowRunSteps: vi.fn(),
+  draftStatus: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -86,6 +87,14 @@ describe("WorkflowView", () => {
     core.workflowCheck.mockImplementation(async (text: string) => valid(text));
     core.workflowRuns.mockResolvedValue([]);
     core.workflowList.mockResolvedValue([]);
+    core.draftStatus.mockResolvedValue({
+      enabled: true,
+      available: false,
+      harness: null,
+      key: false,
+      model: "claude-opus-5",
+      problem: "No agent here can write one.",
+    });
     useWorkflowStore.setState({ items: [], loaded: true, runs: {}, steps: {}, drafts: {} });
     useProjectsStore.setState({ workflowId: null });
   });
@@ -97,6 +106,7 @@ describe("WorkflowView", () => {
     ]);
     render(<WorkflowView workflowId="code-review" />);
     expect(screen.getByText(/Built in — customize it/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Describe it" })).toBeNull();
     expect(await screen.findByLabelText("Workflow file")).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 
@@ -214,6 +224,7 @@ describe("WorkflowView", () => {
     const file = (await screen.findByLabelText("Workflow file")) as HTMLTextAreaElement;
     expect(file.value).toContain("id: my-workflow");
     expect(screen.queryByRole("region", { name: "Runs" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Describe it" })).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
     expect(core.workflowSave).toHaveBeenCalledWith(
       null,

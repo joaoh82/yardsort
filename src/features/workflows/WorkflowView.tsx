@@ -3,6 +3,7 @@ import { errorMessage, ipc, type Step, type WorkflowCheck } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { useProjectsStore } from "@/stores/projects";
 import { NEW_WORKFLOW, TEMPLATE, useWorkflowStore } from "@/stores/workflows";
+import { DescribeWorkflow } from "./DescribeWorkflow";
 import { RunWorkflowDialog } from "./RunWorkflowDialog";
 import { WorkflowRuns } from "./WorkflowRuns";
 
@@ -243,6 +244,7 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
               {steps.length > 0 && <WorkflowChart steps={steps} run={runSteps} />}
             </Suspense>
           </div>
+          {isNew && <DescribeWorkflow />}
           <div className="min-h-0 flex-1">
             <Suspense fallback={null}>
               <WorkflowEditor

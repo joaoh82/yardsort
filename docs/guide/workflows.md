@@ -46,6 +46,16 @@ A workspace's menu has **Run workflow…**, which opens the same dialog for that
 Give it an `id` and **Save**: it is written as `<id>.yaml` in your folder, and never over a file
 already there.
 
+**Or describe it.** A new workflow has a box above the editor: say what it should do, in your own
+words, and press **Write it**. The agent you already have writes it, in its non-interactive mode,
+or your Anthropic API key does — the same writers, and the same switch in Settings → Assist, as
+[having a commit message written](commits-and-pull-requests.md#have-it-written-for-you). The
+model is told the file format and shown the built-in review as an example. What it writes is
+checked like any file; when it has problems it is sent back once, with them, and whatever comes
+back goes into the editor unsaved, with anything still wrong marked where it is. Nothing a model
+wrote is a workflow until you save it. The agent runs in an empty repository of the profile's
+own, never in one of your projects; a repository because some agents will not run outside one.
+
 ## Where workflows come from
 
 - **Built in.** Yardsort ships with one: **Request code review** (`code-review`). A second

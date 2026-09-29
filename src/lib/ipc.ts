@@ -76,6 +76,7 @@ import {
   type Workspace,
   type WorkspaceSettingsDto,
   type YsStatus,
+  type Described,
   type WorkflowItem,
   type WorkflowCheck,
   type WorkflowRun,
@@ -91,6 +92,7 @@ import {
 } from "./bindings";
 
 export type {
+  Described,
   WorkflowItem,
   WorkflowCheck,
   WorkflowRun,
@@ -488,6 +490,9 @@ export const ipc = {
   workflowStart: (workflowId: string, workspaceId: string, inputs: Record<string, string>) =>
     unwrap(commands.workflowStart(workflowId, workspaceId, inputs)),
   workflowCancel: (runId: string) => unwrap(commands.workflowCancel(runId)),
+  /** A model writes a workflow from a description, through Drafting; checked, never saved. */
+  workflowDescribe: (description: string): Promise<Described> =>
+    unwrap(commands.workflowDescribe(description)),
   /** A run was queued, moved on, finished or cancelled. */
   onWorkflowRunsChanged: (handler: () => void) =>
     events.workflowRunsChanged.listen(() => handler()),

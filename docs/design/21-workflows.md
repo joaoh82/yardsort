@@ -304,7 +304,17 @@ request a run would use through `workflow_preview`, or why there is none. `workf
 through the same `runs::queue` as `ys workflow run`, and the app answers `Look` the way `ys`
 does.
 
-**Describe it**, a description written into a workflow by a model, is slice 5.
+**Describe it.** A new workflow has a description box above its editor. The description goes
+through Drafting's own writers and switch (`draft::commands::writers`): the agent the user has, in
+its non-interactive mode, or their Anthropic key — never Jev. The standing instruction
+(`workflow::describe::SYSTEM`) is the file format, the rules the validator enforces, the
+variables, and the built-in review whole as the example. The answer is checked as a typed file
+is; with problems it is sent back once, with them at their lines, for one more answer. Whatever
+comes back is the new workflow's unsaved text, with what is still wrong marked in the editor.
+The agent runs in an empty git repository of the profile's (`<data dir>/drafting`, made once),
+not in a project: a description is not a change to describe, and nothing here should read the
+user's repositories. A repository rather than a bare folder because Codex refuses to run in a
+folder that is not a trusted checkout.
 
 ## Slices
 
@@ -329,8 +339,9 @@ its own.
    workspace menu entry. Testing Library for the list, the dialog's input rules and the run
    history; the chart's layout as a pure function with tests of its own. See
    [slice 4](#slice-4-what-shipped).
-5. **Describe it.** `Want::Workflow` in Drafting, the `draft_workflow` command, the validate-and-
-   retry loop, the editor hand-off. Tests with a fake writer that returns bad YAML once.
+5. **Describe it.** ✅ `workflow::describe` in the core, the `workflow_describe` command, the
+   validate-and-retry loop, the editor hand-off. Tests with a fake writer that returns bad YAML
+   once. See [slice 5](#slice-5-what-shipped).
 6. **Docs and pictures.** The guide's sections on running (the file format's went with slice 1),
    README highlights, the changelog, screenshots of the chart and the run dialog with the throwaway profile.
 
@@ -469,6 +480,36 @@ them. What changed on the way:
   hundred of every workflow filtered afterwards.
 - **Owed:** screenshots of the section, the view and the Run dialog with the throwaway profile
   (slice 6), and the hands-on pass in [08 §22](08-manual-checklist.md#22--workflow-runs).
+
+## Slice 5: what shipped
+
+Describe it, as [the UI](#the-ui) above now describes it. What changed on the way:
+
+- **No `Want::Workflow`.** Drafting's `Want` is a diff-shaped question with a static system
+  prompt; a workflow's system prompt carries the built-in as an example, so it is its own
+  `concat!` constant in `workflow::describe`, and Drafting's `Prepared` and `run` became
+  `pub(crate)` for the workflows command to use. The writers and the switch are shared through
+  one `writers` function, so the two paths cannot drift.
+- **The loop is the core's** — `next_prompt` and `finish` — and the app only runs it, so the
+  fake-writer test (bad YAML once, then good; bad twice, problems left) is a core test with no
+  agent. `MAX_TRIES` is two.
+- **The agent stands in an empty repository of the profile's,** not the project root the
+  proposal had. There is no project chosen in the Workflows view, and an agent reading a
+  repository to write a workflow file would be reading it for nothing.
+- **From review:** the scratch folder is a git repository, because Codex's `exec` refuses a
+  folder that is not a trusted checkout and would have failed every time it was the writer; the
+  retry repeats what was asked before showing the problems, since a second answer is a fresh
+  conversation and a first answer that lost the task left the second writer nothing to go on;
+  and a generation's answer is kept only if the new workflow is as it was when the question went
+  out, so a slower answer never replaces a newer one, what was typed meanwhile, or a discard.
+- **Who wrote it is said in words** (the agent's label, or the model the key asks), from the
+  same answer the commit-message button shows, so the person knows what they are trusting.
+- **The agent path gets the standing instruction in front of its prompt.** Drafting gives an
+  agent only the question, and the system prompt to the key's path; a commit message needs no
+  more, a workflow's format is the whole point. Checked once for real: Claude Code, in an empty
+  folder, given the exact prompt for "have Codex review the pull request and tell me, not the
+  original agent", wrote a valid four-step workflow first time, with no step for the author, and
+  wrote nothing into the folder.
 
 ## Not in v1, on purpose
 

@@ -171,4 +171,6 @@ that is all it does; there is no wording anywhere in this page that came from a 
 Having a model _write_ a commit message or a pull request is a separate thing with its own switch,
 settled at the foot of this settings page because that is where optional AI lives. It uses the
 coding agent you already have, or your own Anthropic API key. See
-[Commits & pull requests](commits-and-pull-requests.md#have-it-written-for-you).
+[Commits & pull requests](commits-and-pull-requests.md#have-it-written-for-you). The same
+switch and the same writers are behind **Write it** on a new [workflow](workflows.md), which
+turns a description into a workflow file for you to check and save.
