@@ -105,6 +105,21 @@ pub async fn workspace_file(
     .await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_save_file(
+    app: AppHandle,
+    workspace_id: String,
+    path: String,
+    expected: String,
+    text: String,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        super::save_working_file(&workspace(state, &workspace_id)?.1, &path, &expected, &text)
+    })
+    .await
+}
+
 /// Watch this workspace's files (replacing any previous watch); `None` stops watching.
 #[tauri::command]
 #[specta::specta]

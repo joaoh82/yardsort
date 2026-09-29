@@ -499,6 +499,21 @@ with the child's pipes drained on their own threads so a hung agent cannot wedge
 Nothing is applied automatically: an answer lands in the text box the user was already looking at,
 and the commit confirmation still stands between it and git.
 
+## Workspace file editing
+
+The core's `changes` module classifies bounded file contents as UTF-8 text, supported raster
+images (MIME type and base64 bytes), other binary data, or too large. Both git revisions and
+working files use this classification. SVG remains text and is previewed through an image element.
+The existing CodeMirror view is editable for working files; diff views remain read-only.
+
+`workspace_save_file` resolves the workspace from its id, checks path containment and the original
+text, and replaces the file through a temporary file in the same directory, preserving permissions.
+It refuses symlinks, git internals, binary files and text over 1 MiB. It rechecks disk contents before
+replacement; this is not a filesystem transaction with external writers, so another process can
+still race the final check and rename. Drafts, including their original text for conflict detection,
+are retained through the core's SQLite UI state under workspace/path keys. Frontend writes to these
+keys are serialized so older keystrokes cannot overwrite newer drafts.
+
 ## Cross-platform notes & risks
 
 | Platform    | Watch out for                                                                                                                                                                                                                                                                                                                                                                                                                                                        |

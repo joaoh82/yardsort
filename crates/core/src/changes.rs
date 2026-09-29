@@ -70,6 +70,10 @@ pub enum Content {
     Text {
         text: String,
     },
+    Image {
+        mime: String,
+        data: String,
+    },
     Binary,
     TooLarge {
         bytes: u32,
@@ -291,16 +295,108 @@ pub fn read_working_file(root: &Path, relative: &str) -> IpcResult<Content> {
 }
 
 fn classify(bytes: Vec<u8>) -> Content {
+    use base64::Engine;
+    let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some("image/webp")
+    } else if bytes.starts_with(b"BM") {
+        Some("image/bmp")
+    } else if bytes.starts_with(b"\0\0\x01\0") {
+        Some("image/x-icon")
+    } else {
+        None
+    };
+    if let Some(mime) = mime {
+        return Content::Image {
+            mime: mime.into(),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        };
+    }
+
     // Git's own rule of thumb: a NUL in the first 8000 bytes means binary.
     if bytes.iter().take(8000).any(|&b| b == 0) {
         return Content::Binary;
     }
     match String::from_utf8(bytes) {
         Ok(text) => Content::Text { text },
-        Err(error) => Content::Text {
-            text: String::from_utf8_lossy(error.as_bytes()).into_owned(),
-        },
+        Err(_) => Content::Binary,
     }
+}
+
+/// Save only the UTF-8 version the user actually opened. Never replace an agent's newer edits.
+pub fn save_working_file(root: &Path, relative: &str, expected: &str, text: &str) -> IpcResult<()> {
+    use std::io::Write;
+    // Two app commands saving the same baseline must not both pass the comparison.
+    static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _saving = SAVING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if text.len() > MAX_VIEW_BYTES || text.contains('\0') {
+        return Err(IpcError::new(
+            "not_editable",
+            "Only text files up to 1 MiB can be saved.",
+        ));
+    }
+    let path = resolve_inside(root, relative)?;
+    // Do not replace symlinks, including dangling ones, or write into git's internal files.
+    if path
+        .strip_prefix(root)
+        .unwrap_or(&path)
+        .components()
+        .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
+        || std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return Err(IpcError::new(
+            "not_editable",
+            "Git internals and symbolic links cannot be edited here.",
+        ));
+    }
+    let io = |error| IpcError::new("io", format!("Cannot save {relative}: {error}"));
+    let canonical = dunce::canonicalize(&path).map_err(io)?;
+    let canonical_root = dunce::canonicalize(root).map_err(io)?;
+    if canonical
+        .strip_prefix(&canonical_root)
+        .unwrap_or(&canonical)
+        .components()
+        .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
+    {
+        return Err(IpcError::new(
+            "not_editable",
+            "Git internals cannot be edited here.",
+        ));
+    }
+    let metadata = std::fs::metadata(&path).map_err(io)?;
+    if !metadata.is_file() || metadata.len() > MAX_VIEW_BYTES as u64 {
+        return Err(IpcError::new(
+            "not_editable",
+            "Only text files up to 1 MiB can be saved.",
+        ));
+    }
+    let current = std::fs::read(&path).map_err(io)?;
+    if current != expected.as_bytes() || !matches!(classify(current), Content::Text { .. }) {
+        return Err(IpcError::new("file_changed", "This file changed on disk. Copy your edits, then discard the draft to reload before saving."));
+    }
+    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap()).map_err(io)?;
+    temporary
+        .as_file()
+        .set_permissions(std::fs::metadata(&path).map_err(io)?.permissions())
+        .map_err(io)?;
+    temporary.write_all(text.as_bytes()).map_err(io)?;
+    temporary.as_file().sync_all().map_err(io)?;
+    // Check again after preparing the replacement; failed writes leave the original untouched.
+    if std::fs::read(&path).map_err(io)? != expected.as_bytes() {
+        return Err(IpcError::new(
+            "file_changed",
+            "This file changed on disk. Your draft has been kept.",
+        ));
+    }
+    temporary.persist(&path).map_err(|error| io(error.error))?;
+    Ok(())
 }
 
 /// A path from a client is untrusted: it must be relative and must not climb out.
@@ -724,6 +820,104 @@ mod tests {
             repo.diff("huge.log", None, Scope::Uncommitted).old,
             Content::TooLarge { .. }
         ));
+    }
+
+    #[test]
+    fn images_are_returned_losslessly_in_files_and_git_revisions() {
+        use base64::Engine;
+        let repo = Repo::new();
+        let png = base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1kAAAAASUVORK5CYII=").unwrap();
+        std::fs::write(repo.path().join("pixel.png"), &png).unwrap();
+        repo.commit("image");
+        let image = read_working_file(repo.path(), "pixel.png").unwrap();
+        let Content::Image { mime, data } = &image else {
+            panic!("expected image")
+        };
+        assert_eq!(mime, "image/png");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .unwrap(),
+            png
+        );
+        assert_eq!(repo.diff("pixel.png", None, Scope::Uncommitted).old, image);
+        assert_eq!(classify(vec![0xff, 0xfe, b'a']), Content::Binary);
+    }
+
+    #[test]
+    fn saves_text_without_changing_line_endings_and_refuses_stale_or_deleted_files() {
+        let repo = Repo::new();
+        repo.write("edit.rs", "old\r\n");
+        save_working_file(repo.path(), "edit.rs", "old\r\n", "new\r\n").unwrap();
+        assert_eq!(
+            std::fs::read(repo.path().join("edit.rs")).unwrap(),
+            b"new\r\n"
+        );
+        assert_eq!(
+            save_working_file(repo.path(), "edit.rs", "old\r\n", "oops")
+                .unwrap_err()
+                .code,
+            "file_changed"
+        );
+        assert_eq!(
+            std::fs::read(repo.path().join("edit.rs")).unwrap(),
+            b"new\r\n"
+        );
+        std::fs::remove_file(repo.path().join("edit.rs")).unwrap();
+        assert!(save_working_file(repo.path(), "edit.rs", "new\r\n", "oops").is_err());
+        assert!(!repo.path().join("edit.rs").exists());
+    }
+
+    #[test]
+    fn saves_reject_binary_large_git_internal_and_escaping_paths() {
+        let repo = Repo::new();
+        repo.write("edit.txt", "old");
+        for text in ["a\0b".to_string(), "x".repeat(MAX_VIEW_BYTES + 1)] {
+            assert_eq!(
+                save_working_file(repo.path(), "edit.txt", "old", &text)
+                    .unwrap_err()
+                    .code,
+                "not_editable"
+            );
+        }
+        assert_eq!(std::fs::read(repo.path().join("edit.txt")).unwrap(), b"old");
+        assert_eq!(
+            save_working_file(repo.path(), "../outside", "", "x")
+                .unwrap_err()
+                .code,
+            "bad_path"
+        );
+        assert_eq!(
+            save_working_file(repo.path(), ".git/HEAD", "", "x")
+                .unwrap_err()
+                .code,
+            "not_editable"
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("edit.txt", repo.path().join("link.txt")).unwrap();
+            assert_eq!(
+                save_working_file(repo.path(), "link.txt", "old", "x")
+                    .unwrap_err()
+                    .code,
+                "not_editable"
+            );
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                repo.path().join("edit.txt"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+            save_working_file(repo.path(), "edit.txt", "old", "new").unwrap();
+            assert_eq!(
+                std::fs::metadata(repo.path().join("edit.txt"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o755
+            );
+        }
     }
 
     #[test]

@@ -6900,6 +6900,7 @@ dependencies = [
 name = "yardsort-core"
 version = "0.13.0"
 dependencies = [
+ "base64 0.22.1",
  "dunce",
  "libc",
  "pty-host",

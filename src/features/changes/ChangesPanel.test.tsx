@@ -282,6 +282,23 @@ describe("ChangesPanel", () => {
     );
   });
 
+  it("shows selected images and before/after image changes", async () => {
+    const user = await renderPanel();
+    core.workspaceFile.mockResolvedValue({ type: "image", mime: "image/png", data: "cGl4ZWw=" });
+    await act(async () => useChangesStore.getState().view({ kind: "file", path: "logo.png" }));
+    expect(await screen.findByRole("img", { name: "logo.png" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,cGl4ZWw=",
+    );
+    core.workspaceDiff.mockResolvedValue({
+      old: { type: "absent" },
+      new: { type: "image", mime: "image/png", data: "cGl4ZWw=" },
+    });
+    await user.click(screen.getByTitle("src/app.ts"));
+    expect(await screen.findByRole("img", { name: "src/app.ts — After" })).toBeInTheDocument();
+    expect(screen.getByText("No file")).toBeInTheDocument();
+  });
+
   it("opens the file in the editor — and the folder, for a deleted file", async () => {
     const user = await renderPanel();
     await user.click(await screen.findByTitle("src/app.ts"));

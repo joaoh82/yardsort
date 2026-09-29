@@ -5,6 +5,11 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Images and editing in the file panel.** Selecting an image opens a preview; SVG files can
+  switch between preview and source. Text and code files can be edited and saved inside
+  Yardsort, with syntax highlighting, undo, retained drafts, and protection against saving over
+  a file changed by an agent or another editor. Image changes show before and after previews.
+
 - **A Yardsort that cannot start now says why.** Opening your data with an older version than
   the one that last used it — after going back to an old download, say — used to close the app
   a moment after launch, every time, without a word. It now shows a dialog saying so and asking

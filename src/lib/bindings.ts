@@ -60,6 +60,7 @@ export const commands = {
 	 */
 	workspaceFiles: (workspaceId: string, dir: string, showIgnored: boolean) => typedError<FileEntry[], IpcError>(__TAURI_INVOKE("workspace_files", { workspaceId, dir, showIgnored })),
 	workspaceFile: (workspaceId: string, path: string) => typedError<Content, IpcError>(__TAURI_INVOKE("workspace_file", { workspaceId, path })),
+	workspaceSaveFile: (workspaceId: string, path: string, expected: string, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_save_file", { workspaceId, path, expected, text })),
 	/**  Watch this workspace's files (replacing any previous watch); `None` stops watching. */
 	workspaceWatch: (workspaceId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_watch", { workspaceId })),
 	/**  Where the selected workspace stands with its remote: what it can commit, push and open. */
@@ -507,7 +508,7 @@ export type Commit = {
 
 export type Content = 
 /**  The file does not exist on this side (added, or deleted). */
-{ type: "absent" } | { type: "text"; text: string } | { type: "binary" } | { type: "tooLarge"; bytes: number };
+{ type: "absent" } | { type: "text"; text: string } | { type: "image"; mime: string; data: string } | { type: "binary" } | { type: "tooLarge"; bytes: number };
 
 export type CreatedWorkspace = {
 	workspace: Workspace,

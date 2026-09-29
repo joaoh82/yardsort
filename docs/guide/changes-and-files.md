@@ -1,6 +1,6 @@
 # Changes & files
 
-The right panel is for **reviewing** what happened in the selected workspace. It updates by
+The right panel is for **reviewing and editing** files in the selected workspace. It updates by
 itself as files change — there is nothing to refresh. Toggle it with `Ctrl+Shift+Alt+B` / `⌥⌘B`.
 
 ![Changes and a diff](../images/overview.png)
@@ -29,7 +29,9 @@ easier on a wide diff. The choice sticks until you change it back.
 | **Edit ↗**                    | Open the file in your editor — see [Settings → General](settings.md#general). |
 | **×**                         | Close the viewer.                                                             |
 
-Binary files and very large files are listed but not rendered.
+PNG, JPEG, GIF, WebP, BMP and ICO images are previewed, with **Before** and **After** images
+for changes. Other binary files and files larger than 1 MiB are listed but not rendered.
+Use **Open file** on a diff to open the current working file for editing.
 
 ### Who wrote it
 
@@ -74,8 +76,23 @@ tooltip then ends with the exact sentence Assist was told.
 
 ## Files
 
-The workspace's folder as a tree. Click a folder to open it, a file to read it (with syntax
-highlighting; read-only).
+![Editing a file inside Yardsort](../images/file-editor.png)
+
+The workspace's folder as a tree. Click a folder to open it, a text or code file to edit it with syntax
+highlighting and undo/redo. **Save** writes your edits to the working file; it does not stage
+or commit them. **Discard** reloads the disk version after asking you to confirm that your
+unsaved edits can be lost. **Edit ↗** still opens your external editor.
+
+Image files open as previews. SVG files start with a preview; **Edit source** opens their text,
+and **Preview** switches back. Text editing and image previews are limited to 1 MiB per file.
+Non-UTF-8 files are treated as binary so editing cannot corrupt their encoding.
+
+Drafts are kept in the app's local profile, including across files, workspaces, expanding or
+closing the viewer, and app restarts. They do not change the working file until you press
+**Save**. If an agent or another editor changes the file, your draft stays visible and saving
+refuses to overwrite that newer version. Copy any edits you want to keep, then **Discard**
+the draft to reload the disk version. Save errors keep the draft too. Git internals and symbolic
+links cannot be saved from this editor.
 
 By default the tree shows what git would: `.git`, and everything ignored by `.gitignore` —
 `node_modules`, build output, `.env` files — is left out, which keeps a big repository quick to
@@ -87,6 +104,6 @@ can tell them apart. The choice is remembered.
 Under the list are the three steps that get a workspace's work out: commit, push, and open the
 pull request. See [Commits & pull requests](commits-and-pull-requests.md).
 
-Reviewing itself stays read-only. Yardsort will not stage part of a change or discard one — do
+Diffs themselves stay read-only. Yardsort will not stage part of a change or discard one — do
 that the way you already do, with a shell tab (`Ctrl+Shift+T`), your editor or your git client.
 The workspace is an ordinary git checkout at the path shown in the footer.
