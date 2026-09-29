@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## 0.13.1
+## 0.14.0
 
 - **Images and editing in the file panel.** Selecting an image opens a preview; SVG files can
   switch between preview and source. Text and code files can be edited and saved inside
@@ -11,6 +11,8 @@ has the downloads and the full commit lists.
   a file changed by an agent or another editor. Disk reloads reset undo history; symlinks are
   explained before editing, and read-only files are refused without changing their permissions.
   Image changes show before and after previews, retaining text when a file changes type.
+
+## 0.13.1
 
 - **A Yardsort that cannot start now says why.** Opening your data with an older version than
   the one that last used it — after going back to an old download, say — used to close the app
