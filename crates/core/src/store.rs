@@ -405,20 +405,57 @@ pub struct Store {
 /// is wrong rather than merely busy.
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Beside the database: a copy of it from just before the last upgrade. The version that was
+/// running before the upgrade can still open it; the upgraded database it cannot.
+pub fn copy_before_upgrade(database: &Path) -> std::path::PathBuf {
+    let mut name = database.file_name().unwrap_or_default().to_os_string();
+    name.push(".before-upgrade");
+    database.with_file_name(name)
+}
+
+/// [`copy_before_upgrade`], when there is one this build can open.
+pub fn readable_copy_before_upgrade(database: &Path) -> Option<std::path::PathBuf> {
+    let copy = copy_before_upgrade(database);
+    let conn =
+        Connection::open_with_flags(&copy, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let schema: u32 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .ok()?;
+    (schema > 0 && schema as usize <= MIGRATIONS.len()).then_some(copy)
+}
+
+/// Writes [`copy_before_upgrade`], replacing the one an earlier upgrade left. Written under
+/// another name first, so a copy cut short never takes the place of a whole one.
+fn keep_a_copy(conn: &Connection, database: &Path) -> StoreResult<()> {
+    let copy = copy_before_upgrade(database);
+    let mut name = copy.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".partial-{}", std::process::id()));
+    let partial = copy.with_file_name(name);
+    let _ = std::fs::remove_file(&partial);
+    let written = conn
+        .execute("VACUUM INTO ?1", [partial.to_string_lossy()])
+        .map_err(StoreError::from)
+        .and_then(|_| std::fs::rename(&partial, &copy).map_err(StoreError::from));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written
+}
+
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        Self::prepare(Connection::open(path)?)
+        Self::prepare(Connection::open(path)?, Some(path))
     }
 
     #[cfg(test)]
     pub fn in_memory() -> Self {
-        Self::prepare(Connection::open_in_memory().unwrap()).unwrap()
+        Self::prepare(Connection::open_in_memory().unwrap(), None).unwrap()
     }
 
-    fn prepare(mut conn: Connection) -> StoreResult<Self> {
+    fn prepare(mut conn: Connection, path: Option<&Path>) -> StoreResult<Self> {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // More than one process opens this database — the app and the `ys` CLI. WAL lets them
@@ -439,6 +476,15 @@ impl Store {
                 found: applied,
                 known: MIGRATIONS.len(),
             });
+        }
+        // An upgrade cannot be taken back: the version that was running before it will refuse
+        // the database from now on. Going back to that version then means going back to this.
+        if applied > 0 && applied < MIGRATIONS.len() {
+            if let Some(path) = path {
+                if let Err(error) = keep_a_copy(&conn, path) {
+                    eprintln!("yardsort: no copy of the database before upgrading it: {error}");
+                }
+            }
         }
         for (index, sql) in MIGRATIONS.iter().enumerate().skip(applied) {
             let tx = conn.transaction()?;
@@ -2498,6 +2544,63 @@ mod tests {
             Store::open(&path),
             Err(StoreError::TooNew { found: 999, .. })
         ));
+    }
+
+    /// Going back to an older version needs the database as it was before the newer one
+    /// upgraded it. On 2026-09-29 there was none, and the only way back was forward.
+    #[test]
+    fn an_upgrade_keeps_a_copy_the_version_before_it_can_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute(
+                "INSERT INTO projects VALUES ('p', 'app', '/code/app', 0, 0)",
+                [],
+            )
+            .unwrap();
+        }
+        assert_eq!(readable_copy_before_upgrade(&path), None);
+
+        let store = Store::open(&path).unwrap();
+        store.add_project("after", "/code/after").unwrap();
+
+        let copy = readable_copy_before_upgrade(&path).expect("a copy from before the upgrade");
+        assert_eq!(copy, dir.path().join("yardsort.db.before-upgrade"));
+        let old = Connection::open(&copy).unwrap();
+        let schema: u32 = old
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(schema, 1, "the version before the upgrade can open it");
+        let names: Vec<String> = old
+            .prepare("SELECT name FROM projects")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            names,
+            ["app"],
+            "as it was before the upgrade, and nothing since"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name.contains("partial"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn a_new_or_current_database_needs_no_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        drop(Store::open(&path).unwrap());
+        drop(Store::open(&path).unwrap());
+        assert!(!copy_before_upgrade(&path).exists());
     }
 
     /// The CLI and the app are two processes on one database. Two `Store`s writing at once must

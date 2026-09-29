@@ -74,11 +74,19 @@ it). Never edit it by hand; commit it when it changes.
 
 ## Trying the app without touching real data
 
+A development build never opens the real profile on its own: without `YARDSORT_DATA_DIR` it uses
+`dev.yardsort.app.development`, beside the real one. This matters because a development build can
+carry migrations no release has, and a database it upgrades is one the installed release refuses.
+That happened on 2026-09-29. Give each worktree its own profile, since branches add migrations
+too:
+
 ```sh
 YARDSORT_DATA_DIR=/tmp/ys YARDSORT_WORKTREE_ROOT=/tmp/ys-wt just dev
 ```
 
-`YARDSORT_YS_DIR=/tmp/ys-bin` does the same for **Install ys**, which otherwise writes to
+Pointing `YARDSORT_DATA_DIR` at the real profile still works, and still upgrades it.
+
+`YARDSORT_YS_DIR=/tmp/ys-bin` keeps **Install ys** away from real places too; it otherwise writes to
 `~/.local/bin`, `/usr/local/bin` or the user's `PATH`.
 
 If the app is started from a terminal that is itself inside an agent, that is fine: the launch

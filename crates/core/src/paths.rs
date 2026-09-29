@@ -21,6 +21,13 @@ pub fn data_dir() -> Option<PathBuf> {
     base_data_dir().map(|dir| dir.join(IDENTIFIER))
 }
 
+/// Where a development build of the app keeps its profile when `YARDSORT_DATA_DIR` does not say:
+/// beside the real one, never in it. A development build can carry migrations no release has, and
+/// the release would then refuse the database it upgraded.
+pub fn development_data_dir() -> Option<PathBuf> {
+    base_data_dir().map(|dir| dir.join(format!("{IDENTIFIER}.development")))
+}
+
 /// `settings.toml`. Under `YARDSORT_DATA_DIR` it sits next to the database instead.
 pub fn config_dir() -> Option<PathBuf> {
     if let Some(dir) = crate::legacy::env_var_os("DATA_DIR") {
@@ -134,6 +141,11 @@ mod tests {
             assert_eq!(
                 config_dir().unwrap(),
                 PathBuf::from("/home/someone/.config/dev.yardsort.app")
+            );
+            assert_eq!(
+                development_data_dir().unwrap(),
+                PathBuf::from("/home/someone/.local/share/dev.yardsort.app.development"),
+                "beside the real profile, never in it"
             );
         });
 

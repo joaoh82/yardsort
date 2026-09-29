@@ -12,6 +12,10 @@ has the downloads and the full commit lists.
   starting is shown the same way. On Linux such a failure no longer counts as Wayland not
   working, which kept that version of the AppImage under XWayland from then on. See
   [Troubleshooting](docs/guide/troubleshooting.md#yardsort-cannot-start).
+- **A way back after an upgrade.** Before a new version upgrades your database, Yardsort keeps a
+  copy of it as it was, `yardsort.db.before-upgrade`, which the version before can still open.
+  If you go back to that version, its dialog points at the copy. See
+  [Going back to the older version](docs/guide/troubleshooting.md#going-back-to-the-older-version-instead).
 
 ## 0.13.0
 

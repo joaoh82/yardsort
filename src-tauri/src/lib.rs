@@ -182,6 +182,10 @@ fn export_bindings(builder: &Builder<tauri::Wry>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First: everything below, and every process started from here, finds the profile by it.
+    #[cfg(debug_assertions)]
+    use_a_development_profile();
+
     // Before anything starts GTK or a thread: the backend is read once, when GTK initialises.
     #[cfg(target_os = "linux")]
     display::choose_backend();
@@ -236,6 +240,25 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// A development build keeps to a profile of its own unless `YARDSORT_DATA_DIR` names one. It can
+/// carry migrations no release has yet, and a database it upgrades is one the installed release
+/// then refuses: on 2026-09-29 that kept 0.12.0 from starting at all. Setting the variable, not
+/// just using the directory, is what makes the daemon, agents' hooks and `ys` agree with the app.
+#[cfg(debug_assertions)]
+fn use_a_development_profile() {
+    if legacy::env_var_os("DATA_DIR").is_some() {
+        return;
+    }
+    let Some(dir) = yardsort_core::paths::development_data_dir() else {
+        return;
+    };
+    eprintln!(
+        "development build: using the profile in {} (set YARDSORT_DATA_DIR to choose another)",
+        dir.display()
+    );
+    std::env::set_var("YARDSORT_DATA_DIR", dir);
 }
 
 /// Everything the app needs before its window can be used. An error here is shown to the user by
@@ -423,15 +446,27 @@ fn store_failure(database: &std::path::Path, error: &store::StoreError) -> Strin
     match error {
         // Only an older Yardsort opening data a newer one has upgraded gets here. The store
         // refuses before it writes anything, so the data is as the newer version left it.
-        store::StoreError::TooNew { .. } => format!(
-            "Your projects and workspaces were last opened by a newer version of Yardsort, and \
-             this one ({}) cannot read them.\n\n\
-             Install the latest Yardsort from https://yardsort.sh to carry on. Nothing has been \
-             changed or lost.\n\n\
-             {}: {error}",
-            env!("CARGO_PKG_VERSION"),
-            database.display()
-        ),
+        store::StoreError::TooNew { .. } => {
+            let copy = store::readable_copy_before_upgrade(database)
+                .map(|copy| {
+                    format!(
+                        "To keep using this version instead, there is a copy from before the \
+                         upgrade at {}. It has nothing done since; Troubleshooting → \
+                         \"Yardsort cannot start\" explains how to use it.\n\n",
+                        copy.display()
+                    )
+                })
+                .unwrap_or_default();
+            format!(
+                "Your projects and workspaces were last opened by a newer version of Yardsort, \
+                 and this one ({}) cannot read them.\n\n\
+                 Install the latest Yardsort from https://yardsort.sh to carry on. Nothing has \
+                 been changed or lost.\n\n\
+                 {copy}{}: {error}",
+                env!("CARGO_PKG_VERSION"),
+                database.display()
+            )
+        }
         _ => format!("cannot open {}: {error}", database.display()),
     }
 }
@@ -500,5 +535,35 @@ mod tests {
             message.contains(&database.display().to_string()),
             "{message}"
         );
+        assert!(
+            !message.contains("copy from before"),
+            "there is none: {message}"
+        );
+    }
+
+    /// With a copy from before the upgrade, the dialog says there is a way back to this version.
+    #[test]
+    fn a_database_from_a_newer_version_points_at_the_copy_from_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("yardsort.db");
+        let copy = super::store::copy_before_upgrade(&database);
+        drop(super::store::Store::open(&copy).unwrap());
+        drop(super::store::Store::open(&database).unwrap());
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .pragma_update(None, "user_version", 999)
+            .unwrap();
+
+        let error = match super::store::Store::open(&database) {
+            Err(error) => error,
+            Ok(_) => panic!("a database from the future must be refused"),
+        };
+        let message = super::store_failure(&database, &error);
+
+        assert!(
+            message.contains("copy from before the upgrade"),
+            "{message}"
+        );
+        assert!(message.contains(&copy.display().to_string()), "{message}");
     }
 }
