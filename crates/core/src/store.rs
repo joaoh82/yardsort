@@ -442,6 +442,45 @@ fn keep_a_copy(conn: &Connection, database: &Path) -> StoreResult<()> {
     written
 }
 
+/// Brings the database up to `migrations`, which is [`MIGRATIONS`] everywhere but in tests.
+///
+/// All of them in one transaction: an upgrade that stops partway leaves the schema it started
+/// from, never one between. That matters for the copy. A retry copies again, and a copy of an
+/// in-between schema would replace the only one the version before the upgrade can open.
+fn upgrade(conn: &mut Connection, migrations: &[&str], path: Option<&Path>) -> StoreResult<()> {
+    let applied: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let applied = applied as usize;
+    if applied > migrations.len() {
+        return Err(StoreError::TooNew {
+            found: applied,
+            known: migrations.len(),
+        });
+    }
+    if applied == migrations.len() {
+        return Ok(());
+    }
+    // An upgrade cannot be taken back: the version that was running before it will refuse the
+    // database from now on. Going back to that version then means going back to this.
+    if applied > 0 {
+        if let Some(path) = path {
+            if let Err(error) = keep_a_copy(conn, path) {
+                eprintln!("yardsort: no copy of the database before upgrading it: {error}");
+            }
+        }
+    }
+    let tx = conn.transaction()?;
+    for sql in &migrations[applied..] {
+        tx.execute_batch(sql)?;
+    }
+    tx.pragma_update(
+        None,
+        "user_version",
+        u32::try_from(migrations.len()).unwrap_or(u32::MAX),
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
         if let Some(dir) = path.parent() {
@@ -469,33 +508,7 @@ impl Store {
         // Taking the lock up front is what actually lets two processes write.
         conn.set_transaction_behavior(TransactionBehavior::Immediate);
 
-        let applied: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        let applied = applied as usize;
-        if applied > MIGRATIONS.len() {
-            return Err(StoreError::TooNew {
-                found: applied,
-                known: MIGRATIONS.len(),
-            });
-        }
-        // An upgrade cannot be taken back: the version that was running before it will refuse
-        // the database from now on. Going back to that version then means going back to this.
-        if applied > 0 && applied < MIGRATIONS.len() {
-            if let Some(path) = path {
-                if let Err(error) = keep_a_copy(&conn, path) {
-                    eprintln!("yardsort: no copy of the database before upgrading it: {error}");
-                }
-            }
-        }
-        for (index, sql) in MIGRATIONS.iter().enumerate().skip(applied) {
-            let tx = conn.transaction()?;
-            tx.execute_batch(sql)?;
-            tx.pragma_update(
-                None,
-                "user_version",
-                u32::try_from(index + 1).unwrap_or(u32::MAX),
-            )?;
-            tx.commit()?;
-        }
+        upgrade(&mut conn, MIGRATIONS, path)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -2592,6 +2605,54 @@ mod tests {
             .filter(|name| name.contains("partial"))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    /// An upgrade over several migrations that stopped partway, then was tried again. It used to
+    /// commit each migration on its own, so the database was left between the two schemas; the
+    /// retry then copied that, over the only copy the version before could open.
+    #[test]
+    fn an_interrupted_upgrade_keeps_the_copy_of_where_it_started() {
+        let schema = |path: &Path| -> u32 {
+            Connection::open(path)
+                .unwrap()
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("yardsort.db");
+        let copy = copy_before_upgrade(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE first (x)").unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+        }
+
+        // The third migration fails, after the second would have committed on its own.
+        let broken = [
+            "CREATE TABLE first (x)",
+            "CREATE TABLE second (x)",
+            "NOT SQL",
+        ];
+        let mut conn = Connection::open(&path).unwrap();
+        assert!(upgrade(&mut conn, &broken, Some(&path)).is_err());
+        drop(conn);
+        assert_eq!(schema(&path), 1, "nothing of the upgrade is left");
+        assert_eq!(schema(&copy), 1);
+
+        let fixed = [
+            "CREATE TABLE first (x)",
+            "CREATE TABLE second (x)",
+            "CREATE TABLE third (x)",
+        ];
+        let mut conn = Connection::open(&path).unwrap();
+        upgrade(&mut conn, &fixed, Some(&path)).unwrap();
+        drop(conn);
+        assert_eq!(schema(&path), 3);
+        assert_eq!(
+            schema(&copy),
+            1,
+            "still the schema the version before can open"
+        );
     }
 
     #[test]
