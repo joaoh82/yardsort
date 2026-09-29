@@ -1,3 +1,4 @@
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
   defaultHighlightStyle,
   LanguageDescription,
@@ -5,15 +6,24 @@ import {
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  Transaction,
+  type Extension,
+} from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
-import { EditorView, lineNumbers } from "@codemirror/view";
+import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+
+const fromOutside = Annotation.define<boolean>();
 
 interface Props {
   /** File name, used to pick syntax highlighting. */
   path: string;
   text: string;
+  onChange?: (text: string) => void;
   /** When given, show `text` as a diff against this. */
   original?: string;
   /** Two panes side by side instead of one with the removals inline. Ignored without `original`. */
@@ -34,7 +44,7 @@ const theme = EditorView.theme({
     color: "var(--color-ink-faint)",
     border: "none",
   },
-  ".cm-content": { caretColor: "transparent" },
+  ".cm-content": { caretColor: "var(--color-ink)" },
   "&.cm-focused": { outline: "none" },
   ".cm-changedLine": { backgroundColor: "rgba(80, 200, 120, 0.14) !important" },
   ".cm-deletedChunk": { backgroundColor: "rgba(240, 90, 90, 0.14)", paddingLeft: "6px" },
@@ -48,23 +58,48 @@ const theme = EditorView.theme({
 });
 
 /**
- * A read-only code viewer: one file, or a diff of two versions — inline, or as two panes.
+ * A code editor when onChange is supplied, otherwise a read-only file or diff — inline, or as two panes.
  * Deliberately thin — it owns a CodeMirror instance and nothing else — so everything around it
  * can be tested without it.
  */
-export function CodeView({ path, text, original, split }: Props) {
+export function CodeView({ path, text, original, split, onChange }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+
+  const historyRef = useRef<Compartment | null>(null);
+  const editorRef = useRef<EditorView | null>(null);
+  const onChangeRef = useRef(onChange);
+  const textRef = useRef(text);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    textRef.current = text;
+  });
+  const editable = onChange !== undefined && original === undefined;
+
+  const readOnlyText = editable ? null : text;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const dark = !window.matchMedia("(prefers-color-scheme: light)").matches;
     const language = new Compartment();
+    const undoHistory = new Compartment();
+    historyRef.current = editable ? undoHistory : null;
 
     const base: Extension[] = [
       lineNumbers(),
-      EditorView.editable.of(false),
-      EditorState.readOnly.of(true),
+      EditorView.editable.of(editable),
+      EditorState.readOnly.of(!editable),
+      ...(editable
+        ? [
+            undoHistory.of(history()),
+            keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+            EditorView.updateListener.of((update) => {
+              if (update.docChanged && !update.transactions.some((t) => t.annotation(fromOutside)))
+                onChangeRef.current?.(update.state.sliceDoc());
+            }),
+            EditorState.lineSeparator.of(textRef.current.includes("\r\n") ? "\r\n" : "\n"),
+          ]
+        : []),
       EditorView.lineWrapping,
       syntaxHighlighting(dark ? oneDarkHighlightStyle : defaultHighlightStyle),
       language.of([]),
@@ -78,7 +113,7 @@ export function CodeView({ path, text, original, split }: Props) {
     if (original !== undefined && split) {
       const merge = new MergeView({
         a: { doc: original, extensions: base },
-        b: { doc: text, extensions: base },
+        b: { doc: textRef.current, extensions: base },
         parent: host,
         highlightChanges: true,
         gutter: true,
@@ -102,8 +137,9 @@ export function CodeView({ path, text, original, split }: Props) {
       }
       const view = new EditorView({
         parent: host,
-        state: EditorState.create({ doc: text, extensions }),
+        state: EditorState.create({ doc: textRef.current, extensions }),
       });
+      editorRef.current = view;
       views = [view];
       destroy = () => view.destroy();
     }
@@ -119,9 +155,26 @@ export function CodeView({ path, text, original, split }: Props) {
 
     return () => {
       disposed = true;
+      historyRef.current = null;
+      editorRef.current = null;
       destroy();
     };
-  }, [path, text, original, split]);
+  }, [path, original, split, editable, readOnlyText]);
+
+  useEffect(() => {
+    const view = editorRef.current;
+    if (view && view.state.sliceDoc() !== text) {
+      // A disk reload/discard starts a new baseline. Mapping old undo entries through a
+      // whole-document replacement can otherwise resurrect text from the previous version.
+      const undoHistory = historyRef.current;
+      view.dispatch({
+        effects: undoHistory ? undoHistory.reconfigure([]) : [],
+        annotations: [fromOutside.of(true), Transaction.addToHistory.of(false)],
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+      });
+      if (undoHistory) view.dispatch({ effects: undoHistory.reconfigure(history()) });
+    }
+  }, [text]);
 
   return <div ref={hostRef} className="h-full min-h-0 overflow-hidden select-text" />;
 }

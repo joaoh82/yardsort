@@ -81,6 +81,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             changes::commands::workspace_diff,
             changes::commands::workspace_files,
             changes::commands::workspace_file,
+            changes::commands::workspace_save_file,
             changes::commands::workspace_watch,
             publish::commands::workspace_publish_state,
             publish::commands::workspace_commit,

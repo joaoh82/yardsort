@@ -341,6 +341,8 @@ export const ipc = {
   /** One folder of the file tree; `dir` is relative, empty for the root. */
   workspaceFiles: (workspaceId: string, dir: string, showIgnored = false) =>
     unwrap(commands.workspaceFiles(workspaceId, dir, showIgnored)),
+  workspaceSaveFile: (workspaceId: string, path: string, expected: string, text: string) =>
+    unwrap(commands.workspaceSaveFile(workspaceId, path, expected, text)),
   workspaceFile: (workspaceId: string, path: string) =>
     unwrap(commands.workspaceFile(workspaceId, path)),
   /** Watch one workspace's files (replacing any earlier watch); `null` stops. */

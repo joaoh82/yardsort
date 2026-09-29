@@ -282,6 +282,74 @@ describe("ChangesPanel", () => {
     );
   });
 
+  it.each([true, false])(
+    "shows text alongside an image when a file changes type (image first: %s)",
+    async (imageFirst) => {
+      const user = await renderPanel();
+      const image = { type: "image", mime: "image/png", data: "cGl4ZWw=" };
+      core.workspaceDiff.mockResolvedValue(
+        imageFirst
+          ? { old: image, new: text("readable text") }
+          : { old: text("readable text"), new: image },
+      );
+      await user.click(await screen.findByTitle("src/app.ts"));
+      expect(await screen.findByTestId("code")).toHaveTextContent("readable text");
+      expect(screen.getByRole("img")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("explains symbolic links without offering an editor", async () => {
+    await renderPanel();
+    core.workspaceFile.mockResolvedValue({
+      type: "notEditable",
+      reason: "Symbolic links cannot be edited here. Open the target file instead.",
+    });
+    await act(async () => useChangesStore.getState().view({ kind: "file", path: "link.txt" }));
+    expect(screen.getByText(/Symbolic links cannot be edited/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("code")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [{ type: "absent" }, "This file no longer exists."],
+    [{ type: "binary" }, "Binary file"],
+    [{ type: "image", mime: "image/png", data: "cGl4ZWw=" }, "This file is now an image."],
+    [{ type: "tooLarge", bytes: 2000000 }, "File too large"],
+  ])("explains unavailable disk contents while retaining a draft: %s", async (file, message) => {
+    await renderPanel();
+    act(() =>
+      useProjectsStore.setState({
+        ui: {
+          'fileDraft:["w1","app.ts"]': JSON.stringify({ expected: "old", text: "kept draft" }),
+        },
+      }),
+    );
+    core.workspaceFile.mockResolvedValue(file);
+    await act(async () => useChangesStore.getState().view({ kind: "file", path: "app.ts" }));
+    expect(await screen.findByTestId("code")).toHaveTextContent("kept draft");
+    expect(screen.getByRole("status")).toHaveTextContent(message as string);
+    expect(screen.queryByText(/file changed on disk/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("shows selected images and before/after image changes", async () => {
+    const user = await renderPanel();
+    core.workspaceFile.mockResolvedValue({ type: "image", mime: "image/png", data: "cGl4ZWw=" });
+    await act(async () => useChangesStore.getState().view({ kind: "file", path: "logo.png" }));
+    expect(await screen.findByRole("img", { name: "logo.png" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,cGl4ZWw=",
+    );
+    core.workspaceDiff.mockResolvedValue({
+      old: { type: "absent" },
+      new: { type: "image", mime: "image/png", data: "cGl4ZWw=" },
+    });
+    await user.click(screen.getByTitle("src/app.ts"));
+    expect(await screen.findByRole("img", { name: "src/app.ts — After" })).toBeInTheDocument();
+    expect(screen.getByText("No file")).toBeInTheDocument();
+  });
+
   it("opens the file in the editor — and the folder, for a deleted file", async () => {
     const user = await renderPanel();
     await user.click(await screen.findByTitle("src/app.ts"));

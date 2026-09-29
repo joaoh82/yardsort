@@ -18,6 +18,8 @@ name = "yardsort_core"
 [dependencies]
 pty-host = { path = "../pty-host", features = ["specta"] }
 pty-ipc = { path = "../pty-ipc" }
+base64 = "0.22"
+tempfile = "3"
 which = "8"
 rusqlite = { version = "0.40", features = ["bundled"] }
 dunce = "1"
@@ -38,9 +40,6 @@ libc = "0.2"
 # Reading `PATH` back from where an installer wrote it. A running process cannot see it change.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-
-[dev-dependencies]
-tempfile = "3"
 
 [features]
 # Test fixtures (real git repositories in temp dirs) shared with the app's own tests.
