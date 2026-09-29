@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.13.1
 
 - **A Yardsort that cannot start now says why.** Opening your data with an older version than
   the one that last used it — after going back to an old download, say — used to close the app
