@@ -218,158 +218,222 @@ pub fn run() {
         })
         .setup(move |app| {
             builder.mount_events(app);
-
-            // `YARDSORT_DATA_DIR` keeps experiments and tests away from the real database (and
-            // settings, which then sit next to it instead of in the OS config directory).
-            let profile = legacy::env_var_os("DATA_DIR").map(std::path::PathBuf::from);
-            let data_dir = match &profile {
-                Some(dir) => dir.clone(),
-                None => app.path().app_data_dir()?,
-            };
-            let config_dir = match &profile {
-                Some(dir) => dir.clone(),
-                None => app.path().app_config_dir()?,
-            };
-            // First launch after the rename from Switchyard: bring the user's data along.
-            if profile.is_none() {
-                match legacy::adopt_switchyard_data(&data_dir, "yardsort.db", &config_dir) {
-                    Ok(adopted) => adopted
-                        .iter()
-                        .for_each(|what| eprintln!("carried over from Switchyard: {what}")),
-                    Err(error) => eprintln!("could not carry Switchyard data over: {error}"),
-                }
+            if let Err(reason) = start(app) {
+                refuse_to_start(app.handle(), &reason.to_string());
             }
-            // The `ys` CLI has to find this same directory without Tauri to ask, so it works the
-            // rules out itself (`yardsort_core::paths`). If the two ever disagree the CLI would
-            // quietly look at the wrong database, so say so loudly here rather than there.
-            for (what, ours, theirs) in [
-                ("data", &data_dir, yardsort_core::paths::data_dir()),
-                ("config", &config_dir, yardsort_core::paths::config_dir()),
-            ] {
-                if theirs.as_ref() != Some(ours) {
-                    eprintln!(
-                        "warning: the {what} directory is {} but yardsort_core::paths says {:?} — \
-                         the ys CLI will need --data-dir",
-                        ours.display(),
-                        theirs,
-                    );
-                }
-            }
-
-            let database = data_dir.join("yardsort.db");
-            let store = store::Store::open(&database)
-                .map_err(|e| format!("cannot open {}: {e}", database.display()))?;
-            let settings = settings::SettingsFile::load(config_dir.join("settings.toml"));
-
-            // Find the daemon for this profile, or start one. Agents from a previous run of the
-            // app are still in it, which is why this comes before the records are settled.
-            let handle = app.handle().clone();
-            let spool_root = data_dir.clone();
-            let connected = daemon::connect(
-                &data_dir,
-                std::sync::Arc::new(move |event| {
-                    // Settle the record first, so a client reacting to the event reads the truth.
-                    if let pty_host::HostEvent::Exited { id, exit } = &event {
-                        if let Some(state) = handle.try_state::<state::AppState>() {
-                            let _ = state
-                                .store
-                                .end_session_by_pty(&id.0, Some(i64::from(exit.code)));
-                            yardsort_core::activity::record_exit(
-                                &state.store,
-                                &id.0,
-                                &yardsort_core::activity::ExitFacts::from(exit),
-                                yardsort_core::activity::Via::Live,
-                            );
-                            // The daemon kept this exit for us too; take it out of the spool
-                            // now rather than find it as a duplicate at the next start. And
-                            // an agent's last hooks ran just before it exited.
-                            yardsort_core::activity::import_spool(&state.store, &spool_root);
-                            activity::drain_inbox(&handle, &state.store, &spool_root);
-                        }
-                    }
-                    // A workflow waiting for an agent to settle hears it here, before the window.
-                    if let Some(driver) = handle.try_state::<workflows::Driver>() {
-                        driver.observe(&event);
-                    }
-                    let _ = terminal::PtyHostEvent(event).emit(&handle);
-                }),
-            );
-            // What agents reported while no window was open.
-            let inbox = yardsort_core::activity::import_inbox(&store, &data_dir);
-            if inbox.imported > 0 || inbox.unlinked > 0 || inbox.unreadable > 0 || inbox.dropped > 0 {
-                eprintln!(
-                    "activity inbox: {} imported, {} duplicate, {} unlinked, {} unreadable, {} dropped",
-                    inbox.imported,
-                    inbox.duplicates,
-                    inbox.unlinked,
-                    inbox.unreadable,
-                    inbox.dropped
-                );
-            }
-            // Exits the daemon kept while no window was open come first: a conversation that
-            // ended cleanly in the meantime must keep its exit code rather than be counted as
-            // interrupted below.
-            let imported = yardsort_core::activity::import_spool(&store, &data_dir);
-            if imported.imported > 0 || imported.unreadable > 0 || imported.dropped > 0 {
-                eprintln!(
-                    "exit spool: {} imported, {} duplicate, {} unmatched, {} unreadable, {} dropped",
-                    imported.imported,
-                    imported.duplicates,
-                    imported.unmatched,
-                    imported.unreadable,
-                    imported.dropped
-                );
-            }
-            // Rows still marked running whose process is *not* among these died with the
-            // previous run; the rest are conversations that never stopped.
-            let alive: Vec<String> = connected
-                .host
-                .list()
-                .into_iter()
-                .map(|session| session.id.0)
-                .collect();
-            store
-                .end_interrupted_sessions(&alive)
-                .map_err(|e| format!("cannot tidy session records: {e}"))?;
-            yardsort_core::activity::end_interrupted(&store, &alive);
-            yardsort_core::activity::prune(&store);
-
-            app.manage(state::AppState::new(
-                data_dir.clone(),
-                connected,
-                store,
-                settings,
-            ));
-
-            // Hooks write to the inbox whenever an agent does something; watch it, so the
-            // timeline moves while the agent works rather than when it exits.
-            match activity::watch_inbox(app.handle().clone(), &data_dir) {
-                Ok(watcher) => {
-                    *app.state::<state::AppState>().inbox_watcher.lock().unwrap() = Some(watcher);
-                }
-                Err(error) => eprintln!("not watching the activity inbox: {error}"),
-            }
-
-            // Workflow runs, queued here or by `ys`, are moved on by a thread of their own.
-            workflows::start(app.handle(), &data_dir);
-
-            // Warm the login-shell environment now, so the first terminal doesn't wait for it.
-            // Then bring a `ys` an older version installed up to this one. Not from a development
-            // build, which would put itself on the user's PATH, unless `YARDSORT_YS_DIR` says where.
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let env = handle.state::<state::AppState>().env();
-                if cfg!(debug_assertions) && legacy::env_var_os("YS_DIR").is_none() {
-                    return;
-                }
-                if let Some(what) = ys::refresh(&ys::Layout::detect(&env), &env) {
-                    eprintln!("ys: {what}");
-                }
-            });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Yardsort");
+        .build(tauri::generate_context!())
+        .expect("error while running Yardsort")
+        .run(|app, event| {
+            // A start that failed has no window left, only its dialog. Stay until it is closed.
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = event
+            {
+                if app.try_state::<StartFailed>().is_some() {
+                    api.prevent_exit();
+                }
+            }
+        });
+}
+
+/// Everything the app needs before its window can be used. An error here is shown to the user by
+/// [`refuse_to_start`], so say what failed in words they can act on.
+fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // `YARDSORT_DATA_DIR` keeps experiments and tests away from the real database (and
+    // settings, which then sit next to it instead of in the OS config directory).
+    let profile = legacy::env_var_os("DATA_DIR").map(std::path::PathBuf::from);
+    let data_dir = match &profile {
+        Some(dir) => dir.clone(),
+        None => app.path().app_data_dir()?,
+    };
+    let config_dir = match &profile {
+        Some(dir) => dir.clone(),
+        None => app.path().app_config_dir()?,
+    };
+    // First launch after the rename from Switchyard: bring the user's data along.
+    if profile.is_none() {
+        match legacy::adopt_switchyard_data(&data_dir, "yardsort.db", &config_dir) {
+            Ok(adopted) => adopted
+                .iter()
+                .for_each(|what| eprintln!("carried over from Switchyard: {what}")),
+            Err(error) => eprintln!("could not carry Switchyard data over: {error}"),
+        }
+    }
+    // The `ys` CLI has to find this same directory without Tauri to ask, so it works the
+    // rules out itself (`yardsort_core::paths`). If the two ever disagree the CLI would
+    // quietly look at the wrong database, so say so loudly here rather than there.
+    for (what, ours, theirs) in [
+        ("data", &data_dir, yardsort_core::paths::data_dir()),
+        ("config", &config_dir, yardsort_core::paths::config_dir()),
+    ] {
+        if theirs.as_ref() != Some(ours) {
+            eprintln!(
+                "warning: the {what} directory is {} but yardsort_core::paths says {:?} — \
+                 the ys CLI will need --data-dir",
+                ours.display(),
+                theirs,
+            );
+        }
+    }
+
+    let database = data_dir.join("yardsort.db");
+    let store = store::Store::open(&database).map_err(|e| store_failure(&database, &e))?;
+    let settings = settings::SettingsFile::load(config_dir.join("settings.toml"));
+
+    // Find the daemon for this profile, or start one. Agents from a previous run of the
+    // app are still in it, which is why this comes before the records are settled.
+    let handle = app.handle().clone();
+    let spool_root = data_dir.clone();
+    let connected = daemon::connect(
+        &data_dir,
+        std::sync::Arc::new(move |event| {
+            // Settle the record first, so a client reacting to the event reads the truth.
+            if let pty_host::HostEvent::Exited { id, exit } = &event {
+                if let Some(state) = handle.try_state::<state::AppState>() {
+                    let _ = state
+                        .store
+                        .end_session_by_pty(&id.0, Some(i64::from(exit.code)));
+                    yardsort_core::activity::record_exit(
+                        &state.store,
+                        &id.0,
+                        &yardsort_core::activity::ExitFacts::from(exit),
+                        yardsort_core::activity::Via::Live,
+                    );
+                    // The daemon kept this exit for us too; take it out of the spool
+                    // now rather than find it as a duplicate at the next start. And
+                    // an agent's last hooks ran just before it exited.
+                    yardsort_core::activity::import_spool(&state.store, &spool_root);
+                    activity::drain_inbox(&handle, &state.store, &spool_root);
+                }
+            }
+            // A workflow waiting for an agent to settle hears it here, before the window.
+            if let Some(driver) = handle.try_state::<workflows::Driver>() {
+                driver.observe(&event);
+            }
+            let _ = terminal::PtyHostEvent(event).emit(&handle);
+        }),
+    );
+    // What agents reported while no window was open.
+    let inbox = yardsort_core::activity::import_inbox(&store, &data_dir);
+    if inbox.imported > 0 || inbox.unlinked > 0 || inbox.unreadable > 0 || inbox.dropped > 0 {
+        eprintln!(
+            "activity inbox: {} imported, {} duplicate, {} unlinked, {} unreadable, {} dropped",
+            inbox.imported, inbox.duplicates, inbox.unlinked, inbox.unreadable, inbox.dropped
+        );
+    }
+    // Exits the daemon kept while no window was open come first: a conversation that
+    // ended cleanly in the meantime must keep its exit code rather than be counted as
+    // interrupted below.
+    let imported = yardsort_core::activity::import_spool(&store, &data_dir);
+    if imported.imported > 0 || imported.unreadable > 0 || imported.dropped > 0 {
+        eprintln!(
+            "exit spool: {} imported, {} duplicate, {} unmatched, {} unreadable, {} dropped",
+            imported.imported,
+            imported.duplicates,
+            imported.unmatched,
+            imported.unreadable,
+            imported.dropped
+        );
+    }
+    // Rows still marked running whose process is *not* among these died with the
+    // previous run; the rest are conversations that never stopped.
+    let alive: Vec<String> = connected
+        .host
+        .list()
+        .into_iter()
+        .map(|session| session.id.0)
+        .collect();
+    store
+        .end_interrupted_sessions(&alive)
+        .map_err(|e| format!("cannot tidy session records: {e}"))?;
+    yardsort_core::activity::end_interrupted(&store, &alive);
+    yardsort_core::activity::prune(&store);
+
+    app.manage(state::AppState::new(
+        data_dir.clone(),
+        connected,
+        store,
+        settings,
+    ));
+
+    // Hooks write to the inbox whenever an agent does something; watch it, so the
+    // timeline moves while the agent works rather than when it exits.
+    match activity::watch_inbox(app.handle().clone(), &data_dir) {
+        Ok(watcher) => {
+            *app.state::<state::AppState>().inbox_watcher.lock().unwrap() = Some(watcher);
+        }
+        Err(error) => eprintln!("not watching the activity inbox: {error}"),
+    }
+
+    // Workflow runs, queued here or by `ys`, are moved on by a thread of their own.
+    workflows::start(app.handle(), &data_dir);
+
+    // Warm the login-shell environment now, so the first terminal doesn't wait for it.
+    // Then bring a `ys` an older version installed up to this one. Not from a development
+    // build, which would put itself on the user's PATH, unless `YARDSORT_YS_DIR` says where.
+    let handle = app.handle().clone();
+    std::thread::spawn(move || {
+        let env = handle.state::<state::AppState>().env();
+        if cfg!(debug_assertions) && legacy::env_var_os("YS_DIR").is_none() {
+            return;
+        }
+        if let Some(what) = ys::refresh(&ys::Layout::detect(&env), &env) {
+            eprintln!("ys: {what}");
+        }
+    });
+    Ok(())
+}
+
+/// Managed only when [`start`] failed: the app is waiting for its error dialog to be closed.
+struct StartFailed;
+
+/// Tauri turns an error from the setup hook into a panic, and release builds abort on panic: the
+/// process dies without a word, and when it was started from a launcher nobody sees its stderr.
+/// That is how a database written by a newer Yardsort once looked like a crash on every start.
+/// So say why in a dialog instead, and exit once it is closed.
+fn refuse_to_start(app: &tauri::AppHandle, reason: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+    eprintln!("yardsort: cannot start: {reason}");
+    // Whatever failed, it was not the display server: do not pin this version to X11 for it.
+    #[cfg(target_os = "linux")]
+    display::start_failed();
+    app.manage(StartFailed);
+    // Nothing behind the window works without the state `start` did not finish, so no page.
+    for window in app.webview_windows().into_values() {
+        let _ = window.destroy();
+    }
+    let handle = app.clone();
+    app.dialog()
+        .message(reason)
+        .title("Yardsort cannot start")
+        .kind(MessageDialogKind::Error)
+        .show(move |_| {
+            // Not `handle.exit(1)`: under `run` the code does not reach the process, and a
+            // launcher or script should see that the start failed.
+            handle.cleanup_before_exit();
+            std::process::exit(1);
+        });
+}
+
+/// Why the database would not open, for the person looking at the dialog.
+fn store_failure(database: &std::path::Path, error: &store::StoreError) -> String {
+    match error {
+        // Only an older Yardsort opening data a newer one has upgraded gets here. The store
+        // refuses before it writes anything, so the data is as the newer version left it.
+        store::StoreError::TooNew { .. } => format!(
+            "Your projects and workspaces were last opened by a newer version of Yardsort, and \
+             this one ({}) cannot read them.\n\n\
+             Install the latest Yardsort from https://yardsort.sh to carry on. Nothing has been \
+             changed or lost.\n\n\
+             {}: {error}",
+            env!("CARGO_PKG_VERSION"),
+            database.display()
+        ),
+        _ => format!("cannot open {}: {error}", database.display()),
+    }
 }
 
 #[cfg(test)]
@@ -405,5 +469,36 @@ mod tests {
             .collect();
         assert!(allowed.contains(&"https://*"), "got {allowed:?}");
         assert!(allowed.contains(&"http://*"), "got {allowed:?}");
+    }
+
+    /// An older Yardsort started on data a newer one upgraded used to abort without a word. What
+    /// it says instead has to tell the person what to do, and that their data is safe.
+    #[test]
+    fn a_database_from_a_newer_version_is_explained_not_just_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("yardsort.db");
+        drop(super::store::Store::open(&database).unwrap());
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .pragma_update(None, "user_version", 999)
+            .unwrap();
+
+        let error = match super::store::Store::open(&database) {
+            Err(error) => error,
+            Ok(_) => panic!("a database from the future must be refused"),
+        };
+        let message = super::store_failure(&database, &error);
+
+        assert!(message.contains("newer version of Yardsort"), "{message}");
+        assert!(message.contains(env!("CARGO_PKG_VERSION")), "{message}");
+        assert!(message.contains("Install the latest Yardsort"), "{message}");
+        assert!(
+            message.contains("Nothing has been changed or lost"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&database.display().to_string()),
+            "{message}"
+        );
     }
 }

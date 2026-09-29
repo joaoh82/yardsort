@@ -23,12 +23,13 @@ that fails is worth more than a row that passes: say what happened.
 
 ## 1 · It starts and says what it found
 
-| ✓   | Check                                                                                                                             |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- |
-|     | The welcome screen lists git and at least one agent as found. **Check again** re-reads without a restart.                         |
-|     | Status bar, bottom right: `env: login shell` (macOS) or `env: process` (Windows), a plausible PATH count, and **`daemon <pid>`**. |
-|     | `daemon <pid>` is present, not `no daemon`. If it says `no daemon`, hover it — that tooltip is the finding.                       |
-|     | **Windows:** with Yardsort open, install an agent it did not find, then press **Check again**. It is found, without a restart.    |
+| ✓   | Check                                                                                                                                              |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | The welcome screen lists git and at least one agent as found. **Check again** re-reads without a restart.                                          |
+|     | Status bar, bottom right: `env: login shell` (macOS) or `env: process` (Windows), a plausible PATH count, and **`daemon <pid>`**.                  |
+|     | `daemon <pid>` is present, not `no daemon`. If it says `no daemon`, hover it — that tooltip is the finding.                                        |
+|     | **Windows:** with Yardsort open, install an agent it did not find, then press **Check again**. It is found, without a restart.                     |
+|     | On a fresh profile, `sqlite3 <profile>/yardsort.db 'PRAGMA user_version = 999'`, then start. **Yardsort cannot start** explains; closing it quits. |
 
 The Windows row is a bug that shipped: a process's environment there is fixed when it starts, so
 until 0.8.2 **Check again** re-read a stale copy and could never find something installed a

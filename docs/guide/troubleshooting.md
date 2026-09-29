@@ -1,5 +1,22 @@
 # Troubleshooting
 
+## Yardsort cannot start
+
+If something goes wrong before the window can open, Yardsort shows a **Yardsort cannot start**
+dialog that says what, and quits when you close it. Started from a terminal, it prints the same
+text there.
+
+The one you are most likely to see says your projects and workspaces **were last opened by a
+newer version of Yardsort**. Each release may upgrade the database the first time it opens it, and
+an older release cannot read what a newer one wrote. That happens when you go back to an older
+download, or have two installs of different versions (an AppImage and a package, say). Install
+the latest release from the [Releases page](https://github.com/joaoh82/yardsort/releases/latest)
+and everything is where you left it: the older version refused before writing anything.
+
+Versions up to 0.13.0 did not show the dialog. They closed a second or two after launch, every
+time, with nothing on screen. If an older Yardsort does that, this is the most likely reason; run
+it from a terminal to see the message.
+
 ## "`claude` was not found on PATH"
 
 Yardsort launches programs with the environment of your **login shell**, which it reads once at
@@ -47,7 +64,9 @@ section above. Agents you have switched off in Settings → Harnesses do not cou
   launcher asks for X11. Yardsort overrides that, because under XWayland typing lags and dictation
   tools that type for you, such as Omarchy's, drop or garble characters.) If a Wayland start of
   the AppImage ever fails before the window appears, the next start uses X11 for that version by
-  itself. To choose, set `YARDSORT_GDK_BACKEND=wayland` or `YARDSORT_GDK_BACKEND=x11`.
+  itself (a start that [stopped with a dialog](#yardsort-cannot-start) does not count). To choose,
+  set `YARDSORT_GDK_BACKEND=wayland` or `YARDSORT_GDK_BACKEND=x11`. To let a version try Wayland
+  again, delete the `wayland-failed` file beside the database.
 
 ## macOS
 

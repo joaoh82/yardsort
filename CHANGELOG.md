@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **A Yardsort that cannot start now says why.** Opening your data with an older version than
+  the one that last used it — after going back to an old download, say — used to close the app
+  a moment after launch, every time, without a word. It now shows a dialog saying so and asking
+  you to install the latest version; your data is left as it was. Any other failure while
+  starting is shown the same way. On Linux such a failure no longer counts as Wayland not
+  working, which kept that version of the AppImage under XWayland from then on. See
+  [Troubleshooting](docs/guide/troubleshooting.md#yardsort-cannot-start).
+
 ## 0.13.0
 
 - **Workflows: named agent work, in the sidebar and from `ys`.** A **Workflows** section above

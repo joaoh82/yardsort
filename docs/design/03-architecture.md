@@ -282,7 +282,12 @@ even if the command fails, and the toolbar refreshes the PR list.
 
 `yardsort.db` in the OS app-data directory (override with `YARDSORT_DATA_DIR`). Migrations are
 numbered SQL files in `crates/core/migrations/`, applied in order and tracked with `user_version`; a
-database written by a newer build is refused rather than touched.
+database written by a newer build is refused rather than touched. The app then says so in a
+**Yardsort cannot start** dialog and exits with status 1 when it is closed. The same happens for
+any other error while starting. It cannot be left to Tauri: an error from the setup hook becomes a
+panic, and release builds abort on panic, so the process would die without a word. A start that
+fails this way also clears the Wayland marker (`display.rs`), so it is not mistaken for a failed
+Wayland start.
 
 ```
 projects    id, name, root_path (unique), sort_order, created_at
