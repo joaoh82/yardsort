@@ -1,5 +1,6 @@
 use super::*;
 use crate::forge::PullRequestState;
+use crate::git::testing::git;
 use crate::store::StepStatus;
 
 const DEMO: &str = r#"id: demo
@@ -381,7 +382,9 @@ fn a_step_move_keeps_its_first_start_time_and_records_what_it_left() {
 #[test]
 fn a_run_knows_its_project_and_workspace() {
     let fx = Fixture::new();
-    let place = Place::load(&fx.store, &fx.workspace.id).unwrap().unwrap();
+    let place = Place::load(&fx.store, &fx.workspace.id, &git())
+        .unwrap()
+        .unwrap();
     let var = |path: &str| place.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
     assert_eq!(var("project.name").as_deref(), Some("app"));
     assert_eq!(var("workspace.branch").as_deref(), Some("fix-login"));
@@ -487,4 +490,117 @@ fn a_workflows_own_runs_are_listed_however_many_newer_ones_other_workflows_have(
             .all(|pair| pair[0].created_at >= pair[1].created_at),
         "newest first"
     );
+}
+
+#[test]
+fn what_a_run_would_render_as_nothing_is_said_before_it_starts() {
+    let fx = Fixture::new();
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    let uses_everything = DEMO.replace("id: demo", "id: all").replace(
+        "prompt: \"{{ inputs.note }}\"",
+        "prompt: \"{{ workspace.task }} on {{ workspace.branch }} from {{ workspace.base_branch }}\\n\\n{{ memory }}\"",
+    );
+    std::fs::write(folder.join("all.yaml"), uses_everything).unwrap();
+    let workflow = crate::workflow::find(fx.dir.path(), "all")
+        .unwrap()
+        .workflow
+        .unwrap();
+    let place = Place::load(&fx.store, &fx.workspace.id, &git())
+        .unwrap()
+        .unwrap();
+
+    // A worktree on a branch made from `main`, no agent started in it yet, memory not shared.
+    let said = empty_variables(&workflow, &place, false);
+    assert_eq!(said.len(), 2, "{said:?}");
+    assert!(said[0].contains("workspace.task") && said[0].contains("without a first message"));
+    assert!(said[1].contains("memory") && said[1].contains("does not give its agents"));
+
+    // Memory shared, and the workspace has a task: nothing to say about those.
+    fx.store
+        .add_session(&crate::store::NewSession {
+            id: "s1",
+            workspace_id: &fx.workspace.id,
+            harness_id: "claude",
+            model: None,
+            effort: None,
+            harness_session_id: None,
+            title: "Fix the login",
+            forked_from: None,
+            pty_session_id: "pty-1",
+            prompt: Some("Fix the login"),
+        })
+        .unwrap();
+    let place = Place::load(&fx.store, &fx.workspace.id, &git())
+        .unwrap()
+        .unwrap();
+    assert!(empty_variables(&workflow, &place, true).is_empty());
+
+    // The project's own checkout is on no branch of Yardsort's making.
+    let local = fx
+        .store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.kind == "local")
+        .unwrap();
+    let place = Place::load(&fx.store, &local.id, &git()).unwrap().unwrap();
+    let said = empty_variables(&workflow, &place, true);
+    assert!(
+        said.iter().any(|s| s.contains("workspace.branch")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().any(|s| s.contains("workspace.base_branch")),
+        "{said:?}"
+    );
+
+    // A workflow that uses none of them has nothing said, whatever the workspace lacks.
+    let demo = crate::workflow::find(fx.dir.path(), "demo")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert!(empty_variables(&demo, &place, false).is_empty());
+}
+
+#[test]
+fn the_projects_own_checkout_takes_its_branch_from_git() {
+    let fx = Fixture::new();
+    let git = git();
+    let repo = fx.dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git.init(&repo).unwrap();
+    git.run(&repo, &["checkout", "-b", "trunk"]).unwrap();
+    git.initial_commit(&repo).unwrap();
+    fx.store
+        .add_project("real", &repo.display().to_string())
+        .unwrap();
+    let local = fx
+        .store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.kind == "local" && w.path == repo.display().to_string())
+        .unwrap();
+    let place = Place::load(&fx.store, &local.id, &git).unwrap().unwrap();
+    let var = |path: &str| place.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
+    assert_eq!(var("workspace.branch").as_deref(), Some("trunk"));
+    assert_eq!(
+        var("workspace.base_branch"),
+        None,
+        "the default branch is based on nothing"
+    );
+
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    let uses = DEMO.replace("id: demo", "id: branches").replace(
+        "prompt: \"{{ inputs.note }}\"",
+        "prompt: \"{{ workspace.branch }} from {{ workspace.base_branch }}\"",
+    );
+    std::fs::write(folder.join("branches.yaml"), uses).unwrap();
+    let workflow = crate::workflow::find(fx.dir.path(), "branches")
+        .unwrap()
+        .workflow
+        .unwrap();
+    let said = empty_variables(&workflow, &place, true);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("workspace.base_branch") && said[0].contains("default branch"));
 }

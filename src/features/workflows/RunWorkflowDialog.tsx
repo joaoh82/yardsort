@@ -244,6 +244,13 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
                 {preview.pullRequestProblem}
               </p>
             ))}
+          {preview && preview.empty.length > 0 && (
+            <ul aria-label="Will be empty" className="flex flex-col gap-1 text-amber-300">
+              {preview.empty.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
           {preview?.needsOrigin && (
             <p className="text-ink-faint">
               When it is time, it tells the agent already running in this workspace, if there is

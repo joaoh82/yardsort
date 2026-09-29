@@ -90,6 +90,8 @@ pub struct RunPreview {
     pub pull_request_problem: Option<String>,
     /// The workflow talks to the workspace's own agent.
     pub needs_origin: bool,
+    /// Variables the run will render as nothing, and why. A run still goes ahead.
+    pub empty: Vec<String>,
 }
 
 fn run_from(row: WorkflowRunRow) -> WorkflowRun {
@@ -281,11 +283,20 @@ pub async fn workflow_preview(
         } else {
             (None, None)
         };
+        let git = crate::git::Git::new(&state.env())?;
+        let empty = match runs::Place::load(&state.store, &workspace.id, &git)? {
+            Some(place) => {
+                let shared = state.store.memory_shared(&workspace.project_id)?;
+                runs::empty_variables(&workflow, &place, shared)
+            }
+            None => Vec::new(),
+        };
         Ok(RunPreview {
             needs_pull_request,
             pull_request,
             pull_request_problem,
             needs_origin: runs::needs_origin(&workflow),
+            empty,
         })
     })
     .await

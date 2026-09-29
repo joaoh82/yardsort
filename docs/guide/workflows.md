@@ -37,7 +37,11 @@ The center panel shows three things:
 **Run…** opens a dialog. It asks for the workspace and for each of the workflow's inputs; an agent
 is picked from the same list as the composer's, with those not installed greyed out. If the
 workflow works with the pull request, the dialog looks it up and shows it, or says why there is
-none to use. The run starts when you press **Run**, and appears at the top of the runs at once.
+none to use. It also says what the run would find nothing for: a prompt that uses
+`{{ workspace.task }}` in a workspace started without a first message, `{{ memory }}` in a
+project that does not share it, or `{{ workspace.base_branch }}` on the default branch, which is
+based on nothing. Those are notes, not refusals; the line renders empty. The run starts when you press **Run**, and appears at the
+top of the runs at once.
 
 A workspace's menu has **Run workflow…**, which opens the same dialog for that workspace, and
 **Request code review…**, which opens it on the built-in review.
@@ -157,7 +161,9 @@ checks everything before anything is queued:
 
 Optional inputs left out take their `default`, or are empty. A workflow runs once at a time in a
 workspace: asking again while it runs is refused, naming the run. With Yardsort closed, `ys` says
-so and queues nothing.
+so and queues nothing. When the run would find nothing for a variable the file uses — the task
+of a workspace started without a first message, say — `ys` says so in a note after queuing, and
+the Run dialog shows it before; the run goes ahead either way.
 
 `ys workflow run` prints the run's id and returns at once. The app picks the run up within a
 second, and moves each step on as soon as it can: every second, and the moment an agent goes
@@ -284,7 +290,7 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | Variable                                                                                          | What it is                                                                                                                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `project.name`, `project.root`                                                                    | The project, and the folder of its own checkout.                                                                                                                                                                                                       |
-| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with.                                                                                                                                                                       |
+| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.         |
 | `pr.number`, `pr.url`, `pr.title`                                                                 | The open pull request for the workspace's branch, found when the run is queued.                                                                                                                                                                        |
 | `inputs.<id>`                                                                                     | What was given for that input.                                                                                                                                                                                                                         |
 | `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`. The step must be among this step's `needs`.                                                      |

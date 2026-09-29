@@ -15,6 +15,7 @@ use super::engine::Inputs;
 use super::{find, template, Action, InputKind, SessionRef, Workflow};
 use crate::error::{IpcError, IpcResult};
 use crate::forge::PullRequest;
+use crate::git::Git;
 use crate::store::{NewWorkflowRun, ProjectRow, Queued, Store, WorkspaceRow};
 
 /// What queuing has to find out from outside: whoever asks for a run answers these.
@@ -224,6 +225,44 @@ pub fn pull_request_of(
     Ok(crate::forge::pull_request_for(&listed, &branch).cloned())
 }
 
+/// What a run of `workflow` in this place would render as nothing, and why: a variable the
+/// file uses that the workspace does not have. Not a refusal — an empty line in a prompt is
+/// allowed — but something to know before starting.
+pub fn empty_variables(workflow: &Workflow, place: &Place, memory_shared: bool) -> Vec<String> {
+    let used: std::collections::BTreeSet<String> = workflow
+        .steps
+        .iter()
+        .flat_map(|step| texts(&step.action))
+        .flat_map(template::placeholders)
+        .map(|var| var.path.join("."))
+        .collect();
+    let name = &place.workspace.name;
+    let mut empty = Vec::new();
+    if used.contains("workspace.task") && place.task.is_none() {
+        empty.push(format!(
+            "`{{{{ workspace.task }}}}` will be empty: `{name}` was started without a first message."
+        ));
+    }
+    if used.contains("workspace.branch") && place.branch.is_none() {
+        empty.push(format!(
+            "`{{{{ workspace.branch }}}}` will be empty: `{name}` is not on a branch."
+        ));
+    }
+    if used.contains("workspace.base_branch") && place.base_branch.is_none() {
+        empty.push(format!(
+            "`{{{{ workspace.base_branch }}}}` will be empty: `{name}` is on the default branch, \
+             which is based on nothing."
+        ));
+    }
+    if used.contains("memory") && !memory_shared {
+        empty.push(format!(
+            "`{{{{ memory }}}}` will be empty: {} does not give its agents its memory.",
+            place.project.name
+        ));
+    }
+    empty
+}
+
 /// Whether a run of `workflow` needs the workspace's pull request: it waits for activity on it,
 /// or names it in a `{{ pr.… }}`.
 pub fn needs_pull_request(workflow: &Workflow) -> bool {
@@ -348,10 +387,16 @@ pub struct Place {
     pub workspace: WorkspaceRow,
     /// The workspace's first message, if it was started with one.
     pub task: Option<String>,
+    /// The branch checked out: the workspace's own, or, for the project's own checkout, which
+    /// has no branch of Yardsort's making, whatever git has checked out there.
+    pub branch: Option<String>,
+    /// What the branch was started from, or, when Yardsort did not start it, the repository's
+    /// default branch — unless that is the branch itself, which is based on nothing.
+    pub base_branch: Option<String>,
 }
 
 impl Place {
-    pub fn load(store: &Store, workspace_id: &str) -> IpcResult<Option<Self>> {
+    pub fn load(store: &Store, workspace_id: &str, git: &Git) -> IpcResult<Option<Self>> {
         let Some(workspace) = store.workspace(workspace_id)? else {
             return Ok(None);
         };
@@ -359,10 +404,24 @@ impl Place {
             return Ok(None);
         };
         let task = store.session_prompts(workspace_id)?.into_iter().next();
+        // Git is asked only where the row does not know, and a folder git cannot answer for —
+        // gone, or not a repository — is simply one with no branch.
+        let root = Path::new(&workspace.path);
+        let branch = workspace.branch.clone().or_else(|| match git.head(root) {
+            Ok(crate::git::Head::Branch(name)) => Some(name),
+            _ => None,
+        });
+        let base_branch = workspace
+            .base_branch
+            .clone()
+            .or_else(|| git.default_branch(root).ok().flatten())
+            .filter(|base| Some(base) != branch.as_ref());
         Ok(Some(Self {
             project,
             workspace,
             task,
+            branch,
+            base_branch,
         }))
     }
 
@@ -375,8 +434,8 @@ impl Place {
             ["project", "root"] => Some(self.project.root_path.clone()),
             ["workspace", "name"] => Some(w.name.clone()),
             ["workspace", "path"] => Some(w.path.clone()),
-            ["workspace", "branch"] => w.branch.clone(),
-            ["workspace", "base_branch"] => w.base_branch.clone(),
+            ["workspace", "branch"] => self.branch.clone(),
+            ["workspace", "base_branch"] => self.base_branch.clone(),
             ["workspace", "task"] => self.task.clone(),
             _ => None,
         }

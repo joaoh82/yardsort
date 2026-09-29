@@ -21,6 +21,7 @@ use super::runs::{self, Facts, Place};
 use super::PrActivity;
 use crate::error::IpcResult;
 use crate::forge::{PrPost, PrPostKind};
+use crate::git::Git;
 use crate::launch::{HarnessRequest, HARNESS_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
 use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow};
 
@@ -118,6 +119,7 @@ impl Driver {
         store: &Store,
         host: &dyn TerminalHost,
         hands: &dyn Hands,
+        git: &Git,
     ) -> IpcResult<bool> {
         self.touched
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -129,7 +131,7 @@ impl Driver {
             self.touch();
         }
         for run in &runs {
-            if let Err(error) = move_on(self, store, host, hands, run) {
+            if let Err(error) = move_on(self, store, host, hands, git, run) {
                 eprintln!("workflows: run {}: {}", run.id, error.message);
             }
         }
@@ -242,6 +244,7 @@ fn move_on(
     store: &Store,
     host: &dyn TerminalHost,
     hands: &dyn Hands,
+    git: &Git,
     run: &WorkflowRunRow,
 ) -> IpcResult<()> {
     let Ok(workflow) = super::parse(&run.definition) else {
@@ -254,7 +257,7 @@ fn move_on(
         return Ok(());
     };
     let place = match run.workspace_id.as_deref() {
-        Some(id) => Place::load(store, id)?,
+        Some(id) => Place::load(store, id, git)?,
         None => None,
     };
     let Some(place) = place else {
