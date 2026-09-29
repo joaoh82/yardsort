@@ -3,42 +3,40 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
-
-- Workflow generation now has a **Workflow writer** choice in Settings → Assist, including
-  Codex and custom harnesses with Write args. Automatic selection skips harnesses that are not
-  installed. Select a chart node to highlight it and jump to its YAML source line.
+## 0.13.0
 
 - **Workflows: named agent work, in the sidebar and from `ys`.** A **Workflows** section above
   Projects lists them; open one to see its steps as a chart, edit its file with every mistake
   marked where it is, follow its runs, and **Run…** it. A new one can be written for you: say
   what it should do and press **Write it**, and the agent you already have, or your Anthropic
-  key, writes the file, checked like any other and never saved until you say so. A workflow is a short YAML file in your
-  profile's `workflows` folder: the inputs to ask for, and steps that start an agent, wait for it
-  to settle, type to it once it is quiet, and notify you. Steps run as soon as the ones they
-  need succeed, so they can run side by side. `ys workflow validate` checks a file and names the
-  line and column of every mistake, including every `{{ variable }}`; `list`, `show` and `copy`
-  manage them. With Yardsort open, `ys workflow run` queues a run and the app carries it out in
-  the background, with the agents it starts as tabs; `ys workflow runs` follows it and `cancel`
-  stops it, never the agents. Steps can wait for a review or comment on the workspace's pull
-  request, use its number and link, and talk to the workspace's own agent. The built-in
-  **Request code review** puts it together, from a workspace's menu or as `ys workflow run
-code-review --input reviewer=codex`: a second agent reviews the pull request and posts on
-  GitHub, then you are told, and the agent that wrote it is told to address the review. See
-  [Workflows](docs/guide/workflows.md).
+  key, writes the file, checked like any other and never saved until you say so. A workflow is a
+  short YAML file in your profile's `workflows` folder: the inputs to ask for, and steps that
+  start an agent, wait for it to settle, type to it once it is quiet, and notify you. Steps run
+  as soon as the ones they need succeed, so they can run side by side. `ys workflow validate`
+  checks a file and names the line and column of every mistake, including every
+  `{{ variable }}`; `list`, `show` and `copy` manage them. With Yardsort open, `ys workflow run`
+  queues a run and the app carries it out in the background, with the agents it starts as tabs;
+  `ys workflow runs` follows it and `cancel` stops it, never the agents. Steps can wait for a
+  review or comment on the workspace's pull request, use its number and link, and talk to the
+  workspace's own agent. The built-in **Request code review** puts it together, from a
+  workspace's menu or as `ys workflow run code-review --input reviewer=codex`: a second agent
+  reviews the pull request and posts on GitHub, then you are told, and the agent that wrote it
+  is told to address the review. See [Workflows](docs/guide/workflows.md).
+- Workflow generation has a **Workflow writer** choice in Settings → Assist, including Codex and
+  custom harnesses with Write args. Automatic selection skips harnesses that are not installed.
+  Select a chart node to highlight it and jump to its YAML source line.
 - **Project search.** Click the search icon beside Projects to filter by name. Clear the filter
   with **×**, or press **Escape** to close it; **×** also closes an empty field. The selected
   workspace's project stays visible, including projects added while filtering.
-- Workspace previews open on hover or keyboard focus without popping over clicks or menus.
-  They only say no PR was found after the forge has answered successfully.
-
-- PR badges and the toolbar dropdown share status colours: green for open PRs, yellow for
-  drafts or pending checks/reviews, red for failures, requested changes or closed PRs, and
-  purple for merged PRs. Open PRs without CI no longer fall back to grey.
 - Workspace rows now preview pull request details on hover or keyboard focus, including branches,
   review status, line counts and individual checks. Open harnesses have a count and a preview of
   their names and activity. The workspace toolbar adds the same PR preview with actions to open,
   copy, refresh, or merge by squash, merge commit or rebase after confirmation.
+- Workspace previews open on hover or keyboard focus without popping over clicks or menus.
+  They only say no PR was found after the forge has answered successfully.
+- PR badges and the toolbar dropdown share status colours: green for open PRs, yellow for
+  drafts or pending checks/reviews, red for failures, requested changes or closed PRs, and
+  purple for merged PRs. Open PRs without CI no longer fall back to grey.
 - Reused branches prefer an open pull request over an older merged or closed one. Slower refresh
   responses no longer replace newer PR data in the sidebar or the core cache.
 
