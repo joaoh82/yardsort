@@ -342,8 +342,9 @@ its own.
 5. **Describe it.** ✅ `workflow::describe` in the core, the `workflow_describe` command, the
    validate-and-retry loop, the editor hand-off. Tests with a fake writer that returns bad YAML
    once. See [slice 5](#slice-5-what-shipped).
-6. **Docs and pictures.** The guide's sections on running (the file format's went with slice 1),
-   README highlights, the changelog, screenshots of the chart and the run dialog with the throwaway profile.
+6. **Docs and pictures.** ✅ The README's highlight and section, the website's section and
+   `ys` line, the quick start, and screenshots of the view and the Run dialog with the throwaway
+   profile. See [slice 6](#slice-6-what-shipped).
 
 Everything in slices 1–3 works with no window, which is what makes triggers other than manual a
 matter of adding a producer of queued runs later.
@@ -521,6 +522,29 @@ Describe it, as [the UI](#the-ui) above now describes it. What changed on the wa
   folder, given the exact prompt for "have Codex review the pull request and tell me, not the
   original agent", wrote a valid four-step workflow first time, with no step for the author, and
   wrote nothing into the folder.
+
+## Slice 6: what shipped
+
+Words and pictures, nothing of the code. The guide's running section and the changelog line had
+gone out with the slices they described, so what was left was the places that repeat the
+README's claims:
+
+- **The README** gained a highlight, a section of its own after the handoff one, the workflow
+  commands in the scriptable highlight, a fourth quick-start step and a documentation row.
+- **The website** gained a sixth idea, "Named agent work, in steps", with the view's screenshot,
+  the same claims as the README's section, and the sections after it moved down one number; the
+  command-line list gained `ys workflow run code-review`.
+- **The quick start** points at **Request code review…** once the pull request is open, and its
+  reading list at the guide.
+- **Two screenshots**, taken with `scripts/screenshots.sh` on the throwaway profile: the built-in
+  review open, with the chart, the file and its runs, and the Run dialog opened from a
+  workspace's menu. The guide and the README show the first; the guide shows the second too.
+  The demo repositories have no remote, so the first take of the dialog said finding the pull
+  request needs `gh`; the script's setup now puts a stand-in `gh` on the profile's `PATH` that
+  answers with one demo pull request, on the newest workspace branch only.
+
+The hands-on pass on macOS and Windows, [08 §22](08-manual-checklist.md#22--workflow-runs), is
+still to be done, and is the milestone's exit.
 
 ## Not in v1, on purpose
 

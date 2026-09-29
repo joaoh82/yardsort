@@ -19,6 +19,10 @@
 #   Forget to clear it; the launch line below makes the store unreachable for that one process
 #   instead. XDG_RUNTIME_DIR is left alone — the Wayland socket is under it.
 #
+#   The demo repositories have no remote, so `setup` also puts a stand-in `gh` on that PATH: it
+#   answers `gh pr list` with one demo pull request on the newest workspace branch, which is what
+#   the workflow-run shot and the pull-request badges show, and refuses everything else.
+#
 # See AGENTS.md. `shoot` finds the window by the profile behind it, so an ordinary copy of
 # Yardsort left open cannot be captured by mistake. It needs Hyprland, grim and jq; on anything
 # else, size the window to the logical equivalent of 1875x1175 and capture it by hand.
@@ -74,6 +78,37 @@ setup() {
     chmod +x "$AGENTS/$command"
     echo "  shim $AGENTS/$command"
   done
+
+  # The demo repositories have no remote, so the real `gh` would only ever say so. This one
+  # answers `pr list` with a demo pull request: on the branch asked for with `--head`, or, for
+  # a project-wide list, on the newest workspace branch git knows in that repository.
+  cat >"$AGENTS/gh" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+  "pr list")
+    branch=
+    while [ $# -gt 0 ]; do
+      case $1 in --head) branch=$2; shift ;; esac
+      shift
+    done
+    if [ -z "$branch" ]; then
+      branch=$(git worktree list --porcelain 2>/dev/null | sed -n 's|^branch refs/heads/||p' |
+        grep -v '^main$' | tail -1)
+    fi
+    [ -n "$branch" ] || { echo '[]'; exit 0; }
+    printf '[{"number":12,"url":"https://github.com/yardsort-demo/weather-cli/pull/12",'
+    printf '"title":"Add a Celsius/Fahrenheit converter script","headRefName":"%s",' "$branch"
+    printf '"state":"OPEN","isDraft":false,"statusCheckRollup":[{"name":"test",'
+    printf '"conclusion":"SUCCESS","status":"COMPLETED"}],"createdAt":"2026-09-29T09:12:00Z",'
+    printf '"baseRefName":"main","headRefOid":"0000000000000000000000000000000000000000",'
+    printf '"additions":48,"deletions":0,"reviewDecision":"","updatedAt":"2026-09-29T09:40:00Z"}]\n'
+    ;;
+  "pr view") echo '{"reviews":[],"comments":[]}' ;;
+  *) echo "gh: this is the screenshot stand-in; '$1 $2' is not answered" >&2; exit 1 ;;
+esac
+EOF
+  chmod +x "$AGENTS/gh"
+  echo "  stand-in $AGENTS/gh (one demo pull request)"
 
   cat >"$SHOT/loginshell" <<'EOF'
 #!/bin/sh

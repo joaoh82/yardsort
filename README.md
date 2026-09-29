@@ -54,6 +54,11 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   Yardsort recorded — your task, where the branch stands, who wrote each file, what every agent
   run did and what is not known — for you to read and edit before it goes. Codex after Claude,
   without retyping the story. [More below](#hand-the-work-to-another-agent).
+- **Workflows: named agent work, in steps.** A short YAML file — have a second agent review
+  this pull request, then tell me and the agent that wrote it — run from the sidebar or with
+  `ys workflow run`, its steps drawn as a chart, every mistake named at its line. The built-in
+  code review is one click in a workspace's menu. Describe one in your own words and a model
+  writes the file, for you to check and save. [More below](#workflows-named-agent-work-in-steps).
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
   one click into your editor. With an agent reporting, each changed file says who wrote it: an
   agent that reported writing it, one that was running a command when it was last written, or
@@ -98,8 +103,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   starts a workspace and an agent without opening the window: `ys workspace new <project>
 "<prompt>"`. The agent belongs to the background process, so it carries on after the command
   returns — and `ys attach` puts it back on your terminal, `ys logs` prints what a session ended
-  up with, `ys workspace handoff` prints the next agent's first message. `ys workspace delete`
-  removes one when the work is done, keeping the branch. Every command takes `--json`.
+  up with, `ys workspace handoff` prints the next agent's first message, `ys workflow run`
+  queues a workflow for the open app to carry out. `ys workspace delete` removes one when the
+  work is done, keeping the branch. Every command takes `--json`.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>
@@ -158,6 +164,34 @@ as what the workspace was asked. From a terminal, `ys workspace handoff <workspa
 same message. See
 [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent).
 
+## Workflows: named agent work, in steps
+
+A workflow is a named, reusable piece of agent work that runs in steps — have a second agent
+review this workspace's pull request, then tell me and the agent that wrote it. It is a short
+YAML file in your profile: the inputs to ask for, and steps that start an agent, wait for it to
+settle, type to it once it is quiet, wait for a review on the pull request, and notify you. A
+step names the steps it needs, so the ones that need nothing of each other run side by side.
+Yardsort checks every name and every `{{ variable }}` before it runs anything, and names the line
+and column of each mistake.
+
+![Workflows: the built-in code review as a chart, with its file and its runs beside it](docs/images/workflows.png)
+
+**Workflows**, above _Projects_ in the sidebar, lists the built-in ones and yours. Open one to see
+its steps as a chart, its file in an editor with every problem marked where it is, and its runs.
+Rather not write the file? Say what it should do and press **Write it**: the agent you already
+have, or your Anthropic key, writes it — checked like any other, and never saved until you say so.
+
+The built-in **Request code review** is in every workspace's menu: a second agent reviews the
+pull request in the same worktree and posts on GitHub, then you are told, and the agent that
+wrote it is told to address the review. From a terminal, with Yardsort open:
+
+```sh
+ys workflow run code-review --workspace fix-login --input reviewer=codex
+```
+
+The app carries the run out in the background, with the agents it starts as ordinary tabs, and
+`ys workflow runs` follows it step by step. See [Workflows](docs/guide/workflows.md).
+
 ## Supported agents
 
 Yardsort starts any coding agent that runs in a terminal. These work out of the box:
@@ -209,7 +243,8 @@ never sees their credentials.
 1. Open Yardsort and press **+** next to _Projects_ → **Open a folder** → choose a git repository.
 2. Press **+** on the project (or `Ctrl+Shift+N` / `⌘N`), type what you want done, press **Enter**.
 3. Watch the agent in the middle, and its changes on the right. Start more workspaces in parallel.
-4. The result is an ordinary git branch — review it, push it, open a PR.
+4. The result is an ordinary git branch — review it, push it, open a PR — or have a second agent
+   review it: **Request code review…** in the workspace's menu.
 
 The [quick start guide](docs/quick-start.md) walks through it with pictures, and the
 [documentation](docs/README.md) covers every part of the app. Both are also on the website, at
@@ -280,6 +315,7 @@ says no.
 | [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file       |
 | [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                |
 | [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history          |
+| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own   |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                     |
 | [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                 |
 | [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints              |
