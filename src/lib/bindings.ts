@@ -1220,6 +1220,8 @@ export type RunPreview = {
 	pullRequestProblem: string | null,
 	/**  The workflow talks to the workspace's own agent. */
 	needsOrigin: boolean,
+	/**  Variables the run will render as nothing, and why. A run still goes ahead. */
+	empty: string[],
 };
 
 export type Scope = "uncommitted" | "committed";

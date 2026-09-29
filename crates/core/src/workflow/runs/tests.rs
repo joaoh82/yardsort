@@ -488,3 +488,69 @@ fn a_workflows_own_runs_are_listed_however_many_newer_ones_other_workflows_have(
         "newest first"
     );
 }
+
+#[test]
+fn what_a_run_would_render_as_nothing_is_said_before_it_starts() {
+    let fx = Fixture::new();
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    let uses_everything = DEMO.replace("id: demo", "id: all").replace(
+        "prompt: \"{{ inputs.note }}\"",
+        "prompt: \"{{ workspace.task }} on {{ workspace.branch }} from {{ workspace.base_branch }}\\n\\n{{ memory }}\"",
+    );
+    std::fs::write(folder.join("all.yaml"), uses_everything).unwrap();
+    let workflow = crate::workflow::find(fx.dir.path(), "all")
+        .unwrap()
+        .workflow
+        .unwrap();
+    let place = Place::load(&fx.store, &fx.workspace.id).unwrap().unwrap();
+
+    // A worktree on a branch made from `main`, no agent started in it yet, memory not shared.
+    let said = empty_variables(&workflow, &place, false);
+    assert_eq!(said.len(), 2, "{said:?}");
+    assert!(said[0].contains("workspace.task") && said[0].contains("without a first message"));
+    assert!(said[1].contains("memory") && said[1].contains("does not give its agents"));
+
+    // Memory shared, and the workspace has a task: nothing to say about those.
+    fx.store
+        .add_session(&crate::store::NewSession {
+            id: "s1",
+            workspace_id: &fx.workspace.id,
+            harness_id: "claude",
+            model: None,
+            effort: None,
+            harness_session_id: None,
+            title: "Fix the login",
+            forked_from: None,
+            pty_session_id: "pty-1",
+            prompt: Some("Fix the login"),
+        })
+        .unwrap();
+    let place = Place::load(&fx.store, &fx.workspace.id).unwrap().unwrap();
+    assert!(empty_variables(&workflow, &place, true).is_empty());
+
+    // The project's own checkout is on no branch of Yardsort's making.
+    let local = fx
+        .store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.kind == "local")
+        .unwrap();
+    let place = Place::load(&fx.store, &local.id).unwrap().unwrap();
+    let said = empty_variables(&workflow, &place, true);
+    assert!(
+        said.iter().any(|s| s.contains("workspace.branch")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().any(|s| s.contains("workspace.base_branch")),
+        "{said:?}"
+    );
+
+    // A workflow that uses none of them has nothing said, whatever the workspace lacks.
+    let demo = crate::workflow::find(fx.dir.path(), "demo")
+        .unwrap()
+        .workflow
+        .unwrap();
+    assert!(empty_variables(&demo, &place, false).is_empty());
+}

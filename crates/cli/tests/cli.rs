@@ -1500,6 +1500,18 @@ steps:
     title: \"#{{ pr.number }}\"
 ";
 
+/// Uses the workspace's task; needs no agent.
+const TASK_NOTE: &str = "id: task-note
+name: Task note
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: tell
+    action: notify
+    title: \"{{ workspace.task }}\"
+";
+
 /// A workflow that needs no agent, so these tests need none on PATH either.
 const PING: &str = "id: ping
 name: Ping
@@ -1622,4 +1634,26 @@ fn a_run_inside_a_workspace_needs_no_name_and_bad_inputs_are_refused() {
 
     let queued = fx.ys_from(Some(&path), &["workflow", "run", "ping"]).ok();
     assert!(queued.contains(made["name"].as_str().unwrap()), "{queued}");
+}
+
+#[test]
+fn a_run_says_what_it_will_find_nothing_for_before_it_goes() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "task-note.yaml", TASK_NOTE);
+    // Made with --no-agent: no first message, so no task.
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .unwrap();
+    let said = fx
+        .ys(&["workflow", "run", "task-note", "--workspace", name])
+        .ok();
+    assert!(said.contains("Queued `task-note`"), "{said}");
+    assert!(
+        said.contains("Note: `{{ workspace.task }}` will be empty"),
+        "{said}"
+    );
+    let json = fx.ys(&["workflow", "runs", "--json"]).ok();
+    assert!(json.contains("task-note"), "queued all the same: {json}");
 }

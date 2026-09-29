@@ -228,21 +228,39 @@ fn start_run(
         &Looking(ys),
     )?;
 
+    // What the run will find nothing for: said, not refused.
+    let empty = match (
+        workflow::find(&ys.data_dir, id).and_then(|e| e.workflow),
+        runs::Place::load(&ys.store, &workspace.id)?,
+    ) {
+        (Some(found), Some(place)) => {
+            let shared = ys.store.memory_shared(&workspace.project_id)?;
+            runs::empty_variables(&found, &place, shared)
+        }
+        _ => Vec::new(),
+    };
+
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Queued<'a> {
         run: &'a str,
         workflow: &'a str,
         workspace: &'a str,
+        /// Variables the run will render as nothing, and why.
+        empty: &'a [String],
     }
     let queued = Queued {
         run: &run_id,
         workflow: id,
         workspace: &workspace.name,
+        empty: &empty,
     };
     out.emit(&queued, || {
         let short = memory::short_id(&run_id);
         println!("Queued `{id}` in {} as run {short}.", workspace.name);
+        for line in &empty {
+            println!("Note: {line}");
+        }
         println!("Follow it with: ys workflow runs --run {short}");
     })
 }

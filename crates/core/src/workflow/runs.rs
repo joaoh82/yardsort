@@ -224,6 +224,44 @@ pub fn pull_request_of(
     Ok(crate::forge::pull_request_for(&listed, &branch).cloned())
 }
 
+/// What a run of `workflow` in this place would render as nothing, and why: a variable the
+/// file uses that the workspace does not have. Not a refusal — an empty line in a prompt is
+/// allowed — but something to know before starting.
+pub fn empty_variables(workflow: &Workflow, place: &Place, memory_shared: bool) -> Vec<String> {
+    let used: std::collections::BTreeSet<String> = workflow
+        .steps
+        .iter()
+        .flat_map(|step| texts(&step.action))
+        .flat_map(template::placeholders)
+        .map(|var| var.path.join("."))
+        .collect();
+    let name = &place.workspace.name;
+    let mut empty = Vec::new();
+    if used.contains("workspace.task") && place.task.is_none() {
+        empty.push(format!(
+            "`{{{{ workspace.task }}}}` will be empty: `{name}` was started without a first message."
+        ));
+    }
+    if used.contains("workspace.branch") && place.workspace.branch.is_none() {
+        empty.push(format!(
+            "`{{{{ workspace.branch }}}}` will be empty: `{name}` is not on a branch Yardsort made."
+        ));
+    }
+    if used.contains("workspace.base_branch") && place.workspace.base_branch.is_none() {
+        empty.push(format!(
+            "`{{{{ workspace.base_branch }}}}` will be empty: Yardsort did not start `{name}`'s \
+             branch from another."
+        ));
+    }
+    if used.contains("memory") && !memory_shared {
+        empty.push(format!(
+            "`{{{{ memory }}}}` will be empty: {} does not give its agents its memory.",
+            place.project.name
+        ));
+    }
+    empty
+}
+
 /// Whether a run of `workflow` needs the workspace's pull request: it waits for activity on it,
 /// or names it in a `{{ pr.… }}`.
 pub fn needs_pull_request(workflow: &Workflow) -> bool {

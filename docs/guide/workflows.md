@@ -37,7 +37,11 @@ The center panel shows three things:
 **Run…** opens a dialog. It asks for the workspace and for each of the workflow's inputs; an agent
 is picked from the same list as the composer's, with those not installed greyed out. If the
 workflow works with the pull request, the dialog looks it up and shows it, or says why there is
-none to use. The run starts when you press **Run**, and appears at the top of the runs at once.
+none to use. It also says what the run would find nothing for: a prompt that uses
+`{{ workspace.task }}` in a workspace started without a first message, `{{ memory }}` in a
+project that does not share it, or the branch of the project's own checkout. Those are notes,
+not refusals; the line renders empty. The run starts when you press **Run**, and appears at the
+top of the runs at once.
 
 A workspace's menu has **Run workflow…**, which opens the same dialog for that workspace, and
 **Request code review…**, which opens it on the built-in review.
@@ -157,7 +161,9 @@ checks everything before anything is queued:
 
 Optional inputs left out take their `default`, or are empty. A workflow runs once at a time in a
 workspace: asking again while it runs is refused, naming the run. With Yardsort closed, `ys` says
-so and queues nothing.
+so and queues nothing. When the run would find nothing for a variable the file uses — the task
+of a workspace started without a first message, say — `ys` says so in a note after queuing, and
+the Run dialog shows it before; the run goes ahead either way.
 
 `ys workflow run` prints the run's id and returns at once. The app picks the run up within a
 second, and moves each step on as soon as it can: every second, and the moment an agent goes

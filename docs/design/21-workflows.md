@@ -504,6 +504,13 @@ Describe it, as [the UI](#the-ui) above now describes it. What changed on the wa
   out, so a slower answer never replaces a newer one, what was typed meanwhile, or a discard.
 - **Who wrote it is said in words** (the agent's label, or the model the key asks), from the
   same answer the commit-message button shows, so the person knows what they are trusting.
+- **A run says what it will find nothing for.** Found in the window: a workflow a model wrote
+  used `{{ workspace.task }}`, and the workspace had been started without a first message, so
+  the prompt said "Its task is:" and nothing. `runs::empty_variables` names each variable the
+  file uses that this workspace has nothing for — the task, the branches of the project's own
+  checkout, memory a project does not share — and the Run dialog shows the list before starting
+  while `ys workflow run` prints it as notes after queuing. Not a refusal: an empty line is
+  allowed, and the built-in behaves the same.
 - **The agent path gets the standing instruction in front of its prompt.** Drafting gives an
   agent only the question, and the system prompt to the key's path; a commit message needs no
   more, a workflow's format is the whole point. Checked once for real: Claude Code, in an empty

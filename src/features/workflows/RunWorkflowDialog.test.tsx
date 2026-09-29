@@ -62,6 +62,7 @@ const withPr: RunPreview = {
   pullRequest: { number: 7, url: "https://github.com/o/r/pull/7", title: "Fix the login" },
   pullRequestProblem: null,
   needsOrigin: true,
+  empty: [],
 };
 
 const fixLogin = worktree("app", "fix-login");
@@ -152,6 +153,19 @@ describe("RunWorkflowDialog", () => {
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
     expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, { depth: "safe" });
+  });
+
+  it("says what the run will render as nothing, and still lets it run", async () => {
+    core.workflowPreview.mockResolvedValue({
+      ...withPr,
+      empty: [
+        "`{{ workspace.task }}` will be empty: `fix-login` was started without a first message.",
+      ],
+    });
+    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
+    const list = await screen.findByRole("list", { name: "Will be empty" });
+    expect(list).toHaveTextContent("started without a first message");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).toBeEnabled());
   });
 
   it("will not start without the pull request a workflow needs, and says why", async () => {
