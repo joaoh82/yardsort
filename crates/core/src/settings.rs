@@ -101,6 +101,9 @@ pub struct DraftSettings {
     /// The model the API key path asks for. Ignored when an agent does the writing — that one
     /// uses whatever the agent itself is configured to use.
     pub model: String,
+    /// The harness that writes workflow files. None chooses the first installed writer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_harness_id: Option<String>,
 }
 
 impl Default for DraftSettings {
@@ -108,6 +111,7 @@ impl Default for DraftSettings {
         Self {
             enabled: true,
             model: crate::draft::DEFAULT_MODEL.to_owned(),
+            workflow_harness_id: None,
         }
     }
 }
@@ -475,6 +479,34 @@ mod tests {
             Thresholds::default().off_task_at_percent,
             "a threshold nobody touched keeps the default"
         );
+    }
+
+    #[test]
+    fn workflow_writer_defaults_to_automatic_and_survives_reload() {
+        let (_dir, path) = file();
+        let file = SettingsFile::load(path.clone());
+        assert_eq!(file.get().draft.workflow_harness_id, None);
+        file.update(|s| s.draft.workflow_harness_id = Some("codex".into()))
+            .unwrap();
+        assert_eq!(
+            SettingsFile::load(path.clone())
+                .get()
+                .draft
+                .workflow_harness_id
+                .as_deref(),
+            Some("codex")
+        );
+        file.update(|s| s.draft.workflow_harness_id = None).unwrap();
+        assert_eq!(
+            SettingsFile::load(path.clone())
+                .get()
+                .draft
+                .workflow_harness_id,
+            None
+        );
+        assert!(!std::fs::read_to_string(path)
+            .unwrap()
+            .contains("workflow_harness_id"));
     }
 
     #[test]

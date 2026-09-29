@@ -571,3 +571,19 @@ still to be done, and is the milestone's exit.
 left panel now has a section above projects), [03-architecture](03-architecture.md) (the engine
 and the driver), [05-roadmap](05-roadmap.md) (M22), [06-open-questions](06-open-questions.md)
 (21–23), [08](08-manual-checklist.md) (§22).
+
+### Workflow writer preference and chart navigation
+
+Settings → Assist now stores `[draft].workflow_harness_id`: absent means Automatic, otherwise
+workflow descriptions use that installed, enabled harness with `write_args`. Automatic filters
+for installed commands before choosing, so an absent Claude installation cannot hide Codex or
+a custom writer. Status and execution share the same resolution. An unavailable explicit choice
+is reported rather than silently choosing another harness. Workspace drafting keeps its existing
+preference for the workspace's agent; both paths retain the optional Anthropic fallback.
+
+Chart nodes are keyboard-accessible buttons with one selected step. The YAML parser supplies a
+step-id-to-source-line map with each check, including semantically invalid files. It ignores
+lookalikes in prompts and omits ambiguous duplicate ids. The editor waits for positions from its
+current text before navigating, marks the selected id line, and scrolls it into view without
+changing the file or taking focus from the chart. Clicking the same step again navigates again;
+clicking the background clears the mark. Built-in read-only files support the same navigation.

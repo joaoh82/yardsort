@@ -4,7 +4,7 @@ use tauri::AppHandle;
 use yardsort_core::draft::{self, Want};
 
 use super::anthropic::{self, AnthropicError};
-use super::{ask, ask_agent, writer, DraftStatus};
+use super::{ask, ask_agent, available_writer, DraftStatus};
 use crate::assist::key::{self, KeyStore};
 use crate::changes::commands::workspace;
 use crate::changes::{Changes, Scope};
@@ -37,22 +37,28 @@ fn harnesses(state: &AppState) -> Vec<HarnessDef> {
 }
 
 fn status(state: &AppState, preferred: Option<&str>) -> DraftStatus {
+    status_for(state, preferred, false)
+}
+
+fn status_for(state: &AppState, preferred: Option<&str>, strict: bool) -> DraftStatus {
     let settings = state.settings.get().draft;
     let all = harnesses(state);
-    let harness = writer(&all, preferred).map(|def| def.label.clone());
+    let selected = available_writer(&all, &state.env(), preferred, strict);
+    let selection_problem = selected.as_ref().err().map(|error| error.message.clone());
+    let harness = selected.ok().flatten().map(|(_, def)| def.label);
     let (found, _) = anthropic_key(state);
     let key = found.is_some();
-    let problem = match (&harness, key) {
+    let problem = selection_problem.or_else(|| match (&harness, key) {
         (None, false) => Some(
             "No agent here can write one, and there is no Anthropic API key. Give a harness its \
              non-interactive arguments in Settings → Harnesses, or add a key in Settings → Assist."
                 .to_owned(),
         ),
         _ => None,
-    };
+    });
     DraftStatus {
         enabled: settings.enabled,
-        available: settings.enabled && (harness.is_some() || key),
+        available: settings.enabled && problem.is_none() && (harness.is_some() || key),
         harness,
         key,
         model: settings.model,
@@ -65,6 +71,55 @@ fn status(state: &AppState, preferred: Option<&str>) -> DraftStatus {
 #[specta::specta]
 pub async fn draft_status(app: AppHandle, harness_id: Option<String>) -> IpcResult<DraftStatus> {
     blocking(app, move |state| Ok(status(state, harness_id.as_deref()))).await
+}
+
+/// Workflow writing has its own harness preference; commit and PR writers stay workspace-based.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowWriterStatus {
+    pub harness_id: Option<String>,
+    pub status: DraftStatus,
+}
+
+fn workflow_status(state: &AppState) -> WorkflowWriterStatus {
+    let harness_id = state.settings.get().draft.workflow_harness_id;
+    let status = status_for(state, harness_id.as_deref(), true);
+    WorkflowWriterStatus { harness_id, status }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_writer_status(app: AppHandle) -> IpcResult<WorkflowWriterStatus> {
+    blocking(app, |state| Ok(workflow_status(state))).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn workflow_save_writer(
+    app: AppHandle,
+    harness_id: Option<String>,
+) -> IpcResult<WorkflowWriterStatus> {
+    blocking(app, move |state| {
+        available_writer(&harnesses(state), &state.env(), harness_id.as_deref(), true)?;
+        state
+            .settings
+            .update(|settings| {
+                settings.draft.workflow_harness_id = harness_id;
+            })
+            .map_err(|error| {
+                IpcError::new(
+                    "settings_write_failed",
+                    format!("Could not save settings: {error}"),
+                )
+            })?;
+        Ok(workflow_status(state))
+    })
+    .await
+}
+
+pub(crate) fn workflow_writers(state: &AppState) -> IpcResult<Writers> {
+    let preferred = state.settings.get().draft.workflow_harness_id;
+    writers_for(state, preferred.as_deref(), true)
 }
 
 /// Keep an Anthropic API key in the OS credential store. Never read back into the webview.
@@ -141,6 +196,10 @@ pub(crate) type Writers = (Option<(Program, HarnessDef)>, Option<String>);
 /// Who can write here: the agent, the key, or neither — in which case this is the error that
 /// says so. The switch in settings is checked first: off means nobody.
 pub(crate) fn writers(state: &AppState, harness_id: Option<&str>) -> IpcResult<Writers> {
+    writers_for(state, harness_id, false)
+}
+
+fn writers_for(state: &AppState, harness_id: Option<&str>, strict: bool) -> IpcResult<Writers> {
     if !state.settings.get().draft.enabled {
         return Err(IpcError::new(
             "draft_off",
@@ -149,8 +208,7 @@ pub(crate) fn writers(state: &AppState, harness_id: Option<&str>) -> IpcResult<W
     }
     let all = harnesses(state);
     let env = state.env();
-    let agent = writer(&all, harness_id)
-        .and_then(|def| Program::find(&env, &def.command).map(|program| (program, def.clone())));
+    let agent = available_writer(&all, &env, harness_id, strict)?;
     let (key, _) = anthropic_key(state);
     if agent.is_none() && key.is_none() {
         return Err(IpcError::new(

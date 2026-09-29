@@ -37,6 +37,8 @@ pub struct WorkflowItem {
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowCheck {
+    /// Step id to its current YAML source line, for chart navigation.
+    pub step_lines: BTreeMap<String, u32>,
     /// The workflow, when the text checks out.
     pub workflow: Option<Workflow>,
     pub id: Option<String>,
@@ -153,13 +155,16 @@ pub async fn workflow_list(app: AppHandle) -> IpcResult<Vec<WorkflowItem>> {
 #[tauri::command]
 #[specta::specta]
 pub fn workflow_check(text: String) -> WorkflowCheck {
+    let step_lines = workflow::step_lines(&text);
     match workflow::parse(&text) {
         Ok(workflow) => WorkflowCheck {
+            step_lines,
             id: Some(workflow.id.clone()),
             workflow: Some(workflow),
             problems: Vec::new(),
         },
         Err(invalid) => WorkflowCheck {
+            step_lines,
             workflow: None,
             id: invalid.id,
             problems: invalid.problems,
@@ -364,7 +369,7 @@ pub async fn workflow_describe(app: AppHandle, description: String) -> IpcResult
     }
     let handle = app.clone();
     let (agent, key, root, writer) = blocking(app, |state| {
-        let (agent, key) = crate::draft::commands::writers(state, None)?;
+        let (agent, key) = crate::draft::commands::workflow_writers(state)?;
         let git = crate::git::Git::new(&state.env())?;
         let root = describe::scratch_dir(&state.data_dir, &git)?;
         let writer = crate::draft::commands::writer_label(state, agent.as_ref());

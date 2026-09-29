@@ -23,7 +23,7 @@ use specta::Type;
 
 use crate::error::{IpcError, IpcResult};
 
-pub use parse::parse;
+pub use parse::{parse, step_lines};
 
 /// The schema version this build reads. A file asking for a later one is listed, not run.
 pub const SCHEMA_VERSION: u32 = 1;

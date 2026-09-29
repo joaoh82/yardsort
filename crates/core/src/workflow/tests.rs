@@ -927,3 +927,16 @@ fn removing_a_replacement_brings_the_built_in_back() {
         Source::BuiltIn
     );
 }
+
+#[test]
+fn chart_source_lines_follow_yaml_ids_not_lookalikes_in_prompts() {
+    let text = "id: same\ninputs:\n  - id: same\nsteps:\n  - action: notify\n    'id': \"same\"\n    body: |\n      - id: decoy\n  - { action: notify, id: second }\n";
+    assert_eq!(
+        super::step_lines(text),
+        std::collections::BTreeMap::from([("same".into(), 6), ("second".into(), 9)])
+    );
+    let edited = format!("# comment\n{text}");
+    assert_eq!(super::step_lines(&edited)["same"], 7);
+    assert!(super::step_lines("steps: [").is_empty());
+    assert!(super::step_lines("steps: [{id: same}, {id: same}]").is_empty());
+}

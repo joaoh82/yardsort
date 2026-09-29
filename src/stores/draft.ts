@@ -7,6 +7,8 @@ export type Drafting = "commitMessage" | "pullRequest";
 
 interface DraftStore {
   status: DraftStatus | null;
+  workflowWriter: Awaited<ReturnType<typeof ipc.workflowWriterStatus>> | null;
+  loadWorkflowWriter: () => Promise<void>;
   busy: Drafting | null;
   error: string | null;
 
@@ -44,6 +46,14 @@ export const useDraftStore = create<DraftStore>((set, get) => {
 
   return {
     status: null,
+    workflowWriter: null,
+    async loadWorkflowWriter() {
+      try {
+        set({ workflowWriter: await ipc.workflowWriterStatus() });
+      } catch {
+        set({ workflowWriter: null });
+      }
+    },
     busy: null,
     error: null,
 

@@ -127,6 +127,15 @@ Both apply to workspaces created from now on; existing ones stay where they are.
 | **Capture what Claude Code reports**                      | Off by default. Claude Code started from Yardsort is given hooks that report each prompt, tool, turn and session end as metadata — see [What Claude Code reports](activity.md#what-claude-code-reports). Your own Claude Code settings are never edited; the hooks ride on a per-launch settings file. Needs the recording switch above.                                                                        |
 | **Clear all recorded activity**                           | Forgets every recorded event and run at once. Beneath it: how much is recorded, where the exit spool, the agents' inbox and the Claude Code hooks file are, and counters for anything that went wrong while recording.                                                                                                                                                                                          |
 
+## Workflow writer
+
+Under **Assist → Writing commit messages, pull requests and workflows**, choose the
+**Workflow writer** used by **Write it** on a new workflow. **Automatic** finds an installed,
+enabled harness with **Write args**; you can instead select a specific available harness.
+The choice is saved as `workflow_harness_id` under `[draft]` in `settings.toml` and does not
+change the agent used for workspace commit or pull request drafts. See [Workflows](workflows.md)
+and [Assist](assist.md) for availability and API fallback behaviour.
+
 ## Environment variables
 
 For testing and unusual setups:

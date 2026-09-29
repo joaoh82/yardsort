@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { errorMessage, ipc, type Step, type WorkflowCheck } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { useProjectsStore } from "@/stores/projects";
@@ -40,6 +40,10 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
 
   const [check, setCheck] = useState<WorkflowCheck | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
+  const [checkedText, setCheckedText] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ id: string | null } | null>(null);
+  // A fresh request also lets a second click jump back to the same step after scrolling away.
+  const selectStep = useCallback((id: string | null) => setSelection({ id }), []);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const runSteps = useWorkflowStore((s) => (selectedRun ? s.steps[selectedRun] : undefined));
   const [running, setRunning] = useState(false);
@@ -56,6 +60,7 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
       void ipc.workflowCheck(text).then((found) => {
         if (!current) return;
         setCheck(found);
+        setCheckedText(text);
         // The chart keeps the last shape that checked out while the file is mid-edit.
         if (found.workflow) setSteps(found.workflow.steps);
       }, console.error);
@@ -241,7 +246,14 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="h-[42%] min-h-40 shrink-0 border-b border-line">
             <Suspense fallback={null}>
-              {steps.length > 0 && <WorkflowChart steps={steps} run={runSteps} />}
+              {steps.length > 0 && (
+                <WorkflowChart
+                  steps={steps}
+                  run={runSteps}
+                  selectedStep={selection?.id ?? null}
+                  onSelect={selectStep}
+                />
+              )}
             </Suspense>
           </div>
           {isNew && <DescribeWorkflow />}
@@ -253,6 +265,8 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
                 onChange={builtIn ? undefined : setDraft}
                 problems={problems}
                 readOnly={builtIn}
+                selection={selection}
+                stepLines={checkedText === text ? check?.stepLines : undefined}
               />
             </Suspense>
           </div>

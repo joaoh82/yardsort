@@ -88,6 +88,8 @@ export const commands = {
 	projectPullRequests: (projectId: string, refresh: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh })),
 	/**  Who would write, for this workspace. `harnessId` is the agent the workspace is using. */
 	draftStatus: (harnessId: string | null) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_status", { harnessId })),
+	workflowWriterStatus: () => typedError<WorkflowWriterStatus, IpcError>(__TAURI_INVOKE("workflow_writer_status")),
+	workflowSaveWriter: (harnessId: string | null) => typedError<WorkflowWriterStatus, IpcError>(__TAURI_INVOKE("workflow_save_writer", { harnessId })),
 	/**  Write a commit message for what the workspace has not committed. */
 	draftCommitMessage: (workspaceId: string, harnessId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("draft_commit_message", { workspaceId, harnessId })),
 	draftPullRequest: (workspaceId: string, harnessId: string | null) => typedError<DraftedPullRequest, IpcError>(__TAURI_INVOKE("draft_pull_request", { workspaceId, harnessId })),
@@ -1423,6 +1425,8 @@ export type Workflow = {
 
 /**  What checking a file's text found. */
 export type WorkflowCheck = {
+	/**  Step id to its current YAML source line, for chart navigation. */
+	stepLines: { [key in string]: number },
 	/**  The workflow, when the text checks out. */
 	workflow: Workflow | null,
 	id: string | null,
@@ -1470,6 +1474,12 @@ export type WorkflowStepRun = {
 	endedAt: number | null,
 	outputs: { [key in string]: string },
 	note: string | null,
+};
+
+/**  Workflow writing has its own harness preference; commit and PR writers stay workspace-based. */
+export type WorkflowWriterStatus = {
+	harnessId: string | null,
+	status: DraftStatus,
 };
 
 export type Workspace = {

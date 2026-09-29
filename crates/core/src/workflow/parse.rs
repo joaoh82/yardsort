@@ -180,6 +180,38 @@ impl RawStep {
     }
 }
 
+/// Source lines for chart navigation, including files with semantic errors. Read YAML rather
+/// than searching text: prompts can themselves contain `- id:`, and keys may be quoted or reordered.
+pub fn step_lines(text: &str) -> BTreeMap<String, u32> {
+    #[derive(Deserialize)]
+    struct Source {
+        steps: Vec<SourceStep>,
+    }
+    #[derive(Deserialize)]
+    struct SourceStep {
+        id: Spanned<String>,
+    }
+    let Ok(source) = serde_saphyr::from_str::<Source>(text) else {
+        return BTreeMap::new();
+    };
+    let mut lines = BTreeMap::new();
+    let mut duplicates = BTreeSet::new();
+    for step in source.steps {
+        let id = step.id.value;
+        if lines
+            .insert(id.clone(), step.id.referenced.line() as u32)
+            .is_some()
+        {
+            duplicates.insert(id);
+        }
+    }
+    // A duplicated id has no unambiguous node to point at.
+    for id in duplicates {
+        lines.remove(&id);
+    }
+    lines
+}
+
 /// Check `text` and build the workflow it describes, or say everything that is wrong with it.
 pub fn parse(text: &str) -> Result<Workflow, Invalid> {
     let head = serde_saphyr::from_str::<Head>(text).ok();

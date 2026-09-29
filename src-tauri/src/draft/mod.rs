@@ -180,6 +180,30 @@ pub fn writer<'a>(harnesses: &'a [HarnessDef], preferred: Option<&str>) -> Optio
         .or_else(|| harnesses.iter().find(usable))
 }
 
+/// Resolve availability before choosing, so an absent first harness cannot hide installed ones.
+/// An explicit workflow choice is strict: never silently substitute a different agent.
+pub fn available_writer(
+    harnesses: &[HarnessDef],
+    env: &crate::env::ShellEnv,
+    preferred: Option<&str>,
+    strict: bool,
+) -> IpcResult<Option<(Program, HarnessDef)>> {
+    let available: Vec<_> = harnesses
+        .iter()
+        .filter(|def| def.enabled && !def.write_args.is_empty())
+        .filter(|def| Program::find(env, &def.command).is_some())
+        .cloned()
+        .collect();
+    if strict && preferred.is_some_and(|id| !available.iter().any(|def| def.id == id)) {
+        return Err(IpcError::new(
+            "workflow_writer_unavailable",
+            "The selected workflow writer is unavailable. Enable and install it with Write args in Settings → Harnesses, or choose another Workflow writer in Settings → Assist.",
+        ));
+    }
+    Ok(writer(&available, preferred)
+        .and_then(|def| Program::find(env, &def.command).map(|program| (program, def.clone()))))
+}
+
 /// The system prompt and user prompt for what is being asked.
 pub fn ask(want: Want, task: Option<&str>, diff: &str) -> (&'static str, String) {
     (want.system(), draft::prompt(want, task, diff))
@@ -246,6 +270,44 @@ mod tests {
     fn nobody_writes_when_nobody_can() {
         assert_eq!(writer(&[def("mine", true, false)], Some("mine")), None);
         assert_eq!(writer(&[], None), None);
+    }
+
+    #[test]
+    fn installed_writers_are_chosen_before_missing_ones_and_explicit_choices_are_respected() {
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let mut missing = def("claude", true, true);
+        missing.command = "/no-such-yardsort-writer/claude".into();
+        let mut codex = def("codex", true, true);
+        codex.command = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut custom = codex.clone();
+        custom.id = "custom".into();
+        let mut all = vec![missing, codex, custom];
+        let chosen = |all: &[HarnessDef], preferred, strict| {
+            available_writer(all, &env, preferred, strict).map(|found| found.map(|(_, def)| def.id))
+        };
+        assert_eq!(chosen(&all, None, true).unwrap().as_deref(), Some("codex"));
+        assert_eq!(
+            chosen(&all, Some("custom"), true).unwrap().as_deref(),
+            Some("custom")
+        );
+        assert!(chosen(&all, Some("claude"), true).is_err());
+        assert!(chosen(&all, Some("removed"), true).is_err());
+        assert_eq!(
+            chosen(&all, Some("claude"), false).unwrap().as_deref(),
+            Some("codex")
+        );
+        all[1].enabled = false;
+        all[2].write_args.clear();
+        assert!(chosen(&all, None, true).unwrap().is_none());
+        assert!(chosen(&all, Some("codex"), true).is_err());
+        assert!(chosen(&all, Some("custom"), true).is_err());
     }
 
     #[test]
