@@ -53,8 +53,17 @@ sends anything outside the docs to GitHub.
 Colours are the desktop app's own tokens (`src/app/globals.css`): dark by default, light when the
 system asks for it. Geist for text, JetBrains Mono for commands, versions and labels. 8px grid,
 6px radii on controls and 10px on cards and screenshots, 1px lines, no shadows except under the
-hero screenshot. The page reads correctly without JavaScript; scripts only add platform detection
-and the copy buttons.
+hero screenshot. The page reads correctly without JavaScript; scripts only add platform detection,
+the copy buttons and analytics.
+
+## Analytics
+
+The site — never the desktop app — reports to PostHog (EU cloud): pageviews, clicks, and session
+replay when it is switched on in the PostHog project. `src/instrumentation-client.ts` starts it,
+and only when `NEXT_PUBLIC_POSTHOG_KEY` is set at build time, so local builds and forks send
+nothing. In production the browser talks to `yardsort.sh/ingest`, which `vercel.json` rewrites to
+PostHog, so blockers of posthog.com don't drop events; a host other than Vercel needs the same
+two rewrites. Under `bun run dev` with the key set, it talks to PostHog directly.
 
 ## Deploying
 
@@ -62,5 +71,6 @@ Deployed on Vercel at [yardsort.sh](https://yardsort.sh); every push to `main` r
 host works. To set it up on Vercel: import the repository, set **Root Directory** to `website`, and
 leave "Include files outside the root directory" on (the default) — the build reads `../docs`,
 `../CHANGELOG.md` and `../src-tauri/tauri.conf.json`. Framework, install and build commands are
-detected. The site shows the version and changelog as of its last build, so redeploy after a
-release (a push to `main` does that).
+detected. Set `NEXT_PUBLIC_POSTHOG_KEY` (the PostHog project's `phc_…` key) under Environment
+Variables for Production. The site shows the version and changelog as of its last build, so
+redeploy after a release (a push to `main` does that).
