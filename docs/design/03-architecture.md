@@ -505,7 +505,9 @@ and the commit confirmation still stands between it and git.
 reserves a new destination directory, clones with the existing git environment, and registers
 the repository only after success. A failed clone removes only an empty directory; files left
 behind are reported and preserved. Cloning runs off the UI thread without holding the
-worktree reconciliation lock.
+worktree reconciliation lock. The frontend tracks pending command requests for the sidebar;
+closing the clone dialog leaves the command running. Completion registers the project but
+selects its workspace only while the original dialog is still open.
 
 `workspace_reveal_file` resolves a workspace id and validates its relative path in Rust before
 calling the cross-platform opener. Deleted files open the nearest existing parent directory;

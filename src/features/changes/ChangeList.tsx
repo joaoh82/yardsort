@@ -1,4 +1,3 @@
-import { useFileContextMenu } from "./useFileContextMenu";
 import { useMemo } from "react";
 import type { ChangeSet, FileChange, Scope } from "@/lib/ipc";
 import { useAssistStore } from "@/stores/assist";
@@ -6,6 +5,7 @@ import { useChangesStore } from "@/stores/changes";
 import { AssistBadges, AssistNote } from "./AssistBadges";
 import { ProvenanceNote, ReportedBadges } from "./ReportedBadges";
 import { useReports } from "./reported";
+import { useFileContextMenu } from "./useFileContextMenu";
 
 const KIND: Record<FileChange["kind"], { letter: string; label: string; colour: string }> = {
   added: { letter: "A", label: "Added", colour: "text-green-400" },

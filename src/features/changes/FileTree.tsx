@@ -1,7 +1,7 @@
-import { useFileContextMenu } from "./useFileContextMenu";
 import { useCallback, useEffect, useState } from "react";
 import { errorMessage, ipc, type FileEntry } from "@/lib/ipc";
 import { useChangesStore } from "@/stores/changes";
+import { useFileContextMenu } from "./useFileContextMenu";
 
 /**
  * The workspace's files, one folder at a time: a folder's contents are only asked for when it is

@@ -56,6 +56,7 @@ export function Sidebar() {
   const loaded = useProjectsStore((s) => s.loaded);
   const empty = useProjectsStore((s) => s.projects.length === 0);
   const error = useProjectsStore((s) => s.error);
+  const pendingClones = useProjectsStore((s) => s.pendingClones);
   const notice = useProjectsStore((s) => s.notice);
   const dismiss = useProjectsStore((s) => s.dismiss);
   const [adding, setAdding] = useState(false);
@@ -170,6 +171,11 @@ export function Sidebar() {
         <ProjectTree query={query} />
       )}
 
+      {pendingClones.map((request) => (
+        <p key={request.id} role="status" className="px-3 py-2 text-ink-muted">
+          Cloning {request.name}…
+        </p>
+      ))}
       <OutcomePrompt />
       {/* While the dialog is open it shows errors itself. */}
       {!adding && (error ?? notice) && (

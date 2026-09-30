@@ -47,15 +47,25 @@ removed again.
 
 ### Clone a GitHub repository
 
-Choose **Clone a GitHub repository**, enter an HTTPS or SSH clone URL (or
-`owner/repository`), and give the local folder a **Name** and **Location**.
+Choose **Clone a GitHub repository** and enter an HTTPS or SSH clone URL, or
+`owner/repository`. Links such as `github.com/owner/repository`, `www.github.com/…`, and
+`http://github.com/…` are accepted and normalized to HTTPS. **Name** starts with the repository's
+name, without `.git`, and follows URL edits until you edit the name yourself. Choose a
+**Location** with **Browse…** or type it in.
+
 **Clone project** downloads the repository into `<location>/<name>`, adds it to the sidebar,
-and selects its **local** workspace. Its history and `origin` remote are preserved; the
-location is remembered for next time. Existing folders, including empty ones, are refused.
+and selects its **local** workspace if the dialog is still open. Its history and `origin`
+remote are preserved; the location is remembered for next time. Existing folders, including
+empty ones, are refused.
 
 Cloning uses your installed git and its existing credentials. For private repositories, set up
-git access before cloning. The dialog stays open with **Cloning…** while git runs, and shows
-any error so you can correct the URL, credentials or destination and retry. If a failed clone
+git access before cloning. While git runs, choose **Run in background**, press **Escape**, or
+click outside the dialog to keep using your terminals. Closing the dialog does not cancel the
+clone. The sidebar shows **Cloning name…** until it finishes. A background completion adds
+the project and shows a notice without switching away from your current workspace.
+
+Errors appear in the dialog, or in the sidebar when it is closed. Correct the URL, credentials
+or destination and retry (open the clone dialog again if you closed it). If a failed clone
 leaves files behind, the error names the folder; inspect it or choose another name before
 retrying. Yardsort does not recursively delete that folder.
 

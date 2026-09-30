@@ -13,15 +13,18 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
   useModalFocus(dialogRef);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && !busy && onClose();
+    const onKeyDown = (event: KeyboardEvent) =>
+      event.key === "Escape" && (!busy || mode === "clone") && onClose();
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, busy]);
+  }, [onClose, busy, mode]);
 
   return (
     <div
       className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[18vh]"
-      onPointerDown={(event) => event.target === event.currentTarget && !busy && onClose()}
+      onPointerDown={(event) =>
+        event.target === event.currentTarget && (!busy || mode === "clone") && onClose()
+      }
     >
       <div
         ref={dialogRef}
@@ -111,15 +114,24 @@ function CreateForm({
   const [name, setName] = useState("");
   const [parent, setParent] = useState(lastParentDir ?? "");
   const [repository, setRepository] = useState("");
+  const [nameEdited, setNameEdited] = useState(false);
+  const mounted = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    mounted.current = true;
     useProjectsStore.getState().dismiss();
     nameRef.current?.focus();
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   const browse = async () => {
-    const folder = await native.pickFolder("Create the project in…", parent || undefined);
+    const folder = await native.pickFolder(
+      cloning ? "Clone the repository into…" : "Create the project in…",
+      parent || undefined,
+    );
     if (folder) setParent(folder);
   };
 
@@ -129,8 +141,11 @@ function CreateForm({
     setBusy(true);
     useProjectsStore.getState().dismiss();
     const created = cloning
-      ? await useProjectsStore.getState().cloneProject(repository, name, parent)
+      ? await useProjectsStore
+          .getState()
+          .cloneProject(repository, name, parent, () => mounted.current)
       : await useProjectsStore.getState().createProject(name, parent);
+    if (!mounted.current) return;
     setBusy(false);
     if (!created) return;
     const selected = useProjectsStore.getState().selectedWorkspaceId;
@@ -154,7 +169,20 @@ function CreateForm({
               <input
                 ref={cloning ? nameRef : undefined}
                 value={repository}
-                onChange={(event) => setRepository(event.target.value)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setRepository(value);
+                  if (!nameEdited) {
+                    setName(
+                      value
+                        .trim()
+                        .replace(/\/+$/, "")
+                        .split("/")
+                        .at(-1)
+                        ?.replace(/\.git$/, "") ?? "",
+                    );
+                  }
+                }}
                 placeholder="https://github.com/owner/repository"
                 spellCheck={false}
                 autoComplete="off"
@@ -171,7 +199,10 @@ function CreateForm({
           <input
             ref={cloning ? undefined : nameRef}
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setName(event.target.value);
+              setNameEdited(true);
+            }}
             placeholder="my-project"
             spellCheck={false}
             autoComplete="off"
@@ -231,6 +262,15 @@ function CreateForm({
           </button>
         </div>
       </fieldset>
+      {cloning && busy && (
+        <button
+          type="button"
+          onClick={onDone}
+          className="mt-3 rounded border border-line px-3 py-1.5 hover:border-accent"
+        >
+          Run in background
+        </button>
+      )}
     </form>
   );
 }

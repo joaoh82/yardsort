@@ -6,7 +6,9 @@ has the downloads and the full commit lists.
 ## Unreleased
 
 - **Clone projects from GitHub.** Add a project from an HTTPS or SSH repository URL, or
-  `owner/repository`, choosing its local name and location.
+  `owner/repository`, choosing its local name and location. Common GitHub web links are accepted,
+  the folder name is suggested from the repository, and cloning can continue in the background
+  while you use your terminals.
 - **Show files in your file explorer.** Right-click entries in Files or Changes to reveal
   their location; deleted files open the nearest existing folder.
 

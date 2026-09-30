@@ -324,7 +324,17 @@ impl Projects<'_> {
 /// Accept GitHub's HTTPS/SSH clone URLs or the convenient owner/repository form.
 fn github_url(repository: &str) -> IpcResult<String> {
     let repository = repository.trim();
-    let (path, ssh) = if let Some(path) = repository.strip_prefix("https://github.com/") {
+    let (path, ssh) = if let Some(path) = [
+        "https://github.com/",
+        "https://www.github.com/",
+        "http://github.com/",
+        "http://www.github.com/",
+        "github.com/",
+        "www.github.com/",
+    ]
+    .iter()
+    .find_map(|prefix| repository.strip_prefix(prefix))
+    {
         (path, false)
     } else if let Some(path) = repository.strip_prefix("git@github.com:") {
         (path, true)
@@ -420,7 +430,15 @@ mod tests {
 
     #[test]
     fn github_repository_forms_are_normalized_and_other_inputs_refused() {
-        for input in ["owner/repo", " https://github.com/owner/repo.git/ "] {
+        for input in [
+            "owner/repo",
+            " https://github.com/owner/repo.git/ ",
+            "github.com/owner/repo",
+            "www.github.com/owner/repo.git",
+            "https://www.github.com/owner/repo",
+            "http://github.com/owner/repo",
+            "http://www.github.com/owner/repo.git/",
+        ] {
             assert_eq!(
                 github_url(input).unwrap(),
                 "https://github.com/owner/repo.git"
@@ -442,6 +460,12 @@ mod tests {
             "a/b c",
             "file:///tmp/repo",
             "https://github.com.evil/a/b",
+            "github.com.evil/a/b",
+            "www.github.com.evil/a/b",
+            "http://github.com.evil/a/b",
+            "https://www.github.com.evil/a/b",
+            "https://token@github.com/a/b",
+            "github.com/a/b?token=secret",
         ] {
             assert_eq!(
                 github_url(input).unwrap_err().code,
