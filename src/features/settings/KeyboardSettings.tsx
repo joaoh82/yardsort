@@ -34,6 +34,7 @@ export function KeyboardSettings() {
 
 function BindingEditor() {
   const stored = usePreferencesStore((s) => s.bindings);
+  const notice = usePreferencesStore((s) => s.bindingNotice);
   const loaded = usePreferencesStore((s) => s.loaded);
   const saving = usePreferencesStore((s) => s.saving);
   const error = usePreferencesStore((s) => s.error);
@@ -42,7 +43,7 @@ function BindingEditor() {
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const problem = bindingError(draft);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(stored);
+  const dirty = notice !== null || JSON.stringify(draft) !== JSON.stringify(stored);
   return (
     <section aria-label="Keyboard shortcuts" className="flex h-full flex-col gap-3 p-5">
       <div>
@@ -56,6 +57,11 @@ function BindingEditor() {
           Escape cancels recording. Copy, paste and save are reserved.
         </p>
       </div>
+      {notice && (
+        <p role="status" className="text-accent">
+          {notice}
+        </p>
+      )}
       <input
         aria-label="Find shortcut"
         placeholder="Find a command…"

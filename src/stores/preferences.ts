@@ -14,6 +14,7 @@ export const TOUR_KEY = "onboarding.welcomeSeen";
 interface Preferences {
   loaded: boolean;
   bindings: Bindings;
+  bindingNotice: string | null;
   welcomeSeen: boolean;
   error: string | null;
   saving: boolean;
@@ -25,6 +26,7 @@ interface Preferences {
 export const usePreferencesStore = create<Preferences>((set, get) => ({
   loaded: false,
   bindings: { ...DEFAULT_BINDINGS },
+  bindingNotice: null,
   welcomeSeen: false,
   error: null,
   saving: false,
@@ -32,9 +34,11 @@ export const usePreferencesStore = create<Preferences>((set, get) => ({
     if (!hasCore()) return;
     try {
       const ui = await ipc.uiStateLoad();
+      const { bindings, notice } = readBindings(ui[BINDINGS_KEY]);
       set({
         loaded: true,
-        bindings: readBindings(ui[BINDINGS_KEY]),
+        bindings,
+        bindingNotice: notice,
         welcomeSeen: ui[TOUR_KEY] === "true",
         error: null,
       });
@@ -52,7 +56,7 @@ export const usePreferencesStore = create<Preferences>((set, get) => ({
     set({ saving: true, error: null });
     try {
       await ipc.uiStateSave(BINDINGS_KEY, JSON.stringify(bindings));
-      set({ bindings: { ...bindings } });
+      set({ bindings: { ...bindings }, bindingNotice: null });
       return true;
     } catch (error) {
       set({ error: errorMessage(error) });

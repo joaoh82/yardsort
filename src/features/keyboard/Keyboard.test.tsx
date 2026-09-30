@@ -44,6 +44,7 @@ beforeEach(() => {
     loaded: true,
     bindings: { ...DEFAULT_BINDINGS },
     error: null,
+    bindingNotice: null,
     saving: false,
   });
   useLayoutStore.setState({
@@ -88,6 +89,84 @@ describe("keyboard navigation", () => {
     fireEvent.keyDown(window, { key: "K", ...mod });
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "B", ...mod });
     expect(useLayoutStore.getState().collapsed.left).toBe(false);
+  });
+  it.each(["textarea", "input", "select", "contenteditable"])(
+    "keeps modified arrows in %s controls without leaving the composer",
+    (kind) => {
+      useProjectsStore.setState({
+        composingProjectId: "p-demo",
+        projects: [project("demo"), project("other")],
+      });
+      render(
+        <>
+          <Host />
+          {kind === "textarea" ? (
+            <textarea aria-label="Editor" defaultValue="Keep this draft" />
+          ) : kind === "input" ? (
+            <input aria-label="Editor" defaultValue="Keep this draft" />
+          ) : kind === "select" ? (
+            <select aria-label="Editor">
+              <option>Keep this draft</option>
+            </select>
+          ) : (
+            <div contentEditable suppressContentEditableWarning>
+              <span aria-label="Editor">Keep this draft</span>
+            </div>
+          )}
+        </>,
+      );
+      const editor = screen.getByLabelText("Editor");
+      for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+        const event = new KeyboardEvent("keydown", {
+          key,
+          ...mod,
+          bubbles: true,
+          cancelable: true,
+        });
+        fireEvent(editor, event);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      expect(enter).not.toHaveBeenCalled();
+      expect(useProjectsStore.getState().composingProjectId).toBe("p-demo");
+      if (kind === "textarea" || kind === "input") expect(editor).toHaveValue("Keep this draft");
+    },
+  );
+  it("still dispatches modified arrows from xterm's helper textarea", () => {
+    render(
+      <>
+        <Host />
+        <textarea className="xterm-helper-textarea" aria-label="Terminal input" />
+      </>,
+    );
+    const event = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      ...mod,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(screen.getByLabelText("Terminal input"), event);
+    expect(enter).toHaveBeenCalledWith("w-demo", false);
+    expect(event.defaultPrevented).toBe(true);
+  });
+  it("leaves disabled command keys unconsumed", () => {
+    useProjectsStore.setState({ composingProjectId: "p-demo" });
+    render(<Host />);
+    for (const key of ["ArrowLeft", "ArrowRight", "T", "W"]) {
+      const event = new KeyboardEvent("keydown", { key, ...mod, bubbles: true, cancelable: true });
+      fireEvent(screen.getByRole("button", { name: "Background" }), event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(core.ptyClose).not.toHaveBeenCalled();
+  });
+  it("keeps the command palette available from text fields", () => {
+    render(
+      <>
+        <Host />
+        <input aria-label="Search" />
+      </>,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Search"), { key: "K", ...mod });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
   it("cycles only usable workspaces and wraps", () => {
     useProjectsStore.setState({
@@ -192,6 +271,33 @@ describe("shortcut configuration", () => {
     expect(screen.getByRole("button", { name: "Save shortcuts" })).toBeDisabled();
     expect(core.uiStateSave).not.toHaveBeenCalled();
   });
+  it.each(["bad json", JSON.stringify({ toggleLeft: "k", toggleRight: "j" })])(
+    "shows recovered binding notices and only clears them after saving (%s)",
+    async (raw) => {
+      core.uiStateLoad.mockResolvedValue({ "keyboard.bindings": raw });
+      await usePreferencesStore.getState().load();
+      const user = userEvent.setup();
+      render(<KeyboardSettings />);
+      expect(screen.getByRole("status")).toHaveTextContent(/Saved shortcuts|left unassigned/);
+      if (raw !== "bad json") {
+        expect(usePreferencesStore.getState().bindings).toMatchObject({
+          palette: null,
+          toggleLeft: "k",
+          toggleRight: "j",
+        });
+      }
+      core.uiStateSave.mockRejectedValueOnce(new Error("Disk full"));
+      await user.click(screen.getByRole("button", { name: "Save shortcuts" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Disk full");
+      expect(usePreferencesStore.getState().bindingNotice).not.toBeNull();
+      await user.click(screen.getByRole("button", { name: "Save shortcuts" }));
+      expect(usePreferencesStore.getState().bindingNotice).toBeNull();
+      const stored = core.uiStateSave.mock.lastCall![1];
+      core.uiStateLoad.mockResolvedValue({ "keyboard.bindings": stored });
+      await act(() => usePreferencesStore.getState().load());
+      expect(usePreferencesStore.getState().bindingNotice).toBeNull();
+    },
+  );
   it("leaves active bindings unchanged when the core refuses a save", async () => {
     core.uiStateSave.mockRejectedValueOnce(new Error("Disk full"));
     const user = userEvent.setup();

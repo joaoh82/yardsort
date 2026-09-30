@@ -572,7 +572,9 @@ fails when the checked-in bindings are stale.
 `src/lib/shortcuts.ts` defines the command IDs, defaults, validation and platform-aware key
 matching. The shell dispatches saved bindings through `features/keyboard/commands.ts`; the
 palette calls the same actions. Workspace selection uses the existing sidebar action, so its
-shell/session behavior is shared. The shortcut listener yields to dialogs and menus. Copy,
+shell/session behavior is shared. The shortcut listener yields to dialogs and menus, and leaves
+modified arrows to editable controls except xterm’s helper textarea. Disabled commands do not
+consume their keys. Copy,
 paste and save keys are reserved; unmodified terminal keys remain outside the app dispatcher.
 
 The preferences store mirrors `keyboard.bindings` and `onboarding.welcomeSeen` from the core's
@@ -582,3 +584,9 @@ tour waits for successful preference loading before offering the invitation. Acc
 skipping it records the choice; replay uses transient layout state. Tour steps highlight real
 panels without starting agents or creating projects, restoring the original collapsed panels
 when the tour closes. Shared modal focus handling traps Tab and restores the previous control.
+
+Binding loading reserves valid saved choices before filling missing defaults. Default collisions
+leave only the affected command unassigned; invalid individual entries and duplicate saved keys
+are recovered locally. The preferences cache carries a recovery notice into Keyboard settings.
+Malformed JSON or a non-object map activates defaults with a notice. Recovery does not write to
+the core: the user reviews and saves the result, which clears the notice only after success.

@@ -43,7 +43,11 @@ Tab reaches the action buttons beside a project or workspace. On a terminal tab,
 
 Dialogs keep keyboard focus inside them and return it when closed. Global app shortcuts pause
 while a dialog or menu is open, including during shortcut recording. Plain terminal keys remain
-with the running program.
+with the running program. Modified arrows in text fields (including the composer, commit
+message, search inputs and editable code) keep their normal caret movement and selection behavior.
+They do not switch workspaces or terminals while you edit. Other shortcuts, including Mod+K,
+remain available in text fields. A focused terminal still uses Mod+arrows for app navigation.
+Disabled commands leave their keys unconsumed.
 
 ## Customize bindings
 
@@ -60,6 +64,15 @@ press Save to apply those too. Bindings are saved in the profile's SQLite UI sta
 restarts. If saving fails, the previous bindings remain active and the error is shown. Button
 hints and the palette reflect saved bindings. The bottom-bar Shortcuts button remains available
 if you clear the shortcut that opens this screen.
+
+Saved bindings take precedence over defaults added by a newer version. If a new default
+conflicts with your shortcut, the new command stays unassigned and remains in the palette.
+Keyboard settings explains any recovered bindings: invalid individual entries use an available
+default; duplicate saved entries keep the first command in the cheat sheet and leave the later
+one unassigned. Unrelated custom bindings and explicitly cleared bindings are preserved. If the
+saved data cannot be read as a command map, defaults are used with a notice. Review and press
+**Save shortcuts** to keep recovered bindings and clear the notice; loading never overwrites the
+stored data automatically.
 
 ## Why Ctrl+Shift?
 

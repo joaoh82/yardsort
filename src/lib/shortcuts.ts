@@ -43,18 +43,76 @@ export function bindingError(bindings: Bindings): string | null {
   }
   return null;
 }
-export function readBindings(raw: string | undefined): Bindings {
+export interface LoadedBindings {
+  bindings: Bindings;
+  notice: string | null;
+}
+
+/** Saved choices take precedence over defaults introduced by a newer app version. */
+export function readBindings(raw: string | undefined): LoadedBindings {
+  const fallback = (notice: string | null): LoadedBindings => ({
+    bindings: { ...DEFAULT_BINDINGS },
+    notice,
+  });
+  if (raw === undefined) return fallback(null);
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(raw ?? "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULT_BINDINGS };
-    const bindings = { ...DEFAULT_BINDINGS };
-    for (const { id } of COMMANDS) {
-      if (Object.hasOwn(value, id)) bindings[id] = (value as Bindings)[id];
-    }
-    return bindingError(bindings) ? { ...DEFAULT_BINDINGS } : bindings;
+    value = JSON.parse(raw);
   } catch {
-    return { ...DEFAULT_BINDINGS };
+    return fallback(
+      "Saved shortcuts could not be read. Defaults are active; save shortcuts to replace the unreadable data.",
+    );
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallback(
+      "Saved shortcuts are not a command map. Defaults are active; save shortcuts to replace the invalid data.",
+    );
+  }
+  const saved = value as Record<string, unknown>;
+  const bindings = { ...DEFAULT_BINDINGS };
+  const used = new Set<string>();
+  const needsDefault = new Set<CommandId>();
+  const notices: string[] = [];
+  for (const { id, label } of COMMANDS) {
+    if (!Object.hasOwn(saved, id)) {
+      needsDefault.add(id);
+      continue;
+    }
+    const key = saved[id];
+    if (!validBinding(key)) {
+      needsDefault.add(id);
+      notices.push(`${label} had an invalid saved binding; its default was considered instead.`);
+      continue;
+    }
+    if (key && used.has(key)) {
+      bindings[id] = null;
+      notices.push(
+        `${label} was left unassigned because its saved binding duplicates another saved shortcut.`,
+      );
+    } else {
+      bindings[id] = key;
+      if (key) used.add(key);
+    }
+  }
+  for (const { id, label } of COMMANDS) {
+    if (!needsDefault.has(id)) continue;
+    const key = DEFAULT_BINDINGS[id];
+    if (key && used.has(key)) {
+      bindings[id] = null;
+      notices.push(
+        `${label} was left unassigned because its default conflicts with a saved shortcut.`,
+      );
+    } else {
+      bindings[id] = key;
+      if (key) used.add(key);
+    }
+  }
+  return {
+    bindings,
+    notice: notices.length
+      ? `${notices.join(" ")} Review and save shortcuts to keep these recovered bindings.`
+      : null,
+  };
 }
 export function eventBinding(event: KeyboardEvent): string | null {
   if (event.isComposing || !isModKey(event) || (!isMac && event.metaKey)) return null;

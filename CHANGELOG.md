@@ -15,6 +15,9 @@ has the downloads and the full commit lists.
   Mod+K, focus the three panels, cycle workspaces and terminal tabs, and navigate trees with
   arrow keys. Settings → Keyboard is the searchable cheat sheet and binding editor, with
   conflict checks, clear/reset controls and saved bindings. Dialogs keep keyboard focus inside.
+  Modified arrows retain text-editing behavior in text fields, and disabled commands leave keys
+  unconsumed. Saved custom bindings take precedence over new defaults; recovery notices explain
+  conflicts or invalid saved data without resetting unrelated shortcuts.
 - **An optional welcome tour.** First launch asks whether to take a short guided tour of the
   main panels. Skip or finish it once; replay it any time from Help / Tour in the bottom bar.
 
