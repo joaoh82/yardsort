@@ -4,6 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 const out = path.resolve(import.meta.dirname, "../out");
+const articles = JSON.parse(
+  fs.readFileSync(path.resolve(import.meta.dirname, "../content/articles.json"), "utf8"),
+);
+const articleFiles = new Map(
+  articles.map((article) => [`${article.section}/${article.slug}/index.html`, article]),
+);
+assert.equal(articleFiles.size, articles.length, "Article addresses must be unique");
+const seenArticles = new Set();
 const origin = "https://www.yardsort.sh";
 const decode = (value) =>
   value.replace(
@@ -68,7 +76,7 @@ for (const file of htmlFiles(out)) {
   assert.equal(meta("twitter:description"), description);
   assert.equal(meta("og:url"), canonical);
   assert.equal(meta("og:site_name"), "Yardsort");
-  assert.equal(meta("og:type"), "website");
+  assert.equal(meta("og:type"), articleFiles.has(relative) ? "article" : "website");
   assert.equal(meta("twitter:card"), "summary_large_image");
   const image = new URL(meta("og:image"));
   assert.equal(image.origin, origin);
@@ -149,11 +157,73 @@ for (const file of htmlFiles(out)) {
         ),
       );
     }
+  } else if (relative.startsWith("blog/") || relative.startsWith("tutorials/")) {
+    const article = articleFiles.get(relative);
+    const breadcrumb = schemas.find((s) => s["@type"] === "BreadcrumbList");
+    assert(breadcrumb, `${relative}: missing breadcrumbs`);
+    assert.equal(breadcrumb.itemListElement.at(-1).item, canonical);
+    assert.equal(breadcrumb.itemListElement.length, article ? 3 : 2);
+    assert.equal([...html.matchAll(/<h1\b/g)].length, 1, `${relative}: expected one H1`);
+    if (article) {
+      seenArticles.add(relative);
+      assert.equal(schemas.length, 2);
+      const schema = schemas.find((s) => ["BlogPosting", "TechArticle"].includes(s["@type"]));
+      assert(schema, `${relative}: missing article schema`);
+      assert.equal(schema["@type"], article.section === "blog" ? "BlogPosting" : "TechArticle");
+      assert.equal(schema.headline, article.title);
+      assert.equal(schema.description, description);
+      assert.equal(schema.url, canonical);
+      assert.equal(schema.mainEntityOfPage, canonical);
+      assert.equal(schema.image, image.href);
+      assert.equal(schema.author.name, "Yardsort");
+      assert.equal(meta("article:published_time"), article.published);
+      assert.equal(meta("article:modified_time"), article.updated);
+      assert.equal(schema.datePublished, article.published);
+      assert.equal(schema.dateModified, article.updated);
+      for (const date of [article.published, article.updated, article.verified].filter(Boolean)) {
+        assert.match(date, /^\d{4}-\d{2}-\d{2}$/);
+        assert(html.includes(`dateTime="${date}"`), `${relative}: date must be visible`);
+      }
+      assert(
+        textContent(html.replace(/<script\b[\s\S]*?<\/script>/g, "")).includes("By Yardsort"),
+        `${relative}: missing visible author`,
+      );
+      if (article.category === "Comparison") {
+        assert(article.verified, `${relative}: comparisons need verification dates`);
+        assert(html.includes("not a hands-on benchmark"));
+      }
+    } else {
+      assert.equal(schemas.length, 1);
+      for (const entry of articles.filter((a) => relative.startsWith(`${a.section}/`))) {
+        assert(
+          html.includes(`href="/${entry.section}/${entry.slug}/"`),
+          "Index must link every article",
+        );
+      }
+    }
+    // Verify actual rendered article links and assets, including heading fragments.
+    for (const match of html.matchAll(/(?:href|src)="(\/[^" ]*)"/g)) {
+      const url = new URL(decode(match[1]), origin);
+      if (url.origin !== origin) continue;
+      const target = path.join(
+        out,
+        decodeURIComponent(url.pathname),
+        url.pathname.endsWith("/") ? "index.html" : "",
+      );
+      assert(fs.existsSync(target), `${relative}: broken local link ${url.pathname}`);
+      if (url.hash && target.endsWith(".html")) {
+        assert(
+          fs.readFileSync(target, "utf8").includes(`id="${decodeURIComponent(url.hash.slice(1))}"`),
+          `${relative}: broken fragment ${url.href}`,
+        );
+      }
+    }
   } else {
     assert.equal(schemas.length, 0, "Product schema belongs on the homepage");
   }
 }
 
+assert.equal(seenArticles.size, articles.length, "Every registered article must be exported");
 assert.equal(answerSections.length, 2, "Expected homepage and guide answers");
 assert.equal(answerSections[0].length, 7, "Expected all seven product questions");
 assert.deepEqual(answerSections[0], answerSections[1], "Homepage and guide answers must agree");

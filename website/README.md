@@ -1,7 +1,6 @@
 # The Yardsort website
 
-The site at [yardsort.sh](https://yardsort.sh): the landing page, the documentation and the
-changelog. It is its own application — its own `package.json`, its own lockfile — and shares
+The site at [yardsort.sh](https://yardsort.sh): the landing page, documentation, changelog, blog and tutorials. It is its own application — its own `package.json`, its own lockfile — and shares
 nothing with the desktop app's build. It lives in this repository so that one change can update the
 app, its docs and the site together.
 
@@ -22,15 +21,16 @@ From the repository root: `just site-dev`, `just site-build`, `just site-check`.
 
 Nothing about the product is written twice. At build time the site reads:
 
-| On the site         | Source                                                                                    |
-| ------------------- | ----------------------------------------------------------------------------------------- |
-| `/docs/…`           | `../docs/quick-start.md`, `../docs/guide/*` and the roadmap — the same files GitHub shows |
-| `/changelog/`       | `../CHANGELOG.md`; the landing page shows its newest four entries                         |
-| Version in the hero | `../src-tauri/tauri.conf.json`                                                            |
-| Screenshots         | `../docs/images/`, copied to `public/docs-images/` before dev and build                   |
-| GitHub stars        | The GitHub API, at build time; left out if the request fails or it is 0                   |
+| On the site               | Source                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| `/docs/…`                 | `../docs/quick-start.md`, `../docs/guide/*` and the roadmap — the same files GitHub shows |
+| `/changelog/`             | `../CHANGELOG.md`; the landing page shows its newest four entries                         |
+| `/blog/…`, `/tutorials/…` | `content/articles.json` and Markdown under `content/blog/` and `content/tutorials/`       |
+| Version in the hero       | `../src-tauri/tauri.conf.json`                                                            |
+| Screenshots               | `../docs/images/`, copied to `public/docs-images/` before dev and build                   |
+| GitHub stars              | The GitHub API, at build time; left out if the request fails or it is 0                   |
 
-Only the landing page's own copy lives here, in `src/components/landing/`. It came from the README;
+The landing page's own copy lives here, in `src/components/landing/`. It came from the README;
 when the README's claims change (platforms, install methods, what is pending), change it too.
 
 ## Writing documentation
@@ -48,6 +48,31 @@ previews. An entry can give a `path` when the file should not
 decide the address: the roadmap is `docs/design/05-roadmap.md`, shown at `/docs/roadmap/`. Write links the way they work on GitHub
 (`workspaces.md#anchor`, `../images/x.png`, `../CONTRIBUTING.md`); the site rewrites them, and
 sends anything outside the docs to GitHub.
+
+## Writing blog posts and tutorials
+
+Add a plain Markdown file to `content/blog/` or `content/tutorials/`, then register it in
+`content/articles.json`. The registry supplies its slug, title, description, category, publication
+date and last substantive update. Comparisons also have a `verified` date: update it only after
+checking the cited official sources. Set publication dates to the actual launch date before merging.
+Keep dates in `YYYY-MM-DD` format. Entries are displayed in registry order; unregistered drafts
+are not exported. Only reviewed entries belong in the registry.
+
+Use absolute site paths for internal links (such as `/docs/guide/workspaces/`) and full HTTPS
+URLs for external sources. Markdown is compiled at build time with the existing docs renderer;
+article routes have no client-side content fetch. The visible title and metadata come from the
+registry. The renderer removes the Markdown H1, leaving one page H1.
+
+Both sections have static index and detail pages, breadcrumbs, unique metadata, article social
+tags, organizational author attribution and `BlogPosting`/`TechArticle` structured data.
+The existing branded share card is shared across them. The sitemap includes both indexes and
+all registered articles. Keep article dates, attribution and schema consistent with visible text.
+
+Comparisons disclose that Yardsort is the publisher and distinguish documentation research from
+hands-on testing. Link claims to official sources, include competitors' strengths, distinguish
+paid plans from provider costs, and label roadmap features as plans. Do not invent performance
+results, personal stories, endorsements or availability. The initial product story incorporates
+the creator's account; Sync is explicitly described as in development.
 
 ## Search and link previews
 
@@ -68,7 +93,7 @@ Vercel. Each page supplies its own canonical, description and Open Graph/Twitter
 documentation descriptions live alongside their titles in `DOCS_NAV`. Page URLs use trailing
 slashes, matching the static export. Keep the hosting redirect and these URLs consistent.
 
-`src/app/sitemap.ts` generates `/sitemap.xml` from the same docs registry, plus the homepage and
+`src/app/sitemap.ts` generates `/sitemap.xml` from the docs and article registries, plus their indexes, the homepage and
 changelog. Quick start is `/docs/`, not `/docs/quick-start/`. `src/app/robots.ts` allows public
 crawling and points to the sitemap. Both files are generated at build time and need no server.
 

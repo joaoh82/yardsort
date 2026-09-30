@@ -27,6 +27,12 @@ For supported agents, platforms, costs, worktree isolation and data handling, re
 | [The `ys` command line](guide/cli.md)                         | Installing it; starting, deleting and handing off workspaces from a terminal or a script    |
 | [Troubleshooting](guide/troubleshooting.md)                   | "Command not found", blank windows, where your data lives                                   |
 
+## Tutorials and articles
+
+Follow the [parallel Claude Code and Codex tutorial](https://www.yardsort.sh/tutorials/claude-code-codex-parallel-worktrees/)
+for a complete two-task example. The [blog](https://www.yardsort.sh/blog/) covers product decisions,
+worktree tradeoffs, and comparisons with Superset and Conductor.
+
 ## Getting help
 
 - Something broken or missing? [Open an issue](https://github.com/joaoh82/yardsort/issues/new/choose) —

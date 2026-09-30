@@ -5,6 +5,9 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Blog and tutorials on the website.** Read the story behind Yardsort, a practical parallel-agent
+  tutorial, a worktree explainer, and dated comparisons with Superset and Conductor.
+
 - **Answers and navigation on the website.** The homepage and About Yardsort guide explain
   supported agents, costs, worktrees, background sessions and data handling. Documentation pages
   now have breadcrumb navigation; product and breadcrumb structured data describe the same content.

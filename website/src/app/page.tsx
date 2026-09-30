@@ -1,3 +1,4 @@
+import { Reading } from "@/components/landing/reading";
 import { Also } from "@/components/landing/also";
 import { Assist } from "@/components/landing/assist";
 import { Cli } from "@/components/landing/cli";
@@ -25,6 +26,7 @@ export default function Home() {
       <Harnesses />
       <Also />
       <Questions />
+      <Reading />
       <OpenSource />
     </>
   );

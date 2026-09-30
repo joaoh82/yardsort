@@ -1,0 +1,49 @@
+[
+  {
+    "section": "blog",
+    "slug": "why-we-built-yardsort",
+    "title": "Why we built Yardsort",
+    "description": "The decisions behind Yardsort: parallel coding on Linux, macOS and Windows, real agent terminals, and workspaces you can inspect with git.",
+    "category": "Inside Yardsort",
+    "published": "2026-09-30",
+    "updated": "2026-09-30"
+  },
+  {
+    "section": "blog",
+    "slug": "git-worktrees-for-parallel-agents",
+    "title": "What git worktrees solve—and what they don’t—for parallel coding agents",
+    "description": "Git worktrees separate working files and branches. Learn why parallel coding agents still need dependency setup, separate ports and integration tests.",
+    "category": "Engineering",
+    "published": "2026-09-30",
+    "updated": "2026-09-30"
+  },
+  {
+    "section": "blog",
+    "slug": "yardsort-vs-superset",
+    "title": "Yardsort vs Superset",
+    "description": "Compare Yardsort and Superset for parallel coding agents: desktop platforms, local and remote workspaces, review tools, session persistence and costs.",
+    "category": "Comparison",
+    "published": "2026-09-30",
+    "updated": "2026-09-30",
+    "verified": "2026-09-30"
+  },
+  {
+    "section": "blog",
+    "slug": "yardsort-vs-conductor",
+    "title": "Yardsort vs Conductor",
+    "description": "Compare Yardsort’s local desktop workflow with Conductor’s Mac and cloud workspaces, including agent choice, review tools, pricing and data handling.",
+    "category": "Comparison",
+    "published": "2026-09-30",
+    "updated": "2026-09-30",
+    "verified": "2026-09-30"
+  },
+  {
+    "section": "tutorials",
+    "slug": "claude-code-codex-parallel-worktrees",
+    "title": "Run Claude Code and Codex in parallel with git worktrees",
+    "description": "Use Yardsort to give Claude Code and Codex separate tasks, prepare their worktrees, review each diff and open two focused pull requests.",
+    "category": "Parallel agents",
+    "published": "2026-09-30",
+    "updated": "2026-09-30"
+  }
+]
