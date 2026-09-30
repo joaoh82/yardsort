@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
+import { CookieConsent } from "@/components/cookie-consent";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <SiteHeader />
         <main>{children}</main>
         <SiteFooter />
+        <CookieConsent />
       </body>
     </html>
   );

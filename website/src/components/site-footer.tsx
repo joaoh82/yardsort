@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { CookieSettingsLink } from "@/components/cookie-consent";
 import { CONTACT_EMAIL, REPO_URL, repoFile } from "@/lib/site";
 
 export function SiteFooter() {
@@ -19,6 +20,7 @@ export function SiteFooter() {
           <a href={repoFile("CONTRIBUTING.md")}>Contributing</a>
           <a href={repoFile("SECURITY.md")}>Security</a>
           <a href={repoFile("LICENSE")}>GPL-3.0</a>
+          <CookieSettingsLink />
         </nav>
       </div>
       <p className="mt-6 text-[13px] text-muted">

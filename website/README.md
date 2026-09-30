@@ -58,10 +58,17 @@ the copy buttons and analytics.
 
 ## Analytics
 
-The site — never the desktop app — reports to PostHog (EU cloud): pageviews, clicks, and session
-replay when it is switched on in the PostHog project. `src/instrumentation-client.ts` starts it,
-and only when `NEXT_PUBLIC_POSTHOG_KEY` is set at build time, so local builds and forks send
-nothing. In production the browser talks to `yardsort.sh/ingest`, which `vercel.json` rewrites to
+The site — never the desktop app — reports to PostHog (EU cloud). `src/instrumentation-client.ts`
+starts it, and only when `NEXT_PUBLIC_POSTHOG_KEY` is set at build time, so local builds and forks
+send nothing and show no banner.
+
+A cookie banner (`src/components/cookie-consent.tsx`) asks first, and nothing is captured until the
+visitor answers. **Accept** sets PostHog's cookies and allows pageviews, clicks and session replay
+(when replay is switched on in the PostHog project). **Decline** sets no cookies and leaves
+anonymous, cookieless pageviews, which PostHog drops unless cookieless tracking is switched on in
+the project. PostHog stores the answer itself, in local storage; **Cookie settings** in the footer
+asks again. Before an answer PostHog still loads the project's configuration and feature flags,
+which session replay needs, but records no event and stores nothing in the browser. In production the browser talks to `yardsort.sh/ingest`, which `vercel.json` rewrites to
 PostHog, so blockers of posthog.com don't drop events; a host other than Vercel needs the same
 two rewrites. Under `bun run dev` with the key set, it talks to PostHog directly.
 

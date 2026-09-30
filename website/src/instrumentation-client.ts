@@ -13,5 +13,9 @@ if (key) {
     // Pageviews on client-side navigation, pageleave, autocapture and session replay (switched on
     // in the PostHog project's settings) all follow these defaults.
     defaults: "2026-08-30",
+    // Nothing is captured until the visitor answers the cookie banner (cookie-consent.tsx).
+    // Declining leaves anonymous, cookieless pageviews, which the PostHog project must have
+    // switched on in its settings or they are dropped.
+    cookieless_mode: "on_reject",
   });
 }
