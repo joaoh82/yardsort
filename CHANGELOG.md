@@ -8,14 +8,9 @@ has the downloads and the full commit lists.
 - **Answers and navigation on the website.** The homepage and About Yardsort guide explain
   supported agents, costs, worktrees, background sessions and data handling. Documentation pages
   now have breadcrumb navigation; product and breadcrumb structured data describe the same content.
-- **Clearer website search and link previews.** Every guide now has its own description and
-  share title, with a branded preview image, consistent canonical URLs and a sitemap.
-- **Clone projects from GitHub.** Add a project from an HTTPS or SSH repository URL, or
-  `owner/repository`, choosing its local name and location. Common GitHub web links are accepted,
-  the folder name is suggested from the repository, and cloning can continue in the background
-  while you use your terminals.
-- **Show files in your file explorer.** Right-click entries in Files or Changes to reveal
-  their location; deleted files open the nearest existing folder.
+
+## 0.15.0
+
 - **Keyboard navigation and configurable shortcuts.** Search commands and workspaces with
   Mod+K, focus the three panels, cycle workspaces and terminal tabs, and navigate trees with
   arrow keys. Settings → Keyboard is the searchable cheat sheet and binding editor, with
@@ -25,6 +20,14 @@ has the downloads and the full commit lists.
   conflicts or invalid saved data without resetting unrelated shortcuts.
 - **An optional welcome tour.** First launch asks whether to take a short guided tour of the
   main panels. Skip or finish it once; replay it any time from Help / Tour in the bottom bar.
+- **Clone projects from GitHub.** Add a project from an HTTPS or SSH repository URL, or
+  `owner/repository`, choosing its local name and location. Common GitHub web links are accepted,
+  the folder name is suggested from the repository, and cloning can continue in the background
+  while you use your terminals.
+- **Show files in your file explorer.** Right-click entries in Files or Changes to reveal
+  their location; deleted files open the nearest existing folder.
+- **Clearer website search and link previews.** Every guide now has its own description and
+  share title, with a branded preview image, consistent canonical URLs and a sitemap.
 
 ## 0.14.0
 

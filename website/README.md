@@ -92,8 +92,26 @@ can retain older cards. Submit the sitemap in the site's webmaster tools when ac
 Colours are the desktop app's own tokens (`src/app/globals.css`): dark by default, light when the
 system asks for it. Geist for text, JetBrains Mono for commands, versions and labels. 8px grid,
 6px radii on controls and 10px on cards and screenshots, 1px lines, no shadows except under the
-hero screenshot. The page reads correctly without JavaScript; scripts only add platform detection
-and the copy buttons.
+hero screenshot. The page reads correctly without JavaScript; scripts only add platform detection,
+the copy buttons and analytics.
+
+## Analytics
+
+The site — never the desktop app — reports to PostHog (EU cloud). `src/instrumentation-client.ts`
+starts it, and only when `NEXT_PUBLIC_POSTHOG_KEY` is set at build time, so local builds and forks
+send nothing and show no banner.
+
+A cookie banner (`src/components/cookie-consent.tsx`) asks first, and nothing is captured until the
+visitor answers. **Accept** sets PostHog's cookies and allows pageviews, clicks and session replay
+(when replay is switched on in the PostHog project). **Decline** sets no cookies and leaves
+anonymous, cookieless pageviews, which PostHog drops unless cookieless tracking is switched on in
+the project. PostHog stores the answer itself, in local storage; **Cookie settings** in the footer
+asks again. Before an answer PostHog still loads the project's configuration and feature flags,
+which session replay needs, but records no event and stores nothing in the browser. In production the browser talks to `yardsort.sh/ingest`, which `vercel.json` rewrites to
+PostHog, so blockers of posthog.com don't drop events; a host other than Vercel needs the same
+rewrites. They match with regular expressions because a pattern like `/ingest/:path*` does not match
+PostHog's paths, which end in a slash (`/e/`, `/flags/`). The `config/` rule removes the slash that
+`trailingSlash` adds to `/array/<key>/config`, which PostHog serves only without it. Under `bun run dev` with the key set, it talks to PostHog directly.
 
 ## Deploying
 
@@ -101,5 +119,6 @@ Deployed on Vercel at [yardsort.sh](https://yardsort.sh); every push to `main` r
 host works. To set it up on Vercel: import the repository, set **Root Directory** to `website`, and
 leave "Include files outside the root directory" on (the default) — the build reads `../docs`,
 `../CHANGELOG.md` and `../src-tauri/tauri.conf.json`. Framework, install and build commands are
-detected. The site shows the version and changelog as of its last build, so redeploy after a
-release (a push to `main` does that).
+detected. Set `NEXT_PUBLIC_POSTHOG_KEY` (the PostHog project's `phc_…` key) under Environment
+Variables for Production. The site shows the version and changelog as of its last build, so
+redeploy after a release (a push to `main` does that).
