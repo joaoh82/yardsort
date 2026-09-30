@@ -97,7 +97,7 @@ asks again. Before an answer PostHog still loads the project's configuration and
 which session replay needs, but records no event and stores nothing in the browser. In production the browser talks to `yardsort.sh/ingest`, which `vercel.json` rewrites to
 PostHog, so blockers of posthog.com don't drop events; a host other than Vercel needs the same
 rewrites. They match with regular expressions because a pattern like `/ingest/:path*` does not match
-PostHog's paths, which end in a slash (`/e/`, `/flags/`). The `array` rule removes the slash that
+PostHog's paths, which end in a slash (`/e/`, `/flags/`). The `config/` rule removes the slash that
 `trailingSlash` adds to `/array/<key>/config`, which PostHog serves only without it. Under `bun run dev` with the key set, it talks to PostHog directly.
 
 ## Deploying
