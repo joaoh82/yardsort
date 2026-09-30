@@ -5,6 +5,8 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Clearer website search and link previews.** Every guide now has its own description and
+  share title, with a branded preview image, consistent canonical URLs and a sitemap.
 - **Clone projects from GitHub.** Add a project from an HTTPS or SSH repository URL, or
   `owner/repository`, choosing its local name and location. Common GitHub web links are accepted,
   the folder name is suggested from the repository, and cloning can continue in the background

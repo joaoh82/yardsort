@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ALL_DOCS, DEFAULT_DOC, docUrl, neighbours, readDoc, REPO_URL } from "@/lib/docs";
 import { renderDoc } from "@/lib/render-doc";
 import { mdxComponents } from "@/components/mdx-components";
+import { pageMetadata } from "@/lib/seo";
 
 type Props = { params: Promise<{ slug?: string[] }> };
 
@@ -20,7 +21,8 @@ function slugOf(parts?: string[]) {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const slug = slugOf((await params).slug);
   const entry = ALL_DOCS.find((d) => d.slug === slug);
-  return { title: entry ? `${entry.title} · Docs` : "Docs" };
+  if (!entry) notFound();
+  return pageMetadata(`${entry.title} · Yardsort Docs`, entry.description, docUrl(slug));
 }
 
 export default async function DocPage({ params }: Props) {

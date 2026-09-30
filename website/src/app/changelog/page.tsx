@@ -2,8 +2,13 @@ import type { Metadata } from "next";
 import { mdxComponents } from "@/components/mdx-components";
 import { renderMarkdown } from "@/lib/render-doc";
 import { readChangelog } from "@/lib/site";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = { title: "Changelog" };
+export const metadata: Metadata = pageMetadata(
+  "Changelog · Yardsort",
+  "See what's new in Yardsort: release notes, new features, improvements and fixes for the desktop app and ys command line.",
+  "/changelog",
+);
 
 // CHANGELOG.md from the repository root, rendered as it is.
 export default async function ChangelogPage() {
