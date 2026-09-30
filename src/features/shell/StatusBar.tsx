@@ -1,10 +1,13 @@
-import { formatShortcut } from "@/lib/platform";
+import { useShortcutLabel } from "@/stores/preferences";
 import { useAppStore } from "@/stores/app";
 import { useLayoutStore } from "@/stores/layout";
 import { usePreflightStore } from "@/stores/preflight";
 import { useTerminalStore } from "@/stores/terminals";
 
 export function StatusBar() {
+  const leftKey = useShortcutLabel("toggleLeft");
+  const rightKey = useShortcutLabel("toggleRight");
+  const paletteKey = useShortcutLabel("palette");
   const info = useAppStore((s) => s.info);
   const env = useAppStore((s) => s.env);
   const daemon = useAppStore((s) => s.daemon);
@@ -18,16 +21,40 @@ export function StatusBar() {
       <div className="flex items-center gap-1">
         <PanelToggle
           label="projects"
-          shortcut={formatShortcut("B")}
+          shortcut={leftKey}
           pressed={!collapsed.left}
           onClick={() => toggle("left")}
         />
         <PanelToggle
           label="changes"
-          shortcut={formatShortcut("B", { alt: true })}
+          shortcut={rightKey}
           pressed={!collapsed.right}
           onClick={() => toggle("right")}
         />
+      </div>
+      <div data-navigation="help" className="flex items-center gap-2">
+        <button
+          type="button"
+          title={`Commands and workspaces (${paletteKey})`}
+          onClick={() => useLayoutStore.getState().setPaletteOpen(true)}
+          className="rounded px-1 hover:bg-raised hover:text-ink"
+        >
+          Commands
+        </button>
+        <button
+          type="button"
+          onClick={() => useLayoutStore.getState().openSettings("keyboard")}
+          className="rounded px-1 hover:bg-raised hover:text-ink"
+        >
+          Shortcuts
+        </button>
+        <button
+          type="button"
+          onClick={() => useLayoutStore.getState().setTourOpen(true)}
+          className="rounded px-1 hover:bg-raised hover:text-ink"
+        >
+          Help / Tour
+        </button>
       </div>
       <div className="flex items-center gap-3 font-mono">
         {daemon && !daemon.running && (

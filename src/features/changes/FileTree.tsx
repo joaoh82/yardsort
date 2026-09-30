@@ -1,3 +1,4 @@
+import { treeNavigation } from "@/lib/treeNavigation";
 import { useCallback, useEffect, useState } from "react";
 import { errorMessage, ipc, type FileEntry } from "@/lib/ipc";
 import { useChangesStore } from "@/stores/changes";
@@ -17,7 +18,12 @@ interface TreeProps {
 
 export function FileTree(props: TreeProps) {
   return (
-    <ul role="tree" aria-label="Files" className="min-h-0 flex-1 overflow-y-auto py-1">
+    <ul
+      onKeyDown={treeNavigation}
+      role="tree"
+      aria-label="Files"
+      className="min-h-0 flex-1 overflow-y-auto py-1"
+    >
       <Folder {...props} dir="" depth={0} insideIgnored={false} />
     </ul>
   );

@@ -13,7 +13,7 @@ import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
 import { useFileDrop } from "@/lib/useFileDrop";
-import { formatShortcut } from "@/lib/platform";
+import { useShortcutLabel } from "@/stores/preferences";
 import { insertDroppedPaths } from "./drop";
 import { assistOn, useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
@@ -45,6 +45,7 @@ const SUGGEST_FROM_CHARS = 15;
  * is checked out, so there is no branch to pick and no worktree to make.
  */
 export function Composer({ project, runIn }: { project: Project; runIn?: Workspace }) {
+  const newWorkspaceKey = useShortcutLabel("newWorkspace");
   const allHarnesses = useHarnessStore((s) => s.harnesses);
   const harnesses = useMemo(() => allHarnesses.filter((h) => h.enabled), [allHarnesses]);
   const harnessesLoaded = useHarnessStore((s) => s.loaded);
@@ -512,8 +513,8 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             </p>
           ) : (
             <p className="text-ink-faint">
-              Enter to start · Shift+Enter for a new line · Esc to cancel · {formatShortcut("N")}{" "}
-              opens this again.{" "}
+              Enter to start · Shift+Enter for a new line · Esc to cancel · {newWorkspaceKey} opens
+              this again.{" "}
               {runIn
                 ? runIn.kind === "local"
                   ? "Runs in the project's own checkout, on the branch it has out. Nothing is created."

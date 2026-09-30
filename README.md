@@ -38,6 +38,11 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 
 ## Highlights
 
+- **Keyboard navigation you can configure.** A command palette, panel focus and workspace/tab
+  switching, with an in-app [shortcut cheat sheet and editor](docs/guide/shortcuts.md).
+- **A guided first look.** An optional welcome tour explains the main panels; replay it from
+  Help / Tour any time.
+
 - **Any terminal agent.** Claude Code, Codex, Grok, OpenCode, OMP, Cursor and Pi
   [out of the box](#supported-agents); add any other with a few lines of configuration — no
   plugin, no release to wait for.

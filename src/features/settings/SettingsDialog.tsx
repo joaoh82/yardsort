@@ -6,16 +6,19 @@ import { GeneralSettings } from "./GeneralSettings";
 import { HarnessSettings } from "./HarnessSettings";
 import { WorkspaceSettings } from "./WorkspaceSettings";
 
+import { useLayoutStore } from "@/stores/layout";
+import { KeyboardSettings } from "./KeyboardSettings";
+
 const SECTIONS = [
   ["harnesses", "Harnesses"],
   ["workspaces", "Workspaces"],
   ["assist", "Assist"],
   ["general", "General"],
+  ["keyboard", "Keyboard"],
 ] as const;
-type Section = (typeof SECTIONS)[number][0];
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
-  const [section, setSection] = useState<Section>("harnesses");
+  const [section, setSection] = useState(useLayoutStore.getState().settingsSection);
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef);
 
@@ -42,7 +45,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       >
         <header className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-3">
           <h2 className="mr-4 font-semibold">Settings</h2>
-          <div role="tablist" className="flex gap-1">
+          <div role="tablist" className="flex min-w-0 gap-1 overflow-x-auto">
             {SECTIONS.map(([id, label]) => (
               <button
                 key={id}
@@ -50,6 +53,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 role="tab"
                 aria-selected={section === id}
                 onClick={() => setSection(id)}
+                onKeyDown={(event) => {
+                  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                  event.preventDefault();
+                  const index = SECTIONS.findIndex(([candidate]) => candidate === id);
+                  const next =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? SECTIONS.length - 1
+                        : (index + (event.key === "ArrowRight" ? 1 : -1) + SECTIONS.length) %
+                          SECTIONS.length;
+                  setSection(SECTIONS[next]![0]);
+                  const tabs =
+                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                      '[role="tab"]',
+                    );
+                  tabs?.item(next).focus();
+                }}
                 className="rounded px-3 py-1 text-ink-muted hover:text-ink aria-selected:bg-raised aria-selected:text-ink"
               >
                 {label}
@@ -62,7 +83,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {section === "harnesses" ? (
+          {section === "keyboard" ? (
+            <KeyboardSettings />
+          ) : section === "harnesses" ? (
             <HarnessSettings />
           ) : section === "workspaces" ? (
             <WorkspaceSettings />

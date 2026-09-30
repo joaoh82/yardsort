@@ -2,6 +2,14 @@ import { Shot } from "@/components/shot";
 
 const POINTS = [
   {
+    title: "Keyboard navigation you can configure",
+    body: "Search commands and workspaces, focus panels and switch terminal tabs from the keyboard. An in-app cheat sheet lets you change bindings and restore the defaults.",
+  },
+  {
+    title: "A guided first look",
+    body: "An optional welcome tour explains the main panels the first time you open Yardsort. Skip it or replay it any time from Help / Tour.",
+  },
+  {
     title: "Private by construction",
     body: "No account, no telemetry, no keys of ours. Agents use their own logins; Yardsort just starts them. It checks for new versions, which you can switch off — and nothing else leaves your machine unless you switch Assist on and bring your own TypeSafe key.",
   },

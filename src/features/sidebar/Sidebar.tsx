@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useOutcomesStore } from "@/stores/outcomes";
 import { PanelHeader } from "@/features/shell/PanelHeader";
 import { hasCore } from "@/lib/ipc";
-import { formatShortcut } from "@/lib/platform";
+import { useShortcutLabel } from "@/stores/preferences";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
@@ -53,6 +53,8 @@ function usePullRequests() {
 
 /** Left panel: projects and their workspaces. */
 export function Sidebar() {
+  const openKey = useShortcutLabel("openProject");
+  const settingsKey = useShortcutLabel("settings");
   const loaded = useProjectsStore((s) => s.loaded);
   const empty = useProjectsStore((s) => s.projects.length === 0);
   const error = useProjectsStore((s) => s.error);
@@ -147,7 +149,7 @@ export function Sidebar() {
           <button
             type="button"
             aria-label="Add project"
-            title={`Add project (open a folder: ${formatShortcut("O")})`}
+            title={`Add project (open a folder: ${openKey})`}
             onClick={() => setAdding(true)}
             className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
           >
@@ -201,7 +203,7 @@ export function Sidebar() {
       <div className="flex items-center gap-1 border-t border-line p-1">
         <button
           type="button"
-          title={`Settings (${formatShortcut(",")})`}
+          title={`Settings (${settingsKey})`}
           onClick={() => useLayoutStore.getState().setSettingsOpen(true)}
           className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded px-2 text-ink-muted hover:bg-raised hover:text-ink"
         >

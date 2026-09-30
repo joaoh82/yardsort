@@ -2,7 +2,15 @@ import { create } from "zustand";
 
 export type SidePanel = "left" | "right";
 
+export type SettingsSection = "harnesses" | "workspaces" | "assist" | "general" | "keyboard";
+
 interface LayoutState {
+  settingsSection: SettingsSection;
+  openSettings: (section: SettingsSection) => void;
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
+  tourOpen: boolean;
+  setTourOpen: (open: boolean) => void;
   collapsed: Record<SidePanel, boolean>;
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
@@ -17,7 +25,16 @@ interface LayoutState {
 export const useLayoutStore = create<LayoutState>((set) => ({
   collapsed: { left: false, right: false },
   settingsOpen: false,
-  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  settingsSection: "harnesses",
+  openSettings: (settingsSection) =>
+    set({ settingsSection, settingsOpen: true, paletteOpen: false }),
+  paletteOpen: false,
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  tourOpen: false,
+  setTourOpen: (tourOpen) =>
+    set({ tourOpen, ...(tourOpen ? { settingsOpen: false, paletteOpen: false } : {}) }),
+  setSettingsOpen: (settingsOpen) =>
+    set({ settingsOpen, ...(settingsOpen ? { settingsSection: "harnesses" } : {}) }),
   toggle: (panel) =>
     set((state) => ({ collapsed: { ...state.collapsed, [panel]: !state.collapsed[panel] } })),
   setCollapsed: (panel, collapsed) =>
