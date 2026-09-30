@@ -3,6 +3,7 @@ import { Geist, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { HOME_DESCRIPTION, HOME_TITLE, SITE_ORIGIN } from "@/lib/seo";
 import "./globals.css";
 
 const geist = Geist({
@@ -16,19 +17,10 @@ const jetbrains = JetBrains_Mono({
   weight: ["400", "500"],
 });
 
-const description =
-  "A desktop app for Linux, macOS and Windows that gives every task its own git worktree and its own terminal, running the coding agent of your choice.";
-
 export const metadata: Metadata = {
-  metadataBase: new URL("https://yardsort.sh"),
-  title: { default: "Yardsort — run AI coding agents in parallel", template: "%s · Yardsort" },
-  description,
-  openGraph: {
-    title: "Yardsort",
-    description,
-    images: ["/docs-images/overview.png"],
-    type: "website",
-  },
+  metadataBase: new URL(SITE_ORIGIN),
+  title: { default: HOME_TITLE, template: "%s · Yardsort" },
+  description: HOME_DESCRIPTION,
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

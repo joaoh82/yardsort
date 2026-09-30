@@ -43,10 +43,36 @@ A page is a file under `../docs/`:
   as source, so keep pages that people read there as `.md`.
 
 To add a page: create the file, then add one line to `DOCS_NAV` in `src/lib/docs.ts` (the sidebar
-and the order of the previous/next links). An entry can give a `path` when the file should not
+and the order of the previous/next links), including a unique `description` for search and link
+previews. An entry can give a `path` when the file should not
 decide the address: the roadmap is `docs/design/05-roadmap.md`, shown at `/docs/roadmap/`. Write links the way they work on GitHub
 (`workspaces.md#anchor`, `../images/x.png`, `../CONTRIBUTING.md`); the site rewrites them, and
 sends anything outside the docs to GitHub.
+
+## Search and link previews
+
+`src/lib/seo.ts` defines the production origin, shared image and page metadata helper. The
+canonical origin is `https://www.yardsort.sh`, matching the existing bare-domain redirect on
+Vercel. Each page supplies its own canonical, description and Open Graph/Twitter title;
+documentation descriptions live alongside their titles in `DOCS_NAV`. Page URLs use trailing
+slashes, matching the static export. Keep the hosting redirect and these URLs consistent.
+
+`src/app/sitemap.ts` generates `/sitemap.xml` from the same docs registry, plus the homepage and
+changelog. Quick start is `/docs/`, not `/docs/quick-start/`. `src/app/robots.ts` allows public
+crawling and points to the sitemap. Both files are generated at build time and need no server.
+
+The 1200 × 630 social card is committed at `public/social/yardsort-v1.png`. Its editable layout
+is `scripts/generate-social-image.tsx`, using `next/og` with the existing logo and demo screenshot.
+Run `bun run social-image` to regenerate it, then inspect the PNG at full and thumbnail sizes.
+It is deliberately separate from normal builds: changing a documentation screenshot does not
+silently replace the share card. For a published replacement, use a new versioned filename in
+the generator and `SOCIAL_IMAGE` to distinguish it from cached previews.
+
+Every `bun run build` runs `scripts/check-seo.mjs` afterward. It checks exported HTML for unique
+titles/descriptions, self-canonicals, matching OG/Twitter fields, image dimensions and alt text,
+404 noindex, and sitemap coverage. `just site-check` also runs lint and types. After deployment,
+verify live redirects, discovery files and previews in the target sharing services; their caches
+can retain older cards. Submit the sitemap in the site's webmaster tools when access is available.
 
 ## Design
 
