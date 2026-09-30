@@ -2,8 +2,8 @@
 
 A **workspace** is one line of work inside a project: a git branch, checked out in its own folder
 (a [git worktree](https://git-scm.com/docs/git-worktree)), with the terminals running in it.
-Because each workspace has its own folder, agents working in parallel never step on each other —
-or on you.
+Separate folders keep each task's file changes apart. Agents started in the same workspace share
+its files, and changes on different branches can still conflict when you merge them.
 
 Workspaces are plain git. Everything Yardsort does you can inspect with `git worktree list` and
 `git branch`, and nothing stops you using those folders from any other tool.

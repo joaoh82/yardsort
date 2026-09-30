@@ -5,6 +5,9 @@ few minutes.
 
 ## Using Yardsort
 
+For supported agents, platforms, costs, worktree isolation and data handling, read
+[About Yardsort](guide/questions.md).
+
 | Guide                                                         | What it covers                                                                              |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                                          |

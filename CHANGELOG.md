@@ -5,6 +5,9 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Answers and navigation on the website.** The homepage and About Yardsort guide explain
+  supported agents, costs, worktrees, background sessions and data handling. Documentation pages
+  now have breadcrumb navigation; product and breadcrumb structured data describe the same content.
 - **Clearer website search and link previews.** Every guide now has its own description and
   share title, with a branded preview image, consistent canonical URLs and a sitemap.
 - **Clone projects from GitHub.** Add a project from an HTTPS or SSH repository URL, or

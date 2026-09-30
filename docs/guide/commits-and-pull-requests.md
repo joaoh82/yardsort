@@ -1,8 +1,8 @@
 # Commits & pull requests
 
-Once you have read what an agent did, the rest of the job is sending it somewhere. The foot of
-the [changes panel](changes-and-files.md) commits it, pushes it and opens the pull request,
-without leaving Yardsort.
+Commit reviewed workspace changes, push the branch and open a GitHub pull request from the foot
+of Yardsort's [changes panel](changes-and-files.md). Review the diff before committing;
+each action uses the selected workspace's repository and branch.
 
 Everything here is ordinary git and, for the pull request, the
 [GitHub CLI](https://cli.github.com). Nothing is stored, no account is created, and Yardsort

@@ -1,9 +1,12 @@
 # Website SEO and AEO review
 
 Reviewed 2026-09-30. Findings below describe the site at audit time. Phase 1 has since been
-implemented in this branch: page metadata, www canonicals, discovery files, a dedicated share
-card and exported-HTML checks. Deployment and checks of live previews remain outstanding.
-Phases 2 and 3 remain proposed work. AEO means making the site useful as a source for answer engines.
+merged and deployed: page metadata, www canonicals, discovery files, a dedicated share card
+and exported-HTML checks. Live metadata, discovery files and the image URL were verified;
+individual sharing services may still cache their own previews.
+Phase 2 is implemented on `ys/website-answer-content`: shared visible product answers, direct
+guide introductions, homepage product/site JSON-LD and documentation breadcrumbs. Phase 3
+remains proposed work. AEO means making the site useful as a source for answer engines.
 
 ## Evidence and scope
 

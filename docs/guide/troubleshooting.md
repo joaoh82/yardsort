@@ -1,5 +1,9 @@
 # Troubleshooting
 
+Use this guide when Yardsort cannot start, cannot find an agent or cannot display a terminal.
+If you are setting it up for the first time, check the [quick-start prerequisites](../quick-start.md#1-before-you-start)
+before changing your configuration.
+
 ## Yardsort cannot start
 
 If something goes wrong before the window can open, Yardsort shows a **Yardsort cannot start**

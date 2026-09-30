@@ -1,6 +1,8 @@
 # Quick start
 
-From nothing to an agent working on your code, in about five minutes.
+Install Yardsort, open a git repository and start a coding agent in a separate git worktree.
+You need git and an agent CLI that already works in your terminal. For supported agents, costs
+and how your data is handled, see [About Yardsort](guide/questions.md).
 
 ## 1. Before you start
 

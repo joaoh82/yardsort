@@ -3,7 +3,7 @@
   <h1>Yardsort</h1>
   <p><strong>Run AI coding agents in parallel — each on its own track.</strong></p>
   <p>
-    A desktop app for Linux, macOS and Windows that gives every task its own git worktree and its
+    Yardsort is an open-source desktop app for Linux, macOS and Windows. Every task gets its own git worktree and its
     own terminal, running the coding agent of your choice.
   </p>
   <p>

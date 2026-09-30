@@ -39,11 +39,11 @@ export function Ideas() {
         id="h-how"
         className="max-w-[720px] text-[26px] leading-[1.15] font-medium tracking-[-0.02em] md:text-[32px]"
       >
-        A sorting yard is where rail cars are sorted onto parallel tracks and later joined back into
-        one train.
+        Run parallel tasks, review changes and merge the work.
       </h2>
       <p className="mt-4 max-w-[640px] text-[17px] text-muted">
-        That is the job: fan work out onto parallel branches, then merge it back.
+        Like a sorting yard bringing rail cars onto separate tracks, Yardsort gives each task a
+        branch and a worktree. Review each result before bringing the changes together.
       </p>
 
       <div className="mt-[72px] space-y-[88px]">
