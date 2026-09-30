@@ -19,8 +19,8 @@ export function Hero() {
         Run AI coding agents in parallel — each on its own track.
       </h1>
       <p className="mx-auto mt-[22px] max-w-[640px] text-[17px] text-muted md:text-[19px]">
-        A desktop app for Linux, macOS and Windows that gives every task its own git worktree and
-        its own terminal, running the coding agent of your choice.
+        Yardsort is an open-source desktop app for Linux, macOS and Windows. Every task gets its own
+        git worktree and its own terminal, running the coding agent of your choice.
       </p>
       <div className="mx-auto mt-8 flex flex-col flex-wrap items-stretch justify-center gap-3 md:flex-row md:items-center">
         <a

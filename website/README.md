@@ -51,6 +51,17 @@ sends anything outside the docs to GitHub.
 
 ## Search and link previews
 
+The homepage's questions render `docs/guide/questions.md`, also published as the About Yardsort
+guide. Edit that Markdown to keep both versions in sync. Answers stay visible without JavaScript.
+
+`src/lib/structured-data.ts` supplies the homepage's `WebSite` and `SoftwareApplication` JSON-LD:
+the release version comes from the app configuration, and costs, platforms and prerequisites
+match visible content. It includes no ratings or reviews and does not claim eligibility for a
+software rich result. `Breadcrumbs` renders each documentation trail and its `BreadcrumbList`
+from one list, with no duplicate Quick start/Docs destination. `JsonLd` escapes `<` when serializing
+data into a script element. After changes, check schema with the Schema.org validator and Google's
+Rich Results Test as well as the exported-HTML checks; appearance in search is not guaranteed.
+
 `src/lib/seo.ts` defines the production origin, shared image and page metadata helper. The
 canonical origin is `https://www.yardsort.sh`, matching the existing bare-domain redirect on
 Vercel. Each page supplies its own canonical, description and Open Graph/Twitter title;
@@ -70,7 +81,9 @@ the generator and `SOCIAL_IMAGE` to distinguish it from cached previews.
 
 Every `bun run build` runs `scripts/check-seo.mjs` afterward. It checks exported HTML for unique
 titles/descriptions, self-canonicals, matching OG/Twitter fields, image dimensions and alt text,
-404 noindex, and sitemap coverage. `just site-check` also runs lint and types. After deployment,
+404 noindex, and sitemap coverage. It also parses JSON-LD, compares breadcrumb names and URLs to
+their visible navigation, checks the product version, and compares the homepage answers with the
+About Yardsort guide. `just site-check` also runs lint and types. After deployment,
 verify live redirects, discovery files and previews in the target sharing services; their caches
 can retain older cards. Submit the sitemap in the site's webmaster tools when access is available.
 

@@ -57,7 +57,7 @@ mod tests {
     fn the_lock_is_seen_while_held_and_gone_once_dropped() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!app_running(dir.path()), "nobody holds it yet");
-        let held = AppLock::take(dir.path()).unwrap().expect("free, so taken");
+        let held = take_within_a_moment(dir.path()).expect("free, so taken");
         assert!(app_running(dir.path()));
         assert!(
             AppLock::take(dir.path()).unwrap().is_none(),
@@ -65,7 +65,7 @@ mod tests {
         );
         drop(held);
         assert!(
-            free_within_a_moment(dir.path()),
+            take_within_a_moment(dir.path()).is_some(),
             "released once the holder is gone"
         );
         assert!(
@@ -76,15 +76,17 @@ mod tests {
 
     /// The lock goes with the file description, and a child another test forks in the same
     /// moment inherits that description until it execs, so a just-dropped lock can be seen held
-    /// for a few microseconds. Look again, briefly, rather than fail on that.
-    fn free_within_a_moment(dir: &Path) -> bool {
+    /// briefly after the parent drops it. This also applies to the short-lived lock taken by
+    /// `app_running` above. Retry acquisition itself, retaining the guard when it succeeds:
+    /// checking for freedom and then taking it would introduce another probe/drop race.
+    fn take_within_a_moment(dir: &Path) -> Option<AppLock> {
         let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
-            if !app_running(dir) {
-                return true;
+            if let Some(held) = AppLock::take(dir).unwrap() {
+                return Some(held);
             }
             if std::time::Instant::now() > until {
-                return false;
+                return None;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
@@ -94,6 +96,6 @@ mod tests {
     fn asking_does_not_take_the_lock_away_from_the_next_app() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!app_running(dir.path()));
-        assert!(AppLock::take(dir.path()).unwrap().is_some());
+        assert!(take_within_a_moment(dir.path()).is_some());
     }
 }

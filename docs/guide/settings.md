@@ -1,5 +1,9 @@
 # Settings & harnesses
 
+Use Settings to configure Yardsort, choose the commands that launch your coding agents and add
+custom harnesses. A harness is an agent's command and argument templates; it uses the agent
+you have installed and authenticated on your computer.
+
 Open with the **Settings** button at the bottom of the left panel, or `Ctrl+Shift+,` / `⌘,`.
 
 Most settings are stored in a plain TOML file you can read, back up and edit:

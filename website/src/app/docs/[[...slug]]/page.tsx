@@ -5,6 +5,7 @@ import { ALL_DOCS, DEFAULT_DOC, docUrl, neighbours, readDoc, REPO_URL } from "@/
 import { renderDoc } from "@/lib/render-doc";
 import { mdxComponents } from "@/components/mdx-components";
 import { pageMetadata } from "@/lib/seo";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 
 type Props = { params: Promise<{ slug?: string[] }> };
 
@@ -35,6 +36,13 @@ export default async function DocPage({ params }: Props) {
 
   return (
     <article className="min-w-0 max-w-[760px]">
+      <Breadcrumbs
+        items={[
+          { name: "Home", path: "/" },
+          ...(slug === DEFAULT_DOC ? [] : [{ name: "Docs", path: "/docs" }]),
+          { name: title ?? "Documentation", path: docUrl(slug) },
+        ]}
+      />
       <h1 className="text-[36px] leading-[1.1] font-medium tracking-[-0.02em]">{title}</h1>
       <div className="prose mt-6 max-w-none">{content}</div>
       <footer className="mt-14 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6 text-sm text-muted">

@@ -3,6 +3,12 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Answers and navigation on the website.** The homepage and About Yardsort guide explain
+  supported agents, costs, worktrees, background sessions and data handling. Documentation pages
+  now have breadcrumb navigation; product and breadcrumb structured data describe the same content.
+
 ## 0.15.0
 
 - **Keyboard navigation and configurable shortcuts.** Search commands and workspaces with

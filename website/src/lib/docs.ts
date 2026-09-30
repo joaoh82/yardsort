@@ -23,6 +23,12 @@ export const DOCS_NAV: DocSection[] = [
         description:
           "Install Yardsort on Linux, macOS or Windows, connect a working agent CLI, open a project and start your first task in its own git worktree.",
       },
+      {
+        slug: "guide/questions",
+        title: "About Yardsort",
+        description:
+          "Answers about Yardsort's supported coding agents, platforms, costs, git worktrees, background sessions and data sent to providers.",
+      },
     ],
   },
   {
