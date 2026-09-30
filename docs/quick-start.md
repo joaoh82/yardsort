@@ -155,3 +155,8 @@ reopens with the whole conversation intact.
 - [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review
 - [Settings & harnesses](guide/settings.md) — make an agent start the way you like
 - [Keyboard shortcuts](guide/shortcuts.md)
+
+## Try two agents in parallel
+
+Continue with the [Claude Code and Codex tutorial](https://www.yardsort.sh/tutorials/claude-code-codex-parallel-worktrees/)
+to create two independent workspaces, inspect their changes, and prepare focused pull requests.

@@ -4,9 +4,11 @@ Reviewed 2026-09-30. Findings below describe the site at audit time. Phase 1 has
 merged and deployed: page metadata, www canonicals, discovery files, a dedicated share card
 and exported-HTML checks. Live metadata, discovery files and the image URL were verified;
 individual sharing services may still cache their own previews.
-Phase 2 is implemented on `ys/website-answer-content`: shared visible product answers, direct
-guide introductions, homepage product/site JSON-LD and documentation breadcrumbs. Phase 3
-remains proposed work. AEO means making the site useful as a source for answer engines.
+Phase 2 is merged: shared visible product answers, direct
+guide introductions, homepage product/site JSON-LD and documentation breadcrumbs. Phase 3 now has an initial blog and tutorial set: a creator story, a worktree explainer,
+Superset and Conductor comparisons, and a worked parallel-agent tutorial. Search Console sitemap
+submission and a successful live fetch were reported during rollout; indexing and traffic still
+need measurement. Performance work and the monthly measurement review remain outstanding. AEO means making the site useful as a source for answer engines.
 
 ## Evidence and scope
 
