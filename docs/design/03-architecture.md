@@ -566,3 +566,19 @@ yardsort/
 
 TypeScript IPC types are generated from Rust with `tauri-specta`, so the boundary can't drift; CI
 fails when the checked-in bindings are stale.
+
+## Keyboard navigation and first-launch tour
+
+`src/lib/shortcuts.ts` defines the command IDs, defaults, validation and platform-aware key
+matching. The shell dispatches saved bindings through `features/keyboard/commands.ts`; the
+palette calls the same actions. Workspace selection uses the existing sidebar action, so its
+shell/session behavior is shared. The shortcut listener yields to dialogs and menus. Copy,
+paste and save keys are reserved; unmodified terminal keys remain outside the app dispatcher.
+
+The preferences store mirrors `keyboard.bindings` and `onboarding.welcomeSeen` from the core's
+existing SQLite `ui_state` commands through `ipc.ts`. Saves update the cache only after core
+success, and the UI reports failures. No migration or localStorage preference is needed. The
+tour waits for successful preference loading before offering the invitation. Accepting or
+skipping it records the choice; replay uses transient layout state. Tour steps highlight real
+panels without starting agents or creating projects, restoring the original collapsed panels
+when the tour closes. Shared modal focus handling traps Tab and restores the previous control.

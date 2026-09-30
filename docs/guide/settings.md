@@ -2,7 +2,7 @@
 
 Open with the **Settings** button at the bottom of the left panel, or `Ctrl+Shift+,` / `⌘,`.
 
-Settings are stored in a plain TOML file you can read, back up and edit:
+Most settings are stored in a plain TOML file you can read, back up and edit:
 
 | System  | Location                                                       |
 | ------- | -------------------------------------------------------------- |
@@ -150,3 +150,14 @@ For testing and unusual setups:
 Programs started in a workspace are themselves given `YARDSORT_RUN_ID`, `YARDSORT_WORKSPACE_ID`
 and, for an agent, `YARDSORT_SESSION_RECORD_ID` — ids a script or hook can use to say which run
 it belongs to. See [Activity](activity.md#what-the-program-is-told).
+
+## Keyboard
+
+**Settings → Keyboard**, **Shortcuts** in the bottom bar, or **Mod+/** opens a searchable cheat
+sheet and editable bindings. Record a combination, clear a binding or restore defaults, then
+press **Save shortcuts**. Conflicts are shown before saving. See [Keyboard shortcuts](shortcuts.md)
+for defaults and navigation instructions. These preferences live in the profile's SQLite UI
+state rather than `settings.toml`.
+
+The optional first-launch tour can be replayed from **Help / Tour** in the bottom bar or from the
+command palette (**Mod+K**). See [First launch](../quick-start.md#3-first-launch).

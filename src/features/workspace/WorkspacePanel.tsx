@@ -17,7 +17,7 @@ import { ProjectSettingsDialog } from "@/features/sidebar/ProjectSettingsDialog"
 import { useAppStore } from "@/stores/app";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
-import { shortcutKeys } from "@/lib/platform";
+import { useShortcutLabel } from "@/stores/preferences";
 import { useProjectsStore, useSelectedWorkspace } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
@@ -188,10 +188,11 @@ function WorkspaceTerminals(props: {
  * open something here — a shell to work by hand, or an agent on the branch as it stands.
  */
 function LocalActions({ workspace }: { workspace: Workspace }) {
+  const terminalKey = useShortcutLabel("newTerminal");
   const actions = [
     {
       label: "Open Terminal",
-      keys: shortcutKeys("T"),
+      keys: [terminalKey],
       onSelect: () => void useTerminalStore.getState().open(workspace.id),
     },
     {

@@ -71,6 +71,23 @@ To remove it again, delete those three files. Your projects and settings live el
 
 ## 3. First launch
 
+On the first launch of a profile, Yardsort asks whether you would like a quick tour. Choose
+**Take the tour** to explore projects, workspaces and terminals, changes and files, workflows,
+and settings. **Not now**, **Skip tour** or Escape dismisses it. Your choice is remembered,
+including if you leave partway through; **Help / Tour** in the bottom bar replays it any time.
+Existing profiles receive the invitation once after upgrading to the version with the tour.
+
+The tour highlights the real panels and works even before you have a project or agent installed.
+It creates no workspaces and starts no agents. Use Next / Back or ← / → to move through it,
+Tab to reach buttons, and Finish to close. Collapsed panels return to their previous state when
+you leave.
+
+![Welcome tour](images/onboarding.png)
+
+For keyboard navigation, **Mod+K** (⌘K on macOS, Ctrl+Shift+K elsewhere) finds commands and
+workspaces. **Shortcuts** in the bottom bar opens the cheat sheet and binding editor; see
+[Keyboard shortcuts](guide/shortcuts.md).
+
 Yardsort looks for git and for the agents it knows, and the welcome screen tells you what it
 found. If something is missing it shows how to install it, with a command you can copy; install
 it, press **Check again** — no restart needed — and carry on. When everything is in place the

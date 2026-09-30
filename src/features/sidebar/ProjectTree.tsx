@@ -1,3 +1,4 @@
+import { treeNavigation } from "@/lib/treeNavigation";
 import { useEffect, useState } from "react";
 import { hasCore, ipc, type Project, type Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
@@ -54,7 +55,12 @@ export function ProjectTree({ query = "" }: { query?: string }) {
       >
         {noMatches ? "No projects match your search." : ""}
       </p>
-      <ul role="tree" aria-label="Projects" className="min-h-0 flex-1 overflow-y-auto py-1">
+      <ul
+        onKeyDown={treeNavigation}
+        role="tree"
+        aria-label="Projects"
+        className="min-h-0 flex-1 overflow-y-auto py-1"
+      >
         {matching.map((project) => (
           <ProjectNode
             key={project.id}

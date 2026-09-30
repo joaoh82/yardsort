@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChangesPanel } from "@/features/changes/ChangesPanel";
-import { composeInCurrentProject, openProjectFromDisk } from "@/features/sidebar/actions";
+import { CommandPalette } from "@/features/keyboard/CommandPalette";
+import { useAppShortcuts } from "@/features/keyboard/useAppShortcuts";
+import { WelcomeTour } from "@/features/onboarding/WelcomeTour";
+import { usePreferencesStore } from "@/stores/preferences";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { UpdateDialog } from "@/features/updates/UpdateDialog";
 import { useUpdateChecks } from "@/features/updates/useUpdateChecks";
@@ -9,14 +12,11 @@ import { Sidebar } from "@/features/sidebar/Sidebar";
 import { QuitDialog } from "@/features/shell/QuitDialog";
 import { WorkspacePanel } from "@/features/workspace/WorkspacePanel";
 import { hasCore } from "@/lib/ipc";
-import { isModKey, shortcutKey } from "@/lib/platform";
 import { useAppStore } from "@/stores/app";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useLayoutStore, type SidePanel } from "@/stores/layout";
-import { useProjectsStore } from "@/stores/projects";
 import { listenForQuitRequests } from "@/stores/quit";
 import { listenForWorkflowRuns } from "@/stores/workflows";
-import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
 import { StatusBar } from "./StatusBar";
 
@@ -28,7 +28,8 @@ export function AppShell() {
   const leftRef = usePanelRef();
   const rightRef = usePanelRef();
   const collapsed = useLayoutStore((s) => s.collapsed);
-  const toggle = useLayoutStore((s) => s.toggle);
+  useAppShortcuts();
+  const paletteOpen = useLayoutStore((s) => s.paletteOpen);
   const setCollapsed = useLayoutStore((s) => s.setCollapsed);
   const settingsOpen = useLayoutStore((s) => s.settingsOpen);
   const updateOpen = useUpdatesStore((s) => s.open);
@@ -61,6 +62,7 @@ export function AppShell() {
 
   useEffect(() => {
     void useAppStore.getState().load().catch(console.error);
+    void usePreferencesStore.getState().load();
     if (hasCore()) void useHarnessStore.getState().load();
     const listening = listenForQuitRequests();
     const runs = listenForWorkflowRuns();
@@ -69,32 +71,6 @@ export function AppShell() {
       void runs.then((stop) => stop());
     };
   }, []);
-
-  // Mod+B / Mod+Alt+B toggle the side panels, Mod+O opens a project, Mod+N composes a new
-  // workspace, Mod+T and Mod+W open and
-  // close terminal tabs in the selected workspace. Always behind Mod (see `isModKey`), so the
-  // program in the terminal never loses a key.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!isModKey(event)) return;
-      const key = shortcutKey(event);
-      const workspaceId = useProjectsStore.getState().selectedWorkspaceId;
-      const terminals = useTerminalStore.getState();
-      if (key === "b") toggle(event.altKey ? "right" : "left");
-      else if (event.altKey) return;
-      else if (key === "," || key === "<") setSettingsOpen(true);
-      else if (key === "o") void openProjectFromDisk();
-      else if (key === "n") composeInCurrentProject();
-      else if (key === "t" && workspaceId) void terminals.open(workspaceId);
-      else if (key === "w" && workspaceId) {
-        const active = terminals.active[workspaceId];
-        if (active) void terminals.close(active);
-      } else return;
-      event.preventDefault();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggle, setSettingsOpen]);
 
   return (
     <div className="flex h-full flex-col">
@@ -114,11 +90,15 @@ export function AppShell() {
           collapsedSize={0}
           onResize={syncFromPanel("left")}
         >
-          <Sidebar />
+          <div data-navigation="Projects" tabIndex={-1} className="h-full">
+            <Sidebar />
+          </div>
         </Panel>
         <Separator className={separatorClass} />
         <Panel id="center" minSize={360}>
-          <WorkspacePanel />
+          <div data-navigation="Workspace" tabIndex={-1} className="h-full">
+            <WorkspacePanel />
+          </div>
         </Panel>
         <Separator className={separatorClass} />
         <Panel
@@ -131,12 +111,16 @@ export function AppShell() {
           collapsedSize={0}
           onResize={syncFromPanel("right")}
         >
-          <ChangesPanel />
+          <div data-navigation="Changes" tabIndex={-1} className="h-full">
+            <ChangesPanel />
+          </div>
         </Panel>
       </Group>
       <StatusBar />
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {updateOpen && <UpdateDialog />}
+      {paletteOpen && <CommandPalette />}
+      <WelcomeTour />
       <QuitDialog />
     </div>
   );

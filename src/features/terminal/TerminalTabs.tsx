@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ContextMenu, type MenuItem } from "@/features/sidebar/ContextMenu";
-import { formatShortcut } from "@/lib/platform";
+import { useShortcutLabel } from "@/stores/preferences";
 import { errorMessage, ipc } from "@/lib/ipc";
 import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
@@ -11,6 +11,7 @@ import { bareHarness } from "./quickLaunch";
 import { StatusDot } from "./StatusDot";
 
 export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
+  const newKey = useShortcutLabel("newTerminal");
   const allTabs = useTerminalStore((s) => s.tabs);
   const activeId = useTerminalStore((s) => s.active[workspaceId]);
   const open = useTerminalStore((s) => s.open);
@@ -26,7 +27,7 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
       </div>
       <button
         type="button"
-        title={`New shell (${formatShortcut("T")})`}
+        title={`New shell (${newKey})`}
         aria-label="New shell"
         onClick={() => void open(workspaceId)}
         className="px-3 text-ink-muted hover:bg-raised hover:text-ink"
@@ -95,6 +96,13 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
       <button
         type="button"
         role="tab"
+        onKeyDown={(event) => {
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+            event.preventDefault();
+            const box = event.currentTarget.getBoundingClientRect();
+            setMenuAt({ x: box.left, y: box.bottom });
+          }
+        }}
         aria-selected={active}
         onClick={() => activate(tab.id)}
         title={record?.title || undefined}
