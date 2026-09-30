@@ -1,3 +1,4 @@
+import { useFileContextMenu } from "./useFileContextMenu";
 import { useMemo } from "react";
 import type { ChangeSet, FileChange, Scope } from "@/lib/ipc";
 import { useAssistStore } from "@/stores/assist";
@@ -36,6 +37,8 @@ export function ChangeList({ changes }: { changes: ChangeSet }) {
 }
 
 function Group({ title, scope, files }: { title: string; scope: Scope; files: FileChange[] }) {
+  const workspaceId = useChangesStore((s) => s.workspaceId);
+  const context = useFileContextMenu(workspaceId);
   const viewing = useChangesStore((s) => s.viewing);
   const view = useChangesStore((s) => s.view);
   const review = useAssistStore((s) => s.review);
@@ -58,6 +61,7 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
         {title}
         <span className="font-normal">{files.length}</span>
       </h3>
+      {context.menu}
       <ul>
         {files.map((change) => {
           const kind = KIND[change.kind];
@@ -72,6 +76,7 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
                 type="button"
                 aria-current={selected}
                 title={change.oldPath ? `${change.oldPath} → ${change.path}` : change.path}
+                onContextMenu={(event) => context.onContextMenu(event, change.path)}
                 onClick={() => void view({ kind: "diff", change, scope })}
                 className="flex h-7 w-full items-center gap-2 px-3 text-left hover:bg-raised aria-[current=true]:bg-raised"
               >

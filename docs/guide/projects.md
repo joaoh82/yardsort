@@ -45,6 +45,20 @@ The name becomes a folder name, so characters that are illegal on some system (`
 are refused, and an existing folder is never touched. If any step fails, the half-made folder is
 removed again.
 
+### Clone a GitHub repository
+
+Choose **Clone a GitHub repository**, enter an HTTPS or SSH clone URL (or
+`owner/repository`), and give the local folder a **Name** and **Location**.
+**Clone project** downloads the repository into `<location>/<name>`, adds it to the sidebar,
+and selects its **local** workspace. Its history and `origin` remote are preserved; the
+location is remembered for next time. Existing folders, including empty ones, are refused.
+
+Cloning uses your installed git and its existing credentials. For private repositories, set up
+git access before cloning. The dialog stays open with **Cloning…** while git runs, and shows
+any error so you can correct the URL, credentials or destination and retry. If a failed clone
+leaves files behind, the error names the folder; inspect it or choose another name before
+retrying. Yardsort does not recursively delete that folder.
+
 ## The `local` workspace
 
 Every project has a **local** entry, always first. It is your repository's own checkout — not a

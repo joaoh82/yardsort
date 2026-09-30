@@ -115,3 +115,11 @@ pull request. See [Commits & pull requests](commits-and-pull-requests.md).
 Diffs themselves stay read-only. Yardsort will not stage part of a change or discard one — do
 that the way you already do, with a shell tab (`Ctrl+Shift+T`), your editor or your git client.
 The workspace is an ordinary git checkout at the path shown in the footer.
+
+## Show a file in the file explorer
+
+Right-click a file or folder in **Files**, or a file in **Changes**, and choose **Show in file
+explorer**. Yardsort asks your system's file manager (Finder on macOS, Explorer on Windows) to
+reveal it. If the file has been deleted, its nearest existing parent folder opens instead.
+Paths outside the workspace, including symlinks pointing outside it, are refused. Press
+**Escape** or click elsewhere to dismiss the menu.

@@ -4,23 +4,24 @@ import { native } from "@/lib/native";
 import { useProjectsStore } from "@/stores/projects";
 import { enterWorkspace, openProjectFromDisk } from "./actions";
 
-/** "Open a folder" or "create a new project" — the two ways a project comes to exist. */
+/** Add an existing folder, create a repository, or clone one from GitHub. */
 export function AddProjectDialog({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<"choose" | "create">("choose");
+  const [mode, setMode] = useState<"choose" | "create" | "clone">("choose");
+  const [busy, setBusy] = useState(false);
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && !busy && onClose();
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, busy]);
 
   return (
     <div
       className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[18vh]"
-      onPointerDown={(event) => event.target === event.currentTarget && onClose()}
+      onPointerDown={(event) => event.target === event.currentTarget && !busy && onClose()}
     >
       <div
         ref={dialogRef}
@@ -31,7 +32,11 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
         className="w-[28rem] max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-5 shadow-2xl shadow-black/50"
       >
         <h2 id={titleId} className="text-base font-semibold">
-          {mode === "choose" ? "Add a project" : "Create a project"}
+          {mode === "choose"
+            ? "Add a project"
+            : mode === "clone"
+              ? "Clone a GitHub repository"
+              : "Create a project"}
         </h2>
         {mode === "choose" ? (
           <div className="mt-4 grid gap-2">
@@ -45,13 +50,24 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               }}
             />
             <Choice
+              title="Clone a GitHub repository"
+              detail="Download a repository into a new local folder."
+              onClick={() => setMode("clone")}
+            />
+            <Choice
               title="Create a new project"
               detail="Make a new folder with an empty git repository in it."
               onClick={() => setMode("create")}
             />
           </div>
         ) : (
-          <CreateForm onBack={() => setMode("choose")} onDone={onClose} />
+          <CreateForm
+            cloning={mode === "clone"}
+            busy={busy}
+            setBusy={setBusy}
+            onBack={() => setMode("choose")}
+            onDone={onClose}
+          />
         )}
       </div>
     </div>
@@ -77,12 +93,24 @@ function Choice(props: {
   );
 }
 
-function CreateForm({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+function CreateForm({
+  onBack,
+  onDone,
+  cloning,
+  busy,
+  setBusy,
+}: {
+  onBack: () => void;
+  onDone: () => void;
+  cloning: boolean;
+  busy: boolean;
+  setBusy: (value: boolean) => void;
+}) {
   const lastParentDir = useProjectsStore((s) => s.lastParentDir);
   const error = useProjectsStore((s) => s.error);
   const [name, setName] = useState("");
   const [parent, setParent] = useState(lastParentDir ?? "");
-  const [busy, setBusy] = useState(false);
+  const [repository, setRepository] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -97,8 +125,12 @@ function CreateForm({ onBack, onDone }: { onBack: () => void; onDone: () => void
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!ready) return;
     setBusy(true);
-    const created = await useProjectsStore.getState().createProject(name, parent);
+    useProjectsStore.getState().dismiss();
+    const created = cloning
+      ? await useProjectsStore.getState().cloneProject(repository, name, parent)
+      : await useProjectsStore.getState().createProject(name, parent);
     setBusy(false);
     if (!created) return;
     const selected = useProjectsStore.getState().selectedWorkspaceId;
@@ -107,70 +139,98 @@ function CreateForm({ onBack, onDone }: { onBack: () => void; onDone: () => void
   };
 
   const separator = parent.includes("\\") ? "\\" : "/";
-  const ready = name.trim() !== "" && parent !== "" && !busy;
+  const ready =
+    name.trim() !== "" && parent.trim() !== "" && (!cloning || repository.trim() !== "") && !busy;
   const field =
     "w-full rounded border border-line bg-canvas px-2 py-1.5 outline-none focus:border-accent";
 
   return (
-    <form onSubmit={submit} className="mt-4 grid gap-3">
-      <label className="grid gap-1">
-        <span className="text-ink-muted">Name</span>
-        <input
-          ref={nameRef}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="my-project"
-          spellCheck={false}
-          autoComplete="off"
-          className={`${field} select-text`}
-        />
-      </label>
-      <div className="grid gap-1">
-        <span className="text-ink-muted">Location</span>
-        <div className="flex gap-2">
+    <form onSubmit={submit} className="mt-4">
+      <fieldset disabled={busy} className="grid gap-3">
+        {cloning && (
+          <div className="grid gap-1">
+            <label className="grid gap-1">
+              <span className="text-ink-muted">GitHub repository</span>
+              <input
+                ref={cloning ? nameRef : undefined}
+                value={repository}
+                onChange={(event) => setRepository(event.target.value)}
+                placeholder="https://github.com/owner/repository"
+                spellCheck={false}
+                autoComplete="off"
+                className={`${field} select-text`}
+              />
+            </label>
+            <span className="text-xs text-ink-faint">
+              HTTPS, SSH, or owner/repository. Uses your existing git credentials.
+            </span>
+          </div>
+        )}
+        <label className="grid gap-1">
+          <span className="text-ink-muted">Name</span>
           <input
-            aria-label="Location"
-            value={parent}
-            onChange={(event) => setParent(event.target.value)}
-            placeholder="Choose a folder…"
+            ref={cloning ? undefined : nameRef}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="my-project"
             spellCheck={false}
-            className={`${field} min-w-0 flex-1 font-mono text-[12px] select-text`}
+            autoComplete="off"
+            className={`${field} select-text`}
           />
+        </label>
+        <div className="grid gap-1">
+          <span className="text-ink-muted">Location</span>
+          <div className="flex gap-2">
+            <input
+              aria-label="Location"
+              value={parent}
+              onChange={(event) => setParent(event.target.value)}
+              placeholder="Choose a folder…"
+              spellCheck={false}
+              className={`${field} min-w-0 flex-1 font-mono text-[12px] select-text`}
+            />
+            <button
+              type="button"
+              onClick={browse}
+              className="rounded border border-line px-3 hover:border-accent"
+            >
+              Browse…
+            </button>
+          </div>
+        </div>
+        <p className="min-h-4 truncate font-mono text-[11px] text-ink-faint">
+          {ready || (name.trim() && parent)
+            ? `${parent.replace(/[\\/]+$/, "")}${separator}${name.trim()}`
+            : ""}
+        </p>
+        {error && (
+          <p role="alert" className="text-red-400 select-text">
+            {error}
+          </p>
+        )}
+        <div className="flex justify-between">
           <button
             type="button"
-            onClick={browse}
-            className="rounded border border-line px-3 hover:border-accent"
+            onClick={onBack}
+            className="px-2 py-1.5 text-ink-muted hover:text-ink"
           >
-            Browse…
+            ← Back
+          </button>
+          <button
+            type="submit"
+            disabled={!ready}
+            className="rounded bg-accent px-4 py-1.5 font-medium text-canvas disabled:opacity-40"
+          >
+            {busy
+              ? cloning
+                ? "Cloning…"
+                : "Creating…"
+              : cloning
+                ? "Clone project"
+                : "Create project"}
           </button>
         </div>
-      </div>
-      <p className="min-h-4 truncate font-mono text-[11px] text-ink-faint">
-        {ready || (name.trim() && parent)
-          ? `${parent.replace(/[\\/]+$/, "")}${separator}${name.trim()}`
-          : ""}
-      </p>
-      {error && (
-        <p role="alert" className="text-red-400 select-text">
-          {error}
-        </p>
-      )}
-      <div className="flex justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          className="px-2 py-1.5 text-ink-muted hover:text-ink"
-        >
-          ← Back
-        </button>
-        <button
-          type="submit"
-          disabled={!ready}
-          className="rounded bg-accent px-4 py-1.5 font-medium text-canvas disabled:opacity-40"
-        >
-          {busy ? "Creating…" : "Create project"}
-        </button>
-      </div>
+      </fieldset>
     </form>
   );
 }

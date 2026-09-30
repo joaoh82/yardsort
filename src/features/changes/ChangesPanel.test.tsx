@@ -11,6 +11,7 @@ const core = vi.hoisted(() => ({
   workspaceFiles: vi.fn(),
   workspaceWatch: vi.fn(),
   openInEditor: vi.fn(),
+  workspaceRevealFile: vi.fn(),
   onWorkspaceFilesChanged: vi.fn(),
   assistStatus: vi.fn(),
   assistReview: vi.fn(),
@@ -76,6 +77,7 @@ describe("ChangesPanel", () => {
     core.workspaceWatch.mockResolvedValue(undefined);
     core.uiStateSave.mockResolvedValue(undefined);
     core.openInEditor.mockResolvedValue(undefined);
+    core.workspaceRevealFile.mockResolvedValue(undefined);
     core.onWorkspaceFilesChanged.mockImplementation((handler) => {
       fileSystemChanged = handler;
       return Promise.resolve(() => {});
@@ -206,6 +208,37 @@ describe("ChangesPanel", () => {
     });
     await user.click(screen.getByTitle("notes.md"));
     expect(await screen.findByText("File too large to show (5.0 MB).")).toBeInTheDocument();
+  });
+
+  it("reveals a changed file from its right-click menu without opening a diff", async () => {
+    const user = await renderPanel();
+    await user.pointer({ target: await screen.findByTitle("src/app.ts"), keys: "[MouseRight]" });
+    await user.click(screen.getByRole("menuitem", { name: "Show in file explorer" }));
+    expect(core.workspaceRevealFile).toHaveBeenCalledWith("w1", "src/app.ts");
+    expect(core.workspaceDiff).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("reveals a file tree entry and reports explorer failures", async () => {
+    core.workspaceFiles.mockResolvedValue([
+      { name: "README.md", path: "README.md", isDir: false, ignored: false },
+    ]);
+    core.workspaceRevealFile.mockRejectedValue({
+      code: "reveal_failed",
+      message: "Could not open the file explorer.",
+    });
+    const user = await renderPanel();
+    await user.click(screen.getByRole("tab", { name: "Files" }));
+    const entry = within(await screen.findByRole("treeitem", { name: "README.md" })).getByRole(
+      "button",
+    );
+    await user.pointer({ target: entry, keys: "[MouseRight]" });
+    await user.keyboard("{Escape}");
+    expect(core.workspaceRevealFile).not.toHaveBeenCalled();
+    await user.pointer({ target: entry, keys: "[MouseRight]" });
+    await user.click(screen.getByRole("menuitem", { name: "Show in file explorer" }));
+    expect(core.workspaceRevealFile).toHaveBeenCalledWith("w1", "README.md");
+    expect(await screen.findByText("Could not open the file explorer.")).toBeInTheDocument();
   });
 
   it("browses files lazily and opens one read-only", async () => {

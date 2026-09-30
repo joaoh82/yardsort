@@ -48,6 +48,7 @@ interface ProjectsState {
   /** Re-read projects from the core (branches change behind our back). */
   refresh: () => Promise<void>;
   openFolder: (path: string, initGit?: boolean) => Promise<OpenResult>;
+  cloneProject: (repository: string, name: string, parent: string) => Promise<boolean>;
   createProject: (name: string, parent: string) => Promise<boolean>;
   /** Take a project off the list. Nothing on disk changes; with `keepHistory` its workspaces
    *  and conversations come back when the same folder is opened again. */
@@ -174,6 +175,18 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         if (isIpcError(error) && error.code === "not_a_git_repo") return { status: "needs-git" };
         set({ error: errorMessage(error) });
         return { status: "failed" };
+      }
+    },
+
+    async cloneProject(repository, name, parent) {
+      try {
+        adopt(await ipc.projectClone(repository, name, parent));
+        set({ lastParentDir: parent });
+        save(KEYS.lastParent, parent);
+        return true;
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return false;
       }
     },
 

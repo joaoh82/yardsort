@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Clone projects from GitHub.** Add a project from an HTTPS or SSH repository URL, or
+  `owner/repository`, choosing its local name and location.
+- **Show files in your file explorer.** Right-click entries in Files or Changes to reveal
+  their location; deleted files open the nearest existing folder.
+
 ## 0.14.0
 
 - **Images and editing in the file panel.** Selecting an image opens a preview; SVG files can

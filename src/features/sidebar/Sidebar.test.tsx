@@ -9,6 +9,7 @@ const core = vi.hoisted(() => ({
   projectsList: vi.fn(),
   projectOpen: vi.fn(),
   projectCreate: vi.fn(),
+  projectClone: vi.fn(),
   projectRemove: vi.fn(),
   projectsReorder: vi.fn(),
   workspaceDelete: vi.fn(),
@@ -625,6 +626,46 @@ describe("Sidebar", () => {
     expect(await screen.findByRole("treeitem", { name: "fresh" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(core.ptySpawn).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w-fresh" }));
+  });
+
+  it("clones a GitHub repository and selects its local workspace", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.projectClone.mockResolvedValue(added("cloned"));
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    expect(screen.getByRole("button", { name: "Clone project" })).toBeDisabled();
+    await user.type(screen.getByLabelText("GitHub repository"), "owner/repo");
+    await user.type(screen.getByLabelText("Name"), "cloned");
+    await user.type(screen.getByLabelText("Location"), "/code");
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    expect(core.projectClone).toHaveBeenCalledWith("owner/repo", "cloned", "/code");
+    expect(await screen.findByRole("treeitem", { name: "cloned" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-cloned");
+  });
+
+  it("keeps a pending clone visible and lets the user retry a failure", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    let fail!: (reason: unknown) => void;
+    core.projectClone.mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.type(screen.getByLabelText("GitHub repository"), "owner/private");
+    await user.type(screen.getByLabelText("Name"), "private");
+    await user.type(screen.getByLabelText("Location"), "/code");
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    expect(screen.getByRole("button", { name: "Cloning…" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await act(async () => fail({ code: "clone_failed", message: "Check your git credentials." }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Check your git credentials.");
+    expect(screen.getByRole("button", { name: "Clone project" })).toBeEnabled();
   });
 
   it("keeps the dialog open and shows why when creation fails", async () => {

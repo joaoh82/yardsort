@@ -499,6 +499,18 @@ with the child's pipes drained on their own threads so a hung agent cannot wedge
 Nothing is applied automatically: an answer lands in the text box the user was already looking at,
 and the commit confirmation still stands between it and git.
 
+## Project cloning and file locations
+
+`Projects::clone_github` validates GitHub HTTPS/SSH URLs or owner/repository shorthand,
+reserves a new destination directory, clones with the existing git environment, and registers
+the repository only after success. A failed clone removes only an empty directory; files left
+behind are reported and preserved. Cloning runs off the UI thread without holding the
+worktree reconciliation lock.
+
+`workspace_reveal_file` resolves a workspace id and validates its relative path in Rust before
+calling the cross-platform opener. Deleted files open the nearest existing parent directory;
+existing entries are revealed in the system file manager.
+
 ## Workspace file editing
 
 The core's `changes` module classifies bounded file contents as UTF-8 text, supported raster

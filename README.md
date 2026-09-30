@@ -240,7 +240,8 @@ never sees their credentials.
 
 ## Quick start
 
-1. Open Yardsort and press **+** next to _Projects_ → **Open a folder** → choose a git repository.
+1. Open Yardsort and press **+** next to _Projects_ → **Open a folder** → choose a git repository,
+   or **Clone a GitHub repository** to download one into a new local folder.
 2. Press **+** on the project (or `Ctrl+Shift+N` / `⌘N`), type what you want done, press **Enter**.
 3. Watch the agent in the middle, and its changes on the right. Start more workspaces in parallel.
 4. The result is an ordinary git branch — review it, push it, open a PR — or have a second agent
