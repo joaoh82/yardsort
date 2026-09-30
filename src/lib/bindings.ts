@@ -17,6 +17,7 @@ export const commands = {
 	projectAutomationSave: (projectId: string, config: ProjectAutomation) => typedError<null, IpcError>(__TAURI_INVOKE("project_automation_save", { projectId, config })),
 	workspaceRun: (workspaceId: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("workspace_run", { workspaceId, size })),
 	projectCreate: (name: string, parent: string) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_create", { name, parent })),
+	projectClone: (repository: string, name: string, parent: string) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_clone", { repository, name, parent })),
 	/**
 	 *  Take a project off the list. With `keep_history` its workspaces and their conversations
 	 *  wait for the folder to be opened again. Files on disk are never touched.
@@ -100,6 +101,8 @@ export const commands = {
 	draftSaveSettings: (enabled: boolean, model: string) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_save_settings", { enabled, model })),
 	/**  Open a file (or the workspace folder, when `path` is `None`) in the user's editor. */
 	openInEditor: (workspaceId: string, path: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("open_in_editor", { workspaceId, path })),
+	/**  Reveal a workspace entry, or open its nearest existing folder when it was deleted. */
+	workspaceRevealFile: (workspaceId: string, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_reveal_file", { workspaceId, path })),
 	assistStatus: () => typedError<AssistStatus, IpcError>(__TAURI_INVOKE("assist_status")),
 	/**
 	 *  Save an API key, once TypeSafe confirms it works. It goes to the OS credential store and is

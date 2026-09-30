@@ -41,6 +41,8 @@ interface ProjectsState {
   collapsed: string[];
   /** Where the last project was created; the next one is offered the same parent. */
   lastParentDir: string | null;
+  /** In-flight clone requests; the Rust command owns the actual operation. */
+  pendingClones: { id: number; name: string }[];
   error: string | null;
   notice: string | null;
 
@@ -48,6 +50,13 @@ interface ProjectsState {
   /** Re-read projects from the core (branches change behind our back). */
   refresh: () => Promise<void>;
   openFolder: (path: string, initGit?: boolean) => Promise<OpenResult>;
+  /** `select` is checked on completion, so closing the dialog keeps the current workspace. */
+  cloneProject: (
+    repository: string,
+    name: string,
+    parent: string,
+    select?: () => boolean,
+  ) => Promise<boolean>;
   createProject: (name: string, parent: string) => Promise<boolean>;
   /** Take a project off the list. Nothing on disk changes; with `keepHistory` its workspaces
    *  and conversations come back when the same folder is opened again. */
@@ -103,8 +112,9 @@ const workspaceIds = (projects: Project[]) =>
   new Set(projects.flatMap((project) => project.workspaces.map((workspace) => workspace.id)));
 
 export const useProjectsStore = create<ProjectsState>((set, get) => {
-  /** Put a just-added project on screen: in the list, expanded, its `local` selected. */
-  const adopt = (added: AddedProject) => {
+  let nextCloneId = 0;
+  /** Add and expand a project; background completions leave the selection alone. */
+  const adopt = (added: AddedProject, select = true) => {
     const { project } = added;
     const local = project.workspaces[0]?.id ?? null;
     set((state) => ({
@@ -112,7 +122,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         ? state.projects.map((p) => (p.id === project.id ? project : p))
         : [...state.projects, project],
       collapsed: state.collapsed.filter((id) => id !== project.id),
-      selectedWorkspaceId: local,
+      selectedWorkspaceId: select ? local : state.selectedWorkspaceId,
       error: null,
       notice: added.alreadyKnown
         ? `${project.name} was already in your projects.`
@@ -122,7 +132,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
             ? `That folder is inside a repository, so its root was added: ${project.rootPath}`
             : null,
     }));
-    save(KEYS.selected, local);
+    if (select) save(KEYS.selected, local);
     save(KEYS.collapsed, get().collapsed);
   };
 
@@ -137,6 +147,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     ui: {},
     collapsed: [],
     lastParentDir: null,
+    pendingClones: [],
     error: null,
     notice: null,
 
@@ -174,6 +185,29 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         if (isIpcError(error) && error.code === "not_a_git_repo") return { status: "needs-git" };
         set({ error: errorMessage(error) });
         return { status: "failed" };
+      }
+    },
+
+    async cloneProject(repository, name, parent, select = () => true) {
+      const request = { id: nextCloneId++, name: name.trim() };
+      set((state) => ({ pendingClones: [...state.pendingClones, request] }));
+      try {
+        const added = await ipc.projectClone(repository, name, parent);
+        const foreground = select();
+        adopt(added, foreground);
+        set({
+          lastParentDir: parent,
+          ...(!foreground && { notice: `${added.project.name} cloned.` }),
+        });
+        save(KEYS.lastParent, parent);
+        return true;
+      } catch (error) {
+        set({ error: `${request.name}: ${errorMessage(error)}` });
+        return false;
+      } finally {
+        set((state) => ({
+          pendingClones: state.pendingClones.filter((pending) => pending.id !== request.id),
+        }));
       }
     },
 

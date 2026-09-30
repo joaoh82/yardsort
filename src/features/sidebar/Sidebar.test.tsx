@@ -9,6 +9,7 @@ const core = vi.hoisted(() => ({
   projectsList: vi.fn(),
   projectOpen: vi.fn(),
   projectCreate: vi.fn(),
+  projectClone: vi.fn(),
   projectRemove: vi.fn(),
   projectsReorder: vi.fn(),
   workspaceDelete: vi.fn(),
@@ -113,6 +114,8 @@ describe("Sidebar", () => {
     usePublishStore.setState({ byProject: {}, workspaceId: null, state: null, busy: null });
     useProjectsStore.setState({
       projects: [],
+      pendingClones: [],
+      lastParentDir: null,
       loaded: false,
       selectedWorkspaceId: null,
       composingProjectId: null,
@@ -625,6 +628,142 @@ describe("Sidebar", () => {
     expect(await screen.findByRole("treeitem", { name: "fresh" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(core.ptySpawn).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w-fresh" }));
+  });
+
+  it("clones a GitHub repository and selects its local workspace", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.projectClone.mockResolvedValue(added("cloned"));
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    expect(screen.getByRole("button", { name: "Clone project" })).toBeDisabled();
+    await user.type(screen.getByLabelText("GitHub repository"), "owner/repo");
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "cloned");
+    await user.type(screen.getByLabelText("Location"), "/code");
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    expect(core.projectClone).toHaveBeenCalledWith("owner/repo", "cloned", "/code");
+    expect(await screen.findByRole("treeitem", { name: "cloned" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-cloned");
+  });
+
+  it("shows a foreground clone failure and lets the user retry", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    let fail!: (reason: unknown) => void;
+    core.projectClone.mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.type(screen.getByLabelText("GitHub repository"), "owner/private");
+    await user.type(screen.getByLabelText("Location"), "/code");
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    expect(screen.getByRole("button", { name: "Cloning…" })).toBeDisabled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await act(async () => fail({ code: "clone_failed", message: "Check your git credentials." }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Check your git credentials.");
+    expect(screen.getByRole("button", { name: "Clone project" })).toBeEnabled();
+    expect(screen.queryByText("Cloning private…")).not.toBeInTheDocument();
+    core.projectClone.mockResolvedValue(added("private"));
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    expect(await screen.findByRole("treeitem", { name: "private" })).toBeInTheDocument();
+  });
+
+  it.each(["Escape", "button", "backdrop"])(
+    "keeps cloning after closing via %s without stealing selection or closing a new dialog",
+    async (close) => {
+      const user = userEvent.setup();
+      await renderSidebar("alpha");
+      let finish!: (value: ReturnType<typeof added>) => void;
+      core.projectClone.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      await user.click(screen.getByRole("button", { name: "Add project" }));
+      await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+      await user.type(screen.getByLabelText("GitHub repository"), "owner/repo");
+      await user.type(screen.getByLabelText("Location"), "/code");
+      await user.click(screen.getByRole("button", { name: "Clone project" }));
+      if (close === "Escape") await user.keyboard("{Escape}");
+      else if (close === "button")
+        await user.click(screen.getByRole("button", { name: "Run in background" }));
+      else await user.click(screen.getByRole("dialog").parentElement!);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByText("Cloning repo…")).toBeInTheDocument();
+      await user.click(rowButton("local"));
+      expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
+      await user.click(screen.getByRole("button", { name: "Add project" }));
+      await act(async () => finish(added("repo")));
+      expect(await screen.findByRole("treeitem", { name: "repo" })).toBeInTheDocument();
+      expect(screen.queryByText("Cloning repo…")).not.toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Add a project" })).toBeInTheDocument();
+      expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
+      expect(core.ptySpawn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId: "w-repo" }),
+      );
+      await user.keyboard("{Escape}");
+      expect(screen.getByText("repo cloned.")).toBeInTheDocument();
+    },
+  );
+
+  it("reports a background clone failure in the sidebar", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    let fail!: (reason: unknown) => void;
+    core.projectClone.mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.type(screen.getByLabelText("GitHub repository"), "owner/private");
+    await user.type(screen.getByLabelText("Location"), "/code");
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    await user.click(screen.getByRole("button", { name: "Run in background" }));
+    await act(async () => fail({ code: "clone_failed", message: "Check your git credentials." }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "private: Check your git credentials.",
+    );
+    expect(screen.queryByText("Cloning private…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "https://github.com/owner/repo.git/",
+    "git@github.com:owner/repo.git",
+    "ssh://git@github.com/owner/repo",
+    "owner/repo",
+    "www.github.com/owner/repo",
+  ])("suggests a folder name from %s until the user edits it", async (repository) => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    native.pickFolder.mockResolvedValue("/code");
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    const input = screen.getByLabelText("GitHub repository");
+    const name = screen.getByLabelText("Name");
+    await user.type(input, repository);
+    expect(name).toHaveValue("repo");
+    await user.clear(input);
+    expect(name).toHaveValue("");
+    await user.type(input, "owner/renamed.git");
+    expect(name).toHaveValue("renamed");
+    await user.clear(name);
+    await user.type(name, "custom-folder");
+    await user.clear(input);
+    await user.type(input, "owner/another");
+    expect(name).toHaveValue("custom-folder");
+    await user.clear(name);
+    await user.type(input, "-changed");
+    expect(name).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Browse…" }));
+    expect(native.pickFolder).toHaveBeenCalledWith("Clone the repository into…", undefined);
   });
 
   it("keeps the dialog open and shows why when creation fails", async () => {

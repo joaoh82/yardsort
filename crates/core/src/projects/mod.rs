@@ -167,6 +167,52 @@ impl Projects<'_> {
         self.add(&normalize(&target), false)
     }
 
+    /// Clone a GitHub repository into a new folder, then register its local workspace.
+    pub fn clone_github(
+        &self,
+        repository: &str,
+        name: &str,
+        parent: &Path,
+    ) -> IpcResult<AddedProject> {
+        let url = github_url(repository)?;
+        self.clone_repository(&url, name, parent)
+    }
+
+    fn clone_repository(&self, url: &str, name: &str, parent: &Path) -> IpcResult<AddedProject> {
+        let name = validate_name(name)?;
+        if !parent.is_dir() {
+            return Err(IpcError::new(
+                "not_a_directory",
+                "Choose an existing destination folder.",
+            ));
+        }
+        let target = normalize(parent).join(name);
+        // Reserve the name atomically. Even an empty existing folder belongs to the user.
+        std::fs::create_dir(&target).map_err(|error| {
+            IpcError::new(
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    "already_exists"
+                } else {
+                    "io"
+                },
+                format!("Cannot create {}: {error}", target.display()),
+            )
+        })?;
+        if let Err(error) = self
+            .git
+            .run(parent, &["clone", "--", url, &target.to_string_lossy()])
+        {
+            // Cloning can take a long time; somebody may have written here in the meantime.
+            // Only remove an empty reservation, never recursively delete user work.
+            let retained = std::fs::remove_dir(&target).is_err() && target.exists();
+            return Err(IpcError::new("clone_failed", format!(
+                "Could not clone the repository: {error}. Check the URL and your git credentials.{}",
+                if retained { format!(" Files were kept at {}; choose another name or inspect that folder before retrying.", target.display()) } else { String::new() }
+            )));
+        }
+        self.add(&target, false)
+    }
+
     fn add(&self, root: &Path, opened_root_instead: bool) -> IpcResult<AddedProject> {
         let root_path = root.to_string_lossy().into_owned();
         let (row, already_known, revived) = match self.store.project_by_root(&root_path)? {
@@ -275,6 +321,54 @@ impl Projects<'_> {
     }
 }
 
+/// Accept GitHub's HTTPS/SSH clone URLs or the convenient owner/repository form.
+fn github_url(repository: &str) -> IpcResult<String> {
+    let repository = repository.trim();
+    let (path, ssh) = if let Some(path) = [
+        "https://github.com/",
+        "https://www.github.com/",
+        "http://github.com/",
+        "http://www.github.com/",
+        "github.com/",
+        "www.github.com/",
+    ]
+    .iter()
+    .find_map(|prefix| repository.strip_prefix(prefix))
+    {
+        (path, false)
+    } else if let Some(path) = repository.strip_prefix("git@github.com:") {
+        (path, true)
+    } else if let Some(path) = repository.strip_prefix("ssh://git@github.com/") {
+        (path, true)
+    } else {
+        (repository, false)
+    };
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() != 2
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || *part == "."
+                || *part == ".."
+                || part.starts_with('-')
+                || !part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        })
+    {
+        return Err(IpcError::new(
+            "invalid_repository",
+            "Enter a GitHub repository as owner/repository, an HTTPS URL, or an SSH clone URL.",
+        ));
+    }
+    Ok(if ssh {
+        format!("git@github.com:{path}.git")
+    } else {
+        format!("https://github.com/{path}.git")
+    })
+}
+
 /// A project name becomes a folder name, so it has to be one on every OS we run on.
 fn validate_name(name: &str) -> IpcResult<&str> {
     let name = name.trim();
@@ -332,6 +426,120 @@ mod tests {
         fn path(&self) -> PathBuf {
             normalize(self.dir.path())
         }
+    }
+
+    #[test]
+    fn github_repository_forms_are_normalized_and_other_inputs_refused() {
+        for input in [
+            "owner/repo",
+            " https://github.com/owner/repo.git/ ",
+            "github.com/owner/repo",
+            "www.github.com/owner/repo.git",
+            "https://www.github.com/owner/repo",
+            "http://github.com/owner/repo",
+            "http://www.github.com/owner/repo.git/",
+        ] {
+            assert_eq!(
+                github_url(input).unwrap(),
+                "https://github.com/owner/repo.git"
+            );
+        }
+        for input in [
+            "git@github.com:owner/repo.git",
+            "ssh://git@github.com/owner/repo",
+        ] {
+            assert_eq!(github_url(input).unwrap(), "git@github.com:owner/repo.git");
+        }
+        for input in [
+            "",
+            "--upload-pack=bad",
+            "https://elsewhere.test/a/b",
+            "a/../b",
+            "a/b/tree/main",
+            "a/b?token=secret",
+            "a/b c",
+            "file:///tmp/repo",
+            "https://github.com.evil/a/b",
+            "github.com.evil/a/b",
+            "www.github.com.evil/a/b",
+            "http://github.com.evil/a/b",
+            "https://www.github.com.evil/a/b",
+            "https://token@github.com/a/b",
+            "github.com/a/b?token=secret",
+        ] {
+            assert_eq!(
+                github_url(input).unwrap_err().code,
+                "invalid_repository",
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn cloning_preserves_history_origin_and_registers_the_local_workspace() {
+        let fx = Fixture::new();
+        let source = fx.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        fx.git.init(&source).unwrap();
+        fx.git.initial_commit(&source).unwrap();
+        let added = fx
+            .projects()
+            .clone_repository(&source.to_string_lossy(), "my clone", &fx.path())
+            .unwrap();
+        let target = PathBuf::from(&added.project.root_path);
+        assert_eq!(
+            fx.git.run(&target, &["rev-parse", "HEAD"]).unwrap(),
+            fx.git.run(&source, &["rev-parse", "HEAD"]).unwrap()
+        );
+        assert_eq!(
+            fx.git
+                .run(&target, &["remote", "get-url", "origin"])
+                .unwrap(),
+            source.to_string_lossy()
+        );
+        assert_eq!(added.project.workspaces[0].kind, WorkspaceKind::Local);
+        assert_eq!(fx.projects().list().unwrap().len(), 1);
+        let error = fx
+            .projects()
+            .clone_repository(&source.to_string_lossy(), "my clone", &fx.path())
+            .unwrap_err();
+        assert_eq!(error.code, "already_exists");
+        assert!(fx.git.has_commits(&target).unwrap());
+    }
+
+    #[test]
+    fn failed_clone_does_not_register_a_project_or_touch_an_existing_folder() {
+        let fx = Fixture::new();
+        let source = fx.path().join("missing");
+        assert_eq!(
+            fx.projects()
+                .clone_repository(&source.to_string_lossy(), "failed", &fx.path())
+                .unwrap_err()
+                .code,
+            "clone_failed"
+        );
+        assert!(fx.projects().list().unwrap().is_empty());
+        assert!(!fx.path().join("failed").exists());
+        std::fs::create_dir(fx.path().join("taken")).unwrap();
+        std::fs::write(fx.path().join("taken/keep"), "user work").unwrap();
+        assert_eq!(
+            fx.projects()
+                .clone_repository(&source.to_string_lossy(), "taken", &fx.path())
+                .unwrap_err()
+                .code,
+            "already_exists"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fx.path().join("taken/keep")).unwrap(),
+            "user work"
+        );
+        assert_eq!(
+            fx.projects()
+                .clone_repository(&source.to_string_lossy(), "../escape", &fx.path())
+                .unwrap_err()
+                .code,
+            "invalid_name"
+        );
     }
 
     #[test]

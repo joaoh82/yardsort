@@ -75,6 +75,25 @@ pub async fn project_create(
     .await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn project_clone(
+    app: AppHandle,
+    repository: String,
+    name: String,
+    parent: String,
+) -> IpcResult<AddedProject> {
+    blocking(app, move |state| {
+        let git = Git::new(&state.env())?;
+        Projects {
+            store: &state.store,
+            git: &git,
+        }
+        .clone_github(&repository, &name, &PathBuf::from(parent))
+    })
+    .await
+}
+
 /// Take a project off the list. With `keep_history` its workspaces and their conversations
 /// wait for the folder to be opened again. Files on disk are never touched.
 #[tauri::command]

@@ -230,6 +230,8 @@ export const ipc = {
   projectsList: () => unwrap(commands.projectsList()),
   /** Rejects with code `not_a_git_repo` unless `initGit` is set. */
   projectOpen: (path: string, initGit = false) => unwrap(commands.projectOpen(path, initGit)),
+  projectClone: (repository: string, name: string, parent: string) =>
+    unwrap(commands.projectClone(repository, name, parent)),
   projectCreate: (name: string, parent: string) => unwrap(commands.projectCreate(name, parent)),
   /** Take a project off the list. With `keepHistory` it comes back whole when opened again. */
   projectRemove: (id: string, keepHistory: boolean) =>
@@ -343,6 +345,8 @@ export const ipc = {
     unwrap(commands.workspaceFiles(workspaceId, dir, showIgnored)),
   workspaceSaveFile: (workspaceId: string, path: string, expected: string, text: string) =>
     unwrap(commands.workspaceSaveFile(workspaceId, path, expected, text)),
+  workspaceRevealFile: (workspaceId: string, path: string) =>
+    done(commands.workspaceRevealFile(workspaceId, path)),
   workspaceFile: (workspaceId: string, path: string) =>
     unwrap(commands.workspaceFile(workspaceId, path)),
   /** Watch one workspace's files (replacing any earlier watch); `null` stops. */

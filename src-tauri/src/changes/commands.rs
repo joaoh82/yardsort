@@ -216,3 +216,86 @@ pub async fn open_in_editor(
 
 /// Tried in order when no editor is configured.
 const EDITORS: &[&str] = &["cursor", "code", "zed", "windsurf", "subl", "idea"];
+
+/// Reveal a workspace entry, or open its nearest existing folder when it was deleted.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_reveal_file(
+    app: AppHandle,
+    workspace_id: String,
+    path: String,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        let (_, root) = workspace(state, &workspace_id)?;
+        let target = reveal_target(&root, &path)?;
+        let result = if target.1 {
+            tauri_plugin_opener::open_path(target.0, None::<&str>)
+        } else {
+            tauri_plugin_opener::reveal_item_in_dir(target.0)
+        };
+        result.map_err(|error| {
+            IpcError::new(
+                "reveal_failed",
+                format!("Could not open the file explorer: {error}"),
+            )
+        })
+    })
+    .await
+}
+
+fn reveal_target(root: &Path, path: &str) -> IpcResult<(PathBuf, bool)> {
+    let mut target = resolve_inside(root, path)?;
+    let missing = !target.exists();
+    while !target.exists() {
+        if !target.pop() {
+            return Err(IpcError::new(
+                "bad_path",
+                "The file's location no longer exists.",
+            ));
+        }
+    }
+    Ok((target, missing))
+}
+
+#[cfg(test)]
+mod reveal_tests {
+    use super::*;
+
+    #[test]
+    fn reveal_selects_existing_files_and_falls_back_for_deleted_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "hello").unwrap();
+        assert_eq!(
+            reveal_target(root, "src/file.txt").unwrap(),
+            (root.join("src/file.txt"), false)
+        );
+        assert_eq!(
+            reveal_target(root, "src/gone/file.txt").unwrap(),
+            (root.join("src"), true)
+        );
+        assert_eq!(
+            reveal_target(root, "../outside").unwrap_err().code,
+            "bad_path"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reveal_refuses_symlinks_outside_the_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("outside")).unwrap();
+        assert_eq!(
+            reveal_target(dir.path(), "outside").unwrap_err().code,
+            "bad_path"
+        );
+        assert_eq!(
+            reveal_target(dir.path(), "outside/deleted")
+                .unwrap_err()
+                .code,
+            "bad_path"
+        );
+    }
+}
