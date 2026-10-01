@@ -11,7 +11,10 @@ export function ContextBar({ tab }: { tab: TerminalTab }) {
   const [reading, setReading] = useState<{ recordId: string; usage: ContextUsage | null }>();
   const recordId = tab.recordId;
   const running = tab.exit === null;
-  const usage = running && reading?.recordId === recordId ? reading.usage : null;
+  // Until this conversation's own reading arrives (a tab or workspace switch), what is held is
+  // another's, or nothing: it says nothing about this one.
+  const loaded = running && reading?.recordId === recordId;
+  const usage = loaded ? reading.usage : null;
   const dismissed = useDismissedContext((s) => (recordId ? (s.byRecord[recordId] ?? 0) : 0));
   const setDismissed = useDismissedContext((s) => s.set);
 
@@ -36,8 +39,8 @@ export function ContextBar({ tab }: { tab: TerminalTab }) {
   const current = usage ? band(usage.percent) : 0;
   // Below the threshold — a compaction, or a fresh start — a later climb is news again.
   useEffect(() => {
-    if (recordId && current === 0 && dismissed !== 0) setDismissed(recordId, 0);
-  }, [recordId, current, dismissed, setDismissed]);
+    if (recordId && loaded && current === 0 && dismissed !== 0) setDismissed(recordId, 0);
+  }, [recordId, loaded, current, dismissed, setDismissed]);
 
   if (!recordId || !usage?.suggest || !usage.compactCommand || current <= dismissed) return null;
   const command = usage.compactCommand;
@@ -62,8 +65,14 @@ export function ContextBar({ tab }: { tab: TerminalTab }) {
       <button
         type="button"
         onClick={() => void compact().catch(console.error)}
-        title={`Types ${command} into the agent`}
-        className="rounded bg-accent px-3 py-0.5 font-medium text-canvas"
+        // Mid-turn, the agent would only queue it.
+        disabled={tab.busy}
+        title={
+          tab.busy
+            ? "Waits until the agent is idle"
+            : `Types ${command} into the agent's prompt and presses Enter`
+        }
+        className="rounded bg-accent px-3 py-0.5 font-medium text-canvas disabled:opacity-40"
       >
         Compact
       </button>

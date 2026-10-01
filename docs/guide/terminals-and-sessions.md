@@ -72,7 +72,10 @@ A plain click belongs to the program too. See [Keyboard shortcuts](shortcuts.md)
 Once a Claude Code or Codex conversation has used **80 %** of its context window, a bar appears
 above its terminal: _Context 84% full — 168,000 of 200,000 tokens_. **Compact** types the agent's
 own `/compact` command into the tab and presses Enter, which has the agent summarise the
-conversation so far and carry on with room to spare. **Not now** hides the bar until the context
+conversation so far and carry on with room to spare. It types into the agent's prompt as it
+stands, so clear anything you have half-written first, or it is sent along with `/compact`.
+While the agent is working on a turn the button is greyed out; it would only queue the command.
+**Not now** hides the bar until the context
 reaches the next step (90 %, then 95 %); after a compaction, or anything else that shrinks the
 context, the next climb past 80 % shows it again. Compacting is always the agent's own work, so
 the bar only offers it. Some agents compact by themselves when they run out, too.

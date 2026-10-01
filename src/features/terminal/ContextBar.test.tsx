@@ -101,6 +101,45 @@ describe("ContextBar", () => {
     expect(await screen.findByText(/Context 81% full/)).toBeTruthy();
   });
 
+  it("keeps a dismissal across tab and workspace switches", async () => {
+    const user = userEvent.setup();
+    const other: TerminalTab = { ...tab, id: "pty-2", recordId: "rec-2" };
+    // The other tab's reading arrives only when the test says so: until then, the bar holds
+    // rec-1's reading while showing rec-2, and nothing about rec-2 is known.
+    let release: (value: ContextUsage) => void = () => {};
+    core.sessionContext.mockImplementation((id: string) =>
+      id === "rec-2"
+        ? new Promise<ContextUsage>((resolve) => (release = resolve))
+        : Promise.resolve(usage(82)),
+    );
+    const { rerender, unmount } = render(<ContextBar tab={tab} />);
+    await user.click(await screen.findByRole("button", { name: "Not now" }));
+    expect(useDismissedContext.getState().byRecord["rec-1"]).toBe(80);
+
+    rerender(<ContextBar tab={other} />);
+    await waitFor(() => expect(core.sessionContext).toHaveBeenCalledWith("rec-2"));
+    rerender(<ContextBar tab={tab} />);
+    await act(async () => release(usage(10)));
+    await waitFor(() => expect(core.sessionContext).toHaveBeenCalledTimes(3));
+    expect(useDismissedContext.getState().byRecord["rec-1"]).toBe(80);
+    expect(screen.queryByRole("status")).toBeNull();
+
+    // Another workspace and back: the bar mounts afresh with no reading yet.
+    unmount();
+    render(<ContextBar tab={tab} />);
+    await waitFor(() => expect(core.sessionContext).toHaveBeenCalledTimes(4));
+    expect(useDismissedContext.getState().byRecord["rec-1"]).toBe(80);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("does not offer to compact while the agent is in the middle of a turn", async () => {
+    core.sessionContext.mockResolvedValue(usage(86));
+    const { rerender } = render(<ContextBar tab={{ ...tab, busy: true }} />);
+    expect(await screen.findByRole("button", { name: "Compact" })).toBeDisabled();
+    rerender(<ContextBar tab={tab} />);
+    expect(screen.getByRole("button", { name: "Compact" })).toBeEnabled();
+  });
+
   it("offers nothing to a shell, an ended agent, or a harness with no compact command", async () => {
     core.sessionContext.mockResolvedValue(usage(90, null));
     const { rerender } = render(<ContextBar tab={tab} />);
