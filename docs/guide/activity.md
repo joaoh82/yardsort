@@ -107,16 +107,15 @@ turn with the turn's ids. Yardsort then reads what the turn did from **Codex's o
 the one Codex keeps under `~/.codex/sessions/` and that `codex resume` reads. Rows appear when a
 turn ends, not while it runs:
 
-| Timeline row                                          | What it comes from                                                                                                              |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| _agent session started_                               | The session file's header: which Codex version, and that it was started from the CLI.                                           |
-| _prompt submitted · 214 characters_                   | Your message. The length, never the text.                                                                                       |
-| _shell done · exit 0 · 3 ms_, _shell failed · exit 1_ | Each command Codex ran, with its exit code and how long it took. The command itself is not recorded.                            |
-| _file added · hello.txt_, _file changed · …_          | Each file Codex wrote through its patch tool: the path relative to the workspace, and whether it was added, changed or deleted. |
-| _mcp:server/tool done_                                | A tool call to one of your MCP servers.                                                                                         |
-| _tokens used · 29,842 total · 138 out_                | What the turn cost. Codex records this; Claude Code's hooks do not.                                                             |
-| _agent finished its turn · 11.0 s_                    | The turn ended, and how long it took.                                                                                           |
-| _context size · 14,992 of 258,400 tokens_             | How much of its window the turn's last request filled, from the session file's own count.                                       |
+| Timeline row                                                             | What it comes from                                                                                                              |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| _agent session started_                                                  | The session file's header: which Codex version, and that it was started from the CLI.                                           |
+| _prompt submitted · 214 characters_                                      | Your message. The length, never the text.                                                                                       |
+| _shell done · exit 0 · 3 ms_, _shell failed · exit 1_                    | Each command Codex ran, with its exit code and how long it took. The command itself is not recorded.                            |
+| _file added · hello.txt_, _file changed · …_                             | Each file Codex wrote through its patch tool: the path relative to the workspace, and whether it was added, changed or deleted. |
+| _mcp:server/tool done_                                                   | A tool call to one of your MCP servers.                                                                                         |
+| _tokens used · 29,842 total · 138 out_                                   | What the turn cost. Codex records this; Claude Code's hooks do not.                                                             |
+| _agent finished its turn · 11.0 s · 14,992 of 258,400 tokens of context_ | The turn ended, how long it took, and how much of its window the turn's last request filled, from the session file's own count. |
 
 Why not Codex's hooks, which look just like Claude Code's? Because Codex, rightly, refuses to run
 a hook until you have reviewed it in its own **/hooks** screen, and the only way past that is a

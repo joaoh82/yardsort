@@ -252,7 +252,7 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
     let mut model: Option<String> = None;
     let mut usage: Option<(i64, Value)> = None;
     // The last `token_count` of the turn: what its final request carried, and the window.
-    let mut context: Option<(i64, u64, u64)> = None;
+    let mut context: Option<(u64, u64)> = None;
     let mut started = false;
     let mut ended = false;
     let key = |what: &str| format!("codex:{thread}:{turn}:{what}");
@@ -305,7 +305,7 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
                 let used = info["last_token_usage"]["total_tokens"].as_u64();
                 let window = info["model_context_window"].as_u64();
                 if let (Some(used), Some(window)) = (used, window) {
-                    context = Some((at, used, window));
+                    context = Some((used, window));
                 }
             }
             Some("event_msg") if in_turn => match text("type").as_deref() {
@@ -316,6 +316,10 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
                 }
                 Some("task_complete") => {
                     ended = true;
+                    // The context reading rides on the turn's end rather than an event of its
+                    // own: `task_complete` comes after the last `token_count`, so a separate
+                    // event would be older than the turn and lose to it as the newest report.
+                    let (used, window) = context.unzip();
                     events.push(Derived {
                         kind: "turn.completed",
                         source_key: key("turn"),
@@ -326,6 +330,8 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
                             "model": model,
                             "durationMs": payload.get("duration_ms"),
                             "timeToFirstTokenMs": payload.get("time_to_first_token_ms"),
+                            "contextTokens": used,
+                            "contextWindow": window,
                         }),
                     });
                 }
@@ -364,19 +370,6 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
                 "outputTokens": n("output_tokens"),
                 "reasoningOutputTokens": n("reasoning_output_tokens"),
                 "totalTokens": n("total_tokens"),
-            }),
-        });
-    }
-    if let Some((at, used, window)) = context {
-        events.push(Derived {
-            kind: "context.reported",
-            source_key: key("context"),
-            occurred_at: at,
-            payload: json!({
-                "threadId": thread,
-                "turnId": turn,
-                "contextTokens": used,
-                "contextWindow": window,
             }),
         });
     }
@@ -578,7 +571,6 @@ mod tests {
                 "tool.completed",
                 "turn.completed",
                 "usage.reported",
-                "context.reported",
             ]
         );
         let by_kind = |kind: &str| events.iter().find(|e| e.kind == kind).unwrap();
@@ -614,11 +606,10 @@ mod tests {
             "the turn's last record"
         );
         assert_eq!(usage.payload["cachedInputTokens"], 26752);
-        let context = by_kind("context.reported");
         assert_eq!(
             (
-                &context.payload["contextTokens"],
-                &context.payload["contextWindow"]
+                &turn.payload["contextTokens"],
+                &turn.payload["contextWindow"]
             ),
             (&json!(14992), &json!(258400)),
             "the last request of the turn, not the first"

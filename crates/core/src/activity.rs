@@ -1686,6 +1686,18 @@ mod tests {
         let mut draft = harness_draft(&ws);
         draft.harness_id = Some("codex".into());
         draft.harness_session_id = None;
+        // The conversation the run belongs to, as the app records it before spawning.
+        store
+            .add_session(&crate::store::NewSession {
+                id: "rec-c",
+                workspace_id: &ws,
+                harness_id: "codex",
+                title: "",
+                pty_session_id: "pty-c",
+                ..Default::default()
+            })
+            .unwrap();
+        draft.session_id = Some("rec-c".into());
         let run_id = recorder.begin(&draft).unwrap();
         recorder.spawned(&run_id, &draft, "pty-c", Some(codex::METHOD_NOTIFY));
         let home = codex_home_with_fixture(dir.path());
@@ -1702,7 +1714,7 @@ mod tests {
         let report = import_inbox(&store, dir.path());
         assert_eq!(
             (report.imported, report.duplicates, report.unlinked),
-            (9, 0, 0)
+            (8, 0, 0)
         );
         assert!(
             inbox.entries().unwrap().is_empty(),
@@ -1714,9 +1726,20 @@ mod tests {
         assert_eq!(of("tool.failed"), 1);
         assert_eq!(of("file.reported_write"), 1);
         assert_eq!(of("usage.reported"), 1);
-        assert_eq!(of("context.reported"), 1);
         assert_eq!(of("turn.completed"), 1);
         let turn = events.iter().find(|e| e.kind == "turn.completed").unwrap();
+        // The context bar reads the turn's report: 14,992 of Codex's 258,400.
+        let session = store
+            .session(turn.session_id.as_deref().expect("linked to the session"))
+            .unwrap()
+            .unwrap();
+        let reading = context::session_context(&store, &session, Some("/compact".into()))
+            .unwrap()
+            .expect("a Codex turn reports its context");
+        assert_eq!(
+            (reading.used_tokens, reading.window_tokens),
+            (14_992, 258_400)
+        );
         assert_eq!(turn.run_id.as_deref(), Some(run_id.as_str()));
         assert_eq!(
             (
@@ -1742,10 +1765,10 @@ mod tests {
             ))
             .unwrap();
         let again = import_inbox(&store, dir.path());
-        assert_eq!((again.imported, again.duplicates), (0, 9));
+        assert_eq!((again.imported, again.duplicates), (0, 8));
         assert_eq!(
             store.all_events(Some(&ws)).unwrap().len(),
-            10,
+            9,
             "plus process.started"
         );
     }

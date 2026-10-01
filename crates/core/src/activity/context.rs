@@ -10,7 +10,8 @@
 //!   `prompt_id`. That count rides on the `turn.completed` event as `contextTokens`. Claude Code
 //!   does not say how large its window is, so [`claude_window`] works it out from the model.
 //! - **Codex**: the session file's `token_count` events carry `info.last_token_usage` and
-//!   `info.model_context_window`; the last one of a turn becomes a `context.reported` event.
+//!   `info.model_context_window`; the last one of a turn rides on its `turn.completed` as
+//!   `contextTokens` and `contextWindow`.
 //!
 //! A compaction (Claude Code's `PostCompact` hook, `session.compacted`) clears the reading until
 //! the next turn reports a new one.
@@ -36,7 +37,7 @@ pub const CLAUDE_LARGE_WINDOW: u64 = 1_000_000;
 const TRANSCRIPT_TAIL_BYTES: u64 = 512 * 1024;
 
 /// The event kinds that say something about the context, newest of which wins.
-pub const KINDS: &[&str] = &["turn.completed", "context.reported", "session.compacted"];
+pub const KINDS: &[&str] = &["turn.completed", "session.compacted"];
 
 /// A session's context, as last reported.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -220,20 +221,15 @@ pub fn session_context(
     let payload: Value = serde_json::from_str(&event.payload).unwrap_or(Value::Null);
     let n = |key: &str| payload.get(key).and_then(Value::as_u64);
     let text = |key: &str| payload.get(key).and_then(Value::as_str);
-    let (used, window) = match event.kind.as_str() {
-        "context.reported" => match (n("contextTokens"), n("contextWindow")) {
-            (Some(used), Some(window)) => (used, window),
-            _ => return Ok(None),
-        },
-        "turn.completed" => match n("contextTokens") {
-            Some(used) => (
-                used,
-                claude_window(used, session.model.as_deref(), text("configuredModel")),
-            ),
-            None => return Ok(None),
-        },
-        _ => return Ok(None),
+    if event.kind != "turn.completed" {
+        return Ok(None);
+    }
+    let Some(used) = n("contextTokens") else {
+        return Ok(None);
     };
+    // Codex says how large its window is; Claude Code does not.
+    let window = n("contextWindow")
+        .unwrap_or_else(|| claude_window(used, session.model.as_deref(), text("configuredModel")));
     Ok(Some(usage(used, window, compact_command)))
 }
 
@@ -525,8 +521,11 @@ mod tests {
         assert_eq!(read("rec-1"), None);
         add(
             "rec-1",
-            "context.reported",
-            serde_json::json!({ "contextTokens": 230_000, "contextWindow": 258_400 }),
+            "turn.completed",
+            serde_json::json!({
+                "threadId": "t", "turnId": "u", "model": "gpt-6",
+                "contextTokens": 230_000, "contextWindow": 258_400,
+            }),
         );
         let codex = read("rec-1").unwrap();
         assert_eq!((codex.percent, codex.suggest), (89, true));

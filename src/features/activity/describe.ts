@@ -167,16 +167,6 @@ export function describeEvent(event: ActivityEvent): {
             : "",
         tone: "plain",
       };
-    case "context.reported":
-      return {
-        title: "context size",
-        detail: p.contextTokens
-          ? `${p.contextTokens.toLocaleString()}${
-              p.contextWindow ? ` of ${p.contextWindow.toLocaleString()}` : ""
-            } tokens`
-          : "",
-        tone: "plain",
-      };
     case "approval.requested":
       return { title: `permission asked for ${toolName(p)}`, detail: toolDetail(p), tone: "plain" };
     case "approval.resolved":
@@ -216,8 +206,13 @@ export function describeEvent(event: ActivityEvent): {
           p.totalTokens !== null && p.totalTokens !== undefined
             ? `${p.totalTokens.toLocaleString()} tokens`
             : null,
-          // Claude Code's turns carry how much context their last request held.
-          p.contextTokens ? `${p.contextTokens.toLocaleString()} tokens of context` : null,
+          // Claude Code's and Codex's turns carry how much context their last request held;
+          // Codex says of how large a window.
+          p.contextTokens
+            ? `${p.contextTokens.toLocaleString()}${
+                p.contextWindow ? ` of ${p.contextWindow.toLocaleString()}` : ""
+              } tokens of context`
+            : null,
           p.detail === "notify" ? "from notify alone; the session file could not be read" : null,
         ]
           .filter(Boolean)
