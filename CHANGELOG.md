@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.16.0
 
 - **Every pull request a workspace opened.** A workspace that opened more than one — a second PR
   on its branch after the first merged, or one from another branch its agent created — shows the
