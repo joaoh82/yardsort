@@ -71,6 +71,8 @@ jobs:
             os: windows-latest
             args: ""
     runs-on: ${{ matrix.os }}
+    # About twice the slowest build, the Linux one at 39 minutes.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
         with:
@@ -78,6 +80,8 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
+        # A hung mirror once held a pull request's check for three hours; this takes two minutes.
+        timeout-minutes: 15
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
