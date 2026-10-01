@@ -5,6 +5,10 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Copy and paste in the terminal work the way more desktops expect.** Right-click for Copy,
+  Paste and Select all. Plain `Ctrl+C` copies while text is selected and interrupts otherwise,
+  so Omarchy's `Super+C` copies. `Ctrl+Insert` and `Shift+Insert` copy and paste too.
+
 - **Blog and tutorials on the website.** Read the story behind Yardsort, a practical parallel-agent
   tutorial, a worktree explainer, and dated comparisons with Superset and Conductor.
 

@@ -6,12 +6,13 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isDragOver } from "@/lib/dragPosition";
 import { ipc, type SessionId } from "@/lib/ipc";
 import { isMac, isModKey, isWindows, shortcutKey } from "@/lib/platform";
 import { useTerminalStore } from "@/stores/terminals";
-import { droppedPathsText, shiftEnterInput } from "./input";
+import { ContextMenu } from "@/features/sidebar/ContextMenu";
+import { clipboardKey, droppedPathsText, shiftEnterInput } from "./input";
 import { attachRenderer, rendererPreference, type RendererKind } from "./renderer";
 import { darkTheme, FONT_FAMILY, lightTheme } from "./theme";
 import { createInputWriter } from "./writer";
@@ -37,6 +38,8 @@ interface Props {
  */
 export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   const probeRef = useRef(probe);
   useEffect(() => {
     probeRef.current = probe;
@@ -68,6 +71,7 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
       }),
     );
     term.open(container);
+    termRef.current = term;
     attachRenderer(term, rendererPreference(rendererOverride), (kind) => {
       useTerminalStore.getState().setRenderer(kind);
       probeRef.current?.onRenderer?.(kind);
@@ -108,13 +112,25 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
         event.preventDefault();
         return false;
       }
+      const clipboard = clipboardKey(event, term.hasSelection(), isMac);
+      if (clipboard === "copy") {
+        copyText(term.getSelection());
+        // The next Ctrl+C is an interrupt again.
+        term.clearSelection();
+        event.preventDefault();
+        return false;
+      }
+      if (clipboard === "paste") {
+        pasteInto(term);
+        event.preventDefault();
+        return false;
+      }
       if (event.type !== "keydown" || !isModKey(event)) return true;
       const key = shortcutKey(event);
       if (key === "c" && term.hasSelection()) {
-        void writeText(term.getSelection()).catch(console.error);
+        copyText(term.getSelection());
       } else if (key === "v") {
-        // `paste` applies bracketed-paste wrapping when the program asked for it.
-        void readText().then((text) => text && term.paste(text), console.error);
+        pasteInto(term);
       } else {
         // Every other Mod combination is an app shortcut: keep it away from the PTY and let it
         // bubble to the window's handlers.
@@ -196,14 +212,59 @@ export function TerminalView({ sessionId, rendererOverride, probe }: Props) {
       onResize.dispose();
       onRender.dispose();
       if (attachment !== null) void ipc.ptyDetach(sessionId, attachment).catch(() => {});
+      termRef.current = null;
+      setMenu(null);
       term.dispose();
     };
   }, [sessionId, rendererOverride]);
 
+  // Right-click offers Copy and Paste, unless the program reads the mouse itself (an agent's
+  // TUI, vim); Shift+right-click opens the menu anyway, as Shift+drag still selects.
+  const onContextMenu = (event: React.MouseEvent) => {
+    const term = termRef.current;
+    if (!term) return;
+    event.preventDefault();
+    if (term.modes.mouseTrackingMode !== "none" && !event.shiftKey) return;
+    setMenu({ x: event.clientX, y: event.clientY, selection: term.getSelection() });
+  };
+  const withTerm = (action: (term: Terminal) => void) => {
+    const term = termRef.current;
+    if (!term) return;
+    action(term);
+    term.focus();
+  };
+
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full overflow-hidden bg-canvas p-2 data-[drop=over]:outline-2 data-[drop=over]:-outline-offset-2 data-[drop=over]:outline-accent"
-    />
+    <>
+      <div
+        ref={containerRef}
+        onContextMenu={onContextMenu}
+        className="h-full w-full overflow-hidden bg-canvas p-2 data-[drop=over]:outline-2 data-[drop=over]:-outline-offset-2 data-[drop=over]:outline-accent"
+      />
+      {menu && (
+        <ContextMenu
+          at={menu}
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              label: "Copy",
+              disabled: !menu.selection,
+              onSelect: () => withTerm(() => copyText(menu.selection)),
+            },
+            { label: "Paste", onSelect: () => withTerm(pasteInto) },
+            { label: "Select all", onSelect: () => withTerm((term) => term.selectAll()) },
+          ]}
+        />
+      )}
+    </>
   );
+}
+
+function copyText(text: string) {
+  void writeText(text).catch(console.error);
+}
+
+// `paste` applies bracketed-paste wrapping when the program asked for it.
+function pasteInto(term: Terminal) {
+  void readText().then((text) => text && term.paste(text), console.error);
 }

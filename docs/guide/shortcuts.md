@@ -4,23 +4,23 @@ Open **Shortcuts** in the bottom bar, or **Settings → Keyboard**, for the in-a
 
 **Mod** is `⌘` on macOS and **`Ctrl+Shift`** on Linux and Windows.
 
-| Shortcut      | Linux / Windows      | macOS       | Action                                    |
-| ------------- | -------------------- | ----------- | ----------------------------------------- |
-| Mod+K         | `Ctrl+Shift+K`       | `⌘K`        | Search commands and workspaces            |
-| Mod+/         | `Ctrl+Shift+/`       | `⌘/`        | Shortcut cheat sheet and configuration    |
-| Mod+L         | `Ctrl+Shift+L`       | `⌘L`        | Focus projects (expands the panel)        |
-| Mod+E         | `Ctrl+Shift+E`       | `⌘E`        | Focus the workspace or active terminal    |
-| Mod+R         | `Ctrl+Shift+R`       | `⌘R`        | Focus changes and files (expands panel)   |
-| Mod+↑ / Mod+↓ | `Ctrl+Shift+↑` / `↓` | `⌘↑` / `⌘↓` | Previous / next usable workspace          |
-| Mod+← / Mod+→ | `Ctrl+Shift+←` / `→` | `⌘←` / `⌘→` | Previous / next terminal tab              |
-| Mod+O         | `Ctrl+Shift+O`       | `⌘O`        | Open a project (folder picker)            |
-| Mod+N         | `Ctrl+Shift+N`       | `⌘N`        | New workspace in the current project      |
-| Mod+T         | `Ctrl+Shift+T`       | `⌘T`        | New shell tab in the selected workspace   |
-| Mod+W         | `Ctrl+Shift+W`       | `⌘W`        | Close the active tab                      |
-| Mod+B         | `Ctrl+Shift+B`       | `⌘B`        | Toggle the left panel                     |
-| Mod+Alt+B     | `Ctrl+Shift+Alt+B`   | `⌥⌘B`       | Toggle the right panel                    |
-| Mod+,         | `Ctrl+Shift+,`       | `⌘,`        | Settings                                  |
-| Mod+C / Mod+V | `Ctrl+Shift+C` / `V` | `⌘C` / `⌘V` | Copy the selection / paste, in a terminal |
+| Shortcut      | Linux / Windows      | macOS       | Action                                                                                              |
+| ------------- | -------------------- | ----------- | --------------------------------------------------------------------------------------------------- |
+| Mod+K         | `Ctrl+Shift+K`       | `⌘K`        | Search commands and workspaces                                                                      |
+| Mod+/         | `Ctrl+Shift+/`       | `⌘/`        | Shortcut cheat sheet and configuration                                                              |
+| Mod+L         | `Ctrl+Shift+L`       | `⌘L`        | Focus projects (expands the panel)                                                                  |
+| Mod+E         | `Ctrl+Shift+E`       | `⌘E`        | Focus the workspace or active terminal                                                              |
+| Mod+R         | `Ctrl+Shift+R`       | `⌘R`        | Focus changes and files (expands panel)                                                             |
+| Mod+↑ / Mod+↓ | `Ctrl+Shift+↑` / `↓` | `⌘↑` / `⌘↓` | Previous / next usable workspace                                                                    |
+| Mod+← / Mod+→ | `Ctrl+Shift+←` / `→` | `⌘←` / `⌘→` | Previous / next terminal tab                                                                        |
+| Mod+O         | `Ctrl+Shift+O`       | `⌘O`        | Open a project (folder picker)                                                                      |
+| Mod+N         | `Ctrl+Shift+N`       | `⌘N`        | New workspace in the current project                                                                |
+| Mod+T         | `Ctrl+Shift+T`       | `⌘T`        | New shell tab in the selected workspace                                                             |
+| Mod+W         | `Ctrl+Shift+W`       | `⌘W`        | Close the active tab                                                                                |
+| Mod+B         | `Ctrl+Shift+B`       | `⌘B`        | Toggle the left panel                                                                               |
+| Mod+Alt+B     | `Ctrl+Shift+Alt+B`   | `⌥⌘B`       | Toggle the right panel                                                                              |
+| Mod+,         | `Ctrl+Shift+,`       | `⌘,`        | Settings                                                                                            |
+| Mod+C / Mod+V | `Ctrl+Shift+C` / `V` | `⌘C` / `⌘V` | Copy the selection / paste, in a terminal ([more ways](terminals-and-sessions.md#copy-paste-links)) |
 
 In the composer: `Enter` starts, `Shift+Enter` adds a line, `Esc` cancels. `Esc` also closes
 dialogs and menus. In an agent's terminal `Shift+Enter` adds a line too — see

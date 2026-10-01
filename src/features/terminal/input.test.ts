@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { droppedPathsText, SHIFT_ENTER, shiftEnterInput } from "./input";
+import { clipboardKey, droppedPathsText, SHIFT_ENTER, shiftEnterInput } from "./input";
 
 const keydown = (init: KeyboardEventInit) =>
   new KeyboardEvent("keydown", { key: "Enter", ...init });
@@ -44,5 +44,40 @@ describe("droppedPathsText", () => {
     expect(droppedPathsText(["C:\\Users\\me\\My Docs\\plan.md"], true)).toBe(
       '"C:\\Users\\me\\My Docs\\plan.md" ',
     );
+  });
+});
+
+describe("clipboardKey", () => {
+  const key = (k: string, init: KeyboardEventInit = {}) =>
+    new KeyboardEvent("keydown", { key: k, ...init });
+
+  it("copies with Ctrl+C only while there is a selection, so the interrupt still works", () => {
+    expect(clipboardKey(key("c", { ctrlKey: true }), true, false)).toBe("copy");
+    expect(clipboardKey(key("C", { ctrlKey: true }), true, false)).toBe("copy");
+    expect(clipboardKey(key("c", { ctrlKey: true }), false, false)).toBeNull();
+  });
+
+  it("leaves Ctrl+C to the program on macOS, where ⌘C copies", () => {
+    expect(clipboardKey(key("c", { ctrlKey: true }), true, true)).toBeNull();
+  });
+
+  it("never takes plain Ctrl+V from the program", () => {
+    expect(clipboardKey(key("v", { ctrlKey: true }), true, false)).toBeNull();
+    expect(clipboardKey(key("v", { ctrlKey: true }), false, false)).toBeNull();
+  });
+
+  it("takes Ctrl+Insert to copy a selection and Shift+Insert to paste", () => {
+    expect(clipboardKey(key("Insert", { ctrlKey: true }), true, false)).toBe("copy");
+    expect(clipboardKey(key("Insert", { ctrlKey: true }), false, false)).toBeNull();
+    expect(clipboardKey(key("Insert", { shiftKey: true }), false, false)).toBe("paste");
+    expect(clipboardKey(key("Insert"), true, false)).toBeNull();
+  });
+
+  it("ignores other modifiers and key-up", () => {
+    expect(clipboardKey(key("c", { ctrlKey: true, altKey: true }), true, false)).toBeNull();
+    expect(clipboardKey(key("c", { ctrlKey: true, metaKey: true }), true, false)).toBeNull();
+    expect(
+      clipboardKey(new KeyboardEvent("keyup", { key: "c", ctrlKey: true }), true, false),
+    ).toBeNull();
   });
 });

@@ -27,14 +27,32 @@ tab you were looking at stays in front.
 
 ### Copy, paste, links
 
-|                    | Linux / Windows | macOS     |
-| ------------------ | --------------- | --------- |
-| Copy the selection | `Ctrl+Shift+C`  | `⌘C`      |
-| Paste              | `Ctrl+Shift+V`  | `⌘V`      |
-| Open a link        | `Ctrl`+click    | `⌘`+click |
+|                    | Linux / Windows                                        | macOS     |
+| ------------------ | ------------------------------------------------------ | --------- |
+| Copy the selection | `Ctrl+Shift+C`, `Ctrl+Insert`, or `Ctrl+C` (see below) | `⌘C`      |
+| Paste              | `Ctrl+Shift+V` or `Shift+Insert`                       | `⌘V`      |
+| Open a link        | `Ctrl`+click                                           | `⌘`+click |
 
-Plain `Ctrl+C`, `Ctrl+V` and a plain click belong to the program in the terminal. See
-[Keyboard shortcuts](shortcuts.md) for why.
+**Right-click** the terminal for **Copy**, **Paste** and **Select all**. A program that reads
+the mouse itself, like an agent's interface or vim, gets the right-click instead. Hold `Shift`
+to open the menu anyway, the same way `Shift`+drag still selects text in such a program.
+
+On Linux and Windows, plain **`Ctrl+C` copies while text is selected** and clears the
+selection, so pressing it again interrupts the program. With nothing selected it is the
+interrupt, as always. This means a desktop that sends `Ctrl+C` for its own copy key, such as
+Omarchy's `Super+C`, copies from Yardsort too.
+
+Plain **`Ctrl+V` always goes to the program.** vim uses it for block selection, and agents
+read it to paste an image. On Omarchy that means `Super+V` (which sends `Ctrl+V`) does not paste
+into a shell. Use `Ctrl+Shift+V` or the right-click menu, or tag Yardsort as a terminal in your
+Hyprland configuration. Omarchy then sends `Ctrl+Shift+C` and `Ctrl+Shift+V`, but `Super+C`
+stops copying in Yardsort's text fields:
+
+```lua
+o.window("yardsort", { tag = "+terminal" })
+```
+
+A plain click belongs to the program too. See [Keyboard shortcuts](shortcuts.md) for why.
 
 ### Typing to an agent
 
