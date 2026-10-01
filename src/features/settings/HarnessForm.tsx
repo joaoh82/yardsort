@@ -33,6 +33,15 @@ const ARG_FIELDS = [
 ] as const;
 type ArgField = (typeof ARG_FIELDS)[number][0];
 
+/**
+ * Built-in auto modes that approve everything not explicitly denied, rather than reviewing what
+ * they approve. The switch says so where the choice is made.
+ */
+const BROAD_AUTO: Record<string, string> = {
+  opencode:
+    "OpenCode's --auto approves every permission you have not explicitly denied — broader than the other agents' auto modes.",
+};
+
 const LIST_FIELDS = [
   ["efforts", "Effort levels", "Comma-separated. Leave empty to hide the effort picker."],
   ["models", "Model suggestions", "Comma-separated. Any model name can still be typed."],
@@ -241,6 +250,9 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
                   Every new, resumed and forked session starts with{" "}
                   <code className="font-mono">{draft.args.autoArgs.trim()}</code>, so the agent asks
                   you less often. What it still asks about is up to the agent.
+                  {BROAD_AUTO[draft.id] && draft.args.autoArgs.trim() === "--auto" && (
+                    <span className="mt-0.5 block text-amber-400">{BROAD_AUTO[draft.id]}</span>
+                  )}
                 </>
               ) : (
                 "This harness has no auto mode Yardsort knows of. Give its flag in Auto args to use one."

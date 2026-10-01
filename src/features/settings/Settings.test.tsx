@@ -229,6 +229,15 @@ describe("Settings", () => {
       expect(none).toBeEnabled();
     });
 
+    it("warns on the switch when an agent's auto mode approves everything not denied", async () => {
+      const opencode = { ...codex, id: "opencode", label: "OpenCode", autoArgs: ["--auto"] };
+      core.harnessesList.mockResolvedValue([claude, codex, opencode]);
+      const { user } = await openSettings();
+      expect(screen.queryByText(/broader than the other agents/)).toBeNull();
+      await user.click(screen.getByRole("button", { name: /OpenCode/ }));
+      expect(await screen.findByText(/broader than the other agents/)).toBeInTheDocument();
+    });
+
     it("saves edits as parsed arguments and lists", async () => {
       core.harnessSave.mockResolvedValue([{ ...claude, modified: true }, codex]);
       const { user } = await openSettings();
