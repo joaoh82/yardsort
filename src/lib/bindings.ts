@@ -723,6 +723,17 @@ export type HarnessDef = {
 	command: string,
 	/**  Always passed. */
 	baseArgs: string[],
+	/**
+	 *  What puts the agent in its "auto" permission mode: it acts on its own but keeps a check on
+	 *  risky actions, rather than asking about everything or nothing. Passed only while
+	 *  [`Self::auto_mode`] is on. Empty means the harness has no such mode.
+	 */
+	autoArgs?: string[],
+	/**
+	 *  Start every interactive session — new, resumed or forked — with [`Self::auto_args`].
+	 *  Off unless the user turns it on: how much an agent may do unasked is their call.
+	 */
+	autoMode?: boolean,
 	modelArgs: string[],
 	effortArgs: string[],
 	sessionArgs: string[],

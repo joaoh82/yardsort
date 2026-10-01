@@ -9,6 +9,12 @@ has the downloads and the full commit lists.
   Paste and Select all. Plain `Ctrl+C` copies while text is selected and interrupts otherwise,
   so Omarchy's `Super+C` copies. `Ctrl+Insert` and `Shift+Insert` copy and paste too.
 
+- **Always start an agent in auto mode.** Settings → Harnesses has a switch per agent that starts
+  every new, resumed and forked session in that agent's own auto mode — `--permission-mode auto`
+  for Claude Code and Grok, `--approve-for-me` for Codex, `--auto` for OpenCode,
+  `--approval-mode=write` for OMP and `--auto-review` for Cursor. Off until you turn it on; custom
+  harnesses can give their own flag.
+
 - **Blog and tutorials on the website.** Read the story behind Yardsort, a practical parallel-agent
   tutorial, a worktree explainer, and dated comparisons with Superset and Conductor.
 

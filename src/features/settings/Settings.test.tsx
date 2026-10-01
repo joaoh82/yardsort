@@ -46,6 +46,8 @@ const claude: HarnessInfo = {
   label: "Claude Code",
   command: "claude",
   baseArgs: [],
+  autoArgs: ["--permission-mode", "auto"],
+  autoMode: false,
   modelArgs: ["--model", "{model}"],
   effortArgs: ["--effort", "{effort}"],
   sessionArgs: ["--session-id", "{session_id}"],
@@ -68,6 +70,7 @@ const codex: HarnessInfo = {
   id: "codex",
   label: "Codex",
   command: "codex",
+  autoArgs: [],
   effortArgs: ["-c", 'model_reasoning_effort="{effort}"'],
   sessionArgs: [],
   sessionIdMode: "latestInCwd",
@@ -144,7 +147,12 @@ describe("Settings", () => {
     core.harnessesList.mockResolvedValue([claude, codex]);
     core.harnessPreview.mockImplementation(async (def: HarnessDef) => ({
       resolvedPath: def.command === "claude" ? "/usr/bin/claude" : null,
-      start: [def.command, ...def.modelArgs, ...def.promptArgs],
+      start: [
+        def.command,
+        ...(def.autoMode ? (def.autoArgs ?? []) : []),
+        ...def.modelArgs,
+        ...def.promptArgs,
+      ],
       resume: [def.command, ...def.resumeArgs],
       fork: [def.command, ...def.forkArgs],
       problem: null,
@@ -194,6 +202,31 @@ describe("Settings", () => {
           expect.objectContaining({ baseArgs: ["--verbose"] }),
         ),
       );
+    });
+
+    it("turns auto mode on with the harness's own flag, and offers it only when there is one", async () => {
+      core.harnessSave.mockResolvedValue([{ ...claude, autoMode: true, modified: true }, codex]);
+      const { user } = await openSettings();
+      const preview = screen.getByRole("region", { name: "Command preview" });
+      await within(preview).findByText("claude --model {model} {prompt}");
+      expect(screen.getByLabelText("Auto args")).toHaveValue("--permission-mode auto");
+
+      const auto = screen.getByRole("checkbox", { name: /Always start in auto mode/ });
+      expect(auto).not.toBeChecked();
+      await user.click(auto);
+      await within(preview).findByText("claude --permission-mode auto --model {model} {prompt}");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect(core.harnessSave.mock.calls[0]![0]).toMatchObject({
+        autoMode: true,
+        autoArgs: ["--permission-mode", "auto"],
+      });
+
+      // Codex here has no auto args: nothing to turn on until some are given.
+      await user.click(screen.getByRole("button", { name: /Codex/ }));
+      const none = screen.getByRole("checkbox", { name: /Always start in auto mode/ });
+      expect(none).toBeDisabled();
+      await user.type(screen.getByLabelText("Auto args"), "--approve-for-me");
+      expect(none).toBeEnabled();
     });
 
     it("saves edits as parsed arguments and lists", async () => {

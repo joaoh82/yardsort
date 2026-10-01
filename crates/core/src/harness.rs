@@ -36,6 +36,15 @@ pub struct HarnessDef {
     pub command: String,
     /// Always passed.
     pub base_args: Vec<String>,
+    /// What puts the agent in its "auto" permission mode: it acts on its own but keeps a check on
+    /// risky actions, rather than asking about everything or nothing. Passed only while
+    /// [`Self::auto_mode`] is on. Empty means the harness has no such mode.
+    #[serde(default)]
+    pub auto_args: Vec<String>,
+    /// Start every interactive session — new, resumed or forked — with [`Self::auto_args`].
+    /// Off unless the user turns it on: how much an agent may do unasked is their call.
+    #[serde(default)]
+    pub auto_mode: bool,
     pub model_args: Vec<String>,
     pub effort_args: Vec<String>,
     pub session_args: Vec<String>,
@@ -88,6 +97,7 @@ impl HarnessDef {
     pub fn start_args(&self, values: &LaunchValues) -> Vec<String> {
         let mut groups = vec![
             &self.base_args,
+            self.auto(),
             &self.model_args,
             &self.effort_args,
             &self.session_args,
@@ -118,10 +128,28 @@ impl HarnessDef {
         } else {
             &self.resume_args
         };
-        [&self.base_args, &self.model_args, &self.effort_args, last]
-            .into_iter()
-            .flat_map(|group| expand(group, values))
-            .collect()
+        // After the resume or fork args, not before: for a harness whose resume is a subcommand
+        // (`codex resume --last`), that is where the subcommand reads its own options.
+        [
+            &self.base_args,
+            &self.model_args,
+            &self.effort_args,
+            last,
+            self.auto(),
+        ]
+        .into_iter()
+        .flat_map(|group| expand(group, values))
+        .collect()
+    }
+
+    /// The auto-mode args when they apply, else nothing. Never part of [`Self::write_args`]
+    /// one-shots: writing a commit message or a pull request runs no tools to approve.
+    fn auto(&self) -> &[String] {
+        if self.auto_mode {
+            &self.auto_args
+        } else {
+            &[]
+        }
     }
 
     /// A blank definition for a harness the user is adding.
@@ -131,6 +159,8 @@ impl HarnessDef {
             label: id.to_owned(),
             command: id.to_owned(),
             base_args: vec![],
+            auto_args: vec![],
+            auto_mode: false,
             model_args: vec![],
             effort_args: vec![],
             session_args: vec![],
@@ -208,6 +238,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             label: "Claude Code".into(),
             command: "claude".into(),
             base_args: vec![],
+            auto_args: strings(&["--permission-mode", "auto"]),
+            auto_mode: false,
             model_args: strings(&["--model", "{model}"]),
             effort_args: strings(&["--effort", "{effort}"]),
             session_args: strings(&["--session-id", "{session_id}"]),
@@ -234,6 +266,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             label: "Codex".into(),
             command: "codex".into(),
             base_args: vec![],
+            auto_args: strings(&["--approve-for-me"]),
+            auto_mode: false,
             model_args: strings(&["-m", "{model}"]),
             effort_args: strings(&["-c", "model_reasoning_effort=\"{effort}\""]),
             session_args: vec![],
@@ -254,6 +288,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             label: "Grok".into(),
             command: "grok".into(),
             base_args: vec![],
+            auto_args: strings(&["--permission-mode", "auto"]),
+            auto_mode: false,
             model_args: strings(&["-m", "{model}"]),
             effort_args: strings(&["--reasoning-effort", "{effort}"]),
             session_args: strings(&["--session-id", "{session_id}"]),
@@ -280,6 +316,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             label: "OpenCode".into(),
             command: "opencode".into(),
             base_args: vec![],
+            auto_args: strings(&["--auto"]),
+            auto_mode: false,
             model_args: strings(&["-m", "{model}"]),
             effort_args: vec![],
             session_args: vec![],
@@ -300,6 +338,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             label: "OMP".into(),
             command: "omp".into(),
             base_args: vec![],
+            auto_args: strings(&["--approval-mode=write"]),
+            auto_mode: false,
             model_args: strings(&["--model", "{model}"]),
             effort_args: strings(&["--thinking", "{effort}"]),
             session_args: vec![],
@@ -322,6 +362,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             label: "Cursor".into(),
             command: "cursor-agent".into(),
             base_args: vec![],
+            auto_args: strings(&["--auto-review"]),
+            auto_mode: false,
             model_args: strings(&["--model", "{model}"]),
             effort_args: vec![],
             session_args: vec![],
@@ -343,6 +385,9 @@ pub fn builtin() -> Vec<HarnessDef> {
             label: "Pi".into(),
             command: "pi".into(),
             base_args: vec![],
+            // Pi asks no permission questions, so there is nothing to automate.
+            auto_args: vec![],
+            auto_mode: false,
             model_args: strings(&["--model", "{model}"]),
             effort_args: strings(&["--thinking", "{effort}"]),
             session_args: strings(&["--session-id", "{session_id}"]),
@@ -379,6 +424,10 @@ pub struct HarnessOverride {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_args: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_args: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_mode: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model_args: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort_args: Option<Vec<String>>,
@@ -412,6 +461,8 @@ macro_rules! each_field {
             label,
             command,
             base_args,
+            auto_args,
+            auto_mode,
             model_args,
             effort_args,
             session_args,
@@ -570,6 +621,9 @@ pub fn validate(def: &HarnessDef) -> Result<(), String> {
         && !def.prompt_args.iter().any(|arg| arg.contains("{prompt}"))
     {
         return Err("With the argv transport, the prompt args must use {prompt}.".into());
+    }
+    if def.auto_mode && def.auto_args.is_empty() {
+        return Err("To start in auto mode, give the auto args that turn it on.".into());
     }
     if def.strengths.chars().count() > MAX_STRENGTHS_CHARS {
         return Err(format!(
@@ -922,6 +976,72 @@ mod tests {
     }
 
     #[test]
+    fn auto_mode_adds_its_args_to_every_interactive_launch_only_while_on() {
+        let v = values("go", "opus", "");
+        let mut claude = find("claude", &[]).unwrap();
+        assert!(!claude.auto_mode, "off unless the user turns it on");
+        assert!(!claude.start_args(&v).contains(&"--permission-mode".into()));
+        assert!(!claude.continue_args(&v, false).contains(&"auto".into()));
+
+        claude.auto_mode = true;
+        assert_eq!(
+            claude.start_args(&v),
+            [
+                "--permission-mode",
+                "auto",
+                "--model",
+                "opus",
+                "--session-id",
+                "11111111-2222-3333-4444-555555555555",
+                "--",
+                "go"
+            ],
+            "before the prompt, which ends the options"
+        );
+        assert_eq!(
+            claude.continue_args(&v, true)[7..],
+            ["--permission-mode", "auto"]
+        );
+
+        // Codex resumes and forks with a subcommand, which reads its own options after it.
+        let mut codex = find("codex", &[]).unwrap();
+        codex.auto_mode = true;
+        assert_eq!(
+            codex.start_args(&v),
+            ["--approve-for-me", "-m", "opus", "--", "go"]
+        );
+        assert_eq!(
+            codex.continue_args(&v, false),
+            ["-m", "opus", "resume", "--last", "--approve-for-me"]
+        );
+        assert_eq!(
+            codex.continue_args(&v, true),
+            ["-m", "opus", "fork", "--last", "--approve-for-me"]
+        );
+    }
+
+    #[test]
+    fn auto_mode_is_saved_like_any_other_field_and_old_settings_load_with_it_off() {
+        // Settings written before auto mode existed have neither field.
+        let old: HarnessOverride =
+            toml::from_str("id = \"claude\"\nbase_args = [\"--verbose\"]\n").unwrap();
+        let claude = find("claude", std::slice::from_ref(&old)).unwrap();
+        assert!(!claude.auto_mode);
+        assert_eq!(claude.auto_args, ["--permission-mode", "auto"]);
+
+        let mut wanted = claude.clone();
+        wanted.auto_mode = true;
+        let mut overrides = vec![old];
+        save_override(&mut overrides, &wanted);
+        assert_eq!(overrides[0].auto_mode, Some(true));
+        assert_eq!(
+            overrides[0].auto_args, None,
+            "the built-in flag keeps following newer Yardsorts"
+        );
+        assert_eq!(find("claude", &overrides), Some(wanted));
+    }
+
+    #[test]
     fn definitions_are_checked_before_saving() {
         let good = find("claude", &[]).unwrap();
         assert!(validate(&good).is_ok());
@@ -946,6 +1066,13 @@ mod tests {
             (
                 Box::new(|d: &mut HarnessDef| d.prompt_args = strings(&["--msg"])),
                 "{prompt}",
+            ),
+            (
+                Box::new(|d: &mut HarnessDef| {
+                    d.auto_mode = true;
+                    d.auto_args = vec![];
+                }),
+                "auto args",
             ),
         ] {
             let mut bad = good.clone();

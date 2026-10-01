@@ -14,6 +14,11 @@ import { TestLaunch } from "./TestLaunch";
 /** The argument groups, in the order they appear on the command line. */
 const ARG_FIELDS = [
   ["baseArgs", "Always", "Passed on every launch."],
+  [
+    "autoArgs",
+    "Auto",
+    "What starts this agent in its auto permission mode. Passed only while auto mode is on, after the resume or fork args when continuing.",
+  ],
   ["modelArgs", "Model", "Used when a model is chosen. {model}"],
   ["effortArgs", "Effort", "Used when an effort level is chosen. {effort}"],
   ["sessionArgs", "Session id", "Used when Yardsort assigns the session id. {session_id}"],
@@ -220,6 +225,29 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
         <legend className="mb-2 text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
           Arguments
         </legend>
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={draft.autoMode ?? false}
+            disabled={!draft.autoMode && !draft.args.autoArgs.trim()}
+            onChange={(e) => set({ autoMode: e.target.checked })}
+          />
+          <span className="grid gap-0.5">
+            Always start in auto mode
+            <span className="text-[12px] text-ink-faint">
+              {draft.args.autoArgs.trim() ? (
+                <>
+                  Every new, resumed and forked session starts with{" "}
+                  <code className="font-mono">{draft.args.autoArgs.trim()}</code>, so the agent asks
+                  you less often. What it still asks about is up to the agent.
+                </>
+              ) : (
+                "This harness has no auto mode Yardsort knows of. Give its flag in Auto args to use one."
+              )}
+            </span>
+          </span>
+        </label>
         {ARG_FIELDS.map(([key, label, hint]) => (
           <Field
             key={key}
