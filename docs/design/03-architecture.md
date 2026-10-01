@@ -268,7 +268,9 @@ row, cached for 30 seconds in `publish::Forge`, and a workspace finds its own by
 A workspace can own several: `forge::pull_requests_from` also counts PRs whose branch the
 worktree checked out before they were opened, and PRs whose head is a commit made in it, both read
 from the worktree's own `HEAD` reflog (`git::head_history`). The project answer carries each
-workspace's numbers; the window shows the head branch's PR first and the rest beside it. The
+workspace's numbers; the window shows the head branch's PR first and the rest beside it. The map
+costs a few `git` processes per workspace, so `Forge::owned` reuses it for as long as the PR list
+it came from is fresh and unchanged. The
 obvious shape — ask about this branch — costs one network round trip per workspace every time the
 window regains focus. The response includes base branch, head OID, review decision, line counts,
 update time and individual checks for the shared sidebar/toolbar preview. Matching a reused branch
@@ -287,8 +289,11 @@ Resolving merge conflicts is handed to an agent, never done by the core. `gh` re
 with the rest of the list; when it says `CONFLICTING`, the toolbar offers to ask the agent that
 opened the PR. `conflicts::author` picks the conversation from the store alone — the harness run
 alive when the forge says the PR was opened, else the conversation given the task, else the newest
-— and nothing it printed is read. `workspace_conflict_helper` names it for the confirmation;
-`workspace_resolve_conflicts` asks `gh pr view` again, then types the request into the running
+— and nothing it printed is read. Both commands refuse a PR the workspace does not own
+(`publish::ensure_own`), as merging does. `workspace_conflict_helper` names the conversation for
+the confirmation and returns its record id; `workspace_resolve_conflicts` takes that id back,
+asks `gh pr view` again, refuses if the choice has moved to another conversation, then types the
+request into the running
 session if it is quiet (never if busy), resumes the conversation with the request as a
 `PendingPrompt` the host types once it is ready, or starts a new conversation of the same harness
 as a handoff, so the record's task stays the user's words.

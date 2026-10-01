@@ -29,7 +29,7 @@ pub(super) fn project_root(state: &AppState, project_id: &str) -> IpcResult<std:
     Ok(std::path::PathBuf::from(project.root_path))
 }
 
-fn found(state: &AppState, project_id: &str, refresh: bool) -> ProjectPullRequests {
+pub(super) fn found(state: &AppState, project_id: &str, refresh: bool) -> ProjectPullRequests {
     let Ok(root) = project_root(state, project_id) else {
         return ProjectPullRequests::default();
     };
@@ -75,7 +75,12 @@ pub async fn project_pull_requests(
 ) -> IpcResult<ProjectPullRequests> {
     blocking(app, move |state| {
         let mut found = found(state, &project_id, refresh);
-        found.workspaces = by_workspace(state, &project_id, &found.pull_requests);
+        let owned = state
+            .forge
+            .owned(&project_id, &found.pull_requests, refresh, || {
+                by_workspace(state, &project_id, &found.pull_requests)
+            });
+        found.workspaces = owned;
         Ok(found)
     })
     .await

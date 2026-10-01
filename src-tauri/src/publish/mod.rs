@@ -212,7 +212,12 @@ pub struct Forge {
     cached: Mutex<HashMap<String, (Instant, ProjectPullRequests)>>,
     requests: Mutex<HashMap<String, u64>>,
     next_request: AtomicU64,
+    /// Each project's workspace-to-pull-request map, with the list it was worked out from.
+    owned: Mutex<HashMap<String, OwnedAnswer>>,
 }
+
+type Owned = BTreeMap<String, Vec<u32>>;
+type OwnedAnswer = (Instant, Vec<PullRequest>, Owned);
 
 impl Forge {
     /// This project's pull requests, from the cache when it is fresh enough.
@@ -280,6 +285,64 @@ impl Forge {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(project_id);
+        self.owned
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(project_id);
+    }
+
+    /// Which of `requests` each of a project's workspaces opened, as `compute` works it out.
+    ///
+    /// Working it out costs a few `git` processes per workspace, and the sidebar asks for every
+    /// project each time the window comes back into focus. So an answer worked out from the same
+    /// list less than [`FRESH_FOR`] ago is reused, like the list itself; `refresh`, or anything
+    /// that makes the project be [forgotten](Self::forget), works it out again.
+    pub fn owned(
+        &self,
+        project_id: &str,
+        requests: &[PullRequest],
+        refresh: bool,
+        compute: impl FnOnce() -> Owned,
+    ) -> Owned {
+        if !refresh {
+            let owned = self.owned.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((at, from, answer)) = owned.get(project_id) {
+                if at.elapsed() < FRESH_FOR && from.as_slice() == requests {
+                    return answer.clone();
+                }
+            }
+        }
+        let answer = compute();
+        self.owned
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                project_id.to_owned(),
+                (Instant::now(), requests.to_vec(), answer.clone()),
+            );
+        answer
+    }
+}
+
+/// Refuse pull request `number` unless it is one of the workspace's own (see
+/// [`pull_requests_of`]): an action on it is an action on someone else's work otherwise.
+pub fn ensure_own(
+    git: &Git,
+    root: &Path,
+    row: &WorkspaceRow,
+    requests: &[PullRequest],
+    number: u32,
+) -> IpcResult<()> {
+    if pull_requests_of(git, root, row, requests)?.contains(&number) {
+        Ok(())
+    } else {
+        Err(crate::error::IpcError::new(
+            "pull_request_changed",
+            format!(
+                "Pull request #{number} is not one this workspace opened. Refresh and choose \
+                 again."
+            ),
+        ))
     }
 }
 
@@ -519,6 +582,56 @@ mod tests {
                 .as_millis(),
         )
         .unwrap()
+    }
+
+    /// Another workspace's pull request is refused, however it was asked for.
+    #[test]
+    fn another_workspaces_pull_request_is_not_this_ones() {
+        let (git, _repo, _remote, trees) = fixture();
+        let tree = trees.path().join("feature");
+        let requests = [
+            PullRequest {
+                number: 7,
+                created_at: Some(now_ms()),
+                ..pr("ys/feature", PullRequestState::Open)
+            },
+            PullRequest {
+                number: 8,
+                created_at: Some(now_ms()),
+                ..pr("ys/someone-else", PullRequestState::Open)
+            },
+        ];
+        let row = row(&tree, Some("trunk"));
+        assert!(ensure_own(&git, &tree, &row, &requests, 7).is_ok());
+        let refused = ensure_own(&git, &tree, &row, &requests, 8).unwrap_err();
+        assert_eq!(refused.code, "pull_request_changed");
+        assert!(ensure_own(&git, &tree, &row, &requests, 99).is_err());
+    }
+
+    /// The workspace map is worked out once per list for as long as the list is fresh, and again
+    /// on a refresh, for a different list, or after the project is forgotten.
+    #[test]
+    fn the_workspace_map_is_reused_while_its_list_is() {
+        let forge = Forge::default();
+        let one = [pr("ys/feature", PullRequestState::Open)];
+        let two = [pr("ys/feature", PullRequestState::Merged)];
+        let computed = std::cell::Cell::new(0);
+        let ask = |requests: &[PullRequest], refresh: bool| {
+            forge.owned("p1", requests, refresh, || {
+                computed.set(computed.get() + 1);
+                BTreeMap::from([("w1".to_owned(), vec![7])])
+            })
+        };
+        assert_eq!(ask(&one, false)["w1"], [7]);
+        ask(&one, false);
+        assert_eq!(computed.get(), 1, "reused");
+        ask(&one, true);
+        assert_eq!(computed.get(), 2, "a refresh works it out again");
+        ask(&two, false);
+        assert_eq!(computed.get(), 3, "so does a different list");
+        forge.forget("p1");
+        ask(&two, false);
+        assert_eq!(computed.get(), 4, "and a forgotten project");
     }
 
     #[test]

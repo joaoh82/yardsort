@@ -396,8 +396,12 @@ export const ipc = {
   ) => unwrap(commands.workspaceMergePullRequest(workspaceId, number, headOid, method)),
   workspaceConflictHelper: (workspaceId: string, number: number) =>
     unwrap(commands.workspaceConflictHelper(workspaceId, number)),
-  workspaceResolveConflicts: (workspaceId: string, number: number, size: TermSize) =>
-    unwrap(commands.workspaceResolveConflicts(workspaceId, number, size)),
+  workspaceResolveConflicts: (
+    workspaceId: string,
+    number: number,
+    sessionId: string,
+    size: TermSize,
+  ) => unwrap(commands.workspaceResolveConflicts(workspaceId, number, sessionId, size)),
 
   /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
   projectPullRequests: (projectId: string, refresh = false) =>

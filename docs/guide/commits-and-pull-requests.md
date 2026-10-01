@@ -162,7 +162,8 @@ Which PRs count as the workspace's comes from git, not from guessing at names. E
 its own record of what its `HEAD` has been (its reflog), so Yardsort counts a PR when:
 
 - its branch is the one the workspace has checked out — what the badge has always shown;
-- its branch was checked out in this workspace before the PR was opened; or
+- its branch was checked out in this workspace before the PR was opened (for the branch the
+  workspace was created on, that is from its creation); or
 - its head commit was made in this workspace, whatever the branch is called on GitHub.
 
 The time matters because branch names get reused: a PR opened on `ys/fix` by a workspace you
@@ -211,7 +212,9 @@ Which agent: the conversation that was running in this workspace when GitHub say
 opened. If none was, the one the workspace's task was first given to; failing that, the newest
 conversation there. A confirmation names it, and says how the request will reach it:
 
-- **Running and quiet** — the request is typed into its tab, as if you had typed it.
+- **Running and quiet** — the request is typed into its tab and sent, as if you had typed it.
+  Anything you had typed there and not sent yet goes with it, as part of the same message:
+  Yardsort cannot see what is in an agent's input, so clear it first if it matters.
 - **Ended** — the conversation is resumed in a new tab and the request typed in once it is ready.
 - **Cannot be continued** (its agent can only resume its latest conversation, say) — a new
   conversation of the same agent starts, given the request and the workspace's task. It is listed
@@ -230,6 +233,11 @@ why beside the toolbar:
 - **GitHub changed its mind.** The PR is asked about again first. If it no longer conflicts, or
   GitHub has not finished working that out after a push, nothing is sent.
 - **No agent has worked here**, or its agent is no longer configured or is disabled.
+- **The PR is not one this workspace opened** — the list was out of date, say. Refresh and choose
+  again.
+- **The agent to ask changed after you confirmed.** GitHub's answer can point at a different
+  conversation from the one the confirmation named; then nothing is sent, and asking again
+  names the new one. Only the conversation you agreed to is ever asked.
 
 GitHub works out whether a PR conflicts lazily, after a push to either branch, so the **⚠** and
 the menu entry can take a minute to appear. **Refresh pull request** asks again.

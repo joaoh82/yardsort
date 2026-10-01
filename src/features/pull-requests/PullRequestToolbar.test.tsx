@@ -238,6 +238,7 @@ it("offers to resolve conflicts only when GitHub reports them", async () => {
 it("names the agent before asking it, and a no sends nothing", async () => {
   usePublishStore.setState({ byProject: { alpha: found([conflicted]) } });
   core.workspaceConflictHelper.mockResolvedValue({
+    sessionId: "r1",
     harnessLabel: "Claude Code",
     title: "Fix the billing quota",
     reach: "resume",
@@ -259,6 +260,7 @@ it("asks the agent and shows the tab it is in", async () => {
   usePublishStore.setState({ byProject: { alpha: found([conflicted]) } });
   useTerminalStore.setState({ tabs: [], active: {} });
   core.workspaceConflictHelper.mockResolvedValue({
+    sessionId: "r1",
     harnessLabel: "Claude Code",
     title: "Fix the billing quota",
     reach: "resume",
@@ -284,7 +286,7 @@ it("asks the agent and shows the tab it is in", async () => {
   await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
   await user.click(screen.getByRole("menuitem", { name: /resolve conflicts/ }));
   await waitFor(() =>
-    expect(core.workspaceResolveConflicts).toHaveBeenCalledWith("w-alpha-feature", 85, {
+    expect(core.workspaceResolveConflicts).toHaveBeenCalledWith("w-alpha-feature", 85, "r1", {
       cols: 80,
       rows: 24,
     }),
@@ -306,4 +308,22 @@ it("says why when the agent cannot be asked", async () => {
   await user.click(screen.getByRole("menuitem", { name: /resolve conflicts/ }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Claude Code is working right now");
   expect(native.confirm).not.toHaveBeenCalled();
+});
+
+it("warns that a half-typed message goes with a request typed into a running agent", async () => {
+  usePublishStore.setState({ byProject: { alpha: found([conflicted]) } });
+  core.workspaceConflictHelper.mockResolvedValue({
+    sessionId: "r1",
+    harnessLabel: "Claude Code",
+    title: "Fix the billing quota",
+    reach: "type",
+  });
+  native.confirm.mockResolvedValue(false);
+  const user = setup();
+  await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
+  await user.click(screen.getByRole("menuitem", { name: /resolve conflicts/ }));
+  await waitFor(() => expect(native.confirm).toHaveBeenCalled());
+  expect(native.confirm.mock.calls[0]![0]).toContain(
+    "Anything you had typed there and not sent goes with it.",
+  );
 });

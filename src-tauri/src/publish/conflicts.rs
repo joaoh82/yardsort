@@ -5,15 +5,14 @@
 //! is resumed when it has ended, or given to a new conversation of the same agent when the old
 //! one cannot be continued. A busy agent is never typed into.
 
-use std::time::Duration;
-
 use pty_host::{SessionId, SessionInfo, SessionState, TermSize};
 use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
 use yardsort_core::conflicts;
 
-use super::commands::{failed, project_root};
+use super::commands::{failed, found, project_root};
+use super::ensure_own;
 use crate::changes::commands::workspace;
 use crate::error::{IpcError, IpcResult};
 use crate::forge::{ForgeError, Gh, Mergeable, PullRequest, PullRequestState};
@@ -22,9 +21,6 @@ use crate::sessions::{self, Continue, SessionRecord};
 use crate::state::{blocking, AppState};
 use crate::store::WorkspaceRow;
 use crate::terminal::{spawn_in_workspace, HarnessRequest, Launch, RECORD_LABEL};
-
-/// How long after the text the Enter is sent, so the agent takes it as one paste.
-const SUBMIT_DELAY: Duration = Duration::from_millis(150);
 
 /// How the message reaches the agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
@@ -42,6 +38,9 @@ pub enum Reach {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictHelper {
+    /// The conversation's record. The request goes to this one or to none: see
+    /// [`workspace_resolve_conflicts`].
+    pub session_id: String,
     pub harness_label: String,
     /// The conversation's title, as its history lists it.
     pub title: String,
@@ -119,7 +118,7 @@ fn plan(state: &AppState, row: &WorkspaceRow, opened_at: Option<i64>) -> IpcResu
 }
 
 /// Who would be asked to resolve pull request `number`'s conflicts, and how — for the
-/// confirmation, before anything is sent. Asks nothing of the forge.
+/// confirmation, before anything is sent. Reads the project's list, cached when it is fresh.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_conflict_helper(
@@ -128,19 +127,16 @@ pub async fn workspace_conflict_helper(
     number: u32,
 ) -> IpcResult<ConflictHelper> {
     blocking(app, move |state| {
-        let (row, _root) = workspace(state, &workspace_id)?;
-        let opened_at = state
-            .forge
-            .cached(&row.project_id)
-            .and_then(|found| {
-                found
-                    .pull_requests
-                    .into_iter()
-                    .find(|pr| pr.number == number)
-            })
+        let (row, root) = workspace(state, &workspace_id)?;
+        let requests = found(state, &row.project_id, false).pull_requests;
+        ensure_own(&Git::new(&state.env())?, &root, &row, &requests, number)?;
+        let opened_at = requests
+            .iter()
+            .find(|pr| pr.number == number)
             .and_then(|pr| pr.created_at);
         let Plan { record, reach } = plan(state, &row, opened_at)?;
         Ok(ConflictHelper {
+            session_id: record.id,
             harness_label: record.harness_label,
             title: record.title,
             reach,
@@ -153,12 +149,16 @@ pub async fn workspace_conflict_helper(
 ///
 /// The forge is asked first, not the list from a moment ago: a pull request that has stopped
 /// conflicting, or whose conflicts GitHub has not worked out yet, is not worth an agent's turn.
+/// It must be one this workspace opened, and `session_id` the conversation the user agreed to
+/// ask — [`ConflictHelper::session_id`]. If another has become the one to ask since, nothing is
+/// sent: the user said yes to that conversation, not to whichever.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_resolve_conflicts(
     app: AppHandle,
     workspace_id: String,
     number: u32,
+    session_id: String,
     size: TermSize,
 ) -> IpcResult<ConflictsAsked> {
     blocking(app, move |state| {
@@ -169,18 +169,24 @@ pub async fn workspace_resolve_conflicts(
             .map_err(failed)?;
         state.forge.forget(&row.project_id);
         let base = still_conflicting(&pr)?;
-        let checked_out = match Git::new(&state.env())?.head(&root)? {
+        // Whose it is, out of the list as it stands now, with the answer just had for this one:
+        // it may be older than the fifty the list holds.
+        let mut requests = found(state, &row.project_id, true).pull_requests;
+        requests.retain(|other| other.number != number);
+        requests.push(pr.clone());
+        let git = Git::new(&state.env())?;
+        ensure_own(&git, &root, &row, &requests, number)?;
+        let checked_out = match git.head(&root)? {
             Head::Branch(name) => Some(name),
             Head::Unborn(_) | Head::Detached(_) => None,
         };
         let Plan { record, reach } = plan(state, &row, pr.created_at)?;
+        same_agent(&record, &session_id)?;
         let session = match reach {
             Reach::Type => {
                 let text = conflicts::prompt(&pr, &base, checked_out.as_deref(), None);
                 let id = SessionId(record.pty_session_id.clone().unwrap_or_default());
-                state.host.paste(&id, &text)?;
-                std::thread::sleep(SUBMIT_DELAY);
-                state.host.write(&id, b"\r")?;
+                pty_host::paste_and_submit(state.host.as_ref(), &id, &text)?;
                 state.host.info(&id)?
             }
             Reach::Resume => {
@@ -219,6 +225,21 @@ pub async fn workspace_resolve_conflicts(
     .await
 }
 
+/// Refuse when the conversation chosen now is not the one the user agreed to ask.
+fn same_agent(chosen: &SessionRecord, confirmed: &str) -> IpcResult<()> {
+    if chosen.id == confirmed {
+        return Ok(());
+    }
+    Err(IpcError::new(
+        "agent_changed",
+        format!(
+            "Since you confirmed, {} in “{}” has become the one to ask. Nothing was sent; ask \
+             again to confirm it.",
+            chosen.harness_label, chosen.title
+        ),
+    ))
+}
+
 /// The base the pull request conflicts with, or why it is not one to ask about.
 fn still_conflicting(pr: &PullRequest) -> IpcResult<String> {
     if pr.state != PullRequestState::Open {
@@ -248,5 +269,40 @@ fn still_conflicting(pr: &PullRequest) -> IpcResult<String> {
                 pr.number
             ),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: &str) -> SessionRecord {
+        SessionRecord {
+            id: id.into(),
+            workspace_id: "w".into(),
+            harness_id: "claude".into(),
+            harness_label: "Claude Code".into(),
+            model: None,
+            effort: None,
+            title: "Fix the login".into(),
+            forked_from: None,
+            running: false,
+            pty_session_id: None,
+            exit_code: Some(0),
+            interrupted: false,
+            started_at: 0.0,
+            ended_at: None,
+            resumable: true,
+            forkable: true,
+            unavailable_reason: None,
+        }
+    }
+
+    #[test]
+    fn only_the_conversation_confirmed_is_asked() {
+        assert!(same_agent(&record("r1"), "r1").is_ok());
+        let refused = same_agent(&record("r2"), "r1").unwrap_err();
+        assert_eq!(refused.code, "agent_changed");
+        assert!(refused.message.contains("Claude Code in “Fix the login”"));
     }
 }

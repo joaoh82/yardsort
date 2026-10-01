@@ -149,6 +149,18 @@ impl PtyHost {
     }
 }
 
+/// Pause between pasting a message and pressing Enter: some TUIs drop an Enter that arrives with
+/// the paste.
+pub const SUBMIT_DELAY: Duration = Duration::from_millis(150);
+
+/// Type `text` into a running session as one paste, then press Enter — a message sent the way a
+/// person would send it. Whatever was already in the program's input goes with it.
+pub fn paste_and_submit(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Result<()> {
+    host.paste(id, text)?;
+    std::thread::sleep(SUBMIT_DELAY);
+    host.write(id, b"\r")
+}
+
 /// What a client of the PTY host can ask for, whether the host is in this process or in the
 /// daemon at the other end of a socket. The app holds one of these and never knows which.
 pub trait TerminalHost: Send + Sync {

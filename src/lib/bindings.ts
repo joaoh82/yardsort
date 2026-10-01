@@ -93,7 +93,7 @@ export const commands = {
 	projectPullRequests: (projectId: string, refresh: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh })),
 	/**
 	 *  Who would be asked to resolve pull request `number`'s conflicts, and how — for the
-	 *  confirmation, before anything is sent. Asks nothing of the forge.
+	 *  confirmation, before anything is sent. Reads the project's list, cached when it is fresh.
 	 */
 	workspaceConflictHelper: (workspaceId: string, number: number) => typedError<ConflictHelper, IpcError>(__TAURI_INVOKE("workspace_conflict_helper", { workspaceId, number })),
 	/**
@@ -101,8 +101,11 @@ export const commands = {
 	 * 
 	 *  The forge is asked first, not the list from a moment ago: a pull request that has stopped
 	 *  conflicting, or whose conflicts GitHub has not worked out yet, is not worth an agent's turn.
+	 *  It must be one this workspace opened, and `session_id` the conversation the user agreed to
+	 *  ask — [`ConflictHelper::session_id`]. If another has become the one to ask since, nothing is
+	 *  sent: the user said yes to that conversation, not to whichever.
 	 */
-	workspaceResolveConflicts: (workspaceId: string, number: number, size: TermSize) => typedError<ConflictsAsked, IpcError>(__TAURI_INVOKE("workspace_resolve_conflicts", { workspaceId, number, size })),
+	workspaceResolveConflicts: (workspaceId: string, number: number, sessionId: string, size: TermSize) => typedError<ConflictsAsked, IpcError>(__TAURI_INVOKE("workspace_resolve_conflicts", { workspaceId, number, sessionId, size })),
 	/**  Who would write, for this workspace. `harnessId` is the agent the workspace is using. */
 	draftStatus: (harnessId: string | null) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_status", { harnessId })),
 	workflowWriterStatus: () => typedError<WorkflowWriterStatus, IpcError>(__TAURI_INVOKE("workflow_writer_status")),
@@ -541,6 +544,11 @@ export type Commit = {
 
 /**  Who would be asked, for the confirmation. */
 export type ConflictHelper = {
+	/**
+	 *  The conversation's record. The request goes to this one or to none: see
+	 *  [`workspace_resolve_conflicts`].
+	 */
+	sessionId: string,
 	harnessLabel: string,
 	/**  The conversation's title, as its history lists it. */
 	title: string,

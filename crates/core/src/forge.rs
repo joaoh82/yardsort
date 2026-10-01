@@ -286,11 +286,10 @@ pub fn pull_requests_from(
             .iter()
             .find(|(checked_out, _)| checked_out == name)
             .map(|(_, at)| *at);
-        // The branch a worktree was born on, or is on now, has been here since the start —
-        // which `checkout` lines do not say, because nothing was checked out to get there.
-        let from_birth = (Some(name) == branch || Some(name) == own)
-            .then_some(history.since)
-            .flatten();
+        // The branch Yardsort made the worktree on has been there since its birth, which no
+        // `checkout` line says: nothing was checked out to get there. Any other branch, the
+        // one checked out now included, has been there since its first `checkout` line.
+        let from_birth = (Some(name) == own).then_some(history.since).flatten();
         match (first, from_birth) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -1053,6 +1052,17 @@ mod tests {
         assert_eq!(
             pull_requests_from(&only_old, Some("ys/fix"), Some("ys/fix"), &history),
             [1]
+        );
+        // A branch checked out later counts from that checkout, not from the worktree's birth,
+        // even while it is the one checked out: #8 was opened on it before then, by someone
+        // else. The branch's own pull request (#9, the newest) still shows, as it always has.
+        let later = [
+            opened(8, "ys/part-two", 150 * minute, "u"),
+            opened(9, "ys/part-two", 160 * minute, "t"),
+        ];
+        assert_eq!(
+            pull_requests_from(&later, Some("ys/part-two"), Some("ys/fix"), &history),
+            [9]
         );
         // Nothing checked out and no history: nothing but what a commit proves.
         assert!(pull_requests_from(&requests, None, None, &HeadHistory::default()).is_empty());

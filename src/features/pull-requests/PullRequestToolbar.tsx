@@ -74,7 +74,7 @@ export function PullRequestToolbar({
     const base = pr.details?.base ?? "its base";
     const how =
       helper.reach === "type"
-        ? `It is running in “${helper.title}”, and the request is typed in there.`
+        ? `It is running in “${helper.title}”, and the request is typed in there and sent. Anything you had typed there and not sent goes with it.`
         : helper.reach === "resume"
           ? `Its conversation “${helper.title}” has ended. It is resumed in a new tab, with the request.`
           : `Its conversation “${helper.title}” cannot be continued, so a new ${helper.harnessLabel} conversation starts with the request and the workspace's task.`;
@@ -85,9 +85,11 @@ export function PullRequestToolbar({
     if (!confirmed) return;
     try {
       const terminals = useTerminalStore.getState();
+      // The conversation agreed to, and no other: the core refuses if the choice has moved.
       const asked = await ipc.workspaceResolveConflicts(
         workspace.id,
         pr.number,
+        helper.sessionId,
         terminals.lastSize,
       );
       if (asked.reach === "type") terminals.activate(asked.session.id);
