@@ -84,10 +84,25 @@ export const commands = {
 	 *  pull request; without it, on the forge's form with both branches already filled in.
 	 */
 	workspaceOpenPullRequest: (workspaceId: string, title: string, body: string, draft: boolean) => typedError<PullRequestOpened, IpcError>(__TAURI_INVOKE("workspace_open_pull_request", { workspaceId, title, body, draft })),
-	/**  Merge a confirmed PR only if it is still the open PR for this workspace and head. */
+	/**
+	 *  Merge a confirmed PR only if it is still open, still one of this workspace's, and still at
+	 *  the head the user confirmed.
+	 */
 	workspaceMergePullRequest: (workspaceId: string, number: number, headOid: string, method: MergeMethod) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_merge_pull_request", { workspaceId, number, headOid, method })),
 	/**  Every pull request `gh` knows for a project, so each workspace row can show its own. */
 	projectPullRequests: (projectId: string, refresh: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh })),
+	/**
+	 *  Who would be asked to resolve pull request `number`'s conflicts, and how — for the
+	 *  confirmation, before anything is sent. Asks nothing of the forge.
+	 */
+	workspaceConflictHelper: (workspaceId: string, number: number) => typedError<ConflictHelper, IpcError>(__TAURI_INVOKE("workspace_conflict_helper", { workspaceId, number })),
+	/**
+	 *  Ask the agent that opened pull request `number` to resolve its merge conflicts.
+	 * 
+	 *  The forge is asked first, not the list from a moment ago: a pull request that has stopped
+	 *  conflicting, or whose conflicts GitHub has not worked out yet, is not worth an agent's turn.
+	 */
+	workspaceResolveConflicts: (workspaceId: string, number: number, size: TermSize) => typedError<ConflictsAsked, IpcError>(__TAURI_INVOKE("workspace_resolve_conflicts", { workspaceId, number, size })),
 	/**  Who would write, for this workspace. `harnessId` is the agent the workspace is using. */
 	draftStatus: (harnessId: string | null) => typedError<DraftStatus, IpcError>(__TAURI_INVOKE("draft_status", { harnessId })),
 	workflowWriterStatus: () => typedError<WorkflowWriterStatus, IpcError>(__TAURI_INVOKE("workflow_writer_status")),
@@ -522,6 +537,21 @@ export type Commit = {
 	subject: string,
 	/**  Everything under the subject, with the blank line between them dropped. Often empty. */
 	body: string,
+};
+
+/**  Who would be asked, for the confirmation. */
+export type ConflictHelper = {
+	harnessLabel: string,
+	/**  The conversation's title, as its history lists it. */
+	title: string,
+	reach: Reach,
+};
+
+/**  The agent was asked. */
+export type ConflictsAsked = {
+	reach: Reach,
+	/**  The terminal it is in: an existing tab for [`Reach::Type`], a new one otherwise. */
+	session: SessionInfo,
 };
 
 export type Content = 
@@ -970,6 +1000,12 @@ export type MemoryWaiting = {
 
 export type MergeMethod = "squash" | "merge" | "rebase";
 
+/**
+ *  GitHub's answer to "can this be merged without conflicts". It works it out lazily, after a
+ *  push to either side, so `Unknown` is an ordinary answer for a while and not an error.
+ */
+export type Mergeable = "mergeable" | "conflicting" | "unknown";
+
 export type NewWorkspace = {
 	projectId: string,
 	/**  `None` starts from the project's default branch. */
@@ -1079,6 +1115,13 @@ export type ProjectPullRequests = {
 	problem: string | null,
 	/**  The problem is that nobody is logged in, which has its own one-line fix. */
 	loggedOut: boolean,
+	/**
+	 *  Each workspace's own pull requests, by number, newest first: see
+	 *  [`pull_requests_from`]. A workspace can have several — a branch reused after its pull
+	 *  request merged, or a second branch its agent opened one from. Absent for a workspace
+	 *  git could not be asked about.
+	 */
+	workspaces: { [key in string]: number[] },
 };
 
 export type PromptTransport = 
@@ -1176,6 +1219,8 @@ export type PullRequestDetails = {
 	review: string,
 	updatedAt: string,
 	checks: PullRequestCheck[],
+	/**  Whether it merges cleanly into its base, as the forge last worked it out. */
+	mergeable: Mergeable,
 };
 
 /**  A pull request that now exists, or the form to fill in to make one. */
@@ -1201,6 +1246,15 @@ export type QuitRequested = {
  *  `src/lib/ipc.ts` corrects that in one place.
  */
 export type RawBytes = number[];
+
+/**  How the message reaches the agent. */
+export type Reach = 
+/**  It is running and quiet: the message is typed into it. */
+"type" | 
+/**  Its process has ended: the conversation is resumed and the message typed in once ready. */
+"resume" | 
+/**  The conversation cannot be continued: a new one of the same agent is started with it. */
+"start";
 
 export type Relevance = 
 /**  Does what the task asks for. */

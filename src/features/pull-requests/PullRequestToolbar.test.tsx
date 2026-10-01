@@ -6,6 +6,8 @@ import { worktree } from "@/test/fixtures";
 const core = vi.hoisted(() => ({
   workspaceMergePullRequest: vi.fn(),
   projectPullRequests: vi.fn(),
+  workspaceConflictHelper: vi.fn(),
+  workspaceResolveConflicts: vi.fn(),
 }));
 const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -17,7 +19,8 @@ vi.mock("@/lib/ipc", async (original) => ({
 vi.mock("@/lib/native", () => ({ native }));
 vi.mock("@tauri-apps/plugin-opener", () => opener);
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => clipboard);
-import { pullRequestFor, usePublishStore } from "@/stores/publish";
+import { pullRequestFor, pullRequestsFor, usePublishStore } from "@/stores/publish";
+import { useTerminalStore } from "@/stores/terminals";
 import { PullRequestToolbar } from "./PullRequestToolbar";
 
 const pr: PullRequest = {
@@ -39,13 +42,15 @@ const pr: PullRequest = {
       { name: "Unit tests", state: "passing" },
       { name: "Build", state: "passing" },
     ],
+    mergeable: "mergeable",
   },
 };
-const found = (requests = [pr]) => ({
+const found = (requests = [pr], workspaces: Record<string, number[]> = {}) => ({
   gh: true,
   pullRequests: requests,
   problem: null,
   loggedOut: false,
+  workspaces,
 });
 beforeEach(() => {
   vi.resetAllMocks();
@@ -156,4 +161,149 @@ it("does not replace a new PR with a slower, older project response", async () =
   resolveOld(found([{ ...pr, number: 42, state: "merged" }]));
   await old;
   expect(usePublishStore.getState().byProject.alpha?.pullRequests[0]?.number).toBe(85);
+});
+
+/** A second pull request the workspace opened, from another branch its agent checked out. */
+const second: PullRequest = {
+  ...pr,
+  number: 90,
+  title: "Split out the quota migration",
+  branch: "ys/quota-migration",
+  details: { ...pr.details!, headOid: "def456" },
+};
+
+it("lists every pull request the workspace opened and acts on the one chosen", async () => {
+  usePublishStore.setState({
+    byProject: { alpha: found([second, pr], { "w-alpha-feature": [90, 85] }) },
+  });
+  const user = setup();
+  // The checked-out branch's own comes first; the other is counted on the menu button.
+  expect(screen.getByRole("button", { name: /Open Pull request #85/ })).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", {
+      name: "Actions for pull request #85 — 1 more from this workspace",
+    }),
+  );
+  expect(
+    screen.getByRole("menuitemradio", { name: /#85 open — Fix billing quota/ }),
+  ).toHaveAttribute("aria-checked", "true");
+  await user.click(screen.getByRole("menuitemradio", { name: /#90 open — Split out/ }));
+  expect(screen.getByRole("button", { name: /Open Pull request #90/ })).toBeInTheDocument();
+
+  native.confirm.mockResolvedValue(true);
+  await user.click(screen.getByRole("button", { name: /Actions for pull request #90/ }));
+  await user.click(screen.getByRole("menuitem", { name: "Squash and merge" }));
+  await waitFor(() =>
+    expect(core.workspaceMergePullRequest).toHaveBeenCalledWith(
+      "w-alpha-feature",
+      90,
+      "def456",
+      "squash",
+    ),
+  );
+});
+
+it("puts the branch's own pull request first, then the core's matches newest first", () => {
+  const workspace = worktree("alpha", "feature");
+  const third = { ...second, number: 70, state: "merged" as const };
+  const all = found([second, pr, third], { "w-alpha-feature": [90, 85, 70] });
+  expect(pullRequestsFor(all, workspace).map((p) => p.number)).toEqual([85, 90, 70]);
+  // Not matched by the core, not on the branch: not this workspace's.
+  expect(pullRequestsFor(found([second, pr]), workspace).map((p) => p.number)).toEqual([85]);
+  // Detached: only what the core matched.
+  expect(
+    pullRequestsFor(all, {
+      ...workspace,
+      head: { label: "abc", detached: true, unborn: false },
+    }).map((p) => p.number),
+  ).toEqual([90, 85, 70]);
+});
+
+const conflicted: PullRequest = {
+  ...pr,
+  details: { ...pr.details!, mergeable: "conflicting" },
+};
+
+it("offers to resolve conflicts only when GitHub reports them", async () => {
+  const user = setup();
+  await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
+  expect(screen.queryByRole("menuitem", { name: /resolve conflicts/ })).not.toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "Escape" });
+  act(() => usePublishStore.setState({ byProject: { alpha: found([conflicted]) } }));
+  expect(screen.getByRole("button", { name: /merge conflicts/ })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
+  expect(screen.getByRole("menuitem", { name: /resolve conflicts/ })).toBeEnabled();
+});
+
+it("names the agent before asking it, and a no sends nothing", async () => {
+  usePublishStore.setState({ byProject: { alpha: found([conflicted]) } });
+  core.workspaceConflictHelper.mockResolvedValue({
+    harnessLabel: "Claude Code",
+    title: "Fix the billing quota",
+    reach: "resume",
+  });
+  native.confirm.mockResolvedValue(false);
+  const user = setup();
+  await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
+  await user.click(screen.getByRole("menuitem", { name: /resolve conflicts/ }));
+  await waitFor(() => expect(native.confirm).toHaveBeenCalled());
+  const [message, options] = native.confirm.mock.calls[0]!;
+  expect(message).toContain("Ask Claude Code to resolve the conflicts in pull request #85");
+  expect(message).toContain("“Fix the billing quota” has ended. It is resumed in a new tab");
+  expect(message).toContain("merge main into ys/feature");
+  expect(options).toMatchObject({ okLabel: "Ask Claude Code" });
+  expect(core.workspaceResolveConflicts).not.toHaveBeenCalled();
+});
+
+it("asks the agent and shows the tab it is in", async () => {
+  usePublishStore.setState({ byProject: { alpha: found([conflicted]) } });
+  useTerminalStore.setState({ tabs: [], active: {} });
+  core.workspaceConflictHelper.mockResolvedValue({
+    harnessLabel: "Claude Code",
+    title: "Fix the billing quota",
+    reach: "resume",
+  });
+  core.workspaceResolveConflicts.mockResolvedValue({
+    reach: "resume",
+    session: {
+      id: "pty-7",
+      program: "claude",
+      args: [],
+      cwd: null,
+      pid: 1,
+      size: { cols: 80, rows: 24 },
+      labels: { workspace: "w-alpha-feature", harness: "claude", record: "r1" },
+      state: { status: "running" },
+      hasOutput: false,
+      busy: false,
+      idleMs: 0,
+    },
+  });
+  native.confirm.mockResolvedValue(true);
+  const user = setup();
+  await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
+  await user.click(screen.getByRole("menuitem", { name: /resolve conflicts/ }));
+  await waitFor(() =>
+    expect(core.workspaceResolveConflicts).toHaveBeenCalledWith("w-alpha-feature", 85, {
+      cols: 80,
+      rows: 24,
+    }),
+  );
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "Asked Claude Code to resolve the conflicts in #85.",
+  );
+  expect(useTerminalStore.getState().active["w-alpha-feature"]).toBe("pty-7");
+  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true);
+});
+
+it("says why when the agent cannot be asked", async () => {
+  usePublishStore.setState({ byProject: { alpha: found([conflicted]) } });
+  core.workspaceConflictHelper.mockRejectedValue(
+    new Error("Claude Code is working right now. Ask again once it is quiet."),
+  );
+  const user = setup();
+  await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
+  await user.click(screen.getByRole("menuitem", { name: /resolve conflicts/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Claude Code is working right now");
+  expect(native.confirm).not.toHaveBeenCalled();
 });

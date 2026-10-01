@@ -356,6 +356,82 @@ impl Git {
             .map(Commit::from_message)
             .collect())
     }
+
+    /// What this checkout's `HEAD` has been, read from its reflog: which branches were checked
+    /// out here and which commits were made here.
+    ///
+    /// A linked worktree keeps a `HEAD` reflog of its own, so this is one workspace's history
+    /// and not the repository's. Git drops entries after 90 days by default; what is gone is
+    /// simply not known. A checkout with no reflog at all answers with an empty history.
+    pub fn head_history(&self, root: &Path) -> GitResult<HeadHistory> {
+        let out = match self.run(
+            root,
+            &[
+                "reflog",
+                "show",
+                "--date=unix",
+                "--max-count=2000",
+                "--format=%H%x09%gd%x09%gs",
+                "HEAD",
+            ],
+        ) {
+            Ok(out) => out,
+            Err(GitError::Failed { .. }) => return Ok(HeadHistory::default()),
+            Err(other) => return Err(other),
+        };
+        Ok(HeadHistory::parse(&out))
+    }
+}
+
+/// See [`Git::head_history`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeadHistory {
+    /// When the oldest entry kept was written, in epoch milliseconds: the checkout's birth, for
+    /// a worktree younger than git's reflog expiry.
+    pub since: Option<i64>,
+    /// Each branch checked out here, with when it first was, in epoch milliseconds.
+    pub branches: Vec<(String, i64)>,
+    /// Full ids of the commits made here: committed, amended or merged with `HEAD` on them.
+    pub commits: std::collections::HashSet<String>,
+}
+
+impl HeadHistory {
+    /// Read `<oid>\tHEAD@{<unix seconds>}\t<message>` lines, newest first. The messages are
+    /// git's own (`checkout: moving from a to b`, `commit: …`), never anything a program wrote.
+    fn parse(out: &str) -> Self {
+        let mut history = Self::default();
+        for line in out.lines() {
+            let mut fields = line.splitn(3, '\t');
+            let (Some(oid), Some(selector), message) =
+                (fields.next(), fields.next(), fields.next().unwrap_or(""))
+            else {
+                continue;
+            };
+            let Some(at) = selector
+                .strip_prefix("HEAD@{")
+                .and_then(|rest| rest.strip_suffix('}'))
+                .and_then(|seconds| seconds.parse::<i64>().ok())
+                .map(|seconds| seconds * 1000)
+            else {
+                continue;
+            };
+            // Newest first, so the last one seen is the oldest.
+            history.since = Some(at);
+            if message.starts_with("commit") {
+                history.commits.insert(oid.to_owned());
+            }
+            if let Some((_, to)) = message
+                .strip_prefix("checkout: moving from ")
+                .and_then(|rest| rest.rsplit_once(" to "))
+            {
+                match history.branches.iter_mut().find(|(name, _)| name == to) {
+                    Some((_, first)) => *first = at,
+                    None => history.branches.push((to.to_owned(), at)),
+                }
+            }
+        }
+        history
+    }
 }
 
 fn parse_worktrees(porcelain: &str) -> Vec<WorktreeEntry> {
@@ -459,6 +535,64 @@ mod tests {
 
         git.run(dir.path(), &["checkout", "--detach"]).unwrap();
         assert!(matches!(git.head(dir.path()).unwrap(), Head::Detached(sha) if sha.len() >= 7));
+    }
+
+    /// A worktree's history is its own: the branches it checked out and the commits made in it,
+    /// and nothing that happened in the main checkout.
+    #[test]
+    fn a_worktrees_head_history_is_its_own() {
+        let (git, repo) = repo_with_commit();
+        let trees = tempfile::tempdir().unwrap();
+        let tree = trees.path().join("wt");
+        git.worktree_add(repo.path(), &tree, "ys/one", "trunk")
+            .unwrap();
+        git.run(&tree, &["commit", "--allow-empty", "-m", "one"])
+            .unwrap();
+        let one = git.run(&tree, &["rev-parse", "HEAD"]).unwrap();
+        git.run(&tree, &["checkout", "-b", "ys/two"]).unwrap();
+        git.run(&tree, &["commit", "--allow-empty", "-m", "two"])
+            .unwrap();
+        let two = git.run(&tree, &["rev-parse", "HEAD"]).unwrap();
+        git.run(&tree, &["checkout", "ys/one"]).unwrap();
+        git.run(repo.path(), &["checkout", "-b", "elsewhere"])
+            .unwrap();
+        git.run(repo.path(), &["commit", "--allow-empty", "-m", "main"])
+            .unwrap();
+        let main = git.run(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+
+        let history = git.head_history(&tree).unwrap();
+        let mut branches: Vec<&str> = history.branches.iter().map(|(b, _)| b.as_str()).collect();
+        branches.sort_unstable();
+        assert_eq!(branches, ["ys/one", "ys/two"]);
+        assert!(history.commits.contains(&one) && history.commits.contains(&two));
+        assert!(
+            !history.commits.contains(&main),
+            "made in the other checkout"
+        );
+        let since = history.since.expect("the worktree's birth");
+        assert!(history.branches.iter().all(|(_, at)| *at >= since));
+        assert!(since > 1_600_000_000_000, "milliseconds: {since}");
+    }
+
+    #[test]
+    fn a_branch_checked_out_twice_keeps_its_first_time() {
+        let history = HeadHistory::parse(
+            "c3\tHEAD@{300}\tcheckout: moving from main to b\n\
+             c2\tHEAD@{200}\tcommit (amend): fix\n\
+             c2\tHEAD@{150}\tcheckout: moving from b to main\n\
+             c1\tHEAD@{100}\tcheckout: moving from main to b\n\
+             c0\tHEAD@{50}\t\n\
+             garbage",
+        );
+        assert_eq!(
+            history.branches,
+            vec![("b".to_owned(), 100_000), ("main".to_owned(), 150_000)]
+        );
+        assert_eq!(history.since, Some(50_000));
+        assert_eq!(
+            history.commits,
+            std::collections::HashSet::from(["c2".to_owned()])
+        );
     }
 
     fn repo_with_commit() -> (Git, tempfile::TempDir) {

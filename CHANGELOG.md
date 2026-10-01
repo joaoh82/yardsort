@@ -5,6 +5,18 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Every pull request a workspace opened.** A workspace that opened more than one — a second PR
+  on its branch after the first merged, or one from another branch its agent created — shows the
+  rest beside its badge (**#42 +2**), lists them when you hover the row, and lets you switch the
+  toolbar between them. Which PRs belong to a workspace comes from its worktree's own git history,
+  so another workspace's PR on a reused branch name is not counted.
+
+- **Ask the agent to resolve merge conflicts.** When GitHub reports that an open PR conflicts
+  with its base, the badge turns red with a **⚠**, and the toolbar menu offers **Ask its agent to
+  resolve conflicts…**. It asks the agent that opened the PR — typed into it if it is running,
+  resumed with the request if it has ended — to merge the base in, resolve the conflicts, run the
+  checks and push, never rebasing or force-pushing. A busy agent is never interrupted.
+
 - **Copy and paste in the terminal work the way more desktops expect.** Right-click for Copy,
   Paste and Select all. Plain `Ctrl+C` copies while text is selected and interrupts otherwise,
   so Omarchy's `Super+C` copies. `Ctrl+Insert` and `Shift+Insert` copy and paste too.

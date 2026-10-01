@@ -5,6 +5,10 @@ export interface MenuItem {
   onSelect: () => void;
   disabled?: boolean;
   danger?: boolean;
+  /** One of a set to choose from: shown ticked when true, and read out as checked or not. */
+  checked?: boolean;
+  /** Draw a line above it, ending the group before. */
+  divider?: boolean;
 }
 
 interface Props {
@@ -66,21 +70,32 @@ export function ContextMenu({ at, items, onClose }: Props) {
       className="fixed z-50 min-w-48 rounded-md border border-line bg-raised py-1 shadow-xl shadow-black/40"
     >
       {items.map((item) => (
-        <button
+        <div
           key={item.label}
-          type="button"
-          role="menuitem"
-          disabled={item.disabled}
-          onClick={() => {
-            onClose();
-            item.onSelect();
-          }}
-          className={`block w-full px-3 py-1.5 text-left outline-none hover:bg-line focus-visible:bg-line disabled:opacity-40 disabled:hover:bg-transparent ${
-            item.danger ? "text-red-400" : ""
-          }`}
+          role="none"
+          className={item.divider ? "mt-1 border-t border-line pt-1" : ""}
         >
-          {item.label}
-        </button>
+          <button
+            type="button"
+            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked}
+            disabled={item.disabled}
+            onClick={() => {
+              onClose();
+              item.onSelect();
+            }}
+            className={`block w-full px-3 py-1.5 text-left outline-none hover:bg-line focus-visible:bg-line disabled:opacity-40 disabled:hover:bg-transparent ${
+              item.danger ? "text-red-400" : ""
+            }`}
+          >
+            {item.checked !== undefined && (
+              <span aria-hidden className="mr-2 inline-block w-3">
+                {item.checked ? "✓" : ""}
+              </span>
+            )}
+            {item.label}
+          </button>
+        </div>
       ))}
     </div>
   );

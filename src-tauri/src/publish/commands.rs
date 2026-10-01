@@ -1,26 +1,27 @@
 //! Commit, push and open a pull request; and what the forge says about one afterwards.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
 
-use super::{state, ProjectPullRequests, PublishState};
+use super::{pull_requests_of, state, ProjectPullRequests, PublishState};
 use crate::changes::commands::workspace;
 use crate::error::{IpcError, IpcResult};
-use crate::forge::{ForgeError, Gh, MergeMethod, PullRequestState};
+use crate::forge::{ForgeError, Gh, MergeMethod, PullRequest, PullRequestState};
 use crate::git::Git;
 use crate::state::{blocking, AppState};
 use crate::store::WorkspaceRow;
 
-fn failed(error: ForgeError) -> IpcError {
+pub(super) fn failed(error: ForgeError) -> IpcError {
     IpcError::new(error.code(), error.to_string())
 }
 
 /// The project's checkout, which is where `gh` is asked: one answer serves every workspace, and
 /// a worktree whose folder has gone cannot be asked at all.
-fn project_root(state: &AppState, project_id: &str) -> IpcResult<std::path::PathBuf> {
+pub(super) fn project_root(state: &AppState, project_id: &str) -> IpcResult<std::path::PathBuf> {
     let project = state
         .store
         .project(project_id)?
@@ -72,7 +73,41 @@ pub async fn project_pull_requests(
     project_id: String,
     refresh: bool,
 ) -> IpcResult<ProjectPullRequests> {
-    blocking(app, move |state| Ok(found(state, &project_id, refresh))).await
+    blocking(app, move |state| {
+        let mut found = found(state, &project_id, refresh);
+        found.workspaces = by_workspace(state, &project_id, &found.pull_requests);
+        Ok(found)
+    })
+    .await
+}
+
+/// Each workspace's own pull requests out of the project's. One `git reflog` per workspace, and
+/// none at all when the project has no pull requests to share out.
+fn by_workspace(
+    state: &AppState,
+    project_id: &str,
+    requests: &[PullRequest],
+) -> BTreeMap<String, Vec<u32>> {
+    let mut found = BTreeMap::new();
+    if requests.is_empty() {
+        return found;
+    }
+    let (Ok(git), Ok(rows)) = (Git::new(&state.env()), state.store.workspaces()) else {
+        return found;
+    };
+    for row in rows
+        .into_iter()
+        .filter(|row| row.project_id == project_id && !row.archived)
+    {
+        let root = Path::new(&row.path);
+        if !root.is_dir() {
+            continue;
+        }
+        if let Ok(numbers) = pull_requests_of(&git, root, &row, requests) {
+            found.insert(row.id, numbers);
+        }
+    }
+    found
 }
 
 /// Commit everything the workspace has changed.
@@ -220,7 +255,8 @@ fn publishable(git: &Git, root: &Path, row: &WorkspaceRow) -> IpcResult<PublishS
     state(git, root, row, &ProjectPullRequests::default())
 }
 
-/// Merge a confirmed PR only if it is still the open PR for this workspace and head.
+/// Merge a confirmed PR only if it is still open, still one of this workspace's, and still at
+/// the head the user confirmed.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_merge_pull_request(
@@ -232,11 +268,14 @@ pub async fn workspace_merge_pull_request(
 ) -> IpcResult<()> {
     blocking(app, move |state| {
         let (row, root) = workspace(state, &workspace_id)?;
-        let current = publish_state(state, &row, &root, true)?;
-        let pr = current
-            .pull_request
-            .as_ref()
-            .filter(|pr| {
+        let found = found(state, &row.project_id, true);
+        let git = Git::new(&state.env())?;
+        let own = pull_requests_of(&git, &root, &row, &found.pull_requests)?;
+        let pr = found
+            .pull_requests
+            .iter()
+            .filter(|pr| own.contains(&pr.number))
+            .find(|pr| {
                 pr.number == number
                     && pr.state == PullRequestState::Open
                     && !pr.draft

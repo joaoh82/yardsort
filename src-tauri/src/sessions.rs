@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use pty_host::{SessionInfo, TermSize};
+use pty_host::{PendingPrompt, SessionInfo, TermSize};
 use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
@@ -110,24 +110,25 @@ fn enabled_harnesses(state: &AppState) -> Vec<HarnessDef> {
         .collect()
 }
 
-fn list(state: &AppState, workspace_id: &str) -> IpcResult<Vec<SessionRecord>> {
+pub(crate) fn list(state: &AppState, workspace_id: &str) -> IpcResult<Vec<SessionRecord>> {
     Ok(describe(
         state.store.sessions(workspace_id)?,
         &enabled_harnesses(state),
     ))
 }
 
-enum Continue {
+pub(crate) enum Continue {
     Resume,
     Fork,
 }
 
-/// Start a harness on an existing conversation.
-fn continue_session(
+/// Start a harness on an existing conversation, typing `prompt` into it once it is ready.
+pub(crate) fn continue_session(
     state: &AppState,
     record_id: &str,
     how: Continue,
     size: TermSize,
+    prompt: Option<String>,
 ) -> IpcResult<SessionInfo> {
     let row = state
         .store
@@ -221,7 +222,11 @@ fn continue_session(
                 program: Some(def.command.clone()),
                 args,
                 labels,
-                paste_when_ready: None,
+                // No harness takes a message on its resume line, so it is typed in instead.
+                paste_when_ready: prompt.map(|text| PendingPrompt {
+                    text,
+                    quiet_ms: def.stdin_ready_ms,
+                }),
                 record: None,
                 env: vec![],
             },
@@ -284,7 +289,7 @@ pub async fn session_context(app: AppHandle, id: String) -> IpcResult<Option<Con
 #[specta::specta]
 pub async fn session_resume(app: AppHandle, id: String, size: TermSize) -> IpcResult<SessionInfo> {
     blocking(app, move |state| {
-        continue_session(state, &id, Continue::Resume, size)
+        continue_session(state, &id, Continue::Resume, size, None)
     })
     .await
 }
@@ -294,7 +299,7 @@ pub async fn session_resume(app: AppHandle, id: String, size: TermSize) -> IpcRe
 #[specta::specta]
 pub async fn session_fork(app: AppHandle, id: String, size: TermSize) -> IpcResult<SessionInfo> {
     blocking(app, move |state| {
-        continue_session(state, &id, Continue::Fork, size)
+        continue_session(state, &id, Continue::Fork, size, None)
     })
     .await
 }

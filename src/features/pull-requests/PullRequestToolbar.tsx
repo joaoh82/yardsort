@@ -6,9 +6,10 @@ import { errorMessage, ipc, type MergeMethod, type Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { PullRequestBadge } from "@/features/sidebar/PullRequestBadge";
-import { pullRequestFor, usePublishStore } from "@/stores/publish";
+import { pullRequestsFor, usePublishStore } from "@/stores/publish";
+import { useTerminalStore } from "@/stores/terminals";
 import { PullRequestDetails } from "./PullRequestDetails";
-import { pullRequestColour } from "./appearance";
+import { conflicting, pullRequestColour } from "./appearance";
 
 const methods: { method: MergeMethod; label: string }[] = [
   { method: "squash", label: "Squash and merge" },
@@ -24,10 +25,12 @@ export function PullRequestToolbar({
   projectId: string;
 }) {
   const found = usePublishStore((s) => s.byProject[projectId]);
-  const pr = pullRequestFor(
-    found,
-    workspace.head && !workspace.head.detached ? workspace.head.label : undefined,
-  );
+  // A workspace can have opened several. The toolbar shows one at a time — the branch's own
+  // until another is chosen from the menu.
+  const prs = pullRequestsFor(found, workspace);
+  const [chosen, setChosen] = useState<number | null>(null);
+  const pr = prs.find((candidate) => candidate.number === chosen) ?? prs[0];
+  const more = prs.length - 1;
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -65,6 +68,36 @@ export function PullRequestToolbar({
         await usePublishStore.getState().refresh();
     }
   }
+  async function resolveConflicts() {
+    if (!pr) return;
+    const helper = await ipc.workspaceConflictHelper(workspace.id, pr.number);
+    const base = pr.details?.base ?? "its base";
+    const how =
+      helper.reach === "type"
+        ? `It is running in “${helper.title}”, and the request is typed in there.`
+        : helper.reach === "resume"
+          ? `Its conversation “${helper.title}” has ended. It is resumed in a new tab, with the request.`
+          : `Its conversation “${helper.title}” cannot be continued, so a new ${helper.harnessLabel} conversation starts with the request and the workspace's task.`;
+    const confirmed = await native.confirm(
+      `Ask ${helper.harnessLabel} to resolve the conflicts in pull request #${pr.number}: ${pr.title}\n\n${how}\n\nIt is asked to merge ${base} into ${pr.branch}, resolve the conflicts, run the project's checks and push — never to rebase or force-push.`,
+      { title: "Resolve merge conflicts", okLabel: `Ask ${helper.harnessLabel}` },
+    );
+    if (!confirmed) return;
+    try {
+      const terminals = useTerminalStore.getState();
+      const asked = await ipc.workspaceResolveConflicts(
+        workspace.id,
+        pr.number,
+        terminals.lastSize,
+      );
+      if (asked.reach === "type") terminals.activate(asked.session.id);
+      else terminals.adopt(asked.session);
+      setNotice(`Asked ${helper.harnessLabel} to resolve the conflicts in #${pr.number}.`);
+    } finally {
+      // The command asked the forge afresh; the badge should say what it said.
+      await usePublishStore.getState().loadProject(projectId, true);
+    }
+  }
   // Keep feedback visible even when refresh removes the badge.
   if (!pr && !error && !notice) return null;
   return (
@@ -80,7 +113,7 @@ export function PullRequestToolbar({
           <button
             ref={menuButton}
             type="button"
-            aria-label={`Actions for pull request #${pr.number}`}
+            aria-label={`Actions for pull request #${pr.number}${more > 0 ? ` — ${more} more from this workspace` : ""}`}
             aria-haspopup="menu"
             aria-expanded={!!at}
             disabled={busy}
@@ -90,7 +123,7 @@ export function PullRequestToolbar({
             }}
             className={`rounded px-1.5 py-1 hover:brightness-125 disabled:opacity-40 ${pullRequestColour(pr)}`}
           >
-            {busy ? "…" : "▾"}
+            {busy ? "…" : <>{more > 0 && <span className="mr-1 tabular-nums">+{more}</span>}▾</>}
           </button>
           {at && (
             <ContextMenu
@@ -100,7 +133,26 @@ export function PullRequestToolbar({
                 menuButton.current?.focus();
               }}
               items={[
-                ...methods.map(({ method, label }) => ({
+                // More than one: say which, and let another be chosen.
+                ...(more > 0
+                  ? prs.map((candidate) => ({
+                      label: `#${candidate.number} ${candidate.state === "open" ? (candidate.draft ? "draft" : "open") : candidate.state} — ${candidate.title}`,
+                      checked: candidate.number === pr.number,
+                      onSelect: () => setChosen(candidate.number),
+                    }))
+                  : []),
+                ...(conflicting(pr)
+                  ? [
+                      {
+                        label: "Ask its agent to resolve conflicts…",
+                        divider: more > 0,
+                        disabled: busy || workspace.missing || workspace.archived,
+                        onSelect: () => void action(resolveConflicts),
+                      },
+                    ]
+                  : []),
+                ...methods.map(({ method, label }, index) => ({
+                  divider: index === 0 && more > 0 && !conflicting(pr),
                   label,
                   disabled:
                     busy ||

@@ -109,6 +109,7 @@ describe("Sidebar", () => {
       pullRequests: [],
       problem: null,
       loggedOut: false,
+      workspaces: {},
     });
     useSessionsStore.setState({ byWorkspace: {}, error: null });
     usePublishStore.setState({ byProject: {}, workspaceId: null, state: null, busy: null });
@@ -256,6 +257,7 @@ describe("Sidebar", () => {
       ],
       problem: null,
       loggedOut: false,
+      workspaces: {},
     });
     await renderWithWorktree();
 
@@ -271,6 +273,45 @@ describe("Sidebar", () => {
         name: /Pull request/,
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it("counts a workspace's other pull requests on its row and lists them on hover", async () => {
+    const opened = (number: number, branch: string, title: string, state = "open") => ({
+      number,
+      url: `https://github.com/o/alpha/pull/${number}`,
+      title,
+      branch,
+      state,
+      draft: false,
+      checks: "passing",
+      details: null,
+    });
+    core.projectPullRequests.mockResolvedValue({
+      gh: true,
+      pullRequests: [
+        opened(43, "ys/feature-part-two", "Split out the migration"),
+        opened(42, "ys/feature", "Fix the login redirect"),
+        opened(30, "ys/feature", "First go at it", "merged"),
+        opened(41, "ys/someone-else", "Not this workspace's"),
+      ],
+      problem: null,
+      loggedOut: false,
+      workspaces: { "w-alpha-feature": [43, 42, 30] },
+    });
+    await renderWithWorktree();
+
+    const row = await screen.findByRole("treeitem", { name: "feature" });
+    // The checked-out branch's own pull request is the badge; the others are counted.
+    expect(await within(row).findByRole("button", { name: /Pull request #42/ })).toBeVisible();
+    expect(
+      within(row).getByLabelText("2 more pull requests from this workspace"),
+    ).toHaveTextContent("+2");
+    await userEvent.setup().hover(rowButton("feature"));
+    const preview = await screen.findByRole("region", { name: "feature details" });
+    expect(within(preview).getByText("Also opened from this workspace")).toBeVisible();
+    expect(within(preview).getByRole("button", { name: /Pull request #43/ })).toBeVisible();
+    expect(within(preview).getByRole("button", { name: /#30 — merged/ })).toBeVisible();
+    expect(within(preview).queryByText("Not this workspace's")).not.toBeInTheDocument();
   });
 
   it("opens the pull request in a browser, without opening the workspace", async () => {
@@ -289,6 +330,7 @@ describe("Sidebar", () => {
       ],
       problem: null,
       loggedOut: false,
+      workspaces: {},
     });
     await renderWithWorktree();
 
@@ -306,6 +348,7 @@ describe("Sidebar", () => {
     core.projectPullRequests.mockResolvedValue({
       gh: true,
       loggedOut: false,
+      workspaces: {},
       problem: null,
       pullRequests: [
         {
@@ -403,6 +446,7 @@ describe("Sidebar", () => {
           pullRequests: [],
           loggedOut: status === "logged out",
           problem: status === "forge error" ? "Network unavailable" : null,
+          workspaces: {},
         });
       await renderWithWorktree();
       await userEvent.setup().hover(rowButton("feature"));
@@ -491,6 +535,7 @@ describe("Sidebar", () => {
       ],
       problem: null,
       loggedOut: false,
+      workspaces: {},
     });
     await renderWithWorktree();
     const row = await screen.findByRole("treeitem", { name: "feature" });
@@ -503,6 +548,7 @@ describe("Sidebar", () => {
       pullRequests: [],
       problem: null,
       loggedOut: false,
+      workspaces: {},
     });
     await renderWithWorktree();
     expect(screen.queryByRole("button", { name: /Pull request/ })).not.toBeInTheDocument();

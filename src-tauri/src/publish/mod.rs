@@ -7,11 +7,13 @@
 //! Pull requests are fetched **per project, not per workspace**. A project with a dozen
 //! workspaces would otherwise make a dozen network calls every time the window came back into
 //! focus, so one `gh pr list` answers for all of them and the answer is cached for
-//! [`FRESH_FOR`]; a workspace finds its own by branch name.
+//! [`FRESH_FOR`]; a workspace finds its own by branch name and by its worktree's own history
+//! (see [`pull_requests_of`]).
 
 pub mod commands;
+pub mod conflicts;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -21,7 +23,9 @@ use serde::Serialize;
 use specta::Type;
 
 use crate::error::IpcResult;
-use crate::forge::{parse_remote, pull_request_for, Gh, PullRequest, PullRequestState, Repo};
+use crate::forge::{
+    parse_remote, pull_request_for, pull_requests_from, Gh, PullRequest, PullRequestState, Repo,
+};
 use crate::git::{Commit, Git, Head};
 use crate::store::WorkspaceRow;
 
@@ -50,6 +54,11 @@ pub struct ProjectPullRequests {
     pub problem: Option<String>,
     /// The problem is that nobody is logged in, which has its own one-line fix.
     pub logged_out: bool,
+    /// Each workspace's own pull requests, by number, newest first: see
+    /// [`pull_requests_from`]. A workspace can have several — a branch reused after its pull
+    /// request merged, or a second branch its agent opened one from. Absent for a workspace
+    /// git could not be asked about.
+    pub workspaces: BTreeMap<String, Vec<u32>>,
 }
 
 /// Where a workspace stands: what it can commit, push and open, and what happened to it.
@@ -177,6 +186,26 @@ pub fn state(
     })
 }
 
+/// The numbers of the pull requests that came out of the workspace at `root`, newest first.
+pub fn pull_requests_of(
+    git: &Git,
+    root: &Path,
+    row: &WorkspaceRow,
+    requests: &[PullRequest],
+) -> IpcResult<Vec<u32>> {
+    let branch = match git.head(root)? {
+        Head::Branch(name) => Some(name),
+        Head::Unborn(_) | Head::Detached(_) => None,
+    };
+    let history = git.head_history(root)?;
+    Ok(pull_requests_from(
+        requests,
+        branch.as_deref(),
+        row.branch.as_deref(),
+        &history,
+    ))
+}
+
 /// The project-wide pull request cache. One per app.
 #[derive(Default)]
 pub struct Forge {
@@ -264,12 +293,14 @@ fn ask(gh: Option<&Gh>, root: &Path) -> ProjectPullRequests {
             pull_requests,
             problem: None,
             logged_out: false,
+            workspaces: BTreeMap::new(),
         },
         Err(error) => ProjectPullRequests {
             gh: true,
             pull_requests: vec![],
             logged_out: error.is_logged_out(),
             problem: Some(error.to_string()),
+            workspaces: BTreeMap::new(),
         },
     }
 }
@@ -442,8 +473,7 @@ mod tests {
                 pr("ys/something-else", PullRequestState::Open),
                 pr("ys/feature", PullRequestState::Open),
             ],
-            problem: None,
-            logged_out: false,
+            ..Default::default()
         };
         let state = state(&git, &tree, &row(&tree, Some("trunk")), &found).unwrap();
         assert_eq!(
@@ -451,6 +481,44 @@ mod tests {
             Some("ys/feature")
         );
         assert!(!state.can_open, "it is already open");
+    }
+
+    /// A real worktree that opened two pull requests — its own branch, then a second branch it
+    /// checked out — finds both, and not one another workspace opened on a branch it never had.
+    #[test]
+    fn a_workspace_finds_every_pull_request_it_opened() {
+        let (git, _repo, _remote, trees) = fixture();
+        let tree = trees.path().join("feature");
+        std::fs::write(tree.join("a.txt"), "one").unwrap();
+        git.commit_all(&tree, "Add a").unwrap();
+        git.run(&tree, &["checkout", "-b", "ys/part-two"]).unwrap();
+        std::fs::write(tree.join("b.txt"), "two").unwrap();
+        git.commit_all(&tree, "Add b").unwrap();
+        git.run(&tree, &["checkout", "ys/feature"]).unwrap();
+
+        let now = now_ms();
+        let opened = |number: u32, branch: &str| PullRequest {
+            number,
+            created_at: Some(now),
+            ..pr(branch, PullRequestState::Open)
+        };
+        let requests = [
+            opened(7, "ys/feature"),
+            opened(8, "ys/part-two"),
+            opened(9, "ys/someone-else"),
+        ];
+        let found = pull_requests_of(&git, &tree, &row(&tree, Some("trunk")), &requests).unwrap();
+        assert_eq!(found, [8, 7]);
+    }
+
+    fn now_ms() -> i64 {
+        i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -529,6 +597,7 @@ mod tests {
             pull_requests: vec![pr("ys/feature", PullRequestState::Merged)],
             problem: None,
             logged_out: false,
+            workspaces: BTreeMap::new(),
         };
         let state = state(&git, &tree, &row(&tree, Some("trunk")), &found).unwrap();
         assert!(state.pull_request.is_some());
@@ -586,6 +655,7 @@ mod tests {
             pull_requests: vec![pr("ys/feature", PullRequestState::Open)],
             problem: None,
             logged_out: false,
+            workspaces: BTreeMap::new(),
         };
         forge
             .cached
@@ -627,6 +697,7 @@ mod tests {
                     pull_requests: vec![pr("ys/feature", PullRequestState::Open)],
                     problem: None,
                     logged_out: false,
+                    workspaces: BTreeMap::new(),
                 },
             ),
         );

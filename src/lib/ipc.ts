@@ -60,6 +60,8 @@ import {
   type PullRequest,
   type PullRequestOpened,
   type MergeMethod,
+  type ConflictHelper,
+  type ConflictsAsked,
   type Relevance,
   type Review,
   type ReviewFlag,
@@ -160,6 +162,8 @@ export type {
   PullRequest,
   PullRequestOpened,
   MergeMethod,
+  ConflictHelper,
+  ConflictsAsked,
   Relevance,
   Review,
   ReviewFlag,
@@ -390,6 +394,10 @@ export const ipc = {
     headOid: string,
     method: MergeMethod,
   ) => unwrap(commands.workspaceMergePullRequest(workspaceId, number, headOid, method)),
+  workspaceConflictHelper: (workspaceId: string, number: number) =>
+    unwrap(commands.workspaceConflictHelper(workspaceId, number)),
+  workspaceResolveConflicts: (workspaceId: string, number: number, size: TermSize) =>
+    unwrap(commands.workspaceResolveConflicts(workspaceId, number, size)),
 
   /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
   projectPullRequests: (projectId: string, refresh = false) =>
