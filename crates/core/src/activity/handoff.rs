@@ -835,7 +835,22 @@ mod tests {
             "`notes.md` (untracked) — last written while claude ran a command; not reported"
         ));
         assert!(text.contains("`README.md` (modified, +1 −1) — no agent reported writing it"));
-        assert!(text.contains("- **claude** (opus), started 2026-09-"));
+        // The session is stamped with the time the test runs; only the shape of the date is fixed.
+        let started = text
+            .split_once("- **claude** (opus), started ")
+            .expect("the agent's line")
+            .1;
+        assert!(
+            started.as_bytes()[..10]
+                .iter()
+                .enumerate()
+                .all(|(i, b)| if i == 4 || i == 7 {
+                    *b == b'-'
+                } else {
+                    b.is_ascii_digit()
+                }),
+            "{started}"
+        );
         assert!(text.contains("and exited cleanly.\n"));
         assert!(text.contains("  - 1 turn.\n"));
         assert!(text.contains("  - Tools: Bash ×2, Write.\n"));
