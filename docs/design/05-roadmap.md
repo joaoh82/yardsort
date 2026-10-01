@@ -708,7 +708,11 @@ fixture; the docs list every action and variable that exists and none that does 
   and pays for — one new harness field, no new credential. An Anthropic API key is the fallback.
   See [open question 19](06-open-questions.md).
 - [x] Per-project setup script and "files to copy into new worktrees" (`.env` etc.); run/dev-server button. Local SQLite configuration; preparation shared with the CLI, failed preparation retained for inspection, run output in daemon terminal tabs.
-- Merge / rebase helpers; "apply this workspace onto local".
+- Merge / rebase helpers; "apply this workspace onto local". A first piece is done: a pull
+  request GitHub says conflicts can be handed back to the agent that opened it, which merges the
+  base in and pushes (see [commits & pull requests](../guide/commits-and-pull-requests.md#resolve-merge-conflicts)).
+  Found while building it: a workspace can own several pull requests, and the branch name alone
+  cannot say which — the worktree's own `HEAD` reflog can.
 - Diff comments sent back to the agent as a prompt.
 - Multi-repo projects; remote/SSH workspaces.
 - Usage / cost view per workspace. MCP config management per harness.

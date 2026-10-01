@@ -29,10 +29,6 @@ use crate::store::{now_ms, StepStatus, Store, WorkflowRunRow};
 /// window uses to tell finished work from the echo of a keystroke, or of a paste.
 pub const SETTLE_BUSY_MS: u32 = 8_000;
 
-/// How long to let a pasted message land before pressing Enter, as the first-prompt delivery
-/// does.
-const SUBMIT_DELAY: Duration = Duration::from_millis(150);
-
 /// How often a run waiting on its pull request asks the forge. A review takes minutes to write;
 /// asking every second would only spend the user's API allowance.
 pub const FORGE_EVERY: Duration = Duration::from_secs(30);
@@ -467,11 +463,8 @@ fn carry_out(
 
 /// Type `text` into a session and submit it, as the first-prompt delivery does.
 fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Result<Outputs, String> {
-    host.paste(id, text)
+    pty_host::paste_and_submit(host, id, text)
         .map_err(|error| format!("Could not type into the session: {error}"))?;
-    std::thread::sleep(SUBMIT_DELAY);
-    host.write(id, b"\r")
-        .map_err(|error| format!("Could not submit the message: {error}"))?;
     Ok(Outputs::new())
 }
 

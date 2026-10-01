@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { PullRequest } from "@/lib/ipc";
-import { pullRequestColour } from "@/features/pull-requests/appearance";
+import { conflicting, pullRequestColour } from "@/features/pull-requests/appearance";
 
 /**
  * A workspace's pull request on its row: the number, and what CI made of it. Pressing it opens
@@ -22,6 +22,7 @@ export function PullRequestBadge({ pr, toolbar = false }: { pr: PullRequest; too
     pr.draft ? `Draft pull request #${pr.number}` : `Pull request #${pr.number}`,
     pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed" : null,
     pr.state === "open" ? CHECKS[pr.checks] : null,
+    conflicting(pr) ? "merge conflicts" : null,
     pr.title,
   ]
     .filter(Boolean)
@@ -49,6 +50,11 @@ export function PullRequestBadge({ pr, toolbar = false }: { pr: PullRequest; too
         </svg>
       )}
       {toolbar ? `#${pr.number}` : text}
+      {toolbar && conflicting(pr) && (
+        <span aria-hidden className="ml-1" title="Merge conflicts">
+          ⚠
+        </span>
+      )}
       {toolbar && (
         <span aria-hidden className="ml-1">
           {pr.checks === "passing"

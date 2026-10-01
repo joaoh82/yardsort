@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { hasCore, ipc, type Project, type Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
-import { pullRequestFor, usePublishStore } from "@/stores/publish";
+import { pullRequestsFor, usePublishStore } from "@/stores/publish";
 import { useTerminalStore } from "@/stores/terminals";
 import { archiveWorkspace, deleteWorkspace, enterWorkspace, restoreWorkspace } from "./actions";
 import { summarise } from "@/features/terminal/activity";
@@ -256,7 +256,8 @@ function WorkspaceNode({
   // hand back a new value on every render and re-render for ever.
   const found = usePublishStore((s) => s.byProject[projectId]);
   const head = workspace.head;
-  const pr = pullRequestFor(found, head && !head.detached ? head.label : undefined);
+  // The branch's own first; any others it opened are counted beside it and listed on hover.
+  const [pr, ...otherPrs] = pullRequestsFor(found, workspace);
   const allTabs = useTerminalStore((s) => s.tabs);
   const tabs = allTabs.filter((tab) => tab.workspaceId === workspace.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -326,7 +327,22 @@ function WorkspaceNode({
             )}
             {workspace.archived && <p className="text-ink-faint">Archived workspace</p>}
             {pr ? (
-              <PullRequestDetails pr={pr} />
+              <>
+                <PullRequestDetails pr={pr} />
+                {otherPrs.length > 0 && (
+                  <div className="border-t border-line pt-3">
+                    <p className="mb-1.5 text-ink-faint">Also opened from this workspace</p>
+                    <ul className="space-y-1">
+                      {otherPrs.map((other) => (
+                        <li key={other.number} className="flex min-w-0 items-center gap-2">
+                          <PullRequestBadge pr={other} />
+                          <span className="truncate text-ink-muted">{other.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             ) : found?.gh && !found.loggedOut && !found.problem ? (
               <p className="text-ink-faint">No pull request found</p>
             ) : null}
@@ -395,8 +411,16 @@ function WorkspaceNode({
         </button>
         <WorkspaceHarnesses tabs={tabs} workspaceId={workspace.id} />
         {pr && (
-          <span className="flex h-full shrink-0 items-center pr-0.5 pl-1">
+          <span className="flex h-full shrink-0 items-center gap-0.5 pr-0.5 pl-1">
             <PullRequestBadge pr={pr} />
+            {otherPrs.length > 0 && (
+              <span
+                aria-label={`${otherPrs.length} more pull request${otherPrs.length === 1 ? "" : "s"} from this workspace`}
+                className="text-[10px] text-ink-faint tabular-nums"
+              >
+                +{otherPrs.length}
+              </span>
+            )}
           </span>
         )}
         {isWorktree && (

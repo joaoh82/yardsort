@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::env::ShellEnv;
+use crate::git::HeadHistory;
 use crate::program::Program;
 
 #[derive(Debug, thiserror::Error)]
@@ -226,6 +227,18 @@ pub struct PullRequestDetails {
     pub review: String,
     pub updated_at: String,
     pub checks: Vec<PullRequestCheck>,
+    /// Whether it merges cleanly into its base, as the forge last worked it out.
+    pub mergeable: Mergeable,
+}
+
+/// GitHub's answer to "can this be merged without conflicts". It works it out lazily, after a
+/// push to either side, so `Unknown` is an ordinary answer for a while and not an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Mergeable {
+    Mergeable,
+    Conflicting,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -251,6 +264,60 @@ pub fn pull_request_for<'a>(requests: &'a [PullRequest], branch: &str) -> Option
         .filter(|pr| pr.branch == branch)
         .max_by_key(|pr| (pr.state == PullRequestState::Open, pr.number))
 }
+
+/// The pull requests that came out of one workspace, by number, newest first.
+///
+/// `branch` is what the workspace has checked out now, and `own` the branch Yardsort made it
+/// with. A pull request belongs to the workspace when its head is a commit made there, or when
+/// its branch was checked out there before it was opened. The time matters because branch
+/// names are reused: an older workspace's pull request on the same name is not this one's.
+///
+/// The one [`pull_request_for`] picks for `branch` is always included, opened before or not:
+/// that is what the workspace has always shown, an adopted worktree's pull request included.
+pub fn pull_requests_from(
+    requests: &[PullRequest],
+    branch: Option<&str>,
+    own: Option<&str>,
+    history: &HeadHistory,
+) -> Vec<u32> {
+    let checked_out_at = |name: &str| {
+        let first = history
+            .branches
+            .iter()
+            .find(|(checked_out, _)| checked_out == name)
+            .map(|(_, at)| *at);
+        // The branch Yardsort made the worktree on has been there since its birth, which no
+        // `checkout` line says: nothing was checked out to get there. Any other branch, the
+        // one checked out now included, has been there since its first `checkout` line.
+        let from_birth = (Some(name) == own).then_some(history.since).flatten();
+        match (first, from_birth) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    };
+    let current = branch.and_then(|branch| pull_request_for(requests, branch));
+    let mut found: Vec<&PullRequest> = requests
+        .iter()
+        .filter(|pr| {
+            Some(pr.number) == current.map(|c| c.number)
+                || pr
+                    .details
+                    .as_ref()
+                    .is_some_and(|d| history.commits.contains(&d.head_oid))
+                || match (checked_out_at(&pr.branch), pr.created_at) {
+                    (Some(at), Some(opened)) => opened + CLOCK_SKEW_MS >= at,
+                    _ => false,
+                }
+        })
+        .collect();
+    found.sort_by_key(|pr| std::cmp::Reverse(pr.number));
+    found.dedup_by_key(|pr| pr.number);
+    found.into_iter().map(|pr| pr.number).collect()
+}
+
+/// How far the forge's clock and this machine's may disagree. A pull request opened a moment
+/// after its branch was checked out must not look as if it came first.
+const CLOCK_SKEW_MS: i64 = 2 * 60 * 1000;
 
 /// A review or a comment on a pull request: what a workflow waiting on one looks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -467,6 +534,25 @@ impl Gh {
         pull_requests(&out)
     }
 
+    /// Pull request `number`, asked of the forge now rather than out of the project's list:
+    /// for an action that must not rest on an answer half a minute old.
+    pub fn pull_request(&self, root: &Path, number: u32) -> ForgeResult<PullRequest> {
+        let out = self.run(
+            root,
+            &[
+                "pr",
+                "view",
+                &number.to_string(),
+                "--json",
+                PULL_REQUEST_FIELDS,
+            ],
+        )?;
+        let row: serde_json::Value =
+            serde_json::from_str(&out).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+        pull_request(&row)
+            .ok_or_else(|| ForgeError::Unreadable("expected a pull request".to_owned()))
+    }
+
     /// The reviews and comments on pull request `number`, oldest first.
     /// `limit` is how long `gh` may take; after that it is stopped and this is an error.
     pub fn pr_posts(&self, root: &Path, number: u32, limit: Duration) -> ForgeResult<Vec<PrPost>> {
@@ -540,7 +626,7 @@ impl Gh {
 
 /// What is asked of `gh` about each pull request.
 const PULL_REQUEST_FIELDS: &str = "number,url,title,headRefName,state,isDraft,statusCheckRollup,\
-createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt";
+createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt,mergeable";
 
 fn pull_requests(out: &str) -> ForgeResult<Vec<PullRequest>> {
     let parsed: serde_json::Value =
@@ -551,7 +637,7 @@ fn pull_requests(out: &str) -> ForgeResult<Vec<PullRequest>> {
     Ok(rows.iter().filter_map(pull_request).collect())
 }
 
-fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
+pub(crate) fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
     Some(PullRequest {
         number: u32::try_from(row.get("number")?.as_u64()?).ok()?,
         url: row.get("url")?.as_str()?.to_owned(),
@@ -601,6 +687,11 @@ fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
                     state: roll_up(Some(&serde_json::json!([check]))),
                 })
                 .collect(),
+            mergeable: match row.get("mergeable").and_then(|v| v.as_str()) {
+                Some("MERGEABLE") => Mergeable::Mergeable,
+                Some("CONFLICTING") => Mergeable::Conflicting,
+                _ => Mergeable::Unknown,
+            },
         }),
         created_at: row
             .get("createdAt")
@@ -893,6 +984,7 @@ mod tests {
                  "headRefName":"ys/fix-login","state":"OPEN","isDraft":true,
                  "baseRefName":"main","headRefOid":"abc123","additions":12,"deletions":3,
                  "reviewDecision":"APPROVED","updatedAt":"2026-09-28T10:00:00Z",
+                 "mergeable":"CONFLICTING",
                  "statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]}]"#,
         )
         .expect("json");
@@ -908,6 +1000,7 @@ mod tests {
         assert_eq!((details.additions, details.deletions), (12, 3));
         assert_eq!(details.review, "APPROVED");
         assert_eq!(details.updated_at, "2026-09-28T10:00:00Z");
+        assert_eq!(details.mergeable, Mergeable::Conflicting);
         assert_eq!(
             details.checks,
             vec![PullRequestCheck {
@@ -915,6 +1008,64 @@ mod tests {
                 state: Checks::Passing
             }]
         );
+    }
+
+    fn opened(number: u32, branch: &str, at: i64, head: &str) -> PullRequest {
+        let row = serde_json::json!({
+            "number": number, "url": format!("https://github.com/o/r/pull/{number}"),
+            "title": "t", "headRefName": branch, "state": "MERGED", "headRefOid": head,
+        });
+        PullRequest {
+            created_at: Some(at),
+            ..pull_request(&row).unwrap()
+        }
+    }
+
+    /// A workspace's pull requests: the one for the branch it is on, one opened from another
+    /// branch it checked out, and one pushed from a commit made there under a name it never
+    /// checked out. Not an older workspace's on a reused name, nor one opened before this
+    /// workspace checked its branch out.
+    #[test]
+    fn a_workspace_owns_what_was_opened_from_it() {
+        let minute = 60_000;
+        let history = HeadHistory {
+            since: Some(100 * minute),
+            branches: vec![("ys/part-two".into(), 200 * minute)],
+            commits: ["c-made-here".to_owned()].into(),
+        };
+        let requests = [
+            opened(1, "ys/fix", 50 * minute, "old"),
+            opened(2, "ys/fix", 150 * minute, "x"),
+            opened(3, "ys/part-two", 250 * minute, "y"),
+            opened(4, "ys/part-two", 20 * minute, "z"),
+            opened(5, "elsewhere", 300 * minute, "c-made-here"),
+            opened(6, "someone-else", 300 * minute, "w"),
+            // A moment before the checkout, by the forge's clock.
+            opened(7, "ys/part-two", 199 * minute, "v"),
+        ];
+        assert_eq!(
+            pull_requests_from(&requests, Some("ys/fix"), Some("ys/fix"), &history),
+            [7, 5, 3, 2]
+        );
+        // The pull request the current branch shows is always there, however old.
+        let only_old = [opened(1, "ys/fix", 50 * minute, "old")];
+        assert_eq!(
+            pull_requests_from(&only_old, Some("ys/fix"), Some("ys/fix"), &history),
+            [1]
+        );
+        // A branch checked out later counts from that checkout, not from the worktree's birth,
+        // even while it is the one checked out: #8 was opened on it before then, by someone
+        // else. The branch's own pull request (#9, the newest) still shows, as it always has.
+        let later = [
+            opened(8, "ys/part-two", 150 * minute, "u"),
+            opened(9, "ys/part-two", 160 * minute, "t"),
+        ];
+        assert_eq!(
+            pull_requests_from(&later, Some("ys/part-two"), Some("ys/fix"), &history),
+            [9]
+        );
+        // Nothing checked out and no history: nothing but what a commit proves.
+        assert!(pull_requests_from(&requests, None, None, &HeadHistory::default()).is_empty());
     }
 
     /// Against the real `gh`, the real network and this repository — so the field names above

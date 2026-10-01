@@ -264,7 +264,13 @@ therefore degrades to the link when `gh` is missing or logged out, and that is a
 rather than an error to report.
 
 **Pull requests are fetched per _project_, not per workspace.** One `gh pr list` answers for every
-row, cached for 30 seconds in `publish::Forge`, and a workspace finds its own by head branch. The
+row, cached for 30 seconds in `publish::Forge`, and a workspace finds its own by head branch.
+A workspace can own several: `forge::pull_requests_from` also counts PRs whose branch the
+worktree checked out before they were opened, and PRs whose head is a commit made in it, both read
+from the worktree's own `HEAD` reflog (`git::head_history`). The project answer carries each
+workspace's numbers; the window shows the head branch's PR first and the rest beside it. The map
+costs a few `git` processes per workspace, so `Forge::owned` reuses it for as long as the PR list
+it came from is fresh and unchanged. The
 obvious shape — ask about this branch — costs one network round trip per workspace every time the
 window regains focus. The response includes base branch, head OID, review decision, line counts,
 update time and individual checks for the shared sidebar/toolbar preview. Matching a reused branch
@@ -273,10 +279,24 @@ keep a slower earlier fetch from overwriting a later one in the core cache and f
 store; invalidation also fences out fetches started before a push or merge.
 
 Merging is a separate workspace command. After the user confirms a method, number and head, the
-core rechecks the workspace's PR and calls `gh pr merge` with an argv array and
-`--match-head-commit`. It never requests branch deletion or administrator bypass. GitHub remains
-responsible for permissions, branch protections and merge queues. The project cache is invalidated
-even if the command fails, and the toolbar refreshes the PR list.
+core asks the forge again, checks the PR is still open, still one of the workspace's and still at
+that head, and calls `gh pr merge` with an argv array and `--match-head-commit`. It never requests
+branch deletion or administrator bypass. GitHub remains responsible for permissions, branch
+protections and merge queues. The project cache is invalidated even if the command fails, and the
+toolbar refreshes the PR list.
+
+Resolving merge conflicts is handed to an agent, never done by the core. `gh` reports `mergeable`
+with the rest of the list; when it says `CONFLICTING`, the toolbar offers to ask the agent that
+opened the PR. `conflicts::author` picks the conversation from the store alone — the harness run
+alive when the forge says the PR was opened, else the conversation given the task, else the newest
+— and nothing it printed is read. Both commands refuse a PR the workspace does not own
+(`publish::ensure_own`), as merging does. `workspace_conflict_helper` names the conversation for
+the confirmation and returns its record id; `workspace_resolve_conflicts` takes that id back,
+asks `gh pr view` again, refuses if the choice has moved to another conversation, then types the
+request into the running
+session if it is quiet (never if busy), resumes the conversation with the request as a
+`PendingPrompt` the host types once it is ready, or starts a new conversation of the same harness
+as a handoff, so the record's task stays the user's words.
 
 ## Data model (SQLite)
 

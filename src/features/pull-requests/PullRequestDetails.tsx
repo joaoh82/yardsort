@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { PullRequest } from "@/lib/ipc";
-import { pullRequestColour } from "./appearance";
+import { conflicting, pullRequestColour } from "./appearance";
 
 const checksLabel = {
   none: "No checks reported",
@@ -51,6 +51,11 @@ export function PullRequestDetails({ pr }: { pr: PullRequest }) {
         {pr.branch}
         {details?.base ? ` → ${details.base}` : ""}
       </p>
+      {conflicting(pr) && (
+        <p className="text-red-400">
+          Conflicts with {details?.base || "its base"}: they must be resolved before it can merge.
+        </p>
+      )}
       <div className="border-t border-line pt-3">
         <p className={checksColour[pr.checks]}>
           {checksLabel[pr.checks]}

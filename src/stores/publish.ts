@@ -6,6 +6,7 @@ import {
   type PublishState,
   type PullRequest,
   type PullRequestOpened,
+  type Workspace,
 } from "@/lib/ipc";
 import { useProjectsStore } from "./projects";
 
@@ -17,6 +18,7 @@ const NO_PULL_REQUESTS: ProjectPullRequests = {
   pullRequests: [],
   problem: null,
   loggedOut: false,
+  workspaces: {},
 };
 
 interface PublishStore {
@@ -61,6 +63,25 @@ export function pullRequestFor(
       if ((pr.state === "open") !== (best.state === "open")) return pr.state === "open" ? pr : best;
       return pr.number > best.number ? pr : best;
     }, undefined);
+}
+
+/**
+ * Every pull request a workspace opened: the one for the branch it is on first — what it has
+ * always shown — then the others the core matched to it, newest first. Which ones belong to it
+ * is the core's call (`pull_requests_from`); this only puts the two answers together.
+ */
+export function pullRequestsFor(
+  found: ProjectPullRequests | undefined,
+  workspace: Pick<Workspace, "id" | "head">,
+): PullRequest[] {
+  if (!found) return [];
+  const head = workspace.head;
+  const current = pullRequestFor(found, head && !head.detached ? head.label : undefined);
+  const others = (found.workspaces[workspace.id] ?? [])
+    .filter((number) => number !== current?.number)
+    .map((number) => found.pullRequests.find((pr) => pr.number === number))
+    .filter((pr) => pr !== undefined);
+  return current ? [current, ...others] : others;
 }
 
 export const usePublishStore = create<PublishStore>((set, get) => {

@@ -6,7 +6,8 @@ export function pullRequestColour(pr: PullRequest): string {
   if (
     pr.state === "closed" ||
     pr.checks === "failing" ||
-    pr.details?.review === "CHANGES_REQUESTED"
+    pr.details?.review === "CHANGES_REQUESTED" ||
+    conflicting(pr)
   )
     return "bg-red-500/20 text-red-400";
   if (pr.draft || pr.checks === "running" || pr.details?.review === "REVIEW_REQUIRED")
@@ -14,4 +15,9 @@ export function pullRequestColour(pr: PullRequest): string {
   // An open PR is green even when CI is not configured. The check label still says
   // "no checks", and a success tick is reserved for checks that actually passed.
   return "bg-green-500/20 text-green-400";
+}
+
+/** Open, and GitHub says it cannot be merged without resolving conflicts first. */
+export function conflicting(pr: PullRequest): boolean {
+  return pr.state === "open" && pr.details?.mergeable === "conflicting";
 }

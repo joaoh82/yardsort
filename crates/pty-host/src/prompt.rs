@@ -9,12 +9,11 @@ use std::time::{Duration, Instant};
 
 use crate::session::Session;
 use crate::types::{PendingPrompt, SessionState};
+use crate::SUBMIT_DELAY;
 
 /// How long to wait for a program to become ready before pasting anyway.
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const READY_POLL: Duration = Duration::from_millis(100);
-/// Pause between pasting and pressing Enter; some TUIs drop an Enter that arrives with the paste.
-const SUBMIT_DELAY: Duration = Duration::from_millis(150);
 
 #[derive(Debug, PartialEq, Eq)]
 enum Readiness {

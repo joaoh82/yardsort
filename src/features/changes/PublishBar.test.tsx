@@ -106,6 +106,7 @@ describe("PublishBar", () => {
       pullRequests: [],
       problem: null,
       loggedOut: false,
+      workspaces: {},
     });
     seed();
   });

@@ -121,11 +121,12 @@ its status. The toolbar button, its dropdown arrow and the preview use the same 
 | ------------------ | ------------------------------------------------------------------------------------ |
 | **#42**, green     | Open with no pending or failing status. CI may have passed or may not be configured. |
 | **#42**, yellow    | Draft, checks running, or review required.                                           |
-| **#42**, red       | At least one check failed, or changes were requested in review.                      |
+| **#42**, red       | At least one check failed, changes were requested, or it has merge conflicts.        |
 | **merged**, purple | Merged. The workspace can be archived or deleted.                                    |
 | **closed**, red    | Closed without merging.                                                              |
 
-For open PRs, failures and requested changes take precedence over pending statuses. Green does
+For open PRs, failures, requested changes and merge conflicts take precedence over pending
+statuses. Green does
 not claim that CI ran: the preview says **No checks reported** when no result is available, and
 the toolbar only shows a success tick when checks actually passed. Hover or keyboard-focus a
 workspace row to preview its pull request: number, title, state, head and base branches, review
@@ -140,10 +141,35 @@ claiming that no PR exists.
 on it, so pressing it opens the pull request while pressing the row still opens the workspace. The
 same summary sits at the right of the panel foot for the selected workspace, and does the same.
 
-The workspace toolbar also shows the PR number and check status. Hover or focus it for the same
-details, or use its arrow menu for **View on GitHub**, **Copy PR link**, and **Refresh pull
-request**. A merged or closed PR stays visible until another PR replaces it on that branch.
-When a branch has several PRs, an open one takes precedence; otherwise Yardsort shows the newest.
+The workspace toolbar also shows the PR number and check status, and **⚠** when GitHub reports
+merge conflicts. Hover or focus it for the same details, or use its arrow menu for **View on
+GitHub**, **Copy PR link**, and **Refresh pull request**. A merged or closed PR stays visible
+until another PR replaces it on that branch. When a branch has several PRs, an open one takes
+precedence; otherwise Yardsort shows the newest.
+
+### A workspace with several pull requests
+
+One workspace can open more than one pull request: a second PR on the same branch after the first
+merged, or an agent that split its work and opened a PR from another branch it created there. The
+badge stays the PR for the branch the workspace has checked out, and the rest are counted beside
+it — **#42 +2** on the row, **+2 ▾** on the toolbar's arrow. Hover the row to see them listed
+under _Also opened from this workspace_, each with its own badge to open it. In the toolbar, the
+arrow menu lists them all with a tick on the one shown; choose another and the toolbar, its
+preview and every action in the menu are about that one until you switch back or leave the
+workspace.
+
+Which PRs count as the workspace's comes from git, not from guessing at names. Each worktree keeps
+its own record of what its `HEAD` has been (its reflog), so Yardsort counts a PR when:
+
+- its branch is the one the workspace has checked out — what the badge has always shown;
+- its branch was checked out in this workspace before the PR was opened (for the branch the
+  workspace was created on, that is from its creation); or
+- its head commit was made in this workspace, whatever the branch is called on GitHub.
+
+The time matters because branch names get reused: a PR opened on `ys/fix` by a workspace you
+deleted last month is not this one's, even if this one is also on `ys/fix`. Git keeps that record
+for 90 days by default, so a PR older than that is still found only through the branch the
+workspace is on.
 
 **This needs `gh`.** Without it there is no number and no check result anywhere in the app, and
 nothing complains about that: it is a supported way to use Yardsort, not a fault. Logged out of
@@ -176,7 +202,48 @@ You can refresh again from the menu.
 
 ![Pull request actions in the workspace toolbar](../images/pull-request-actions.png)
 
+## Resolve merge conflicts
+
+When GitHub says an open PR conflicts with its base, the toolbar's arrow menu offers **Ask its
+agent to resolve conflicts…**. It hands the work back to the agent that opened the PR, which
+already knows the task and the code, instead of leaving you to merge by hand.
+
+Which agent: the conversation that was running in this workspace when GitHub says the PR was
+opened. If none was, the one the workspace's task was first given to; failing that, the newest
+conversation there. A confirmation names it, and says how the request will reach it:
+
+- **Running and quiet** — the request is typed into its tab and sent, as if you had typed it.
+  Anything you had typed there and not sent yet goes with it, as part of the same message:
+  Yardsort cannot see what is in an agent's input, so clear it first if it matters.
+- **Ended** — the conversation is resumed in a new tab and the request typed in once it is ready.
+- **Cannot be continued** (its agent can only resume its latest conversation, say) — a new
+  conversation of the same agent starts, given the request and the workspace's task. It is listed
+  as _Resolve conflicts in #42_.
+
+The request names the PR, its branch and its base, and asks the agent to fetch the base, merge it
+into the branch, resolve each conflict keeping what both sides meant, run the project's checks,
+commit and push. It is told **not to rebase or force-push**, so the PR's history and its review
+comments stay where they were, and to stop and ask you when a conflict needs a decision it cannot
+make from the code and the task.
+
+Cancelling the confirmation sends nothing. A few things stop it before anything is sent, and say
+why beside the toolbar:
+
+- **The agent is working.** Yardsort never types into a busy agent; ask again once it is quiet.
+- **GitHub changed its mind.** The PR is asked about again first. If it no longer conflicts, or
+  GitHub has not finished working that out after a push, nothing is sent.
+- **No agent has worked here**, or its agent is no longer configured or is disabled.
+- **The PR is not one this workspace opened** — the list was out of date, say. Refresh and choose
+  again.
+- **The agent to ask changed after you confirmed.** GitHub's answer can point at a different
+  conversation from the one the confirmation named; then nothing is sent, and asking again
+  names the new one. Only the conversation you agreed to is ever asked.
+
+GitHub works out whether a PR conflicts lazily, after a push to either branch, so the **⚠** and
+the menu entry can take a minute to appear. **Refresh pull request** asks again.
+
 ## What it does not do
 
 No review comments, CI logs, local rebasing or staging area. Those remain with the forge or your
-git tools; the toolbar's rebase option is GitHub's PR merge method.
+git tools; the toolbar's rebase option is GitHub's PR merge method. Yardsort never resolves a
+conflict itself: it asks the agent, which does it with git in the workspace like any other work.

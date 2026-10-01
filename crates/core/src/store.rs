@@ -847,6 +847,28 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The conversation the workspace's task was given to: the oldest one with a first message.
+    pub fn task_session(&self, workspace_id: &str) -> StoreResult<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT id FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL
+                 ORDER BY rowid LIMIT 1",
+                [workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// What a conversation is called in lists.
+    pub fn set_session_title(&self, id: &str, title: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "UPDATE sessions SET title = ? WHERE id = ?",
+            params![title, id],
+        )?;
+        Ok(())
+    }
+
     /// A resumed session runs again, in a new PTY.
     pub fn mark_session_running(&self, id: &str, pty_session_id: &str) -> StoreResult<()> {
         self.conn().execute(
