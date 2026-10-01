@@ -67,6 +67,29 @@ A plain click belongs to the program too. See [Keyboard shortcuts](shortcuts.md)
   put a path in the first message, before anything is running, drop the file on the
   [composer](workspaces.md#starting-one-the-composer) instead.
 
+### When an agent's context fills up
+
+Once a Claude Code or Codex conversation has used **80 %** of its context window, a bar appears
+above its terminal: _Context 84% full — 168,000 of 200,000 tokens_. **Compact** types the agent's
+own `/compact` command into the tab and presses Enter, which has the agent summarise the
+conversation so far and carry on with room to spare. **Not now** hides the bar until the context
+reaches the next step (90 %, then 95 %); after a compaction, or anything else that shrinks the
+context, the next climb past 80 % shows it again. Compacting is always the agent's own work, so
+the bar only offers it. Some agents compact by themselves when they run out, too.
+
+The numbers come from what the agent records about its own requests, never from the terminal. So
+the bar needs the agent's reporting switched on: **Capture what Claude Code reports** or **Capture
+what Codex reports** in Settings → General (see [Activity](activity.md)). It updates when a turn
+ends, not while one runs.
+
+- **Codex** states its window in its session file, so its share is exact.
+- **Claude Code** does not say how large its window is. Yardsort takes the usual 200,000 tokens,
+  or 1,000,000 for a model chosen with `[1m]` — on the workspace (`opus[1m]`), in
+  `ANTHROPIC_MODEL`, or as `model` in Claude Code's settings (the project's `.claude/` files, then
+  `~/.claude/settings.json`). A context already past 200,000 tokens is taken as a 1M window. If
+  you pick a 1M model some other way — `/model` inside the session, say — the bar can show early;
+  press **Not now**.
+
 ## Handing work to another agent
 
 One agent has worked in a workspace and you want a second one there: Codex after Claude, or the

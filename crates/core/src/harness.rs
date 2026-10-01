@@ -73,6 +73,12 @@ pub struct HarnessDef {
     /// agent suits which work is the user's call, not ours.
     #[serde(default)]
     pub strengths: String,
+    /// What to type into the agent to have it summarise its conversation and free its context,
+    /// e.g. `/compact`. Offered when the agent reports a context that is nearly full — see
+    /// [`crate::activity::context`]. `None` for an agent that has no such command or does not
+    /// report its context.
+    #[serde(default)]
+    pub compact_command: Option<String>,
 }
 
 pub const DEFAULT_STDIN_READY_MS: u32 = 1500;
@@ -175,6 +181,7 @@ impl HarnessDef {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: None,
         }
     }
 }
@@ -260,6 +267,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: Some("/compact".into()),
         },
         HarnessDef {
             id: "codex".into(),
@@ -282,6 +290,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: Some("/compact".into()),
         },
         HarnessDef {
             id: "grok".into(),
@@ -310,6 +319,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: None,
         },
         HarnessDef {
             id: "opencode".into(),
@@ -332,6 +342,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: None,
         },
         HarnessDef {
             id: "omp".into(),
@@ -356,6 +367,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: None,
         },
         HarnessDef {
             id: "cursor".into(),
@@ -379,6 +391,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: None,
         },
         HarnessDef {
             id: "pi".into(),
@@ -402,6 +415,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             stdin_ready_ms: DEFAULT_STDIN_READY_MS,
             enabled: true,
             strengths: String::new(),
+            compact_command: None,
         },
     ]
 }

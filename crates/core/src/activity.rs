@@ -29,6 +29,7 @@ use crate::store::{NewEvent, NewRun, RunRow, Store, StoreResult};
 
 pub mod claude;
 pub mod codex;
+pub mod context;
 pub mod cursor;
 pub mod grok;
 pub mod handoff;
@@ -1701,7 +1702,7 @@ mod tests {
         let report = import_inbox(&store, dir.path());
         assert_eq!(
             (report.imported, report.duplicates, report.unlinked),
-            (8, 0, 0)
+            (9, 0, 0)
         );
         assert!(
             inbox.entries().unwrap().is_empty(),
@@ -1713,6 +1714,7 @@ mod tests {
         assert_eq!(of("tool.failed"), 1);
         assert_eq!(of("file.reported_write"), 1);
         assert_eq!(of("usage.reported"), 1);
+        assert_eq!(of("context.reported"), 1);
         assert_eq!(of("turn.completed"), 1);
         let turn = events.iter().find(|e| e.kind == "turn.completed").unwrap();
         assert_eq!(turn.run_id.as_deref(), Some(run_id.as_str()));
@@ -1740,10 +1742,10 @@ mod tests {
             ))
             .unwrap();
         let again = import_inbox(&store, dir.path());
-        assert_eq!((again.imported, again.duplicates), (0, 8));
+        assert_eq!((again.imported, again.duplicates), (0, 9));
         assert_eq!(
             store.all_events(Some(&ws)).unwrap().len(),
-            9,
+            10,
             "plus process.started"
         );
     }

@@ -7,6 +7,7 @@ import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
 import { LatencyRunner } from "@/features/terminal/LatencyRunner";
 import { bareHarness } from "@/features/terminal/quickLaunch";
+import { ContextBar } from "@/features/terminal/ContextBar";
 import { EndedBar } from "@/features/terminal/EndedBar";
 import { SessionHistory } from "@/features/terminal/SessionHistory";
 import { TerminalTabs } from "@/features/terminal/TerminalTabs";
@@ -128,6 +129,7 @@ function WorkspaceTerminals(props: {
         </div>
       )}
       {activeTab && <EndedBar tab={activeTab} />}
+      {activeTab && <ContextBar tab={activeTab} />}
       <div className="min-h-0 flex-1">
         {/* Only the active terminal is mounted; the others keep running in the core and are
             repainted from a snapshot when they come back. `key` forces a fresh view per session. */}

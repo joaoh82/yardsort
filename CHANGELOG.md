@@ -15,6 +15,12 @@ has the downloads and the full commit lists.
   `--approval-mode=write` for OMP and `--auto-review` for Cursor. Off until you turn it on; custom
   harnesses can give their own flag.
 
+- **A nudge to compact a full context.** When a Claude Code or Codex conversation has used 80 %
+  of its context window, a bar above its terminal says so and offers **Compact**, which types the
+  agent's `/compact` for you; **Not now** hides it until the next step up. It reads the agents' own
+  usage records, so it needs their activity capture switched on in Settings → General. The
+  Activity timeline shows the same numbers on each turn.
+
 - **Blog and tutorials on the website.** Read the story behind Yardsort, a practical parallel-agent
   tutorial, a worktree explainer, and dated comparisons with Superset and Conductor.
 

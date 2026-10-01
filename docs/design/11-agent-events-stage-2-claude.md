@@ -61,22 +61,34 @@ of theirs that carries a field under a different name loses that field, never th
 Producer `claude`, method `hook`, fidelity `reported`, schema 1. `occurred_at` is the hook
 process's clock: Claude Code sends no time of its own.
 
-| Hook event           | Kind                                                | Payload                                                                                              | Source     |
-| -------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------- |
-| `SessionStart`       | `session.started`                                   | `source`, `contextTokens`                                                                            | fixture    |
-| `SessionEnd`         | `session.ended`                                     | `reason`                                                                                             | fixture    |
-| `UserPromptSubmit`   | `prompt.submitted`                                  | `promptId`, `chars`, `permissionMode`                                                                | fixture    |
-| `PreToolUse`         | `tool.started`                                      | `tool`, `toolUseId`, `path`?, `pathOutsideWorkspace`?, `subagentType`?, `promptId`, `permissionMode` | fixture    |
-| `PostToolUse`        | `tool.completed`                                    | as above, plus `durationMs`                                                                          | fixture    |
-| `PostToolUseFailure` | `tool.failed`                                       | as `tool.started`, plus `durationMs`, `interrupted`; no error text                                   | fixture    |
-| `PermissionRequest`  | `approval.requested`                                | as `tool.started`                                                                                    | documented |
-| `PermissionDenied`   | `approval.resolved`                                 | as `tool.started`, plus `decision: "denied"`                                                         | documented |
-| `Notification`       | `agent.notified`                                    | `type` (`permission_prompt`, `idle_prompt`, …)                                                       | documented |
-| `Stop`               | `turn.completed`                                    | `promptId`, `stopHookActive`, `backgroundTasks` (a count)                                            | fixture    |
-| `StopFailure`        | `turn.failed`                                       | `promptId`, `errorType`                                                                              | documented |
-| `SubagentStart/Stop` | `agent.subagent_started` / `agent.subagent_stopped` | `agentId`, `agentType`                                                                               | documented |
-| `PostCompact`        | `session.compacted`                                 | `trigger`                                                                                            | documented |
-| `PostModelSwitch`    | `agent.model_switched`                              | `model`, `previousModel`                                                                             | documented |
+| Hook event           | Kind                                                | Payload                                                                                                                            | Source     |
+| -------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `SessionStart`       | `session.started`                                   | `source`, `contextTokens`                                                                                                          | fixture    |
+| `SessionEnd`         | `session.ended`                                     | `reason`                                                                                                                           | fixture    |
+| `UserPromptSubmit`   | `prompt.submitted`                                  | `promptId`, `chars`, `permissionMode`                                                                                              | fixture    |
+| `PreToolUse`         | `tool.started`                                      | `tool`, `toolUseId`, `path`?, `pathOutsideWorkspace`?, `subagentType`?, `promptId`, `permissionMode`                               | fixture    |
+| `PostToolUse`        | `tool.completed`                                    | as above, plus `durationMs`                                                                                                        | fixture    |
+| `PostToolUseFailure` | `tool.failed`                                       | as `tool.started`, plus `durationMs`, `interrupted`; no error text                                                                 | fixture    |
+| `PermissionRequest`  | `approval.requested`                                | as `tool.started`                                                                                                                  | documented |
+| `PermissionDenied`   | `approval.resolved`                                 | as `tool.started`, plus `decision: "denied"`                                                                                       | documented |
+| `Notification`       | `agent.notified`                                    | `type` (`permission_prompt`, `idle_prompt`, …)                                                                                     | documented |
+| `Stop`               | `turn.completed`                                    | `promptId`, `stopHookActive`, `backgroundTasks` (a count); `contextTokens`, `model`, `configuredModel` from the transcript (below) | fixture    |
+| `StopFailure`        | `turn.failed`                                       | `promptId`, `errorType`                                                                                                            | documented |
+| `SubagentStart/Stop` | `agent.subagent_started` / `agent.subagent_stopped` | `agentId`, `agentType`                                                                                                             | documented |
+| `PostCompact`        | `session.compacted`                                 | `trigger`                                                                                                                          | documented |
+| `PostModelSwitch`    | `agent.model_switched`                              | `model`, `previousModel`                                                                                                           | documented |
+
+**Context, from the transcript.** The hooks carry no token counts, so on `Stop` the hook reads
+the end of the conversation's transcript (`transcript_path`, at most its last 512 KiB): the
+turn is what follows the `user` line whose `promptId` is the hook's `prompt_id`, and its last
+main-thread `assistant` message gives `contextTokens = input_tokens + cache_read_input_tokens +
+cache_creation_input_tokens` and the `model`. Only usage is read; no content. Claude Code
+2.1.284 writes that message about 70 ms _after_ running the hook (measured with a `Stop` hook
+under `-p`), so the hook polls for up to a second — until an assistant message follows the prompt
+with no tool result after it — and then takes the newest reading there is. `configuredModel` is
+`ANTHROPIC_MODEL` or the `model` of Claude Code's settings files, because the window size is not
+reported anywhere: `[1m]` there, or on the workspace's model, means 1,000,000 tokens, else
+200,000. See `crates/core/src/activity/context.rs`, which also feeds the context bar.
 
 `agent.notified` with `permission_prompt` or `idle_prompt` is the signal open question 16 wanted
 to infer from the screen — for Claude Code, reported instead of guessed. Nothing consumes it yet.

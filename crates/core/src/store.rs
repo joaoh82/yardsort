@@ -1546,6 +1546,31 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The newest of one session's events of the given kinds. Scoped by workspace too, so the
+    /// timeline index does the narrowing.
+    pub fn latest_session_event_of_kinds(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        kinds: &[&str],
+    ) -> StoreResult<Option<EventRow>> {
+        if kinds.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn();
+        let marks = kinds.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM agent_events
+             WHERE workspace_id = ? AND session_id = ? AND kind IN ({marks})
+             ORDER BY occurred_at DESC, seq DESC LIMIT 1"
+        ))?;
+        let params = [workspace_id, session_id]
+            .into_iter()
+            .chain(kinds.iter().copied());
+        let mut rows = stmt.query_map(rusqlite::params_from_iter(params), event_from_row)?;
+        Ok(rows.next().transpose()?)
+    }
+
     /// Which of a workspace's runs have events from somewhere other than Yardsort's own
     /// lifecycle, and through which method: one `(run id, method)` per pair, in first-seen
     /// order. What a run was asked to report survives here after its start event is gone.

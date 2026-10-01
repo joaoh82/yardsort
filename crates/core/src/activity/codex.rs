@@ -251,6 +251,9 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
     let mut cwd: Option<String> = None;
     let mut model: Option<String> = None;
     let mut usage: Option<(i64, Value)> = None;
+    // The last `token_count` of the turn: what its final request carried, and the window.
+    let mut context: Option<(i64, u64, u64)> = None;
+    let mut started = false;
     let mut ended = false;
     let key = |what: &str| format!("codex:{thread}:{turn}:{what}");
 
@@ -282,6 +285,7 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
                 });
             }
             Some("turn_context") if in_turn => {
+                started = true;
                 model = text("model");
                 if cwd.is_none() {
                     cwd = text("cwd");
@@ -292,7 +296,20 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
                     usage = Some((at, record.clone()));
                 }
             }
+            // `token_count` names no turn; between this turn's start and its end, it is this
+            // turn's.
+            Some("event_msg")
+                if started && !ended && text("type").as_deref() == Some("token_count") =>
+            {
+                let info = &payload["info"];
+                let used = info["last_token_usage"]["total_tokens"].as_u64();
+                let window = info["model_context_window"].as_u64();
+                if let (Some(used), Some(window)) = (used, window) {
+                    context = Some((at, used, window));
+                }
+            }
             Some("event_msg") if in_turn => match text("type").as_deref() {
+                Some("task_started") => started = true,
                 Some("item_completed") => {
                     let item = &payload["item"];
                     events.extend(item_events(item, thread, turn, at, cwd.as_deref()));
@@ -347,6 +364,19 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
                 "outputTokens": n("output_tokens"),
                 "reasoningOutputTokens": n("reasoning_output_tokens"),
                 "totalTokens": n("total_tokens"),
+            }),
+        });
+    }
+    if let Some((at, used, window)) = context {
+        events.push(Derived {
+            kind: "context.reported",
+            source_key: key("context"),
+            occurred_at: at,
+            payload: json!({
+                "threadId": thread,
+                "turnId": turn,
+                "contextTokens": used,
+                "contextWindow": window,
             }),
         });
     }
@@ -548,6 +578,7 @@ mod tests {
                 "tool.completed",
                 "turn.completed",
                 "usage.reported",
+                "context.reported",
             ]
         );
         let by_kind = |kind: &str| events.iter().find(|e| e.kind == kind).unwrap();
@@ -583,6 +614,15 @@ mod tests {
             "the turn's last record"
         );
         assert_eq!(usage.payload["cachedInputTokens"], 26752);
+        let context = by_kind("context.reported");
+        assert_eq!(
+            (
+                &context.payload["contextTokens"],
+                &context.payload["contextWindow"]
+            ),
+            (&json!(14992), &json!(258400)),
+            "the last request of the turn, not the first"
+        );
 
         for event in &events {
             let text = event.payload.to_string();
