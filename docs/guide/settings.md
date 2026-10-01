@@ -55,6 +55,7 @@ if you still need it to resume older conversations.
 | **Label**            | The name shown in the app.                                                                                                                                                                                                                                                                                                                      |
 | **Command**          | The program to run. It is looked up on the `PATH` of your login shell (so tools installed by mise, nvm, Homebrew or cargo are found), and the resolved location is shown underneath.                                                                                                                                                            |
 | **Always args**      | Passed on every launch — the place for flags you always want, such as a permission mode.                                                                                                                                                                                                                                                        |
+| **Auto args**        | What starts the agent in its _auto_ permission mode, e.g. `--permission-mode auto`. Passed only while **Always start in auto mode** is ticked — see below.                                                                                                                                                                                      |
 | **Model args**       | Used when a model is chosen, e.g. `--model {model}`.                                                                                                                                                                                                                                                                                            |
 | **Effort args**      | Used when an effort level is chosen, e.g. `--effort {effort}`.                                                                                                                                                                                                                                                                                  |
 | **Session id args**  | Used when Yardsort assigns the conversation's id, e.g. `--session-id {session_id}`.                                                                                                                                                                                                                                                             |
@@ -67,6 +68,25 @@ if you still need it to resume older conversations.
 | **Session id**       | **assigned**: Yardsort chooses the id, so any session can be resumed. **latest in folder**: the agent chooses, and only its most recent conversation in a workspace can be continued.                                                                                                                                                           |
 | **Good at**          | Optional, in your words: what this harness suits. Used only by [Assist](assist.md), to suggest a harness for the message you are typing. Yardsort never fills this in for you.                                                                                                                                                                  |
 | **Enabled**          | Disabled harnesses stay configured but are not offered.                                                                                                                                                                                                                                                                                         |
+
+### Auto mode
+
+Tick **Always start in auto mode** on a harness and every session of it — new, resumed or forked —
+starts in the agent's own auto mode, so it asks you less often. It is off until you turn it on,
+for each harness separately. Each built-in knows its flag:
+
+| Harness           | Auto args                | What the agent still asks about                                  |
+| ----------------- | ------------------------ | ---------------------------------------------------------------- |
+| Claude Code, Grok | `--permission-mode auto` | Whatever its own auto mode judges risky.                         |
+| Codex             | `--approve-for-me`       | Approvals go to Codex's automatic review, in its sandbox.        |
+| OpenCode          | `--auto`                 | Only what your OpenCode config explicitly denies — the broadest. |
+| OMP               | `--approval-mode=write`  | Running commands and other exec tools; reads and edits go ahead. |
+| Cursor            | `--auto-review`          | Whatever Cursor's reviewer does not consider safe.               |
+| Pi                | —                        | Pi asks nothing, so the switch is unavailable.                   |
+
+What auto mode allows is the agent's decision, not Yardsort's — read its documentation before
+turning it on. For a custom harness, type its flag into **Auto args** and the switch becomes
+available. Drafting a commit message or a pull request never uses auto mode: it runs no tools.
 
 ### How arguments work
 

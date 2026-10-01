@@ -27,14 +27,32 @@ tab you were looking at stays in front.
 
 ### Copy, paste, links
 
-|                    | Linux / Windows | macOS     |
-| ------------------ | --------------- | --------- |
-| Copy the selection | `Ctrl+Shift+C`  | `⌘C`      |
-| Paste              | `Ctrl+Shift+V`  | `⌘V`      |
-| Open a link        | `Ctrl`+click    | `⌘`+click |
+|                    | Linux / Windows                                        | macOS     |
+| ------------------ | ------------------------------------------------------ | --------- |
+| Copy the selection | `Ctrl+Shift+C`, `Ctrl+Insert`, or `Ctrl+C` (see below) | `⌘C`      |
+| Paste              | `Ctrl+Shift+V` or `Shift+Insert`                       | `⌘V`      |
+| Open a link        | `Ctrl`+click                                           | `⌘`+click |
 
-Plain `Ctrl+C`, `Ctrl+V` and a plain click belong to the program in the terminal. See
-[Keyboard shortcuts](shortcuts.md) for why.
+**Right-click** the terminal for **Copy**, **Paste** and **Select all**. A program that reads
+the mouse itself, like an agent's interface or vim, gets the right-click instead. Hold `Shift`
+to open the menu anyway, the same way `Shift`+drag still selects text in such a program.
+
+On Linux and Windows, plain **`Ctrl+C` copies while text is selected** and clears the
+selection, so pressing it again interrupts the program. With nothing selected it is the
+interrupt, as always. This means a desktop that sends `Ctrl+C` for its own copy key, such as
+Omarchy's `Super+C`, copies from Yardsort too.
+
+Plain **`Ctrl+V` always goes to the program.** vim uses it for block selection, and agents
+read it to paste an image. On Omarchy that means `Super+V` (which sends `Ctrl+V`) does not paste
+into a shell. Use `Ctrl+Shift+V` or the right-click menu, or tag Yardsort as a terminal in your
+Hyprland configuration. Omarchy then sends `Ctrl+Shift+C` and `Ctrl+Shift+V`, but `Super+C`
+stops copying in Yardsort's text fields:
+
+```lua
+o.window("yardsort", { tag = "+terminal" })
+```
+
+A plain click belongs to the program too. See [Keyboard shortcuts](shortcuts.md) for why.
 
 ### Typing to an agent
 
@@ -48,6 +66,32 @@ Plain `Ctrl+C`, `Ctrl+V` and a plain click belong to the program in the terminal
   it goes to whatever program is in the tab — a shell gets an argument it can use as it is. To
   put a path in the first message, before anything is running, drop the file on the
   [composer](workspaces.md#starting-one-the-composer) instead.
+
+### When an agent's context fills up
+
+Once a Claude Code or Codex conversation has used **80 %** of its context window, a bar appears
+above its terminal: _Context 84% full — 168,000 of 200,000 tokens_. **Compact** types the agent's
+own `/compact` command into the tab and presses Enter, which has the agent summarise the
+conversation so far and carry on with room to spare. It types into the agent's prompt as it
+stands, so clear anything you have half-written first, or it is sent along with `/compact`.
+While the agent is working on a turn the button is greyed out; it would only queue the command.
+**Not now** hides the bar until the context
+reaches the next step (90 %, then 95 %); after a compaction, or anything else that shrinks the
+context, the next climb past 80 % shows it again. Compacting is always the agent's own work, so
+the bar only offers it. Some agents compact by themselves when they run out, too.
+
+The numbers come from what the agent records about its own requests, never from the terminal. So
+the bar needs the agent's reporting switched on: **Capture what Claude Code reports** or **Capture
+what Codex reports** in Settings → General (see [Activity](activity.md)). It updates when a turn
+ends, not while one runs.
+
+- **Codex** states its window in its session file, so its share is exact.
+- **Claude Code** does not say how large its window is. Yardsort takes the usual 200,000 tokens,
+  or 1,000,000 for a model chosen with `[1m]` — on the workspace (`opus[1m]`), in
+  `ANTHROPIC_MODEL`, or as `model` in Claude Code's settings (the project's `.claude/` files, then
+  `~/.claude/settings.json`). A context already past 200,000 tokens is taken as a 1M window. If
+  you pick a 1M model some other way — `/model` inside the session, say — the bar can show early;
+  press **Not now**.
 
 ## Handing work to another agent
 

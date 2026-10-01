@@ -124,6 +124,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             outcomes::outcomes_agents,
             activity::settings_save_activity,
             sessions::sessions_list,
+            sessions::session_context,
             sessions::session_resume,
             sessions::session_fork,
             sessions::session_forget,

@@ -25,6 +25,8 @@ command     = "claude"                 # resolved against the login-shell PATH
 enabled     = true
 
 base_args   = []                                   # always passed
+auto_args   = ["--permission-mode", "auto"]        # passed while auto_mode is on
+auto_mode   = false                                # the user's choice; off by default
 model_args  = ["--model", "{model}"]               # omitted when model = default
 effort_args = ["--effort", "{effort}"]             # omitted when effort = default
 efforts     = ["low", "medium", "high", "xhigh", "max"]
@@ -58,6 +60,9 @@ every harness needing hand-written templates.
 - An arg group whose placeholder has no value is dropped whole (no model chosen → no `--model`).
 - Final argv to start = `command` + `base_args` + `model_args` + `effort_args` + `session_args` +
   `prompt_args`; to resume or fork, `resume_args` / `fork_args` take the place of the last two.
+  With `auto_mode` on, `auto_args` follow `base_args` when starting, and come **last** when
+  resuming or forking, because Codex resumes with a subcommand that reads its own options.
+  `write_args` one-shots (drafting a commit message) never get them: they run no tools.
   The session id has a group of its own so that an empty prompt drops only the prompt.
 - Braces that are not one of our placeholders are literal, so JSON can be passed in an argument.
 - Built-in definitions are compiled in. User edits are stored as overrides, so **Restore defaults**
@@ -118,8 +123,21 @@ Notes:
   creation so behaviour is identical across harnesses.
 - **Gemini CLI** (0.60.0) is also installed and fits the same shape — `-m`, `-i {prompt}` for
   "prompt then stay interactive", `--session-id`, `--resume latest`. A possible future default.
-- Permission / approval modes (`--permission-mode`, `-a`, `--always-approve`, `--auto`) are
-  deliberately **not** in the defaults. Users who want them add them to `base_args`.
+- Permission / approval modes are **off** by default. Since 2026-10-01 each built-in carries the
+  flag for its _auto_ mode in `auto_args` — the agent acts on its own but keeps some check on
+  what it does — and Settings → Harnesses has an "Always start in auto mode" switch that passes
+  it. Checked against `--help` of Claude Code 2.1.284, Codex 0.159.0, Grok 1.0.44, OpenCode
+  1.18.31, OMP 18.3.2 and Cursor Agent 2026.09.23:
+
+  | Harness  | `auto_args`              | Why this one                                                                                                        |
+  | -------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+  | Claude   | `--permission-mode auto` | Its own auto mode. Not `bypassPermissions`.                                                                         |
+  | Grok     | `--permission-mode auto` | Same mode names as Claude.                                                                                          |
+  | Codex    | `--approve-for-me`       | Approvals go through automatic review in the workspace-write sandbox. `resume` and `fork` take it too.              |
+  | OpenCode | `--auto`                 | Its only switch: approves what is not explicitly denied — broader than the others; deny rules still hold.           |
+  | OMP      | `--approval-mode=write`  | Approves reads and edits, still asks before exec tools (bash, eval, browser, task). `--auto-approve` would be yolo. |
+  | Cursor   | `--auto-review`          | A classifier runs safe tool calls and prompts for the rest. `--force`/`--yolo` would run everything.                |
+  | Pi       | —                        | Pi asks no permission questions, so there is nothing to switch.                                                     |
 
 ### OMP, Cursor and Pi
 

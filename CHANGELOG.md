@@ -5,6 +5,22 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Copy and paste in the terminal work the way more desktops expect.** Right-click for Copy,
+  Paste and Select all. Plain `Ctrl+C` copies while text is selected and interrupts otherwise,
+  so Omarchy's `Super+C` copies. `Ctrl+Insert` and `Shift+Insert` copy and paste too.
+
+- **Always start an agent in auto mode.** Settings → Harnesses has a switch per agent that starts
+  every new, resumed and forked session in that agent's own auto mode — `--permission-mode auto`
+  for Claude Code and Grok, `--approve-for-me` for Codex, `--auto` for OpenCode,
+  `--approval-mode=write` for OMP and `--auto-review` for Cursor. Off until you turn it on; custom
+  harnesses can give their own flag.
+
+- **A nudge to compact a full context.** When a Claude Code or Codex conversation has used 80 %
+  of its context window, a bar above its terminal says so and offers **Compact**, which types the
+  agent's `/compact` for you; **Not now** hides it until the next step up. It reads the agents' own
+  usage records, so it needs their activity capture switched on in Settings → General. The
+  Activity timeline shows the same numbers on each turn.
+
 - **Blog and tutorials on the website.** Read the story behind Yardsort, a practical parallel-agent
   tutorial, a worktree explainer, and dated comparisons with Superset and Conductor.
 

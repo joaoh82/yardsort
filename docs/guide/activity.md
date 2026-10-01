@@ -57,18 +57,21 @@ Switch on **Capture what Claude Code reports** in Settings → General (it needs
 agents start and exit**, and is off by default) and every Claude Code that Yardsort starts —
 from the composer, the tab bar, Resume, Fork or `ys` — reports what it does, in its own words:
 
-| Timeline row                                                                     | What Claude Code said                                                                                                      |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| _agent session started_, _agent resumed its session_, _agent forked its session_ | Its session began, and how. On a resume, how many tokens of context it picked up.                                          |
-| _prompt submitted · 147 characters_                                              | You sent a message. The length, never the text.                                                                            |
-| _Edit started_, _Edit done · src/app.rs · 12 ms_                                 | A tool ran: its name, the file's path relative to the workspace (or _a file outside the workspace_), and how long it took. |
-| _Bash started_, _Bash done_                                                      | A command ran. The command itself is not recorded.                                                                         |
-| _Agent (Explore) started_                                                        | It started a subagent, of that type.                                                                                       |
-| _Read failed_, _Bash denied_, _permission asked for Bash_                        | A tool failed, was refused, or is waiting for your yes. No error text, no command.                                         |
-| _agent raised a notification · permission_prompt_                                | It wants you: a permission prompt, or it has been idle waiting for input.                                                  |
-| _agent finished its turn_ / _agent's turn failed · rate_limit_                   | The turn ended, or ended in an error of that kind.                                                                         |
-| _agent compacted its context_, _agent switched model_                            | Housekeeping it did.                                                                                                       |
-| _agent session ended_                                                            | It is shutting down, and why.                                                                                              |
+| Timeline row                                                                               | What Claude Code said                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| _agent session started_, _agent resumed its session_, _agent forked its session_           | Its session began, and how. On a resume, how many tokens of context it picked up.                                                                                                                                                                                |
+| _prompt submitted · 147 characters_                                                        | You sent a message. The length, never the text.                                                                                                                                                                                                                  |
+| _Edit started_, _Edit done · src/app.rs · 12 ms_                                           | A tool ran: its name, the file's path relative to the workspace (or _a file outside the workspace_), and how long it took.                                                                                                                                       |
+| _Bash started_, _Bash done_                                                                | A command ran. The command itself is not recorded.                                                                                                                                                                                                               |
+| _Agent (Explore) started_                                                                  | It started a subagent, of that type.                                                                                                                                                                                                                             |
+| _Read failed_, _Bash denied_, _permission asked for Bash_                                  | A tool failed, was refused, or is waiting for your yes. No error text, no command.                                                                                                                                                                               |
+| _agent raised a notification · permission_prompt_                                          | It wants you: a permission prompt, or it has been idle waiting for input.                                                                                                                                                                                        |
+| _agent finished its turn · 154,003 tokens of context_ / _agent's turn failed · rate_limit_ | The turn ended, and how much context its last request carried — read from the turn's last message in Claude Code's transcript, its usage only, after Claude Code has written it (the hook waits up to a second for that) — or it ended in an error of that kind. |
+| _agent compacted its context_, _agent switched model_                                      | Housekeeping it did.                                                                                                                                                                                                                                             |
+| _agent session ended_                                                                      | It is shutting down, and why.                                                                                                                                                                                                                                    |
+
+The context counts are what the [context bar](terminals-and-sessions.md#when-an-agents-context-fills-up)
+reads, for Claude Code and Codex alike.
 
 The run's own _claude started_ row says _reporting through hooks_ when this was on for it, so a
 quiet timeline means the agent had nothing to say, not that nobody was listening.
@@ -104,15 +107,15 @@ turn with the turn's ids. Yardsort then reads what the turn did from **Codex's o
 the one Codex keeps under `~/.codex/sessions/` and that `codex resume` reads. Rows appear when a
 turn ends, not while it runs:
 
-| Timeline row                                          | What it comes from                                                                                                              |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| _agent session started_                               | The session file's header: which Codex version, and that it was started from the CLI.                                           |
-| _prompt submitted · 214 characters_                   | Your message. The length, never the text.                                                                                       |
-| _shell done · exit 0 · 3 ms_, _shell failed · exit 1_ | Each command Codex ran, with its exit code and how long it took. The command itself is not recorded.                            |
-| _file added · hello.txt_, _file changed · …_          | Each file Codex wrote through its patch tool: the path relative to the workspace, and whether it was added, changed or deleted. |
-| _mcp:server/tool done_                                | A tool call to one of your MCP servers.                                                                                         |
-| _tokens used · 29,842 total · 138 out_                | What the turn cost. Codex records this; Claude Code's hooks do not.                                                             |
-| _agent finished its turn · 11.0 s_                    | The turn ended, and how long it took.                                                                                           |
+| Timeline row                                                             | What it comes from                                                                                                              |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| _agent session started_                                                  | The session file's header: which Codex version, and that it was started from the CLI.                                           |
+| _prompt submitted · 214 characters_                                      | Your message. The length, never the text.                                                                                       |
+| _shell done · exit 0 · 3 ms_, _shell failed · exit 1_                    | Each command Codex ran, with its exit code and how long it took. The command itself is not recorded.                            |
+| _file added · hello.txt_, _file changed · …_                             | Each file Codex wrote through its patch tool: the path relative to the workspace, and whether it was added, changed or deleted. |
+| _mcp:server/tool done_                                                   | A tool call to one of your MCP servers.                                                                                         |
+| _tokens used · 29,842 total · 138 out_                                   | What the turn cost. Codex records this; Claude Code's hooks do not.                                                             |
+| _agent finished its turn · 11.0 s · 14,992 of 258,400 tokens of context_ | The turn ended, how long it took, and how much of its window the turn's last request filled, from the session file's own count. |
 
 Why not Codex's hooks, which look just like Claude Code's? Because Codex, rightly, refuses to run
 a hook until you have reviewed it in its own **/hooks** screen, and the only way past that is a

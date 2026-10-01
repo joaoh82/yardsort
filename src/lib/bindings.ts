@@ -180,6 +180,21 @@ export const commands = {
 	outcomesAgents: () => typedError<AgentOutcomes[], IpcError>(__TAURI_INVOKE("outcomes_agents")),
 	settingsSaveActivity: (activity: ActivitySettingsDto) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_activity", { activity })),
 	sessionsList: (workspaceId: string) => typedError<SessionRecord[], IpcError>(__TAURI_INVOKE("sessions_list", { workspaceId })),
+	/**
+	 *  How full a conversation's context is, as the agent last reported it, and what to type to
+	 *  compact it. `None` when nothing was reported since it started or last compacted.
+	 */
+	sessionContext: (id: string) => typedError<{
+	/**  Tokens the last request carried. */
+	usedTokens: number,
+	windowTokens: number,
+	/**  `used / window`, rounded down, at most 100. */
+	percent: number,
+	/**  At or past [`SUGGEST_PERCENT`], and the harness has a command to compact with. */
+	suggest: boolean,
+	/**  What to type to compact, from the harness definition. */
+	compactCommand: string | null,
+} | null, IpcError>(__TAURI_INVOKE("session_context", { id })),
 	/**  Continue a conversation whose process has ended, in a new terminal. */
 	sessionResume: (id: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("session_resume", { id, size })),
 	/**  Start a copy of a conversation — running or not — that goes its own way from here. */
@@ -513,6 +528,19 @@ export type Content =
 /**  The file does not exist on this side (added, or deleted). */
 { type: "absent" } | { type: "text"; text: string } | { type: "image"; mime: string; data: string } | { type: "notEditable"; reason: string } | { type: "binary" } | { type: "tooLarge"; bytes: number };
 
+/**  A session's context, as last reported. */
+export type ContextUsage = {
+	/**  Tokens the last request carried. */
+	usedTokens: number,
+	windowTokens: number,
+	/**  `used / window`, rounded down, at most 100. */
+	percent: number,
+	/**  At or past [`SUGGEST_PERCENT`], and the harness has a command to compact with. */
+	suggest: boolean,
+	/**  What to type to compact, from the harness definition. */
+	compactCommand: string | null,
+};
+
 export type CreatedWorkspace = {
 	workspace: Workspace,
 	session: SessionInfo,
@@ -723,6 +751,17 @@ export type HarnessDef = {
 	command: string,
 	/**  Always passed. */
 	baseArgs: string[],
+	/**
+	 *  What puts the agent in its "auto" permission mode: it acts on its own but keeps a check on
+	 *  risky actions, rather than asking about everything or nothing. Passed only while
+	 *  [`Self::auto_mode`] is on. Empty means the harness has no such mode.
+	 */
+	autoArgs?: string[],
+	/**
+	 *  Start every interactive session — new, resumed or forked — with [`Self::auto_args`].
+	 *  Off unless the user turns it on: how much an agent may do unasked is their call.
+	 */
+	autoMode?: boolean,
 	modelArgs: string[],
 	effortArgs: string[],
 	sessionArgs: string[],
@@ -755,6 +794,13 @@ export type HarnessDef = {
 	 *  agent suits which work is the user's call, not ours.
 	 */
 	strengths?: string,
+	/**
+	 *  What to type into the agent to have it summarise its conversation and free its context,
+	 *  e.g. `/compact`. Offered when the agent reports a context that is nearly full — see
+	 *  [`crate::activity::context`]. `None` for an agent that has no such command or does not
+	 *  report its context.
+	 */
+	compactCommand?: string | null,
 };
 
 /**  A harness definition plus whether its command can be found on this machine. */

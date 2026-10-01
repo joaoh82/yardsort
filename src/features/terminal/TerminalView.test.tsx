@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type KeyHandler = (event: KeyboardEvent) => boolean;
@@ -12,6 +12,10 @@ const fake = vi.hoisted(() => {
     csi: new Map<string, () => boolean>(),
     paste: vi.fn(),
     focus: vi.fn(),
+    selection: "",
+    clearSelection: vi.fn(),
+    selectAll: vi.fn(),
+    mouseTrackingMode: "none",
     dragHandler: null as DragHandler | null,
     unlistenDrag: vi.fn(),
   };
@@ -41,7 +45,13 @@ const fake = vi.hoisted(() => {
       return { dispose() {} };
     }
     write() {}
-    hasSelection = () => false;
+    hasSelection = () => state.selection !== "";
+    getSelection = () => state.selection;
+    clearSelection = state.clearSelection;
+    selectAll = state.selectAll;
+    get modes() {
+      return { mouseTrackingMode: state.mouseTrackingMode };
+    }
     paste = state.paste;
     focus = state.focus;
     dispose() {}
@@ -67,6 +77,8 @@ vi.mock("@tauri-apps/api/webview", () => ({
     },
   }),
 }));
+const clipboard = vi.hoisted(() => ({ readText: vi.fn(), writeText: vi.fn() }));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => clipboard);
 const core = vi.hoisted(() => ({
   ptyWrite: vi.fn(),
   ptyResize: vi.fn(),
@@ -114,6 +126,10 @@ beforeEach(() => {
   fake.state.keyHandler = null;
   fake.state.dragHandler = null;
   fake.state.csi.clear();
+  fake.state.selection = "";
+  fake.state.mouseTrackingMode = "none";
+  clipboard.readText.mockResolvedValue("pasted text");
+  clipboard.writeText.mockResolvedValue(undefined);
   core.ptyWrite.mockResolvedValue(undefined);
   core.ptyResize.mockResolvedValue(undefined);
   core.ptyAttach.mockResolvedValue(1);
@@ -180,5 +196,65 @@ describe("dropping files", () => {
     await vi.waitFor(() => expect(fake.state.dragHandler).not.toBeNull());
     unmount();
     expect(fake.state.unlistenDrag).toHaveBeenCalled();
+  });
+});
+
+describe("clipboard", () => {
+  const press = (key: string, init: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent("keydown", { key, cancelable: true, ...init });
+    return { event, handled: !fake.state.keyHandler!(event) };
+  };
+
+  beforeEach(() => useTerminalStore.setState({ tabs: [tab(null)] }));
+
+  it("copies a selection with plain Ctrl+C and clears it, so the next one interrupts", async () => {
+    await mount();
+    fake.state.selection = "ls -la";
+    const { event, handled } = press("c", { ctrlKey: true });
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(clipboard.writeText).toHaveBeenCalledWith("ls -la");
+    expect(fake.state.clearSelection).toHaveBeenCalled();
+  });
+
+  it("lets Ctrl+C through to the program when nothing is selected", async () => {
+    await mount();
+    expect(press("c", { ctrlKey: true }).handled).toBe(false);
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("pastes with Shift+Insert", async () => {
+    await mount();
+    expect(press("Insert", { shiftKey: true }).handled).toBe(true);
+    await vi.waitFor(() => expect(fake.state.paste).toHaveBeenCalledWith("pasted text"));
+  });
+
+  it("offers Copy and Paste on right-click", async () => {
+    const { container } = render(<TerminalView sessionId="s1" />);
+    await vi.waitFor(() => expect(fake.state.dragHandler).not.toBeNull());
+    const view = container.firstElementChild as HTMLElement;
+
+    fireEvent.contextMenu(view);
+    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Paste" }));
+    await vi.waitFor(() => expect(fake.state.paste).toHaveBeenCalledWith("pasted text"));
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fake.state.selection = "error: oops";
+    fireEvent.contextMenu(view);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy" }));
+    expect(clipboard.writeText).toHaveBeenCalledWith("error: oops");
+  });
+
+  it("leaves right-click to a program that reads the mouse, unless Shift is held", async () => {
+    const { container } = render(<TerminalView sessionId="s1" />);
+    await vi.waitFor(() => expect(fake.state.dragHandler).not.toBeNull());
+    const view = container.firstElementChild as HTMLElement;
+    fake.state.mouseTrackingMode = "any";
+
+    fireEvent.contextMenu(view);
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(view, { shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 });

@@ -20,6 +20,7 @@ use crate::terminal::{
     settle_record, with_launcher, ResolvedLaunch, HARNESS_LABEL, HARNESS_SESSION_LABEL,
     RECORD_LABEL, WORKSPACE_LABEL,
 };
+use yardsort_core::activity::context::{self, ContextUsage};
 use yardsort_core::activity::{self, Continuation, RunDraft, RunKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
@@ -260,6 +261,22 @@ fn continue_session(
 #[specta::specta]
 pub async fn sessions_list(app: AppHandle, workspace_id: String) -> IpcResult<Vec<SessionRecord>> {
     blocking(app, move |state| list(state, &workspace_id)).await
+}
+
+/// How full a conversation's context is, as the agent last reported it, and what to type to
+/// compact it. `None` when nothing was reported since it started or last compacted.
+#[tauri::command]
+#[specta::specta]
+pub async fn session_context(app: AppHandle, id: String) -> IpcResult<Option<ContextUsage>> {
+    blocking(app, move |state| {
+        let Some(row) = state.store.session(&id)? else {
+            return Ok(None);
+        };
+        let compact = harness::find(&row.harness_id, &state.settings.get().harnesses)
+            .and_then(|def| def.compact_command);
+        Ok(context::session_context(&state.store, &row, compact)?)
+    })
+    .await
 }
 
 /// Continue a conversation whose process has ended, in a new terminal.

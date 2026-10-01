@@ -11,6 +11,7 @@ import {
   type ActivityEvent,
   type ActivityPage,
   type ActivitySettingsDto,
+  type ContextUsage,
   type AgentOutcomes,
   type Attempt,
   type FileReports,
@@ -110,6 +111,7 @@ export type {
   ActivityEvent,
   ActivityPage,
   ActivitySettingsDto,
+  ContextUsage,
   AgentOutcomes,
   Attempt,
   FileReports,
@@ -307,6 +309,11 @@ export const ipc = {
 
   /** A workspace's harness conversations, newest first. */
   sessionsList: (workspaceId: string) => unwrap(commands.sessionsList(workspaceId)),
+  /**
+   * How full a conversation's context is, as its agent last reported, and the command that
+   * compacts it; `null` when nothing was reported since it started or last compacted.
+   */
+  sessionContext: (id: string): Promise<ContextUsage | null> => unwrap(commands.sessionContext(id)),
   /** Continue an ended conversation in a new terminal. */
   sessionResume: (id: string, size: TermSize) => unwrap(commands.sessionResume(id, size)),
   /** Start a copy of a conversation that goes its own way. */

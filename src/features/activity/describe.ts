@@ -29,6 +29,7 @@ interface Payload {
   agentType?: string | null;
   trigger?: string | null;
   contextTokens?: number | null;
+  contextWindow?: number | null;
   // Read from Codex's session file.
   status?: string | null;
   totalTokens?: number | null;
@@ -204,6 +205,13 @@ export function describeEvent(event: ActivityEvent): {
           // The pi family and Cursor report a turn's tokens on the turn itself.
           p.totalTokens !== null && p.totalTokens !== undefined
             ? `${p.totalTokens.toLocaleString()} tokens`
+            : null,
+          // Claude Code's and Codex's turns carry how much context their last request held;
+          // Codex says of how large a window.
+          p.contextTokens
+            ? `${p.contextTokens.toLocaleString()}${
+                p.contextWindow ? ` of ${p.contextWindow.toLocaleString()}` : ""
+              } tokens of context`
             : null,
           p.detail === "notify" ? "from notify alone; the session file could not be read" : null,
         ]

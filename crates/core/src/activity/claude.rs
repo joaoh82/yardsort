@@ -249,6 +249,35 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
     })
 }
 
+/// Add what the conversation's transcript says about its context to a finished turn: the tokens
+/// the last request carried (`contextTokens`), the model that answered, and the model Claude
+/// Code's settings name (`configuredModel`), which is how a `[1m]` window is told apart. A turn
+/// whose transcript cannot be read is left as it is. Claude Code writes the turn's answer just
+/// after running the hook, so this waits for it — briefly; see [`super::context::SETTLE_WAIT`].
+pub fn add_context(
+    reported: &mut Reported,
+    hook: &Value,
+    env: &dyn Fn(&str) -> Option<String>,
+    wait: std::time::Duration,
+) {
+    if reported.kind != "turn.completed" {
+        return;
+    }
+    let Some(transcript) = hook.get("transcript_path").and_then(Value::as_str) else {
+        return;
+    };
+    let prompt_id = hook.get("prompt_id").and_then(Value::as_str);
+    let Some((tokens, model)) =
+        super::context::claude_turn_waiting(Path::new(transcript), prompt_id, wait)
+    else {
+        return;
+    };
+    let cwd = hook.get("cwd").and_then(Value::as_str).map(Path::new);
+    reported.payload["contextTokens"] = json!(tokens);
+    reported.payload["model"] = json!(model);
+    reported.payload["configuredModel"] = json!(super::context::claude_configured_model(cwd, env));
+}
+
 /// The file a tool is about, relative to the workspace — or nothing, and a flag, when it is
 /// somewhere else. Absolute paths outside the worktree are the user's business.
 fn tool_path(input: Option<&Value>, cwd: Option<&str>) -> (Option<String>, bool) {

@@ -24,6 +24,30 @@ export function shiftEnterInput(event: KeyboardEvent, speaksCsiU: boolean): stri
 }
 
 /**
+ * Clipboard keys besides Mod+C and Mod+V, or `null` when the key belongs to the program.
+ *
+ * Plain Ctrl+C copies only while text is selected, as in Windows Terminal; the rest of the time
+ * it is the program's interrupt. Desktops that turn a "copy" key into Ctrl+C for every window
+ * (Omarchy's Super+C) need this. Ctrl+Insert and Shift+Insert are the X11 terminal copy and
+ * paste. Plain Ctrl+V stays with the program, because vim's block selection and an agent's image
+ * paste both use it. On macOS ⌘C copies, so Ctrl+C always interrupts.
+ */
+export function clipboardKey(
+  event: KeyboardEvent,
+  hasSelection: boolean,
+  mac: boolean,
+): "copy" | "paste" | null {
+  if (event.type !== "keydown" || event.altKey || event.metaKey) return null;
+  const { ctrlKey: ctrl, shiftKey: shift } = event;
+  if (event.key === "Insert") {
+    if (ctrl && !shift) return hasSelection ? "copy" : null;
+    return shift && !ctrl ? "paste" : null;
+  }
+  if (!mac && ctrl && !shift && event.key.toLowerCase() === "c" && hasSelection) return "copy";
+  return null;
+}
+
+/**
  * The text a terminal pastes when files are dropped on it: each path quoted for the shell of the
  * platform, separated by spaces, with a trailing space so typing can carry on. Agents read the
  * paths as files to look at; a shell gets arguments it can use as they are.

@@ -99,7 +99,8 @@ pub fn deliver_payload(
 ) -> Result<InboxEntry, String> {
     let (producer, method, kind, native_session_id, reduced) = match harness {
         claude::HARNESS_ID => {
-            let r = claude::normalize(&payload)?;
+            let mut r = claude::normalize(&payload)?;
+            claude::add_context(&mut r, &payload, env, super::context::SETTLE_WAIT);
             (
                 claude::PRODUCER,
                 claude::METHOD,
@@ -216,6 +217,56 @@ mod tests {
         let files = inbox.entries().unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(Inbox::read(&files[0]).unwrap(), entry);
+    }
+
+    #[test]
+    fn a_claude_turn_carries_its_context_from_the_transcript_and_nothing_else_of_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"model":"opus[1m]"}"#,
+        )
+        .unwrap();
+        let transcript = dir.path().join("t.jsonl");
+        let assistant = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "model": "claude-opus-5-5",
+                "content": [{"type": "text", "text": "a secret answer"}],
+                "usage": {
+                    "input_tokens": 2,
+                    "cache_read_input_tokens": 170_000,
+                    "cache_creation_input_tokens": 998,
+                },
+            },
+        });
+        let mut stop: serde_json::Value = serde_json::from_slice(&fixture("11-Stop")).unwrap();
+        let prompt = serde_json::json!({ "type": "user", "promptId": stop["prompt_id"] });
+        std::fs::write(&transcript, format!("{prompt}\n{assistant}\n")).unwrap();
+        stop["transcript_path"] = transcript.to_string_lossy().into_owned().into();
+        let home_str = home.to_string_lossy().into_owned();
+        let env = |name: &str| (name == "HOME").then(|| home_str.clone());
+        let inbox = dir.path().join("inbox");
+
+        let entry = deliver_payload("claude", &inbox, stop, &env).unwrap();
+        assert_eq!(entry.kind, "turn.completed");
+        assert_eq!(entry.payload["contextTokens"], 171_000);
+        assert_eq!(entry.payload["model"], "claude-opus-5-5");
+        assert_eq!(entry.payload["configuredModel"], "opus[1m]");
+        assert!(!entry.payload.to_string().contains("secret"));
+
+        // Any other event leaves the transcript alone; so does a turn whose transcript is gone.
+        let tool = deliver(
+            "claude",
+            &inbox,
+            &mut fixture("04-PostToolUse").as_slice(),
+            &env,
+        );
+        assert!(tool.unwrap().payload.get("contextTokens").is_none());
+        let gone = deliver("claude", &inbox, &mut fixture("11-Stop").as_slice(), &env);
+        assert!(gone.unwrap().payload.get("contextTokens").is_none());
     }
 
     #[test]
