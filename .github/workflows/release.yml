@@ -136,10 +136,8 @@ jobs:
       # the packages put it on PATH or the app offers to, and it updates with the app. See
       # `src-tauri/src/ys.rs`.
       #
-      # Inside the macOS app it is signed and notarized with the bundle. The loose copy attached
-      # below is not: a bare executable cannot have a notarization ticket stapled to it, so a
-      # quarantined download is refused whether it is signed or not. `docs/guide/cli.md` tells
-      # people how to clear the flag.
+      # Inside the macOS app it is signed and notarized with the bundle, and that signed copy is
+      # the one the macOS archive carries: see "Take the signed ys out of the macOS app" below.
       - name: Build the ys CLI
         shell: bash
         run: |
@@ -170,6 +168,44 @@ jobs:
           args: --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.bundle.conf.json ${{ matrix.args }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      # The macOS archive carries the copy of `ys` from inside the app, not the one built above.
+      # Tauri signs it with the bundle, and Apple's notary service issues a ticket for every
+      # executable in what it is sent, so that file is signed and notarized in its own right — and
+      # no certificate has to be imported a second time, which `tauri-action` leaves no room for.
+      # A ticket cannot be stapled to a bare executable, so Gatekeeper looks this one up online
+      # the first time a quarantined copy runs. The unsigned one was refused outright (#93).
+      - name: Take the signed ys out of the macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "::warning::This macOS build is unsigned, so the standalone ys is too."
+            exit 0
+          fi
+          signed="target/universal-apple-darwin/release/bundle/macos/Yardsort.app/Contents/MacOS/ys"
+          if [ ! -f "$signed" ]; then
+            echo "::error::No ys at $signed, so the standalone ys would have gone out unsigned."
+            exit 1
+          fi
+          cp "$signed" ys
+
+          # Both architectures, a signature that holds outside the bundle, and our team's.
+          lipo ys -verify_arch arm64 x86_64
+          codesign --verify --strict --verbose=2 ys
+          details="$(codesign --display --verbose=2 ys 2>&1)"
+          if ! grep -qx "TeamIdentifier=$APPLE_TEAM_ID" <<<"$details"; then
+            echo "::error::The ys taken from the app is not signed by our team."
+            echo "$details"
+            exit 1
+          fi
+
+          # Ask Apple whether it holds a ticket for this file by itself. Only a warning: the
+          # app's notarization, which is what covers it, has already had to succeed above, and
+          # a lookup that fails for its own reasons should not hold a release back.
+          if ! codesign --verify --check-notarization -R="notarized" --verbose=2 ys; then
+            echo "::warning::Could not confirm a notarization ticket for the standalone ys. Check a browser-downloaded copy on a Mac before telling anyone it is notarized."
+          fi
 
       - name: Attach the ys CLI to the release
         shell: bash
