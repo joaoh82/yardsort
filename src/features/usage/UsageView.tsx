@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { errorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/app";
 import { useProjectsStore } from "@/stores/projects";
 import { MachineResources } from "./MachineResources";
@@ -16,6 +17,7 @@ let lastTab: Tab = "tokens";
 export function UsageView() {
   const [tab, setTab] = useState<Tab>(lastTab);
   const show = useAppStore((s) => s.showUsageInSidebar);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const choose = (next: Tab) => {
     lastTab = next;
     setTab(next);
@@ -55,9 +57,13 @@ export function UsageView() {
           <input
             type="checkbox"
             checked={show}
-            onChange={(event) =>
-              void useAppStore.getState().setShowUsageInSidebar(event.target.checked)
-            }
+            onChange={(event) => {
+              setSaveError(null);
+              useAppStore
+                .getState()
+                .setShowUsageInSidebar(event.target.checked)
+                .catch((reason: unknown) => setSaveError(errorMessage(reason)));
+            }}
             className="accent-(--color-accent)"
           />
           Show Usage in the sidebar
@@ -72,6 +78,11 @@ export function UsageView() {
           ×
         </button>
       </header>
+      {saveError && (
+        <p role="alert" className="border-b border-line px-4 py-2 text-red-400 select-text">
+          {saveError}
+        </p>
+      )}
       <div role="tabpanel" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {tab === "tokens" ? <TokenUsage /> : <MachineResources />}
       </div>

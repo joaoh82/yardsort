@@ -211,7 +211,6 @@ export function errorMessage(error: unknown): string {
 
 type Outcome<T> = { status: "ok"; data: T } | { status: "error"; error: IpcError };
 
-/** Generated commands return a result object; the app prefers exceptions. Throws `IpcError`. */
 /**
  * specta types every Rust `f64` as `number | null`, because JSON has no NaN. The usage reports'
  * figures are always finite, so they are narrowed to `number` here, once — except the fields that
@@ -232,6 +231,7 @@ export type PlaceUsage = UsageReport["places"][number];
 export type Load = MachineReport["yardsort"];
 export type TerminalLoad = MachineReport["loose"][number];
 
+/** Generated commands return a result object; the app prefers exceptions. Throws `IpcError`. */
 async function unwrap<T>(outcome: Promise<Outcome<T>>): Promise<T> {
   const result = await outcome;
   if (result.status === "error") throw result.error;

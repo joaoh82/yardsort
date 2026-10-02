@@ -17,7 +17,7 @@
 //! None of this is the output of a terminal: it is structured data the agents keep on disk, the
 //! same files the activity adapters already read (see `crate::activity`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -573,7 +573,8 @@ impl LogCache {
         }
 
         let mut cache = self.files.lock().unwrap_or_else(PoisonError::into_inner);
-        cache.retain(|path, _| found.iter().any(|(_, p)| p == path));
+        let present: HashSet<&Path> = found.iter().map(|(_, path)| path.as_path()).collect();
+        cache.retain(|path, _| present.contains(path.as_path()));
         let mut files = Vec::new();
         for (agent, path) in found {
             let Ok(meta) = std::fs::metadata(&path) else {

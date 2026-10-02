@@ -198,6 +198,79 @@ describe("Usage", () => {
     expect(screen.getByText("tokens processed").previousSibling).toHaveTextContent("6.8B");
   });
 
+  it("measures every workspace in the unit the tab shows, priced or not", async () => {
+    const user = userEvent.setup();
+    core.usageTokens.mockResolvedValue(
+      tokens({
+        places: [
+          {
+            label: "app",
+            project: "app",
+            workspaceId: "w-app",
+            folder: null,
+            tokens: 1e6,
+            cost: 50,
+          },
+          // Grok is unpriced: no cost, many tokens.
+          {
+            label: "tool",
+            project: null,
+            workspaceId: null,
+            folder: "~/tool",
+            tokens: 2e6,
+            cost: 0,
+          },
+        ],
+      }),
+    );
+    render(<UsageView />);
+    const places = await screen.findByRole("region", { name: "By workspace" });
+    const bar = (label: string) =>
+      within(places).getByText(label).closest("li")!.querySelector<HTMLElement>("[style]")!;
+
+    expect(bar("app · app").style.width).toBe("100%");
+    expect(bar("tool").style.width).toBe("0%");
+
+    await user.click(screen.getByRole("button", { name: "Tokens" }));
+    expect(bar("tool").style.width).toBe("100%");
+    expect(bar("app · app").style.width).toBe("50%");
+    expect(within(places).getAllByRole("listitem")[0]).toHaveTextContent("tool");
+  });
+
+  it("keeps the range last chosen when an earlier one answers after it", async () => {
+    const user = userEvent.setup();
+    render(<UsageView />);
+    await screen.findByText("$126*");
+
+    let finish90: (report: UsageReport) => void = () => {};
+    core.usageTokens.mockImplementation((days: number) =>
+      days === 90
+        ? new Promise<UsageReport>((resolve) => (finish90 = resolve))
+        : Promise.resolve(tokens({ days, cost: 7 })),
+    );
+    await user.click(screen.getByRole("button", { name: "90d" }));
+    await user.click(screen.getByRole("button", { name: "7d" }));
+    expect(await screen.findByText("$7.00*")).toBeInTheDocument();
+
+    await act(async () => finish90(tokens({ days: 90, cost: 900 })));
+    expect(screen.getByText("$7.00*")).toBeInTheDocument();
+    expect(screen.queryByText("$900*")).not.toBeInTheDocument();
+    expect(screen.getByText("From session logs on this machine")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Read the logs again" })).toBeEnabled();
+  });
+
+  it("puts the sidebar switch back and says so when it cannot be saved", async () => {
+    const user = userEvent.setup();
+    core.settingsSaveUsage.mockRejectedValue(new Error("Could not save settings: read-only"));
+    render(<UsageView />);
+    const box = screen.getByRole("checkbox", { name: "Show Usage in the sidebar" });
+    await user.click(box);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("read-only");
+    expect(box).toBeChecked();
+    expect(useAppStore.getState().showUsageInSidebar).toBe(true);
+  });
+
   it("says where it looked when there are no logs at all", async () => {
     core.usageTokens.mockResolvedValue(
       tokens({ agents: [], daily: [], models: [], places: [], limits: [], cost: 0 }),

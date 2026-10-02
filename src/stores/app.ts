@@ -13,13 +13,13 @@ interface AppState {
   showTimeline: boolean;
   /** Mirrors the usage setting: whether Usage sits at the foot of the sidebar. */
   showUsageInSidebar: boolean;
-  /** Turn that on or off, saving it. */
+  /** Turn that on or off, saving it. If it cannot be saved, it goes back and this rejects. */
   setShowUsageInSidebar: (show: boolean) => Promise<void>;
   load: () => Promise<void>;
 }
 
 /** Facts about the running app and the environment it launches programs in. */
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   info: null,
   env: null,
   daemon: null,
@@ -29,9 +29,15 @@ export const useAppStore = create<AppState>((set) => ({
   showTimeline: false,
   showUsageInSidebar: true,
   async setShowUsageInSidebar(show) {
+    const before = get().showUsageInSidebar;
     set({ showUsageInSidebar: show });
-    const settings = await ipc.settingsSaveUsage(show);
-    set({ showUsageInSidebar: settings.showUsageInSidebar });
+    try {
+      const settings = await ipc.settingsSaveUsage(show);
+      set({ showUsageInSidebar: settings.showUsageInSidebar });
+    } catch (error) {
+      set({ showUsageInSidebar: before });
+      throw error;
+    }
   },
   async load() {
     if (!hasCore()) return;

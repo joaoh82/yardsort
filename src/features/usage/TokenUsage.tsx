@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
-import { errorMessage, ipc, type AgentLimits, type UsageReport } from "@/lib/ipc";
+import { errorMessage, ipc, type AgentLimits, type PlaceUsage, type UsageReport } from "@/lib/ipc";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
 import { DailyBars } from "./DailyBars";
@@ -38,19 +38,26 @@ export function TokenUsage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The range last asked for. Replies can arrive out of order — a long range is slower to add
+  // up — and one for a range no longer chosen must not replace the one that is.
+  const wanted = useRef(days);
   const load = useCallback(
     (range: number) =>
       ipc.usageTokens(range).then(
         (report) => {
+          if (wanted.current !== range) return;
           setRead({ days: range, report, at: Date.now() });
           setError(null);
         },
-        (reason) => setError(errorMessage(reason)),
+        (reason) => {
+          if (wanted.current === range) setError(errorMessage(reason));
+        },
       ),
     [],
   );
 
   useEffect(() => {
+    wanted.current = days;
     void load(days);
   }, [days, load]);
 
@@ -323,7 +330,7 @@ function Spending(props: {
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Models report={report} />
-        <Places report={report} />
+        <Places report={report} metric={metric} />
       </div>
     </section>
   );
@@ -415,24 +422,28 @@ function Models({ report }: { report: UsageReport }) {
   );
 }
 
-function Places({ report }: { report: UsageReport }) {
+function Places({ report, metric }: { report: UsageReport; metric: Metric }) {
   const [all, setAll] = useState(false);
   const select = useProjectsStore((s) => s.select);
-  const rows = all ? report.places : report.places.slice(0, SHORT_LIST);
-  const top = Math.max(0, ...report.places.map((p) => p.cost || p.tokens));
+  // One unit for every row, the one the tab is showing: an unpriced place has no cost, and its
+  // token count beside other places' dollars would dwarf them.
+  const measure = (place: PlaceUsage) => (metric === "cost" ? place.cost : place.tokens);
+  const sorted = [...report.places].sort((a, b) => measure(b) - measure(a));
+  const rows = all ? sorted : sorted.slice(0, SHORT_LIST);
+  const top = Math.max(0, ...sorted.map(measure));
   return (
     <section aria-label="By workspace" className="self-start">
       <header className="flex items-center border-b border-line py-1.5 text-ink-muted">
         <span className="flex-1">Workspace</span>
         <ShowAll count={report.places.length} all={all} onToggle={() => setAll(!all)} />
-        <span className="ml-4">Cost</span>
+        <span className="ml-4">{metric === "cost" ? "Cost" : "Tokens"}</span>
       </header>
       <ul className="grid">
         {rows.map((place) => {
           const workspaceId = place.workspaceId;
           const key = workspaceId ?? place.folder ?? place.label;
           const label = place.project ? `${place.project} · ${place.label}` : place.label;
-          const size = top > 0 ? ((place.cost || place.tokens) / top) * 100 : 0;
+          const size = top > 0 ? (measure(place) / top) * 100 : 0;
           return (
             <li key={key} className="py-1">
               <div className="flex items-center gap-3">
