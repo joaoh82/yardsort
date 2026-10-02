@@ -143,10 +143,15 @@ macOS users can `brew install --cask joaoh82/yardsort/yardsort`. The cask lives 
 repository, [joaoh82/homebrew-yardsort](https://github.com/joaoh82/homebrew-yardsort), and is
 generated from `packaging/homebrew/yardsort.rb.in`.
 
-The **Homebrew** job runs on macOS and proves the cask before publishing it: `brew style`,
-`brew audit --strict --online`, a real `brew install`, then `codesign --verify`, Gatekeeper's
-verdict (`spctl`, which must say _Notarized Developer ID_) and the installed version. Only then
-does it push to the tap.
+The **Homebrew** job runs on macOS and proves the cask before publishing it: `brew update`, so
+the check runs against the Homebrew users have rather than the one in the runner image, then
+`brew style`, `brew audit --strict --online`, a real `brew install`, `codesign --verify`,
+Gatekeeper's verdict (`spctl`, which must say _Notarized Developer ID_) and the installed
+version. Only then does it push to the tap.
+
+The cask declares no minimum macOS. The app's own minimum is older than any macOS Homebrew still
+runs on, and Homebrew refuses a `depends_on macos:` that names a release it has dropped — which
+is how the cask stopped installing in September 2026.
 
 It needs `HOMEBREW_TAP_DEPLOY_KEY`: the private half of an SSH **deploy key** registered, with
 write access, on the tap repository only — it can touch nothing else.

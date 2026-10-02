@@ -5,6 +5,10 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **`brew install --cask joaoh82/yardsort/yardsort` works again.** Current Homebrew refused the
+  cask over a minimum-macOS line it no longer accepts. The line is gone, and releases now test the
+  cask against an up-to-date Homebrew.
+
 - **Usage is easier to find in the docs and website.** The README and homepage now explain both
   tabs, supported token sources and API cost estimates. The quick start introduces Usage, and
   the guide adds a first-look walkthrough, refresh guidance and the distinction from activity

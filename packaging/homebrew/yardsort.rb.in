@@ -16,7 +16,6 @@ cask "yardsort" do
 
   # The app updates itself (signed, on request), so `brew upgrade` leaves it alone by default.
   auto_updates true
-  depends_on macos: :catalina
 
   app "Yardsort.app"
   # The command-line client ships inside the app, signed with it; Homebrew links it onto PATH.
