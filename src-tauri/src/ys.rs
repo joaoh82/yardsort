@@ -356,13 +356,13 @@ fn version_of(path: &Path, env: &ShellEnv) -> Option<String> {
 /// and leave a descendant holding its stdout, so the end of the output may never come: only the
 /// first line is read, and that too against the deadline.
 fn version_within(path: &Path, env: &ShellEnv, timeout: Duration) -> Option<String> {
-    let mut child = Program::at(path.to_owned(), env)
-        .command(&std::env::temp_dir())
+    let started = Instant::now();
+    let mut command = Program::at(path.to_owned(), env).command(&std::env::temp_dir());
+    command
         .arg("--version")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    let mut child = spawn_once_writable(&mut command, timeout).ok()?;
     let stdout = child.stdout.take()?;
     let (sender, first_line) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -370,7 +370,6 @@ fn version_within(path: &Path, env: &ShellEnv, timeout: Duration) -> Option<Stri
         let _ = std::io::BufReader::new(stdout).read_line(&mut line);
         let _ = sender.send(line);
     });
-    let started = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
@@ -387,6 +386,30 @@ fn version_within(path: &Path, env: &ShellEnv, timeout: Duration) -> Option<Stri
         .recv_timeout(timeout.saturating_sub(started.elapsed()))
         .ok()?;
     parse_version(&line)
+}
+
+/// `spawn`, retried while the file is "busy": a Unix refuses to run a file that any process holds
+/// open for writing. The copy `install` has just made is one, until the copy is closed — and so,
+/// for a moment, is any file this process had open when another thread forked, since the child
+/// keeps every descriptor until it execs. The app forks all the time, so the version probe that
+/// follows an install is the one most likely to find the file busy. The condition lasts
+/// microseconds; the retry is bounded by the probe's own deadline.
+fn spawn_once_writable(
+    command: &mut std::process::Command,
+    timeout: Duration,
+) -> std::io::Result<std::process::Child> {
+    let started = Instant::now();
+    loop {
+        match command.spawn() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && started.elapsed() < timeout =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            result => return result,
+        }
+    }
 }
 
 /// `ys 0.10.0` → `0.10.0`, as clap prints it.
@@ -589,6 +612,34 @@ mod tests {
 
     /// A wrapper that exits but leaves a descendant holding its stdout: the end of the output
     /// never comes while the descendant lives.
+    /// What happens, now and then, right after `install` copies `ys`: the file is still open for
+    /// writing somewhere when it is first run, and the kernel says "text file busy". Here the test
+    /// itself holds it open, and lets go a moment later.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_still_open_for_writing_is_probed_once_it_is_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = env_with_path(dir.path());
+        let ys = fake_ys(dir.path(), "0.10.0");
+        let held = std::fs::OpenOptions::new().append(true).open(&ys).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            drop(held);
+        });
+
+        assert_eq!(
+            version_within(&ys, &env, Duration::from_secs(3)).as_deref(),
+            Some("0.10.0")
+        );
+        release.join().unwrap();
+
+        // Held for good, the probe gives up at its deadline rather than hanging.
+        let _held = std::fs::OpenOptions::new().append(true).open(&ys).unwrap();
+        let started = Instant::now();
+        assert_eq!(version_within(&ys, &env, Duration::from_millis(300)), None);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_descendant_holding_stdout_does_not_outlast_the_timeout() {
