@@ -1,0 +1,278 @@
+{
+  "data": {
+    "repository": {
+      "pullRequests": {
+        "totalCount": 7,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAyNS0wMS0xOVQyMjo0ODowMFrOiEPOKw=="
+        },
+        "nodes": [
+          {
+            "number": 14017,
+            "url": "https://github.com/o/r/pull/14017",
+            "title": "Speed up the first paint",
+            "isDraft": true,
+            "state": "OPEN",
+            "createdAt": "2026-07-30T12:32:13Z",
+            "updatedAt": "2026-07-30T14:37:39Z",
+            "headRefName": "branch-14017",
+            "headRefOid": "9e77378acc20c75a97029917519fcfeccec0a80e",
+            "baseRefName": "trunk",
+            "isCrossRepository": true,
+            "additions": 744,
+            "deletions": 11,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": {
+              "login": "hedy"
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": null
+                },
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "edsger"
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "state": "COMMENTED",
+                  "author": {
+                    "login": "linus"
+                  }
+                }
+              ]
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          {
+                            "state": "ACTION_REQUIRED",
+                            "count": 0
+                          },
+                          {
+                            "state": "CANCELLED",
+                            "count": 0
+                          },
+                          {
+                            "state": "COMPLETED",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "IN_PROGRESS",
+                            "count": 0
+                          },
+                          {
+                            "state": "NEUTRAL",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "QUEUED",
+                            "count": 0
+                          },
+                          {
+                            "state": "SKIPPED",
+                            "count": 0
+                          },
+                          {
+                            "state": "STALE",
+                            "count": 0
+                          },
+                          {
+                            "state": "STARTUP_FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 11
+                          },
+                          {
+                            "state": "TIMED_OUT",
+                            "count": 0
+                          },
+                          {
+                            "state": "WAITING",
+                            "count": 0
+                          }
+                        ],
+                        "statusContextCountsByState": [
+                          {
+                            "state": "EXPECTED",
+                            "count": 0
+                          },
+                          {
+                            "state": "ERROR",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 0
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 13947,
+            "url": "https://github.com/o/r/pull/13947",
+            "title": "Handle an empty answer",
+            "isDraft": true,
+            "state": "OPEN",
+            "createdAt": "2026-07-23T01:07:38Z",
+            "updatedAt": "2026-07-23T15:39:39Z",
+            "headRefName": "branch-13947",
+            "headRefOid": "d3de8af6a2cb9af422cf1bd4849c7af3811be641",
+            "baseRefName": "trunk",
+            "isCrossRepository": true,
+            "additions": 530,
+            "deletions": 15,
+            "mergeable": "CONFLICTING",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": {
+              "login": "ada"
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "state": "COMMENTED",
+                  "author": {
+                    "login": "grace"
+                  }
+                }
+              ]
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          {
+                            "state": "ACTION_REQUIRED",
+                            "count": 0
+                          },
+                          {
+                            "state": "CANCELLED",
+                            "count": 0
+                          },
+                          {
+                            "state": "COMPLETED",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "IN_PROGRESS",
+                            "count": 0
+                          },
+                          {
+                            "state": "NEUTRAL",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "QUEUED",
+                            "count": 0
+                          },
+                          {
+                            "state": "SKIPPED",
+                            "count": 6
+                          },
+                          {
+                            "state": "STALE",
+                            "count": 0
+                          },
+                          {
+                            "state": "STARTUP_FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 1
+                          },
+                          {
+                            "state": "TIMED_OUT",
+                            "count": 0
+                          },
+                          {
+                            "state": "WAITING",
+                            "count": 0
+                          }
+                        ],
+                        "statusContextCountsByState": [
+                          {
+                            "state": "EXPECTED",
+                            "count": 0
+                          },
+                          {
+                            "state": "ERROR",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 0
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "viewer": {
+      "login": "ada"
+    }
+  }
+}

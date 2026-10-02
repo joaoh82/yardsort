@@ -8,6 +8,9 @@ Everything here is ordinary git and, for the pull request, the
 [GitHub CLI](https://cli.github.com). Nothing is stored, no account is created, and Yardsort
 never holds a credential of its own.
 
+This page is about the pull request a workspace opens. For every pull request of every project —
+a teammate's, or one you want to start an agent on — see [Pull requests](pull-requests.md).
+
 ## Commit
 
 When a workspace has uncommitted changes, a message box appears under the list with a
@@ -70,6 +73,11 @@ The push is never forced. Yardsort can only ever add to what the remote already 
 Credentials are git's: your SSH key, or whatever credential helper you already use. Yardsort
 runs git with prompts disabled, so a push that needs an answer nobody can see fails with git's
 own message instead of hanging.
+
+One branch is never pushed from here: a workspace
+[started from a fork's pull request](pull-requests.md#from-a-fork). Its branch follows the pull
+request, and a push would create a new branch on your project's remote rather than update the
+fork. The panel shows no **Push** there and says why.
 
 ## Open a pull request
 
@@ -163,8 +171,11 @@ its own record of what its `HEAD` has been (its reflog), so Yardsort counts a PR
 
 - its branch is the one the workspace has checked out — what the badge has always shown;
 - its branch was checked out in this workspace before the PR was opened (for the branch the
-  workspace was created on, that is from its creation); or
-- its head commit was made in this workspace, whatever the branch is called on GitHub.
+  workspace was created on, that is from its creation);
+- its head commit was made in this workspace, whatever the branch is called on GitHub; or
+- the workspace was [started from it](pull-requests.md#start-a-workspace-from-a-pull-request)
+  and it comes from a fork, in which case git's own configuration of the branch says which pull
+  request it follows.
 
 The time matters because branch names get reused: a PR opened on `ys/fix` by a workspace you
 deleted last month is not this one's, even if this one is also on `ys/fix`. Git keeps that record
@@ -178,7 +189,10 @@ expecting numbers and there are none, the pull request dialog says what `gh` act
 
 Yardsort asks the forge once per project, not once per workspace, and reuses the answer for half
 a minute. It asks again when you come back to the window, every minute while it is open, and
-straight after anything you do that changes the answer.
+straight after anything you do that changes the answer. What it asks for is the newest fifty pull
+requests; every _open_ one is read as well when Yardsort starts and while the
+[Pull requests](pull-requests.md#how-often-github-is-asked) view is open, so a workspace whose
+open pull request has fifty newer ones in front of it still gets its badge.
 
 ![Workspace pull request preview with review status and checks](../images/pull-request-preview.png)
 

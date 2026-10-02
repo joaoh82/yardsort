@@ -55,6 +55,9 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // A handoff starts the message with the packet Yardsort assembled; the user edits it here.
   // Read once, at mount: the composer is keyed by workspace, so a new handoff is a new mount.
   const [handoff] = useState(() => (runIn ? useProjectsStore.getState().composingPrompt : null));
+  // Started from a pull request: the branch the core got ready is the one to open. Read once,
+  // like the handoff; the view that sets it is closed by opening this.
+  const [prepared] = useState(() => (runIn ? null : useProjectsStore.getState().composingBranch));
   const [message, setMessage] = useState(handoff ?? "");
   const [harnessId, setHarnessId] = useState<string | null>(null);
   const [model, setModel] = useState(last.model ?? "");
@@ -137,14 +140,20 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         if (stale) return;
         setBranches(list);
         const start = list.default ?? list.branches[0];
-        setBase(start ? `new:${start}` : "");
+        // A pull request's branch, unless something checked it out in the meantime: git allows
+        // a branch one place, and the list below would not offer it either.
+        const pullRequest =
+          prepared &&
+          list.branches.includes(prepared.branch) &&
+          !list.checkedOut.includes(prepared.branch);
+        setBase(pullRequest ? `open:${prepared.branch}` : start ? `new:${start}` : "");
       },
       (reason) => !stale && setError(reason?.message ?? String(reason)),
     );
     return () => {
       stale = true;
     };
-  }, [project.id, runIn]);
+  }, [project.id, runIn, prepared]);
 
   // The project's memory, when it shares it: what goes after the message, and a way to leave it
   // out of this one launch. A handoff's packet carries it already.
@@ -522,6 +531,16 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
                 : mode === "open"
                   ? `Opens the existing branch "${branch}" in a new git worktree.`
                   : "A new branch and git worktree are created when you start."}
+              {mode === "open" && prepared?.branch === branch && (
+                <>
+                  {prepared.fork &&
+                    " It is a pull request from a fork: the branch follows the pull request, and Yardsort will not push it."}
+                  {prepared.behind > 0 &&
+                    ` This branch was already here and is ${prepared.behind} ${
+                      prepared.behind === 1 ? "commit" : "commits"
+                    } behind the pull request. It is opened as it is.`}
+                </>
+              )}
             </p>
           )}
         </div>

@@ -10,7 +10,9 @@ use tauri::AppHandle;
 use super::{pull_requests_of, state, ProjectPullRequests, PublishState};
 use crate::changes::commands::workspace;
 use crate::error::{IpcError, IpcResult};
-use crate::forge::{ForgeError, Gh, MergeMethod, PullRequest, PullRequestState};
+use crate::forge::{
+    parse_remote, ForgeError, Gh, MergeMethod, PullRequest, PullRequestState, Repo,
+};
 use crate::git::Git;
 use crate::state::{blocking, AppState};
 use crate::store::WorkspaceRow;
@@ -30,13 +32,29 @@ pub(super) fn project_root(state: &AppState, project_id: &str) -> IpcResult<std:
 }
 
 pub(super) fn found(state: &AppState, project_id: &str, refresh: bool) -> ProjectPullRequests {
+    look(state, project_id, refresh, false)
+}
+
+/// What the forge says about a project's pull requests. `full` is the Pull requests view
+/// asking: every open one, not only the newest fifty.
+fn look(state: &AppState, project_id: &str, refresh: bool, full: bool) -> ProjectPullRequests {
     let Ok(root) = project_root(state, project_id) else {
         return ProjectPullRequests::default();
     };
     let gh = Gh::find(&state.env());
     state
         .forge
-        .pull_requests(gh.as_ref(), &root, project_id, refresh)
+        .pull_requests(gh.as_ref(), &root, project_id, refresh, full, &|| {
+            repo_at(state, &root)
+        })
+}
+
+/// The project's remote as a repository on a forge: the one a push would go to.
+fn repo_at(state: &AppState, root: &Path) -> Option<Repo> {
+    let git = Git::new(&state.env()).ok()?;
+    let remote = git.push_remote(root).ok()??;
+    let url = git.remote_url(root, &remote).ok()??;
+    parse_remote(&url)
 }
 
 fn publish_state(
@@ -66,15 +84,20 @@ pub async fn workspace_publish_state(
 }
 
 /// Every pull request `gh` knows for a project, so each workspace row can show its own.
+///
+/// `full` reads every open pull request as well as the newest fifty: what the Pull requests
+/// view lists. It is several questions to the forge on a busy repository, so only that view
+/// asks for it.
 #[tauri::command]
 #[specta::specta]
 pub async fn project_pull_requests(
     app: AppHandle,
     project_id: String,
     refresh: bool,
+    full: bool,
 ) -> IpcResult<ProjectPullRequests> {
     blocking(app, move |state| {
-        let mut found = found(state, &project_id, refresh);
+        let mut found = look(state, &project_id, refresh, full);
         let owned = state
             .forge
             .owned(&project_id, &found.pull_requests, refresh, || {
@@ -240,7 +263,17 @@ fn fall_back(publishable: &PublishState) -> IpcResult<PullRequestOpened> {
         })
 }
 
-fn push(git: &Git, root: &Path, publishable: &PublishState) -> IpcResult<()> {
+pub(super) fn push(git: &Git, root: &Path, publishable: &PublishState) -> IpcResult<()> {
+    if let Some(number) = publishable.follows_pull_request {
+        return Err(IpcError::new(
+            "follows_pull_request",
+            format!(
+                "This branch is a checkout of pull request #{number}, which comes from a fork. \
+                 Yardsort does not push to forks: a push from here would make a new branch on \
+                 this project's remote instead."
+            ),
+        ));
+    }
     let (Some(remote), Some(branch)) = (&publishable.remote, &publishable.branch) else {
         return Err(IpcError::new(
             "nothing_to_push",
@@ -280,20 +313,8 @@ pub async fn workspace_merge_pull_request(
             .pull_requests
             .iter()
             .filter(|pr| own.contains(&pr.number))
-            .find(|pr| {
-                pr.number == number
-                    && pr.state == PullRequestState::Open
-                    && !pr.draft
-                    && !head_oid.is_empty()
-                    && pr
-                        .details
-                        .as_ref()
-                        .is_some_and(|details| details.head_oid == head_oid)
-            })
-            .ok_or_else(|| {
-                IpcError::new("pull_request_changed",
-            "The pull request changed or is no longer ready to merge. Refresh and review it again.")
-            })?;
+            .find(|pr| pr.number == number && still_mergeable(pr, &head_oid))
+            .ok_or_else(pull_request_changed)?;
         let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
         // Use the same repository context as the project-wide query.
         let result = gh.merge_pull_request(
@@ -306,4 +327,23 @@ pub async fn workspace_merge_pull_request(
         result.map_err(failed)
     })
     .await
+}
+
+/// Whether `pr` is still what the user confirmed merging: open, not a draft, and at the head
+/// commit the confirmation showed.
+pub(super) fn still_mergeable(pr: &PullRequest, head_oid: &str) -> bool {
+    pr.state == PullRequestState::Open
+        && !pr.draft
+        && !head_oid.is_empty()
+        && pr
+            .details
+            .as_ref()
+            .is_some_and(|details| details.head_oid == head_oid)
+}
+
+pub(super) fn pull_request_changed() -> IpcError {
+    IpcError::new(
+        "pull_request_changed",
+        "The pull request changed or is no longer ready to merge. Refresh and review it again.",
+    )
 }

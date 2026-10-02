@@ -184,3 +184,29 @@ From the design pass in [21-workflows](21-workflows.md).
     ones, with those not on `PATH` shown greyed as "not installed" rather than hidden, so a
     missing agent is a thing to notice, not a mystery. A required agent starts on the first one
     installed. `ys workflow run` refuses one that is not set up or not on `PATH` (slice 2).
+
+## Pull requests
+
+From the design pass in [22-pull-requests](22-pull-requests.md).
+
+24. **Should the right panel get out of the way while the Pull requests view is open?** It keeps
+    showing the selected workspace's changes, as it does beside Usage and a workflow, and the
+    Code tab wants the width. Lean: leave it alone — its shortcut collapses it — and decide after
+    slice 3 has been used on a laptop screen.
+25. ~~**How is a workspace started from a fork's pull request tied to it, and should Yardsort push
+    to forks?**~~ **Settled 2026-10-02, in slice 1, as the lean said.** Its local branch is
+    `pr/<n>`, and the tie is recorded in git: `refs/pull/<n>/head` on the pull request's remote
+    is the branch's upstream, the way `gh pr checkout` leaves it. So the pull request is found
+    from git's configuration and not from the branch's name, `git pull` in the workspace follows
+    the pull request, and a plain `git push` is refused by git itself (checked in a scratch
+    repository). Yardsort does not push such a branch — the core refuses and the panel says why
+    instead of offering **Push**. Pushing to a contributor's fork stays undesigned, on purpose.
+26. **Should the recent tier become the lighter query too?** Today's `gh pr list` asks for every
+    check of fifty pull requests and takes 4.5 s on a busy repository; the open tier's query asks
+    for counts and would do the same fifty faster, with one shape of answer instead of two. What
+    it costs is the check names in a workspace's preview, which would then come from the detail
+    query. Lean: yes, once slice 2 has that query.
+27. **May a description ever load its images?** Not loading them is the safe answer and the first
+    one: the content policy forbids it, and an image is a request to a server of the author's
+    choosing. Screenshots in a description are also half of why people open it. Lean: stay with
+    links, and hear whether it is missed.

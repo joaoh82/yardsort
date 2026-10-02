@@ -148,6 +148,24 @@ If this happens for **every** session, check whether you start Yardsort from a t
 itself running inside an agent; versions before 0.1 leaked that agent's session markers into the
 agents they launched, which stopped Claude Code from saving transcripts.
 
+## The Pull requests view is empty, or says `gh` failed
+
+The view reads GitHub through the [GitHub CLI](https://cli.github.com), and says on a line above
+the list why a project has no rows. The fixes, in the order they usually apply:
+
+- **`gh` is not installed, or nobody is logged in** — install it, run `gh auth login` in a
+  terminal, then press **Refresh**. Yardsort looks for `gh` on the same `PATH` it finds your
+  agents on, so if a terminal finds it and Yardsort does not, see
+  ["`claude` was not found on PATH"](#claude-was-not-found-on-path) above: the cause is the same.
+- **`HTTP 502` or `HTTP 504`** — GitHub took too long. It happens on repositories with a great
+  many pull requests and checks; **Retry** usually succeeds, and the rows that did arrive stay.
+- **The project is on GitLab, Bitbucket or Gitea, or has no remote** — the view is for GitHub.
+- **A pull request you expected is not there** — the list holds every open one up to the 200
+  most recently updated, and the newest fifty of any state. An older merged or closed one is on
+  GitHub.
+
+See [Pull requests](pull-requests.md#when-something-is-missing).
+
 ## Coming from Switchyard
 
 Yardsort was called Switchyard until v0.2. The first time Yardsort starts it **copies** your

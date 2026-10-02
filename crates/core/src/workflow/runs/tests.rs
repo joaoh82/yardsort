@@ -117,6 +117,7 @@ fn pull_request(number: u32, state: crate::forge::PullRequestState) -> PullReque
         draft: false,
         checks: crate::forge::Checks::None,
         details: None,
+        author: None,
         created_at: None,
     }
 }

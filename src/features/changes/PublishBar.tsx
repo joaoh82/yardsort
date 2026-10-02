@@ -33,7 +33,10 @@ export function PublishBar({
   if (!state || !state.branch) return null;
 
   const unpushed = state.ahead;
-  const canPush = state.remote !== null && unpushed > 0;
+  // A checkout of a fork's pull request is not pushed from here: the push would land on this
+  // project's remote as a new branch, not on the fork. The core refuses it too.
+  const follows = state.followsPullRequest;
+  const canPush = state.remote !== null && unpushed > 0 && follows === null;
   const noun = state.repo?.kind === "gitlab" ? "merge request" : "pull request";
 
   return (
@@ -76,6 +79,12 @@ export function PublishBar({
         <PullRequestLink />
       </CommitBox>
 
+      {follows !== null && (
+        <p className="mt-2 text-[11px] text-ink-faint">
+          This branch follows pull request #{follows}, which comes from a fork. Commits stay here:
+          Yardsort does not push to forks.
+        </p>
+      )}
       {error && (
         <p role="alert" className="mt-2 text-red-400 select-text">
           {error}

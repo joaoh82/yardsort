@@ -6,6 +6,7 @@ import {
   isIpcError,
   type AddedProject,
   type NewWorkspace,
+  type PreparedBranch,
   type Project,
   type Workspace,
   type SessionInfo,
@@ -37,6 +38,11 @@ interface ProjectsState {
   workflowId: string | null;
   /** The Usage view is open in the center panel, which it takes over like a workflow. */
   usageOpen: boolean;
+  /** The Pull requests view is open in the center panel, which it takes over the same way. */
+  pullRequestsOpen: boolean;
+  /** The branch the composer should open rather than start from: a pull request's, got ready
+   *  by the core. Cleared with the composer. */
+  composingBranch: PreparedBranch | null;
   /** Raw persisted UI state, for features that remember small things (see `remember`). */
   ui: Record<string, string>;
   /** Projects are expanded unless listed here, so new ones start open. */
@@ -65,11 +71,15 @@ interface ProjectsState {
   remove: (id: string, keepHistory: boolean) => Promise<boolean>;
   move: (id: string, by: -1 | 1) => Promise<void>;
   select: (workspaceId: string | null) => void;
-  compose: (projectId: string | null) => void;
+  /** `branch` opens the composer on a branch that exists — a pull request's — instead of on
+   *  a new one. */
+  compose: (projectId: string | null, branch?: PreparedBranch) => void;
   /** Show a workflow in the center panel; `null` closes it. */
   openWorkflow: (workflowId: string | null) => void;
   /** Show the Usage view in the center panel, or close it. */
   openUsage: (open: boolean) => void;
+  /** Show the Pull requests view in the center panel, or close it. */
+  openPullRequests: (open: boolean) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
   composeIn: (workspace: Workspace, prompt?: string) => void;
   /**
@@ -147,8 +157,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     composingProjectId: null,
     composingWorkspaceId: null,
     composingPrompt: null,
+    composingBranch: null,
     workflowId: null,
     usageOpen: false,
+    pullRequestsOpen: false,
     ui: {},
     collapsed: [],
     lastParentDir: null,
@@ -273,8 +285,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           composingProjectId: null,
           composingWorkspaceId: null,
           composingPrompt: null,
+          composingBranch: null,
           workflowId: null,
           usageOpen: false,
+          pullRequestsOpen: false,
         });
       }
       set({
@@ -282,19 +296,23 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
+        composingBranch: null,
         workflowId: null,
         usageOpen: false,
+        pullRequestsOpen: false,
       });
       save(KEYS.selected, workspaceId);
     },
 
-    compose(projectId) {
+    compose(projectId, branch) {
       set((state) => ({
         composingProjectId: projectId,
         composingWorkspaceId: null,
         composingPrompt: null,
+        composingBranch: (projectId && branch) || null,
         workflowId: null,
         usageOpen: false,
+        pullRequestsOpen: false,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
@@ -304,19 +322,35 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({
         workflowId,
         usageOpen: false,
+        pullRequestsOpen: false,
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
+        composingBranch: null,
       });
     },
 
     openUsage(open) {
       set({
         usageOpen: open,
+        pullRequestsOpen: false,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
+        composingBranch: null,
+      });
+    },
+
+    openPullRequests(open) {
+      set({
+        pullRequestsOpen: open,
+        usageOpen: false,
+        workflowId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
       });
     },
 
@@ -326,8 +360,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingProjectId: null,
         composingWorkspaceId: workspace.id,
         composingPrompt: prompt ?? null,
+        composingBranch: null,
         workflowId: null,
         usageOpen: false,
+        pullRequestsOpen: false,
       });
       save(KEYS.selected, workspace.id);
     },

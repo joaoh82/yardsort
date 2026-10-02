@@ -9,6 +9,20 @@ has the downloads and the full commit lists.
   tabs, supported token sources and API cost estimates. The quick start introduces Usage, and
   the guide adds a first-look walkthrough, refresh guidance and the distinction from activity
   capture. New screenshots show Token usage and Machine resources with demo data.
+- **Pull requests: every project's, in one place.** **Pull requests**, at the top of the sidebar
+  or in the command palette, lists the pull requests of every project on GitHub — every open one
+  up to the 200 most recently updated, and the newest fifty of any state — with who opened each,
+  its checks as passed out of total, its age, its size and whether it conflicts. Filter by state,
+  project, author and review status, including _Awaiting review from you_ and _Reviewed by you_;
+  the filters are remembered. Open one to see its reviewers and act on it: **Start workspace**
+  fetches its branch and opens the composer on it, **Merge** (squash, merge commit or rebase),
+  **Close** and **Reopen** each ask first and say whose pull request it is. No branch is ever
+  deleted, and a branch you already have is never moved. A pull request from a fork becomes a
+  `pr/<number>` branch that follows it; Yardsort does not push to forks, and the changes panel
+  says so instead of offering **Push**. It needs `gh`, and says plainly when `gh` is missing,
+  logged out, or the project is on another forge. See [Pull requests](docs/guide/pull-requests.md).
+- A workspace whose open pull request has more than fifty newer ones in front of it now shows it
+  on its row: every open pull request is read when Yardsort starts, not only the newest fifty.
 
 ## 0.17.0
 

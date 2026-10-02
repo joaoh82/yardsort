@@ -278,6 +278,38 @@ prefers an open PR, then the highest PR number, independently of response order.
 keep a slower earlier fetch from overwriting a later one in the core cache and frontend project
 store; invalidation also fences out fetches started before a push or merge.
 
+**Two tiers, one list.** That `gh pr list` — the newest fifty of any state, every check by name
+— is the _recent_ tier. The Pull requests view needs every open pull request, and `gh pr list`
+cannot give 200 of those with their checks from a busy repository: GitHub answers 502 or 504
+after ten seconds ([22 § what was measured](22-pull-requests.md#what-was-measured)). So the
+_open_ tier is a query of our own through `gh api graphql` (`Gh::open_pull_requests`): fifty to
+the page, a cursor between pages, a time limit on each, and the checks _counted_ by state rather
+than listed. `{owner}` and `{repo}` are `gh`'s placeholders, so it is the repository `gh pr
+list` picked in the same folder. A page that fails keeps the pages before it and says why.
+`publish::Forge` holds both tiers and `compose` makes one list of them: a pull request both have
+is the recent tier's, and the open tier adds the older open ones. The open tier is read once at
+start and then only while the view is showing (`project_pull_requests(…, full)`); an
+invalidation keeps its rows and marks them out of date rather than dropping them, because
+nothing would read them again until the view opened. `CheckCounts` is the one place a check's
+state is classified, and `Checks` is worked out from it, so a badge and a row cannot disagree.
+
+**Acting on any pull request of a project** is `publish::pull_requests`: merge, close, reopen.
+Each asks the forge about that one pull request again first (`gh pr view`), and refuses if it
+is no longer what the confirmation showed. Unlike the toolbar's commands these do not require
+that a workspace owns it — that is the point of the view — and the confirmation says whose it
+is instead.
+
+**A pull request's branch, for a workspace** (`prepare_branch`): a branch already here is never
+moved; one in the project's remote is fetched into its remote-tracking ref and a local branch
+made to track it; one from a fork becomes `pr/<n>` at `refs/pull/<n>/head`, with that ref
+recorded as the branch's upstream (`Git::follow_pull_request`, what `gh pr checkout` does). The
+upstream is how the workspace is tied to its pull request — `publish::state` and
+`pull_requests_of` read it back with `Git::followed_pull_request`, not the branch's name — and
+it is why `git pull` follows the pull request while a plain `git push` refuses. Yardsort's own
+push refuses such a branch in the core. The remote fetched from is the one whose URL names the
+pull request's repository, which in a clone of a fork is `upstream`, not `origin`. A branch name
+that came from the forge is checked with `git check-ref-format` before any command sees it.
+
 Merging is a separate workspace command. After the user confirms a method, number and head, the
 core asks the forge again, checks the PR is still open, still one of the workspace's and still at
 that head, and calls `gh pr merge` with an argv array and `--match-head-commit`. It never requests

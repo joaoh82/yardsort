@@ -89,8 +89,29 @@ export const commands = {
 	 *  the head the user confirmed.
 	 */
 	workspaceMergePullRequest: (workspaceId: string, number: number, headOid: string, method: MergeMethod) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_merge_pull_request", { workspaceId, number, headOid, method })),
-	/**  Every pull request `gh` knows for a project, so each workspace row can show its own. */
-	projectPullRequests: (projectId: string, refresh: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh })),
+	/**
+	 *  Every pull request `gh` knows for a project, so each workspace row can show its own.
+	 * 
+	 *  `full` reads every open pull request as well as the newest fifty: what the Pull requests
+	 *  view lists. It is several questions to the forge on a busy repository, so only that view
+	 *  asks for it.
+	 */
+	projectPullRequests: (projectId: string, refresh: boolean, full: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh, full })),
+	/**
+	 *  Merge a pull request of this project, if it is still open, still not a draft and still at
+	 *  the head commit the user confirmed. Never deletes a branch, never bypasses a protection.
+	 */
+	pullRequestMerge: (projectId: string, number: number, headOid: string, method: MergeMethod) => typedError<null, IpcError>(__TAURI_INVOKE("pull_request_merge", { projectId, number, headOid, method })),
+	/**  Close a pull request without merging it. Its branch stays, and nothing is posted on it. */
+	pullRequestClose: (projectId: string, number: number) => typedError<null, IpcError>(__TAURI_INVOKE("pull_request_close", { projectId, number })),
+	/**  Open a closed pull request again. */
+	pullRequestReopen: (projectId: string, number: number) => typedError<null, IpcError>(__TAURI_INVOKE("pull_request_reopen", { projectId, number })),
+	/**
+	 *  Get pull request `number`'s branch into the project's repository, ready for the composer's
+	 *  "open existing branch". Nothing is checked out and no worktree is made here: that is the
+	 *  composer's, with the agent and the message the user gives it.
+	 */
+	pullRequestPrepareBranch: (projectId: string, number: number) => typedError<PreparedBranch, IpcError>(__TAURI_INVOKE("pull_request_prepare_branch", { projectId, number })),
 	/**
 	 *  Who would be asked to resolve pull request `number`'s conflicts, and how — for the
 	 *  confirmation, before anything is sent. Reads the project's list, cached when it is fresh.
@@ -563,6 +584,19 @@ export type ChangeSet = {
 	 *  (the workspace *is* the base branch, or HEAD is detached).
 	 */
 	base: string | null,
+};
+
+/**
+ *  How a pull request's checks divide up: what a row in a list shows as _12/12_.
+ * 
+ *  The one place a check's state is read, so the verdict on a workspace's badge and the numbers
+ *  in the pull request list cannot disagree: [`Checks`] is worked out from these.
+ */
+export type CheckCounts = {
+	passed: number,
+	failed: number,
+	/**  Queued, in progress, or waiting on something: not finished either way. */
+	running: number,
 };
 
 /**  What CI says about a pull request's head commit, rolled up into the one thing a row can show. */
@@ -1155,6 +1189,21 @@ export type Preflight = {
 	ready: boolean,
 };
 
+/**  A local branch a workspace can be opened on for a pull request. */
+export type PreparedBranch = {
+	branch: string,
+	/**
+	 *  Commits the pull request has that this branch does not. Only a branch that was already
+	 *  here can be behind: it is opened as it is and never moved.
+	 */
+	behind: number,
+	/**
+	 *  The pull request comes from a fork, so the branch is `pr/<number>` and follows the pull
+	 *  request rather than a branch of this project's remote. Yardsort will not push it.
+	 */
+	fork: boolean,
+};
+
 /**  One thing wrong with a file, where it is. */
 export type Problem = {
 	/**  1-based. `None` when the problem is the file as a whole. */
@@ -1232,6 +1281,24 @@ export type ProjectPullRequests = {
 	 *  git could not be asked about.
 	 */
 	workspaces: { [key in string]: number[] },
+	/**
+	 *  The project's remote read as a repository on a forge: what the Pull requests view calls
+	 *  it, and how it knows a project is not on GitHub. `None` for a remote that is a path on
+	 *  disk, and for no remote at all.
+	 */
+	repo: Repo | null,
+	/**
+	 *  Who `gh` is logged in as, once the open pull requests have been read: what "by you"
+	 *  means in the view's filters.
+	 */
+	viewer: string | null,
+	/**
+	 *  How many open pull requests the forge says the repository has. More than the list holds
+	 *  when there are more than [`OPEN_LIMIT`]. `None` until the open ones have been read.
+	 */
+	openTotal: number | null,
+	/**  Why the open pull requests could not all be read, when the recent ones could. */
+	openProblem: string | null,
 };
 
 export type PromptTransport = 
@@ -1300,9 +1367,15 @@ export type PublishState = {
 	problem: string | null,
 	/**  That reason is "log in first", which has a one-line fix worth printing. */
 	loggedOut: boolean,
+	/**
+	 *  The branch is a checkout of this pull request from a fork (see
+	 *  [`Git::follow_pull_request`]). Yardsort does not push it: a push would make a new branch
+	 *  on the project's own remote, not update the fork the pull request comes from.
+	 */
+	followsPullRequest: number | null,
 };
 
-/**  A pull request, as much of it as a workspace row and the panel need. */
+/**  A pull request, as much of it as a workspace row, the panel and the pull request list need. */
 export type PullRequest = {
 	number: number,
 	url: string,
@@ -1313,6 +1386,15 @@ export type PullRequest = {
 	draft: boolean,
 	checks: Checks,
 	details: PullRequestDetails | null,
+	/**  Who opened it, by login. `None` for an account that no longer exists. */
+	author: string | null,
+	/**
+	 *  When it was opened, in epoch milliseconds. A row shows its age from it, and it is how an
+	 *  attempt is matched to the pull request opened during its life (see `crate::outcomes`).
+	 *  A whole number of milliseconds fits a JavaScript number with room to spare, which is
+	 *  what the window is told it is.
+	 */
+	createdAt: number | null,
 };
 
 export type PullRequestCheck = {
@@ -1328,9 +1410,20 @@ export type PullRequestDetails = {
 	deletions: number,
 	review: string,
 	updatedAt: string,
+	/**
+	 *  Each check by name. Empty when the pull request came from the list of open ones, which
+	 *  asks the forge for [`check_counts`](Self::check_counts) alone: see [`Gh::open_page`].
+	 */
 	checks: PullRequestCheck[],
+	checkCounts: CheckCounts,
 	/**  Whether it merges cleanly into its base, as the forge last worked it out. */
 	mergeable: Mergeable,
+	/**  Reviews asked for and not given yet. */
+	reviewRequests: ReviewRequest[],
+	/**  Each reviewer's latest review. */
+	reviews: PullRequestReview[],
+	/**  Its branch lives in a fork, not in the repository it would merge into. */
+	crossRepository: boolean,
 };
 
 /**  A pull request that now exists, or the form to fill in to make one. */
@@ -1338,6 +1431,12 @@ export type PullRequestOpened = {
 	url: string,
 	/**  `gh` opened it. When false the URL is the forge's own form, to finish in a browser. */
 	created: boolean,
+};
+
+/**  A reviewer's latest word on a pull request. */
+export type PullRequestReview = {
+	login: string,
+	state: ReviewState,
 };
 
 export type PullRequestState = "open" | "merged" | "closed";
@@ -1411,6 +1510,15 @@ export type ReviewFlag =
  *  reporting what they wrote. Only asked when the provenance facts are sent.
  */
 "unaccounted";
+
+/**  Someone a review was asked of and who has not answered yet: a person, or a team. */
+export type ReviewRequest = {
+	/**  A login, or a team's slug. */
+	name: string,
+	team: boolean,
+};
+
+export type ReviewState = "approved" | "changesRequested" | "commented" | "dismissed";
 
 /**  What a run is about. A workspace run knows the workspace, its branch and its pull request. */
 export type RunContext = "workspace";

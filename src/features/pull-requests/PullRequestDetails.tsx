@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { PullRequest } from "@/lib/ipc";
-import { conflicting, pullRequestColour } from "./appearance";
+import { checksColour, conflicting, pullRequestColour, pullRequestStateLabel } from "./appearance";
+import { checksSummary } from "./rows";
 
 const checksLabel = {
   none: "No checks reported",
@@ -8,19 +9,17 @@ const checksLabel = {
   passing: "All checks passed",
   failing: "Checks failing",
 };
-const checksColour = {
-  none: "text-ink-faint",
-  running: "text-amber-300",
-  passing: "text-green-400",
-  failing: "text-red-400",
-};
 const reviewLabel: Record<string, string> = {
   APPROVED: "Approved",
   CHANGES_REQUESTED: "Changes requested",
   REVIEW_REQUIRED: "Review required",
 };
 
-export function PullRequestDetails({ pr }: { pr: PullRequest }) {
+/**
+ * A pull request at a glance. `link` is the "View on GitHub" foot, which the Pull requests view
+ * leaves off: it has that among its own actions.
+ */
+export function PullRequestDetails({ pr, link = true }: { pr: PullRequest; link?: boolean }) {
   const details = pr.details;
   const updated = details?.updatedAt ? new Date(details.updatedAt) : null;
   return (
@@ -28,13 +27,7 @@ export function PullRequestDetails({ pr }: { pr: PullRequest }) {
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-ink-muted">#{pr.number}</span>
         <span className={`rounded-full px-2 py-0.5 ${pullRequestColour(pr)}`}>
-          {pr.state === "open"
-            ? pr.draft
-              ? "Draft"
-              : "Open"
-            : pr.state === "merged"
-              ? "Merged"
-              : "Closed"}
+          {pullRequestStateLabel(pr)}
         </span>
         {details?.review && (
           <span className="text-ink-muted">{reviewLabel[details.review] ?? details.review}</span>
@@ -59,9 +52,8 @@ export function PullRequestDetails({ pr }: { pr: PullRequest }) {
       <div className="border-t border-line pt-3">
         <p className={checksColour[pr.checks]}>
           {checksLabel[pr.checks]}
-          {details?.checks.length
-            ? ` · ${details.checks.filter((check) => check.state === "passing").length}/${details.checks.length}`
-            : ""}
+          {/* Counted by the core, which has the numbers even when it has no names to list. */}
+          {checksSummary(pr) && ` · ${checksSummary(pr)}`}
         </p>
         {!!details?.checks.length && (
           <details className="mt-2">
@@ -80,13 +72,15 @@ export function PullRequestDetails({ pr }: { pr: PullRequest }) {
       {updated && !Number.isNaN(updated.getTime()) && (
         <p className="text-[11px] text-ink-faint">Updated {updated.toLocaleString()}</p>
       )}
-      <button
-        type="button"
-        onClick={() => void openUrl(pr.url).catch(console.error)}
-        className="flex w-full items-center justify-between border-t border-line pt-3 text-ink-muted hover:text-ink"
-      >
-        View on GitHub <span aria-hidden>↗</span>
-      </button>
+      {link && (
+        <button
+          type="button"
+          onClick={() => void openUrl(pr.url).catch(console.error)}
+          className="flex w-full items-center justify-between border-t border-line pt-3 text-ink-muted hover:text-ink"
+        >
+          View on GitHub <span aria-hidden>↗</span>
+        </button>
+      )}
     </div>
   );
 }

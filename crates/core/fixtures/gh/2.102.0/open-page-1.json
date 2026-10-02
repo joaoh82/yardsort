@@ -1,0 +1,575 @@
+{
+  "data": {
+    "repository": {
+      "pullRequests": {
+        "totalCount": 7,
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0wNy0zMVQxMzo1MzozMVrO7S0HqQ=="
+        },
+        "nodes": [
+          {
+            "number": 14578,
+            "url": "https://github.com/o/r/pull/14578",
+            "title": "Fix the login redirect",
+            "isDraft": true,
+            "state": "OPEN",
+            "createdAt": "2026-10-02T16:16:44Z",
+            "updatedAt": "2026-10-02T19:12:04Z",
+            "headRefName": "branch-14578",
+            "headRefOid": "2cb1e86df01b09755e1d113364144c5687a0ed03",
+            "baseRefName": "trunk",
+            "isCrossRepository": false,
+            "additions": 1332,
+            "deletions": 867,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": {
+              "login": "grace"
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "state": "COMMENTED",
+                  "author": {
+                    "login": "linus"
+                  }
+                }
+              ]
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          {
+                            "state": "ACTION_REQUIRED",
+                            "count": 0
+                          },
+                          {
+                            "state": "CANCELLED",
+                            "count": 0
+                          },
+                          {
+                            "state": "COMPLETED",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "IN_PROGRESS",
+                            "count": 0
+                          },
+                          {
+                            "state": "NEUTRAL",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "QUEUED",
+                            "count": 0
+                          },
+                          {
+                            "state": "SKIPPED",
+                            "count": 20
+                          },
+                          {
+                            "state": "STALE",
+                            "count": 0
+                          },
+                          {
+                            "state": "STARTUP_FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 12
+                          },
+                          {
+                            "state": "TIMED_OUT",
+                            "count": 0
+                          },
+                          {
+                            "state": "WAITING",
+                            "count": 0
+                          }
+                        ],
+                        "statusContextCountsByState": [
+                          {
+                            "state": "EXPECTED",
+                            "count": 0
+                          },
+                          {
+                            "state": "ERROR",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 0
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 14572,
+            "url": "https://github.com/o/r/pull/14572",
+            "title": "Add a retry to the uploader",
+            "isDraft": false,
+            "state": "OPEN",
+            "createdAt": "2026-10-01T16:59:27Z",
+            "updatedAt": "2026-10-02T18:41:41Z",
+            "headRefName": "branch-14572",
+            "headRefOid": "2205d0d92af8dc3f159f55590d102d2e7e21b054",
+            "baseRefName": "stack-base",
+            "isCrossRepository": false,
+            "additions": 95,
+            "deletions": 5,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": {
+              "login": "margaret"
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "grace"
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": []
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          {
+                            "state": "ACTION_REQUIRED",
+                            "count": 0
+                          },
+                          {
+                            "state": "CANCELLED",
+                            "count": 0
+                          },
+                          {
+                            "state": "COMPLETED",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "IN_PROGRESS",
+                            "count": 0
+                          },
+                          {
+                            "state": "NEUTRAL",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "QUEUED",
+                            "count": 0
+                          },
+                          {
+                            "state": "SKIPPED",
+                            "count": 13
+                          },
+                          {
+                            "state": "STALE",
+                            "count": 0
+                          },
+                          {
+                            "state": "STARTUP_FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 7
+                          },
+                          {
+                            "state": "TIMED_OUT",
+                            "count": 0
+                          },
+                          {
+                            "state": "WAITING",
+                            "count": 0
+                          }
+                        ],
+                        "statusContextCountsByState": [
+                          {
+                            "state": "EXPECTED",
+                            "count": 0
+                          },
+                          {
+                            "state": "ERROR",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 0
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 14044,
+            "url": "https://github.com/o/r/pull/14044",
+            "title": "Tidy the settings page",
+            "isDraft": true,
+            "state": "OPEN",
+            "createdAt": "2026-08-03T02:21:12Z",
+            "updatedAt": "2026-09-23T21:42:29Z",
+            "headRefName": "branch-14044",
+            "headRefOid": "e05af6362b45a97e619612446bad1794bd999f4b",
+            "baseRefName": "trunk",
+            "isCrossRepository": true,
+            "additions": 1,
+            "deletions": 1,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": {
+              "login": "ken"
+            },
+            "reviewRequests": {
+              "nodes": [
+                {
+                  "requestedReviewer": null
+                },
+                {
+                  "requestedReviewer": {
+                    "__typename": "User",
+                    "login": "barbara"
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": []
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          {
+                            "state": "ACTION_REQUIRED",
+                            "count": 0
+                          },
+                          {
+                            "state": "CANCELLED",
+                            "count": 0
+                          },
+                          {
+                            "state": "COMPLETED",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "IN_PROGRESS",
+                            "count": 0
+                          },
+                          {
+                            "state": "NEUTRAL",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "QUEUED",
+                            "count": 0
+                          },
+                          {
+                            "state": "SKIPPED",
+                            "count": 19
+                          },
+                          {
+                            "state": "STALE",
+                            "count": 0
+                          },
+                          {
+                            "state": "STARTUP_FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 2
+                          },
+                          {
+                            "state": "TIMED_OUT",
+                            "count": 0
+                          },
+                          {
+                            "state": "WAITING",
+                            "count": 0
+                          }
+                        ],
+                        "statusContextCountsByState": [
+                          {
+                            "state": "EXPECTED",
+                            "count": 0
+                          },
+                          {
+                            "state": "ERROR",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 0
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 13665,
+            "url": "https://github.com/o/r/pull/13665",
+            "title": "Bump the parser",
+            "isDraft": false,
+            "state": "OPEN",
+            "createdAt": "2026-06-15T18:51:42Z",
+            "updatedAt": "2026-09-03T15:21:05Z",
+            "headRefName": "branch-13665",
+            "headRefOid": "d819e5fc0a55eebf11090ba1e1b04101664c8316",
+            "baseRefName": "trunk",
+            "isCrossRepository": false,
+            "additions": 6,
+            "deletions": 6,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "APPROVED",
+            "author": {
+              "login": "dennis"
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "state": "COMMENTED",
+                  "author": {
+                    "login": "linus"
+                  }
+                },
+                {
+                  "state": "APPROVED",
+                  "author": {
+                    "login": "margaret"
+                  }
+                }
+              ]
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          {
+                            "state": "ACTION_REQUIRED",
+                            "count": 0
+                          },
+                          {
+                            "state": "CANCELLED",
+                            "count": 0
+                          },
+                          {
+                            "state": "COMPLETED",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "IN_PROGRESS",
+                            "count": 0
+                          },
+                          {
+                            "state": "NEUTRAL",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "QUEUED",
+                            "count": 0
+                          },
+                          {
+                            "state": "SKIPPED",
+                            "count": 6
+                          },
+                          {
+                            "state": "STALE",
+                            "count": 0
+                          },
+                          {
+                            "state": "STARTUP_FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 10
+                          },
+                          {
+                            "state": "TIMED_OUT",
+                            "count": 0
+                          },
+                          {
+                            "state": "WAITING",
+                            "count": 0
+                          }
+                        ],
+                        "statusContextCountsByState": [
+                          {
+                            "state": "EXPECTED",
+                            "count": 0
+                          },
+                          {
+                            "state": "ERROR",
+                            "count": 0
+                          },
+                          {
+                            "state": "FAILURE",
+                            "count": 0
+                          },
+                          {
+                            "state": "PENDING",
+                            "count": 0
+                          },
+                          {
+                            "state": "SUCCESS",
+                            "count": 0
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 13506,
+            "url": "https://github.com/o/r/pull/13506",
+            "title": "Document the release steps",
+            "isDraft": false,
+            "state": "OPEN",
+            "createdAt": "2026-05-24T09:01:16Z",
+            "updatedAt": "2026-08-30T22:36:37Z",
+            "headRefName": "branch-13506",
+            "headRefOid": "d1e08222974cba66d09a71b9c8e820fca0a64007",
+            "baseRefName": "trunk",
+            "isCrossRepository": true,
+            "additions": 67,
+            "deletions": 1,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "CHANGES_REQUESTED",
+            "author": {
+              "login": "frances"
+            },
+            "reviewRequests": {
+              "nodes": []
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "state": "COMMENTED",
+                  "author": {
+                    "login": "linus"
+                  }
+                },
+                {
+                  "state": "CHANGES_REQUESTED",
+                  "author": {
+                    "login": "edsger"
+                  }
+                }
+              ]
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": null
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "viewer": {
+      "login": "ada"
+    }
+  }
+}

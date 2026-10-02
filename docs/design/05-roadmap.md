@@ -697,6 +697,46 @@ _Exit:_ the code-review workflow runs against a real pull request on all three p
 window and from `ys`; a busy agent is never written to; every validation error has a failing
 fixture; the docs list every action and variable that exists and none that does not.
 
+## M23 — Pull requests
+
+Proposed in [22-pull-requests](22-pull-requests.md), after a ten-question design pass on
+2026-10-02. Slice 1 is built.
+
+- A **Pull requests** row at the top of the sidebar, above Workflows, opens a view in the center
+  panel: every pull request of every project's repository, with state, project, author and
+  review filters and a search, all but the search remembered. GitHub through `gh` only; no
+  credential of Yardsort's own.
+- A detail pane with **Summary** (description, checks with links, reviewers, conversation) and
+  **Code** (the diff, from the pull request's commits fetched into refs of Yardsort's own, shown
+  with the changes panel's viewer). Start a workspace from a pull request, merge, close, reopen —
+  each confirmed, a _no_ always respected.
+- Found before any code was written: `gh pr list` cannot return 200 pull requests with their
+  checks from a busy repository — GitHub answers 502 or 504 after ten seconds. So the open pull
+  requests come from a query of our own through `gh api graphql`, fifty to the page, asking for
+  check _counts_ and not every check. The measurements are in
+  [22 § what was measured](22-pull-requests.md#what-was-measured).
+- Four slices, each its own pull request:
+- [x] Slice 1: the list, the filters and the actions. The open tier through `gh api graphql`,
+      paged, beside the existing list; the sidebar row, the view, its filters remembered in
+      `ui_state`; merge, close, reopen and Start workspace, the last through the composer. A
+      fork's pull request becomes a branch whose upstream is the pull request, which settled
+      [open question 25](06-open-questions.md). Found: taking the list's panel out of the
+      tree while the details stayed tripped an assertion in the panel library, so hiding the
+      list collapses its panel, as the shell's side panels do; and jsdom lays nothing out, so the
+      view was also driven in headless Chromium with demo data. Not done: the screenshot, which
+      wants a real window. Recorded in
+      [22 § slice 1](22-pull-requests.md#slice-1-what-shipped).
+- [ ] Slice 2: Summary.
+- [ ] Slice 3: Code.
+- [ ] Slice 4: writing — a reply box, comments on lines, and selected lines of a diff sent to a
+      workspace's agent.
+
+_Exit:_ on all three platforms, a repository with more open pull requests than one page lists
+them, filters them and says when there are more than it shows; a pull request from a fork can be
+read, diffed and started as a workspace; a _no_ to Merge, Close and Reopen sends nothing; and
+without `gh`, logged out, or on another forge, the view says which and nothing else in the app
+changes.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
@@ -713,7 +753,8 @@ fixture; the docs list every action and variable that exists and none that does 
   base in and pushes (see [commits & pull requests](../guide/commits-and-pull-requests.md#resolve-merge-conflicts)).
   Found while building it: a workspace can own several pull requests, and the branch name alone
   cannot say which — the worktree's own `HEAD` reflog can.
-- Diff comments sent back to the agent as a prompt.
+- Diff comments sent back to the agent as a prompt. Planned for a pull request's diff as slice 4
+  of [M23](#m23--pull-requests).
 - Multi-repo projects; remote/SSH workspaces.
 - ~~**Usage / cost view per workspace.**~~ **Done**, as the Usage view: token usage from the
   agents' own logs, and machine resources per terminal. What was found: the figures were already

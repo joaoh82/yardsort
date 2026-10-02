@@ -65,6 +65,12 @@ export const DOCS_NAV: DocSection[] = [
           "Commit workspace changes, push your branch and open a GitHub pull request from Yardsort using git and the GitHub CLI.",
       },
       {
+        slug: "guide/pull-requests",
+        title: "Pull requests",
+        description:
+          "See every GitHub pull request of every project in one list. Filter by project, author and review status, start a workspace on one, merge, close or reopen it.",
+      },
+      {
         slug: "guide/settings",
         title: "Settings & harnesses",
         description:

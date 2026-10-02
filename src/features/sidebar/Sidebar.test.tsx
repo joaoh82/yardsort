@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { added, project, record, worktree } from "@/test/fixtures";
+import { added, project, pullRequest, pullRequestsOf, record, worktree } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   uiStateLoad: vi.fn(),
@@ -121,12 +121,83 @@ describe("Sidebar", () => {
       loaded: false,
       selectedWorkspaceId: null,
       composingProjectId: null,
+      pullRequestsOpen: false,
+      usageOpen: false,
+      workflowId: null,
       collapsed: [],
       error: null,
       notice: null,
     });
     useTerminalStore.setState({ tabs: [], active: {}, error: null });
     useUpdatesStore.setState({ status: null, open: false });
+  });
+
+  it("counts every project's open pull requests at the top, and opens and closes the view", async () => {
+    core.projectPullRequests.mockImplementation(async (id: string) =>
+      id === "p-alpha"
+        ? pullRequestsOf([pullRequest(1), pullRequest(2, { state: "merged" })])
+        : // The forge has more open than the list holds: the count says so.
+          pullRequestsOf([pullRequest(1), pullRequest(3, { draft: true })], { openTotal: 1394 }),
+    );
+    const user = userEvent.setup();
+    await renderSidebar("alpha", "beta");
+    const row = await screen.findByRole("button", { name: "Pull requests, 3+ open" });
+    expect(row).not.toHaveAttribute("aria-current");
+
+    act(() => useProjectsStore.setState({ usageOpen: true }));
+    await user.click(row);
+    expect(useProjectsStore.getState().pullRequestsOpen).toBe(true);
+    expect(useProjectsStore.getState().usageOpen, "one view at a time").toBe(false);
+    expect(row).toHaveAttribute("aria-current", "page");
+
+    await user.click(row);
+    expect(useProjectsStore.getState().pullRequestsOpen).toBe(false);
+  });
+
+  it("gives the panel back to a workspace when one is chosen", async () => {
+    const user = userEvent.setup();
+    await renderWithWorktree();
+    await user.click(rowButton("feature"));
+    expect(screen.getByRole("treeitem", { name: "feature" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "Pull requests" }));
+    // The workspace is still the one to go back to, but it is not what the panel shows.
+    expect(screen.getByRole("treeitem", { name: "feature" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    await user.click(rowButton("feature"));
+    expect(useProjectsStore.getState().pullRequestsOpen).toBe(false);
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha-feature");
+  });
+
+  it("reads every open pull request once at the start, then only while the view is open", async () => {
+    await renderSidebar("alpha");
+    await waitFor(() =>
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true),
+    );
+
+    // Coming back to the window with the view closed: the newest fifty, as before.
+    core.projectPullRequests.mockClear();
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() =>
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", true, false),
+    );
+    expect(core.projectPullRequests).not.toHaveBeenCalledWith("p-alpha", true, true);
+
+    // Opening the view asks for all of them; so does coming back while it is open.
+    core.projectPullRequests.mockClear();
+    act(() => useProjectsStore.getState().openPullRequests(true));
+    await waitFor(() =>
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true),
+    );
+    core.projectPullRequests.mockClear();
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() =>
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", true, true),
+    );
   });
 
   it("offers Usage beside Settings, opens and closes it, and hides it when asked", async () => {
@@ -574,7 +645,9 @@ describe("Sidebar", () => {
       workspaces: {},
     });
     await renderWithWorktree();
-    expect(screen.queryByRole("button", { name: /Pull request/ })).not.toBeInTheDocument();
+    // No badge on any row. The Pull requests row at the top is still there, without a count.
+    expect(screen.queryByRole("button", { name: /pull request #/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
