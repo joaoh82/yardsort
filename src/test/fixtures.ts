@@ -1,4 +1,12 @@
-import type { AddedProject, HarnessInfo, Project, SessionRecord, Workspace } from "@/lib/ipc";
+import type {
+  AddedProject,
+  HarnessInfo,
+  Project,
+  ProjectPullRequests,
+  PullRequest,
+  SessionRecord,
+  Workspace,
+} from "@/lib/ipc";
 
 /** A project with its `local` workspace, as the core would describe it. */
 export function project(name: string, overrides: Partial<Project> = {}): Project {
@@ -96,4 +104,58 @@ export const harness = (id: string, extra: Partial<HarnessInfo> = {}): HarnessIn
   modified: false,
   resolvedPath: `/usr/bin/${id}`,
   ...extra,
+});
+
+type PullRequestDetails = NonNullable<PullRequest["details"]>;
+
+/** An open pull request with passing checks, as the core would describe it. */
+export const pullRequest = (
+  number: number,
+  overrides: Partial<Omit<PullRequest, "details">> & { details?: Partial<PullRequestDetails> } = {},
+): PullRequest => {
+  const { details, ...rest } = overrides;
+  return {
+    number,
+    url: `https://github.com/demo/app/pull/${number}`,
+    title: `Pull request ${number}`,
+    branch: `ys/branch-${number}`,
+    state: "open",
+    draft: false,
+    checks: "passing",
+    author: "grace",
+    createdAt: Date.parse("2026-09-28T09:00:00Z"),
+    ...rest,
+    details: {
+      base: "main",
+      headOid: `head-${number}`,
+      additions: 10,
+      deletions: 2,
+      review: "",
+      updatedAt: "2026-09-28T10:00:00Z",
+      checks: [],
+      checkCounts: { passed: 3, failed: 0, running: 0 },
+      mergeable: "mergeable",
+      reviewRequests: [],
+      reviews: [],
+      crossRepository: false,
+      ...details,
+    },
+  };
+};
+
+/** What the core says about one project's pull requests: `gh` there, logged in as `ada`. */
+export const pullRequestsOf = (
+  pullRequests: PullRequest[],
+  overrides: Partial<ProjectPullRequests> = {},
+): ProjectPullRequests => ({
+  gh: true,
+  pullRequests,
+  problem: null,
+  loggedOut: false,
+  workspaces: {},
+  repo: { host: "github.com", owner: "demo", name: "app", kind: "github" },
+  viewer: "ada",
+  openTotal: pullRequests.filter((pr) => pr.state === "open").length,
+  openProblem: null,
+  ...overrides,
 });

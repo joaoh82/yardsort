@@ -81,6 +81,12 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   conflicts with its base can be handed back to the agent that opened it to resolve. Without
   `gh`, your browser opens the forge's own form, on GitHub, GitLab, Bitbucket or Gitea alike. See
   [Commits & pull requests](docs/guide/commits-and-pull-requests.md).
+- **Every pull request in one place.** **Pull requests**, at the top of the sidebar, lists the
+  pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks,
+  reviewers and size, filtered by project, author and review status. Start a workspace on one,
+  merge it, close it or reopen it from there, each confirmed first and naming whose it is. It
+  reads GitHub through `gh`; Yardsort still holds no credential. See
+  [Pull requests](docs/guide/pull-requests.md).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
@@ -347,23 +353,24 @@ says no.
 
 ## Documentation
 
-|                                                                                                  |                                                                |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                        |
-| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                   |
-| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off |
-| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                    |
-| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file       |
-| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                |
-| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history          |
-| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own   |
-| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent          |
-| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                     |
-| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                 |
-| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints              |
-| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs  |
-| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                |
-| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions           |
+|                                                                                                  |                                                                 |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                         |
+| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                    |
+| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off  |
+| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                     |
+| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file        |
+| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                 |
+| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history           |
+| [Pull requests](docs/guide/pull-requests.md)                                                     | Every project's pull requests: filter, start a workspace, merge |
+| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own    |
+| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent           |
+| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                      |
+| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                  |
+| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints               |
+| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs   |
+| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                 |
+| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions            |
 
 ## Build from source
 

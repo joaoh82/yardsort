@@ -197,7 +197,78 @@ pub enum PullRequestState {
     Closed,
 }
 
-/// A pull request, as much of it as a workspace row and the panel need.
+/// How a pull request's checks divide up: what a row in a list shows as _12/12_.
+///
+/// The one place a check's state is read, so the verdict on a workspace's badge and the numbers
+/// in the pull request list cannot disagree: [`Checks`] is worked out from these.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckCounts {
+    pub passed: u32,
+    pub failed: u32,
+    /// Queued, in progress, or waiting on something: not finished either way.
+    pub running: u32,
+}
+
+impl CheckCounts {
+    pub fn total(&self) -> u32 {
+        self.passed + self.failed + self.running
+    }
+
+    /// One failure outranks everything — a green summary hiding a red check is the one answer
+    /// that would make this worse than not showing it at all. Anything still running outranks
+    /// success, so "passing" always means *finished* and passing.
+    pub fn verdict(&self) -> Checks {
+        if self.failed > 0 {
+            Checks::Failing
+        } else if self.running > 0 {
+            Checks::Running
+        } else if self.passed > 0 {
+            Checks::Passing
+        } else {
+            Checks::None
+        }
+    }
+
+    /// Count `count` checks that reported `verdict`. A cancelled check is a failure; a skipped
+    /// or neutral one passes, once it has finished.
+    fn add(&mut self, verdict: &str, finished: bool, count: u32) {
+        match verdict.to_ascii_uppercase().as_str() {
+            "FAILURE" | "ERROR" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED"
+            | "STARTUP_FAILURE" => self.failed += count,
+            "SUCCESS" | "NEUTRAL" | "SKIPPED" if finished => self.passed += count,
+            _ => self.running += count,
+        }
+    }
+}
+
+/// Someone a review was asked of and who has not answered yet: a person, or a team.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRequest {
+    /// A login, or a team's slug.
+    pub name: String,
+    pub team: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewState {
+    Approved,
+    ChangesRequested,
+    Commented,
+    Dismissed,
+}
+
+/// A reviewer's latest word on a pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReview {
+    pub login: String,
+    pub state: ReviewState,
+}
+
+/// A pull request, as much of it as a workspace row, the panel and the pull request list need.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequest {
@@ -210,9 +281,13 @@ pub struct PullRequest {
     pub draft: bool,
     pub checks: Checks,
     pub details: Option<PullRequestDetails>,
-    /// When it was opened, in epoch milliseconds. Not sent to the window: it is how an attempt is
-    /// matched to the pull request opened during its life (see `crate::outcomes`).
-    #[serde(skip)]
+    /// Who opened it, by login. `None` for an account that no longer exists.
+    pub author: Option<String>,
+    /// When it was opened, in epoch milliseconds. A row shows its age from it, and it is how an
+    /// attempt is matched to the pull request opened during its life (see `crate::outcomes`).
+    /// A whole number of milliseconds fits a JavaScript number with room to spare, which is
+    /// what the window is told it is.
+    #[specta(type = Option<f64>)]
     pub created_at: Option<i64>,
 }
 
@@ -226,9 +301,18 @@ pub struct PullRequestDetails {
     pub deletions: u32,
     pub review: String,
     pub updated_at: String,
+    /// Each check by name. Empty when the pull request came from the list of open ones, which
+    /// asks the forge for [`check_counts`](Self::check_counts) alone: see [`Gh::open_page`].
     pub checks: Vec<PullRequestCheck>,
+    pub check_counts: CheckCounts,
     /// Whether it merges cleanly into its base, as the forge last worked it out.
     pub mergeable: Mergeable,
+    /// Reviews asked for and not given yet.
+    pub review_requests: Vec<ReviewRequest>,
+    /// Each reviewer's latest review.
+    pub reviews: Vec<PullRequestReview>,
+    /// Its branch lives in a fork, not in the repository it would merge into.
+    pub cross_repository: bool,
 }
 
 /// GitHub's answer to "can this be merged without conflicts". It works it out lazily, after a
@@ -622,11 +706,234 @@ impl Gh {
             .trim()
             .to_owned())
     }
+
+    /// Close pull request `number` without merging it. Its branch is left where it is, and no
+    /// comment is posted.
+    pub fn close_pull_request(&self, root: &Path, number: u32) -> ForgeResult<()> {
+        self.run(root, &["pr", "close", &number.to_string()])?;
+        Ok(())
+    }
+
+    /// Open a closed pull request again.
+    pub fn reopen_pull_request(&self, root: &Path, number: u32) -> ForgeResult<()> {
+        self.run(root, &["pr", "reopen", &number.to_string()])?;
+        Ok(())
+    }
+
+    /// One page of the repository's open pull requests, most recently updated first: the page
+    /// after the cursor `after`, or the first.
+    ///
+    /// Our own query through `gh api graphql` rather than `gh pr list`, which asks for every
+    /// check of every pull request a hundred at a time — more than GitHub answers in its ten
+    /// seconds on a repository with real CI. This asks for fifty and for the checks *counted*.
+    /// The measurements are in `docs/design/22-pull-requests.md`.
+    ///
+    /// `{owner}` and `{repo}` are `gh`'s own placeholders, so the repository is the one
+    /// `gh pr list` would have picked in the same folder. `host` is needed for a GitHub that is
+    /// not github.com: `gh api` asks its default host otherwise, whatever the remote says.
+    pub fn open_page(
+        &self,
+        root: &Path,
+        host: Option<&str>,
+        after: Option<&str>,
+        limit: Duration,
+    ) -> ForgeResult<OpenPage> {
+        let query = format!("query={OPEN_QUERY}");
+        let after = after.map(|cursor| format!("after={cursor}"));
+        let mut args = vec!["api", "graphql"];
+        if let Some(host) = host {
+            args.extend(["--hostname", host]);
+        }
+        // `-F` fills the placeholders in; `-f` sends the rest exactly as written.
+        args.extend(["-F", "owner={owner}", "-F", "name={repo}", "-f", &query]);
+        if let Some(after) = &after {
+            args.extend(["-f", after]);
+        }
+        let out = self
+            .run_within(root, &args, limit)
+            .map_err(|error| match error {
+                // The command is the whole query otherwise, which helps nobody read the reason.
+                ForgeError::Failed { stderr, .. } => ForgeError::Failed {
+                    command: "api graphql".to_owned(),
+                    stderr,
+                },
+                other => other,
+            })?;
+        open_page(&out)
+    }
+
+    /// Every open pull request, a page at a time, up to `cap`.
+    ///
+    /// Never an `Err`: a page that fails ends the reading and says why, and the pages before it
+    /// are kept. Half a list with the reason beside it is worth more than none.
+    pub fn open_pull_requests(
+        &self,
+        root: &Path,
+        host: Option<&str>,
+        cap: usize,
+        limit: Duration,
+    ) -> OpenPullRequests {
+        let mut found = OpenPullRequests::default();
+        let mut after: Option<String> = None;
+        loop {
+            let page = match self.open_page(root, host, after.as_deref(), limit) {
+                Ok(page) => page,
+                Err(error) => {
+                    found.logged_out = error.is_logged_out();
+                    found.problem = Some(error.to_string());
+                    break;
+                }
+            };
+            found.answered = true;
+            found.total = page.total.or(found.total);
+            found.viewer = page.viewer.or(found.viewer);
+            for pr in page.pull_requests {
+                // Ordered by when they last changed, so one that changed between two pages can
+                // turn up on both.
+                if !found
+                    .pull_requests
+                    .iter()
+                    .any(|seen| seen.number == pr.number)
+                {
+                    found.pull_requests.push(pr);
+                }
+            }
+            if found.pull_requests.len() >= cap {
+                found.pull_requests.truncate(cap);
+                break;
+            }
+            match page.next {
+                Some(cursor) => after = Some(cursor),
+                None => break,
+            }
+        }
+        found
+    }
+}
+
+/// The open pull requests of a repository, fifty to the page. The fields are the ones
+/// [`PULL_REQUEST_FIELDS`] asks `gh` for, except the checks: counted by state, not listed.
+const OPEN_QUERY: &str = "query($owner:String!,$name:String!,$after:String){\
+repository(owner:$owner,name:$name){\
+pullRequests(states:OPEN,first:50,after:$after,orderBy:{field:UPDATED_AT,direction:DESC}){\
+totalCount pageInfo{hasNextPage endCursor} \
+nodes{number url title isDraft state createdAt updatedAt headRefName headRefOid baseRefName \
+isCrossRepository additions deletions mergeable reviewDecision author{login} \
+reviewRequests(first:10){nodes{requestedReviewer{__typename ...on User{login} ...on Team{slug}}}} \
+latestReviews(first:10){nodes{state author{login}}} \
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:1){\
+checkRunCountsByState{state count} statusContextCountsByState{state count}}}}}}}}} \
+viewer{login}}";
+
+/// One page of [`Gh::open_page`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OpenPage {
+    pub pull_requests: Vec<PullRequest>,
+    /// How many open pull requests the repository has, on every page.
+    pub total: Option<u32>,
+    /// The cursor to ask for the next page with. `None` on the last one.
+    pub next: Option<String>,
+    /// Who `gh` is logged in as.
+    pub viewer: Option<String>,
+}
+
+/// What [`Gh::open_pull_requests`] managed to read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OpenPullRequests {
+    pub pull_requests: Vec<PullRequest>,
+    pub total: Option<u32>,
+    pub viewer: Option<String>,
+    /// At least one page arrived. When none did, whatever was known before is still the best
+    /// there is.
+    pub answered: bool,
+    /// Why the reading stopped short, when it did.
+    pub problem: Option<String>,
+    pub logged_out: bool,
+}
+
+/// Read one answer to [`OPEN_QUERY`].
+pub fn open_page(json: &str) -> ForgeResult<OpenPage> {
+    let unreadable = |what: &str| ForgeError::Unreadable(what.to_owned());
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+    let data = parsed
+        .get("data")
+        .ok_or_else(|| unreadable("expected data"))?;
+    let list = data
+        .get("repository")
+        .and_then(|repository| repository.get("pullRequests"))
+        .filter(|list| !list.is_null())
+        .ok_or_else(|| unreadable("expected a repository's pull requests"))?;
+    let nodes = |value: Option<&serde_json::Value>| -> Vec<serde_json::Value> {
+        value
+            .and_then(|v| v.get("nodes"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    };
+    let pull_requests = nodes(Some(list))
+        .iter()
+        .filter_map(|node| {
+            let requests: Vec<serde_json::Value> = nodes(node.get("reviewRequests"))
+                .iter()
+                .filter_map(|request| request.get("requestedReviewer").cloned())
+                .collect();
+            let commits = nodes(node.get("commits"));
+            let contexts = commits
+                .first()
+                .and_then(|node| node.get("commit"))
+                .and_then(|commit| commit.get("statusCheckRollup"))
+                .and_then(|rollup| rollup.get("contexts"));
+            let mut counts = CheckCounts::default();
+            for key in ["checkRunCountsByState", "statusContextCountsByState"] {
+                for by_state in items(contexts.and_then(|contexts| contexts.get(key))) {
+                    let state = by_state.get("state").and_then(|s| s.as_str());
+                    let count = by_state
+                        .get("count")
+                        .and_then(|c| c.as_u64())
+                        .and_then(|c| u32::try_from(c).ok());
+                    if let (Some(state), Some(count)) = (state, count) {
+                        counts.add(state, true, count);
+                    }
+                }
+            }
+            read(
+                node,
+                vec![],
+                counts,
+                &requests,
+                &nodes(node.get("latestReviews")),
+            )
+        })
+        .collect();
+    let page = list.get("pageInfo");
+    let more = page
+        .and_then(|page| page.get("hasNextPage"))
+        .and_then(|more| more.as_bool())
+        .unwrap_or(false);
+    Ok(OpenPage {
+        pull_requests,
+        total: list
+            .get("totalCount")
+            .and_then(|total| total.as_u64())
+            .and_then(|total| u32::try_from(total).ok()),
+        next: page
+            .and_then(|page| page.get("endCursor"))
+            .and_then(|cursor| cursor.as_str())
+            .filter(|_| more)
+            .map(str::to_owned),
+        viewer: data
+            .get("viewer")
+            .and_then(|viewer| viewer.get("login"))
+            .and_then(|login| login.as_str())
+            .map(str::to_owned),
+    })
 }
 
 /// What is asked of `gh` about each pull request.
 const PULL_REQUEST_FIELDS: &str = "number,url,title,headRefName,state,isDraft,statusCheckRollup,\
-createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt,mergeable";
+createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt,mergeable,\
+author,reviewRequests,latestReviews,isCrossRepository";
 
 fn pull_requests(out: &str) -> ForgeResult<Vec<PullRequest>> {
     let parsed: serde_json::Value =
@@ -637,7 +944,41 @@ fn pull_requests(out: &str) -> ForgeResult<Vec<PullRequest>> {
     Ok(rows.iter().filter_map(pull_request).collect())
 }
 
+/// A pull request out of `gh pr list --json` or `gh pr view --json`: every check by name.
 pub(crate) fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
+    let rollup = row.get("statusCheckRollup");
+    let checks = rollup
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .map(|check| PullRequestCheck {
+            name: check
+                .get("name")
+                .or_else(|| check.get("context"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("Check")
+                .to_owned(),
+            state: roll_up(Some(&serde_json::json!([check]))),
+        })
+        .collect();
+    read(
+        row,
+        checks,
+        count(rollup),
+        items(row.get("reviewRequests")),
+        items(row.get("latestReviews")),
+    )
+}
+
+/// What a row from `gh` and a node from our own query have in common, which is nearly all of
+/// it. They differ in how the checks arrive and in how the two review lists are wrapped.
+fn read(
+    row: &serde_json::Value,
+    checks: Vec<PullRequestCheck>,
+    check_counts: CheckCounts,
+    review_requests: &[serde_json::Value],
+    reviews: &[serde_json::Value],
+) -> Option<PullRequest> {
     Some(PullRequest {
         number: u32::try_from(row.get("number")?.as_u64()?).ok()?,
         url: row.get("url")?.as_str()?.to_owned(),
@@ -656,7 +997,7 @@ pub(crate) fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
             .get("isDraft")
             .and_then(|d| d.as_bool())
             .unwrap_or(false),
-        checks: roll_up(row.get("statusCheckRollup")),
+        checks: check_counts.verdict(),
         details: Some(PullRequestDetails {
             base: string_field(row, "baseRefName"),
             head_oid: string_field(row, "headRefOid"),
@@ -672,31 +1013,67 @@ pub(crate) fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
                 .unwrap_or(0),
             review: string_field(row, "reviewDecision"),
             updated_at: string_field(row, "updatedAt"),
-            checks: row
-                .get("statusCheckRollup")
-                .and_then(|v| v.as_array())
-                .into_iter()
-                .flatten()
-                .map(|check| PullRequestCheck {
-                    name: check
-                        .get("name")
-                        .or_else(|| check.get("context"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Check")
-                        .to_owned(),
-                    state: roll_up(Some(&serde_json::json!([check]))),
-                })
-                .collect(),
+            checks,
+            check_counts,
             mergeable: match row.get("mergeable").and_then(|v| v.as_str()) {
                 Some("MERGEABLE") => Mergeable::Mergeable,
                 Some("CONFLICTING") => Mergeable::Conflicting,
                 _ => Mergeable::Unknown,
             },
+            review_requests: review_requests.iter().filter_map(review_request).collect(),
+            reviews: reviews.iter().filter_map(review).collect(),
+            cross_repository: row
+                .get("isCrossRepository")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         }),
+        author: row
+            .get("author")
+            .and_then(|author| author.get("login"))
+            .and_then(|login| login.as_str())
+            .filter(|login| !login.is_empty())
+            .map(str::to_owned),
         created_at: row
             .get("createdAt")
             .and_then(|t| t.as_str())
             .and_then(crate::activity::iso_to_ms),
+    })
+}
+
+fn items(list: Option<&serde_json::Value>) -> &[serde_json::Value] {
+    list.and_then(|v| v.as_array()).map_or(&[], Vec::as_slice)
+}
+
+/// A person or a team a review was asked of. A team has a slug where a person has a login.
+fn review_request(reviewer: &serde_json::Value) -> Option<ReviewRequest> {
+    let text = |key: &str| reviewer.get(key).and_then(|v| v.as_str());
+    match text("login") {
+        Some(login) => Some(ReviewRequest {
+            name: login.to_owned(),
+            team: false,
+        }),
+        None => text("slug")
+            .or_else(|| text("name"))
+            .map(|team| ReviewRequest {
+                name: team.to_owned(),
+                team: true,
+            }),
+    }
+}
+
+/// A reviewer's latest review. One still being written has not been given, and is not one.
+fn review(review: &serde_json::Value) -> Option<PullRequestReview> {
+    let login = review.get("author")?.get("login")?.as_str()?;
+    let state = match review.get("state")?.as_str()? {
+        "APPROVED" => ReviewState::Approved,
+        "CHANGES_REQUESTED" => ReviewState::ChangesRequested,
+        "COMMENTED" => ReviewState::Commented,
+        "DISMISSED" => ReviewState::Dismissed,
+        _ => return None,
+    };
+    Some(PullRequestReview {
+        login: login.to_owned(),
+        state,
     })
 }
 
@@ -707,44 +1084,30 @@ fn string_field(row: &serde_json::Value, key: &str) -> String {
         .to_owned()
 }
 
-/// Reduce every check on the head commit to one verdict.
-///
-/// One failure outranks everything — a green summary hiding a red check is the one answer that
-/// would make this worse than not showing it at all. Anything still running outranks success,
-/// so "passing" always means *finished* and passing.
+/// Reduce every check on the head commit to one verdict: see [`CheckCounts::verdict`].
 fn roll_up(rollup: Option<&serde_json::Value>) -> Checks {
-    let Some(checks) = rollup.and_then(|value| value.as_array()) else {
-        return Checks::None;
-    };
-    if checks.is_empty() {
-        return Checks::None;
-    }
-    let mut running = false;
-    let mut any = false;
-    for check in checks {
+    count(rollup).verdict()
+}
+
+/// Count the checks `gh` lists on the head commit, by what became of each.
+fn count(rollup: Option<&serde_json::Value>) -> CheckCounts {
+    let mut counts = CheckCounts::default();
+    for check in rollup
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+    {
         // A check run reports `status` then `conclusion`; a commit status only has `state`.
         let status = check.get("status").and_then(|s| s.as_str());
         let verdict = check
             .get("conclusion")
             .and_then(|c| c.as_str())
             .or_else(|| check.get("state").and_then(|s| s.as_str()))
-            .unwrap_or("")
-            .to_ascii_uppercase();
+            .unwrap_or("");
         let finished = status.is_none_or(|status| status.eq_ignore_ascii_case("COMPLETED"));
-        match verdict.as_str() {
-            "FAILURE" | "ERROR" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED"
-            | "STARTUP_FAILURE" => return Checks::Failing,
-            "SUCCESS" | "NEUTRAL" | "SKIPPED" if finished => any = true,
-            _ => running = true,
-        }
+        counts.add(verdict, finished, 1);
     }
-    if running {
-        Checks::Running
-    } else if any {
-        Checks::Passing
-    } else {
-        Checks::None
-    }
+    counts
 }
 
 #[cfg(test)]
@@ -1008,6 +1371,10 @@ mod tests {
                 state: Checks::Passing
             }]
         );
+        assert_eq!(details.check_counts.passed, 1);
+        assert!(details.review_requests.is_empty() && details.reviews.is_empty());
+        assert!(!details.cross_repository);
+        assert_eq!(pr.author, None, "not asked for, not invented");
     }
 
     fn opened(number: u32, branch: &str, at: i64, head: &str) -> PullRequest {
@@ -1099,6 +1466,431 @@ mod tests {
             found.iter().any(|pr| pr.checks != Checks::None),
             "at least one of them ran checks, so the rollup really was read"
         );
+    }
+
+    fn fixture(name: &str) -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/gh/2.102.0")
+            .join(name);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    }
+
+    /// What `gh api graphql` really answered: see the README beside the fixtures.
+    #[test]
+    fn reads_a_recorded_page_of_open_pull_requests() {
+        let page = open_page(&fixture("open-page-1.json")).unwrap();
+        assert_eq!(page.total, Some(7));
+        assert_eq!(page.viewer.as_deref(), Some("ada"));
+        assert!(page.next.is_some(), "there is a page after it");
+        let numbers: Vec<u32> = page.pull_requests.iter().map(|pr| pr.number).collect();
+        assert_eq!(numbers, [14578, 14572, 14044, 13665, 13506]);
+
+        let find = |number: u32| {
+            let pr = page.pull_requests.iter().find(|pr| pr.number == number);
+            pr.cloned().unwrap()
+        };
+        let draft = find(14578);
+        assert!(draft.draft);
+        assert_eq!(draft.state, PullRequestState::Open);
+        assert_eq!(draft.author.as_deref(), Some("grace"));
+        assert_eq!(draft.url, "https://github.com/o/r/pull/14578");
+        assert!(draft.created_at.is_some());
+        assert_eq!(draft.checks, Checks::Passing);
+        let details = draft.details.unwrap();
+        // 20 skipped and 12 succeeded: a skipped check passes.
+        assert_eq!(
+            details.check_counts,
+            CheckCounts {
+                passed: 32,
+                failed: 0,
+                running: 0
+            }
+        );
+        assert!(details.checks.is_empty(), "counted, not listed");
+        assert_eq!(details.base, "trunk");
+        assert_eq!(details.review, "REVIEW_REQUIRED");
+        assert!(!details.cross_repository);
+        assert_eq!(
+            details.reviews,
+            [PullRequestReview {
+                login: "linus".into(),
+                state: ReviewState::Commented
+            }]
+        );
+
+        assert_eq!(
+            find(14572).details.unwrap().review_requests,
+            [ReviewRequest {
+                name: "grace".into(),
+                team: false
+            }]
+        );
+        // A team the asking account may not see arrives as null, and is not a request we can
+        // name.
+        let fork = find(14044).details.unwrap();
+        assert!(fork.cross_repository);
+        assert_eq!(fork.review_requests.len(), 1);
+        assert_eq!(fork.review_requests[0].name, "barbara");
+
+        assert_eq!(find(13665).details.unwrap().review, "APPROVED");
+        // No check has ever reported on this one: there is no rollup at all.
+        let unchecked = find(13506);
+        assert_eq!(unchecked.checks, Checks::None);
+        let details = unchecked.details.unwrap();
+        assert_eq!(details.check_counts.total(), 0);
+        assert_eq!(details.reviews[1].state, ReviewState::ChangesRequested);
+
+        let last = open_page(&fixture("open-page-2.json")).unwrap();
+        assert_eq!(last.pull_requests.len(), 2);
+        assert_eq!(last.next, None, "the last page has nothing after it");
+    }
+
+    #[test]
+    fn reads_a_recorded_list_with_authors_and_reviews() {
+        let found = pull_requests(&fixture("pr-list.json")).unwrap();
+        let states: Vec<PullRequestState> = found.iter().map(|pr| pr.state).collect();
+        assert_eq!(
+            states,
+            [
+                PullRequestState::Open,
+                PullRequestState::Merged,
+                PullRequestState::Closed
+            ]
+        );
+        for pr in &found {
+            assert!(pr.author.is_some(), "#{}", pr.number);
+            let details = pr.details.as_ref().unwrap();
+            assert_eq!(details.checks.len(), 3, "listed by name");
+            assert_eq!(details.check_counts.total(), 3, "and counted");
+            assert_eq!(pr.checks, details.check_counts.verdict());
+        }
+        let merged = found[1].details.as_ref().unwrap();
+        assert_eq!(
+            merged.reviews.iter().map(|r| r.state).collect::<Vec<_>>(),
+            [ReviewState::Commented, ReviewState::Approved]
+        );
+        let closed = found[2].details.as_ref().unwrap();
+        assert_eq!(closed.review_requests.len(), 1);
+        assert!(!closed.review_requests[0].team);
+    }
+
+    /// A team in `gh pr list`'s own shape, which has a name and a slug and no login.
+    #[test]
+    fn a_requested_team_is_named_by_its_slug() {
+        let row = serde_json::json!({
+            "number": 1, "url": "https://github.com/o/r/pull/1", "headRefName": "b",
+            "reviewRequests": [
+                {"__typename": "Team", "name": "Code Reviewers", "slug": "code-reviewers"},
+                {"__typename": "User", "login": "ada"}
+            ],
+            "latestReviews": [
+                {"author": {"login": "ada"}, "state": "PENDING"},
+                {"author": {"login": "grace"}, "state": "DISMISSED"}
+            ],
+        });
+        let details = pull_request(&row).unwrap().details.unwrap();
+        assert_eq!(
+            details.review_requests,
+            [
+                ReviewRequest {
+                    name: "code-reviewers".into(),
+                    team: true
+                },
+                ReviewRequest {
+                    name: "ada".into(),
+                    team: false
+                }
+            ]
+        );
+        assert_eq!(
+            details.reviews,
+            [PullRequestReview {
+                login: "grace".into(),
+                state: ReviewState::Dismissed
+            }],
+            "a review still being written has not been given"
+        );
+    }
+
+    /// The same checks, listed one by one as `gh pr list` has them and counted by state as our
+    /// own query has them, come to the same numbers and the same verdict.
+    #[test]
+    fn listed_and_counted_checks_agree() {
+        let listed = serde_json::json!([
+            {"status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"status": "COMPLETED", "conclusion": "SKIPPED"},
+            {"status": "COMPLETED", "conclusion": "NEUTRAL"},
+            {"status": "COMPLETED", "conclusion": "CANCELLED"},
+            {"status": "COMPLETED", "conclusion": "TIMED_OUT"},
+            {"status": "IN_PROGRESS", "conclusion": null},
+            {"status": "QUEUED", "conclusion": null},
+            {"context": "ci/legacy", "state": "PENDING"},
+            {"context": "ci/other", "state": "SUCCESS"},
+        ]);
+        let by_hand = count(Some(&listed));
+        assert_eq!(
+            by_hand,
+            CheckCounts {
+                passed: 4,
+                failed: 2,
+                running: 3
+            }
+        );
+
+        // The shape recorded from a repository with checks still going.
+        let counted = serde_json::json!({"data": {"repository": {"pullRequests": {
+            "totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null},
+            "nodes": [{
+                "number": 1, "url": "https://github.com/o/r/pull/1", "headRefName": "b",
+                "reviewRequests": {"nodes": []}, "latestReviews": {"nodes": []},
+                "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {
+                    "checkRunCountsByState": [
+                        {"state": "ACTION_REQUIRED", "count": 0},
+                        {"state": "CANCELLED", "count": 1},
+                        {"state": "IN_PROGRESS", "count": 1},
+                        {"state": "NEUTRAL", "count": 1},
+                        {"state": "QUEUED", "count": 1},
+                        {"state": "SKIPPED", "count": 1},
+                        {"state": "SUCCESS", "count": 1},
+                        {"state": "TIMED_OUT", "count": 1}
+                    ],
+                    "statusContextCountsByState": [
+                        {"state": "PENDING", "count": 1},
+                        {"state": "SUCCESS", "count": 1}
+                    ]
+                }}}}]}
+            }]
+        }}, "viewer": {"login": "ada"}}});
+        let page = open_page(&counted.to_string()).unwrap();
+        let pr = &page.pull_requests[0];
+        assert_eq!(pr.details.as_ref().unwrap().check_counts, by_hand);
+        assert_eq!(pr.checks, roll_up(Some(&listed)));
+        assert_eq!(pr.checks, Checks::Failing, "one failure outranks the rest");
+    }
+
+    #[test]
+    fn an_answer_without_a_repository_is_not_an_empty_list() {
+        assert!(open_page(r#"{"data":{"repository":null}}"#).is_err());
+        assert!(open_page(r#"{"errors":[{"message":"nope"}]}"#).is_err());
+        assert!(open_page("<html>502</html>").is_err());
+    }
+
+    /// A page of our own query's answer with these pull requests on it.
+    #[cfg(unix)]
+    fn page_of(numbers: &[u32], next: Option<&str>, total: u32) -> String {
+        let nodes: Vec<serde_json::Value> = numbers
+            .iter()
+            .map(|number| {
+                serde_json::json!({
+                    "number": number, "url": format!("https://github.com/o/r/pull/{number}"),
+                    "headRefName": format!("b{number}"), "state": "OPEN",
+                    "reviewRequests": {"nodes": []}, "latestReviews": {"nodes": []},
+                    "commits": {"nodes": []},
+                })
+            })
+            .collect();
+        serde_json::json!({"data": {"repository": {"pullRequests": {
+            "totalCount": total,
+            "pageInfo": {"hasNextPage": next.is_some(), "endCursor": next},
+            "nodes": nodes,
+        }}, "viewer": {"login": "ada"}}})
+        .to_string()
+    }
+
+    /// A `gh` that answers the first page, then whatever `second` and `third` say to do for
+    /// the pages after the cursors `c1` and `c2`, and writes down what it was asked.
+    #[cfg(unix)]
+    fn paged_gh(dir: &Path, second: &str, third: &str) -> Gh {
+        use std::os::unix::fs::PermissionsExt;
+        let here = dir.display();
+        let script = dir.join("gh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{here}/asked'\ncase \"$*\" in\n\
+                 *after=c2*) {third} ;;\n*after=c1*) {second} ;;\n*) cat '{here}/1.json' ;;\nesac\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        Gh::at(script, &env)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_pull_requests_are_read_a_page_at_a_time_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().display().to_string();
+        std::fs::write(dir.path().join("1.json"), page_of(&[9, 8], Some("c1"), 5)).unwrap();
+        // #8 changed while the pages were being read, and so is on the second one too.
+        std::fs::write(dir.path().join("2.json"), page_of(&[8, 7], Some("c2"), 5)).unwrap();
+        std::fs::write(dir.path().join("3.json"), page_of(&[6, 5], None, 5)).unwrap();
+        let gh = paged_gh(
+            dir.path(),
+            &format!("cat '{here}/2.json'"),
+            &format!("cat '{here}/3.json'"),
+        );
+        let found = gh.open_pull_requests(
+            dir.path(),
+            Some("github.example.com"),
+            200,
+            Duration::from_secs(10),
+        );
+        let numbers: Vec<u32> = found.pull_requests.iter().map(|pr| pr.number).collect();
+        assert_eq!(numbers, [9, 8, 7, 6, 5], "in order, each once");
+        assert_eq!(found.total, Some(5));
+        assert_eq!(found.viewer.as_deref(), Some("ada"));
+        assert!(found.answered);
+        assert_eq!(found.problem, None);
+
+        let asked = std::fs::read_to_string(dir.path().join("asked")).unwrap();
+        let asked: Vec<&str> = asked.lines().collect();
+        assert_eq!(asked.len(), 3, "three pages, three questions");
+        assert!(asked[0].starts_with("api graphql --hostname github.example.com "));
+        assert!(asked[0].contains("-F owner={owner} -F name={repo} -f query=query("));
+        assert!(!asked[0].contains("after="), "the first page has no cursor");
+        assert!(asked[1].ends_with("-f after=c1"));
+        assert!(asked[2].ends_with("-f after=c2"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_page_that_fails_keeps_the_pages_before_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("1.json"), page_of(&[9, 8], Some("c1"), 120)).unwrap();
+        let gh = paged_gh(
+            dir.path(),
+            "echo 'HTTP 504: no answer' >&2; exit 1",
+            "exit 1",
+        );
+        let found = gh.open_pull_requests(dir.path(), None, 200, Duration::from_secs(10));
+        assert_eq!(found.pull_requests.len(), 2, "what arrived is kept");
+        assert_eq!(found.total, Some(120));
+        assert!(found.answered);
+        let problem = found.problem.unwrap();
+        assert!(problem.contains("HTTP 504"), "{problem}");
+        assert!(
+            !problem.contains("query("),
+            "the reason, not the question: {problem}"
+        );
+        assert!(!found.logged_out);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_page_that_never_answers_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("1.json"), page_of(&[9], Some("c1"), 2)).unwrap();
+        let gh = paged_gh(dir.path(), "sleep 30", "exit 1");
+        let started = std::time::Instant::now();
+        let found = gh.open_pull_requests(dir.path(), None, 200, Duration::from_millis(400));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "waited {:?}",
+            started.elapsed()
+        );
+        assert_eq!(found.pull_requests.len(), 1);
+        assert!(found.problem.unwrap().contains("no answer within"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reading_stops_at_the_cap_and_still_says_how_many_there_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().display().to_string();
+        std::fs::write(
+            dir.path().join("1.json"),
+            page_of(&[9, 8], Some("c1"), 1394),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("2.json"),
+            page_of(&[7, 6], Some("c2"), 1394),
+        )
+        .unwrap();
+        let gh = paged_gh(dir.path(), &format!("cat '{here}/2.json'"), "exit 1");
+        let found = gh.open_pull_requests(dir.path(), None, 3, Duration::from_secs(10));
+        let numbers: Vec<u32> = found.pull_requests.iter().map(|pr| pr.number).collect();
+        assert_eq!(numbers, [9, 8, 7]);
+        assert_eq!(found.total, Some(1394));
+        assert_eq!(found.problem, None, "the third page was never asked for");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nobody_logged_in_is_said_once_and_nothing_is_claimed() {
+        let dir = tempfile::tempdir().unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let script = dir.path().join("gh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho 'To get started with GitHub CLI, please run: gh auth login' >&2\nexit 4\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let found =
+            Gh::at(script, &env).open_pull_requests(dir.path(), None, 200, Duration::from_secs(10));
+        assert!(found.logged_out);
+        assert!(!found.answered);
+        assert!(found.pull_requests.is_empty());
+    }
+
+    /// Closing and reopening are one argument array each: no comment, no branch deleted.
+    #[cfg(unix)]
+    #[test]
+    fn closing_and_reopening_ask_for_nothing_more() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = paged_gh(dir.path(), "true", "true");
+        std::fs::write(dir.path().join("1.json"), "").unwrap();
+        gh.close_pull_request(dir.path(), 42).unwrap();
+        gh.reopen_pull_request(dir.path(), 42).unwrap();
+        let asked = std::fs::read_to_string(dir.path().join("asked")).unwrap();
+        assert_eq!(asked, "pr close 42\npr reopen 42\n");
+    }
+
+    /// The open tier against the real `gh`, the real network and this repository: that `gh api
+    /// graphql` takes the query as written, fills `{owner}` and `{repo}` in from the folder, and
+    /// answers in the shape [`open_page`] reads. Ignored by default, like the one above.
+    ///
+    /// `cargo test -p yardsort-core -- --ignored --nocapture reads_this_repositorys`
+    #[test]
+    #[ignore = "needs gh, a login and the network"]
+    fn reads_this_repositorys_open_pull_requests_a_page_at_a_time() {
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let gh = Gh::find(&env).expect("gh on PATH");
+        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let found = gh.open_pull_requests(here, None, 200, Duration::from_secs(20));
+        println!(
+            "{} open listed of {:?}, as {:?}; problem: {:?}",
+            found.pull_requests.len(),
+            found.total,
+            found.viewer,
+            found.problem
+        );
+        assert!(found.answered, "{:?}", found.problem);
+        assert_eq!(found.problem, None);
+        assert!(found.viewer.is_some(), "gh said who is logged in");
+        let total = found.total.expect("the forge counted them");
+        assert_eq!(found.pull_requests.len(), total.min(200) as usize);
+        for pr in &found.pull_requests {
+            assert_eq!(pr.state, PullRequestState::Open);
+            assert!(pr.url.starts_with("https://"));
+            assert!(pr.details.is_some());
+        }
     }
 
     #[test]

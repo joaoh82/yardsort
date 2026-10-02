@@ -241,6 +241,7 @@ impl Profile {
                 draft: false,
                 checks: Checks::None,
                 details: None,
+                author: None,
                 created_at: None,
             }),
         };

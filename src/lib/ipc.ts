@@ -62,6 +62,12 @@ import {
   type PullRequest,
   type PullRequestOpened,
   type MergeMethod,
+  type CheckCounts,
+  type Checks,
+  type PreparedBranch,
+  type PullRequestReview,
+  type ReviewRequest,
+  type ReviewState,
   type ConflictHelper,
   type ConflictsAsked,
   type Relevance,
@@ -164,6 +170,12 @@ export type {
   PullRequest,
   PullRequestOpened,
   MergeMethod,
+  CheckCounts,
+  Checks,
+  PreparedBranch,
+  PullRequestReview,
+  ReviewRequest,
+  ReviewState,
   ConflictHelper,
   ConflictsAsked,
   Relevance,
@@ -437,8 +449,21 @@ export const ipc = {
   ) => unwrap(commands.workspaceResolveConflicts(workspaceId, number, sessionId, size)),
 
   /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
-  projectPullRequests: (projectId: string, refresh = false) =>
-    unwrap(commands.projectPullRequests(projectId, refresh)),
+  /** `full` also reads every open pull request, not only the newest fifty: the Pull requests
+   *  view's question, and several round trips on a busy repository. */
+  projectPullRequests: (projectId: string, refresh = false, full = false) =>
+    unwrap(commands.projectPullRequests(projectId, refresh, full)),
+  /** Merge any pull request of a project, at the head commit the user confirmed. */
+  pullRequestMerge: (projectId: string, number: number, headOid: string, method: MergeMethod) =>
+    done(commands.pullRequestMerge(projectId, number, headOid, method)),
+  /** Close without merging. The branch stays. */
+  pullRequestClose: (projectId: string, number: number) =>
+    done(commands.pullRequestClose(projectId, number)),
+  pullRequestReopen: (projectId: string, number: number) =>
+    done(commands.pullRequestReopen(projectId, number)),
+  /** Fetch a pull request's branch so the composer can open a workspace on it. */
+  pullRequestPrepareBranch: (projectId: string, number: number) =>
+    unwrap(commands.pullRequestPrepareBranch(projectId, number)),
 
   /**
    * Whether a model can write a commit message or a pull request here, and which one would.

@@ -59,6 +59,8 @@ beforeEach(() => {
     composingProjectId: null,
     composingWorkspaceId: null,
     workflowId: null,
+    usageOpen: false,
+    pullRequestsOpen: false,
   });
   useTerminalStore.setState({ tabs: [], active: {} });
 });
@@ -82,6 +84,23 @@ describe("keyboard navigation", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Background" })).toHaveFocus();
   });
+  it("opens Pull requests from the palette, where a new shell tab is then not on offer", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    fireEvent.keyDown(window, { key: "K", ...mod });
+    await user.type(screen.getByRole("combobox"), "pull req");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(useProjectsStore.getState().pullRequestsOpen).toBe(true));
+
+    // The panel is showing pull requests, not a workspace's terminals.
+    fireEvent.keyDown(window, { key: "K", ...mod });
+    await user.type(screen.getByRole("combobox"), "new shell");
+    expect(screen.getByRole("option", { name: /New shell tab/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
   it("does not run app commands behind a dialog or on repeated keys", () => {
     render(<Host />);
     fireEvent.keyDown(window, { key: "B", ...mod, repeat: true });

@@ -19,6 +19,10 @@ const NO_PULL_REQUESTS: ProjectPullRequests = {
   problem: null,
   loggedOut: false,
   workspaces: {},
+  repo: null,
+  viewer: null,
+  openTotal: null,
+  openProblem: null,
 };
 
 interface PublishStore {
@@ -43,8 +47,11 @@ interface PublishStore {
     body: string;
     draft: boolean;
   }) => Promise<PullRequestOpened | null>;
-  /** Load one project's pull requests. Never throws: a forge that will not answer says so. */
-  loadProject: (projectId: string, refresh?: boolean) => Promise<void>;
+  /**
+   * Load one project's pull requests. Never throws: a forge that will not answer says so.
+   * `full` also reads every open one, for the Pull requests view.
+   */
+  loadProject: (projectId: string, refresh?: boolean, full?: boolean) => Promise<void>;
   /** Ask the forge again about the project the followed workspace belongs to. */
   reloadProject: () => Promise<void>;
   clearError: () => void;
@@ -165,11 +172,11 @@ export const usePublishStore = create<PublishStore>((set, get) => {
       return opened;
     },
 
-    async loadProject(projectId, refresh = false) {
+    async loadProject(projectId, refresh = false, full = false) {
       const request = (projectRequests.get(projectId) ?? 0) + 1;
       projectRequests.set(projectId, request);
       try {
-        const found = await ipc.projectPullRequests(projectId, refresh);
+        const found = await ipc.projectPullRequests(projectId, refresh, full);
         if (projectRequests.get(projectId) !== request) return;
         set((s) => ({ byProject: { ...s.byProject, [projectId]: found } }));
       } catch (error) {

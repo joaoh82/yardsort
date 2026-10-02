@@ -26,6 +26,10 @@ const POINTS = [
     body: "After you archive or delete a workspace, one optional click says how it went; a merged pull request counts as kept until you say otherwise. Each agent's history on your own work sits beside the composer's picker, and says too few to say until there is enough of it.",
   },
   {
+    title: "Every pull request in one place",
+    body: "One list of the pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks, reviewers and size, filtered by project, author and review status. Start a workspace on one, merge it, close it or reopen it, each confirmed first. It reads GitHub through gh; Yardsort still holds no credential.",
+  },
+  {
     title: "Choose how agents start",
     body: "Always start in auto mode is a per-agent choice in Harness settings, off until you enable it. For Claude Code and Codex, with activity capture on, a hint at 80% of the context window offers Compact to send the agent's own /compact command.",
   },

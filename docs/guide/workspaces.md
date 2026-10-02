@@ -61,6 +61,15 @@ If preparation or the agent launch fails, the worktree and its branch are kept, 
 and copied files remain available. The error names its folder. Fix the problem and open the
 workspace to start an agent, or delete it through the workspace menu if it is no longer needed.
 
+### From a pull request
+
+**Start workspace** on a pull request in the [Pull requests](pull-requests.md) view opens this
+same composer with the pull request's branch already chosen under **Open existing branch**. The
+agent, the message and **Start** are yours as usual, and nothing is created until you press it.
+The line under the box says when the branch comes from a fork — Yardsort will not push it — and
+when a branch you already had is behind the pull request. See
+[Start a workspace from a pull request](pull-requests.md#start-a-workspace-from-a-pull-request).
+
 ### Where the folders go
 
 `~/yardsort/<project>/<workspace>` by default. Change the folder and the `ys/` branch prefix in

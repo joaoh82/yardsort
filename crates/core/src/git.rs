@@ -383,6 +383,100 @@ impl Git {
     }
 }
 
+/// Bringing work in from the remote without touching anything the user has: a branch into its
+/// remote-tracking ref, a pull request's head into a ref of Yardsort's own.
+impl Git {
+    /// Whether `name` is something git will take as a branch name. A name that arrived from a
+    /// forge is checked before it is handed to any other command: a leading dash would be read
+    /// as an option.
+    pub fn valid_branch_name(&self, root: &Path, name: &str) -> GitResult<bool> {
+        if name.starts_with('-') {
+            return Ok(false);
+        }
+        match self.run(root, &["check-ref-format", "--branch", name]) {
+            Ok(_) => Ok(true),
+            Err(GitError::Failed { .. }) => Ok(false),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Fetch `branch` from `remote` into `refs/remotes/<remote>/<branch>`, whatever the remote
+    /// is configured to fetch. No local branch moves.
+    pub fn fetch_branch(&self, root: &Path, remote: &str, branch: &str) -> GitResult<()> {
+        let refspec = format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}");
+        self.run(root, &["fetch", "--quiet", remote, &refspec])
+            .map(drop)
+    }
+
+    /// Fetch the head of pull request `number` into a ref of Yardsort's own and return that
+    /// ref's name. The forge publishes `refs/pull/<n>/head` on the repository a pull request
+    /// would merge into, also when its branch lives in a fork. No branch and no
+    /// remote-tracking ref is touched.
+    pub fn fetch_pull_request(&self, root: &Path, remote: &str, number: u32) -> GitResult<String> {
+        let ours = format!("refs/yardsort/pull/{number}/head");
+        let refspec = format!("+refs/pull/{number}/head:{ours}");
+        self.run(root, &["fetch", "--quiet", remote, &refspec])?;
+        Ok(ours)
+    }
+
+    /// Make the local `branch` from `start`. With `track`, `start` becomes its upstream.
+    pub fn branch_create(
+        &self,
+        root: &Path,
+        branch: &str,
+        start: &str,
+        track: bool,
+    ) -> GitResult<()> {
+        let tracking = if track { "--track" } else { "--no-track" };
+        self.run(root, &["branch", tracking, branch, start])
+            .map(drop)
+    }
+
+    /// Record that `branch` is a checkout of pull request `number`: its upstream becomes the
+    /// pull request's head on `remote`, the way `gh pr checkout` leaves a fork's branch. So
+    /// `git pull` there follows the pull request, a plain `git push` refuses (the names do not
+    /// match), and [`Self::followed_pull_request`] can say which pull request it is without
+    /// guessing from the branch's name.
+    pub fn follow_pull_request(
+        &self,
+        root: &Path,
+        branch: &str,
+        remote: &str,
+        number: u32,
+    ) -> GitResult<()> {
+        let merge = format!("refs/pull/{number}/head");
+        self.run(
+            root,
+            &["config", &format!("branch.{branch}.remote"), remote],
+        )?;
+        self.run(root, &["config", &format!("branch.{branch}.merge"), &merge])
+            .map(drop)
+    }
+
+    /// The pull request `branch` follows, if [`Self::follow_pull_request`] (or `gh pr
+    /// checkout`) set it up as one.
+    pub fn followed_pull_request(&self, root: &Path, branch: &str) -> GitResult<Option<u32>> {
+        let key = format!("branch.{branch}.merge");
+        match self.run(root, &["config", "--get", &key]) {
+            Ok(merge) => Ok(merge
+                .trim()
+                .strip_prefix("refs/pull/")
+                .and_then(|rest| rest.strip_suffix("/head"))
+                .and_then(|number| number.parse().ok())),
+            // Exit 1: the key is not set.
+            Err(GitError::Failed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// How many commits `to` has that `from` does not.
+    pub fn commits_between(&self, root: &Path, from: &str, to: &str) -> GitResult<u32> {
+        let range = format!("{from}..{to}");
+        let out = self.run(root, &["rev-list", "--count", &range])?;
+        Ok(out.trim().parse().unwrap_or(0))
+    }
+}
+
 /// See [`Git::head_history`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HeadHistory {

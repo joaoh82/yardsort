@@ -56,6 +56,7 @@ const state = (extra: Partial<PublishState> = {}): PublishState => ({
   gh: true,
   problem: null,
   loggedOut: false,
+  followsPullRequest: null,
   ...extra,
 });
 
@@ -71,6 +72,8 @@ const pr = (extra: Partial<PullRequest> = {}): PullRequest => ({
   draft: false,
   checks: "passing",
   details: null,
+  author: "ada",
+  createdAt: null,
   ...extra,
 });
 
@@ -376,6 +379,23 @@ describe("PublishBar", () => {
     show([]);
     expect(screen.queryByRole("button", { name: /^Open/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /#42 · checks passing/ })).toBeInTheDocument();
+  });
+
+  it("offers no push on a branch that follows a fork's pull request, and says why", () => {
+    seed({
+      branch: "pr/12",
+      ahead: 2,
+      unpushed: [commit("My fix"), commit("Their work")],
+      canOpen: false,
+      followsPullRequest: 12,
+      pullRequest: pr({ number: 12, branch: "patch-1" }),
+    });
+    show([]);
+    expect(screen.queryByRole("button", { name: /^Push/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Open pull request/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/follows pull request #12, which comes from a fork/)).toBeVisible();
+    // The pull request itself is still one press away.
+    expect(screen.getByRole("button", { name: /#12/ })).toBeVisible();
   });
 
   it("stays out of the way on a detached HEAD", async () => {

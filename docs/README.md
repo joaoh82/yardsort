@@ -12,25 +12,26 @@ To compare agent tokens and estimated API costs, or find which workspace is usin
 memory, open **Usage** from the sidebar or command palette. The [Usage guide](guide/usage.md)
 walks through both tabs and explains what the local figures include.
 
-| Guide                                                         | What it covers                                                                              |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                                          |
-| [Projects](guide/projects.md)                                 | Adding, creating, reordering and removing projects; the `local` workspace                   |
-| [Workspaces](guide/workspaces.md)                             | The composer, branches and worktrees, rename / archive / restore / delete                   |
-| [Terminals & sessions](guide/terminals-and-sessions.md)       | Tabs, shells, status dots, notifications, resume and fork, handing work to another agent    |
-| [Changes & files](guide/changes-and-files.md)                 | Reviewing what an agent did: changed files and who wrote them, diffs, the file tree         |
-| [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row                      |
-| [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor                                |
-| [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer                         |
-| [Activity](guide/activity.md)                                 | The local record of what ran, what each agent reports, and the experimental timeline        |
-| [Memory](guide/memory.md)                                     | Lessons about a project for its agents: written by you, proposed by agents, approved by you |
-| [Outcomes](guide/outcomes.md)                                 | What became of each attempt, and each agent's history on your work                          |
-| [Workflows](guide/workflows.md)                               | Named, reusable agent work in YAML: the built-in code review, writing and checking your own |
-| [Usage](guide/usage.md)                                       | Tokens your agents spent and what they would cost; CPU and memory per agent, live           |
-| [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                          |
-| [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                                           |
-| [The `ys` command line](guide/cli.md)                         | Installing it; starting, deleting and handing off workspaces from a terminal or a script    |
-| [Troubleshooting](guide/troubleshooting.md)                   | "Command not found", blank windows, where your data lives                                   |
+| Guide                                                         | What it covers                                                                                 |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                                             |
+| [Projects](guide/projects.md)                                 | Adding, creating, reordering and removing projects; the `local` workspace                      |
+| [Workspaces](guide/workspaces.md)                             | The composer, branches and worktrees, rename / archive / restore / delete                      |
+| [Terminals & sessions](guide/terminals-and-sessions.md)       | Tabs, shells, status dots, notifications, resume and fork, handing work to another agent       |
+| [Changes & files](guide/changes-and-files.md)                 | Reviewing what an agent did: changed files and who wrote them, diffs, the file tree            |
+| [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row                         |
+| [Pull requests](guide/pull-requests.md)                       | Every project's pull requests in one view: filter them, start a workspace on one, merge, close |
+| [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor                                   |
+| [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer                            |
+| [Activity](guide/activity.md)                                 | The local record of what ran, what each agent reports, and the experimental timeline           |
+| [Memory](guide/memory.md)                                     | Lessons about a project for its agents: written by you, proposed by agents, approved by you    |
+| [Outcomes](guide/outcomes.md)                                 | What became of each attempt, and each agent's history on your work                             |
+| [Workflows](guide/workflows.md)                               | Named, reusable agent work in YAML: the built-in code review, writing and checking your own    |
+| [Usage](guide/usage.md)                                       | Tokens your agents spent and what they would cost; CPU and memory per agent, live              |
+| [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                             |
+| [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                                              |
+| [The `ys` command line](guide/cli.md)                         | Installing it; starting, deleting and handing off workspaces from a terminal or a script       |
+| [Troubleshooting](guide/troubleshooting.md)                   | "Command not found", blank windows, where your data lives                                      |
 
 ## Tutorials and articles
 

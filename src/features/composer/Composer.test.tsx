@@ -110,6 +110,7 @@ describe("Composer", () => {
       projects: [app],
       selectedWorkspaceId: "w-app",
       composingProjectId: "p-app",
+      composingBranch: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
@@ -184,6 +185,40 @@ describe("Composer", () => {
     expect(core.workspaceCreate).toHaveBeenCalledWith(
       expect.objectContaining({ baseBranch: null, existingBranch: "ys/kept-earlier" }),
     );
+  });
+
+  it("opens on a pull request's branch when started from one, and says what it is", async () => {
+    const created = worktree("app", "kept-earlier");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    useProjectsStore.setState({
+      composingBranch: { branch: "ys/kept-earlier", behind: 2, fork: true },
+    });
+    const user = await renderComposer();
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("open:ys/kept-earlier"),
+    );
+    const hint = screen.getByText(/Enter to start/);
+    expect(hint).toHaveTextContent('Opens the existing branch "ys/kept-earlier"');
+    expect(hint).toHaveTextContent("a pull request from a fork");
+    expect(hint).toHaveTextContent("Yardsort will not push it");
+    expect(hint).toHaveTextContent("is 2 commits behind the pull request. It is opened as it is.");
+
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ baseBranch: null, existingBranch: "ys/kept-earlier" }),
+    );
+
+    // Another branch chosen by hand is not the pull request's, and is not described as one.
+    await user.selectOptions(screen.getByRole("combobox", { name: "Branch" }), "open:develop");
+    expect(screen.getByText(/Enter to start/)).not.toHaveTextContent("pull request");
+  });
+
+  it("starts from the default branch when the pull request's branch was checked out meanwhile", async () => {
+    useProjectsStore.setState({ composingBranch: { branch: "ys/in-use", behind: 0, fork: false } });
+    await renderComposer();
+    // Git allows a branch one place: the list does not offer it, so it is not chosen either.
+    expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("new:main");
   });
 
   it("Shift+Enter breaks the line instead of sending", async () => {
@@ -366,6 +401,7 @@ describe("Composer with Assist", () => {
       projects: [app],
       selectedWorkspaceId: "w-app",
       composingProjectId: "p-app",
+      composingBranch: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });

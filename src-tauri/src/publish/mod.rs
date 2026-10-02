@@ -9,9 +9,15 @@
 //! focus, so one `gh pr list` answers for all of them and the answer is cached for
 //! [`FRESH_FOR`]; a workspace finds its own by branch name and by its worktree's own history
 //! (see [`pull_requests_of`]).
+//!
+//! That list is the *recent* tier: the newest fifty, whatever their state, with every check by
+//! name. The Pull requests view adds the *open* tier — every open pull request up to
+//! [`OPEN_LIMIT`], read a page at a time by [`Gh::open_pull_requests`] — which is only asked for
+//! while that view is showing. [`Forge`] keeps both and hands out one list.
 
 pub mod commands;
 pub mod conflicts;
+pub mod pull_requests;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -24,7 +30,8 @@ use specta::Type;
 
 use crate::error::IpcResult;
 use crate::forge::{
-    parse_remote, pull_request_for, pull_requests_from, Gh, PullRequest, PullRequestState, Repo,
+    parse_remote, pull_request_for, pull_requests_from, ForgeKind, Gh, OpenPullRequests,
+    PullRequest, PullRequestState, Repo,
 };
 use crate::git::{Commit, Git, Head};
 use crate::store::WorkspaceRow;
@@ -38,6 +45,14 @@ const FRESH_FOR: Duration = Duration::from_secs(30);
 /// for; asking for every pull request a busy repository ever had would be a slow query for
 /// answers nobody can use.
 const LIMIT: u32 = 50;
+
+/// How many open pull requests the Pull requests view reads, most recently updated first. Past
+/// this the view says how many more there are and sends you to the forge for them.
+const OPEN_LIMIT: usize = 200;
+
+/// How long one page of open pull requests may take. GitHub gives up on a query after ten
+/// seconds itself; this is for a network that went away instead.
+const PAGE_LIMIT: Duration = Duration::from_secs(20);
 
 /// Commits offered as a starting point for a pull request's title and body.
 const MAX_COMMITS: usize = 20;
@@ -59,6 +74,18 @@ pub struct ProjectPullRequests {
     /// request merged, or a second branch its agent opened one from. Absent for a workspace
     /// git could not be asked about.
     pub workspaces: BTreeMap<String, Vec<u32>>,
+    /// The project's remote read as a repository on a forge: what the Pull requests view calls
+    /// it, and how it knows a project is not on GitHub. `None` for a remote that is a path on
+    /// disk, and for no remote at all.
+    pub repo: Option<Repo>,
+    /// Who `gh` is logged in as, once the open pull requests have been read: what "by you"
+    /// means in the view's filters.
+    pub viewer: Option<String>,
+    /// How many open pull requests the forge says the repository has. More than the list holds
+    /// when there are more than [`OPEN_LIMIT`]. `None` until the open ones have been read.
+    pub open_total: Option<u32>,
+    /// Why the open pull requests could not all be read, when the recent ones could.
+    pub open_problem: Option<String>,
 }
 
 /// Where a workspace stands: what it can commit, push and open, and what happened to it.
@@ -98,6 +125,10 @@ pub struct PublishState {
     pub problem: Option<String>,
     /// That reason is "log in first", which has a one-line fix worth printing.
     pub logged_out: bool,
+    /// The branch is a checkout of this pull request from a fork (see
+    /// [`Git::follow_pull_request`]). Yardsort does not push it: a push would make a new branch
+    /// on the project's own remote, not update the fork the pull request comes from.
+    pub follows_pull_request: Option<u32>,
 }
 
 impl PublishState {
@@ -157,15 +188,26 @@ pub fn state(
         None => vec![],
     };
 
-    let pull_request = branch
-        .as_ref()
-        .and_then(|branch| pull_request_for(&found.pull_requests, branch).cloned());
+    let follows_pull_request = match &branch {
+        Some(branch) => git.followed_pull_request(root, branch)?,
+        None => None,
+    };
+    let pull_request = match follows_pull_request {
+        // Its name here is not its name on the forge, so the number is what finds it.
+        Some(number) => found.pull_requests.iter().find(|pr| pr.number == number),
+        None => branch
+            .as_ref()
+            .and_then(|branch| pull_request_for(&found.pull_requests, branch)),
+    }
+    .cloned();
 
     // Somewhere to open it, and nothing open there already. A merged or closed one does not
-    // stand in the way: the branch may well have moved on since.
+    // stand in the way: the branch may well have moved on since. A branch that *is* a pull
+    // request has nothing to open.
     let can_open = branch.is_some()
         && base.is_some()
         && repo.is_some()
+        && follows_pull_request.is_none()
         && !matches!(&pull_request, Some(pr) if pr.state == PullRequestState::Open);
 
     Ok(PublishState {
@@ -183,6 +225,7 @@ pub fn state(
         gh: found.gh,
         problem: found.problem.clone(),
         logged_out: found.logged_out,
+        follows_pull_request,
     })
 }
 
@@ -198,12 +241,20 @@ pub fn pull_requests_of(
         Head::Unborn(_) | Head::Detached(_) => None,
     };
     let history = git.head_history(root)?;
-    Ok(pull_requests_from(
-        requests,
-        branch.as_deref(),
-        row.branch.as_deref(),
-        &history,
-    ))
+    let mut found =
+        pull_requests_from(requests, branch.as_deref(), row.branch.as_deref(), &history);
+    // A workspace started from a fork's pull request: its branch says which one in git's own
+    // config, since neither its name nor a commit made here can.
+    let followed = match &branch {
+        Some(branch) => git.followed_pull_request(root, branch)?,
+        None => None,
+    };
+    if let Some(number) = followed {
+        if requests.iter().any(|pr| pr.number == number) && !found.contains(&number) {
+            found.insert(0, number);
+        }
+    }
+    Ok(found)
 }
 
 /// The project-wide pull request cache. One per app.
@@ -214,6 +265,17 @@ pub struct Forge {
     next_request: AtomicU64,
     /// Each project's workspace-to-pull-request map, with the list it was worked out from.
     owned: Mutex<HashMap<String, OwnedAnswer>>,
+    /// Each project's open pull requests, as last read: the open tier.
+    open: Mutex<HashMap<String, OpenTier>>,
+    open_requests: Mutex<HashMap<String, u64>>,
+}
+
+/// A project's open pull requests and when they were read. `at` is `None` once something has
+/// happened that the answer does not know about — it is still shown, and asked for again the
+/// next time anyone looks at the whole list.
+struct OpenTier {
+    at: Option<Instant>,
+    found: OpenPullRequests,
 }
 
 type Owned = BTreeMap<String, Vec<u32>>;
@@ -225,14 +287,76 @@ impl Forge {
     /// Blocking: it runs `gh`, which talks to the network. Never an `Err` — a forge that cannot
     /// be reached is a missing badge, not a failed command, and the reason travels in
     /// [`ProjectPullRequests::problem`] so the panel can show it where it belongs.
+    ///
+    /// The recent tier is always what is asked for. With `full` the open tier is too, when it
+    /// is stale; without it, whatever the open tier last said is still part of the answer.
+    /// `repo` is only called when `gh` is: it costs two git processes.
     pub fn pull_requests(
         &self,
         gh: Option<&Gh>,
         root: &Path,
         project_id: &str,
         refresh: bool,
+        full: bool,
+        repo: &dyn Fn() -> Option<Repo>,
     ) -> ProjectPullRequests {
-        self.load(project_id, refresh, || ask(gh, root))
+        let recent = self.load(project_id, refresh, || ask(gh, root, repo()));
+        if let (true, Some(gh), Some(host)) = (full, gh, open_host(&recent)) {
+            self.load_open(project_id, refresh, || {
+                gh.open_pull_requests(root, host, OPEN_LIMIT, PAGE_LIMIT)
+            });
+        }
+        let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        compose(recent, open.get(project_id).map(|tier| &tier.found))
+    }
+
+    /// Read the open tier unless it was read less than [`FRESH_FOR`] ago.
+    fn load_open(&self, project_id: &str, refresh: bool, fetch: impl FnOnce() -> OpenPullRequests) {
+        if !refresh {
+            let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+            let fresh = open
+                .get(project_id)
+                .and_then(|tier| tier.at)
+                .is_some_and(|at| at.elapsed() < FRESH_FOR);
+            if fresh {
+                return;
+            }
+        }
+        let request = {
+            let mut requests = self
+                .open_requests
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let request = self.next_request.fetch_add(1, Ordering::Relaxed);
+            requests.insert(project_id.to_owned(), request);
+            request
+        };
+        let found = fetch();
+        let requests = self
+            .open_requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if requests.get(project_id) != Some(&request) {
+            return;
+        }
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        let found = match open.remove(project_id) {
+            // Nothing arrived at all: what was known is still the best there is, with the
+            // reason it could not be brought up to date.
+            Some(before) if !found.answered => OpenPullRequests {
+                problem: found.problem,
+                logged_out: found.logged_out,
+                ..before.found
+            },
+            _ => found,
+        };
+        open.insert(
+            project_id.to_owned(),
+            OpenTier {
+                at: Some(Instant::now()),
+                found,
+            },
+        );
     }
 
     fn load(
@@ -289,6 +413,21 @@ impl Forge {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(project_id);
+        // The open tier is kept, marked out of date: it is only read while the Pull requests
+        // view is showing, and dropping it would take the older open pull requests off every
+        // workspace row until then. An answer still on its way is from before, and is dropped.
+        self.open_requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(project_id);
+        if let Some(tier) = self
+            .open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(project_id)
+        {
+            tier.at = None;
+        }
     }
 
     /// Which of `requests` each of a project's workspaces opened, as `compute` works it out.
@@ -346,32 +485,80 @@ pub fn ensure_own(
     }
 }
 
-fn ask(gh: Option<&Gh>, root: &Path) -> ProjectPullRequests {
+fn ask(gh: Option<&Gh>, root: &Path, repo: Option<Repo>) -> ProjectPullRequests {
     let Some(gh) = gh else {
-        return ProjectPullRequests::default();
+        return ProjectPullRequests {
+            repo,
+            ..Default::default()
+        };
     };
     match gh.pull_requests(root, LIMIT) {
         Ok(pull_requests) => ProjectPullRequests {
             gh: true,
             pull_requests,
-            problem: None,
-            logged_out: false,
-            workspaces: BTreeMap::new(),
+            repo,
+            ..Default::default()
         },
         Err(error) => ProjectPullRequests {
             gh: true,
-            pull_requests: vec![],
             logged_out: error.is_logged_out(),
             problem: Some(error.to_string()),
-            workspaces: BTreeMap::new(),
+            repo,
+            ..Default::default()
         },
     }
+}
+
+/// Whether the open pull requests are worth asking for, and of which host: `Some(None)` is
+/// "yes, of `gh`'s default host".
+///
+/// Not when nobody is logged in — the recent tier already said so, once. Not for a forge `gh`
+/// does not speak to. A host this cannot place (an ssh alias, a GitHub Enterprise under a name
+/// of its own) is asked: `gh` knows more about it than a URL does, and says so if not.
+fn open_host(recent: &ProjectPullRequests) -> Option<Option<&str>> {
+    if !recent.gh || recent.logged_out {
+        return None;
+    }
+    let repo = recent.repo.as_ref()?;
+    match repo.kind {
+        ForgeKind::GitLab | ForgeKind::Bitbucket => None,
+        ForgeKind::GitHub if repo.host != "github.com" => Some(Some(&repo.host)),
+        ForgeKind::GitHub | ForgeKind::Unknown => Some(None),
+    }
+}
+
+/// One list out of the two tiers.
+///
+/// A pull request both have is the recent tier's: that tier is asked at least as often, knows
+/// when one was merged or closed, and has its checks by name. The open tier adds the open pull
+/// requests the newest fifty did not reach.
+fn compose(
+    mut recent: ProjectPullRequests,
+    open: Option<&OpenPullRequests>,
+) -> ProjectPullRequests {
+    let Some(open) = open else {
+        return recent;
+    };
+    let older: Vec<PullRequest> = open
+        .pull_requests
+        .iter()
+        .filter(|pr| !recent.pull_requests.iter().any(|r| r.number == pr.number))
+        .cloned()
+        .collect();
+    recent.pull_requests.extend(older);
+    recent.viewer = open.viewer.clone();
+    recent.open_total = open.total;
+    // Logged out, or `gh` failing for both: said once, by the recent tier.
+    if recent.problem.is_none() && !open.logged_out {
+        recent.open_problem = open.problem.clone();
+    }
+    recent
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::forge::{Checks, ForgeKind};
+    use crate::forge::Checks;
     use crate::git::testing;
 
     fn row(path: &Path, base: Option<&str>) -> WorkspaceRow {
@@ -523,6 +710,7 @@ mod tests {
             checks: Checks::Passing,
             created_at: None,
             details: None,
+            author: None,
         }
     }
 
@@ -708,9 +896,7 @@ mod tests {
         let found = ProjectPullRequests {
             gh: true,
             pull_requests: vec![pr("ys/feature", PullRequestState::Merged)],
-            problem: None,
-            logged_out: false,
-            workspaces: BTreeMap::new(),
+            ..Default::default()
         };
         let state = state(&git, &tree, &row(&tree, Some("trunk")), &found).unwrap();
         assert!(state.pull_request.is_some());
@@ -739,6 +925,7 @@ mod tests {
             gh: false,
             problem: None,
             logged_out: false,
+            follows_pull_request: None,
         };
         assert_eq!(
             state.compare_url().as_deref(),
@@ -750,7 +937,7 @@ mod tests {
     fn without_gh_there_is_nothing_to_cache_and_no_complaint_about_it() {
         let forge = Forge::default();
         let dir = tempfile::tempdir().unwrap();
-        let answer = forge.pull_requests(None, dir.path(), "p1", false);
+        let answer = forge.pull_requests(None, dir.path(), "p1", false, false, &|| None);
         assert_eq!(answer, ProjectPullRequests::default());
         assert!(!answer.gh);
         assert_eq!(
@@ -766,9 +953,7 @@ mod tests {
         let answer = ProjectPullRequests {
             gh: true,
             pull_requests: vec![pr("ys/feature", PullRequestState::Open)],
-            problem: None,
-            logged_out: false,
-            workspaces: BTreeMap::new(),
+            ..Default::default()
         };
         forge
             .cached
@@ -776,9 +961,12 @@ mod tests {
             .unwrap()
             .insert("p1".into(), (Instant::now(), answer.clone()));
 
-        assert_eq!(forge.pull_requests(None, dir.path(), "p1", false), answer);
         assert_eq!(
-            forge.pull_requests(None, dir.path(), "p1", true),
+            forge.pull_requests(None, dir.path(), "p1", false, false, &|| None),
+            answer
+        );
+        assert_eq!(
+            forge.pull_requests(None, dir.path(), "p1", true, false, &|| None),
             ProjectPullRequests::default(),
             "a refresh goes back to gh, which is not there"
         );
@@ -790,10 +978,241 @@ mod tests {
             .insert("p1".into(), (Instant::now(), answer.clone()));
         forge.forget("p1");
         assert_eq!(
-            forge.pull_requests(None, dir.path(), "p1", false),
+            forge.pull_requests(None, dir.path(), "p1", false, false, &|| None),
             ProjectPullRequests::default(),
             "and so does a look after forgetting"
         );
+    }
+
+    fn numbered(number: u32, state: PullRequestState) -> PullRequest {
+        PullRequest {
+            number,
+            ..pr(&format!("b{number}"), state)
+        }
+    }
+
+    fn open_tier(numbers: &[u32]) -> OpenPullRequests {
+        OpenPullRequests {
+            pull_requests: numbers
+                .iter()
+                .map(|number| numbered(*number, PullRequestState::Open))
+                .collect(),
+            total: Some(u32::try_from(numbers.len()).unwrap()),
+            viewer: Some("ada".into()),
+            answered: true,
+            problem: None,
+            logged_out: false,
+        }
+    }
+
+    fn on(host: &str, kind: ForgeKind) -> Option<Repo> {
+        Some(Repo {
+            host: host.into(),
+            owner: "o".into(),
+            name: "r".into(),
+            kind,
+        })
+    }
+
+    /// The two tiers as one list: the recent tier's word on a pull request both have, and the
+    /// open tier's older ones after it.
+    #[test]
+    fn the_open_tier_adds_what_the_newest_fifty_did_not_reach() {
+        let recent = ProjectPullRequests {
+            gh: true,
+            // #9 was merged a moment ago; the open tier, read earlier, still has it open.
+            pull_requests: vec![
+                numbered(10, PullRequestState::Open),
+                numbered(9, PullRequestState::Merged),
+            ],
+            ..Default::default()
+        };
+        let all = compose(recent.clone(), Some(&open_tier(&[10, 9, 3, 2])));
+        let rows: Vec<(u32, PullRequestState)> = all
+            .pull_requests
+            .iter()
+            .map(|pr| (pr.number, pr.state))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (10, PullRequestState::Open),
+                (9, PullRequestState::Merged),
+                (3, PullRequestState::Open),
+                (2, PullRequestState::Open)
+            ]
+        );
+        assert_eq!(all.viewer.as_deref(), Some("ada"));
+        assert_eq!(all.open_total, Some(4));
+        assert_eq!(all.open_problem, None);
+
+        assert_eq!(compose(recent.clone(), None), recent, "no open tier yet");
+    }
+
+    #[test]
+    fn why_the_open_ones_are_incomplete_is_said_once() {
+        let recent = ProjectPullRequests {
+            gh: true,
+            ..Default::default()
+        };
+        let mut partial = open_tier(&[3]);
+        partial.problem = Some("HTTP 504".into());
+        assert_eq!(
+            compose(recent.clone(), Some(&partial))
+                .open_problem
+                .as_deref(),
+            Some("HTTP 504")
+        );
+        // The recent tier already has a reason of its own: one line, not two.
+        let failing = ProjectPullRequests {
+            problem: Some("gh broke".into()),
+            ..recent.clone()
+        };
+        assert_eq!(compose(failing, Some(&partial)).open_problem, None);
+        partial.logged_out = true;
+        assert_eq!(compose(recent, Some(&partial)).open_problem, None);
+    }
+
+    #[test]
+    fn the_open_tier_is_only_asked_of_a_forge_gh_speaks_to() {
+        let answering = |repo: Option<Repo>| ProjectPullRequests {
+            gh: true,
+            repo,
+            ..Default::default()
+        };
+        assert_eq!(
+            open_host(&answering(on("github.com", ForgeKind::GitHub))),
+            Some(None),
+            "gh's default host"
+        );
+        assert_eq!(
+            open_host(&answering(on("github.example.com", ForgeKind::GitHub))),
+            Some(Some("github.example.com"))
+        );
+        assert_eq!(
+            open_host(&answering(on("work", ForgeKind::Unknown))),
+            Some(None),
+            "an ssh alias: gh knows what it stands for"
+        );
+        assert_eq!(
+            open_host(&answering(on("gitlab.com", ForgeKind::GitLab))),
+            None
+        );
+        assert_eq!(
+            open_host(&answering(on("bitbucket.org", ForgeKind::Bitbucket))),
+            None
+        );
+        assert_eq!(open_host(&answering(None)), None, "no remote to ask about");
+        let mut logged_out = answering(on("github.com", ForgeKind::GitHub));
+        logged_out.logged_out = true;
+        assert_eq!(open_host(&logged_out), None);
+        let mut without_gh = answering(on("github.com", ForgeKind::GitHub));
+        without_gh.gh = false;
+        assert_eq!(open_host(&without_gh), None);
+    }
+
+    /// The open tier is reused while it is fresh, read again on a refresh, kept but marked out
+    /// of date when the project is forgotten, and never emptied by a read that got nothing.
+    #[test]
+    fn the_open_tier_is_kept_until_something_better_arrives() {
+        let forge = Forge::default();
+        let asked = std::cell::Cell::new(0);
+        let read = |refresh: bool, answer: OpenPullRequests| {
+            forge.load_open("p1", refresh, || {
+                asked.set(asked.get() + 1);
+                answer
+            });
+        };
+        let held = || {
+            let open = forge.open.lock().unwrap();
+            let tier = open.get("p1").unwrap();
+            let numbers: Vec<u32> = tier
+                .found
+                .pull_requests
+                .iter()
+                .map(|pr| pr.number)
+                .collect();
+            (numbers, tier.found.problem.clone(), tier.at.is_some())
+        };
+
+        read(false, open_tier(&[3, 2]));
+        read(false, open_tier(&[1]));
+        assert_eq!(asked.get(), 1, "fresh: not asked again");
+        assert_eq!(held(), (vec![3, 2], None, true));
+
+        read(true, open_tier(&[4, 3]));
+        assert_eq!(asked.get(), 2, "a refresh asks");
+        assert_eq!(held().0, [4, 3]);
+
+        forge.forget("p1");
+        assert_eq!(
+            held(),
+            (vec![4, 3], None, false),
+            "still shown, known to be old"
+        );
+        let nothing = OpenPullRequests {
+            problem: Some("could not resolve host".into()),
+            ..Default::default()
+        };
+        read(false, nothing);
+        assert_eq!(asked.get(), 3, "out of date: asked without a refresh");
+        assert_eq!(
+            held(),
+            (vec![4, 3], Some("could not resolve host".into()), true),
+            "nothing arrived, so what was known stays, with the reason"
+        );
+
+        // Half a list is an answer: it replaces what was there.
+        let mut partial = open_tier(&[5]);
+        partial.problem = Some("HTTP 504".into());
+        read(true, partial);
+        assert_eq!(held(), (vec![5], Some("HTTP 504".into()), true));
+    }
+
+    #[test]
+    fn an_open_tier_read_before_the_project_changed_is_dropped() {
+        use std::sync::{mpsc, Arc};
+        let forge = Arc::new(Forge::default());
+        forge.load_open("p1", true, || open_tier(&[2]));
+        let worker_forge = Arc::clone(&forge);
+        let (started, started_rx) = mpsc::channel();
+        let (finish, finish_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_forge.load_open("p1", true, || {
+                started.send(()).unwrap();
+                finish_rx.recv().unwrap();
+                open_tier(&[9])
+            });
+        });
+        started_rx.recv().unwrap();
+        // A merge, say: what is on its way was read before it.
+        forge.forget("p1");
+        finish.send(()).unwrap();
+        worker.join().unwrap();
+        let open = forge.open.lock().unwrap();
+        let tier = open.get("p1").unwrap();
+        assert_eq!(tier.found.pull_requests[0].number, 2);
+        assert!(tier.at.is_none(), "and it is still due to be read again");
+    }
+
+    /// Without the view asking, the open tier is not read — and what it last said is still in
+    /// the answer.
+    #[test]
+    fn only_a_full_look_reads_the_open_tier() {
+        let forge = Forge::default();
+        let dir = tempfile::tempdir().unwrap();
+        forge.load_open("p1", true, || open_tier(&[3]));
+        let answer = forge.pull_requests(None, dir.path(), "p1", false, false, &|| None);
+        assert_eq!(
+            answer.pull_requests.len(),
+            1,
+            "from the open tier, as last read"
+        );
+        assert_eq!(answer.open_total, Some(1));
+        // A full look without gh has nobody to ask, and says nothing about it.
+        let full = forge.pull_requests(None, dir.path(), "p1", true, true, &|| None);
+        assert_eq!(full.pull_requests.len(), 1);
+        assert_eq!(full.open_problem, None);
     }
 
     #[test]
@@ -808,14 +1227,12 @@ mod tests {
                 ProjectPullRequests {
                     gh: true,
                     pull_requests: vec![pr("ys/feature", PullRequestState::Open)],
-                    problem: None,
-                    logged_out: false,
-                    workspaces: BTreeMap::new(),
+                    ..Default::default()
                 },
             ),
         );
         assert_eq!(
-            forge.pull_requests(None, dir.path(), "p1", false),
+            forge.pull_requests(None, dir.path(), "p1", false, false, &|| None),
             ProjectPullRequests::default()
         );
     }

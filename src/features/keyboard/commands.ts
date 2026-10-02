@@ -49,7 +49,8 @@ export function commandEnabled(id: CommandId): boolean {
       !projects.composingProjectId &&
       !projects.composingWorkspaceId &&
       !projects.workflowId &&
-      !projects.usageOpen
+      !projects.usageOpen &&
+      !projects.pullRequestsOpen
     );
   if (["closeTerminal", "previousTerminal", "nextTerminal"].includes(id))
     return (
@@ -58,7 +59,8 @@ export function commandEnabled(id: CommandId): boolean {
       !projects.composingProjectId &&
       !projects.composingWorkspaceId &&
       !projects.workflowId &&
-      !projects.usageOpen
+      !projects.usageOpen &&
+      !projects.pullRequestsOpen
     );
   if (["nextWorkspace", "previousWorkspace"].includes(id)) return availableWorkspaces().length > 0;
   return true;
@@ -81,6 +83,9 @@ export function runCommand(id: CommandId) {
       break;
     case "usage":
       projects.openUsage(true);
+      break;
+    case "pullRequests":
+      projects.openPullRequests(true);
       break;
     case "tour":
       layout.setTourOpen(true);

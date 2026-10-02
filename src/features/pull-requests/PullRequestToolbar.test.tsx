@@ -43,7 +43,13 @@ const pr: PullRequest = {
       { name: "Build", state: "passing" },
     ],
     mergeable: "mergeable",
+    checkCounts: { passed: 2, failed: 0, running: 0 },
+    reviewRequests: [],
+    reviews: [],
+    crossRepository: false,
   },
+  author: "ada",
+  createdAt: null,
 };
 const found = (requests = [pr], workspaces: Record<string, number[]> = {}) => ({
   gh: true,
@@ -51,6 +57,10 @@ const found = (requests = [pr], workspaces: Record<string, number[]> = {}) => ({
   problem: null,
   loggedOut: false,
   workspaces,
+  repo: null,
+  viewer: null,
+  openTotal: null,
+  openProblem: null,
 });
 beforeEach(() => {
   vi.resetAllMocks();
@@ -113,7 +123,7 @@ it.each([
       method,
     ),
   );
-  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true);
+  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false);
   expect(await screen.findByRole("status")).toHaveTextContent("Merge request sent");
 });
 it("offers copy and refresh, and reports merge errors", async () => {
@@ -123,7 +133,7 @@ it("offers copy and refresh, and reports merge errors", async () => {
   await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(pr.url));
   await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
   await user.click(screen.getByRole("menuitem", { name: "Refresh pull request" }));
-  await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true));
+  await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false));
   native.confirm.mockResolvedValue(true);
   core.workspaceMergePullRequest.mockRejectedValue(new Error("Branch protection requires review"));
   await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
@@ -295,7 +305,7 @@ it("asks the agent and shows the tab it is in", async () => {
     "Asked Claude Code to resolve the conflicts in #85.",
   );
   expect(useTerminalStore.getState().active["w-alpha-feature"]).toBe("pty-7");
-  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true);
+  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false);
 });
 
 it("says why when the agent cannot be asked", async () => {
