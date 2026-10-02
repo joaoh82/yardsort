@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.17.0
 
 - **Usage: the tokens your agents spent, and what they use of the machine.** **Usage**, at the
   foot of the sidebar or in the command palette, has two tabs. **Token usage** reads the logs
