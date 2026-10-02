@@ -2,11 +2,18 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectPullRequests } from "@/lib/ipc";
-import { project, pullRequest, pullRequestsOf, worktree } from "@/test/fixtures";
+import {
+  project,
+  pullRequest,
+  pullRequestsOf,
+  pullRequestSummary,
+  worktree,
+} from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   uiStateSave: vi.fn(),
   projectPullRequests: vi.fn(),
+  pullRequestSummary: vi.fn(),
   pullRequestMerge: vi.fn(),
   pullRequestClose: vi.fn(),
   pullRequestReopen: vi.fn(),
@@ -110,6 +117,9 @@ beforeEach(() => {
   localStorage.clear();
   core.uiStateSave.mockResolvedValue(undefined);
   core.projectPullRequests.mockImplementation(async (id: string) => answers()[id]);
+  core.pullRequestSummary.mockImplementation(async (id: string, number: number) =>
+    pullRequestSummary(answers()[id]!.pullRequests.find((pr) => pr.number === number)!),
+  );
   core.sessionsList.mockResolvedValue([]);
   core.ptySpawn.mockResolvedValue({ id: "s1", labels: { workspace: feature.id } });
   opener.openUrl.mockResolvedValue(undefined);
@@ -131,7 +141,13 @@ beforeEach(() => {
     error: null,
   });
   usePublishStore.setState({ byProject: {}, workspaceId: null, state: null, busy: null });
-  usePullRequestsStore.setState({ selected: null, busy: null, error: null, notice: null });
+  usePullRequestsStore.setState({
+    selected: null,
+    summaries: {},
+    busy: null,
+    error: null,
+    notice: null,
+  });
   useSessionsStore.setState({ byWorkspace: {}, error: null });
   useTerminalStore.setState({ tabs: [], active: {}, error: null });
 });
@@ -374,6 +390,10 @@ describe("the details", () => {
     expect(row(/Add a retry/)).toHaveAttribute("aria-current", "true");
     expect(within(pane).getByText("grace/retry → main")).toBeVisible();
     expect(within(pane).getByText("Review required")).toBeVisible();
+    expect(
+      await within(pane).findByText("What Add a retry to the uploader is about."),
+    ).toBeVisible();
+    expect(core.pullRequestSummary).toHaveBeenCalledWith(alpha.id, 8, false);
     const reviewers = within(pane).getByRole("region", { name: "Reviewers" });
     expect(reviewers).toHaveTextContent("linuscommented");
     expect(reviewers).toHaveTextContent("adareview requested");
@@ -500,6 +520,10 @@ describe("merging, closing and reopening", () => {
     await user.click(row(/Add a retry/));
     await user.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(core.pullRequestClose).toHaveBeenCalledWith(alpha.id, 8));
+    // What the forge says about it now is asked for too, not taken from before the close.
+    await waitFor(() =>
+      expect(core.pullRequestSummary).toHaveBeenLastCalledWith(alpha.id, 8, true),
+    );
     const [message, options] = native.confirm.mock.calls[0]!;
     expect(message).toContain("Close pull request #8 without merging it?");
     expect(message).toContain("grace opened it, not you.");

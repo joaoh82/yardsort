@@ -65,7 +65,10 @@ import {
   type CheckCounts,
   type Checks,
   type PreparedBranch,
+  type PullRequestCheck,
+  type PullRequestPost,
   type PullRequestReview,
+  type PullRequestSummary,
   type ReviewRequest,
   type ReviewState,
   type ConflictHelper,
@@ -173,7 +176,10 @@ export type {
   CheckCounts,
   Checks,
   PreparedBranch,
+  PullRequestCheck,
+  PullRequestPost,
   PullRequestReview,
+  PullRequestSummary,
   ReviewRequest,
   ReviewState,
   ConflictHelper,
@@ -453,6 +459,9 @@ export const ipc = {
    *  view's question, and several round trips on a busy repository. */
   projectPullRequests: (projectId: string, refresh = false, full = false) =>
     unwrap(commands.projectPullRequests(projectId, refresh, full)),
+  /** One pull request in full: description, checks with links, reviewers, conversation. */
+  pullRequestSummary: (projectId: string, number: number, refresh = false) =>
+    unwrap(commands.pullRequestSummary(projectId, number, refresh)),
   /** Merge any pull request of a project, at the head commit the user confirmed. */
   pullRequestMerge: (projectId: string, number: number, headOid: string, method: MergeMethod) =>
     done(commands.pullRequestMerge(projectId, number, headOid, method)),

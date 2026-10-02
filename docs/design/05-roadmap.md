@@ -700,7 +700,7 @@ fixture; the docs list every action and variable that exists and none that does 
 ## M23 — Pull requests
 
 Proposed in [22-pull-requests](22-pull-requests.md), after a ten-question design pass on
-2026-10-02. Slice 1 is built.
+2026-10-02. Slices 1 and 2 are built.
 
 - A **Pull requests** row at the top of the sidebar, above Workflows, opens a view in the center
   panel: every pull request of every project's repository, with state, project, author and
@@ -726,7 +726,11 @@ Proposed in [22-pull-requests](22-pull-requests.md), after a ten-question design
       view was also driven in headless Chromium with demo data. Not done: the screenshot, which
       wants a real window. Recorded in
       [22 § slice 1](22-pull-requests.md#slice-1-what-shipped).
-- [ ] Slice 2: Summary.
+- [x] Slice 2: Summary. `gh pr view` for one pull request in full, kept for 30 s; the description
+      and the conversation as Markdown with no HTML, no image loaded and every link opened in the
+      browser; every check with its workflow and a link to its run; a summary that is read again
+      when the list says the pull request changed. Recorded in
+      [22 § slice 2](22-pull-requests.md#slice-2-what-shipped).
 - [ ] Slice 3: Code.
 - [ ] Slice 4: writing — a reply box, comments on lines, and selected lines of a diff sent to a
       workspace's agent.

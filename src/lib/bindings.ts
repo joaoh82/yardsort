@@ -98,6 +98,11 @@ export const commands = {
 	 */
 	projectPullRequests: (projectId: string, refresh: boolean, full: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh, full })),
 	/**
+	 *  One pull request in full: its description, every check with its link, its reviewers and
+	 *  the conversation. What the Pull requests view's Summary shows, read when a row is opened.
+	 */
+	pullRequestSummary: (projectId: string, number: number, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("pull_request_summary", { projectId, number, refresh })),
+	/**
 	 *  Merge a pull request of this project, if it is still open, still not a draft and still at
 	 *  the head commit the user confirmed. Never deletes a branch, never bypasses a protection.
 	 */
@@ -1400,6 +1405,10 @@ export type PullRequest = {
 export type PullRequestCheck = {
 	name: string,
 	state: Checks,
+	/**  The workflow a check run belongs to — `CI` for `CI / test`. A commit status has none. */
+	workflow: string | null,
+	/**  Where the forge shows this run: its log, or whatever a commit status points at. */
+	url: string | null,
 };
 
 /**  Detail shared by the sidebar card and toolbar, from the same project-wide query. */
@@ -1433,6 +1442,34 @@ export type PullRequestOpened = {
 	created: boolean,
 };
 
+/**  A comment on a pull request's conversation, or a review of it. */
+export type PullRequestPost = {
+	kind: PullRequestPostKind,
+	/**  By login. `None` for an account that no longer exists. */
+	author: string | null,
+	/**  When it was posted, in epoch milliseconds. */
+	at: number | null,
+	/**
+	 *  Markdown. Often empty for a review, which may be a verdict and nothing else, or only
+	 *  comments on lines.
+	 */
+	body: string,
+	/**
+	 *  Where to read it on the forge. A review has no address of its own, and gets the pull
+	 *  request's.
+	 */
+	url: string | null,
+	/**  What a review concluded. `None` for a comment. */
+	review: ReviewState | null,
+	/**
+	 *  The forge has hidden it — as spam, off-topic, outdated — and says why. Its words are
+	 *  then not shown here either.
+	 */
+	hidden: string | null,
+};
+
+export type PullRequestPostKind = "comment" | "review";
+
 /**  A reviewer's latest word on a pull request. */
 export type PullRequestReview = {
 	login: string,
@@ -1440,6 +1477,23 @@ export type PullRequestReview = {
 };
 
 export type PullRequestState = "open" | "merged" | "closed";
+
+/**
+ *  One pull request in full, asked about by itself: what the Pull requests view's Summary
+ *  shows. The list has most of [`PullRequest`] already; this adds the words.
+ */
+export type PullRequestSummary = {
+	/**  As the forge has it this moment, with every check by name and link. */
+	pullRequest: PullRequest,
+	/**  The description, as its author wrote it: Markdown. Empty when there is none. */
+	body: string,
+	changedFiles: number,
+	/**
+	 *  The conversation: comments and reviews as they were given, oldest first. Comments made
+	 *  on particular lines are not among them — `gh pr view` does not return those.
+	 */
+	posts: PullRequestPost[],
+};
 
 /**  Asks the webview to put the question to the user. It answers with [`app_quit`]. */
 export type QuitRequested = {

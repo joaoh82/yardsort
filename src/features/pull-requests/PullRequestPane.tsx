@@ -3,9 +3,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { selectWorkspace } from "@/features/keyboard/commands";
-import type { MergeMethod, PullRequest } from "@/lib/ipc";
+import type { MergeMethod } from "@/lib/ipc";
 import { usePullRequestsStore, type Target } from "@/stores/pullRequests";
-import { PullRequestDetails } from "./PullRequestDetails";
+import { Summary } from "./Summary";
 import { mergeBlocked } from "./appearance";
 import { age, type Row } from "./rows";
 
@@ -19,16 +19,10 @@ const button =
   "h-7 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
 const quiet = "size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink";
 
-const verdict = {
-  approved: "approved",
-  changesRequested: "requested changes",
-  commented: "commented",
-  dismissed: "review dismissed",
-} as const;
-
 /**
- * One pull request, beside the list: who and when, what can be done to it, and what the forge
- * says about it. The Summary and the Code of the design arrive here in later slices.
+ * One pull request, beside the list: who and when, what can be done to it, and its Summary —
+ * description, checks, reviewers, conversation. The Code of the design arrives in a later slice,
+ * and the two become tabs then.
  */
 export function PullRequestPane({
   row,
@@ -100,8 +94,7 @@ export function PullRequestPane({
         )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-4 select-text">
-        <PullRequestDetails pr={pr} link={false} />
-        <Reviewers pr={pr} />
+        <Summary row={row} now={now} />
       </div>
     </section>
   );
@@ -221,53 +214,5 @@ function Actions({ row }: { row: Row }) {
         {copied ? "Copied" : "Copy link"}
       </button>
     </div>
-  );
-}
-
-/** Who was asked for a review and has not answered, and each reviewer's latest word. */
-function Reviewers({ pr }: { pr: PullRequest }) {
-  const details = pr.details;
-  if (!details) return null;
-  const { reviewRequests, reviews } = details;
-  return (
-    <section aria-label="Reviewers" className="mt-4 border-t border-line pt-3">
-      <h3 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
-        Reviewers
-      </h3>
-      {reviewRequests.length + reviews.length === 0 ? (
-        <p className="mt-2 text-ink-faint">Nobody has been asked, and nobody has reviewed it.</p>
-      ) : (
-        <ul className="mt-2 space-y-1">
-          {reviews.map((review) => (
-            <li key={`review-${review.login}`} className="flex justify-between gap-3">
-              <span className="min-w-0 truncate">{review.login}</span>
-              <span
-                className={`shrink-0 ${
-                  review.state === "approved"
-                    ? "text-green-400"
-                    : review.state === "changesRequested"
-                      ? "text-red-400"
-                      : "text-ink-muted"
-                }`}
-              >
-                {verdict[review.state]}
-              </span>
-            </li>
-          ))}
-          {reviewRequests.map((request) => (
-            <li
-              key={`request-${request.team ? "team" : "user"}-${request.name}`}
-              className="flex justify-between gap-3"
-            >
-              <span className="min-w-0 truncate">
-                {request.team && <span className="text-ink-faint">team </span>}
-                {request.name}
-              </span>
-              <span className="shrink-0 text-amber-300">review requested</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }

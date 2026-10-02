@@ -1,4 +1,4 @@
-import type { Project, ProjectPullRequests, PullRequest, Workspace } from "@/lib/ipc";
+import type { CheckCounts, Project, ProjectPullRequests, PullRequest, Workspace } from "@/lib/ipc";
 import { pullRequestsFor } from "@/stores/publish";
 
 /** A pull request in the list: the request, the project it belongs to, and what links them. */
@@ -99,3 +99,12 @@ export function checksLabel(pr: PullRequest): string {
 /** `owner/name`, or nothing for a project whose remote is not a forge. */
 export const repoName = (found: ProjectPullRequests | undefined): string =>
   found?.repo ? `${found.repo.owner}/${found.repo.name}` : "";
+
+/** The checks in one line: what failed first, then what is still going, then that all is well. */
+export function checksHeadline(counts: CheckCounts | undefined): string {
+  const total = counts ? counts.passed + counts.failed + counts.running : 0;
+  if (!counts || total === 0) return "No checks reported";
+  if (counts.failed > 0) return `${counts.failed} of ${total} failed`;
+  if (counts.running > 0) return `${counts.running} of ${total} still running`;
+  return total === 1 ? "The one check passed" : `All ${total} passed`;
+}

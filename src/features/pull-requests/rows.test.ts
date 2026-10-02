@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { project, pullRequest, pullRequestsOf, worktree } from "@/test/fixtures";
-import { age, checksLabel, checksSummary, moreOpenThanListed, openIn, rowsOf } from "./rows";
+import {
+  age,
+  checksHeadline,
+  checksLabel,
+  checksSummary,
+  moreOpenThanListed,
+  openIn,
+  rowsOf,
+} from "./rows";
 
 const at = (iso: string) => ({ details: { updatedAt: iso } });
 
@@ -89,6 +97,15 @@ describe("what a row says", () => {
     expect(checksSummary(none)).toBe("");
     expect(checksLabel(none)).toBe("no checks reported");
     expect(checksSummary({ ...none, details: null })).toBe("");
+  });
+
+  it("says in one line how the checks went: what failed, then what is going, then all well", () => {
+    expect(checksHeadline({ passed: 9, failed: 2, running: 1 })).toBe("2 of 12 failed");
+    expect(checksHeadline({ passed: 9, failed: 0, running: 3 })).toBe("3 of 12 still running");
+    expect(checksHeadline({ passed: 12, failed: 0, running: 0 })).toBe("All 12 passed");
+    expect(checksHeadline({ passed: 1, failed: 0, running: 0 })).toBe("The one check passed");
+    expect(checksHeadline({ passed: 0, failed: 0, running: 0 })).toBe("No checks reported");
+    expect(checksHeadline(undefined)).toBe("No checks reported");
   });
 
   it("gives an age in the shortest form that is still clear", () => {
