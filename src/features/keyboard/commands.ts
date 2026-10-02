@@ -48,7 +48,8 @@ export function commandEnabled(id: CommandId): boolean {
       usable &&
       !projects.composingProjectId &&
       !projects.composingWorkspaceId &&
-      !projects.workflowId
+      !projects.workflowId &&
+      !projects.usageOpen
     );
   if (["closeTerminal", "previousTerminal", "nextTerminal"].includes(id))
     return (
@@ -56,7 +57,8 @@ export function commandEnabled(id: CommandId): boolean {
       !!useTerminalStore.getState().active[workspaceId] &&
       !projects.composingProjectId &&
       !projects.composingWorkspaceId &&
-      !projects.workflowId
+      !projects.workflowId &&
+      !projects.usageOpen
     );
   if (["nextWorkspace", "previousWorkspace"].includes(id)) return availableWorkspaces().length > 0;
   return true;
@@ -76,6 +78,9 @@ export function runCommand(id: CommandId) {
       break;
     case "shortcuts":
       layout.openSettings("keyboard");
+      break;
+    case "usage":
+      projects.openUsage(true);
       break;
     case "tour":
       layout.setTourOpen(true);

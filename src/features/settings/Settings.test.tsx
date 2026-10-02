@@ -97,6 +97,7 @@ const settings: SettingsInfo = {
     capturePi: false,
     captureCursor: false,
   },
+  showUsageInSidebar: true,
 };
 
 const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({

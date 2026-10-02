@@ -6,6 +6,8 @@ import { Channel, isTauri } from "@tauri-apps/api/core";
 import {
   commands,
   events,
+  type MachineReport as RawMachineReport,
+  type UsageReport as RawUsageReport,
   type ActivityCounter,
   type ActivityDiagnostics,
   type ActivityEvent,
@@ -210,6 +212,26 @@ export function errorMessage(error: unknown): string {
 type Outcome<T> = { status: "ok"; data: T } | { status: "error"; error: IpcError };
 
 /** Generated commands return a result object; the app prefers exceptions. Throws `IpcError`. */
+/**
+ * specta types every Rust `f64` as `number | null`, because JSON has no NaN. The usage reports'
+ * figures are always finite, so they are narrowed to `number` here, once — except the fields that
+ * really are optional, named in `Keep`.
+ */
+type Finite<T, Keep extends string> = [T] extends [number | null]
+  ? number
+  : T extends (infer U)[]
+    ? Finite<U, Keep>[]
+    : T extends object
+      ? { [K in keyof T]: K extends Keep ? T[K] : Finite<T[K], Keep> }
+      : T;
+export type UsageReport = Finite<RawUsageReport, "knownCost" | "resetsAt">;
+export type MachineReport = Finite<RawMachineReport, "loadOne">;
+export type AgentLimits = UsageReport["limits"][number];
+export type ModelUsage = UsageReport["models"][number];
+export type PlaceUsage = UsageReport["places"][number];
+export type Load = MachineReport["yardsort"];
+export type TerminalLoad = MachineReport["loose"][number];
+
 async function unwrap<T>(outcome: Promise<Outcome<T>>): Promise<T> {
   const result = await outcome;
   if (result.status === "error") throw result.error;
@@ -278,6 +300,17 @@ export const ipc = {
 
   settingsSaveActivity: (activity: ActivitySettingsDto) =>
     unwrap(commands.settingsSaveActivity(activity)),
+  /** Whether Usage is offered at the foot of the sidebar. */
+  settingsSaveUsage: (showInSidebar: boolean) => unwrap(commands.settingsSaveUsage(showInSidebar)),
+
+  /** What Yardsort and its agents use of this machine now, with the last five minutes. */
+  usageMachine: () => unwrap(commands.usageMachine()) as Promise<MachineReport>,
+  /**
+   * Tokens the agents spent over the last `days` days, read from their own logs on this
+   * machine and priced at API rates. Days are the viewer's own.
+   */
+  usageTokens: (days: number) =>
+    unwrap(commands.usageTokens(days, -new Date().getTimezoneOffset())) as Promise<UsageReport>,
 
   /**
    * A page of a workspace's recorded activity, newest first: events before `beforeSeq`, or the

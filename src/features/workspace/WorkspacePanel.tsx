@@ -3,6 +3,7 @@ import { PullRequestToolbar } from "@/features/pull-requests/PullRequestToolbar"
 import { ActivityPanel } from "@/features/activity/ActivityPanel";
 import { Composer } from "@/features/composer/Composer";
 import { WorkflowView } from "@/features/workflows/WorkflowView";
+import { UsageView } from "@/features/usage/UsageView";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
 import { LatencyRunner } from "@/features/terminal/LatencyRunner";
@@ -35,6 +36,7 @@ export function WorkspacePanel() {
   // so the panel needs both the workspace and the project it belongs to.
   const composingWorkspaceId = useProjectsStore((s) => s.composingWorkspaceId);
   const workflowId = useProjectsStore((s) => s.workflowId);
+  const usageOpen = useProjectsStore((s) => s.usageOpen);
   const runIn =
     selection && selection.workspace.id === composingWorkspaceId ? selection : undefined;
 
@@ -53,7 +55,9 @@ export function WorkspacePanel() {
   }
   return (
     <main aria-label="Workspace" className="flex h-full flex-col bg-canvas">
-      {workflowId ? (
+      {usageOpen ? (
+        <UsageView />
+      ) : workflowId ? (
         <WorkflowView key={workflowId} workflowId={workflowId} />
       ) : composingFor ? (
         <Composer key={composingFor.id} project={composingFor} />

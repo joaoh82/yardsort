@@ -64,6 +64,8 @@ pub struct SettingsInfo {
     /// Why the settings file was ignored, if it was (it is kept, never overwritten).
     pub problem: Option<String>,
     pub activity: ActivitySettingsDto,
+    /// Offer Usage at the foot of the sidebar.
+    pub show_usage_in_sidebar: bool,
 }
 
 /// The activity switches, as Settings → General shows them. See `crate::activity`.
@@ -261,6 +263,7 @@ pub(crate) fn settings_info(state: &AppState) -> IpcResult<SettingsInfo> {
             capture_pi: settings.activity.capture_pi,
             capture_cursor: settings.activity.capture_cursor,
         },
+        show_usage_in_sidebar: settings.usage.show_in_sidebar,
         notify_when_quiet: settings.general.notify_when_quiet,
         check_for_updates: settings.general.check_for_updates,
         editor_command: settings.general.editor_command,

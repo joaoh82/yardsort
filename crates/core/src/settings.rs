@@ -25,6 +25,8 @@ pub struct Settings {
     pub draft: DraftSettings,
     #[serde(skip_serializing_if = "ActivitySettings::is_default")]
     pub activity: ActivitySettings,
+    #[serde(skip_serializing_if = "UsageSettings::is_default")]
+    pub usage: UsageSettings,
     /// Overrides of built-in harnesses, and whole custom ones. See [`HarnessOverride`].
     #[serde(rename = "harness", skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessOverride>,
@@ -56,6 +58,28 @@ impl Default for GeneralSettings {
 }
 
 impl GeneralSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// The Usage view: what the agents use of this machine, and the tokens they spent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UsageSettings {
+    /// Offer Usage at the foot of the sidebar. The command palette offers it either way.
+    pub show_in_sidebar: bool,
+}
+
+impl Default for UsageSettings {
+    fn default() -> Self {
+        Self {
+            show_in_sidebar: true,
+        }
+    }
+}
+
+impl UsageSettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }

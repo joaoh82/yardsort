@@ -11,6 +11,10 @@ interface AppState {
   checkForUpdates: boolean;
   /** Mirrors the activity setting: whether a workspace offers its experimental timeline. */
   showTimeline: boolean;
+  /** Mirrors the usage setting: whether Usage sits at the foot of the sidebar. */
+  showUsageInSidebar: boolean;
+  /** Turn that on or off, saving it. */
+  setShowUsageInSidebar: (show: boolean) => Promise<void>;
   load: () => Promise<void>;
 }
 
@@ -23,6 +27,12 @@ export const useAppStore = create<AppState>((set) => ({
   // Off until the settings say otherwise, so nothing phones home before they are read.
   checkForUpdates: false,
   showTimeline: false,
+  showUsageInSidebar: true,
+  async setShowUsageInSidebar(show) {
+    set({ showUsageInSidebar: show });
+    const settings = await ipc.settingsSaveUsage(show);
+    set({ showUsageInSidebar: settings.showUsageInSidebar });
+  },
   async load() {
     if (!hasCore()) return;
     set({ info: await ipc.appInfo(), daemon: await ipc.daemonStatus() });
@@ -31,6 +41,7 @@ export const useAppStore = create<AppState>((set) => ({
       notifyWhenQuiet: settings.notifyWhenQuiet,
       checkForUpdates: settings.checkForUpdates,
       showTimeline: settings.activity.showTimeline,
+      showUsageInSidebar: settings.showUsageInSidebar,
     });
     // Slower: the first call waits for the login shell to report its environment.
     set({ env: await ipc.envInfo() });

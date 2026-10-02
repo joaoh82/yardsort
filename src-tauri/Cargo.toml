@@ -46,6 +46,8 @@ tokio = { version = "1", features = ["time", "rt"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The Usage view's machine resources: CPU and memory per process, on every platform.
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }

@@ -26,6 +26,10 @@ const POINTS = [
     body: "After you archive or delete a workspace, one optional click says how it went; a merged pull request counts as kept until you say otherwise. Each agent's history on your own work sits beside the composer's picker, and says too few to say until there is enough of it.",
   },
   {
+    title: "Usage: tokens and the machine",
+    body: "What your agents spent, read from their own logs on this machine — by day, agent, model and workspace, priced at API rates for comparison. Beside it, live CPU and memory for every agent, down to each terminal's process tree. Nothing is sent anywhere.",
+  },
+  {
     title: "Closing the window doesn't stop them",
     body: "Terminals live in a small background process, so agents keep working while Yardsort is closed — or after it crashes. Open it again and every screen is repainted where it got to.",
   },

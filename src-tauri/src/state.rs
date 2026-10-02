@@ -33,6 +33,8 @@ pub struct AppState {
     pub watcher: Mutex<Option<crate::changes::watch::WorkspaceWatcher>>,
     /// Watches the activity inbox for what agents' hooks drop there. See `crate::activity`.
     pub inbox_watcher: Mutex<Option<crate::activity::InboxWatcher>>,
+    /// The Usage view's process sampler and parsed session logs. See `crate::usage`.
+    pub usage: crate::usage::Usage,
     env: Mutex<Option<Arc<ShellEnv>>>,
 }
 
@@ -55,6 +57,7 @@ impl AppState {
             reconciling: Mutex::new(()),
             watcher: Mutex::new(None),
             inbox_watcher: Mutex::new(None),
+            usage: crate::usage::Usage::default(),
             env: Mutex::new(None),
         }
     }

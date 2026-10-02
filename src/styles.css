@@ -17,6 +17,15 @@
     Consolas, monospace;
 }
 
+/* One per agent in the Usage view's charts. Validated for colour-blind separation against the
+   surface of each mode; a legend and labels name them too. `static`, because the charts use them
+   from inline styles, which Tailwind cannot see, and it drops theme variables nothing uses. */
+@theme static {
+  --color-agent-claude: #cf6a48;
+  --color-agent-codex: #4a8ad0;
+  --color-agent-grok: #4aa36a;
+}
+
 /* Make native controls — selects, scrollbars, date pickers — follow the theme too. */
 :root {
   color-scheme: dark;
@@ -33,6 +42,9 @@
     --color-ink-muted: #4b5563;
     --color-ink-faint: #7b8493;
     --color-accent: #b77a00;
+    --color-agent-claude: #c2603f;
+    --color-agent-codex: #2f74c0;
+    --color-agent-grok: #2f8f55;
   }
 }
 

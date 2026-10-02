@@ -314,6 +314,15 @@ export const commands = {
 	 *  their work. A repository, not a bare folder, because Codex refuses to run outside one.
 	 */
 	workflowDescribe: (description: string) => typedError<Described, IpcError>(__TAURI_INVOKE("workflow_describe", { description })),
+	/**  What Yardsort and its agents use of this machine right now, with the last five minutes. */
+	usageMachine: () => typedError<MachineReport, IpcError>(__TAURI_INVOKE("usage_machine")),
+	/**
+	 *  The tokens the agents spent over the last `days` days, from their own logs on this machine.
+	 *  `utc_offset_minutes` is the viewer's, so a day is theirs.
+	 */
+	usageTokens: (days: number, utcOffsetMinutes: number) => typedError<UsageReport, IpcError>(__TAURI_INVOKE("usage_tokens", { days, utcOffsetMinutes })),
+	/**  Whether Usage is offered at the foot of the sidebar. */
+	settingsSaveUsage: (showInSidebar: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_usage", { showInSidebar })),
 };
 
 /** Events */
@@ -435,6 +444,14 @@ export type AddedProject = {
 	revived: boolean,
 };
 
+export type AgentLimits = {
+	agent: string,
+	plan: string | null,
+	/**  When the agent last heard these from its vendor, in epoch milliseconds. */
+	observedAt: number | null,
+	windows: LimitWindowDto[],
+};
+
 export type AgentOutcomes = {
 	harness: string,
 	attempts: number,
@@ -448,6 +465,17 @@ export type AgentOutcomes = {
 	enough: boolean,
 };
 
+export type AgentUsage = {
+	/**  The harness id: `claude`, `codex` or `grok`. */
+	agent: string,
+	tokens: number | null,
+	cost: number | null,
+	/**  Where its logs are, with the home folder as `~`. */
+	location: string | null,
+	/**  Log files found there, of any age. */
+	files: number,
+};
+
 /**  Static facts about the running app, shown in the UI and useful in bug reports. */
 export type AppInfo = {
 	name: string,
@@ -457,6 +485,13 @@ export type AppInfo = {
 	arch: string,
 	debug: boolean,
 	dev: DevFlags,
+};
+
+/**  A part of the app itself: its main process, its webview, the terminal host. */
+export type AppPart = {
+	/**  `main`, `webview` or `host`. */
+	part: string,
+	load: Load,
 };
 
 export type AssistStatus = {
@@ -604,6 +639,12 @@ export type DaemonStatus = {
 	 *  rather than stopped behind the user's back.
 	 */
 	strandedSessions: number | null,
+};
+
+export type DayUsage = {
+	date: string,
+	cost: (number | null)[],
+	tokens: (number | null)[],
 };
 
 /**  A workflow a model wrote from a description, checked, for the editor. Nothing is saved. */
@@ -902,6 +943,13 @@ export type HeadInfo = {
 	unborn: boolean,
 };
 
+export type HistoryPoint = {
+	/**  Epoch milliseconds. */
+	at: number | null,
+	cpu: number | null,
+	memory: number | null,
+};
+
 /**  Host-wide notifications, delivered to the sink given to [`crate::PtyHost::new`]. */
 export type HostEvent = 
 /**  The session's process ended and all of its output has been delivered. */
@@ -962,6 +1010,34 @@ export type KeySource = "none" |
 /**  `TYPESAFE_API_KEY`, from the environment Yardsort runs in. */
 "environment";
 
+export type LimitWindowDto = {
+	minutes: number | null,
+	usedPercent: number | null,
+	resetsAt: number | null,
+};
+
+export type Load = {
+	/**  Percent of the whole machine: every core counted, so it never passes 100. */
+	cpu: number | null,
+	/**  Bytes resident. */
+	memory: number | null,
+	processes: number,
+};
+
+export type MachineReport = {
+	sampledAt: number | null,
+	/**  Everything below together: the app, the terminal host and every terminal. */
+	yardsort: Load,
+	system: SystemLoad,
+	app: AppPart[],
+	/**  Projects with something running, heaviest first. */
+	projects: ProjectLoad[],
+	/**  Terminals in no workspace. */
+	loose: TerminalLoad[],
+	/**  Yardsort's own total, oldest first, over the last five minutes it was looked at. */
+	history: HistoryPoint[],
+};
+
 /**  What Jev said about one proposal. */
 export type MemoryCheck = {
 	id: string,
@@ -1014,6 +1090,14 @@ export type MergeMethod = "squash" | "merge" | "rebase";
  */
 export type Mergeable = "mergeable" | "conflicting" | "unknown";
 
+export type ModelUsage = {
+	model: string,
+	agent: string,
+	tokens: number | null,
+	/**  `None` when the model's price is not known. */
+	knownCost: number | null,
+};
+
 export type NewWorkspace = {
 	projectId: string,
 	/**  `None` starts from the project's default branch. */
@@ -1038,6 +1122,17 @@ export type ObservedMatch = {
 export type ObservedWrite = {
 	at: number | null,
 	matches: ObservedMatch[],
+};
+
+/**  Where the tokens were spent: a Yardsort workspace, or a folder Yardsort does not know. */
+export type PlaceUsage = {
+	label: string,
+	project: string | null,
+	workspaceId: string | null,
+	/**  The folder, for one Yardsort does not know. */
+	folder: string | null,
+	tokens: number | null,
+	cost: number | null,
 };
 
 export type PrActivity = "review" | "comment" | "any";
@@ -1089,6 +1184,13 @@ export type ProjectAutomation = {
 export type ProjectCommand = {
 	program: string,
 	args: string[],
+};
+
+export type ProjectLoad = {
+	projectId: string,
+	name: string,
+	load: Load,
+	workspaces: WorkspaceLoad[],
 };
 
 /**  A project's memory, as the view shows it. */
@@ -1428,6 +1530,8 @@ export type SettingsInfo = {
 	/**  Why the settings file was ignored, if it was (it is kept, never overwritten). */
 	problem: string | null,
 	activity: ActivitySettingsDto,
+	/**  Offer Usage at the foot of the sidebar. */
+	showUsageInSidebar: boolean,
 };
 
 /**  Where a workflow came from. */
@@ -1475,9 +1579,33 @@ export type Suggestion = {
 	effortByHarness: { [key in string]: string },
 };
 
+export type SystemLoad = {
+	totalMemory: number | null,
+	usedMemory: number | null,
+	availableMemory: number | null,
+	cpuCount: number,
+	/**  Percent of the whole machine in use, by anything. */
+	cpu: number | null,
+	/**  The one-minute load average. Windows has none. */
+	loadOne: number | null,
+};
+
 export type TermSize = {
 	cols: number,
 	rows: number,
+};
+
+export type TerminalLoad = {
+	sessionId: string,
+	/**
+	 *  The conversation's title, else the harness's name; `None` for a plain shell or a run
+	 *  command, which the page names itself.
+	 */
+	label: string | null,
+	harness: string | null,
+	/**  Set for a project's run command. */
+	run: boolean,
+	load: Load,
 };
 
 /**
@@ -1492,6 +1620,18 @@ export type ThresholdsDto = {
 	defaults: [number, number, number],
 	/**  The lowest and highest either end may be. */
 	range: [number, number],
+};
+
+export type TokenTotals = {
+	/**  Everything: input of every kind, and output. */
+	processed: number | null,
+	cacheRead: number | null,
+	cacheWrite: number | null,
+	/**  Input that was neither read from nor written to a cache. */
+	uncachedInput: number | null,
+	output: number | null,
+	/**  What reading from the cache saved against paying full input price for the same tokens. */
+	cacheSavings: number | null,
 };
 
 /**  What starts a run, and what a run is about. */
@@ -1522,6 +1662,26 @@ export type UpdateStatus = {
 	installKind: InstallKind,
 	/**  The newer release, if there is one. */
 	available: AvailableUpdate | null,
+};
+
+export type UsageReport = {
+	days: number,
+	/**  `YYYY-MM-DD`, the first and the last day in range. */
+	from: string,
+	to: string,
+	/**  What the priced tokens would cost at API rates, in US dollars. */
+	cost: number | null,
+	/**  Models seen whose price is not known: their tokens are counted, their cost is not. */
+	unpricedModels: string[],
+	totals: TokenTotals,
+	/**  Every agent with logs or usage, in a fixed order. */
+	agents: AgentUsage[],
+	/**  One per day in range, oldest first; `cost` and `tokens` line up with `agents`. */
+	daily: DayUsage[],
+	/**  Most expensive first, then most tokens. */
+	models: ModelUsage[],
+	places: PlaceUsage[],
+	limits: AgentLimits[],
 };
 
 /**  A workflow file, checked and ready to run. */
@@ -1627,6 +1787,13 @@ export type WorkspaceKind =
 "local" | 
 /**  A git worktree on its own branch. */
 "worktree";
+
+export type WorkspaceLoad = {
+	workspaceId: string,
+	name: string,
+	load: Load,
+	terminals: TerminalLoad[],
+};
 
 export type WorkspaceSettingsDto = {
 	/**  `None` uses `default_worktree_root`. */
