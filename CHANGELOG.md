@@ -5,6 +5,10 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Install ys no longer, now and then, says the copy it just made is "not Yardsort's".** Right
+  after the copy, the file could still be held open for a moment, and running it to read its
+  version failed. The check now waits that moment out.
+
 - **The standalone `ys` for macOS is signed and notarized.** The `ys-…-macos-universal.tar.gz` on
   the releases page used to hold an unsigned binary, which macOS refused with _"ys" Not Opened_
   when it was downloaded with a browser. It is now the same signed, notarized file the app
