@@ -610,11 +610,10 @@ mod tests {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    /// A wrapper that exits but leaves a descendant holding its stdout: the end of the output
-    /// never comes while the descendant lives.
     /// What happens, now and then, right after `install` copies `ys`: the file is still open for
-    /// writing somewhere when it is first run, and the kernel says "text file busy". Here the test
-    /// itself holds it open, and lets go a moment later.
+    /// writing somewhere when it is first run, and Linux says "text file busy". Here the test
+    /// itself holds it open, and lets go a moment later. (macOS and Windows run the file anyway,
+    /// so there the retry has nothing to do and this passes trivially.)
     #[cfg(unix)]
     #[test]
     fn a_file_still_open_for_writing_is_probed_once_it_is_closed() {
@@ -632,14 +631,24 @@ mod tests {
             Some("0.10.0")
         );
         release.join().unwrap();
+    }
 
-        // Held for good, the probe gives up at its deadline rather than hanging.
+    /// Held for good, the probe gives up at its deadline rather than retrying forever. Only
+    /// Linux refuses to run a file that is open for writing, so only there is this a thing.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_held_open_for_writing_for_good_times_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = env_with_path(dir.path());
+        let ys = fake_ys(dir.path(), "0.10.0");
         let _held = std::fs::OpenOptions::new().append(true).open(&ys).unwrap();
         let started = Instant::now();
         assert_eq!(version_within(&ys, &env, Duration::from_millis(300)), None);
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    /// A wrapper that exits but leaves a descendant holding its stdout: the end of the output
+    /// never comes while the descendant lives.
     #[cfg(unix)]
     #[test]
     fn a_descendant_holding_stdout_does_not_outlast_the_timeout() {
