@@ -101,10 +101,11 @@ export function Cli() {
               ))}
             </ul>
             <p className="mt-2.5 text-[12px] text-faint">
-              On macOS this standalone copy is unsigned — the one inside the app is not — so a copy
-              downloaded with a browser is quarantined:{" "}
+              On macOS the standalone copy is unsigned up to 0.17.0, so one downloaded with a
+              browser is refused:{" "}
               <code className="font-mono text-muted">xattr -d com.apple.quarantine ys</code>, or
-              fetch it with <code className="font-mono text-muted">curl</code>.
+              fetch it with <code className="font-mono text-muted">curl</code>. Later releases carry
+              the signed, notarized copy from inside the app.
             </p>
           </div>
         </div>

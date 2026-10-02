@@ -5,6 +5,11 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **The standalone `ys` for macOS is signed and notarized.** The `ys-…-macos-universal.tar.gz` on
+  the releases page used to hold an unsigned binary, which macOS refused with _"ys" Not Opened_
+  when it was downloaded with a browser. It is now the same signed, notarized file the app
+  carries. See [the `ys` guide](docs/guide/cli.md#without-the-app).
+
 - **`brew install --cask joaoh82/yardsort/yardsort` works again.** Current Homebrew refused the
   cask over a minimum-macOS line it no longer accepts. The line is gone, and releases now test the
   cask against an up-to-date Homebrew.

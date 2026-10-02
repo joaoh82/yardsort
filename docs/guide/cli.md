@@ -58,9 +58,13 @@ tar -xzf ys-*-macos-universal.tar.gz && sudo install ys /usr/local/bin/
 
 On Windows, unzip `ys-*-windows-x86_64.zip` and put `ys.exe` in a folder on your `PATH`.
 
-This copy of `ys` is not signed or notarized on macOS, unlike the one inside the app. A copy
-downloaded with a browser is therefore quarantined and refused on first run. Either download it
-with `curl`, or clear the flag:
+On macOS, this copy is the same file as the one inside the app: signed with the same Developer
+ID and notarized by Apple. A notarization ticket cannot be attached to a bare executable, so the
+first time a copy downloaded with a browser runs, macOS looks the ticket up online — that first
+run needs a network connection.
+
+Releases up to 0.17.0 carried an unsigned copy instead, which macOS refuses with _"ys" Not
+Opened_ when it was downloaded with a browser. Either download it with `curl`, or clear the flag:
 
 ```sh
 xattr -d com.apple.quarantine ys

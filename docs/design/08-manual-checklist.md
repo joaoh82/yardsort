@@ -113,8 +113,9 @@ check — and `ys` works out where your data lives by its own copy of Tauri's ru
 never met a database that macOS or Windows created.
 
 `ys` is a separate download from the [releases](https://github.com/joaoh82/yardsort/releases), not
-part of the app bundle. Put it on your `PATH` first. On macOS it is **unsigned**, so a copy
-downloaded with a browser is quarantined — that is itself the first row.
+part of the app bundle. Put it on your `PATH` first. On macOS it is signed and notarized, but no
+ticket can be stapled to it, so what a browser-downloaded copy does on first run is itself the
+first row.
 
 Run it against the same throwaway profile the app is using:
 
@@ -124,13 +125,13 @@ ys --data-dir /tmp/ys doctor        # or C:\ys on Windows
 
 ### It runs, and it is looking at the right place
 
-| ✓   | Check                                                                                                                                            |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-|     | macOS, downloaded with a browser: it is refused on first run. `xattr -d com.apple.quarantine ys` fixes it. Downloaded with `curl`: it just runs. |
-|     | Windows: `ys --help` **prints something**. Silence means the console is missing, which is the bug a separate binary exists to avoid.             |
-|     | `ys doctor` with no `--data-dir`, while the app is closed: the data directory it names is the one the app really uses.                           |
-|     | That same `doctor` says `database … (found)` and a plausible project count — not `NOT FOUND`, and not zero when you have projects.               |
-|     | The app prints no `warning: the data directory is …` line at startup. If it does, `ys` and the app disagree and that warning is the finding.     |
+| ✓   | Check                                                                                                                                        |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | macOS, downloaded with a browser, online: it runs — no _"ys" Not Opened_ and no `xattr` needed. Downloaded with `curl`: it just runs.        |
+|     | Windows: `ys --help` **prints something**. Silence means the console is missing, which is the bug a separate binary exists to avoid.         |
+|     | `ys doctor` with no `--data-dir`, while the app is closed: the data directory it names is the one the app really uses.                       |
+|     | That same `doctor` says `database … (found)` and a plausible project count — not `NOT FOUND`, and not zero when you have projects.           |
+|     | The app prints no `warning: the data directory is …` line at startup. If it does, `ys` and the app disagree and that warning is the finding. |
 
 The third and fourth rows are the important ones on each platform. `ys` resolves the directory
 itself rather than asking Tauri, so a difference here is silent: it would report a Yardsort you

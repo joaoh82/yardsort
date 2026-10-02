@@ -69,11 +69,21 @@ app's has no console on Windows — built from the same commit in the same job. 
 
 The same binary is also attached as a plain archive: `ys-<version>-linux-x86_64.tar.gz`,
 `ys-<version>-macos-universal.tar.gz` and `ys-<version>-windows-x86_64.zip`. The macOS one is
-`lipo`'d from both architectures. Inside the app it is signed and notarized with the bundle; the
-loose copy is **neither**. Two reasons: `tauri-action` imports the certificate into a keychain of
-its own for its own run, so no identity is available to a later step; and a ticket cannot be
-stapled to a bare executable, so signing without notarization would not spare anyone the
-quarantine prompt anyway. The [guide](guide/cli.md) says how to clear it.
+`lipo`'d from both architectures.
+
+On macOS the archive does not carry the binary as it was built, but the copy **taken back out of
+the finished app**. `tauri-action` imports the certificate into a keychain of its own for its own
+run, so no identity is available to a later step — but it signs `Contents/MacOS/ys` along with the
+bundle, and Apple's notary service issues a ticket for every executable in what it is sent, not
+only for the app. That file is therefore signed and notarized in its own right. The job checks the
+signature, the team and both architectures before attaching it, and asks Apple for the ticket; a
+failed ticket lookup is a warning, not a failed release. A ticket cannot be stapled to a bare
+executable, so Gatekeeper looks it up online the first time a quarantined copy runs. Without the
+Apple secrets the archive carries the unsigned build, as the app does.
+
+`scripts/notarization-ticket.py <file>…` asks the same question from any system, with nothing but
+Python: it prints each architecture's signer and whether Apple holds a ticket for it. Run it on
+the `ys` from a published archive to confirm a release.
 
 ## macOS signing and notarization
 

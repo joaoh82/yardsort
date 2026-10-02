@@ -350,6 +350,13 @@ _Notes:_
   without notarization spares nobody the quarantine prompt — a bare executable cannot have a
   ticket stapled to it. Doing it properly means importing the certificate ourselves _and_
   notarizing, and even then Gatekeeper checks over the network.
+- Found when someone downloaded that unsigned copy and reported the app as unsigned (#93): none
+  of that was needed. The `ys` inside the released app is signed on its own, and Apple holds a
+  notarization ticket for it by itself — the notary service issues one for every executable in a
+  submission. The macOS archive now carries that copy, taken back out of the built app. Checked
+  against 0.17.0 by computing each architecture's code-directory hash and asking Apple's ticket
+  service (`scripts/notarization-ticket.py`); what Gatekeeper then does with a quarantined copy
+  has not been watched on a Mac yet, and is the first row of the checklist's section 6.
 - `ys attach` followed: raw mode, size matching and a `Ctrl-]` that detaches without stopping
   anything. Input is forwarded as **raw bytes**, never as parsed key events, so mouse reporting,
   bracketed paste and anything crossterm does not model survive the trip. Reading happens on a
@@ -370,7 +377,7 @@ _Notes:_
   nothing is running. So a finished agent's last screen outlives the agent but not the daemon.
   Keeping screens would mean writing whatever an agent printed to disk, which is a decision
   about secrets rather than about storage — not taken here.
-- Still open: `ys` is unsigned on macOS and no package manager ships it. None of its terminal
+- Still open: no package manager ships `ys` by itself. None of its terminal
   handling — raw mode, `Ctrl-]`, resize forwarding — nor its idea of where the data directory is
   has been exercised by a human on macOS or Windows; a test can check neither. Section 6 of
   [08-manual-checklist](08-manual-checklist.md) is the pass, and it is owed alongside M7's.
