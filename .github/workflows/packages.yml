@@ -168,6 +168,9 @@ jobs:
           git -c user.name="Yardsort release bot" -c user.email="noreply@github.com" commit -m "Yardsort $version"
 
           # Prove it before anyone is told: style, audit, a real install, and Gatekeeper's verdict.
+          # Against today's Homebrew, not the one the runner image was built with: that one was a
+          # month old when it passed a `depends_on` stanza every user's Homebrew refused (#90).
+          brew update
           brew tap joaoh82/yardsort "$RUNNER_TEMP/tap"
           brew style --cask joaoh82/yardsort/yardsort
           brew audit --cask --strict --online joaoh82/yardsort/yardsort
