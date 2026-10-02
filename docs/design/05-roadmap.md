@@ -715,7 +715,19 @@ fixture; the docs list every action and variable that exists and none that does 
   cannot say which — the worktree's own `HEAD` reflog can.
 - Diff comments sent back to the agent as a prompt.
 - Multi-repo projects; remote/SSH workspaces.
-- Usage / cost view per workspace. MCP config management per harness.
+- ~~**Usage / cost view per workspace.**~~ **Done**, as the Usage view: token usage from the
+  agents' own logs, and machine resources per terminal. What was found: the figures were already
+  on disk — Claude Code writes the API's `usage` on every reply, Codex a `token_usage_record` per
+  response and its plan's rate limits, Grok a `usage.json` per session — so no hook, plugin or
+  network call was needed, and the count covers conversations started outside Yardsort too.
+  Claude Code writes a reply once per content block and copies earlier replies into a resumed
+  conversation's file, so counting needs its message and request ids; adding up lines naively
+  overcounts. Prices are a table in the core, dated, and a model not in it is counted but never
+  priced by a near match. Machine figures are a terminal's whole process tree, taken from the
+  daemon's session pids before the app's and host's own trees, so nothing is counted twice with
+  or without a daemon. Not done: OpenCode, OMP, pi and Cursor usage; Claude Code's and Grok's plan
+  limits, which they do not write down.
+- MCP config management per harness.
 - Command palette; themes; Omarchy theme integration.
 
 ### Deferred from the agent-events stages

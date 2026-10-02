@@ -30,7 +30,8 @@ dialogs and menus. In an agent's terminal `Shift+Enter` adds a line too — see
 
 **Commands** in the bottom bar or **Mod+K** opens a searchable palette of commands and
 workspaces. Type to filter, use ↑ / ↓ to select and Enter to run; Escape closes it. Commands
-that do not apply to the current workspace are disabled. Workspace navigation follows project
+that do not apply to the current workspace are disabled. Some commands have no key until you give
+them one — [Usage](usage.md) and the welcome tour among them — and are always here. Workspace navigation follows project
 order, wraps at either end, and skips archived or missing workspaces and missing projects.
 Opening a worktree follows the same behavior as clicking its row, including opening a shell
 when it has no terminal or conversation to return to.

@@ -3,6 +3,19 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Usage: the tokens your agents spent, and what they use of the machine.** **Usage**, at the
+  foot of the sidebar or in the command palette, has two tabs. **Token usage** reads the logs
+  Claude Code, Codex and Grok keep on this machine and shows the last 7, 30 or 90 days by day,
+  agent, model and workspace — with cache reads, cache writes, output, and what the cache saved —
+  priced at each vendor's API rates as an estimate (a subscription is not billed that way), and
+  Codex's plan limits as it last heard them. **Machine resources** samples every two seconds while
+  it is open: Yardsort's CPU and memory over the last five minutes, the machine's memory and load,
+  and a breakdown by project, workspace and terminal, each terminal counted with every process it
+  started. Nothing is sent anywhere. A switch in its header takes it off the sidebar. See
+  [Usage](docs/guide/usage.md).
+
 ## 0.16.0
 
 - **Every pull request a workspace opened.** A workspace that opened more than one — a second PR

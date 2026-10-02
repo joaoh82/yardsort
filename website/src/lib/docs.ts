@@ -95,6 +95,12 @@ export const DOCS_NAV: DocSection[] = [
           "Record whether workspace results were kept, partly kept or discarded, and review how coding agents perform on your projects in Yardsort.",
       },
       {
+        slug: "guide/usage",
+        title: "Usage",
+        description:
+          "See the tokens Claude Code, Codex and Grok spent, priced at API rates, and the CPU and memory Yardsort and each agent use, live.",
+      },
+      {
         slug: "guide/workflows",
         title: "Workflows",
         description:

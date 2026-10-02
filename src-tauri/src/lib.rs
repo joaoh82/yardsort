@@ -19,6 +19,7 @@ mod sessions;
 mod state;
 mod terminal;
 mod updates;
+mod usage;
 mod workflows;
 mod ys;
 
@@ -164,6 +165,9 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::workflow_start,
             workflows::commands::workflow_cancel,
             workflows::commands::workflow_describe,
+            usage::usage_machine,
+            usage::usage_tokens,
+            usage::settings_save_usage,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,

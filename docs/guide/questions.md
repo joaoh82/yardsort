@@ -43,6 +43,9 @@ ends the agents instead. This does not keep work running through a computer shut
 Yardsort stores its project, workspace and session records on your computer. The coding agents
 you run can send prompts and code to their own providers under their own settings.
 
+The [Usage](usage.md) view reads the token counts the agents keep in their own logs on this
+machine, and the operating system's process figures; it sends nothing.
+
 Optional Assist uses TypeSafe Jev. Depending on the features you enable, it sends changed-file
 diffs and task context, composer text and harness descriptions, or memory proposals and approved
 entries. Assist does not send terminal output. The [Assist guide](assist.md) explains what each

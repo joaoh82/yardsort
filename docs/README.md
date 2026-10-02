@@ -22,6 +22,7 @@ For supported agents, platforms, costs, worktree isolation and data handling, re
 | [Memory](guide/memory.md)                                     | Lessons about a project for its agents: written by you, proposed by agents, approved by you |
 | [Outcomes](guide/outcomes.md)                                 | What became of each attempt, and each agent's history on your work                          |
 | [Workflows](guide/workflows.md)                               | Named, reusable agent work in YAML: the built-in code review, writing and checking your own |
+| [Usage](guide/usage.md)                                       | Tokens your agents spent and what they would cost; CPU and memory per agent, live           |
 | [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                          |
 | [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                                           |
 | [The `ys` command line](guide/cli.md)                         | Installing it; starting, deleting and handing off workspaces from a terminal or a script    |

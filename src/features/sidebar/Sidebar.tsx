@@ -3,6 +3,7 @@ import { useOutcomesStore } from "@/stores/outcomes";
 import { PanelHeader } from "@/features/shell/PanelHeader";
 import { hasCore } from "@/lib/ipc";
 import { useShortcutLabel } from "@/stores/preferences";
+import { useAppStore } from "@/stores/app";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
@@ -209,10 +210,36 @@ export function Sidebar() {
         >
           <span aria-hidden>⚙</span> Settings
         </button>
+        <UsageButton />
         <UpdatePill />
       </div>
       {adding && <AddProjectDialog onClose={() => setAdding(false)} />}
     </aside>
+  );
+}
+
+/** Usage, beside Settings, unless the user hid it; the command palette offers it either way. */
+function UsageButton() {
+  const show = useAppStore((s) => s.showUsageInSidebar);
+  const open = useProjectsStore((s) => s.usageOpen);
+  if (!show) return null;
+  return (
+    <button
+      type="button"
+      aria-current={open ? "page" : undefined}
+      title="Usage: machine resources and tokens"
+      onClick={() => useProjectsStore.getState().openUsage(!open)}
+      className={`flex h-7 shrink-0 items-center gap-1.5 rounded px-2 hover:bg-raised hover:text-ink ${
+        open ? "bg-raised text-ink" : "text-ink-muted"
+      }`}
+    >
+      <svg aria-hidden="true" viewBox="0 0 16 16" className="size-3.5" fill="currentColor">
+        <rect x="2" y="9" width="2.5" height="5" rx="0.5" />
+        <rect x="6.75" y="5" width="2.5" height="9" rx="0.5" />
+        <rect x="11.5" y="2" width="2.5" height="12" rx="0.5" />
+      </svg>
+      Usage
+    </button>
   );
 }
 

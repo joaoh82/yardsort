@@ -103,6 +103,11 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   how it went; a merged pull request counts as kept until you say otherwise. Each agent's history
   on your own work sits beside the composer's picker — and says "too few to say" until there is
   enough of it. See [Outcomes](docs/guide/outcomes.md).
+- **Usage: tokens and the machine.** What your agents spent, read from their own logs on this
+  machine — Claude Code, Codex and Grok — by day, agent, model and workspace, priced at API rates
+  for comparison, with Codex's plan limits as it last heard them. Beside it, live CPU and memory
+  for Yardsort and every agent it runs, down to each terminal's process tree. Nothing is sent
+  anywhere. See [Usage](docs/guide/usage.md).
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client that comes with the app,
@@ -323,6 +328,7 @@ says no.
 | [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                |
 | [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history          |
 | [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own   |
+| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent          |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                     |
 | [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                 |
 | [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints              |

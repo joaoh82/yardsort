@@ -45,6 +45,7 @@ vi.mock("@/lib/native", () => ({ native }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => opener);
 
+import { useAppStore } from "@/stores/app";
 import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
 import { useSessionsStore } from "@/stores/sessions";
@@ -126,6 +127,28 @@ describe("Sidebar", () => {
     });
     useTerminalStore.setState({ tabs: [], active: {}, error: null });
     useUpdatesStore.setState({ status: null, open: false });
+  });
+
+  it("offers Usage beside Settings, opens and closes it, and hides it when asked", async () => {
+    const user = userEvent.setup();
+    core.projectsList.mockResolvedValue([]);
+    useAppStore.setState({ showUsageInSidebar: true });
+    useProjectsStore.setState({ usageOpen: false, workflowId: "wf" });
+    const { unmount } = render(<Sidebar />);
+
+    await user.click(screen.getByRole("button", { name: "Usage" }));
+    expect(useProjectsStore.getState().usageOpen).toBe(true);
+    // It takes the center panel over, like a workflow.
+    expect(useProjectsStore.getState().workflowId).toBeNull();
+    expect(screen.getByRole("button", { name: "Usage" })).toHaveAttribute("aria-current", "page");
+    await user.click(screen.getByRole("button", { name: "Usage" }));
+    expect(useProjectsStore.getState().usageOpen).toBe(false);
+    unmount();
+
+    useAppStore.setState({ showUsageInSidebar: false });
+    render(<Sidebar />);
+    expect(screen.queryByRole("button", { name: "Usage" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Settings/ })).toBeInTheDocument();
   });
 
   it("filters project names, clears the query, and closes search with Escape", async () => {
