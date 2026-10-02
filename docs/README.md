@@ -8,6 +8,10 @@ few minutes.
 For supported agents, platforms, costs, worktree isolation and data handling, read
 [About Yardsort](guide/questions.md).
 
+To compare agent tokens and estimated API costs, or find which workspace is using CPU and
+memory, open **Usage** from the sidebar or command palette. The [Usage guide](guide/usage.md)
+walks through both tabs and explains what the local figures include.
+
 | Guide                                                         | What it covers                                                                              |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                                          |

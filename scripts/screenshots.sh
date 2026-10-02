@@ -65,6 +65,8 @@ usage() {
 setup() {
   rm -rf "$SHOT" "$AGENTS" "$DEMO"
   mkdir -p "$SHOT/data" "$AGENTS" "$DEMO/repos" "$DEMO/wt"
+  # Usage reads agent logs independently of the profile. Never let it read real conversations.
+  mkdir -p "$SHOT/claude" "$SHOT/codex" "$SHOT/grok"
 
   for command in "${SHIMMED[@]}"; do
     local real
@@ -139,6 +141,9 @@ EOF
   YARDSORT_DATA_DIR=$SHOT/data \\
   YARDSORT_WORKTREE_ROOT=$DEMO/wt \\
   YARDSORT_YS_DIR=$DEMO/bin \\
+  CLAUDE_CONFIG_DIR=$SHOT/claude \\
+  CODEX_HOME=$SHOT/codex \\
+  GROK_HOME=$SHOT/grok \\
   SHELL=$SHOT/loginshell \\
   DBUS_SESSION_BUS_ADDRESS=unix:path=$SHOT/no-bus \\
   just dev
@@ -278,10 +283,8 @@ shoot() {
   for tool in hyprctl grim jq; do
     command -v "$tool" >/dev/null || { echo "shoot needs $tool." >&2; exit 1; }
   done
-  if [ "$name" != size ] && [ ! -e "docs/images/$name.png" ]; then
-    echo "There is no docs/images/$name.png to replace. One of:" >&2
-    (cd docs/images && ls *.png | sed 's/\.png$/  /' | tr -d '\n' | sed 's/^/  /') >&2
-    echo >&2
+  if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+    echo "Use a screenshot name containing only lowercase letters, digits and hyphens." >&2
     exit 1
   fi
 
@@ -317,6 +320,7 @@ shoot() {
     setfloating "$window"
   dispatch "hl.dsp.window.resize({ window = \"$window\", x = $logical_w, y = $logical_h })" \
     resizewindowpixel "exact $logical_w $logical_h,$window"
+  dispatch "hl.dsp.window.center({ window = \"$window\" })" centerwindow "$window"
   sleep 0.5
 
   local x y w h
@@ -334,6 +338,10 @@ shoot() {
     return
   fi
 
+  # Keep chart hover cards and tooltips out of the capture.
+  dispatch "hl.dsp.cursor.move({ x = $((x + 20)), y = $((y + h - 80)) })" \
+    movecursor "$((x + 20))" "$((y + h - 80))"
+  sleep 0.2
   grim -g "$x,$y ${w}x${h}" "$repo/docs/images/$name.png"
   echo "docs/images/$name.png  $(file -b "$repo/docs/images/$name.png" | grep -o '[0-9]* x [0-9]*' | tr -d ' ')" \
     "  (the set is ${WIDTH}x${HEIGHT})"

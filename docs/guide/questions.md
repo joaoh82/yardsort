@@ -18,6 +18,18 @@ Yardsort is free to download and use, with source code under the
 [GPL-3.0 license](../../LICENSE). Agent subscriptions or API usage are separate: each agent
 uses your own account. Optional [Assist](assist.md) requests are billed to your TypeSafe account.
 
+## Can I see token usage and how much CPU or memory agents use?
+
+Yes. Open **Usage** from the sidebar or command palette. **Token usage** reads Claude Code,
+Codex and Grok's local logs for the last 7, 30 or 90 days, including sessions started outside
+Yardsort. Compare agents, models and workspaces, inspect cache savings, and see Codex's last
+reported plan limits. API cost estimates are for comparison and do not represent your
+subscription bill; models with unknown prices still count toward tokens.
+
+**Machine resources** shows CPU and memory for Yardsort and every terminal it runs, including
+each agent's child processes. It samples every two seconds while the tab is open and the window
+is visible. Both tabs stay local and need no extra key or activity capture. See [Usage](usage.md).
+
 ## Do I need to install the coding agents separately?
 
 Yes. Install git and at least one coding agent CLI, and make sure the agent works in a fresh

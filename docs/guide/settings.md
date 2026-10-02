@@ -151,6 +151,13 @@ Both apply to workspaces created from now on; existing ones stay where they are.
 | **Capture what Claude Code reports**                      | Off by default. Claude Code started from Yardsort is given hooks that report each prompt, tool, turn and session end as metadata — see [What Claude Code reports](activity.md#what-claude-code-reports). Your own Claude Code settings are never edited; the hooks ride on a per-launch settings file. Needs the recording switch above.                                                                        |
 | **Clear all recorded activity**                           | Forgets every recorded event and run at once. Beneath it: how much is recorded, where the exit spool, the agents' inbox and the Claude Code hooks file are, and counters for anything that went wrong while recording.                                                                                                                                                                                          |
 
+## Usage
+
+The **Usage** panel has its own **Show Usage in the sidebar** switch in its header. Hiding the
+button leaves Usage available from the command palette. This preference is saved under
+`[usage]` as `show_in_sidebar` in `settings.toml`. Token usage reads the agents' own logs
+independently of the recording and capture switches above. See [Usage](usage.md).
+
 ## Workflow writer
 
 Under **Assist → Writing commit messages, pull requests and workflows**, choose the

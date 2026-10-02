@@ -26,8 +26,8 @@ const POINTS = [
     body: "After you archive or delete a workspace, one optional click says how it went; a merged pull request counts as kept until you say otherwise. Each agent's history on your own work sits beside the composer's picker, and says too few to say until there is enough of it.",
   },
   {
-    title: "Usage: tokens and the machine",
-    body: "What your agents spent, read from their own logs on this machine — by day, agent, model and workspace, priced at API rates for comparison. Beside it, live CPU and memory for every agent, down to each terminal's process tree. Nothing is sent anywhere.",
+    title: "Choose how agents start",
+    body: "Always start in auto mode is a per-agent choice in Harness settings, off until you enable it. For Claude Code and Codex, with activity capture on, a hint at 80% of the context window offers Compact to send the agent's own /compact command.",
   },
   {
     title: "Closing the window doesn't stop them",
