@@ -15,7 +15,9 @@ use tauri::AppHandle;
 
 use super::commands::{failed, project_root, pull_request_changed, still_mergeable};
 use crate::error::{IpcError, IpcResult};
-use crate::forge::{parse_remote, ForgeError, Gh, MergeMethod, PullRequest, PullRequestState};
+use crate::forge::{
+    parse_remote, ForgeError, Gh, MergeMethod, PullRequest, PullRequestState, PullRequestSummary,
+};
 use crate::git::Git;
 use crate::state::{blocking, AppState};
 
@@ -25,6 +27,33 @@ fn fresh(state: &AppState, project_id: &str, number: u32) -> IpcResult<(Gh, Path
     let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
     let pr = gh.pull_request(&root, number).map_err(failed)?;
     Ok((gh, root, pr))
+}
+
+/// How long `gh` may take over one pull request. It answers in about a second; this is for a
+/// network that went away.
+const SUMMARY_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// One pull request in full: its description, every check with its link, its reviewers and
+/// the conversation. What the Pull requests view's Summary shows, read when a row is opened.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_request_summary(
+    app: AppHandle,
+    project_id: String,
+    number: u32,
+    refresh: bool,
+) -> IpcResult<PullRequestSummary> {
+    blocking(app, move |state| {
+        let root = project_root(state, &project_id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        state
+            .forge
+            .summary(&project_id, number, refresh, || {
+                gh.pull_request_summary(&root, number, SUMMARY_LIMIT)
+            })
+            .map_err(failed)
+    })
+    .await
 }
 
 fn no_longer(number: u32, what: &str) -> IpcError {

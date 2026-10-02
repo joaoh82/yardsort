@@ -299,6 +299,13 @@ is no longer what the confirmation showed. Unlike the toolbar's commands these d
 that a workspace owns it — that is the point of the view — and the confirmation says whose it
 is instead.
 
+**One pull request in full** (`Gh::pull_request_summary`, `Forge::summary`) is `gh pr view` for
+the list's fields plus the description, the comments and the reviews, kept for 30 seconds by
+project and number. It is what the view's Summary shows, and it is read when a row is opened and
+again when the list says the row changed. Descriptions and comments are other people's text:
+the window renders them as Markdown with raw HTML dropped, no image loaded, and links handed to
+the opener, and a comment the forge has hidden loses its words in the core.
+
 **A pull request's branch, for a workspace** (`prepare_branch`): a branch already here is never
 moved; one in the project's remote is fetched into its remote-tracking ref and a local branch
 made to track it; one from a fork becomes `pr/<n>` at `refs/pull/<n>/head`, with that ref

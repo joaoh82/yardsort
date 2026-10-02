@@ -258,6 +258,7 @@ the menu entry can take a minute to appear. **Refresh pull request** asks again.
 
 ## What it does not do
 
-No review comments, CI logs, local rebasing or staging area. Those remain with the forge or your
-git tools; the toolbar's rebase option is GitHub's PR merge method. Yardsort never resolves a
+No CI logs, local rebasing or staging area. Those remain with the forge or your git tools; the
+toolbar's rebase option is GitHub's PR merge method. A pull request's description, checks and
+conversation are read in the [Pull requests](pull-requests.md#the-details) view, not here. Yardsort never resolves a
 conflict itself: it asks the agent, which does it with git in the workspace like any other work.

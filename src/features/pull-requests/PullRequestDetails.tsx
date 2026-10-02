@@ -16,10 +16,19 @@ const reviewLabel: Record<string, string> = {
 };
 
 /**
- * A pull request at a glance. `link` is the "View on GitHub" foot, which the Pull requests view
- * leaves off: it has that among its own actions.
+ * A pull request at a glance. The Pull requests view leaves two parts off: `link`, the "View on
+ * GitHub" foot, which it has among its own actions, and `checks`, which it shows in full with a
+ * link to every run.
  */
-export function PullRequestDetails({ pr, link = true }: { pr: PullRequest; link?: boolean }) {
+export function PullRequestDetails({
+  pr,
+  link = true,
+  checks = true,
+}: {
+  pr: PullRequest;
+  link?: boolean;
+  checks?: boolean;
+}) {
   const details = pr.details;
   const updated = details?.updatedAt ? new Date(details.updatedAt) : null;
   return (
@@ -49,26 +58,28 @@ export function PullRequestDetails({ pr, link = true }: { pr: PullRequest; link?
           Conflicts with {details?.base || "its base"}: they must be resolved before it can merge.
         </p>
       )}
-      <div className="border-t border-line pt-3">
-        <p className={checksColour[pr.checks]}>
-          {checksLabel[pr.checks]}
-          {/* Counted by the core, which has the numbers even when it has no names to list. */}
-          {checksSummary(pr) && ` · ${checksSummary(pr)}`}
-        </p>
-        {!!details?.checks.length && (
-          <details className="mt-2">
-            <summary className="cursor-pointer text-ink-muted">Show checks</summary>
-            <ul className="mt-2 space-y-1.5">
-              {details.checks.map((check, index) => (
-                <li key={`${check.name}-${index}`} className="flex justify-between gap-3">
-                  <span className="min-w-0 break-words">{check.name}</span>
-                  <span className={`shrink-0 ${checksColour[check.state]}`}>{check.state}</span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </div>
+      {checks && (
+        <div className="border-t border-line pt-3">
+          <p className={checksColour[pr.checks]}>
+            {checksLabel[pr.checks]}
+            {/* Counted by the core, which has the numbers even when it has no names to list. */}
+            {checksSummary(pr) && ` · ${checksSummary(pr)}`}
+          </p>
+          {!!details?.checks.length && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-ink-muted">Show checks</summary>
+              <ul className="mt-2 space-y-1.5">
+                {details.checks.map((check, index) => (
+                  <li key={`${check.name}-${index}`} className="flex justify-between gap-3">
+                    <span className="min-w-0 break-words">{check.name}</span>
+                    <span className={`shrink-0 ${checksColour[check.state]}`}>{check.state}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
       {updated && !Number.isNaN(updated.getTime()) && (
         <p className="text-[11px] text-ink-faint">Updated {updated.toLocaleString()}</p>
       )}

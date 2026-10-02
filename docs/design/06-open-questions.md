@@ -209,4 +209,5 @@ From the design pass in [22-pull-requests](22-pull-requests.md).
 27. **May a description ever load its images?** Not loading them is the safe answer and the first
     one: the content policy forbids it, and an image is a request to a server of the author's
     choosing. Screenshots in a description are also half of why people open it. Lean: stay with
-    links, and hear whether it is missed.
+    links, and hear whether it is missed. Slice 2 shipped the lean: an image is a link labelled
+    with its alt text. Still open, for what use says.

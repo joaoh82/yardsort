@@ -30,8 +30,8 @@ use specta::Type;
 
 use crate::error::IpcResult;
 use crate::forge::{
-    parse_remote, pull_request_for, pull_requests_from, ForgeKind, Gh, OpenPullRequests,
-    PullRequest, PullRequestState, Repo,
+    parse_remote, pull_request_for, pull_requests_from, ForgeKind, ForgeResult, Gh,
+    OpenPullRequests, PullRequest, PullRequestState, PullRequestSummary, Repo,
 };
 use crate::git::{Commit, Git, Head};
 use crate::store::WorkspaceRow;
@@ -268,6 +268,10 @@ pub struct Forge {
     /// Each project's open pull requests, as last read: the open tier.
     open: Mutex<HashMap<String, OpenTier>>,
     open_requests: Mutex<HashMap<String, u64>>,
+    /// Pull requests read in full, for the Pull requests view's Summary, by project and number.
+    summaries: Mutex<HashMap<(String, u32), (Instant, PullRequestSummary)>>,
+    /// Counts every [`forget`](Self::forget), so a summary read before one is not kept after.
+    forgotten: AtomicU64,
 }
 
 /// A project's open pull requests and when they were read. `at` is `None` once something has
@@ -387,6 +391,42 @@ impl Forge {
         answer
     }
 
+    /// Pull request `number` in full, from the cache when it was read less than [`FRESH_FOR`]
+    /// ago. Unlike the lists this *is* an `Err` when `gh` cannot answer: the Summary has
+    /// nothing else to show, and says why in its place.
+    pub fn summary(
+        &self,
+        project_id: &str,
+        number: u32,
+        refresh: bool,
+        fetch: impl FnOnce() -> ForgeResult<PullRequestSummary>,
+    ) -> ForgeResult<PullRequestSummary> {
+        let key = (project_id.to_owned(), number);
+        if !refresh {
+            let summaries = self
+                .summaries
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some((at, summary)) = summaries.get(&key) {
+                if at.elapsed() < FRESH_FOR {
+                    return Ok(summary.clone());
+                }
+            }
+        }
+        let before = self.forgotten.load(Ordering::Relaxed);
+        let summary = fetch()?;
+        // Something was done to the project while this was being read — a merge, a close — and
+        // what was read is from before it. It is still the answer to this question; it is just
+        // not kept for the next one.
+        if self.forgotten.load(Ordering::Relaxed) == before {
+            self.summaries
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(key, (Instant::now(), summary.clone()));
+        }
+        Ok(summary)
+    }
+
     /// Whatever is cached for a project, however old, and never a fetch: for readers that must
     /// not wait on the network, like the Outcomes view. The publish panel keeps it current.
     pub fn cached(&self, project_id: &str) -> Option<ProjectPullRequests> {
@@ -413,6 +453,11 @@ impl Forge {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(project_id);
+        self.forgotten.fetch_add(1, Ordering::Relaxed);
+        self.summaries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(project, _), _| project != project_id);
         // The open tier is kept, marked out of date: it is only read while the Pull requests
         // view is showing, and dropping it would take the older open pull requests off every
         // workspace row until then. An answer still on its way is from before, and is dropped.
@@ -1213,6 +1258,86 @@ mod tests {
         let full = forge.pull_requests(None, dir.path(), "p1", true, true, &|| None);
         assert_eq!(full.pull_requests.len(), 1);
         assert_eq!(full.open_problem, None);
+    }
+
+    fn in_full(number: u32, body: &str) -> PullRequestSummary {
+        PullRequestSummary {
+            pull_request: numbered(number, PullRequestState::Open),
+            body: body.into(),
+            changed_files: 1,
+            posts: vec![],
+        }
+    }
+
+    /// A pull request read in full is reused while it is fresh, read again on a refresh and
+    /// after the project is forgotten, and a failure is passed on rather than remembered.
+    #[test]
+    fn a_pull_request_in_full_is_reused_until_something_changes() {
+        let forge = Forge::default();
+        let asked = std::cell::Cell::new(0);
+        let read = |number: u32, refresh: bool, body: &str| {
+            forge.summary("p1", number, refresh, || {
+                asked.set(asked.get() + 1);
+                Ok(in_full(number, body))
+            })
+        };
+        assert_eq!(read(7, false, "first").unwrap().body, "first");
+        assert_eq!(
+            read(7, false, "second").unwrap().body,
+            "first",
+            "fresh: reused"
+        );
+        assert_eq!(asked.get(), 1);
+        assert_eq!(
+            read(8, false, "other").unwrap().body,
+            "other",
+            "another number"
+        );
+        assert_eq!(
+            read(7, true, "third").unwrap().body,
+            "third",
+            "a refresh asks"
+        );
+
+        forge.forget("p2");
+        assert_eq!(
+            read(7, false, "x").unwrap().body,
+            "third",
+            "another project's news"
+        );
+        forge.forget("p1");
+        assert_eq!(read(7, false, "fourth").unwrap().body, "fourth");
+        assert_eq!(read(8, false, "fifth").unwrap().body, "fifth");
+
+        let failed = forge.summary("p1", 7, true, || {
+            Err(crate::forge::ForgeError::Unreadable("nope".into()))
+        });
+        assert!(failed.is_err());
+        assert_eq!(
+            read(7, false, "y").unwrap().body,
+            "fourth",
+            "a failure does not replace what was known"
+        );
+    }
+
+    /// A merge lands while a summary is being read: what was read is from before it.
+    #[test]
+    fn a_summary_read_before_the_project_changed_is_not_kept() {
+        let forge = Forge::default();
+        let stale = forge
+            .summary("p1", 7, false, || {
+                forge.forget("p1");
+                Ok(in_full(7, "before the merge"))
+            })
+            .unwrap();
+        assert_eq!(
+            stale.body, "before the merge",
+            "still the answer to that question"
+        );
+        let fresh = forge
+            .summary("p1", 7, false, || Ok(in_full(7, "after")))
+            .unwrap();
+        assert_eq!(fresh.body, "after", "and asked again by the next one");
     }
 
     #[test]

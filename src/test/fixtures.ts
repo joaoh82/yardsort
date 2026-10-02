@@ -4,6 +4,7 @@ import type {
   Project,
   ProjectPullRequests,
   PullRequest,
+  PullRequestSummary,
   SessionRecord,
   Workspace,
 } from "@/lib/ipc";
@@ -157,5 +158,17 @@ export const pullRequestsOf = (
   viewer: "ada",
   openTotal: pullRequests.filter((pr) => pr.state === "open").length,
   openProblem: null,
+  ...overrides,
+});
+
+/** A pull request read in full: a description, and nothing said about it yet. */
+export const pullRequestSummary = (
+  pr: PullRequest,
+  overrides: Partial<PullRequestSummary> = {},
+): PullRequestSummary => ({
+  pullRequest: pr,
+  body: `What ${pr.title} is about.`,
+  changedFiles: 2,
+  posts: [],
   ...overrides,
 });

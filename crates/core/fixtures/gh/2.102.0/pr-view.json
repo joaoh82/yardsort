@@ -1,0 +1,139 @@
+{
+  "additions": 6,
+  "author": {
+    "id": "U_dennis",
+    "is_bot": false,
+    "login": "dennis",
+    "name": "Dennis"
+  },
+  "baseRefName": "trunk",
+  "body": "## What\n\nWrites down how a release is cut.\n\n- [x] the steps\n- [ ] the screenshots\n\n<!-- a template comment -->\n",
+  "changedFiles": 2,
+  "comments": [
+    {
+      "id": "IC_0",
+      "author": {
+        "login": "linus"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "Thanks. One question about step 3.",
+      "createdAt": "2026-07-21T14:43:27Z",
+      "includesCreatedEdit": true,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/o/r/pull/13665#issuecomment-1",
+      "viewerDidAuthor": false
+    }
+  ],
+  "createdAt": "2026-06-15T18:51:42Z",
+  "deletions": 6,
+  "headRefName": "branch-13665",
+  "headRefOid": "d819e5fc0a55eebf11090ba1e1b04101664c8316",
+  "isCrossRepository": false,
+  "isDraft": false,
+  "latestReviews": [
+    {
+      "id": "PRR_x",
+      "author": {
+        "login": "margaret"
+      },
+      "authorAssociation": "CONTRIBUTOR",
+      "body": "",
+      "submittedAt": "2026-06-15T18:51:50Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "COMMENTED",
+      "commit": {
+        "oid": ""
+      }
+    },
+    {
+      "id": "PRR_x",
+      "author": {
+        "login": "grace"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "",
+      "submittedAt": "2026-06-15T18:54:17Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "APPROVED",
+      "commit": {
+        "oid": ""
+      }
+    }
+  ],
+  "mergeable": "MERGEABLE",
+  "number": 13665,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [],
+  "reviews": [
+    {
+      "id": "PRR_0",
+      "author": {
+        "login": "margaret"
+      },
+      "authorAssociation": "CONTRIBUTOR",
+      "body": "Looks right to me.",
+      "submittedAt": "2026-06-15T18:51:50Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "COMMENTED",
+      "commit": {
+        "oid": "d819e5fc0a55eebf11090ba1e1b04101664c8316"
+      }
+    },
+    {
+      "id": "PRR_1",
+      "author": {
+        "login": "grace"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "",
+      "submittedAt": "2026-06-15T18:54:17Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "APPROVED",
+      "commit": {
+        "oid": "d819e5fc0a55eebf11090ba1e1b04101664c8316"
+      }
+    }
+  ],
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-06-15T18:55:04Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/1",
+      "name": "CodeQL-Build (go)",
+      "startedAt": "2026-06-15T18:51:54Z",
+      "status": "COMPLETED",
+      "workflowName": "Code Scanning"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-06-15T18:51:57Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/2",
+      "name": "label-external / label_issues",
+      "startedAt": "2026-06-15T18:51:55Z",
+      "status": "COMPLETED",
+      "workflowName": "PR Triaging"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-06-15T20:25:02Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/3",
+      "name": "build (ubuntu-24.04-firewall)",
+      "startedAt": "2026-06-15T20:19:35Z",
+      "status": "COMPLETED",
+      "workflowName": "Unit and Integration Tests"
+    }
+  ],
+  "title": "Document the release steps",
+  "updatedAt": "2026-09-03T15:21:05Z",
+  "url": "https://github.com/o/r/pull/13665"
+}

@@ -14,13 +14,17 @@ has the downloads and the full commit lists.
   up to the 200 most recently updated, and the newest fifty of any state — with who opened each,
   its checks as passed out of total, its age, its size and whether it conflicts. Filter by state,
   project, author and review status, including _Awaiting review from you_ and _Reviewed by you_;
-  the filters are remembered. Open one to see its reviewers and act on it: **Start workspace**
+  the filters are remembered. Open one for its **Summary** — the description as Markdown, every
+  check with a link to its run, the reviewers, and the conversation of comments and reviews —
+  and to act on it: **Start workspace**
   fetches its branch and opens the composer on it, **Merge** (squash, merge commit or rebase),
   **Close** and **Reopen** each ask first and say whose pull request it is. No branch is ever
   deleted, and a branch you already have is never moved. A pull request from a fork becomes a
   `pr/<number>` branch that follows it; Yardsort does not push to forks, and the changes panel
-  says so instead of offering **Push**. It needs `gh`, and says plainly when `gh` is missing,
-  logged out, or the project is on another forge. See [Pull requests](docs/guide/pull-requests.md).
+  says so instead of offering **Push**. Other people's words are shown with care: no image in
+  a description is loaded, links open in your browser, and HTML is not rendered. It needs `gh`,
+  and says plainly when `gh` is missing, logged out, or the project is on another forge. See
+  [Pull requests](docs/guide/pull-requests.md).
 - A workspace whose open pull request has more than fifty newer ones in front of it now shows it
   on its row: every open pull request is read when Yardsort starts, not only the newest fifty.
 

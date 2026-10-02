@@ -39,8 +39,8 @@ const pr: PullRequest = {
     review: "APPROVED",
     updatedAt: "2026-09-28T10:00:00Z",
     checks: [
-      { name: "Unit tests", state: "passing" },
-      { name: "Build", state: "passing" },
+      { name: "Unit tests", state: "passing", workflow: "CI", url: null },
+      { name: "Build", state: "passing", workflow: "CI", url: null },
     ],
     mergeable: "mergeable",
     checkCounts: { passed: 2, failed: 0, running: 0 },

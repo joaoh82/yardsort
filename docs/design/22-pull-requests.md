@@ -1,7 +1,8 @@
 # Pull requests
 
-_Proposed 2026-10-02. Slice 1 is built — see [what shipped](#slice-1-what-shipped), which also says
-where it differs from the proposal below. Slices 2–4 are still a proposal._
+_Proposed 2026-10-02. Slices 1 and 2 are built — see [slice 1](#slice-1-what-shipped) and
+[slice 2](#slice-2-what-shipped), which also say where they differ from the proposal below.
+Slices 3 and 4 are still a proposal._
 
 Every pull request of every project in one place: a **Pull requests** row at the top of the
 sidebar opens a view in the center panel that lists them, filters them, shows one in detail —
@@ -267,12 +268,14 @@ Per project, as a line above the rows, never a dialog and never instead of other
 
 ## The detail
 
-A header — number, title, state, author, `head → base`, age — the actions, then two tabs.
+A header — number, title, state, author, `head → base`, age — the actions, then two tabs. Until
+slice 3 gives the second tab something to show, the Summary is simply what is under the actions.
 
 ### Summary (slice 2)
 
-`pull_request_detail(project_id, number)` runs `gh pr view <n> --json` for the body, comments,
-reviews, review requests, latest reviews, files and every check, reused for 30 s.
+`pull_request_summary(project_id, number, refresh)` runs `gh pr view <n> --json` for the body,
+comments, reviews, review requests, latest reviews, the count of changed files and every check,
+reused for 30 s.
 
 - **Description**, as Markdown. `react-markdown` with `remark-gfm` is a new dependency: there is
   no Markdown renderer in the app today. Raw HTML in a description is not rendered. A link opens
@@ -397,7 +400,7 @@ slice 1.
 | `pull_request_prepare_branch(project_id, number)`                                    | 1     | the branch to open, and how far behind it is          |
 | `pull_request_merge(project_id, number, head_oid, method)`                           | 1     | shares its checks with `workspace_merge_pull_request` |
 | `pull_request_close(project_id, number)` · `pull_request_reopen`                     | 1     | forget the project's cache afterwards                 |
-| `pull_request_detail(project_id, number, refresh)`                                   | 2     | body, checks, reviewers, conversation, files          |
+| `pull_request_summary(project_id, number, refresh)`                                  | 2     | body, checks with links, reviewers, conversation      |
 | `pull_request_changes(project_id, number)`                                           | 3     | fetches, then lists the changed files                 |
 | `pull_request_diff(project_id, number, path, old_path)`                              | 3     | both sides of one file                                |
 | `pull_request_comment` · `pull_request_line_comments` · `pull_request_send_to_agent` | 4     |                                                       |
@@ -444,8 +447,8 @@ Each is one pull request with its docs, tests and changelog line, in this order.
       the actions and the `PullRequestDetails` card that exists; the three confirmations.
    7. Docs: a new `docs/guide/pull-requests.md`, the rest of
       [what this touches](#documentation-this-touches), and a screenshot.
-2. **Summary.** `pull_request_detail`; the Markdown renderer and its rules; checks with links,
-   reviewers, the conversation, read-only.
+2. **Summary.** ✅ `pull_request_summary`; the Markdown renderer and its rules; checks with links,
+   reviewers, the conversation, read-only. See [slice 2](#slice-2-what-shipped).
 3. **Code.** `Changes` between two revisions; the private refs and their cleanup; the file list,
    the viewer and the Files dropdown in the detail pane.
 4. **Writing.** The reply box; comments on lines; send to an agent, with or without a workspace.
@@ -498,6 +501,50 @@ below 720 px — because jsdom lays nothing out.
 needs to answer `gh api graphql` too, and the demo repositories need a GitHub remote, before the
 view has anything worth a picture. The hands-on pass, [08 §23](08-manual-checklist.md), is also
 still to be done on all three systems.
+
+## Slice 2: what shipped
+
+The Summary: description, checks with links, reviewers, conversation. Read-only.
+
+- **`Gh::pull_request_summary`** asks `gh pr view <n> --json` for the list's own fields plus
+  `body,comments,reviews,changedFiles`, with a time limit. It returns the pull request as the
+  forge has it now, so the Summary's checks and reviewers are fresher than the row's.
+  `PullRequestCheck` gained `workflow` and `url` (`detailsUrl`, or `targetUrl` for a commit
+  status), which every reader of the list now gets too.
+- **`Forge::summary`** keeps each one for 30 s by project and number. Unlike the lists it is an
+  `Err` when `gh` cannot answer: the Summary has nothing else to show there and says why. A
+  summary read while the project was being forgotten — a merge landing mid-read — is returned
+  but not kept.
+- **The window follows the list.** The store keeps one summary per row with a _stamp_ of what
+  the list said when it was asked for: state, head commit, `updatedAt` and the check counts. The
+  list is polled every minute while the view is open, and when a row's stamp moves the summary
+  is read again, past the core's cache. A check finishing moves nothing on a pull request but
+  the counts, which is why they are in the stamp. The old summary stays on screen until the new
+  one arrives, and an answer overtaken by a later question is dropped. After Merge, Close or
+  Reopen it is read again whatever the list says.
+- **Markdown** is `react-markdown` with `remark-gfm`, loaded when the first pull request is
+  opened. `skipHtml` drops raw HTML altogether rather than printing it. Only `http(s):` and
+  `mailto:` are links, opened through the opener with the click and the middle click both
+  prevented, so the webview never navigates. An image is a link labelled with its alt text.
+  Task-list boxes are disabled. Each of these has a test.
+- **A comment the forge hid stays hidden.** `isMinimized` comments keep their place and their
+  author and lose their words in the core, not only in the window.
+- **A review with no words** is shown for what it was: _approved_, _requested changes_, or, for a
+  bare `COMMENTED`, _left comments on lines of the code_ — those comments being the one part of
+  a conversation `gh pr view` does not return. The foot of the conversation says so and links
+  to the forge. They arrive with slice 4.
+- **No tabs yet.** One tab is not a choice. The Summary sits under the actions, and becomes the
+  first of two when slice 3 brings Code.
+- **Named `pull_request_summary`**, not `pull_request_detail`: there is already a
+  `PullRequestDetails`, and one letter is not enough to tell two types apart.
+
+How it was checked: the parser against a recorded `gh pr view` answer, names and words replaced;
+the cache and the stamp with unit tests; the Summary and the Markdown renderer through Testing
+Library; and the pane in headless Chromium with demo data, where the description rendered with
+its table, task list and code, no image element existed, and the template comment was gone.
+
+Still not done: the screenshot, and the hands-on pass ([08 §23](08-manual-checklist.md)), which
+has rows for the Summary now.
 
 ## Not in this version, on purpose
 

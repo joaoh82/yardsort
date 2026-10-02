@@ -330,6 +330,55 @@ pub enum Mergeable {
 pub struct PullRequestCheck {
     pub name: String,
     pub state: Checks,
+    /// The workflow a check run belongs to — `CI` for `CI / test`. A commit status has none.
+    pub workflow: Option<String>,
+    /// Where the forge shows this run: its log, or whatever a commit status points at.
+    pub url: Option<String>,
+}
+
+/// One pull request in full, asked about by itself: what the Pull requests view's Summary
+/// shows. The list has most of [`PullRequest`] already; this adds the words.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestSummary {
+    /// As the forge has it this moment, with every check by name and link.
+    pub pull_request: PullRequest,
+    /// The description, as its author wrote it: Markdown. Empty when there is none.
+    pub body: String,
+    pub changed_files: u32,
+    /// The conversation: comments and reviews as they were given, oldest first. Comments made
+    /// on particular lines are not among them — `gh pr view` does not return those.
+    pub posts: Vec<PullRequestPost>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum PullRequestPostKind {
+    Comment,
+    Review,
+}
+
+/// A comment on a pull request's conversation, or a review of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestPost {
+    pub kind: PullRequestPostKind,
+    /// By login. `None` for an account that no longer exists.
+    pub author: Option<String>,
+    /// When it was posted, in epoch milliseconds.
+    #[specta(type = f64)]
+    pub at: i64,
+    /// Markdown. Often empty for a review, which may be a verdict and nothing else, or only
+    /// comments on lines.
+    pub body: String,
+    /// Where to read it on the forge. A review has no address of its own, and gets the pull
+    /// request's.
+    pub url: Option<String>,
+    /// What a review concluded. `None` for a comment.
+    pub review: Option<ReviewState>,
+    /// The forge has hidden it — as spam, off-topic, outdated — and says why. Its words are
+    /// then not shown here either.
+    pub hidden: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Type)]
@@ -637,6 +686,23 @@ impl Gh {
             .ok_or_else(|| ForgeError::Unreadable("expected a pull request".to_owned()))
     }
 
+    /// Pull request `number` in full — its description, every check with its link, and the
+    /// conversation — asked of the forge now. `limit` is how long `gh` may take.
+    pub fn pull_request_summary(
+        &self,
+        root: &Path,
+        number: u32,
+        limit: Duration,
+    ) -> ForgeResult<PullRequestSummary> {
+        let fields = format!("{PULL_REQUEST_FIELDS},body,comments,reviews,changedFiles");
+        let out = self.run_within(
+            root,
+            &["pr", "view", &number.to_string(), "--json", &fields],
+            limit,
+        )?;
+        pull_request_summary(&out)
+    }
+
     /// The reviews and comments on pull request `number`, oldest first.
     /// `limit` is how long `gh` may take; after that it is stopped and this is an error.
     pub fn pr_posts(&self, root: &Path, number: u32, limit: Duration) -> ForgeResult<Vec<PrPost>> {
@@ -811,6 +877,84 @@ impl Gh {
     }
 }
 
+/// Read what `gh pr view --json` printed for [`Gh::pull_request_summary`].
+pub fn pull_request_summary(json: &str) -> ForgeResult<PullRequestSummary> {
+    let row: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+    let pull_request = pull_request(&row)
+        .ok_or_else(|| ForgeError::Unreadable("expected a pull request".to_owned()))?;
+    let author = |post: &serde_json::Value| {
+        post.get("author")
+            .and_then(|author| author.get("login"))
+            .and_then(|login| login.as_str())
+            .filter(|login| !login.is_empty())
+            .map(str::to_owned)
+    };
+    let at = |post: &serde_json::Value, key: &str| {
+        post.get(key)
+            .and_then(|t| t.as_str())
+            .and_then(crate::activity::iso_to_ms)
+    };
+
+    let mut posts = Vec::new();
+    for comment in items(row.get("comments")) {
+        let Some(at) = at(comment, "createdAt") else {
+            continue;
+        };
+        let hidden = comment
+            .get("isMinimized")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+            .then(|| string_field(comment, "minimizedReason").to_ascii_lowercase());
+        posts.push(PullRequestPost {
+            kind: PullRequestPostKind::Comment,
+            author: author(comment),
+            at,
+            // What the forge hid is not shown by another door.
+            body: match hidden {
+                Some(_) => String::new(),
+                None => string_field(comment, "body"),
+            },
+            url: comment
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
+            review: None,
+            hidden,
+        });
+    }
+    for given in items(row.get("reviews")) {
+        // A review still being written has no time and no verdict: it has not been given.
+        let (Some(at), Some(state)) = (
+            at(given, "submittedAt"),
+            review(given).map(|review| review.state),
+        ) else {
+            continue;
+        };
+        posts.push(PullRequestPost {
+            kind: PullRequestPostKind::Review,
+            author: author(given),
+            at,
+            body: string_field(given, "body"),
+            url: Some(pull_request.url.clone()),
+            review: Some(state),
+            hidden: None,
+        });
+    }
+    posts.sort_by_key(|post| post.at);
+
+    Ok(PullRequestSummary {
+        body: string_field(&row, "body"),
+        changed_files: row
+            .get("changedFiles")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(0),
+        posts,
+        pull_request,
+    })
+}
+
 /// The open pull requests of a repository, fifty to the page. The fields are the ones
 /// [`PULL_REQUEST_FIELDS`] asks `gh` for, except the checks: counted by state, not listed.
 const OPEN_QUERY: &str = "query($owner:String!,$name:String!,$after:String){\
@@ -951,14 +1095,23 @@ pub(crate) fn pull_request(row: &serde_json::Value) -> Option<PullRequest> {
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
-        .map(|check| PullRequestCheck {
-            name: check
-                .get("name")
-                .or_else(|| check.get("context"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("Check")
-                .to_owned(),
-            state: roll_up(Some(&serde_json::json!([check]))),
+        .map(|check| {
+            let text = |key: &str| {
+                check
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_owned)
+            };
+            PullRequestCheck {
+                // A check run has a name; a commit status has a context instead.
+                name: text("name")
+                    .or_else(|| text("context"))
+                    .unwrap_or_else(|| "Check".to_owned()),
+                state: roll_up(Some(&serde_json::json!([check]))),
+                workflow: text("workflowName"),
+                url: text("detailsUrl").or_else(|| text("targetUrl")),
+            }
         })
         .collect();
     read(
@@ -1368,7 +1521,9 @@ mod tests {
             details.checks,
             vec![PullRequestCheck {
                 name: "test".into(),
-                state: Checks::Passing
+                state: Checks::Passing,
+                workflow: None,
+                url: None,
             }]
         );
         assert_eq!(details.check_counts.passed, 1);
@@ -1572,6 +1727,151 @@ mod tests {
         let closed = found[2].details.as_ref().unwrap();
         assert_eq!(closed.review_requests.len(), 1);
         assert!(!closed.review_requests[0].team);
+    }
+
+    /// One pull request in full, as `gh pr view` really printed it.
+    #[test]
+    fn reads_a_recorded_pull_request_in_full() {
+        let summary = pull_request_summary(&fixture("pr-view.json")).unwrap();
+        let pr = &summary.pull_request;
+        assert_eq!(pr.number, 13665);
+        assert_eq!(pr.author.as_deref(), Some("dennis"));
+        assert!(summary.body.starts_with("## What\n"));
+        assert_eq!(summary.changed_files, 2);
+
+        // Every check, by name, with the workflow it belongs to and where to read its run.
+        let details = pr.details.as_ref().unwrap();
+        assert_eq!(details.checks.len(), 3);
+        assert_eq!(
+            details.checks[0],
+            PullRequestCheck {
+                name: "CodeQL-Build (go)".into(),
+                state: Checks::Passing,
+                workflow: Some("Code Scanning".into()),
+                url: Some("https://github.com/o/r/actions/runs/1/job/1".into()),
+            }
+        );
+
+        // The two reviews came first and the comment a month later: oldest first, whatever
+        // order `gh` lists the two kinds in.
+        let said: Vec<_> = summary
+            .posts
+            .iter()
+            .map(|post| (post.kind, post.author.as_deref(), post.review))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                (
+                    PullRequestPostKind::Review,
+                    Some("margaret"),
+                    Some(ReviewState::Commented)
+                ),
+                (
+                    PullRequestPostKind::Review,
+                    Some("grace"),
+                    Some(ReviewState::Approved)
+                ),
+                (PullRequestPostKind::Comment, Some("linus"), None),
+            ]
+        );
+        assert!(summary
+            .posts
+            .windows(2)
+            .all(|pair| pair[0].at <= pair[1].at));
+        assert_eq!(summary.posts[0].body, "Looks right to me.");
+        assert_eq!(summary.posts[1].body, "", "an approval with nothing to add");
+        assert_eq!(
+            summary.posts[1].url.as_deref(),
+            Some("https://github.com/o/r/pull/13665"),
+            "a review has no address of its own"
+        );
+        assert_eq!(
+            summary.posts[2].url.as_deref(),
+            Some("https://github.com/o/r/pull/13665#issuecomment-1")
+        );
+        assert!(summary.posts.iter().all(|post| post.hidden.is_none()));
+    }
+
+    #[test]
+    fn a_hidden_comment_keeps_its_place_and_loses_its_words() {
+        let json = serde_json::json!({
+            "number": 7, "url": "https://github.com/o/r/pull/7", "headRefName": "b",
+            "body": "",
+            "statusCheckRollup": [
+                {"__typename": "StatusContext", "context": "ci/legacy", "state": "FAILURE",
+                 "targetUrl": "https://ci.example.com/7"}
+            ],
+            "comments": [
+                {"author": {"login": "spammer"}, "body": "Buy things", "isMinimized": true,
+                 "minimizedReason": "SPAM", "createdAt": "2026-09-28T16:10:00Z",
+                 "url": "https://github.com/o/r/pull/7#issuecomment-1"},
+                {"author": null, "body": "From an account that has gone",
+                 "isMinimized": false, "minimizedReason": "",
+                 "createdAt": "2026-09-28T16:20:00Z", "url": "u"}
+            ],
+            "reviews": [
+                {"author": {"login": "ada"}, "state": "PENDING", "body": "half written",
+                 "submittedAt": null},
+                {"author": {"login": "ada"}, "state": "CHANGES_REQUESTED", "body": "",
+                 "submittedAt": "2026-09-28T16:15:00Z"}
+            ],
+        });
+        let summary = pull_request_summary(&json.to_string()).unwrap();
+        assert_eq!(
+            summary.posts.len(),
+            3,
+            "a review still being written is not given yet"
+        );
+        let spam = &summary.posts[0];
+        assert_eq!(spam.hidden.as_deref(), Some("spam"));
+        assert_eq!(
+            spam.body, "",
+            "what the forge hid is not shown by another door"
+        );
+        assert_eq!(summary.posts[1].review, Some(ReviewState::ChangesRequested));
+        assert_eq!(summary.posts[2].author, None);
+        assert_eq!(summary.posts[2].body, "From an account that has gone");
+
+        // A commit status has a context for a name and a target for a link, and no workflow.
+        let check = &summary.pull_request.details.as_ref().unwrap().checks[0];
+        assert_eq!(check.name, "ci/legacy");
+        assert_eq!(check.state, Checks::Failing);
+        assert_eq!(check.workflow, None);
+        assert_eq!(check.url.as_deref(), Some("https://ci.example.com/7"));
+
+        assert!(pull_request_summary("{}").is_err(), "not a pull request");
+        assert!(pull_request_summary("gh: not found").is_err());
+    }
+
+    /// The question asked of `gh` is one argument array: the list's fields and the words.
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_in_full_is_one_question() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().display().to_string();
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/gh/2.102.0/pr-view.json"),
+            dir.path().join("1.json"),
+        )
+        .unwrap();
+        let gh = paged_gh(dir.path(), "true", "true");
+        let summary = gh
+            .pull_request_summary(dir.path(), 13665, Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(summary.posts.len(), 3);
+        let asked = std::fs::read_to_string(format!("{here}/asked")).unwrap();
+        assert!(
+            asked.starts_with("pr view 13665 --json number,url,title,"),
+            "{asked}"
+        );
+        assert!(
+            asked
+                .trim_end()
+                .ends_with(",body,comments,reviews,changedFiles"),
+            "{asked}"
+        );
+        assert_eq!(asked.lines().count(), 1);
     }
 
     /// A team in `gh pr list`'s own shape, which has a name and a slug and no login.
@@ -1891,6 +2191,41 @@ mod tests {
             assert!(pr.url.starts_with("https://"));
             assert!(pr.details.is_some());
         }
+    }
+
+    /// One pull request in full against the real `gh`: the newest one this repository has.
+    /// Ignored by default, like the two above.
+    #[test]
+    #[ignore = "needs gh, a login and the network"]
+    fn reads_this_repositorys_newest_pull_request_in_full() {
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let gh = Gh::find(&env).expect("gh on PATH");
+        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let newest = gh.pull_requests(here, 1).expect("gh answered")[0].number;
+        let summary = gh
+            .pull_request_summary(here, newest, Duration::from_secs(20))
+            .expect("gh answered");
+        let details = summary.pull_request.details.as_ref().unwrap();
+        println!(
+            "#{}: {} chars of description, {} files, {} checks ({} with a link), {} posts",
+            summary.pull_request.number,
+            summary.body.len(),
+            summary.changed_files,
+            details.checks.len(),
+            details.checks.iter().filter(|c| c.url.is_some()).count(),
+            summary.posts.len()
+        );
+        assert_eq!(summary.pull_request.number, newest);
+        assert!(summary.changed_files > 0);
+        assert_eq!(details.checks.len() as u32, details.check_counts.total());
+        assert!(summary
+            .posts
+            .windows(2)
+            .all(|pair| pair[0].at <= pair[1].at));
     }
 
     #[test]
