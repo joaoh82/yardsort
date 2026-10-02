@@ -98,7 +98,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/usage",
         title: "Usage",
         description:
-          "See the tokens Claude Code, Codex and Grok spent, priced at API rates, and the CPU and memory Yardsort and each agent use, live.",
+          "Open the Usage panel to compare Claude Code, Codex and Grok tokens, estimated API costs and Codex plan limits, or inspect live CPU and memory by workspace and terminal.",
       },
       {
         slug: "guide/workflows",

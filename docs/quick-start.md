@@ -141,10 +141,24 @@ With the pull request open, **Request code review…** in the workspace's menu h
 review it and post on GitHub, then tells you and the agent that wrote it. That is a
 [workflow](guide/workflows.md); the **Workflows** section above Projects has it and any you write.
 
+### Check tokens and machine resources
+
+Open **Usage** beside **Settings** at the foot of the sidebar, or search for _Usage_ with
+**Mod+K**. **Token usage** compares Claude Code, Codex and Grok over **7d**, **30d** or **90d**,
+by day, agent, model and workspace. It reads their local logs, including sessions started outside
+Yardsort, without requiring activity capture. **Cost** is an API-price estimate, not your
+subscription bill; **Tokens** includes models whose price is unknown.
+
+**Machine resources** shows live CPU and memory for Yardsort and all its terminals, including
+programs the agents start. Sort by CPU or memory, expand a workspace to inspect its terminals,
+or click its name to go back to work. Nothing is sent anywhere. See [Usage](guide/usage.md).
+
 ## 7. Come back later
 
-Quit whenever you like. When you return, pick the workspace and press **Resume** — the agent
-reopens with the whole conversation intact.
+Close the window whenever you like. With agents still working, choose **Leave them running**
+to keep them in the background; reopening Yardsort reconnects to their terminals. **Stop them**
+ends them instead. For a conversation that has ended, pick the workspace and press **Resume**
+to reopen it with its conversation intact.
 
 ![Previous sessions](images/sessions.png)
 
@@ -153,6 +167,7 @@ reopens with the whole conversation intact.
 - [Workspaces](guide/workspaces.md) — branches, archiving, cleaning up
 - [Terminals & sessions](guide/terminals-and-sessions.md) — resume, fork, notifications
 - [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review
+- [Usage](guide/usage.md) — tokens, estimated API costs, plan limits and live CPU and memory
 - [Settings & harnesses](guide/settings.md) — make an agent start the way you like
 - [Keyboard shortcuts](guide/shortcuts.md)
 

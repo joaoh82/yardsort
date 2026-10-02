@@ -38,6 +38,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 
 ## Highlights
 
+- **Track tokens and machine resources.** Open **Usage** from the sidebar to compare Claude
+  Code, Codex and Grok by day, model and workspace, see estimated API costs and Codex's last
+  reported plan limits, or inspect live CPU and memory for every terminal's process tree.
+  [More below](#usage-tokens-cost-estimates-and-machine-resources).
 - **Keyboard navigation you can configure.** A command palette, panel focus and workspace/tab
   switching, with an in-app [shortcut cheat sheet and editor](docs/guide/shortcuts.md).
 - **A guided first look.** An optional welcome tour explains the main panels; replay it from
@@ -65,7 +69,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   code review is one click in a workspace's menu. Describe one in your own words and a model
   writes the file, for you to check and save. [More below](#workflows-named-agent-work-in-steps).
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
-  one click into your editor. With an agent reporting, each changed file says who wrote it: an
+  image previews. Edit text files inside Yardsort, with retained drafts and a check before
+  overwriting a file changed on disk, or open them in your editor. With an agent reporting,
+  each changed file says who wrote it: an
   agent that reported writing it, one that was running a command when it was last written, or
   nobody the record knows of.
 - **Send it on without leaving.** Commit what an agent wrote, push it, and open the pull request
@@ -103,11 +109,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   how it went; a merged pull request counts as kept until you say otherwise. Each agent's history
   on your own work sits beside the composer's picker — and says "too few to say" until there is
   enough of it. See [Outcomes](docs/guide/outcomes.md).
-- **Usage: tokens and the machine.** What your agents spent, read from their own logs on this
-  machine — Claude Code, Codex and Grok — by day, agent, model and workspace, priced at API rates
-  for comparison, with Codex's plan limits as it last heard them. Beside it, live CPU and memory
-  for Yardsort and every agent it runs, down to each terminal's process tree. Nothing is sent
-  anywhere. See [Usage](docs/guide/usage.md).
+- **Choose how agents start.** Enable **Always start in auto mode** per harness in
+  [Settings](docs/guide/settings.md#auto-mode). For Claude Code and Codex,
+  with activity capture enabled, a [context hint](docs/guide/terminals-and-sessions.md#when-an-agents-context-fills-up)
+  offers **Compact** when a conversation reaches 80 % of its context window.
 - **Keeps itself current.** Signed in-app updates on macOS, Windows and the Linux AppImage — one
   click, and your agents' conversations resume afterwards.
 - **Scriptable.** [`ys`](docs/guide/cli.md), a small command-line client that comes with the app,
@@ -129,6 +134,29 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
     <td align="center"><sub>Come back later: Resume or Fork any conversation</sub></td>
   </tr>
 </table>
+
+## Usage: tokens, cost estimates and machine resources
+
+![Usage: token totals, estimated API costs, cache savings and workspaces using demo logs](docs/images/usage-tokens.png)
+
+Open **Usage** beside **Settings** at the foot of the sidebar, or search for it in the command
+palette (**⌘K** on macOS, **Ctrl+Shift+K** elsewhere).
+
+- **Token usage** reads Claude Code, Codex and Grok's local session logs, including conversations
+  started outside Yardsort. Compare the last **7d**, **30d** or **90d** by day, agent, model and
+  workspace; inspect cache reads, cache writes, output and cache savings. Codex's plan limits
+  show when they were last reported. No activity capture or extra API key is needed.
+- **Cost** estimates the API price of those tokens in US dollars, rather than your subscription
+  bill. Unknown models, including Grok models, still contribute tokens but no cost.
+- **Machine resources** shows live CPU and memory for Yardsort, its background terminal host,
+  and each project, workspace and terminal, including the programs an agent starts. Sort by
+  memory or CPU to find the busiest workspace and click its name to return to it. Sampling runs
+  every two seconds while this tab is open and the window is visible.
+
+All figures stay on your machine. Token history covers only logs still present there; it does
+not include other computers. Machine resources covers all agents Yardsort runs, while token
+totals currently cover Claude Code, Codex and Grok. See the [Usage guide](docs/guide/usage.md)
+for sources, pricing limits and the option to hide the sidebar button.
 
 ## Hand the work to another agent
 
@@ -255,6 +283,7 @@ never sees their credentials.
    or **Clone a GitHub repository** to download one into a new local folder.
 2. Press **+** on the project (or `Ctrl+Shift+N` / `⌘N`), type what you want done, press **Enter**.
 3. Watch the agent in the middle, and its changes on the right. Start more workspaces in parallel.
+   Open **Usage** in the sidebar to compare their tokens and inspect live CPU and memory.
 4. The result is an ordinary git branch — review it, push it, open a PR — or have a second agent
    review it: **Request code review…** in the workspace's menu.
 

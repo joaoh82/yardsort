@@ -3,6 +3,13 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Usage is easier to find in the docs and website.** The README and homepage now explain both
+  tabs, supported token sources and API cost estimates. The quick start introduces Usage, and
+  the guide adds a first-look walkthrough, refresh guidance and the distinction from activity
+  capture. New screenshots show Token usage and Machine resources with demo data.
+
 ## 0.17.0
 
 - **Usage: the tokens your agents spent, and what they use of the machine.** **Usage**, at the

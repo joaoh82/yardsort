@@ -8,6 +8,7 @@ import { Ideas } from "@/components/landing/ideas";
 import { Install } from "@/components/landing/install";
 import { OpenSource } from "@/components/landing/open-source";
 import { Questions } from "@/components/landing/questions";
+import { Usage } from "@/components/landing/usage";
 import { JsonLd } from "@/components/json-ld";
 import { homeStructuredData } from "@/lib/structured-data";
 import { HOME_DESCRIPTION, HOME_TITLE, pageMetadata } from "@/lib/seo";
@@ -21,6 +22,7 @@ export default function Home() {
       <Hero />
       <Install />
       <Ideas />
+      <Usage />
       <Cli />
       <Assist />
       <Harnesses />

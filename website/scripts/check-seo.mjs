@@ -225,7 +225,7 @@ for (const file of htmlFiles(out)) {
 
 assert.equal(seenArticles.size, articles.length, "Every registered article must be exported");
 assert.equal(answerSections.length, 2, "Expected homepage and guide answers");
-assert.equal(answerSections[0].length, 7, "Expected all seven product questions");
+assert.equal(answerSections[0].length, 8, "Expected all eight product questions, including Usage");
 assert.deepEqual(answerSections[0], answerSections[1], "Homepage and guide answers must agree");
 
 const sitemap = fs.readFileSync(path.join(out, "sitemap.xml"), "utf8");
