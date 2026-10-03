@@ -17,6 +17,7 @@ import {
   visible,
   type Filters,
 } from "./filters";
+import { NewTaskDialog } from "./NewTaskDialog";
 import { TaskFilters } from "./TaskFilters";
 import { TaskList } from "./TaskList";
 import { TaskPane } from "./TaskPane";
@@ -37,9 +38,12 @@ export function TasksView() {
   const ui = useProjectsStore((s) => s.ui);
   const byProject = useTasksStore((s) => s.byProject);
   const selected = useTasksStore((s) => s.selected);
+  const failed = useTasksStore((s) => s.error);
+  const notice = useTasksStore((s) => s.notice);
   const [search, setSearch] = useState("");
   const [listHidden, setListHidden] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [creating, setCreating] = useState(false);
   const frame = useRef<HTMLDivElement>(null);
   const narrow = useNarrowerThan(frame, STACK_BELOW_PX);
 
@@ -99,6 +103,15 @@ export function TasksView() {
     if (panel && detailed) setListHidden(panel.isCollapsed());
   };
   const viewer = listed.map((project) => byProject[project.id]?.viewer).find(Boolean) ?? null;
+  // Where a task can be opened: on GitHub, with issues on, and somebody logged in.
+  const writable = useMemo(
+    () =>
+      listed.filter((project) => {
+        const found = byProject[project.id];
+        return covered(found) && !found?.disabled && !found?.loggedOut;
+      }),
+    [listed, byProject],
+  );
   const active = filtering(filters, search);
   const loading =
     listed.length > 0 &&
@@ -194,10 +207,23 @@ export function TasksView() {
         </div>
         <button
           type="button"
+          disabled={writable.length === 0}
+          title={
+            writable.length === 0
+              ? "No project here has GitHub issues to add to"
+              : "Open a new issue on a project's repository"
+          }
+          onClick={() => setCreating(true)}
+          className="ml-auto rounded border border-line px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+        >
+          New task
+        </button>
+        <button
+          type="button"
           disabled={refreshing || listed.length === 0}
           title="Ask GitHub again"
           onClick={() => void refresh(listed.map((project) => project.id))}
-          className="ml-auto rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+          className="rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
         >
           {refreshing ? "Refreshing…" : "Refresh"}
         </button>
@@ -231,6 +257,37 @@ export function TasksView() {
         onRetry={(id) => void refresh([id])}
         retrying={refreshing}
       />
+      {/* What was just done to a task, when the task itself has left the list — closed from
+          the Open tab, most of all. With its details open, they say it; without them, here. */}
+      {!current && (failed || notice) && (
+        <div className="flex shrink-0 items-start gap-2 border-b border-line px-4 py-1.5 text-[12px]">
+          <p
+            role={failed ? "alert" : "status"}
+            className={`min-w-0 flex-1 break-words select-text ${failed ? "text-red-400" : "text-ink-muted"}`}
+          >
+            {failed ?? notice}
+          </p>
+          <button
+            type="button"
+            onClick={() => useTasksStore.getState().dismiss()}
+            className="shrink-0 text-ink-faint hover:text-ink"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {creating && writable.length > 0 && (
+        <NewTaskDialog
+          projects={writable}
+          // The one whose task is open, or the only one being looked at, or the first.
+          initial={
+            writable.find((project) => project.id === current?.project.id)?.id ??
+            writable.find((project) => filters.projects.includes(project.id))?.id ??
+            writable[0]!.id
+          }
+          onClose={() => setCreating(false)}
+        />
+      )}
       <div ref={frame} onKeyDown={onKeyDown} className="min-h-0 flex-1">
         {/* The list keeps its place in the tree whether or not the details are open: a row that
             was just pressed must still be there, focused, for Escape and the arrow keys. */}

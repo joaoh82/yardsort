@@ -9,9 +9,16 @@ const core = vi.hoisted(() => ({
   projectTasks: vi.fn(),
   taskDetail: vi.fn(),
   taskPrompt: vi.fn(),
+  taskCreate: vi.fn(),
+  taskComment: vi.fn(),
+  taskClose: vi.fn(),
+  taskReopen: vi.fn(),
+  taskEdit: vi.fn(),
+  projectTaskChoices: vi.fn(),
   sessionsList: vi.fn(),
   ptySpawn: vi.fn(),
 }));
+const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 const clipboard = vi.hoisted(() => ({ writeText: vi.fn() }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -19,6 +26,7 @@ vi.mock("@/lib/ipc", async (original) => ({
   hasCore: () => true,
   ipc: core,
 }));
+vi.mock("@/lib/native", () => ({ native }));
 vi.mock("@tauri-apps/plugin-opener", () => opener);
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => clipboard);
 
@@ -115,6 +123,17 @@ beforeEach(() => {
     prompt: `Work on this GitHub issue: ${key}`,
     task: linkTo(Number(key.slice(1))),
   }));
+  for (const fn of [core.taskComment, core.taskClose, core.taskReopen, core.taskEdit]) {
+    fn.mockResolvedValue(undefined);
+  }
+  core.taskCreate.mockResolvedValue({
+    key: "#13",
+    url: "https://github.com/demo/app/issues/13",
+  });
+  core.projectTaskChoices.mockResolvedValue({
+    labels: [bug, { name: "docs", color: "0075ca" }, { name: "question", color: "d876e3" }],
+    assignees: ["ada", "grace", "linus"],
+  });
   useTasksStore.setState({
     byProject: {},
     closedWanted: false,
@@ -122,6 +141,8 @@ beforeEach(() => {
     details: {},
     busy: null,
     error: null,
+    notice: null,
+    choices: {},
   });
 });
 
@@ -475,7 +496,11 @@ describe("one task in full", () => {
       "Could not read this task: HTTP 502",
     );
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("What Worktrees on a network drive is about.")).toBeVisible();
+    // Asked for again on each try: the plain paragraph shown first is replaced when the
+    // Markdown renderer arrives.
+    await waitFor(() =>
+      expect(screen.getByText("What Worktrees on a network drive is about.")).toBeVisible(),
+    );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(core.taskDetail).toHaveBeenLastCalledWith(alpha.id, "#12", true);
   });
@@ -605,5 +630,321 @@ describe("handing a task to an agent", () => {
       await user.click(screen.getByRole("menuitem", { name: "12-network-drive-2" }));
       expect(useProjectsStore.getState().selectedWorkspaceId).toBe(two.id);
     });
+  });
+});
+
+describe("managing a task", () => {
+  const pane = () => screen.getByRole("region", { name: "Task #12" });
+  const open = async (title = /Worktrees/, key = "#12") => {
+    const user = show();
+    await user.click(row(title));
+    const region = screen.getByRole("region", { name: `Task ${key}` });
+    await within(region).findByRole("form", { name: "Reply" });
+    return user;
+  };
+  /**
+   * Type into the reply box. Focused by hand and not by a click: jsdom lays nothing out, so
+   * the panels' divider thinks every press of the pointer is on it and takes the focus.
+   */
+  const write = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+    const box = within(pane()).getByRole("textbox", { name: "Your comment" });
+    box.focus();
+    await user.keyboard(text);
+    return box;
+  };
+  const written = () =>
+    [core.taskComment, core.taskClose, core.taskReopen, core.taskEdit, core.taskCreate].flatMap(
+      (fn) => fn.mock.calls,
+    );
+
+  describe("a reply", () => {
+    it("is posted as written, says so, and asks the source again", async () => {
+      const user = await open();
+      expect(within(pane()).getByRole("button", { name: "Comment" })).toBeDisabled();
+      const box = await write(user, "  Which **version**?  ");
+      await user.click(within(pane()).getByRole("button", { name: "Comment" }));
+
+      await waitFor(() =>
+        expect(core.taskComment).toHaveBeenCalledWith(alpha.id, "#12", "Which **version**?"),
+      );
+      expect(await within(pane()).findByRole("status")).toHaveTextContent("Commented on #12.");
+      expect(box).toHaveValue("");
+      expect(core.projectTasks).toHaveBeenCalledWith(alpha.id, true, false);
+      await waitFor(() => expect(core.taskDetail).toHaveBeenLastCalledWith(alpha.id, "#12", true));
+    });
+
+    it("clears the box as soon as the comment lands, not after everything is read again", async () => {
+      const user = await open();
+      // The reading-again is `gh` over the network. Here it never comes back at all.
+      core.projectTasks.mockReturnValue(new Promise(() => {}));
+      const box = await write(user, "Once.");
+      await user.click(within(pane()).getByRole("button", { name: "Comment" }));
+      await waitFor(() => expect(core.taskComment).toHaveBeenCalledTimes(1));
+      // Were the box still full and the button still live, a second press would post it again.
+      await waitFor(() => expect(box).toHaveValue(""));
+    });
+
+    it("is sent with Ctrl+Enter, and not at all when there is nothing in it", async () => {
+      const user = await open();
+      await write(user, "{Control>}{Enter}{/Control}");
+      expect(core.taskComment).not.toHaveBeenCalled();
+      await write(user, "Thanks.{Control>}{Enter}{/Control}");
+      await waitFor(() => expect(core.taskComment).toHaveBeenCalledTimes(1));
+    });
+
+    it("keeps what was typed when it could not be posted, and says why", async () => {
+      core.taskComment.mockRejectedValue({ code: "gh_failed", message: "HTTP 403" });
+      const user = await open();
+      const box = await write(user, "Thanks.");
+      await user.click(within(pane()).getByRole("button", { name: "Comment" }));
+      expect(await within(pane()).findByRole("alert")).toHaveTextContent("HTTP 403");
+      expect(box).toHaveValue("Thanks.");
+    });
+  });
+
+  describe("closing and reopening", () => {
+    it("sends nothing when the answer is no", async () => {
+      native.confirm.mockResolvedValue(false);
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: "Close" }));
+      await user.click(screen.getByRole("menuitem", { name: "Close as completed" }));
+      await waitFor(() => expect(native.confirm).toHaveBeenCalledTimes(1));
+      const [question] = native.confirm.mock.calls[0]!;
+      expect(question).toContain("Close task #12 as completed?");
+      expect(question).toContain("Worktrees on a network drive");
+      expect(question).toContain("grace opened it.");
+      expect(written(), "a no is respected").toEqual([]);
+    });
+
+    it("closes with the reason chosen when the answer is yes", async () => {
+      native.confirm.mockResolvedValue(true);
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: "Close" }));
+      await user.click(screen.getByRole("menuitem", { name: "Close as not planned" }));
+      await waitFor(() =>
+        expect(core.taskClose).toHaveBeenCalledWith(alpha.id, "#12", "notPlanned"),
+      );
+      expect(await within(pane()).findByRole("status")).toHaveTextContent(
+        "Closed #12 as not planned.",
+      );
+    });
+
+    it("still says what was done when the closed task leaves the list, as GitHub has it", async () => {
+      native.confirm.mockResolvedValue(true);
+      // After the close the source no longer lists #12 among the open ones.
+      core.taskClose.mockImplementation(async () => {
+        core.projectTasks.mockImplementation(async (id: string) =>
+          id === alpha.id ? tasksOf([daemon]) : answers()[id],
+        );
+      });
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: "Close" }));
+      await user.click(screen.getByRole("menuitem", { name: "Close as completed" }));
+
+      await waitFor(() =>
+        expect(screen.queryByRole("region", { name: "Task #12" })).not.toBeInTheDocument(),
+      );
+      expect(titles()).toEqual(["Document the daemon", "Dark mode"]);
+      expect(screen.getByRole("status")).toHaveTextContent("Closed #12 as completed.");
+      await user.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it("offers Reopen on a closed task, and reopens only on a yes", async () => {
+      const user = show(answers(), { [FILTERS_KEY]: JSON.stringify({ state: "closed" }) });
+      await user.click(row(/Crash on an empty repository/));
+      const closed = screen.getByRole("region", { name: "Task #4" });
+      expect(within(closed).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+
+      native.confirm.mockResolvedValueOnce(false);
+      await user.click(within(closed).getByRole("button", { name: "Reopen" }));
+      await waitFor(() => expect(native.confirm).toHaveBeenCalledTimes(1));
+      expect(written(), "a no is respected").toEqual([]);
+
+      native.confirm.mockResolvedValueOnce(true);
+      await user.click(within(closed).getByRole("button", { name: "Reopen" }));
+      await waitFor(() => expect(core.taskReopen).toHaveBeenCalledWith(alpha.id, "#4"));
+      // Closed tasks are showing, so they are asked for again with the open ones.
+      await waitFor(() => expect(core.projectTasks).toHaveBeenLastCalledWith(alpha.id, true, true));
+    });
+
+    it("shows the forge's refusal in its own words", async () => {
+      native.confirm.mockResolvedValue(true);
+      core.taskClose.mockRejectedValue({
+        code: "gh_failed",
+        message: "must have triage permissions",
+      });
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: "Close" }));
+      await user.click(screen.getByRole("menuitem", { name: "Close as completed" }));
+      expect(await within(pane()).findByRole("alert")).toHaveTextContent(
+        "must have triage permissions",
+      );
+    });
+  });
+
+  describe("labels and assignees", () => {
+    it("offers the repository's labels with the task's own ticked, and adds one", async () => {
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: /^Labels/ }));
+      expect(core.projectTaskChoices).toHaveBeenCalledWith(alpha.id);
+      expect(await screen.findByRole("menuitemradio", { name: "docs" })).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
+      expect(screen.getByRole("menuitemradio", { name: "bug" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await user.click(screen.getByRole("menuitemradio", { name: "docs" }));
+      await waitFor(() =>
+        expect(core.taskEdit).toHaveBeenCalledWith(alpha.id, "#12", {
+          title: null,
+          addLabels: ["docs"],
+          removeLabels: [],
+          addAssignees: [],
+          removeAssignees: [],
+        }),
+      );
+      expect(await within(pane()).findByRole("status")).toHaveTextContent("Labelled #12 docs.");
+    });
+
+    it("takes off a label the task has", async () => {
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: /^Labels/ }));
+      await user.click(screen.getByRole("menuitemradio", { name: "bug" }));
+      await waitFor(() =>
+        expect(core.taskEdit).toHaveBeenCalledWith(
+          alpha.id,
+          "#12",
+          expect.objectContaining({ addLabels: [], removeLabels: ["bug"] }),
+        ),
+      );
+    });
+
+    it("still offers what the task has when the repository's list cannot be read", async () => {
+      core.projectTaskChoices.mockRejectedValue({ code: "gh_failed", message: "HTTP 502" });
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: /^Labels/ }));
+      expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+        "✓bug",
+      ]);
+    });
+
+    it("assigns and unassigns, with you first", async () => {
+      const user = await open(/Document the daemon/, "#9");
+      const region = () => screen.getByRole("region", { name: "Task #9" });
+      await user.click(within(region()).getByRole("button", { name: /^Assignees/ }));
+      const people = await screen.findAllByRole("menuitemradio");
+      await waitFor(() =>
+        expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+          "ada (you)",
+          "grace",
+          "linus",
+        ]),
+      );
+      expect(people[0]).toHaveAttribute("aria-checked", "false");
+      await user.click(screen.getByRole("menuitemradio", { name: "ada (you)" }));
+      await waitFor(() =>
+        expect(core.taskEdit).toHaveBeenCalledWith(
+          alpha.id,
+          "#9",
+          expect.objectContaining({ addAssignees: ["ada"], removeAssignees: [] }),
+        ),
+      );
+      expect(await within(region()).findByRole("status")).toHaveTextContent("Assigned #9 to ada.");
+    });
+  });
+});
+
+describe("a new task", () => {
+  const dialog = () => screen.getByRole("dialog", { name: "New task" });
+
+  it("is opened in the chosen project with what was written, and then selected", async () => {
+    core.projectTasks.mockImplementation(async (id: string) =>
+      id === alpha.id
+        ? tasksOf([task(13, { title: "Crash on start" }), drive, daemon])
+        : answers()[id],
+    );
+    const user = show();
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    expect(within(dialog()).getByRole("button", { name: "Create" })).toBeDisabled();
+    expect(within(dialog()).getByText(/as soon as you\s+press Create/)).toBeVisible();
+
+    await user.type(within(dialog()).getByRole("textbox", { name: "Title" }), "Crash on start");
+    await user.type(
+      within(dialog()).getByRole("textbox", { name: "Description" }),
+      "It **crashes**.",
+    );
+    await user.click(await within(dialog()).findByRole("checkbox", { name: "bug" }));
+    await user.click(within(dialog()).getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(core.taskCreate).toHaveBeenCalledWith(alpha.id, {
+        title: "Crash on start",
+        body: "It **crashes**.",
+        labels: ["bug"],
+        assignees: [],
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(useTasksStore.getState().selected).toBe(`${alpha.id}#13`);
+    expect(await screen.findByRole("region", { name: "Task #13" })).toBeVisible();
+  });
+
+  it("goes to the project that was picked, with that project's labels", async () => {
+    const user = show();
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.selectOptions(within(dialog()).getByRole("combobox", { name: "Project" }), "beta");
+    await waitFor(() => expect(core.projectTaskChoices).toHaveBeenCalledWith(beta.id));
+    await user.type(within(dialog()).getByRole("textbox", { name: "Title" }), "Dark mode");
+    await user.click(within(dialog()).getByRole("button", { name: "Create" }));
+    await waitFor(() =>
+      expect(core.taskCreate).toHaveBeenCalledWith(
+        beta.id,
+        expect.objectContaining({ title: "Dark mode", labels: [] }),
+      ),
+    );
+  });
+
+  it("sends nothing on Cancel or Escape", async () => {
+    const user = show();
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.type(within(dialog()).getByRole("textbox", { name: "Title" }), "Never mind");
+    await user.click(within(dialog()).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(core.taskCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps what was written and says why when it could not be opened", async () => {
+    core.taskCreate.mockRejectedValue({ code: "gh_failed", message: "Issues are disabled" });
+    const user = show();
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.type(within(dialog()).getByRole("textbox", { name: "Title" }), "Crash on start");
+    await user.click(within(dialog()).getByRole("button", { name: "Create" }));
+    expect(await within(dialog()).findByRole("alert")).toHaveTextContent("Issues are disabled");
+    expect(within(dialog()).getByRole("textbox", { name: "Title" })).toHaveValue("Crash on start");
+  });
+
+  it("offers only projects whose tasks can be read, and is off when there are none", async () => {
+    const user = show({
+      [alpha.id]: tasksOf([drive]),
+      [beta.id]: tasksOf([], {
+        repo: { host: "gitlab.com", owner: "demo", name: "site", kind: "gitlab" },
+      }),
+    });
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    const options = within(within(dialog()).getByRole("combobox", { name: "Project" }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(options).toEqual(["alpha"]);
+  });
+
+  it("is off when no project has issues to add to", () => {
+    show({ [alpha.id]: tasksOf([], { disabled: true }), [beta.id]: tasksOf([], { repo: null }) });
+    expect(screen.getByRole("button", { name: "New task" })).toBeDisabled();
   });
 });

@@ -393,9 +393,11 @@ describe("the details", () => {
     expect(row(/Add a retry/)).toHaveAttribute("aria-current", "true");
     expect(within(pane).getByText("grace/retry → main")).toBeVisible();
     expect(within(pane).getByText("Review required")).toBeVisible();
-    expect(
-      await within(pane).findByText("What Add a retry to the uploader is about."),
-    ).toBeVisible();
+    // Asked for again on each try: the words are first shown plain, and that paragraph is
+    // replaced when the Markdown renderer arrives. One found a moment before is gone by then.
+    await waitFor(() =>
+      expect(within(pane).getByText("What Add a retry to the uploader is about.")).toBeVisible(),
+    );
     expect(core.pullRequestSummary).toHaveBeenCalledWith(alpha.id, 8, false);
     const reviewers = within(pane).getByRole("region", { name: "Reviewers" });
     expect(reviewers).toHaveTextContent("linuscommented");

@@ -11,10 +11,10 @@ It needs the [GitHub CLI](https://cli.github.com), installed and logged in, and 
 projects on GitHub. Yardsort holds no credential of its own: everything here is `gh`, with the
 permissions you already have.
 
-From here you read tasks and [hand one to an agent](#handing-a-task-to-an-agent). Creating,
-answering and closing tasks from Yardsort is the next step and is not built yet; **Open on
-GitHub** is the way to do those until then. The same list is on the command line as
-[`ys task`](cli.md#ys-task), which is how an agent in a workspace sees it.
+From here you read tasks, [hand one to an agent](#handing-a-task-to-an-agent), and
+[manage them](#managing-tasks): open a new one, answer, close, reopen, label and assign. All of
+it is on the command line too, as [`ys task`](cli.md#ys-task), which is how an agent in a
+workspace sees tasks and files one.
 
 ## The number in the sidebar
 
@@ -183,11 +183,48 @@ A closed task has no **Delegate**. Archiving or deleting the workspace leaves th
 
 From a terminal, [`ys task start`](cli.md#ys-task) does the same without the composer.
 
+## Managing tasks
+
+Everything here writes to GitHub at once, as you, through `gh`. Other people see it there, and
+GitHub tells the ones who are following. What GitHub will not let you do — closing an issue in a
+repository you cannot triage, say — it refuses in its own words, shown under the buttons.
+
+### A new task
+
+**New task**, in the view's header, opens a dialog: the **project** (those on GitHub with
+issues on; the one you were looking at first), a **title**, a **description** in Markdown, and
+the repository's **labels** to tick. **Create** opens the issue and selects it in the list.
+Create is the confirmation: the issue is public as soon as you press it. **Cancel** or **Esc**
+sends nothing, and if GitHub refuses, what you typed stays where it was.
+
+### Answering
+
+The box under a task's conversation posts a comment. **Comment**, or **Ctrl+Enter** / **⌘Enter**,
+sends it; sending is the confirmation. The box clears as soon as the comment has landed; the
+conversation is read again right after. A task you answer stops [needing an answer](#what-needs-an-answer-means)
+— if you are one of the repository's maintainers.
+
+### Closing and reopening
+
+**Close ▾** on an open task offers **Close as completed** and **Close as not planned**.
+**Reopen** is on a closed one. A task closed from the **Open** tab leaves that list, and its
+details with it; a line above the list says it was closed. Both ask first, naming the task and who opened it, because both
+tell people something: closing says their issue is finished with, and reopening notifies
+everyone following it. A _no_ sends nothing. Closing posts no comment and deletes nothing.
+
+### Labels and assignees
+
+**Labels ▾** lists the repository's labels with the task's own ticked; **Assignees ▾** lists
+the people who can be assigned — you first — with the current ones ticked. Ticking applies at
+once, and unticking undoes it; neither asks first. The lists are read from GitHub when you open
+one, up to 200 labels and 100 people. If they cannot be read, what the task already has is
+still offered, so it can be taken off.
+
 ## How often GitHub is asked
 
 Once for each project when Yardsort starts, so the sidebar's number is there. After that, only
 while the Tasks view is open: when you open it, when the window comes back into focus, every
-minute, and on **Refresh**. With the view closed nothing is asked, so the number in the sidebar
+minute, on **Refresh**, and after anything you do to a task. With the view closed nothing is asked, so the number in the sidebar
 is as of the last time you looked.
 
 ## When something is missing
@@ -204,8 +241,10 @@ A line above the list says why a project has no rows, without hiding the other p
 
 ## What it does not do, yet
 
-- **Create, answer, close, reopen, label or assign** a task. Next. Until then, use
-  **Open on GitHub**, or `gh issue` in a terminal.
+- **Edit** a task's title or description, or a comment, from the window. `ys task edit` can
+  change a title.
+- **Close as a duplicate**, milestones, issue types, sub-issues, attachments and issue
+  templates.
 - **Hand over several tasks at once**, or start one from the window without the composer.
 - **Change the wording of the message** other than by editing it in the composer.
 - **Other sources.** Linear and others are planned behind the same view; only GitHub issues are

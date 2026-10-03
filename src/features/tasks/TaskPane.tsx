@@ -6,6 +6,7 @@ import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import type { TaskComment } from "@/lib/ipc";
 import { age } from "@/features/pull-requests/rows";
 import { useTasksStore, type Target } from "@/stores/tasks";
+import { Manage, Reply } from "./TaskActions";
 import { Label } from "./TaskList";
 import { at, stateColour, stateLabel, type Row } from "./rows";
 
@@ -23,7 +24,7 @@ const ago = (time: number, now: number) =>
 
 /**
  * One task, beside the list: what it is, what its author says it is, what has been said, and a
- * way to hand it to an agent. Replying on it and closing it arrive in a later slice.
+ * way to hand it to an agent, answer it, close it, label it and assign it.
  *
  * The top of it comes from the list, which is already here. The description and the
  * conversation are asked for when the row is opened and again whenever the list says the task
@@ -46,6 +47,7 @@ export function TaskPane({
   const state = useTasksStore((s) => s.details[row.key]);
   const busy = useTasksStore((s) => s.busy);
   const failed = useTasksStore((s) => s.error);
+  const notice = useTasksStore((s) => s.notice);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const goButton = useRef<HTMLButtonElement>(null);
   // Which row's link was copied, so the word does not follow to the next task opened.
@@ -150,10 +152,11 @@ export function TaskPane({
                   : "Delegate"}
             </button>
           )}
+          <Manage row={row} />
           <button
             type="button"
             onClick={() => void openUrl(task.url).catch(console.error)}
-            className={button}
+            className={`${button} ml-auto`}
           >
             Open on GitHub <span aria-hidden>↗</span>
           </button>
@@ -170,10 +173,13 @@ export function TaskPane({
             {copied === row.key ? "Copied" : "Copy link"}
           </button>
         </div>
-        {failed && (
+        {(failed || notice) && (
           <div className="mt-2 flex items-start gap-2">
-            <p role="alert" className="min-w-0 flex-1 break-words text-red-400 select-text">
-              {failed}
+            <p
+              role={failed ? "alert" : "status"}
+              className={`min-w-0 flex-1 break-words select-text ${failed ? "text-red-400" : "text-ink-muted"}`}
+            >
+              {failed ?? notice}
             </p>
             <button
               type="button"
@@ -270,6 +276,7 @@ export function TaskPane({
               </ol>
             </>
           )}
+          {detail && <Reply target={target} />}
         </Section>
       </div>
     </section>

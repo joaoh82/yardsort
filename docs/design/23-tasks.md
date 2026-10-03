@@ -1,8 +1,8 @@
 # Tasks
 
-_Proposed 2026-10-03. Slices 1 and 2 are built — see [slice 1](#slice-1-what-shipped) and
-[slice 2](#slice-2-what-shipped), which also say where they differ from the proposal below.
-Slice 3 is still a proposal._
+_Proposed 2026-10-03. All three slices are built — see [slice 1](#slice-1-what-shipped),
+[slice 2](#slice-2-what-shipped) and [slice 3](#slice-3-what-shipped), which also say where they
+differ from the proposal below._
 
 A **Tasks** row in the sidebar opens a view in the center panel that lists the work waiting in
 every project — to begin with, each project's GitHub issues — filters it, shows one in full with
@@ -95,7 +95,13 @@ One trait in `yardsort-core`, so the app and `ys` share every rule:
 pub trait TaskSource {
     fn list(&self, root: &Path, state: TaskState, cap: usize) -> TaskList;
     fn show(&self, root: &Path, key: &str) -> ForgeResult<TaskDetail>;
-    // Slice 3: create, comment, close, reopen, edit.
+    fn create(&self, root: &Path, new: &NewTask) -> ForgeResult<CreatedTask>;
+    fn comment(&self, root: &Path, key: &str, text: &str) -> ForgeResult<()>;
+    fn close(&self, root: &Path, key: &str, reason: CloseReason) -> ForgeResult<()>;
+    fn reopen(&self, root: &Path, key: &str) -> ForgeResult<()>;
+    fn edit(&self, root: &Path, key: &str, change: &TaskEdit) -> ForgeResult<()>;
+    fn labels(&self, root: &Path) -> ForgeResult<Vec<TaskLabel>>;
+    fn assignees(&self, root: &Path) -> ForgeResult<Vec<String>>;
 }
 ```
 
@@ -431,7 +437,7 @@ README, website — when the third is in.
    `docs/guide/tasks.md`.
 2. **Delegate.** ✅ See [slice 2](#slice-2-what-shipped). The message; the composer reading a prompt for a new workspace; migration
    0014; **Go to workspace**; the key on the workspace's row; `ys task start`.
-3. **Manage.** **New task**, reply, close, reopen, labels, assignees — in the view and in
+3. **Manage.** ✅ See [slice 3](#slice-3-what-shipped). **New task**, reply, close, reopen, labels, assignees — in the view and in
    `ys task create`, `comment`, `close`, `reopen`, `edit`. The screenshot, taken with a
    stand-in `gh` printing fixtures so that no real login or repository appears.
 
@@ -584,6 +590,86 @@ Not done:
   [08 §24](08-manual-checklist.md) has the rows.
 - **The screenshot**, still with slice 3.
 - **An agent was not started from a real issue** to see what it makes of the message.
+
+## Slice 3: what shipped
+
+Built on 2026-10-03, as proposed except where said.
+
+- **The source writes** (`tasks/github.rs`): `create`, `comment`, `close`, `reopen`, `edit`,
+  `labels`, `assignees` on `TaskSource`, each one `gh issue …` or `gh label list`, with the
+  assignable people from a query of our own. Words go on standard input. A link is looked up
+  before anything is written through it (`resolve`), so another repository's is refused.
+- **The app** (`publish/tasks.rs`): `task_create`, `task_comment`, `task_close`, `task_reopen`,
+  `task_edit`, `project_task_choices`. After any write the cache is marked out of date —
+  rows kept, details dropped — so the next look asks again.
+- **The view**: **New task**; the reply box; **Close ▾** and **Reopen**, each confirmed and each
+  with a test that a _no_ sends nothing; **Labels ▾** and **Assignees ▾**; what was done, or
+  the forge's refusal, said under the buttons.
+- **`ys task create`, `comment`, `close`, `reopen`, `edit`**, with `--json`. `close` and
+  `reopen` read the task first, refuse one already in that state, and without `--yes` say what
+  they would do and exit non-zero.
+- **The delegated message** now says `ys task comment` exists, and to ask before using it.
+- **Docs**: the guide's _Managing tasks_, the CLI guide, the changelog, the README, the landing
+  page, [03-architecture](03-architecture.md), [08 §24](08-manual-checklist.md).
+
+What was measured, as the proposal asked before building the assignee picker
+(`gh` 2.102.0, 2026-10-03):
+
+| Query                                    | Repository                        | Result |
+| ---------------------------------------- | --------------------------------- | ------ |
+| `assignableUsers(first: 100)`            | this one (1 assignable)           | 0.4 s  |
+| `assignableUsers(first: 100)`            | `cli/cli` (22 assignable)         | 1.0 s  |
+| `assignableUsers(first: 100)`            | `rust-lang/rust` (178 assignable) | 2.1 s  |
+| `gh label list --limit 200`, name colour | `rust-lang/rust` (200 read)       | 0.8 s  |
+
+So the pickers read one page of each when they are opened, and keep it for the life of the
+app. A repository with more than a hundred assignable people offers the first hundred, you, and
+whoever is already assigned.
+
+Where it differs from the proposal:
+
+- **One command for what the pickers offer**, `project_task_choices`, not two.
+- **`ys task close` has no `--comment`.** `gh issue close --comment` takes the words as an
+  argument; a comment is `ys task comment`, then close.
+- **Closing as a duplicate is not offered.** `gh` wants the issue it duplicates, which is a
+  second thing to choose and a second thing to get wrong.
+- **A title can be changed from `ys task edit` and not from the window**, where there is no
+  place to type one yet.
+- **`ys task close` and `reopen` read the task before acting**, so the refusal can name it and
+  so one already closed or open is said as that rather than sent.
+- **The reply box clears when the comment has landed**, not after the list and the detail have
+  been read again: those are the network, and a full box with a live button is a second post.
+
+Changed after review, before merging:
+
+- **What was done to a task is still said when the task leaves the list.** Closing from the
+  Open tab drops the row, and the details with it, which is where the line saying _Closed #12_
+  was. The view says it above the list when no details are open. The test that should have
+  caught it had a stand-in that kept the closed task among the open ones; it now drops it.
+
+Found:
+
+- **jsdom lays nothing out, and the panels' divider takes the focus on every pointer press
+  because of it.** Typing into the reply box in a test went nowhere until the box was focused
+  by hand. The same view in headless Chromium takes a click as it should.
+- **A Rust command's parameter named `new` becomes a TypeScript parameter named `new`**, which
+  is not a name TypeScript allows. It is `task`.
+- **[Open question 32](06-open-questions.md)** — recording what an agent did to a task in the
+  workspace's activity — was looked at as it said. The event layer takes a new kind without a
+  migration (`agent_events.kind` is free text). It is not done: it wants kinds, payloads, a
+  line in the timeline and in `ys activity list`, and the activity guide, which is a change of
+  its own. Still open, with that answer to its _if_.
+
+Not done:
+
+- **Nothing was written to a real repository.** Every write is tested against a stand-in `gh`
+  that records what it was asked and what came in on standard input; the reads behind the
+  pickers were run against the real one. Creating, commenting on and closing a real issue is
+  public and tells people, and was left for a hand on the window:
+  [08 §24](08-manual-checklist.md).
+- **The screenshot.** It needs the real window on a real screen, and `scripts/screenshots.sh`'s
+  stand-in `gh` to answer for issues as it does for pull requests.
+- **macOS and Windows by hand.**
 
 ## Not in this version, on purpose
 

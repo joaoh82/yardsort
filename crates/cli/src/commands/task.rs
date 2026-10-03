@@ -4,13 +4,19 @@
 //! Tasks view reads them: the reading, what needs an answer and what a filter lets through are
 //! all `yardsort_core::tasks`, so the two cannot disagree. Nothing is kept between runs — each
 //! command asks `gh` when it is run — and the app need not be open.
+//!
+//! `create`, `comment`, `close`, `reopen` and `edit` write to GitHub at once: there is no list
+//! of proposals for the user to approve, as there is for memory. Whoever runs them — most often
+//! an agent, behind its own permission prompt — has decided. `close` and `reopen` want `--yes`
+//! all the same, so that neither can be the side effect of a command run to look.
 
 use yardsort_core::forge::{self, ForgeKind, Gh};
 use yardsort_core::store::ProjectRow;
 use yardsort_core::tasks::delegate;
 use yardsort_core::tasks::github::{coverage, Coverage, GitHub};
 use yardsort_core::tasks::{
-    ClosedAs, Filter, Task, TaskDetail, TaskList, TaskSource, TaskState, CLOSED_CAP, OPEN_CAP,
+    CloseReason, ClosedAs, Filter, NewTask, Task, TaskDetail, TaskEdit, TaskList, TaskSource,
+    TaskState, CLOSED_CAP, OPEN_CAP,
 };
 
 use crate::{table, Failure, Output, Yardsort};
@@ -20,6 +26,14 @@ pub enum State {
     Open,
     Closed,
     All,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Reason {
+    /// It is done.
+    Completed,
+    /// It will not be done.
+    NotPlanned,
 }
 
 #[derive(clap::Subcommand)]
@@ -55,6 +69,79 @@ pub enum Command {
     Show {
         /// Which one: `91`, `#91`, or its URL.
         task: String,
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+    },
+    /// Open a new task: an issue on the project's repository. It is public at once, and the
+    /// people watching the repository are told.
+    Create {
+        /// What it is about, in a line.
+        title: String,
+        /// The description, as Markdown.
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        /// Read the description from this file. `-` reads standard input.
+        #[arg(long, value_name = "FILE")]
+        body_file: Option<String>,
+        /// A label to give it. Repeat it for several.
+        #[arg(long, value_name = "NAME")]
+        label: Vec<String>,
+        /// Who to assign it to, by login. `@me` is whoever `gh` is logged in as.
+        #[arg(long, value_name = "LOGIN")]
+        assignee: Vec<String>,
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+    },
+    /// Post a comment on a task. Everyone following it is told.
+    Comment {
+        /// Which one: `91`, `#91`, or its URL.
+        task: String,
+        /// What to say, as Markdown.
+        #[arg(required_unless_present = "body_file", conflicts_with = "body_file")]
+        text: Option<String>,
+        /// Read the comment from this file. `-` reads standard input.
+        #[arg(long, value_name = "FILE")]
+        body_file: Option<String>,
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+    },
+    /// Close a task. Without `--yes` it says what it would close and does nothing.
+    Close {
+        /// Which one: `91`, `#91`, or its URL.
+        task: String,
+        #[arg(long, value_enum, default_value = "completed")]
+        reason: Reason,
+        /// Do it. Closing tells whoever opened the task that it is finished with.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+    },
+    /// Reopen a closed task. Without `--yes` it says what it would reopen and does nothing.
+    Reopen {
+        /// Which one: `91`, `#91`, or its URL.
+        task: String,
+        /// Do it. Reopening tells everyone following the task.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+    },
+    /// Change a task's labels, assignees or title.
+    Edit {
+        /// Which one: `91`, `#91`, or its URL.
+        task: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        add_label: Vec<String>,
+        #[arg(long, value_name = "NAME")]
+        remove_label: Vec<String>,
+        /// Assign it to this login. `@me` is whoever `gh` is logged in as.
+        #[arg(long, value_name = "LOGIN")]
+        assign: Vec<String>,
+        #[arg(long, value_name = "LOGIN")]
+        unassign: Vec<String>,
         #[arg(long, value_name = "PROJECT")]
         project: Option<String>,
     },
@@ -183,6 +270,130 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 })?;
             out.emit(&detail, || print!("{}", written(&detail)))
         }
+        Command::Create {
+            title,
+            body,
+            body_file,
+            label,
+            assignee,
+            project,
+        } => {
+            let body = text_from(body, body_file.as_deref())?.unwrap_or_default();
+            let project = project_of(ys, project.as_deref())?;
+            let gh = gh(ys)?;
+            let source = source(ys, &gh, &project)?;
+            let created = source
+                .create(
+                    std::path::Path::new(&project.root_path),
+                    &NewTask {
+                        title,
+                        body,
+                        labels: label,
+                        assignees: assignee,
+                    },
+                )
+                .map_err(said)?;
+            out.emit(&created, || {
+                println!("created  {}\n  url    {}", created.key, created.url)
+            })
+        }
+        Command::Comment {
+            task,
+            text,
+            body_file,
+            project,
+        } => {
+            let text = text_from(text, body_file.as_deref())?.unwrap_or_default();
+            let project = project_of(ys, project.as_deref())?;
+            let gh = gh(ys)?;
+            let source = source(ys, &gh, &project)?;
+            source
+                .comment(std::path::Path::new(&project.root_path), &task, &text)
+                .map_err(said)?;
+            done(out, &task, "commented", "Commented on")
+        }
+        Command::Close {
+            task,
+            reason,
+            yes,
+            project,
+        } => {
+            let project = project_of(ys, project.as_deref())?;
+            let gh = gh(ys)?;
+            let source = source(ys, &gh, &project)?;
+            let root = std::path::Path::new(&project.root_path);
+            // Read first: it is what the refusal names, and a link is checked by it.
+            let detail = source.show(root, &task).map_err(said)?;
+            let it = &detail.task;
+            if it.state == TaskState::Closed {
+                return Err(Failure::new(format!("{} is already closed.", it.key)));
+            }
+            let (reason, as_what) = match reason {
+                Reason::Completed => (CloseReason::Completed, "completed"),
+                Reason::NotPlanned => (CloseReason::NotPlanned, "not planned"),
+            };
+            if !yes {
+                return Err(Failure::new(format!(
+                    "This would close {} as {as_what}: {}\nOpened by {}. Closing tells them it \
+                     is finished with. Nothing was done; add --yes to do it.",
+                    it.key,
+                    it.title,
+                    it.author.as_deref().unwrap_or("ghost"),
+                )));
+            }
+            source.close(root, &it.key, reason).map_err(said)?;
+            done(out, &it.key, "closed", "Closed")
+        }
+        Command::Reopen { task, yes, project } => {
+            let project = project_of(ys, project.as_deref())?;
+            let gh = gh(ys)?;
+            let source = source(ys, &gh, &project)?;
+            let root = std::path::Path::new(&project.root_path);
+            let detail = source.show(root, &task).map_err(said)?;
+            let it = &detail.task;
+            if it.state == TaskState::Open {
+                return Err(Failure::new(format!("{} is already open.", it.key)));
+            }
+            if !yes {
+                return Err(Failure::new(format!(
+                    "This would reopen {}: {}\nReopening tells everyone following it. Nothing \
+                     was done; add --yes to do it.",
+                    it.key, it.title,
+                )));
+            }
+            source.reopen(root, &it.key).map_err(said)?;
+            done(out, &it.key, "reopened", "Reopened")
+        }
+        Command::Edit {
+            task,
+            title,
+            add_label,
+            remove_label,
+            assign,
+            unassign,
+            project,
+        } => {
+            let change = TaskEdit {
+                title,
+                add_labels: add_label,
+                remove_labels: remove_label,
+                add_assignees: assign,
+                remove_assignees: unassign,
+            };
+            if change.is_empty() {
+                return Err(Failure::new(
+                    "Nothing to change. Give --title, --add-label, --remove-label, --assign or \
+                     --unassign.",
+                ));
+            }
+            let project = project_of(ys, project.as_deref())?;
+            let gh = gh(ys)?;
+            let source = source(ys, &gh, &project)?;
+            source
+                .edit(std::path::Path::new(&project.root_path), &task, &change)
+                .map_err(said)?;
+            done(out, &task, "edited", "Changed")
+        }
         Command::Start {
             task,
             project,
@@ -231,6 +442,48 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             )
         }
     }
+}
+
+/// What `gh` said, or that nobody is logged in to it.
+fn said(error: forge::ForgeError) -> Failure {
+    match error.is_logged_out() {
+        true => Failure::new(LOGGED_OUT),
+        false => Failure::new(error.to_string()),
+    }
+}
+
+/// Text given outright, or read from a file, or from standard input for `-`.
+fn text_from(given: Option<String>, file: Option<&str>) -> Result<Option<String>, Failure> {
+    match (given, file) {
+        (Some(text), _) => Ok(Some(text)),
+        (None, Some("-")) => {
+            use std::io::Read;
+            let mut text = String::new();
+            std::io::stdin()
+                .read_to_string(&mut text)
+                .map_err(|e| Failure::new(format!("cannot read standard input: {e}")))?;
+            Ok(Some(text))
+        }
+        (None, Some(path)) => std::fs::read_to_string(path)
+            .map(Some)
+            .map_err(|e| Failure::new(format!("cannot read {path}: {e}"))),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Say that something was done to a task.
+fn done(out: &Output, task: &str, did: &str, word: &str) -> Result<(), Failure> {
+    #[derive(serde::Serialize)]
+    struct Done<'a> {
+        task: String,
+        did: &'a str,
+    }
+    let key = match yardsort_core::tasks::github::number(task) {
+        Some(number) => format!("#{number}"),
+        None => task.to_owned(),
+    };
+    let done = Done { task: key, did };
+    out.emit(&done, || println!("{word} {}.", done.task))
 }
 
 const LOGGED_OUT: &str = "Nobody is logged in to the GitHub CLI. Run `gh auth login`, then try \

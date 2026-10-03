@@ -12,8 +12,8 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::{
-    needs_answer, ClosedAs, Task, TaskComment, TaskDetail, TaskLabel, TaskList, TaskSource,
-    TaskSourceKind, TaskState, Voice, PAGE_LIMIT,
+    needs_answer, CloseReason, ClosedAs, CreatedTask, NewTask, Task, TaskComment, TaskDetail,
+    TaskEdit, TaskLabel, TaskList, TaskSource, TaskSourceKind, TaskState, Voice, PAGE_LIMIT,
 };
 use crate::forge::{ForgeError, ForgeKind, ForgeResult, Gh, Repo};
 
@@ -102,6 +102,18 @@ impl<'a> GitHub<'a> {
         }
     }
 
+    /// The number of the issue `key` means, for something that is about to change it.
+    ///
+    /// A link says which repository it is about and `gh` is only given a number, so a link is
+    /// looked up first: one to another repository's issue is refused, where otherwise this
+    /// project's issue of the same number would be the one closed or commented on.
+    fn resolve(&self, root: &Path, key: &str) -> ForgeResult<u32> {
+        if repository(key).is_some() {
+            self.show(root, key)?;
+        }
+        number(key).ok_or_else(|| refused(&format!("{key:?} is not an issue's number")))
+    }
+
     fn page(&self, root: &Path, state: TaskState, after: Option<&str>) -> ForgeResult<Page> {
         let after = after.map(|cursor| format!("after={cursor}"));
         let mut extra = Vec::new();
@@ -186,7 +198,132 @@ impl TaskSource for GitHub<'_> {
         }
         Ok(detail)
     }
+
+    fn create(&self, root: &Path, new: &NewTask) -> ForgeResult<CreatedTask> {
+        let title = new.title.trim();
+        if title.is_empty() {
+            return Err(refused("a task needs a title"));
+        }
+        let mut args = vec!["issue", "create", "--title", title, "--body-file", "-"];
+        for label in &new.labels {
+            args.extend(["--label", label]);
+        }
+        for assignee in &new.assignees {
+            args.extend(["--assignee", assignee]);
+        }
+        // The description is the user's words: on standard input, never in the arguments.
+        let out = self.gh.run_with_stdin(root, &args, &new.body)?;
+        // `gh` prints the new issue's address, after anything else it has to say.
+        let url = out
+            .lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| line.starts_with("http"))
+            .ok_or_else(|| ForgeError::Unreadable("expected the new issue's link".to_owned()))?;
+        let number = number(url)
+            .ok_or_else(|| ForgeError::Unreadable("expected the new issue's link".to_owned()))?;
+        Ok(CreatedTask {
+            key: format!("#{number}"),
+            url: url.to_owned(),
+        })
+    }
+
+    fn comment(&self, root: &Path, key: &str, text: &str) -> ForgeResult<()> {
+        if text.trim().is_empty() {
+            return Err(refused("write something first"));
+        }
+        let number = self.resolve(root, key)?.to_string();
+        self.gh.run_with_stdin(
+            root,
+            &["issue", "comment", &number, "--body-file", "-"],
+            text,
+        )?;
+        Ok(())
+    }
+
+    fn close(&self, root: &Path, key: &str, reason: CloseReason) -> ForgeResult<()> {
+        let number = self.resolve(root, key)?.to_string();
+        let reason = match reason {
+            CloseReason::Completed => "completed",
+            CloseReason::NotPlanned => "not planned",
+        };
+        self.gh
+            .run(root, &["issue", "close", &number, "--reason", reason])?;
+        Ok(())
+    }
+
+    fn reopen(&self, root: &Path, key: &str) -> ForgeResult<()> {
+        let number = self.resolve(root, key)?.to_string();
+        self.gh.run(root, &["issue", "reopen", &number])?;
+        Ok(())
+    }
+
+    fn edit(&self, root: &Path, key: &str, change: &TaskEdit) -> ForgeResult<()> {
+        if change.is_empty() {
+            return Err(refused("nothing to change"));
+        }
+        if change
+            .title
+            .as_deref()
+            .is_some_and(|title| title.trim().is_empty())
+        {
+            return Err(refused("a task needs a title"));
+        }
+        let number = self.resolve(root, key)?.to_string();
+        let mut args = vec!["issue", "edit", number.as_str()];
+        if let Some(title) = &change.title {
+            args.extend(["--title", title.trim()]);
+        }
+        for (flag, names) in [
+            ("--add-label", &change.add_labels),
+            ("--remove-label", &change.remove_labels),
+            ("--add-assignee", &change.add_assignees),
+            ("--remove-assignee", &change.remove_assignees),
+        ] {
+            for name in names {
+                args.extend([flag, name.as_str()]);
+            }
+        }
+        self.gh.run(root, &args)?;
+        Ok(())
+    }
+
+    fn labels(&self, root: &Path) -> ForgeResult<Vec<TaskLabel>> {
+        let out = self.gh.run(
+            root,
+            &["label", "list", "--json", "name,color", "--limit", "200"],
+        )?;
+        serde_json::from_str(&out).map_err(|e| ForgeError::Unreadable(e.to_string()))
+    }
+
+    fn assignees(&self, root: &Path) -> ForgeResult<Vec<String>> {
+        let out = self
+            .gh
+            .graphql(root, self.host.as_deref(), ASSIGNEES_QUERY, &[], self.limit)?;
+        let data = data(&out)?;
+        let mut logins: Vec<String> = nodes(
+            data.get("repository")
+                .and_then(|repository| repository.get("assignableUsers")),
+        )
+        .iter()
+        .filter_map(|user| login(Some(user)))
+        .collect();
+        logins.sort_by_key(|login| login.to_lowercase());
+        Ok(logins)
+    }
 }
+
+/// Something `gh` was never asked, because it could not have been meant.
+fn refused(why: &str) -> ForgeError {
+    ForgeError::Failed {
+        command: "issue".to_owned(),
+        stderr: why.to_owned(),
+    }
+}
+
+/// Who can be assigned an issue: the first hundred, which is one answer's worth.
+const ASSIGNEES_QUERY: &str = "query($owner:String!,$name:String!){\
+repository(owner:$owner,name:$name){assignableUsers(first:100){nodes{login}}}}";
 
 /// The repository an issue's URL is in, as `host/owner/name` in lower case. `None` for
 /// anything that is not such a URL — a bare number most of all.
@@ -651,6 +788,211 @@ mod tests {
         assert!(page("not json").is_err());
     }
 
+    /// A `gh` that writes down what it was asked and what came in on standard input, and
+    /// answers every question with `answer`.
+    #[cfg(unix)]
+    fn recording(dir: &Path, answer: &str) -> Gh {
+        let here = dir.display();
+        stand_in(
+            dir,
+            &format!(
+                "#!/bin/sh\necho \"$*\" >> '{here}/asked'\n\
+                 case \"$*\" in *--body-file*) cat >> '{here}/stdin' ;; esac\n{answer}\n"
+            ),
+        )
+    }
+
+    #[cfg(unix)]
+    fn stdin(dir: &Path) -> String {
+        std::fs::read_to_string(dir.join("stdin")).unwrap_or_default()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_task_is_created_with_its_words_on_standard_input_and_its_link_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = recording(
+            dir.path(),
+            "echo 'Creating issue in example/widgets'; echo 'https://github.com/example/widgets/issues/93'",
+        );
+        let made = GitHub::new(&gh, None)
+            .create(
+                dir.path(),
+                &NewTask {
+                    title: "  Crash on start  ".to_owned(),
+                    body: "It **crashes**.\n\n--title is not a flag here".to_owned(),
+                    labels: vec!["bug".to_owned(), "good first issue".to_owned()],
+                    assignees: vec!["@me".to_owned()],
+                },
+            )
+            .unwrap();
+        assert_eq!(made.key, "#93");
+        assert_eq!(made.url, "https://github.com/example/widgets/issues/93");
+        assert_eq!(
+            asked(dir.path()),
+            ["issue create --title Crash on start --body-file - --label bug --label good first issue --assignee @me"]
+        );
+        assert_eq!(
+            stdin(dir.path()),
+            "It **crashes**.\n\n--title is not a flag here"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nothing_is_sent_for_a_task_with_no_title_a_comment_with_no_words_or_an_edit_of_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = recording(dir.path(), "exit 0");
+        let source = GitHub::new(&gh, None);
+        assert!(source.create(dir.path(), &NewTask::default()).is_err());
+        assert!(source.comment(dir.path(), "7", "  \n ").is_err());
+        assert!(source.edit(dir.path(), "7", &TaskEdit::default()).is_err());
+        let blank = TaskEdit {
+            title: Some("  ".to_owned()),
+            ..Default::default()
+        };
+        assert!(source.edit(dir.path(), "7", &blank).is_err());
+        assert!(source
+            .close(dir.path(), "soon", CloseReason::Completed)
+            .is_err());
+        assert!(asked(dir.path()).is_empty(), "{:?}", asked(dir.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn comment_close_reopen_and_edit_say_exactly_what_they_mean_to_gh() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = recording(dir.path(), "exit 0");
+        let source = GitHub::new(&gh, None);
+        source.comment(dir.path(), "#7", "Which version?").unwrap();
+        source
+            .close(dir.path(), "7", CloseReason::Completed)
+            .unwrap();
+        source
+            .close(dir.path(), "7", CloseReason::NotPlanned)
+            .unwrap();
+        source.reopen(dir.path(), "7").unwrap();
+        source
+            .edit(
+                dir.path(),
+                "7",
+                &TaskEdit {
+                    title: Some(" New title ".to_owned()),
+                    add_labels: vec!["bug".to_owned()],
+                    remove_labels: vec!["question".to_owned(), "help wanted".to_owned()],
+                    add_assignees: vec!["ada".to_owned()],
+                    remove_assignees: vec!["grace".to_owned()],
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            asked(dir.path()),
+            [
+                "issue comment 7 --body-file -",
+                "issue close 7 --reason completed",
+                "issue close 7 --reason not planned",
+                "issue reopen 7",
+                "issue edit 7 --title New title --add-label bug --remove-label question \
+                 --remove-label help wanted --add-assignee ada --remove-assignee grace",
+            ]
+        );
+        assert_eq!(stdin(dir.path()), "Which version?");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_looked_up_before_anything_is_written_and_another_repositorys_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let view =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/gh/2.102.0/issue-view.json");
+        let gh = recording(
+            dir.path(),
+            &format!("case \"$*\" in *graphql*) cat '{}' ;; esac", view.display()),
+        );
+        let source = GitHub::new(&gh, None);
+        let elsewhere = "https://github.com/someone/else/issues/14394";
+        for refused in [
+            source.comment(dir.path(), elsewhere, "hello"),
+            source.close(dir.path(), elsewhere, CloseReason::Completed),
+            source.reopen(dir.path(), elsewhere),
+            source.edit(
+                dir.path(),
+                elsewhere,
+                &TaskEdit {
+                    add_labels: vec!["bug".to_owned()],
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let said = refused.unwrap_err().to_string();
+            assert!(said.contains("github.com/someone/else"), "{said}");
+        }
+        assert!(
+            asked(dir.path())
+                .iter()
+                .all(|a| a.starts_with("api graphql")),
+            "only looked up, never written: {:?}",
+            asked(dir.path())
+        );
+
+        // Its own link is as good as its number.
+        source
+            .close(
+                dir.path(),
+                "https://github.com/example/widgets/issues/14394",
+                CloseReason::Completed,
+            )
+            .unwrap();
+        assert_eq!(
+            asked(dir.path()).last().unwrap(),
+            "issue close 14394 --reason completed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_from_the_forge_arrives_in_its_own_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = recording(
+            dir.path(),
+            "echo 'GraphQL: must have triage permissions (closeIssue)' >&2; exit 1",
+        );
+        let said = GitHub::new(&gh, None)
+            .close(dir.path(), "7", CloseReason::Completed)
+            .unwrap_err()
+            .to_string();
+        assert!(said.contains("must have triage permissions"), "{said}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn labels_and_assignable_people_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = recording(
+            dir.path(),
+            r#"case "$*" in
+  *"label list"*) echo '[{"name":"bug","color":"d73a4a"},{"name":"good first issue","color":"7057ff"}]' ;;
+  *) echo '{"data":{"repository":{"assignableUsers":{"nodes":[{"login":"grace"},{"login":"Ada"},{"login":"linus"}]}}}}' ;;
+esac"#,
+        );
+        let source = GitHub::new(&gh, None);
+        let labels = source.labels(dir.path()).unwrap();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[1].name, "good first issue");
+        assert_eq!(labels[1].color, "7057ff");
+        assert_eq!(
+            source.assignees(dir.path()).unwrap(),
+            ["Ada", "grace", "linus"]
+        );
+        let asked = asked(dir.path());
+        assert_eq!(asked[0], "label list --json name,color --limit 200");
+        assert!(
+            asked[1].contains("assignableUsers(first:100)"),
+            "{}",
+            asked[1]
+        );
+    }
+
     /// Against the real `gh`, the real network and this repository — so the queries above are
     /// checked against what GitHub actually accepts and returns rather than against fixtures
     /// that were right once. Ignored by default: CI has no network and no login.
@@ -684,6 +1026,14 @@ mod tests {
                 assert_eq!(detail.task.needs_answer, task.needs_answer);
             }
         }
+        // What the pickers offer. Reading only: nothing here writes to the repository.
+        let labels = source.labels(here).expect("gh answered");
+        println!("{} labels", labels.len());
+        assert!(labels.iter().any(|label| label.name == "bug"));
+        assert!(labels.iter().all(|label| label.color.len() == 6));
+        let people = source.assignees(here).expect("gh answered");
+        println!("{} assignable", people.len());
+        assert!(!people.is_empty());
         let missing = source.show(here, "999999").unwrap_err();
         assert!(
             missing.to_string().contains("Could not resolve"),

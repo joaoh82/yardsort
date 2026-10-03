@@ -1,5 +1,17 @@
 import { create } from "zustand";
-import { errorMessage, ipc, type ProjectTasks, type Task, type TaskDetail } from "@/lib/ipc";
+import {
+  errorMessage,
+  ipc,
+  type CloseReason,
+  type CreatedTask,
+  type NewTask,
+  type ProjectTasks,
+  type Task,
+  type TaskChoices,
+  type TaskDetail,
+  type TaskEdit,
+} from "@/lib/ipc";
+import { native } from "@/lib/native";
 import { useProjectsStore } from "./projects";
 
 const NO_TASKS: ProjectTasks = {
@@ -53,6 +65,10 @@ interface TasksStore {
   busy: string | null;
   /** Why the last thing asked of a task could not be done. */
   error: string | null;
+  /** What the last thing done to a task was, said once it is done. */
+  notice: string | null;
+  /** The labels and people each project's tasks can be given, once asked for. */
+  choices: Record<string, TaskChoices>;
 
   /** Load one project's tasks. Never throws: a source that will not answer says so. */
   loadProject: (projectId: string, refresh?: boolean, closed?: boolean) => Promise<void>;
@@ -71,7 +87,27 @@ interface TasksStore {
    */
   delegate: (target: Target) => Promise<void>;
   dismiss: () => void;
+  /** Post a comment. Resolves to whether it was posted; the reason is kept when it was not. */
+  comment: (target: Target, body: string) => Promise<boolean>;
+  /** Close a task, after asking. A no sends nothing. */
+  close: (target: Target, reason: CloseReason) => Promise<void>;
+  /** Reopen a task, after asking. A no sends nothing. */
+  reopen: (target: Target) => Promise<void>;
+  /** Change its labels or assignees. Applied as asked: each can be undone the same way. */
+  edit: (target: Target, change: Partial<TaskEdit>, notice: string) => Promise<void>;
+  /** Open a new task. Resolves to it, or to the reason it could not be opened. */
+  create: (projectId: string, task: NewTask) => Promise<CreatedTask | { error: string }>;
+  /** Ask what a project's tasks can be labelled with and assigned to, once. */
+  loadChoices: (projectId: string) => Promise<void>;
 }
+
+const NO_EDIT: TaskEdit = {
+  title: null,
+  addLabels: [],
+  removeLabels: [],
+  addAssignees: [],
+  removeAssignees: [],
+};
 
 export const useTasksStore = create<TasksStore>((set, get) => {
   /** The latest request per project and per row: an answer that is no longer the latest is dropped. */
@@ -84,6 +120,33 @@ export const useTasksStore = create<TasksStore>((set, get) => {
       return { details: { ...s.details, [key]: { ...before, ...next } } };
     });
 
+  /**
+   * Do one thing to one task. The source is asked again afterwards whatever happened: a
+   * refusal usually means the list was out of date.
+   */
+  async function act(target: Target, run: () => Promise<string>): Promise<boolean> {
+    if (get().busy) return false;
+    set({ busy: target.key, error: null, notice: null });
+    let did = false;
+    try {
+      set({ notice: await run() });
+      did = true;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    } finally {
+      set({ busy: null });
+      // Not waited for: it is `gh` over the network, and whoever asked — a reply box that
+      // clears when its comment has landed — must not sit with its text and a live button
+      // until everything has been read again.
+      void get()
+        .loadProject(target.projectId, true, get().closedWanted)
+        .then(() => (get().details[target.key] ? get().loadDetail(target, true) : undefined));
+    }
+    return did;
+  }
+  const whose = (task: Task) =>
+    task.author ? `${task.author} opened it.` : "Its author's account no longer exists.";
+
   return {
     byProject: {},
     closedWanted: false,
@@ -91,10 +154,73 @@ export const useTasksStore = create<TasksStore>((set, get) => {
     details: {},
     busy: null,
     error: null,
+    notice: null,
+    choices: {},
+
+    comment(target, body) {
+      return act(target, async () => {
+        await ipc.taskComment(target.projectId, target.task.key, body);
+        return `Commented on ${target.task.key}.`;
+      });
+    },
+
+    async close(target, reason) {
+      const { task } = target;
+      const as = reason === "completed" ? "completed" : "not planned";
+      const confirmed = await native.confirm(
+        `Close task ${task.key} as ${as}?\n\n${task.title}\n\n${whose(task)} Closing tells them, and everyone following it, that it is finished with. Nothing is posted on it, and it can be reopened.`,
+        { title: "Close task", okLabel: "Close task" },
+      );
+      if (!confirmed) return;
+      await act(target, async () => {
+        await ipc.taskClose(target.projectId, task.key, reason);
+        return `Closed ${task.key} as ${as}.`;
+      });
+    },
+
+    async reopen(target) {
+      const { task } = target;
+      const confirmed = await native.confirm(
+        `Reopen task ${task.key}?\n\n${task.title}\n\n${whose(task)} Everyone following it is told.`,
+        { title: "Reopen task", okLabel: "Reopen" },
+      );
+      if (!confirmed) return;
+      await act(target, async () => {
+        await ipc.taskReopen(target.projectId, task.key);
+        return `Reopened ${task.key}.`;
+      });
+    },
+
+    async edit(target, change, notice) {
+      await act(target, async () => {
+        await ipc.taskEdit(target.projectId, target.task.key, { ...NO_EDIT, ...change });
+        return notice;
+      });
+    },
+
+    async create(projectId, task) {
+      try {
+        const created = await ipc.taskCreate(projectId, task);
+        await get().loadProject(projectId, true, get().closedWanted);
+        return created;
+      } catch (error) {
+        return { error: errorMessage(error) };
+      }
+    },
+
+    async loadChoices(projectId) {
+      if (get().choices[projectId]) return;
+      try {
+        const found = await ipc.projectTaskChoices(projectId);
+        set((s) => ({ choices: { ...s.choices, [projectId]: found } }));
+      } catch {
+        // The pickers then offer what the task already has, which is enough to remove by.
+      }
+    },
 
     async delegate(target) {
       if (get().busy) return;
-      set({ busy: target.key, error: null });
+      set({ busy: target.key, error: null, notice: null });
       try {
         const { prompt, task } = await ipc.taskPrompt(target.projectId, target.task.key);
         useProjectsStore.getState().compose(target.projectId, undefined, prompt, task);
@@ -106,7 +232,7 @@ export const useTasksStore = create<TasksStore>((set, get) => {
     },
 
     dismiss() {
-      set({ error: null });
+      set({ error: null, notice: null });
     },
 
     async loadProject(projectId, refresh = false, closed = false) {
@@ -133,7 +259,7 @@ export const useTasksStore = create<TasksStore>((set, get) => {
     },
 
     select(key) {
-      set({ selected: key, error: null });
+      set({ selected: key, error: null, notice: null });
     },
 
     async loadDetail(target, force = false) {

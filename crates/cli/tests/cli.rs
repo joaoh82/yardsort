@@ -1688,7 +1688,7 @@ impl Tasks {
                 .join("../core/fixtures/gh/2.102.0");
             let script = format!(
                 // `PATH` has nothing but git and this, so `cat` is spelled out.
-                "#!/bin/sh\necho \"$*\" >> '{}/asked'\nfixtures='{}'\n\
+                "#!/bin/sh\nhere='{0}'\necho \"$*\" >> \"$here/asked\"\nfixtures='{1}'\n\
                  cat() {{ while IFS= read -r line || [ -n \"$line\" ]; do \
                  printf '%s\\n' \"$line\"; done < \"$1\"; }}\n{body}\n",
                 bin.path().display(),
@@ -2232,4 +2232,276 @@ fn the_message_can_be_read_without_anything_being_made() {
     let listed = tasks.ys(None, &["workspace", "list", "--json"]).ok();
     let listed: serde_json::Value = serde_json::from_str(&listed).expect("valid JSON");
     assert!(worktrees_in(&listed).is_empty(), "{listed}");
+}
+
+/// On GitHub, with a `gh` that reads the recorded issue, takes what is written to it — keeping
+/// whatever comes in on standard input — and says a new issue is #93.
+#[cfg(unix)]
+fn writable() -> Tasks {
+    Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some(
+            "keep() { while IFS= read -r line || [ -n \"$line\" ]; do \
+             printf '%s\\n' \"$line\"; done >> \"$here/stdin\"; }\n\
+             case \"$*\" in\n\
+             *'issue(number:'*) cat \"$fixtures/issue-view.json\" ;;\n\
+             'issue create'*) keep; echo 'https://github.com/example/widgets/issues/93' ;;\n\
+             'issue comment'*) keep ;;\n\
+             esac",
+        ),
+    )
+}
+
+#[cfg(unix)]
+impl Tasks {
+    /// What `gh` was asked to change: everything but the lookups.
+    fn written(&self) -> Vec<String> {
+        self.asked()
+            .into_iter()
+            .filter(|asked| !asked.starts_with("api graphql"))
+            .collect()
+    }
+
+    fn stdin(&self) -> String {
+        std::fs::read_to_string(self.bin.path().join("stdin")).unwrap_or_default()
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_task_is_created_and_its_key_and_link_are_printed() {
+    let tasks = writable();
+    let body = tasks.bin.path().join("body.md");
+    std::fs::write(&body, "It **crashes** on start.\n").unwrap();
+    let made = tasks
+        .ys(
+            Some(&tasks.fx.repo),
+            &[
+                "task",
+                "create",
+                "Crash on start",
+                "--body-file",
+                &body.to_string_lossy(),
+                "--label",
+                "bug",
+                "--label",
+                "good first issue",
+                "--assignee",
+                "@me",
+            ],
+        )
+        .ok();
+    assert!(made.contains("created  #93"), "{made}");
+    assert!(
+        made.contains("https://github.com/example/widgets/issues/93"),
+        "{made}"
+    );
+    assert_eq!(
+        tasks.written(),
+        ["issue create --title Crash on start --body-file - --label bug --label good first issue --assignee @me"]
+    );
+    assert_eq!(tasks.stdin(), "It **crashes** on start.\n");
+
+    let json = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "create",
+                "Another",
+                "--body",
+                "Words.",
+                "--project",
+                "Demo",
+                "--json",
+            ],
+        )
+        .ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["key"], "#93");
+    assert_eq!(
+        parsed["url"],
+        "https://github.com/example/widgets/issues/93"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_comment_is_posted_with_its_words_on_standard_input() {
+    let tasks = writable();
+    let said = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "comment",
+                "#14394",
+                "Which version is this?",
+                "--project",
+                "Demo",
+            ],
+        )
+        .ok();
+    assert_eq!(said.trim(), "Commented on #14394.");
+    assert_eq!(tasks.written(), ["issue comment 14394 --body-file -"]);
+    assert_eq!(tasks.stdin(), "Which version is this?\n");
+
+    // Nothing to say is nothing sent.
+    let refused = tasks
+        .ys(
+            None,
+            &["task", "comment", "14394", "  ", "--project", "Demo"],
+        )
+        .failed();
+    assert!(refused.contains("write something first"), "{refused}");
+    assert_eq!(tasks.written().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn close_and_reopen_do_nothing_without_yes() {
+    let tasks = writable();
+    // The recorded issue is open.
+    let would = tasks
+        .ys(None, &["task", "close", "14394", "--project", "Demo"])
+        .failed();
+    assert!(
+        would.contains("This would close #14394 as completed"),
+        "{would}"
+    );
+    assert!(would.contains("Replaced title of issue 14394"), "{would}");
+    assert!(would.contains("add --yes"), "{would}");
+    assert!(tasks.written().is_empty(), "{:?}", tasks.written());
+
+    let closed = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "close",
+                "14394",
+                "--reason",
+                "not-planned",
+                "--yes",
+                "--project",
+                "Demo",
+            ],
+        )
+        .ok();
+    assert_eq!(closed.trim(), "Closed #14394.");
+    assert_eq!(tasks.written(), ["issue close 14394 --reason not planned"]);
+
+    // It is open as far as the source says, so there is nothing to reopen, --yes or not.
+    let already = tasks
+        .ys(
+            None,
+            &["task", "reopen", "14394", "--yes", "--project", "Demo"],
+        )
+        .failed();
+    assert!(already.contains("#14394 is already open"), "{already}");
+    assert_eq!(tasks.written().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_closed_task_is_reopened_only_with_yes_and_not_closed_again() {
+    let tasks = Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some("case \"$*\" in *'issue(number:'*) cat \"$fixtures/issue-view-hidden.json\" ;; esac"),
+    );
+    let written = |tasks: &Tasks| {
+        tasks
+            .asked()
+            .into_iter()
+            .filter(|asked| !asked.starts_with("api graphql"))
+            .collect::<Vec<_>>()
+    };
+    let would = tasks
+        .ys(None, &["task", "reopen", "11809", "--project", "Demo"])
+        .failed();
+    assert!(would.contains("This would reopen #11809"), "{would}");
+    let already = tasks
+        .ys(
+            None,
+            &["task", "close", "11809", "--yes", "--project", "Demo"],
+        )
+        .failed();
+    assert!(already.contains("#11809 is already closed"), "{already}");
+    assert!(written(&tasks).is_empty(), "{:?}", written(&tasks));
+
+    let reopened = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "reopen",
+                "11809",
+                "--yes",
+                "--project",
+                "Demo",
+                "--json",
+            ],
+        )
+        .ok();
+    let parsed: serde_json::Value = serde_json::from_str(&reopened).expect("valid JSON");
+    assert_eq!(parsed["task"], "#11809");
+    assert_eq!(parsed["did"], "reopened");
+    assert_eq!(written(&tasks), ["issue reopen 11809"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_task_is_edited_and_an_edit_of_nothing_is_refused() {
+    let tasks = writable();
+    let nothing = tasks
+        .ys(None, &["task", "edit", "14394", "--project", "Demo"])
+        .failed();
+    assert!(nothing.contains("Nothing to change"), "{nothing}");
+    assert!(tasks.asked().is_empty());
+
+    let changed = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "edit",
+                "14394",
+                "--add-label",
+                "bug",
+                "--remove-label",
+                "question",
+                "--assign",
+                "@me",
+                "--unassign",
+                "grace",
+                "--title",
+                "A better title",
+                "--project",
+                "Demo",
+            ],
+        )
+        .ok();
+    assert_eq!(changed.trim(), "Changed #14394.");
+    assert_eq!(
+        tasks.written(),
+        ["issue edit 14394 --title A better title --add-label bug --remove-label question --add-assignee @me --remove-assignee grace"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn nothing_is_written_through_a_link_to_another_repositorys_issue() {
+    let tasks = writable();
+    let elsewhere = "https://github.com/someone/else/issues/14394";
+    for args in [
+        vec!["task", "comment", elsewhere, "hello"],
+        vec!["task", "close", elsewhere, "--yes"],
+        vec!["task", "edit", elsewhere, "--add-label", "bug"],
+    ] {
+        let mut args = args;
+        args.extend(["--project", "Demo"]);
+        let refused = tasks.ys(None, &args).failed();
+        assert!(refused.contains("github.com/someone/else"), "{refused}");
+    }
+    assert!(tasks.written().is_empty(), "{:?}", tasks.written());
 }

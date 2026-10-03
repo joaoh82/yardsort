@@ -240,4 +240,6 @@ From the design pass in [23-tasks](23-tasks.md).
     run by an agent Yardsort launched knows its run. A line in the activity — _filed #93_ —
     would make what an agent did on the forge visible afterwards without parsing anything it
     printed. Lean: yes, for `create`, `comment`, `close` and `reopen`, if the event layer takes
-    a new kind without a migration; look in slice 3.
+    a new kind without a migration; look in slice 3. Looked at in slice 3: it does — a kind is
+    free text — and it was left out all the same, as a change of its own: kinds, payloads, the
+    timeline's wording, `ys activity list` and the activity guide. Still open.

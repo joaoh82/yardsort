@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Tasks: manage them from Yardsort.** **New task** opens an issue on a project's repository,
+  with a title, a description and labels. A box under a task's conversation posts a comment.
+  **Close ▾** closes one as completed or as not planned, and **Reopen** reopens one — each
+  asked about first, naming who opened it. **Labels ▾** and **Assignees ▾** tick and untick.
+  Everything goes through `gh`, as you; a refusal from GitHub is shown in its own words.
+- **`ys task create`, `comment`, `close`, `reopen` and `edit`.** An agent in a workspace can
+  now file an issue, answer one, label and assign it. They write to GitHub at once; `close` and
+  `reopen` do nothing without `--yes`. See [the `ys` guide](docs/guide/cli.md#ys-task).
 - **Tasks: hand one to an agent.** **Delegate** on an open task opens the composer with the
   first message written from the issue — title, description, the latest comments — between two
   lines that mark it as text other people wrote, with what the agent should do if that text

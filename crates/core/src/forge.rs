@@ -621,7 +621,7 @@ impl Gh {
         command
     }
 
-    fn run(&self, cwd: &Path, args: &[&str]) -> ForgeResult<String> {
+    pub(crate) fn run(&self, cwd: &Path, args: &[&str]) -> ForgeResult<String> {
         let output = self.command(cwd, args).output()?;
         Self::answer(args, &output)
     }
@@ -851,7 +851,12 @@ impl Gh {
     /// Run `gh` with `stdin` on its standard input: for text that is the user's words, which
     /// never go in an argument — an argument list has a length Windows caps, and a shell is not
     /// involved either way, but a `--body` of a few thousand characters is a thing to avoid.
-    fn run_with_stdin(&self, cwd: &Path, args: &[&str], stdin: &str) -> ForgeResult<String> {
+    pub(crate) fn run_with_stdin(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        stdin: &str,
+    ) -> ForgeResult<String> {
         use std::io::Write;
         let mut child = self
             .command(cwd, args)

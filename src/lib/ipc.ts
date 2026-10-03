@@ -64,6 +64,11 @@ import {
   type TaskDetail,
   type TaskLabel,
   type TaskRef,
+  type TaskChoices,
+  type TaskEdit,
+  type NewTask,
+  type CreatedTask,
+  type CloseReason,
   type Delegated,
   type PublishState,
   type PullRequest,
@@ -187,6 +192,11 @@ export type {
   TaskDetail,
   TaskLabel,
   TaskRef,
+  TaskChoices,
+  TaskEdit,
+  NewTask,
+  CreatedTask,
+  CloseReason,
   Delegated,
   PublishState,
   PullRequest,
@@ -548,6 +558,19 @@ export const ipc = {
     unwrap(commands.taskDetail(projectId, key, refresh)),
   /** A task made ready to hand to an agent: the first message, and what to record. */
   taskPrompt: (projectId: string, key: string) => unwrap(commands.taskPrompt(projectId, key)),
+  /** Open a new task on the project's source. Public at once. */
+  taskCreate: (projectId: string, task: NewTask) => unwrap(commands.taskCreate(projectId, task)),
+  /** Post a comment on a task. */
+  taskComment: (projectId: string, key: string, body: string) =>
+    done(commands.taskComment(projectId, key, body)),
+  taskClose: (projectId: string, key: string, reason: CloseReason) =>
+    done(commands.taskClose(projectId, key, reason)),
+  taskReopen: (projectId: string, key: string) => done(commands.taskReopen(projectId, key)),
+  /** Change a task's labels, assignees or title. */
+  taskEdit: (projectId: string, key: string, change: TaskEdit) =>
+    done(commands.taskEdit(projectId, key, change)),
+  /** The labels and people a project's tasks can be given. */
+  projectTaskChoices: (projectId: string) => unwrap(commands.projectTaskChoices(projectId)),
 
   /**
    * Whether a model can write a commit message or a pull request here, and which one would.
