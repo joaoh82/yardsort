@@ -55,10 +55,16 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // A handoff starts the message with the packet Yardsort assembled; the user edits it here.
   // Read once, at mount: the composer is keyed by workspace, so a new handoff is a new mount.
   const [handoff] = useState(() => (runIn ? useProjectsStore.getState().composingPrompt : null));
-  // Started from a pull request: the branch the core got ready is the one to open. Read once,
-  // like the handoff; the view that sets it is closed by opening this.
+  // Started from a pull request: the branch the core got ready is the one to open, and a note
+  // about the pull request may be the first message. Read once, like the handoff; the view
+  // that sets them is closed by opening this.
   const [prepared] = useState(() => (runIn ? null : useProjectsStore.getState().composingBranch));
-  const [message, setMessage] = useState(handoff ?? "");
+  const [note] = useState(() =>
+    runIn || !useProjectsStore.getState().composingBranch
+      ? null
+      : useProjectsStore.getState().composingPrompt,
+  );
+  const [message, setMessage] = useState(handoff ?? note ?? "");
   const [harnessId, setHarnessId] = useState<string | null>(null);
   const [model, setModel] = useState(last.model ?? "");
   const [effort, setEffort] = useState(last.effort ?? "");

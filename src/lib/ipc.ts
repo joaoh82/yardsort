@@ -70,6 +70,11 @@ import {
   type CheckCounts,
   type Checks,
   type PreparedBranch,
+  type DiffSide,
+  type Excerpt,
+  type LineComment,
+  type LinePlace,
+  type PullRequestChanges,
   type PullRequestCheck,
   type PullRequestPost,
   type PullRequestReview,
@@ -186,6 +191,11 @@ export type {
   CheckCounts,
   Checks,
   PreparedBranch,
+  DiffSide,
+  Excerpt,
+  LineComment,
+  LinePlace,
+  PullRequestChanges,
   PullRequestCheck,
   PullRequestPost,
   PullRequestReview,
@@ -472,6 +482,48 @@ export const ipc = {
   /** One pull request in full: description, checks with links, reviewers, conversation. */
   pullRequestSummary: (projectId: string, number: number, refresh = false) =>
     unwrap(commands.pullRequestSummary(projectId, number, refresh)),
+  /** The files a pull request changes. Fetches its commits first if they are not here. */
+  pullRequestChanges: (projectId: string, number: number) =>
+    unwrap(commands.pullRequestChanges(projectId, number)),
+  /** Both sides of one of those files, between the two commits `pullRequestChanges` named. */
+  pullRequestDiff: (
+    projectId: string,
+    commits: Pick<PullRequestChanges, "baseOid" | "headOid">,
+    change: Pick<FileChange, "path" | "oldPath">,
+  ) =>
+    unwrap(
+      commands.pullRequestDiff(
+        projectId,
+        commits.baseOid,
+        commits.headOid,
+        change.path,
+        change.oldPath,
+      ),
+    ),
+  /** Post a comment on a pull request's conversation. */
+  pullRequestComment: (projectId: string, number: number, body: string) =>
+    done(commands.pullRequestComment(projectId, number, body)),
+  /** Every comment made on lines of a pull request's diff. */
+  pullRequestLineComments: (projectId: string, number: number) =>
+    unwrap(commands.pullRequestLineComments(projectId, number)),
+  /** Post a comment on particular lines of a pull request's diff. */
+  pullRequestLineComment: (projectId: string, number: number, place: LinePlace, body: string) =>
+    done(commands.pullRequestLineComment(projectId, number, place, body)),
+  /** Who in a workspace would be given a note about its pull request's lines, and how. */
+  pullRequestNoteHelper: (workspaceId: string, number: number) =>
+    unwrap(commands.pullRequestNoteHelper(workspaceId, number)),
+  /** Give that agent the note: typed in, resumed with it, or as a new conversation's first message. */
+  pullRequestSendNote: (
+    workspaceId: string,
+    number: number,
+    sessionId: string,
+    excerpt: Excerpt,
+    note: string,
+    size: TermSize,
+  ) => unwrap(commands.pullRequestSendNote(workspaceId, number, sessionId, excerpt, note, size)),
+  /** The note as a composer's first message, for a pull request with no workspace yet. */
+  pullRequestNoteText: (projectId: string, number: number, excerpt: Excerpt, note: string) =>
+    unwrap(commands.pullRequestNoteText(projectId, number, excerpt, note)),
   /** Merge any pull request of a project, at the head commit the user confirmed. */
   pullRequestMerge: (projectId: string, number: number, headOid: string, method: MergeMethod) =>
     done(commands.pullRequestMerge(projectId, number, headOid, method)),

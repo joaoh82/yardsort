@@ -103,6 +103,52 @@ export const commands = {
 	 */
 	pullRequestSummary: (projectId: string, number: number, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("pull_request_summary", { projectId, number, refresh })),
 	/**
+	 *  The files a pull request changes. Fetches its commits into refs of Yardsort's own if they
+	 *  are not here yet — nothing is checked out, and no branch or remote-tracking ref moves.
+	 * 
+	 *  Which head and base: the ones the project's list names. The list is what the window shows,
+	 *  it is what notices a push, and it is already here — so this asks the forge for nothing. A
+	 *  pull request the list does not have (the list was emptied by an action a moment ago, say)
+	 *  is asked about afresh, never out of a cache: a diff is only as good as its head.
+	 */
+	pullRequestChanges: (projectId: string, number: number) => typedError<PullRequestChanges, IpcError>(__TAURI_INVOKE("pull_request_changes", { projectId, number })),
+	/**
+	 *  Both sides of one file of a pull request, between the two commits
+	 *  [`pull_request_changes`] answered with.
+	 */
+	pullRequestDiff: (projectId: string, baseOid: string, headOid: string, path: string, oldPath: string | null) => typedError<FileDiff, IpcError>(__TAURI_INVOKE("pull_request_diff", { projectId, baseOid, headOid, path, oldPath })),
+	/**
+	 *  Post a comment on a pull request's conversation. The words are the user's, sent as they
+	 *  are; pressing Send was the confirmation.
+	 */
+	pullRequestComment: (projectId: string, number: number, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("pull_request_comment", { projectId, number, body })),
+	/**
+	 *  Every comment on lines of a pull request's diff. Not cached: it is asked for with the
+	 *  diff, and again when the list says the pull request changed.
+	 */
+	pullRequestLineComments: (projectId: string, number: number) => typedError<LineComment[], IpcError>(__TAURI_INVOKE("pull_request_line_comments", { projectId, number })),
+	/**  Post a comment on particular lines of a pull request's diff. */
+	pullRequestLineComment: (projectId: string, number: number, place: LinePlace, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("pull_request_line_comment", { projectId, number, place, body })),
+	/**
+	 *  Who in a workspace would be given a note about pull request `number`'s lines, and how — for
+	 *  the confirmation, before anything is sent. The same choice as for merge conflicts: the
+	 *  conversation that opened the pull request, else the one given the task, else the newest.
+	 */
+	pullRequestNoteHelper: (workspaceId: string, number: number) => typedError<ConflictHelper, IpcError>(__TAURI_INVOKE("pull_request_note_helper", { workspaceId, number })),
+	/**
+	 *  Give the agent in a workspace a note about lines of its pull request: typed into it if it is
+	 *  running and quiet, into it once resumed if it has ended, or as the first message of a new
+	 *  conversation of the same agent. Never into a busy one. `session_id` is the conversation the
+	 *  user agreed to ask ([`pull_request_note_helper`]); if another has become the one to ask,
+	 *  nothing is sent.
+	 */
+	pullRequestSendNote: (workspaceId: string, number: number, sessionId: string, excerpt: Excerpt, note: string, size: TermSize) => typedError<ConflictsAsked, IpcError>(__TAURI_INVOKE("pull_request_send_note", { workspaceId, number, sessionId, excerpt, note, size })),
+	/**
+	 *  The note as the composer's first message, for a pull request with no workspace yet: what
+	 *  [`pull_request_prepare_branch`] is followed by.
+	 */
+	pullRequestNoteText: (projectId: string, number: number, excerpt: Excerpt, note: string) => typedError<string, IpcError>(__TAURI_INVOKE("pull_request_note_text", { projectId, number, excerpt, note })),
+	/**
 	 *  Merge a pull request of this project, if it is still open, still not a draft and still at
 	 *  the head commit the user confirmed. Never deletes a branch, never bypasses a protection.
 	 */
@@ -730,6 +776,13 @@ export type DevFlags = {
 	renderer: string | null,
 };
 
+/**  Which side of a diff a comment on a line is about. */
+export type DiffSide = 
+/**  The file as it was: a removed or unchanged line of the old version. */
+"left" | 
+/**  The file as the pull request has it. */
+"right";
+
 export type DownloadProgress = {
 	downloaded: number,
 	/**  `None` when the server did not say how big the download is. */
@@ -797,6 +850,17 @@ export type Evidence = {
 	prState: string | null,
 	/**  `archived` or `deleted`, when the workspace ended. */
 	ended: string | null,
+};
+
+/**  The lines the note is about. */
+export type Excerpt = {
+	path: string,
+	side: DiffSide,
+	/**  The first and last line, 1-based, of the file on that side. */
+	from: number,
+	to: number,
+	/**  The lines themselves, as the viewer had them. */
+	text: string,
 };
 
 export type ExitInfo = {
@@ -1067,6 +1131,48 @@ export type LimitWindowDto = {
 	minutes: number | null,
 	usedPercent: number | null,
 	resetsAt: number | null,
+};
+
+/**  A comment on particular lines of a pull request's diff, as the forge's API lists them. */
+export type LineComment = {
+	/**  The forge's id, as text: it does not fit a JavaScript number. */
+	id: string,
+	path: string,
+	/**
+	 *  The line it is on now, in the file as the pull request has it (or as it was, for
+	 *  [`DiffSide::Left`]). `None` when the diff has moved on from under it, or when it is about
+	 *  the file as a whole.
+	 */
+	line: number | null,
+	/**  The first line of a range, when it is on several. */
+	startLine: number | null,
+	side: DiffSide,
+	/**  The line it was made on, which is all that is left of where an outdated one went. */
+	originalLine: number | null,
+	/**  The diff has changed since and the forge no longer places it on a line. */
+	outdated: boolean,
+	/**  About the file as a whole, not a line of it. */
+	wholeFile: boolean,
+	author: string | null,
+	/**  In epoch milliseconds. */
+	at: number | null,
+	/**  Markdown. */
+	body: string,
+	url: string | null,
+	/**  The comment this one answers, when it is a reply. */
+	inReplyTo: string | null,
+};
+
+/**  Where a comment on lines goes: what the forge needs to place it. */
+export type LinePlace = {
+	/**  The head commit the lines are of, as the diff was read. */
+	commit: string,
+	path: string,
+	side: DiffSide,
+	/**  The last line, or the only one. */
+	line: number,
+	/**  The first line of a range. */
+	startLine: number | null,
 };
 
 export type Load = {
@@ -1447,6 +1553,15 @@ export type PullRequest = {
 	createdAt: number | null,
 };
 
+/**  A pull request's diff: the files it changes, and the two commits they are read between. */
+export type PullRequestChanges = {
+	files: FileChange[],
+	/**  The pull request's head, as fetched. [`pull_request_diff`] is asked with it. */
+	headOid: string,
+	/**  Where the pull request left its base branch: what the diff is measured from. */
+	baseOid: string,
+};
+
 export type PullRequestCheck = {
 	name: string,
 	state: Checks,
@@ -1460,6 +1575,11 @@ export type PullRequestCheck = {
 export type PullRequestDetails = {
 	base: string,
 	headOid: string,
+	/**
+	 *  The commit of the base branch the forge measures the pull request against. For one
+	 *  merged long ago it is the base as it was then, which is what still gives its diff back.
+	 */
+	baseOid: string,
 	additions: number,
 	deletions: number,
 	review: string,

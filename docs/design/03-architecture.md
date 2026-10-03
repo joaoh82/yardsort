@@ -319,6 +319,25 @@ again when the list says the row changed. Descriptions and comments are other pe
 the window renders them as Markdown with raw HTML dropped, no image loaded, and links handed to
 the opener, and a comment the forge has hidden loses its words in the core.
 
+**A pull request's diff** needs its commits and no checkout. `fetch_for_diff` fetches
+`refs/pull/<n>/head` into `refs/yardsort/pull/<n>/head`, and with it the base commit the forge
+recorded, by id; it is pinned under `…/base`. Those refs are Yardsort's own namespace: no branch
+or remote-tracking ref moves, and they are deleted when a pull request leaves a list that is
+whole (`prune_refs`). The diff is `changes::Between` over the head and its merge base with that
+base — the same `FileChange` and `FileDiff` a workspace's changes are, which is why the same
+viewer shows both. Measuring from the recorded base rather than the base branch's tip is what
+keeps a merged pull request's diff from coming out empty.
+
+**Writing to the forge** is three `gh` calls with the user's words on standard input, never in
+an argument: `gh pr comment --body-file -`, and `gh api -X POST …/pulls/<n>/comments` with
+`-F body=@-` for a comment on lines. Comments on lines are read with `gh api --paginate --slurp`,
+which `gh pr view` does not return. **A note on lines for an agent** reuses the conflict
+helper's two halves — `plan` chooses the conversation, `deliver` reaches it, never a busy one —
+with words from `code_note::prompt`; with no workspace, `prepare_branch` and the composer, the
+note as its first message. The window shows each comment thread under its lines as a block
+widget in CodeMirror, mapping a comment on the old text to the new text through the merge
+view's chunks.
+
 **A pull request's branch, for a workspace** (`prepare_branch`): a branch already here is never
 moved; one in the project's remote is fetched into its remote-tracking ref and a local branch
 made to track it; one from a fork becomes `pr/<n>` at `refs/pull/<n>/head`, with that ref

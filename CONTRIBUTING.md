@@ -94,7 +94,10 @@ Two principles explain most design decisions — more in [architecture](docs/des
 
 CI runs the checks on Linux, macOS and Windows. Platform-specific failures are common in this
 codebase — that is what the matrix is for — so do not be discouraged by a red Windows run; the
-logs usually say exactly what differed.
+logs usually say exactly what differed. A ruleset on `main` requires all three `Check` jobs and
+`Website` to pass before a pull request merges, so `gh pr merge --auto` waits for them; `main`
+cannot be deleted or force-pushed. Repository admins can bypass it — which is what lets
+`just release` push its version commit and tag straight to `main`.
 
 ### Style
 

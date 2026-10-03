@@ -707,7 +707,7 @@ fixture; the docs list every action and variable that exists and none that does 
 ## M23 — Pull requests
 
 Proposed in [22-pull-requests](22-pull-requests.md), after a ten-question design pass on
-2026-10-02. Slices 1 and 2 are built.
+2026-10-02. All four slices are built; the screenshot and the hands-on pass remain.
 
 - A **Pull requests** row at the top of the sidebar, above Workflows, opens a view in the center
   panel: every pull request of every project's repository, with state, project, author and
@@ -738,9 +738,16 @@ Proposed in [22-pull-requests](22-pull-requests.md), after a ten-question design
       browser; every check with its workflow and a link to its run; a summary that is read again
       when the list says the pull request changed. Recorded in
       [22 § slice 2](22-pull-requests.md#slice-2-what-shipped).
-- [ ] Slice 3: Code.
-- [ ] Slice 4: writing — a reply box, comments on lines, and selected lines of a diff sent to a
-      workspace's agent.
+- [x] Slice 3: Code. A pull request's commits fetched into `refs/yardsort/pull/<n>/`, never
+      checked out; its diff measured from the base commit the forge recorded, so one merged long
+      ago still shows; the changes panel's viewer shared rather than copied; refs dropped when a
+      pull request leaves a list that is whole. Recorded in
+      [22 § slice 3](22-pull-requests.md#slice-3-what-shipped).
+- [x] Slice 4: writing. A reply box; every comment on lines beside the lines it is about, in
+      the viewer; selected lines sent with a note to the pull request's agent by the conflict
+      helper's rules, or as a new workspace's first message, and optionally to GitHub as a
+      comment on those lines. Recorded in
+      [22 § slice 4](22-pull-requests.md#slice-4-what-shipped).
 
 _Exit:_ on all three platforms, a repository with more open pull requests than one page lists
 them, filters them and says when there are more than it shows; a pull request from a fork can be
@@ -800,8 +807,9 @@ logged out, or on another forge, the view and `ys` say which and nothing else ch
   base in and pushes (see [commits & pull requests](../guide/commits-and-pull-requests.md#resolve-merge-conflicts)).
   Found while building it: a workspace can own several pull requests, and the branch name alone
   cannot say which — the worktree's own `HEAD` reflog can.
-- Diff comments sent back to the agent as a prompt. Planned for a pull request's diff as slice 4
-  of [M23](#m23--pull-requests).
+- ~~Diff comments sent back to the agent as a prompt.~~ **Done** for a pull request's diff, as
+  slice 4 of [M23](#m23--pull-requests): selected lines and a note go to the agent in the pull
+  request's workspace by the conflict helper's rules.
 - Multi-repo projects; remote/SSH workspaces.
 - ~~**Usage / cost view per workspace.**~~ **Done**, as the Usage view: token usage from the
   agents' own logs, and machine resources per terminal. What was found: the figures were already

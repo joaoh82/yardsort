@@ -56,14 +56,18 @@ pub struct ConflictsAsked {
     pub session: SessionInfo,
 }
 
-struct Plan {
-    record: SessionRecord,
-    reach: Reach,
+pub(super) struct Plan {
+    pub(super) record: SessionRecord,
+    pub(super) reach: Reach,
 }
 
 /// Choose the conversation and how to reach it. An error when there is no agent, or the one
 /// there is busy.
-fn plan(state: &AppState, row: &WorkspaceRow, opened_at: Option<i64>) -> IpcResult<Plan> {
+pub(super) fn plan(
+    state: &AppState,
+    row: &WorkspaceRow,
+    opened_at: Option<i64>,
+) -> IpcResult<Plan> {
     let sessions = state.store.sessions(&row.id)?;
     let runs = state.store.runs(&row.id)?;
     let task = state.store.task_session(&row.id)?;
@@ -182,51 +186,70 @@ pub async fn workspace_resolve_conflicts(
         };
         let Plan { record, reach } = plan(state, &row, pr.created_at)?;
         same_agent(&record, &session_id)?;
-        let session = match reach {
-            Reach::Type => {
-                let text = conflicts::prompt(&pr, &base, checked_out.as_deref(), None);
-                let id = SessionId(record.pty_session_id.clone().unwrap_or_default());
-                pty_host::paste_and_submit(state.host.as_ref(), &id, &text)?;
-                state.host.info(&id)?
-            }
-            Reach::Resume => {
-                let text = conflicts::prompt(&pr, &base, checked_out.as_deref(), None);
-                sessions::continue_session(state, &record.id, Continue::Resume, size, Some(text))?
-            }
-            Reach::Start => {
-                // A new conversation has not seen the task, so it is told.
-                let task = state.store.session_prompts(&row.id)?.into_iter().next();
-                let text = conflicts::prompt(&pr, &base, checked_out.as_deref(), task.as_deref());
-                let session = spawn_in_workspace(
-                    state,
-                    &row.id,
-                    // Sent as a handoff: the record keeps no first message, so the workspace's
-                    // task stays what the user first asked.
-                    Launch::Harness(HarnessRequest {
-                        id: record.harness_id.clone(),
-                        model: record.model.clone(),
-                        effort: record.effort.clone(),
-                        prompt: Some(text),
-                        handoff: true,
-                        skip_memory: false,
-                    }),
-                    size,
-                )?;
-                if let Some(id) = session.labels.get(RECORD_LABEL) {
-                    state
-                        .store
-                        .set_session_title(id, &format!("Resolve conflicts in #{number}"))?;
-                }
-                session
-            }
-        };
+        let session = deliver(
+            state,
+            &row,
+            &record,
+            reach,
+            |task| conflicts::prompt(&pr, &base, checked_out.as_deref(), task),
+            &format!("Resolve conflicts in #{number}"),
+            size,
+        )?;
         Ok(ConflictsAsked { reach, session })
     })
     .await
 }
 
+/// Get a message to the conversation `plan` chose, the way it said: typed into it, typed into
+/// it once resumed, or as the first message of a new conversation of the same agent. `text` is
+/// asked for the words, with the workspace's task for a conversation that has not seen it;
+/// `title` names a new conversation in the history.
+pub(super) fn deliver(
+    state: &AppState,
+    row: &WorkspaceRow,
+    record: &SessionRecord,
+    reach: Reach,
+    text: impl Fn(Option<&str>) -> String,
+    title: &str,
+    size: TermSize,
+) -> IpcResult<SessionInfo> {
+    Ok(match reach {
+        Reach::Type => {
+            let id = SessionId(record.pty_session_id.clone().unwrap_or_default());
+            pty_host::paste_and_submit(state.host.as_ref(), &id, &text(None))?;
+            state.host.info(&id)?
+        }
+        Reach::Resume => {
+            sessions::continue_session(state, &record.id, Continue::Resume, size, Some(text(None)))?
+        }
+        Reach::Start => {
+            // A new conversation has not seen the task, so it is told.
+            let task = state.store.session_prompts(&row.id)?.into_iter().next();
+            let session = spawn_in_workspace(
+                state,
+                &row.id,
+                // Sent as a handoff: the record keeps no first message, so the workspace's
+                // task stays what the user first asked.
+                Launch::Harness(HarnessRequest {
+                    id: record.harness_id.clone(),
+                    model: record.model.clone(),
+                    effort: record.effort.clone(),
+                    prompt: Some(text(task.as_deref())),
+                    handoff: true,
+                    skip_memory: false,
+                }),
+                size,
+            )?;
+            if let Some(id) = session.labels.get(RECORD_LABEL) {
+                state.store.set_session_title(id, title)?;
+            }
+            session
+        }
+    })
+}
+
 /// Refuse when the conversation chosen now is not the one the user agreed to ask.
-fn same_agent(chosen: &SessionRecord, confirmed: &str) -> IpcResult<()> {
+pub(super) fn same_agent(chosen: &SessionRecord, confirmed: &str) -> IpcResult<()> {
     if chosen.id == confirmed {
         return Ok(());
     }

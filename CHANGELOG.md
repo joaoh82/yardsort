@@ -18,6 +18,22 @@ has the downloads and the full commit lists.
   `--state`, `--label`, `--assignee`, `--author`, `--search` and `--json`, so an agent in a
   workspace can be asked which issues are open and which are waiting. See
   [the `ys` guide](docs/guide/cli.md#ys-task).
+- **Pull requests: comments, and a note on lines for an agent.** A box under a pull request's
+  conversation posts a comment on it. Under **Code**, each comment made on lines of the diff sits
+  beside those lines, with its replies, and each file says how many threads it has. Select lines
+  and press **Note on lines…** to send what you want done about them to the agent in the pull
+  request's workspace — typed in if it is running and quiet, resumed with it if it has ended,
+  never into a busy one — or, with no workspace yet, to start one with the note as the agent's
+  first message. The same note can also go on GitHub as a comment on those lines, or only there.
+  See [Pull requests](docs/guide/pull-requests.md#a-note-on-lines-for-an-agent).
+- **Pull requests: the Code tab.** A pull request's details now have two tabs, **Summary** and
+  **Code**. Code lists the files it changes with their kinds and line counts, and opens each in
+  the changes panel's own viewer, inline or side by side, highlighted, with unchanged stretches
+  folded. Nothing is checked out for it: the pull request's commits are fetched into refs of
+  Yardsort's own, no branch or remote-tracking branch moves, and what was fetched is let go when
+  the pull request leaves the list. The diff is measured from where the pull request left its
+  base, so one merged long ago still shows its files. See
+  [Pull requests](docs/guide/pull-requests.md#code).
 
 ## 0.18.0
 
@@ -31,8 +47,11 @@ has the downloads and the full commit lists.
   carries. See [the `ys` guide](docs/guide/cli.md#without-the-app).
 
 - **`brew install --cask joaoh82/yardsort/yardsort` works again.** Current Homebrew refused the
-  cask over a minimum-macOS line it no longer accepts. The line is gone, and releases now test the
-  cask against an up-to-date Homebrew.
+  cask over a minimum-macOS line it no longer accepts (#90). The cask now says `depends_on :macos`
+  with no minimum version — the one form today's `brew style` takes, which also insists on the
+  stanza for every app cask and on its exact placement — and releases test the cask against an
+  up-to-date Homebrew before publishing it, so a rule change like this is caught there rather
+  than by users.
 
 - **Usage is easier to find in the docs and website.** The README and homepage now explain both
   tabs, supported token sources and API cost estimates. The quick start introduces Usage, and

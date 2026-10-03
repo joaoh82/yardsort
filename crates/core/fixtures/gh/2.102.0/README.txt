@@ -9,6 +9,12 @@ open-page-1.json, open-page-2.json
 pr-view.json
     `gh pr view <n> --json <forge::PULL_REQUEST_FIELDS>,body,comments,reviews,changedFiles`:
     one pull request with a comment and two reviews, cut down to its first three checks.
+    `baseRefOid`, which the question gained later, was added by hand with a made-up id.
+
+pr-line-comments.json
+    `gh api --paginate --slurp repos/{owner}/{repo}/pulls/<n>/comments`: one page, cut down to
+    three comments on lines — one on a single line, one on a range, and a reply to the first.
+    A reply carries `in_reply_to_id`; a first comment has no such key at all.
 
 pr-list.json
     `gh pr list --state all --json <forge::PULL_REQUEST_FIELDS>`: one open, one merged, one

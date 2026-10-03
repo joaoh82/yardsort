@@ -192,7 +192,8 @@ From the design pass in [22-pull-requests](22-pull-requests.md).
 24. **Should the right panel get out of the way while the Pull requests view is open?** It keeps
     showing the selected workspace's changes, as it does beside Usage and a workflow, and the
     Code tab wants the width. Lean: leave it alone — its shortcut collapses it — and decide after
-    slice 3 has been used on a laptop screen.
+    slice 3 has been used on a laptop screen. Slice 3 is built; the details can also hide the
+    list. Still to be decided from use.
 25. ~~**How is a workspace started from a fork's pull request tied to it, and should Yardsort push
     to forks?**~~ **Settled 2026-10-02, in slice 1, as the lean said.** Its local branch is
     `pr/<n>`, and the tie is recorded in git: `refs/pull/<n>/head` on the pull request's remote

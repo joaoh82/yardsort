@@ -240,9 +240,9 @@ filters (with **Clear filters**); nothing open at all.
 ## Delegating
 
 **Delegate** on a row or in the detail opens the composer for that task's project, with the
-message filled in. It is `compose(projectId, …)` with a prompt — the store's `composingPrompt`
-is today only read for a handoff into an existing workspace, so the composer learns to read it
-for a new one too.
+message filled in. It is `compose(projectId, undefined, prompt)`: the composer already starts a new workspace's
+message from the store's `composingPrompt`, since a pull request's note on lines needed it
+([22](22-pull-requests.md)), so delegating a task asks nothing new of it.
 
 The workspace is named from the issue's title and number rather than from the first line of the
 message, which here is always the same sentence. The base branch is the composer's usual

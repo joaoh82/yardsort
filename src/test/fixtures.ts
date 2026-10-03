@@ -132,6 +132,7 @@ export const pullRequest = (
     details: {
       base: "main",
       headOid: `head-${number}`,
+      baseOid: "b".repeat(40),
       additions: 10,
       deletions: 2,
       review: "",

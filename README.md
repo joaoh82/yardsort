@@ -84,10 +84,11 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Every pull request in one place.** **Pull requests**, at the top of the sidebar, lists the
   pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks,
   reviewers and size, filtered by project, author and review status. Open one to read its
-  description, its checks and the conversation. Start a workspace on one, merge it, close it or
-  reopen it from there, each confirmed first and naming whose it is. It
-  reads GitHub through `gh`; Yardsort still holds no credential. See
-  [Pull requests](docs/guide/pull-requests.md).
+  description, its checks, the conversation and its diff, with every comment beside the lines it
+  is about; reply, or select lines and send a note about them to the agent working on it. Start
+  a workspace on one, merge it, close it or reopen it from there, each confirmed first and naming
+  whose it is. It reads GitHub through `gh`; Yardsort still holds no credential.
+  [More below](#every-pull-request-in-one-place).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
@@ -164,6 +165,34 @@ All figures stay on your machine. Token history covers only logs still present t
 not include other computers. Machine resources covers all agents Yardsort runs, while token
 totals currently cover Claude Code, Codex and Grok. See the [Usage guide](docs/guide/usage.md)
 for sources, pricing limits and the option to hide the sidebar button.
+
+## Every pull request in one place
+
+![Pull requests: every project's pull requests in one list, with one open beside it showing its description, checks and reviewers](docs/images/pull-requests.png)
+
+**Pull requests**, at the very top of the sidebar, is one list of the pull requests of every
+project on GitHub — the ones agents opened, the ones you opened, the ones a teammate opened last
+week — most recently updated first. Each row says who opened it, how the checks stand, how big it
+is, and which workspace holds its branch. Filter by state, project, author and review status, or
+search a title or a number.
+
+- **Summary** is the pull request as GitHub has it: the description, every check with a link to
+  its run, who was asked to review and what they said, and the conversation, with a box to reply.
+- **Code** is its diff, read with git into the project's own repository: the files it changes,
+  each with the number of comment threads on it, and the viewer with every thread under the
+  lines it is about. Select lines and **Note on lines…** sends what you want done to the agent
+  that has the pull request's workspace — typed into it if it is running and quiet, resumed if it
+  has ended, or a new workspace started with the note as its first message — and, if you like,
+  posts the same note on GitHub as a comment on those lines.
+- **Start workspace**, **Merge**, **Close** and **Reopen** act on any pull request from here,
+  each confirmed first and naming whose it is. A fork's pull request gets a workspace too, on a
+  branch Yardsort will not push.
+
+![Pull requests, Code tab: a changed file with a review thread sitting under the line it is about](docs/images/pull-requests-code.png)
+
+It needs the [GitHub CLI](https://cli.github.com), logged in; everything here is `gh` with the
+permissions you already have, and nothing you write reaches `gh` as a command-line argument.
+See [Pull requests](docs/guide/pull-requests.md).
 
 ## Hand the work to another agent
 

@@ -74,8 +74,8 @@ interface ProjectsState {
   move: (id: string, by: -1 | 1) => Promise<void>;
   select: (workspaceId: string | null) => void;
   /** `branch` opens the composer on a branch that exists — a pull request's — instead of on
-   *  a new one. */
-  compose: (projectId: string | null, branch?: PreparedBranch) => void;
+   *  a new one, and `prompt` is the message it starts with: a note about the pull request. */
+  compose: (projectId: string | null, branch?: PreparedBranch, prompt?: string) => void;
   /** Show a workflow in the center panel; `null` closes it. */
   openWorkflow: (workflowId: string | null) => void;
   /** Show the Usage view in the center panel, or close it. */
@@ -311,11 +311,11 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       save(KEYS.selected, workspaceId);
     },
 
-    compose(projectId, branch) {
+    compose(projectId, branch, prompt) {
       set((state) => ({
         composingProjectId: projectId,
         composingWorkspaceId: null,
-        composingPrompt: null,
+        composingPrompt: (projectId && prompt) || null,
         composingBranch: (projectId && branch) || null,
         workflowId: null,
         usageOpen: false,
