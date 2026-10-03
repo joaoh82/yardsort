@@ -13,6 +13,7 @@ use crate::git::Git;
 use crate::harness::{self, HarnessDef};
 use crate::projects::{Projects, Workspace};
 use crate::state::{blocking, AppState};
+use crate::tasks::delegate::{self, TaskRef};
 use crate::terminal::{spawn_in_workspace, HarnessRequest, Launch};
 
 /// A harness definition plus whether its command can be found on this machine.
@@ -113,6 +114,9 @@ pub struct NewWorkspace {
     pub existing_branch: Option<String>,
     pub harness: HarnessRequest,
     pub size: TermSize,
+    /// The task this workspace is being started from, when it is: it names the workspace and
+    /// is recorded against it. See `crate::tasks::delegate`.
+    pub task: Option<TaskRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -366,10 +370,24 @@ pub async fn workspace_create(
         let prompt = request.harness.prompt.clone().unwrap_or_default();
         let row = match request.existing_branch.as_deref() {
             Some(branch) => workspaces.open_branch(&request.project_id, branch)?,
-            None => {
-                workspaces.create(&request.project_id, request.base_branch.as_deref(), &prompt)?
-            }
+            None => match &request.task {
+                Some(task) => workspaces.create_named(
+                    &request.project_id,
+                    request.base_branch.as_deref(),
+                    &delegate::workspace_name(task),
+                )?,
+                None => workspaces.create(
+                    &request.project_id,
+                    request.base_branch.as_deref(),
+                    &prompt,
+                )?,
+            },
         };
+        // Recorded before the agent starts: a workspace that is kept after its agent failed to
+        // start was still started from that task.
+        if let Some(task) = &request.task {
+            state.store.link_task(&row.id, &task.row())?;
+        }
 
         match spawn_in_workspace(
             state,

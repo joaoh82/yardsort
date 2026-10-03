@@ -10,12 +10,13 @@
 //! come to disagree: what [needs an answer](needs_answer), and what a [`Filter`] lets through.
 //! See `docs/design/23-tasks.md`.
 
+pub mod delegate;
 pub mod github;
 
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::forge::ForgeResult;
@@ -32,7 +33,7 @@ pub const CLOSED_CAP: usize = 50;
 pub const PAGE_LIMIT: Duration = Duration::from_secs(20);
 
 /// Where a task is kept.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskSourceKind {
     GitHub,

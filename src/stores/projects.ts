@@ -7,6 +7,7 @@ import {
   type AddedProject,
   type NewWorkspace,
   type PreparedBranch,
+  type TaskRef,
   type Project,
   type Workspace,
   type SessionInfo,
@@ -45,6 +46,9 @@ interface ProjectsState {
   /** The branch the composer should open rather than start from: a pull request's, got ready
    *  by the core. Cleared with the composer. */
   composingBranch: PreparedBranch | null;
+  /** The task the composer's workspace is being started from: it is recorded against the
+   *  workspace, and names it. Cleared with the composer. */
+  composingTask: TaskRef | null;
   /** Raw persisted UI state, for features that remember small things (see `remember`). */
   ui: Record<string, string>;
   /** Projects are expanded unless listed here, so new ones start open. */
@@ -75,7 +79,12 @@ interface ProjectsState {
   select: (workspaceId: string | null) => void;
   /** `branch` opens the composer on a branch that exists — a pull request's — instead of on
    *  a new one, and `prompt` is the message it starts with: a note about the pull request. */
-  compose: (projectId: string | null, branch?: PreparedBranch, prompt?: string) => void;
+  compose: (
+    projectId: string | null,
+    branch?: PreparedBranch,
+    prompt?: string,
+    task?: TaskRef,
+  ) => void;
   /** Show a workflow in the center panel; `null` closes it. */
   openWorkflow: (workflowId: string | null) => void;
   /** Show the Usage view in the center panel, or close it. */
@@ -162,6 +171,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     composingWorkspaceId: null,
     composingPrompt: null,
     composingBranch: null,
+    composingTask: null,
     workflowId: null,
     usageOpen: false,
     pullRequestsOpen: false,
@@ -291,6 +301,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           composingWorkspaceId: null,
           composingPrompt: null,
           composingBranch: null,
+          composingTask: null,
           workflowId: null,
           usageOpen: false,
           pullRequestsOpen: false,
@@ -303,6 +314,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingWorkspaceId: null,
         composingPrompt: null,
         composingBranch: null,
+        composingTask: null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
@@ -311,12 +323,13 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       save(KEYS.selected, workspaceId);
     },
 
-    compose(projectId, branch, prompt) {
+    compose(projectId, branch, prompt, task) {
       set((state) => ({
         composingProjectId: projectId,
         composingWorkspaceId: null,
         composingPrompt: (projectId && prompt) || null,
         composingBranch: (projectId && branch) || null,
+        composingTask: (projectId && task) || null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
@@ -336,6 +349,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingWorkspaceId: null,
         composingPrompt: null,
         composingBranch: null,
+        composingTask: null,
       });
     },
 
@@ -349,6 +363,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingWorkspaceId: null,
         composingPrompt: null,
         composingBranch: null,
+        composingTask: null,
       });
     },
 
@@ -362,6 +377,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingWorkspaceId: null,
         composingPrompt: null,
         composingBranch: null,
+        composingTask: null,
       });
     },
 
@@ -375,6 +391,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingWorkspaceId: null,
         composingPrompt: null,
         composingBranch: null,
+        composingTask: null,
       });
     },
 
@@ -385,6 +402,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingWorkspaceId: workspace.id,
         composingPrompt: prompt ?? null,
         composingBranch: null,
+        composingTask: null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { project, task, tasksOf } from "@/test/fixtures";
+import { project, task, tasksOf, worktree } from "@/test/fixtures";
 import { at, moreOpenThanListed, needingAnswer, openIn, rowsOf, stateLabel } from "./rows";
 
 const alpha = project("alpha");
@@ -39,6 +39,49 @@ describe("rowsOf", () => {
     expect(rows.map((row) => row.task.key)).toEqual(["#5", "#2"]);
     expect(at("")).toBeNull();
     expect(at("2026-09-01T00:00:00Z")).toBe(Date.parse("2026-09-01T00:00:00Z"));
+  });
+});
+
+describe("the workspaces started from a task", () => {
+  const from = (number: number) => ({
+    source: "github" as const,
+    repo: "github.com/demo/app",
+    key: `#${number}`,
+    url: `https://github.com/demo/app/issues/${number}`,
+    title: `Task ${number}`,
+  });
+
+  it("are on its row, by the task's link and not by its key alone", () => {
+    const first = { ...worktree("alpha", "one"), tasks: [from(7)] };
+    const second = { ...worktree("alpha", "two"), tasks: [from(7)] };
+    const other = { ...worktree("alpha", "three"), tasks: [from(8)] };
+    const put_away = { ...worktree("alpha", "four"), tasks: [from(7)], archived: true };
+    const gone = { ...worktree("alpha", "five"), tasks: [from(7)], missing: true };
+    // Another project's #7 is another task.
+    const elsewhere = {
+      ...worktree("beta", "six"),
+      tasks: [{ ...from(7), url: "https://github.com/demo/site/issues/7" }],
+    };
+    const rows = rowsOf(
+      [
+        { ...alpha, workspaces: [...alpha.workspaces, first, second, other, put_away, gone] },
+        { ...beta, workspaces: [...beta.workspaces, elsewhere] },
+      ],
+      {
+        [alpha.id]: tasksOf([task(7), task(9)]),
+        [beta.id]: tasksOf([task(7)]),
+      },
+    );
+    const of = (name: string, key: string) =>
+      rows
+        .find((row) => row.project.name === name && row.task.key === key)!
+        .workspaces.map((workspace) => workspace.name);
+    expect(of("alpha", "#7"), "a folder that is gone is not somewhere to go").toEqual([
+      "one",
+      "two",
+    ]);
+    expect(of("alpha", "#9")).toEqual([]);
+    expect(of("beta", "#7"), "its own repository's issue is a different link").toEqual([]);
   });
 });
 

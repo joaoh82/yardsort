@@ -1720,6 +1720,7 @@ impl Tasks {
         command
             .args(["--data-dir", &self.fx.data_dir.to_string_lossy()])
             .args(args)
+            .env("YARDSORT_WORKTREE_ROOT", &self.fx.worktree_root)
             .env("YARDSORT_NO_DAEMON", "1")
             .env("PATH", self.bin.path())
             // No login shell to ask, so the environment is this one: see `ShellEnv::resolve`.
@@ -2043,4 +2044,134 @@ fn a_list_that_stops_short_says_so_beside_the_answer() {
         run.stderr
     );
     assert!(run.stderr.contains("HTTP 502"), "{}", run.stderr);
+}
+
+#[cfg(unix)]
+#[test]
+fn starting_a_task_makes_a_workspace_named_after_it_and_remembers_which() {
+    let tasks = Tasks::recorded();
+    let started = tasks
+        .ys(
+            None,
+            &["task", "start", "#14394", "--project", "Demo", "--no-agent"],
+        )
+        .ok();
+    assert!(started.contains("created  14394-"), "{started}");
+    assert!(started.contains("task   #14394"), "{started}");
+
+    let listed = tasks.ys(None, &["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&listed).expect("valid JSON");
+    let made: Vec<&serde_json::Value> = worktrees_in(&listed);
+    assert_eq!(made.len(), 1);
+    assert!(made[0]["name"].as_str().unwrap().starts_with("14394-"));
+    assert!(std::path::Path::new(made[0]["path"].as_str().unwrap()).is_dir());
+    let task = &made[0]["tasks"][0];
+    assert_eq!(task["source"], "github");
+    assert_eq!(task["key"], "#14394");
+    assert_eq!(task["repo"], "github.com/example/widgets");
+    assert_eq!(
+        task["url"],
+        "https://github.com/example/widgets/issues/14394"
+    );
+    assert_eq!(task["title"], "Replaced title of issue 14394");
+    // The project's own checkout was not started from anything.
+    let local = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["kind"] == "local")
+        .unwrap();
+    assert_eq!(local["tasks"].as_array().unwrap().len(), 0);
+
+    // A second attempt at the same task is a second workspace, with the same task on it.
+    let again = tasks
+        .ys(
+            Some(&tasks.fx.repo),
+            &["task", "start", "14394", "--no-agent", "--json"],
+        )
+        .ok();
+    let again: serde_json::Value = serde_json::from_str(&again).expect("valid JSON");
+    assert_eq!(again["task"], "#14394");
+    assert_ne!(again["name"], made[0]["name"]);
+    assert!(again["name"].as_str().unwrap().starts_with("14394-"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_workspace_made_any_other_way_has_no_task() {
+    let tasks = Tasks::recorded();
+    tasks
+        .ys(
+            None,
+            &["workspace", "new", "Demo", "fix the login", "--no-agent"],
+        )
+        .ok();
+    let listed = tasks.ys(None, &["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&listed).expect("valid JSON");
+    assert_eq!(
+        worktrees_in(&listed)[0]["tasks"].as_array().unwrap().len(),
+        0
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_task_that_cannot_be_started_leaves_nothing_behind() {
+    let nothing_made = |tasks: &Tasks| {
+        let listed = tasks.ys(None, &["workspace", "list", "--json"]).ok();
+        let listed: serde_json::Value = serde_json::from_str(&listed).expect("valid JSON");
+        assert!(worktrees_in(&listed).is_empty(), "{listed}");
+    };
+
+    // A closed one.
+    let closed = Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some("cat \"$fixtures/issue-view-hidden.json\""),
+    );
+    let said = closed
+        .ys(
+            None,
+            &["task", "start", "11809", "--project", "Demo", "--no-agent"],
+        )
+        .failed();
+    assert!(said.contains("#11809 is closed"), "{said}");
+    nothing_made(&closed);
+
+    // Another repository's.
+    let tasks = Tasks::recorded();
+    let said = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "start",
+                "https://github.com/someone/else/issues/14394",
+                "--project",
+                "Demo",
+                "--no-agent",
+            ],
+        )
+        .failed();
+    assert!(said.contains("github.com/someone/else"), "{said}");
+    nothing_made(&tasks);
+
+    // An agent that is not there: refused before `gh` is asked anything.
+    let tasks = Tasks::recorded();
+    let said = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "start",
+                "14394",
+                "--project",
+                "Demo",
+                "--harness",
+                "nope",
+            ],
+        )
+        .failed();
+    assert!(said.contains("nope"), "{said}");
+    assert!(tasks.asked().is_empty(), "{:?}", tasks.asked());
+    nothing_made(&tasks);
 }

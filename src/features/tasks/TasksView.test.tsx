@@ -2,12 +2,15 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectTasks } from "@/lib/ipc";
-import { project, task, taskDetail, tasksOf } from "@/test/fixtures";
+import { project, task, taskDetail, tasksOf, worktree } from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   uiStateSave: vi.fn(),
   projectTasks: vi.fn(),
   taskDetail: vi.fn(),
+  taskPrompt: vi.fn(),
+  sessionsList: vi.fn(),
+  ptySpawn: vi.fn(),
 }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 const clipboard = vi.hoisted(() => ({ writeText: vi.fn() }));
@@ -106,7 +109,29 @@ beforeEach(() => {
     tasksOpen: true,
     error: null,
   });
-  useTasksStore.setState({ byProject: {}, closedWanted: false, selected: null, details: {} });
+  core.sessionsList.mockResolvedValue([]);
+  core.ptySpawn.mockResolvedValue({ id: "s1", labels: {} });
+  core.taskPrompt.mockImplementation(async (_id: string, key: string) => ({
+    prompt: `Work on this GitHub issue: ${key}`,
+    task: linkTo(Number(key.slice(1))),
+  }));
+  useTasksStore.setState({
+    byProject: {},
+    closedWanted: false,
+    selected: null,
+    details: {},
+    busy: null,
+    error: null,
+  });
+});
+
+/** What a workspace remembers of the task it was started from. */
+const linkTo = (number: number) => ({
+  source: "github" as const,
+  repo: "github.com/demo/app",
+  key: `#${number}`,
+  url: `https://github.com/demo/app/issues/${number}`,
+  title: `Task ${number}`,
 });
 
 describe("the list", () => {
@@ -501,5 +526,84 @@ describe("one task in full", () => {
     await user.click(row(/Worktrees/));
     act(() => useTasksStore.setState({ byProject: { [alpha.id]: tasksOf([daemon]) } }));
     expect(screen.queryByRole("region", { name: "Task #12" })).not.toBeInTheDocument();
+  });
+});
+
+describe("handing a task to an agent", () => {
+  const pane = () => screen.getByRole("region", { name: "Task #12" });
+
+  it("opens the composer with the message the core wrote, and starts nothing", async () => {
+    const user = show();
+    await user.click(row(/Worktrees/));
+    await user.click(within(pane()).getByRole("button", { name: "Delegate" }));
+
+    await waitFor(() => expect(useProjectsStore.getState().composingProjectId).toBe(alpha.id));
+    expect(core.taskPrompt).toHaveBeenCalledWith(alpha.id, "#12");
+    const projects = useProjectsStore.getState();
+    expect(projects.composingPrompt).toBe("Work on this GitHub issue: #12");
+    expect(projects.composingTask).toEqual(linkTo(12));
+    expect(projects.composingBranch).toBeNull();
+    expect(projects.tasksOpen, "the composer takes the panel").toBe(false);
+    expect(core.ptySpawn, "the composer is where it starts").not.toHaveBeenCalled();
+  });
+
+  it("says why when the task could not be got ready, and stays where it is", async () => {
+    core.taskPrompt.mockRejectedValue({ code: "gh_failed", message: "HTTP 502" });
+    const user = show();
+    await user.click(row(/Worktrees/));
+    await user.click(within(pane()).getByRole("button", { name: "Delegate" }));
+    expect(await within(pane()).findByRole("alert")).toHaveTextContent("HTTP 502");
+    expect(useProjectsStore.getState().composingProjectId).toBeNull();
+    expect(useProjectsStore.getState().tasksOpen).toBe(true);
+    await user.click(within(pane()).getByRole("button", { name: "Dismiss" }));
+    expect(within(pane()).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("is not offered for a closed task", async () => {
+    const user = show(answers(), { [FILTERS_KEY]: JSON.stringify({ state: "closed" }) });
+    await user.click(row(/Crash on an empty repository/));
+    const closed = screen.getByRole("region", { name: "Task #4" });
+    expect(within(closed).queryByRole("button", { name: /Delegate/ })).not.toBeInTheDocument();
+    expect(within(closed).getByRole("button", { name: /Open on GitHub/ })).toBeVisible();
+  });
+
+  describe("when a workspace was started from it", () => {
+    const one = { ...worktree("alpha", "12-network-drive"), tasks: [linkTo(12)] };
+    const two = { ...worktree("alpha", "12-network-drive-2"), tasks: [linkTo(12)] };
+    const withWorkspaces = (...made: (typeof one)[]) =>
+      useProjectsStore.setState({
+        projects: [{ ...alpha, workspaces: [...alpha.workspaces, ...made] }, beta],
+      });
+
+    it("names the workspace under the row and goes there", async () => {
+      withWorkspaces(one);
+      const user = show();
+      await user.click(screen.getByRole("button", { name: "12-network-drive" }));
+      expect(useProjectsStore.getState().selectedWorkspaceId).toBe(one.id);
+      expect(useProjectsStore.getState().tasksOpen, "the view gives way").toBe(false);
+    });
+
+    it("offers Go to workspace, and Delegate again for another attempt", async () => {
+      withWorkspaces(one);
+      const user = show();
+      await user.click(row(/Worktrees/));
+      expect(within(pane()).queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+      await user.click(within(pane()).getByRole("button", { name: "Delegate again" }));
+      await waitFor(() => expect(core.taskPrompt).toHaveBeenCalledWith(alpha.id, "#12"));
+      await waitFor(() => expect(useProjectsStore.getState().composingProjectId).toBe(alpha.id));
+
+      useProjectsStore.setState({ composingProjectId: null, tasksOpen: true });
+      await user.click(within(pane()).getByRole("button", { name: "Go to workspace" }));
+      expect(useProjectsStore.getState().selectedWorkspaceId).toBe(one.id);
+    });
+
+    it("asks which, when there is more than one", async () => {
+      withWorkspaces(one, two);
+      const user = show();
+      await user.click(row(/Worktrees/));
+      await user.click(within(pane()).getByRole("button", { name: /Go to workspace/ }));
+      await user.click(screen.getByRole("menuitem", { name: "12-network-drive-2" }));
+      expect(useProjectsStore.getState().selectedWorkspaceId).toBe(two.id);
+    });
   });
 });

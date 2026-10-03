@@ -3,7 +3,7 @@
 //! Everything here is plain git underneath — `git worktree add -b` and `git worktree remove` —
 //! so a user can always inspect or undo what Yardsort did with their own tools.
 
-mod naming;
+pub(crate) mod naming;
 
 use std::path::{Path, PathBuf};
 
@@ -35,6 +35,18 @@ impl Workspaces<'_> {
         base: Option<&str>,
         prompt: &str,
     ) -> IpcResult<WorkspaceRow> {
+        let seed = self.store.workspaces()?.len();
+        self.create_named(project_id, base, &naming::base_name(prompt, seed))
+    }
+
+    /// As [`create`](Self::create), named `wanted` — or `wanted-2`, and so on, when that is
+    /// taken. `wanted` must already be a slug: see [`naming`].
+    pub fn create_named(
+        &self,
+        project_id: &str,
+        base: Option<&str>,
+        wanted: &str,
+    ) -> IpcResult<WorkspaceRow> {
         let (project, root) = self.usable_project(project_id)?;
         let base = match base {
             Some(base) => base.to_owned(),
@@ -47,11 +59,10 @@ impl Workspaces<'_> {
         };
 
         let project_dir = self.project_dir(&project);
-        let seed = self.store.workspaces()?.len();
         // A name is free only if neither its branch nor its folder exists — including leftovers
         // Yardsort does not know about.
         let mut probe_error = None;
-        let name = naming::unique(&naming::base_name(prompt, seed), |candidate| {
+        let name = naming::unique(wanted, |candidate| {
             let branch_taken = self
                 .git
                 .branch_exists(&root, &self.settings.branch_for(candidate))

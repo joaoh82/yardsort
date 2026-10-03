@@ -63,6 +63,8 @@ import {
   type TaskComment,
   type TaskDetail,
   type TaskLabel,
+  type TaskRef,
+  type Delegated,
   type PublishState,
   type PullRequest,
   type PullRequestOpened,
@@ -184,6 +186,8 @@ export type {
   TaskComment,
   TaskDetail,
   TaskLabel,
+  TaskRef,
+  Delegated,
   PublishState,
   PullRequest,
   PullRequestOpened,
@@ -542,6 +546,8 @@ export const ipc = {
   /** One task in full: its description and its conversation. */
   taskDetail: (projectId: string, key: string, refresh = false) =>
     unwrap(commands.taskDetail(projectId, key, refresh)),
+  /** A task made ready to hand to an agent: the first message, and what to record. */
+  taskPrompt: (projectId: string, key: string) => unwrap(commands.taskPrompt(projectId, key)),
 
   /**
    * Whether a model can write a commit message or a pull request here, and which one would.

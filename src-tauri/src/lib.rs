@@ -106,6 +106,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             publish::pull_requests::pull_request_prepare_branch,
             publish::tasks::project_tasks,
             publish::tasks::task_detail,
+            publish::tasks::task_prompt,
             publish::conflicts::workspace_conflict_helper,
             publish::conflicts::workspace_resolve_conflicts,
             draft::commands::draft_status,

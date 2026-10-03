@@ -7,6 +7,7 @@ use serde::Serialize;
 use yardsort_core::git::normalize;
 use yardsort_core::launch::{HarnessRequest, Launch, Launcher};
 use yardsort_core::store::WorkspaceRow;
+use yardsort_core::tasks::delegate::{self, TaskRef};
 use yardsort_core::workspaces::Workspaces;
 
 use crate::{table, Failure, Output, Yardsort};
@@ -92,6 +93,8 @@ struct Workspace {
     branch: Option<String>,
     path: String,
     archived: bool,
+    /// The tasks it was started from, oldest first: see `ys task start`.
+    tasks: Vec<TaskRef>,
 }
 
 #[derive(Serialize)]
@@ -104,6 +107,9 @@ struct Created {
     /// The PTY session running the agent, when one was started.
     session: Option<String>,
     harness: Option<String>,
+    /// The task it was started from, when it was: its key, `#91`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<String>,
 }
 
 pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure> {
@@ -118,7 +124,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             effort,
             no_agent,
         } => new(
-            ys, project, prompt, base, harness, model, effort, no_agent, out,
+            ys, project, prompt, None, base, harness, model, effort, no_agent, out,
         ),
         Command::Delete { workspace, force } => delete(ys, &workspace, force, out),
         Command::Handoff { workspace } => handoff(ys, &workspace, out),
@@ -178,6 +184,13 @@ fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Resu
         .filter(|w| all || !w.archived)
         .map(|w| Workspace {
             project: named(&w.project_id),
+            tasks: ys
+                .store
+                .workspace_tasks(&w.id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(TaskRef::from_row)
+                .collect(),
             id: w.id,
             name: w.name,
             kind: w.kind,
@@ -217,10 +230,12 @@ fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Resu
 }
 
 #[allow(clippy::too_many_arguments)]
-fn new(
+pub(super) fn new(
     ys: &Yardsort,
     project: String,
     prompt: String,
+    // The task this is started from: it names the workspace and is recorded against it.
+    task: Option<TaskRef>,
     base: Option<String>,
     harness: Option<String>,
     model: Option<String>,
@@ -239,14 +254,22 @@ fn new(
 
     let git = ys.git()?;
     let worktree_root = ys.worktree_root()?;
-    let workspace: WorkspaceRow = Workspaces {
+    let workspaces = Workspaces {
         env: ys.env(),
         store: &ys.store,
         git: &git,
         worktree_root: &worktree_root,
         settings: &ys.settings.workspaces,
-    }
-    .create(&project.id, base.as_deref(), &prompt)?;
+    };
+    let workspace: WorkspaceRow = match &task {
+        Some(task) => {
+            let name = delegate::workspace_name(task);
+            let row = workspaces.create_named(&project.id, base.as_deref(), &name)?;
+            ys.store.link_task(&row.id, &task.row())?;
+            row
+        }
+        None => workspaces.create(&project.id, base.as_deref(), &prompt)?,
+    };
 
     let mut created = Created {
         id: workspace.id.clone(),
@@ -255,6 +278,7 @@ fn new(
         path: workspace.path.clone(),
         session: None,
         harness: harness.clone(),
+        task: task.as_ref().map(|task| task.key.clone()),
     };
 
     if let Some(harness) = harness {
@@ -301,6 +325,9 @@ fn new(
 
     out.emit(&created, || {
         println!("created  {}", created.name);
+        if let Some(task) = &created.task {
+            println!("  task   {task}");
+        }
         if let Some(branch) = &created.branch {
             println!("  branch {branch}");
         }

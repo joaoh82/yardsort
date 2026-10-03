@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from "react";
 import type { TaskLabel } from "@/lib/ipc";
+import { selectWorkspace } from "@/features/keyboard/commands";
 import { age } from "@/features/pull-requests/rows";
 import { at, stateColour, stateLabel, type Row } from "./rows";
 
@@ -75,7 +76,7 @@ function TaskRow({
   now: number;
   onSelect: (key: string) => void;
 }) {
-  const { task, project } = row;
+  const { task, project, workspaces } = row;
   const updated = at(task.updatedAt);
   return (
     <li className={`border-b border-line ${selected ? "bg-raised" : ""}`}>
@@ -84,7 +85,7 @@ function TaskRow({
         data-task-row={row.key}
         aria-current={selected ? "true" : undefined}
         onClick={() => onSelect(row.key)}
-        className="block w-full px-3 py-2 text-left outline-none hover:bg-raised focus-visible:bg-raised"
+        className={`block w-full px-3 pt-2 text-left outline-none hover:bg-raised focus-visible:bg-raised ${workspaces.length > 0 ? "pb-1" : "pb-2"}`}
       >
         <span className="flex items-center gap-2">
           <span className="min-w-0 truncate text-ink-muted">{project.name}</span>
@@ -125,6 +126,18 @@ function TaskRow({
           ))}
         </span>
       </button>
+      {workspaces.map((workspace) => (
+        <button
+          key={workspace.id}
+          type="button"
+          title={`Go to the workspace ${workspace.name}`}
+          onClick={() => selectWorkspace(workspace.id)}
+          className="mb-1.5 ml-3 block max-w-[calc(100%-1.5rem)] truncate rounded px-1 text-[11px] text-ink-muted hover:bg-raised hover:text-ink"
+        >
+          <span aria-hidden>↳ </span>
+          {workspace.name}
+        </button>
+      ))}
     </li>
   );
 }

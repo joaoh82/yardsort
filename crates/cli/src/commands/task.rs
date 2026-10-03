@@ -7,6 +7,7 @@
 
 use yardsort_core::forge::{self, ForgeKind, Gh};
 use yardsort_core::store::ProjectRow;
+use yardsort_core::tasks::delegate;
 use yardsort_core::tasks::github::{coverage, Coverage, GitHub};
 use yardsort_core::tasks::{
     ClosedAs, Filter, Task, TaskDetail, TaskList, TaskSource, TaskState, CLOSED_CAP, OPEN_CAP,
@@ -56,6 +57,32 @@ pub enum Command {
         task: String,
         #[arg(long, value_name = "PROJECT")]
         project: Option<String>,
+    },
+    /// Hand a task to an agent: a new branch and worktree, and an agent started in it with
+    /// the task as its first message.
+    ///
+    /// What `ys workspace new` does, with the message written from the task — its title,
+    /// description and latest comments, marked as text other people wrote — and the workspace
+    /// named after it and recorded as started from it. The message is not shown first: read
+    /// the task with `ys task show` before starting an agent on something a stranger wrote.
+    Start {
+        /// Which one: `91`, `#91`, or its URL.
+        task: String,
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+        /// The branch to start from. Defaults to the project's default branch.
+        #[arg(long)]
+        base: Option<String>,
+        /// The agent to run. With one enabled agent, it can be left out.
+        #[arg(long)]
+        harness: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        effort: Option<String>,
+        /// Make the workspace and record the task, but start nothing in it.
+        #[arg(long)]
+        no_agent: bool,
     },
 }
 
@@ -148,6 +175,49 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                     false => Failure::new(error.to_string()),
                 })?;
             out.emit(&detail, || print!("{}", written(&detail)))
+        }
+        Command::Start {
+            task,
+            project,
+            base,
+            harness,
+            model,
+            effort,
+            no_agent,
+        } => {
+            let project = project_of(ys, project.as_deref())?;
+            // The harness is checked before `gh` is asked, and both before anything is made.
+            if !no_agent {
+                super::workspace::choose_harness(ys, harness.as_deref())?;
+            }
+            let gh = gh(ys)?;
+            let source = source(ys, &gh, &project)?;
+            let detail = source
+                .show(std::path::Path::new(&project.root_path), &task)
+                .map_err(|error| match error.is_logged_out() {
+                    true => Failure::new(LOGGED_OUT),
+                    false => Failure::new(error.to_string()),
+                })?;
+            if detail.task.state == TaskState::Closed {
+                return Err(Failure::new(format!(
+                    "{} is closed. Reopen it on GitHub first, or start a workspace with \
+                     `ys workspace new`.",
+                    detail.task.key
+                )));
+            }
+            let delegated = delegate::delegated(&detail);
+            super::workspace::new(
+                ys,
+                project.id,
+                delegated.prompt,
+                Some(delegated.task),
+                base,
+                harness,
+                model,
+                effort,
+                no_agent,
+                out,
+            )
         }
     }
 }

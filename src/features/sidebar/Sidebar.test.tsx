@@ -233,6 +233,64 @@ describe("Sidebar", () => {
     expect(core.projectTasks).toHaveBeenCalledTimes(4);
   });
 
+  describe("a workspace started from a task", () => {
+    const from = {
+      source: "github" as const,
+      repo: "github.com/demo/app",
+      key: "#91",
+      url: "https://github.com/demo/app/issues/91",
+      title: "Worktrees on a network drive",
+    };
+    async function renderStartedFromTask() {
+      const alpha = project("alpha");
+      const feature = { ...worktree("alpha", "feature"), tasks: [from] };
+      core.projectsList.mockResolvedValue([
+        { ...alpha, workspaces: [...alpha.workspaces, feature] },
+      ]);
+      render(<Sidebar />);
+      await screen.findByRole("treeitem", { name: "feature" });
+    }
+    const badge = () =>
+      screen.getByRole("button", { name: "Open task #91 — Worktrees on a network drive" });
+
+    it("shows the task's key on its row, which opens the task in the Tasks view", async () => {
+      core.projectTasks.mockResolvedValue(tasksOf([task(91, { title: from.title })]));
+      const user = userEvent.setup();
+      await renderStartedFromTask();
+      await waitFor(() => expect(useTasksStore.getState().byProject["p-alpha"]).toBeDefined());
+      expect(badge()).toHaveTextContent("#91");
+
+      await user.click(badge());
+      expect(useProjectsStore.getState().tasksOpen).toBe(true);
+      expect(useTasksStore.getState().selected).toBe("p-alpha#91");
+      expect(opener.openUrl).not.toHaveBeenCalled();
+    });
+
+    it("opens the task on GitHub when the list has no row for it", async () => {
+      // Closed since, or past what the list reads.
+      core.projectTasks.mockResolvedValue(tasksOf([task(5)]));
+      const user = userEvent.setup();
+      await renderStartedFromTask();
+      await waitFor(() => expect(useTasksStore.getState().byProject["p-alpha"]).toBeDefined());
+
+      await user.click(badge());
+      expect(opener.openUrl).toHaveBeenCalledWith(from.url);
+      expect(useProjectsStore.getState().tasksOpen, "not a view with nothing open").toBe(false);
+    });
+
+    it("gives the row's one number to the pull request once there is one", async () => {
+      core.projectPullRequests.mockResolvedValue(
+        pullRequestsOf([pullRequest(95, { branch: "ys/feature" })]),
+      );
+      await renderStartedFromTask();
+      expect(await screen.findByRole("button", { name: /^Open Pull request #95/ })).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: /^Open task #91/ }),
+        "the task is in the hover, not on the row",
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("gives the panel back to a workspace when one is chosen", async () => {
     const user = userEvent.setup();
     await renderWithWorktree();

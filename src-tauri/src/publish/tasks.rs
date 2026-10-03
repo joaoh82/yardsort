@@ -21,6 +21,7 @@ use super::commands::{failed, project_root, repo_at};
 use crate::error::IpcResult;
 use crate::forge::{ForgeError, ForgeResult, Gh, Repo};
 use crate::state::{blocking, AppState};
+use crate::tasks::delegate::{delegated, Delegated};
 use crate::tasks::github::{coverage, Coverage, GitHub};
 use crate::tasks::{Task, TaskDetail, TaskList, TaskSource, TaskState, CLOSED_CAP, OPEN_CAP};
 
@@ -265,6 +266,31 @@ pub async fn task_detail(
             .tasks
             .detail(&project_id, &key, refresh, || source.show(&root, &key))
             .map_err(failed)
+    })
+    .await
+}
+
+/// A task made ready to hand to an agent: the first message, built from the task as its
+/// source has it this moment, and what to record against the workspace that is started. The
+/// composer shows the message for the user to read and edit; nothing starts here.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_prompt(app: AppHandle, project_id: String, key: String) -> IpcResult<Delegated> {
+    blocking(app, move |state| {
+        let root = project_root(state, &project_id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        let Coverage::Covered(host) = coverage(repo_at(state, &root).as_ref()) else {
+            return Err(crate::error::IpcError::new(
+                "tasks_not_covered",
+                "This project's tasks cannot be read: it is not on GitHub.",
+            ));
+        };
+        let source = GitHub::new(&gh, host);
+        let detail = state
+            .tasks
+            .detail(&project_id, &key, true, || source.show(&root, &key))
+            .map_err(failed)?;
+        Ok(delegated(&detail))
     })
     .await
 }
