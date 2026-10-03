@@ -34,6 +34,7 @@ const pr: PullRequest = {
   details: {
     base: "main",
     headOid: "abc123",
+    baseOid: "base0000",
     additions: 69,
     deletions: 5,
     review: "APPROVED",

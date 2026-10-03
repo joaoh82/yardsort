@@ -297,6 +297,9 @@ pub struct PullRequest {
 pub struct PullRequestDetails {
     pub base: String,
     pub head_oid: String,
+    /// The commit of the base branch the forge measures the pull request against. For one
+    /// merged long ago it is the base as it was then, which is what still gives its diff back.
+    pub base_oid: String,
     pub additions: u32,
     pub deletions: u32,
     pub review: String,
@@ -962,7 +965,7 @@ repository(owner:$owner,name:$name){\
 pullRequests(states:OPEN,first:50,after:$after,orderBy:{field:UPDATED_AT,direction:DESC}){\
 totalCount pageInfo{hasNextPage endCursor} \
 nodes{number url title isDraft state createdAt updatedAt headRefName headRefOid baseRefName \
-isCrossRepository additions deletions mergeable reviewDecision author{login} \
+baseRefOid isCrossRepository additions deletions mergeable reviewDecision author{login} \
 reviewRequests(first:10){nodes{requestedReviewer{__typename ...on User{login} ...on Team{slug}}}} \
 latestReviews(first:10){nodes{state author{login}}} \
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:1){\
@@ -1076,8 +1079,8 @@ pub fn open_page(json: &str) -> ForgeResult<OpenPage> {
 
 /// What is asked of `gh` about each pull request.
 const PULL_REQUEST_FIELDS: &str = "number,url,title,headRefName,state,isDraft,statusCheckRollup,\
-createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt,mergeable,\
-author,reviewRequests,latestReviews,isCrossRepository";
+createdAt,baseRefName,headRefOid,baseRefOid,additions,deletions,reviewDecision,updatedAt,\
+mergeable,author,reviewRequests,latestReviews,isCrossRepository";
 
 fn pull_requests(out: &str) -> ForgeResult<Vec<PullRequest>> {
     let parsed: serde_json::Value =
@@ -1154,6 +1157,7 @@ fn read(
         details: Some(PullRequestDetails {
             base: string_field(row, "baseRefName"),
             head_oid: string_field(row, "headRefOid"),
+            base_oid: string_field(row, "baseRefOid"),
             additions: row
                 .get("additions")
                 .and_then(|v| v.as_u64())
@@ -1741,6 +1745,11 @@ mod tests {
 
         // Every check, by name, with the workflow it belongs to and where to read its run.
         let details = pr.details.as_ref().unwrap();
+        assert!(
+            crate::git::is_commit_id(&details.base_oid),
+            "{}",
+            details.base_oid
+        );
         assert_eq!(details.checks.len(), 3);
         assert_eq!(
             details.checks[0],
@@ -2052,6 +2061,11 @@ mod tests {
         let asked: Vec<&str> = asked.lines().collect();
         assert_eq!(asked.len(), 3, "three pages, three questions");
         assert!(asked[0].starts_with("api graphql --hostname github.example.com "));
+        assert!(
+            asked[0].contains("headRefOid baseRefName baseRefOid "),
+            "{}",
+            asked[0]
+        );
         assert!(asked[0].contains("-F owner={owner} -F name={repo} -f query=query("));
         assert!(!asked[0].contains("after="), "the first page has no cursor");
         assert!(asked[1].ends_with("-f after=c1"));

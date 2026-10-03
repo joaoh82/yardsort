@@ -75,7 +75,10 @@ GitHub has more open than it read, rather than letting a search come up empty.
 ## The details
 
 Press a row and its details open beside the list. At the top: the project, who opened it and
-when, and [what you can do](#what-you-can-do) with it. Under that, its **Summary**:
+when, and [what you can do](#what-you-can-do) with it. Under that, two tabs: **Summary** and
+[**Code**](#code). The tab you are on is kept as you go from one pull request to the next.
+
+The **Summary**:
 
 - **What it is** — number, state and review decision, the title, **branch → base**, the lines
   added and removed, whether it conflicts with its base, and when it last changed.
@@ -111,8 +114,37 @@ is shown with care:
 
 **Comments on particular lines of the code** are not shown yet. A review that has only such
 comments reads _Left comments on lines of the code_, and the foot of the conversation links to
-GitHub for them. You cannot reply from here yet either, and the diff itself is the next piece
-being built; **Open on GitHub ↗** has all three.
+GitHub for them. You cannot reply from here yet either. **Open on GitHub ↗** has both.
+
+### Code
+
+The pull request's diff, in the viewer the [changes panel](changes-and-files.md) uses.
+
+It opens on the **files**: how many changed and by how many lines, then each file with what
+happened to it — **M** modified, **A** added, **D** deleted, **R** renamed — and its lines added
+and removed. Hover a renamed file for where it came from.
+
+Press a file to read it:
+
+- the diff, syntax-highlighted, with the stretches that did not change folded away;
+- **Side by side** / **Inline** switches between two panes and one. It is the same setting as
+  the changes panel's, and remembered;
+- the **Files** box and **‹ ›** go to another file without going back to the list, and **← All
+  files** goes back to it;
+- an image is shown before and after; a binary file, or one too large to show, says so.
+
+**Nothing is checked out for this.** The first time you open Code for a pull request, Yardsort
+fetches its commits with git and keeps them under names of its own in the project's repository
+(`refs/yardsort/pull/…`). No branch of yours moves, no remote-tracking branch moves, and no
+files appear anywhere. After a push to the pull request they are fetched again; when the pull
+request leaves the list, what was kept for it is removed.
+
+The diff is what the pull request changes from where it left its base branch, as GitHub shows
+it. For one merged long ago, that is the base as it was then.
+
+The fetch uses git's own credentials — your SSH key or credential helper, the same as a push —
+and never asks for anything on screen. If it fails, the tab shows what git said, with **Retry**
+and **See the diff on GitHub ↗**. The Summary does not depend on it.
 
 ### Moving around
 
@@ -203,6 +235,11 @@ A pull request's Summary is one more question, about a second, asked when you op
 is reused for half a minute, and asked for again when the list says something about the pull
 request changed.
 
+Code asks GitHub nothing the list has not already asked: the two commits it reads between are
+the ones the list names. It asks _git_, once for each head commit — when you first open the tab
+for a pull request, and again when the list notices a push to it. Going between files, and
+coming back to a pull request you have already read, costs no network at all.
+
 ## When something is missing
 
 The view says why, on a line above the rows, without hiding the projects that are fine:
@@ -219,10 +256,13 @@ The view says why, on a line above the rows, without hiding the projects that ar
   went wrong and **Retry**.
 - **One pull request could not be read** — its Summary says why, with **Retry**. The row and
   everything the list knows about it are still there.
+- **Its commits could not be fetched** — Code says what git said. `Permission denied` means git
+  has no credentials for the remote in a place it can use without asking: an SSH key that needs
+  a passphrase typed, most often. The same fetch from a shell tab will say more.
 
 ## What it does not do
 
-- Show the diff, or comments made on particular lines of it — those are being built next.
+- Show comments made on particular lines of the diff — those are being built next.
 - Post a comment or a reply.
 - Approve or request changes, edit a title, or change labels, assignees or reviewers.
 - Delete a branch, after a merge or ever.

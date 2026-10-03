@@ -92,6 +92,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             publish::commands::workspace_merge_pull_request,
             publish::commands::project_pull_requests,
             publish::pull_requests::pull_request_summary,
+            publish::pull_requests::pull_request_changes,
+            publish::pull_requests::pull_request_diff,
             publish::pull_requests::pull_request_merge,
             publish::pull_requests::pull_request_close,
             publish::pull_requests::pull_request_reopen,

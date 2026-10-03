@@ -306,6 +306,15 @@ again when the list says the row changed. Descriptions and comments are other pe
 the window renders them as Markdown with raw HTML dropped, no image loaded, and links handed to
 the opener, and a comment the forge has hidden loses its words in the core.
 
+**A pull request's diff** needs its commits and no checkout. `fetch_for_diff` fetches
+`refs/pull/<n>/head` into `refs/yardsort/pull/<n>/head`, and with it the base commit the forge
+recorded, by id; it is pinned under `…/base`. Those refs are Yardsort's own namespace: no branch
+or remote-tracking ref moves, and they are deleted when a pull request leaves a list that is
+whole (`prune_refs`). The diff is `changes::Between` over the head and its merge base with that
+base — the same `FileChange` and `FileDiff` a workspace's changes are, which is why the same
+viewer shows both. Measuring from the recorded base rather than the base branch's tip is what
+keeps a merged pull request's diff from coming out empty.
+
 **A pull request's branch, for a workspace** (`prepare_branch`): a branch already here is never
 moved; one in the project's remote is fetched into its remote-tracking ref and a local branch
 made to track it; one from a fork becomes `pr/<n>` at `refs/pull/<n>/head`, with that ref

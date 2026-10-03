@@ -4,6 +4,7 @@ import {
   ipc,
   type MergeMethod,
   type PullRequest,
+  type PullRequestChanges,
   type PullRequestSummary,
 } from "@/lib/ipc";
 import { native } from "@/lib/native";
@@ -44,11 +45,29 @@ export function summaryStamp(pr: PullRequest): string {
   ].join("|");
 }
 
+/** The files a pull request changes, or the fetching of them. */
+export interface ChangesState {
+  /** The last list read. Kept while a newer one is on its way. */
+  changes: PullRequestChanges | null;
+  loading: boolean;
+  error: string | null;
+  /** The head commit the list named when this was asked for: a push moves it, nothing else. */
+  head: string;
+}
+
+export type DetailTab = "summary" | "code";
+
 interface PullRequestsStore {
   /** The row open in the detail pane. */
   selected: string | null;
+  /** Which of its tabs is showing. Kept from one pull request to the next, until you quit:
+   *  someone reading diffs wants the next one's diff too. */
+  tab: DetailTab;
+  showTab: (tab: DetailTab) => void;
   /** Pull requests read in full, by row key: what the Summary shows. */
   summaries: Record<string, SummaryState>;
+  /** The files each pull request changes, by row key: what Code shows. */
+  changes: Record<string, ChangesState>;
   /** The row something is being done to. One at a time: each action moves the others' ground. */
   busy: string | null;
   error: string | null;
@@ -62,6 +81,12 @@ interface PullRequestsStore {
    * changes, the summary is read again. `force` reads it regardless — Retry.
    */
   loadSummary: (target: Target, force?: boolean) => Promise<void>;
+  /**
+   * Read the files a pull request changes, unless that was done for the head commit the list
+   * names now. The first time, and after a push, this fetches the pull request's commits —
+   * which is git over the network, and can take a moment or fail.
+   */
+  loadChanges: (target: Target, force?: boolean) => Promise<void>;
   merge: (target: Target, method: MergeMethod, label: string) => Promise<void>;
   close: (target: Target) => Promise<void>;
   reopen: (target: Target) => Promise<void>;
@@ -88,6 +113,7 @@ function whose(target: Target): string {
 export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
   /** The latest request per row: an answer that is no longer the latest is dropped. */
   const asked = new Map<string, number>();
+  const askedChanges = new Map<string, number>();
   const patch = (key: string, next: Partial<SummaryState>) =>
     set((s) => {
       const before = s.summaries[key];
@@ -118,7 +144,13 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
 
   return {
     selected: null,
+    tab: "summary",
     summaries: {},
+    changes: {},
+
+    showTab(tab) {
+      set({ tab });
+    },
     busy: null,
     error: null,
     notice: null,
@@ -147,6 +179,32 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
         if (asked.get(key) === request) patch(key, { summary, loading: false });
       } catch (error) {
         if (asked.get(key) === request) patch(key, { loading: false, error: errorMessage(error) });
+      }
+    },
+
+    async loadChanges(target, force = false) {
+      const { key } = target;
+      const head = target.pr.details?.headOid ?? "";
+      const before = get().changes[key];
+      if (!force && before && before.head === head && (before.loading || !before.error)) return;
+      const request = (askedChanges.get(key) ?? 0) + 1;
+      askedChanges.set(key, request);
+      const put = (next: Partial<ChangesState>) =>
+        set((s) => {
+          const now = s.changes[key];
+          return now ? { changes: { ...s.changes, [key]: { ...now, ...next } } } : s;
+        });
+      set((s) => ({
+        changes: {
+          ...s.changes,
+          [key]: { changes: before?.changes ?? null, loading: true, error: null, head },
+        },
+      }));
+      try {
+        const changes = await ipc.pullRequestChanges(target.projectId, target.pr.number);
+        if (askedChanges.get(key) === request) put({ changes, loading: false });
+      } catch (error) {
+        if (askedChanges.get(key) === request) put({ loading: false, error: errorMessage(error) });
       }
     },
 

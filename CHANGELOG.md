@@ -3,6 +3,17 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Pull requests: the Code tab.** A pull request's details now have two tabs, **Summary** and
+  **Code**. Code lists the files it changes with their kinds and line counts, and opens each in
+  the changes panel's own viewer, inline or side by side, highlighted, with unchanged stretches
+  folded. Nothing is checked out for it: the pull request's commits are fetched into refs of
+  Yardsort's own, no branch or remote-tracking branch moves, and what was fetched is let go when
+  the pull request leaves the list. The diff is measured from where the pull request left its
+  base, so one merged long ago still shows its files. See
+  [Pull requests](docs/guide/pull-requests.md#code).
+
 ## 0.18.0
 
 - **Install ys no longer, now and then, says the copy it just made is "not Yardsort's".** Right

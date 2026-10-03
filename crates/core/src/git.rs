@@ -412,11 +412,67 @@ impl Git {
     /// ref's name. The forge publishes `refs/pull/<n>/head` on the repository a pull request
     /// would merge into, also when its branch lives in a fork. No branch and no
     /// remote-tracking ref is touched.
-    pub fn fetch_pull_request(&self, root: &Path, remote: &str, number: u32) -> GitResult<String> {
-        let ours = format!("refs/yardsort/pull/{number}/head");
+    ///
+    /// `also` is a commit to bring along in the same round trip, asked for by its id: the
+    /// commit a pull request is measured from. Forges answer for a commit by id; a plain git
+    /// server may refuse, and then the whole fetch fails and nothing is changed.
+    pub fn fetch_pull_request(
+        &self,
+        root: &Path,
+        remote: &str,
+        number: u32,
+        also: Option<&str>,
+    ) -> GitResult<String> {
+        let ours = pull_request_ref(number, "head");
         let refspec = format!("+refs/pull/{number}/head:{ours}");
-        self.run(root, &["fetch", "--quiet", remote, &refspec])?;
+        let mut args = vec!["fetch", "--quiet", remote, &refspec];
+        args.extend(also);
+        self.run(root, &args)?;
         Ok(ours)
+    }
+
+    /// Fetch the remote's `source` ref into the local ref `into`, forced: for a ref of
+    /// Yardsort's own, which nothing else writes to.
+    pub fn fetch_into(&self, root: &Path, remote: &str, source: &str, into: &str) -> GitResult<()> {
+        let refspec = format!("+{source}:{into}");
+        self.run(root, &["fetch", "--quiet", remote, &refspec])
+            .map(drop)
+    }
+
+    /// The full id of the commit `name` is, or `None` when there is no such commit here.
+    pub fn commit_id(&self, root: &Path, name: &str) -> GitResult<Option<String>> {
+        let commit = format!("{name}^{{commit}}");
+        match self.run(root, &["rev-parse", "--verify", "--quiet", &commit]) {
+            Ok(id) if !id.is_empty() => Ok(Some(id)),
+            Ok(_) => Ok(None),
+            Err(GitError::Failed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Where two commits' histories last agreed, or `None` when they never did.
+    pub fn merge_base(&self, root: &Path, one: &str, other: &str) -> GitResult<Option<String>> {
+        match self.run(root, &["merge-base", one, other]) {
+            Ok(id) if !id.is_empty() => Ok(Some(id)),
+            Ok(_) => Ok(None),
+            Err(GitError::Failed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Point the ref `name` at `commit`, creating it if need be.
+    pub fn update_ref(&self, root: &Path, name: &str, commit: &str) -> GitResult<()> {
+        self.run(root, &["update-ref", name, commit]).map(drop)
+    }
+
+    pub fn delete_ref(&self, root: &Path, name: &str) -> GitResult<()> {
+        self.run(root, &["update-ref", "-d", name]).map(drop)
+    }
+
+    /// The full names of every ref under `prefix`.
+    pub fn refs_under(&self, root: &Path, prefix: &str) -> GitResult<Vec<String>> {
+        let out = self.run(root, &["for-each-ref", "--format=%(refname)", prefix])?;
+        Ok(out.lines().map(str::to_owned).collect())
     }
 
     /// Make the local `branch` from `start`. With `track`, `start` becomes its upstream.
@@ -475,6 +531,19 @@ impl Git {
         let out = self.run(root, &["rev-list", "--count", &range])?;
         Ok(out.trim().parse().unwrap_or(0))
     }
+}
+
+/// Where Yardsort keeps the commits of pull requests it has fetched: refs of its own, which no
+/// branch, tag or remote-tracking ref ever shares a name with. `which` is `head` or `base`.
+pub const PULL_REQUEST_REFS: &str = "refs/yardsort/pull";
+
+pub fn pull_request_ref(number: u32, which: &str) -> String {
+    format!("{PULL_REQUEST_REFS}/{number}/{which}")
+}
+
+/// A commit id written out in full, and nothing else: safe to hand to git as an argument.
+pub fn is_commit_id(text: &str) -> bool {
+    matches!(text.len(), 40 | 64) && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// See [`Git::head_history`].
@@ -596,6 +665,18 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_commit_id_is_hex_written_in_full_and_nothing_else() {
+        assert!(is_commit_id(&"0123456789abcdef".repeat(4)[..40]));
+        assert!(is_commit_id(&"AbCdEf0123456789".repeat(4)));
+        for not in ["", "HEAD", "main", "abc123", "-n", "--all"] {
+            assert!(!is_commit_id(not), "{not}");
+        }
+        assert!(!is_commit_id(&"z".repeat(40)));
+        assert!(!is_commit_id(&format!("{} ", "a".repeat(39))));
+        assert_eq!(pull_request_ref(7, "head"), "refs/yardsort/pull/7/head");
+    }
 
     #[test]
     fn a_plain_directory_is_not_a_repository() {

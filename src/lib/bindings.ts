@@ -103,6 +103,21 @@ export const commands = {
 	 */
 	pullRequestSummary: (projectId: string, number: number, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("pull_request_summary", { projectId, number, refresh })),
 	/**
+	 *  The files a pull request changes. Fetches its commits into refs of Yardsort's own if they
+	 *  are not here yet — nothing is checked out, and no branch or remote-tracking ref moves.
+	 * 
+	 *  Which head and base: the ones the project's list names. The list is what the window shows,
+	 *  it is what notices a push, and it is already here — so this asks the forge for nothing. A
+	 *  pull request the list does not have (the list was emptied by an action a moment ago, say)
+	 *  is asked about afresh, never out of a cache: a diff is only as good as its head.
+	 */
+	pullRequestChanges: (projectId: string, number: number) => typedError<PullRequestChanges, IpcError>(__TAURI_INVOKE("pull_request_changes", { projectId, number })),
+	/**
+	 *  Both sides of one file of a pull request, between the two commits
+	 *  [`pull_request_changes`] answered with.
+	 */
+	pullRequestDiff: (projectId: string, baseOid: string, headOid: string, path: string, oldPath: string | null) => typedError<FileDiff, IpcError>(__TAURI_INVOKE("pull_request_diff", { projectId, baseOid, headOid, path, oldPath })),
+	/**
 	 *  Merge a pull request of this project, if it is still open, still not a draft and still at
 	 *  the head commit the user confirmed. Never deletes a branch, never bypasses a protection.
 	 */
@@ -1402,6 +1417,15 @@ export type PullRequest = {
 	createdAt: number | null,
 };
 
+/**  A pull request's diff: the files it changes, and the two commits they are read between. */
+export type PullRequestChanges = {
+	files: FileChange[],
+	/**  The pull request's head, as fetched. [`pull_request_diff`] is asked with it. */
+	headOid: string,
+	/**  Where the pull request left its base branch: what the diff is measured from. */
+	baseOid: string,
+};
+
 export type PullRequestCheck = {
 	name: string,
 	state: Checks,
@@ -1415,6 +1439,11 @@ export type PullRequestCheck = {
 export type PullRequestDetails = {
 	base: string,
 	headOid: string,
+	/**
+	 *  The commit of the base branch the forge measures the pull request against. For one
+	 *  merged long ago it is the base as it was then, which is what still gives its diff back.
+	 */
+	baseOid: string,
 	additions: number,
 	deletions: number,
 	review: string,

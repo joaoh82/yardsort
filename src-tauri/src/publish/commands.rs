@@ -98,6 +98,14 @@ pub async fn project_pull_requests(
 ) -> IpcResult<ProjectPullRequests> {
     blocking(app, move |state| {
         let mut found = look(state, &project_id, refresh, full);
+        // The whole list is in hand: the moment to let go of what was fetched for pull requests
+        // that are no longer on it.
+        if full {
+            if let (Ok(git), Ok(root)) = (Git::new(&state.env()), project_root(state, &project_id))
+            {
+                super::pull_requests::prune_refs(&git, &root, &found);
+            }
+        }
         let owned = state
             .forge
             .owned(&project_id, &found.pull_requests, refresh, || {

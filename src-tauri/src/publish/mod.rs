@@ -427,6 +427,31 @@ impl Forge {
         Ok(summary)
     }
 
+    /// Pull request `number` as the project's list has it now — the recent tier's copy first,
+    /// then the open tier's — or `None` when neither has it. Never a fetch.
+    pub fn find(&self, project_id: &str, number: u32) -> Option<PullRequest> {
+        let in_recent = {
+            let cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
+            cached.get(project_id).and_then(|(_, answer)| {
+                answer
+                    .pull_requests
+                    .iter()
+                    .find(|pr| pr.number == number)
+                    .cloned()
+            })
+        };
+        in_recent.or_else(|| {
+            let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+            open.get(project_id).and_then(|tier| {
+                tier.found
+                    .pull_requests
+                    .iter()
+                    .find(|pr| pr.number == number)
+                    .cloned()
+            })
+        })
+    }
+
     /// Whatever is cached for a project, however old, and never a fetch: for readers that must
     /// not wait on the network, like the Outcomes view. The publish panel keeps it current.
     pub fn cached(&self, project_id: &str) -> Option<ProjectPullRequests> {
@@ -1338,6 +1363,32 @@ mod tests {
             .summary("p1", 7, false, || Ok(in_full(7, "after")))
             .unwrap();
         assert_eq!(fresh.body, "after", "and asked again by the next one");
+    }
+
+    /// What `find` answers is what the list shows: the recent tier's copy, which is the one
+    /// refreshed every minute, before the open tier's older one.
+    #[test]
+    fn a_pull_request_is_found_in_the_lists_as_the_window_sees_it() {
+        let forge = Forge::default();
+        assert_eq!(forge.find("p1", 7), None);
+
+        forge.load_open("p1", true, || open_tier(&[7, 3]));
+        assert_eq!(forge.find("p1", 3).map(|pr| pr.number), Some(3));
+        assert_eq!(forge.find("p1", 9), None);
+
+        let mut merged = numbered(7, PullRequestState::Merged);
+        merged.details = None;
+        forge.load("p1", true, || ProjectPullRequests {
+            gh: true,
+            pull_requests: vec![merged],
+            ..Default::default()
+        });
+        assert_eq!(
+            forge.find("p1", 7).map(|pr| pr.state),
+            Some(PullRequestState::Merged),
+            "the recent tier's word, not the open tier's older one"
+        );
+        assert_eq!(forge.find("p2", 7), None);
     }
 
     #[test]
