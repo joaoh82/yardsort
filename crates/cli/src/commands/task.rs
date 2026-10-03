@@ -94,7 +94,13 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 let found = read(source.list(root, *state, *cap), &project)?;
                 said_short(&found, *state);
                 viewer = found.viewer.or(viewer);
-                tasks.extend(found.tasks);
+                // One closed or reopened between the two questions is in both answers. It is
+                // listed once, as the open one: what the app's list does with the same pair.
+                for task in found.tasks {
+                    if !tasks.iter().any(|seen: &Task| seen.key == task.key) {
+                        tasks.push(task);
+                    }
+                }
             }
             let mut tasks: Vec<Task> = tasks
                 .into_iter()

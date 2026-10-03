@@ -1870,6 +1870,60 @@ fn closed_tasks_are_asked_for_only_when_wanted() {
 
 #[cfg(unix)]
 #[test]
+fn a_task_in_both_the_open_and_the_closed_answer_is_listed_once() {
+    // The closed question is answered with two issues the open one already had: what GitHub
+    // says of an issue reopened between the two.
+    let tasks = Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some(
+            "case \"$*\" in\n\
+             *states:CLOSED*|*after=*) cat \"$fixtures/issues-page-2.json\" ;;\n\
+             *) cat \"$fixtures/issues-page-1.json\" ;;\nesac",
+        ),
+    );
+    let all = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "list",
+                "--project",
+                "Demo",
+                "--state",
+                "all",
+                "--json",
+            ],
+        )
+        .ok();
+    let mut all = keys(&all);
+    assert_eq!(all.len(), 9, "{all:?}");
+    all.sort();
+    all.dedup();
+    assert_eq!(all.len(), 9, "no key twice");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_to_another_repositorys_issue_is_refused_by_name() {
+    let tasks = Tasks::recorded();
+    let refused = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "show",
+                "https://github.com/someone/else/issues/14394",
+                "--project",
+                "Demo",
+            ],
+        )
+        .failed();
+    assert!(refused.contains("github.com/someone/else"), "{refused}");
+    assert!(refused.contains("github.com/example/widgets"), "{refused}");
+}
+
+#[cfg(unix)]
+#[test]
 fn the_project_is_the_one_the_command_is_run_in() {
     let tasks = Tasks::recorded();
     let here = tasks

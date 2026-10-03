@@ -473,6 +473,16 @@ Where it differs from the proposal:
   (`cargo test -p yardsort-core -- --ignored reads_this_repositorys_own_issues`). It passed on
   2026-10-03.
 
+Changed after review, before merging:
+
+- **One issue in full decides from its last five comments too.** It is read with a hundred, and
+  deciding from those let `ys task show` say an answer was owed, or not, where `ys task list`
+  said the opposite: a maintainer's reply followed by five bot comments was the case.
+- **A link to another repository's issue is refused**, naming both repositories. Only the
+  number in it was asked for, so it was answered with this project's issue of that number.
+- **`ys task list --state all` lists an issue once** when it is in both the open and the closed
+  answer, as the app's list already did.
+
 Found:
 
 - **A fresh worktree has no `node_modules`**, and `bunx prettier` then fetches a prettier of its

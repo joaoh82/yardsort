@@ -169,8 +169,32 @@ impl TaskSource for GitHub<'_> {
             &["-F", &number],
             self.limit,
         )?;
-        detail(&out)
+        let detail = detail(&out)?;
+        // A link says which repository it is about, and only its number was asked for. One to
+        // another repository's issue would otherwise be answered with this project's issue of
+        // the same number, which looks exactly like a right answer.
+        if let (Some(asked), Some(answered)) = (repository(key), repository(&detail.task.url)) {
+            if asked != answered {
+                return Err(ForgeError::Failed {
+                    command: "issue".to_owned(),
+                    stderr: format!(
+                        "that link is to an issue of {asked}, and this project's tasks are \
+                         {answered}'s"
+                    ),
+                });
+            }
+        }
+        Ok(detail)
     }
+}
+
+/// The repository an issue's URL is in, as `host/owner/name` in lower case. `None` for
+/// anything that is not such a URL — a bare number most of all.
+fn repository(url: &str) -> Option<String> {
+    let (before, _) = url.trim().rsplit_once("/issues/")?;
+    let (_, rest) = before.split_once("://")?;
+    let rest = rest.trim_start_matches("www.");
+    (rest.split('/').count() == 3).then(|| rest.to_ascii_lowercase())
 }
 
 /// The number in what a person typed for an issue: `91`, `#91`, or its URL.
@@ -248,7 +272,14 @@ fn task(node: &Value) -> Option<Task> {
     let url = node.get("url")?.as_str()?.to_owned();
     let open = node.get("state").and_then(|s| s.as_str()) != Some("CLOSED");
     let conversation = node.get("comments");
-    let latest: Vec<Voice> = nodes(conversation).iter().map(voice).collect();
+    // The end of the conversation, and no more of it than a list is given: one issue in full
+    // comes with a hundred comments, and deciding from those would let `ys task show` say
+    // something `ys task list` does not about the same issue.
+    let comments = nodes(conversation);
+    let latest: Vec<Voice> = comments[comments.len().saturating_sub(LATEST as usize)..]
+        .iter()
+        .map(voice)
+        .collect();
     Some(Task {
         source: TaskSourceKind::GitHub,
         key: format!("#{number}"),
@@ -539,6 +570,79 @@ mod tests {
         assert!(detail.comments.iter().any(|c| !c.body.is_empty()));
     }
 
+    /// An issue as either query answers it, with these comments: each is a kind of author and
+    /// an association.
+    fn issue_with(comments: &[(&str, &str)]) -> String {
+        let nodes: Vec<String> = comments
+            .iter()
+            .map(|(kind, association)| {
+                format!(
+                    r#"{{"authorAssociation":"{association}","author":{{"__typename":"{kind}","login":"x"}},"body":"","createdAt":"2026-10-01T00:00:00Z","url":"u","isMinimized":false,"minimizedReason":null}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"number":7,"url":"https://github.com/o/r/issues/7","title":"t","state":"OPEN","stateReason":null,"createdAt":"","updatedAt":"","authorAssociation":"NONE","author":{{"__typename":"User","login":"grace"}},"labels":{{"nodes":[]}},"assignees":{{"nodes":[]}},"closedByPullRequestsReferences":{{"nodes":[]}},"body":"","comments":{{"totalCount":{},"nodes":[{}]}}}}"#,
+            comments.len(),
+            nodes.join(",")
+        )
+    }
+
+    /// A list is given the last five comments and one issue in full a hundred. Both decide
+    /// from the last five, or `ys task list` and `ys task show` would disagree.
+    #[test]
+    fn the_list_and_the_detail_agree_on_whether_an_answer_is_owed() {
+        let bots = [("Bot", "NONE"); 5];
+        // An outsider opened it, a maintainer answered, and five bots followed.
+        let mut answered = vec![("User", "MEMBER")];
+        answered.extend(bots);
+        // An outsider's question, further back than five bots.
+        let mut asked = vec![("User", "MEMBER"), ("User", "NONE")];
+        asked.extend(bots);
+        for comments in [answered, asked] {
+            let whole = issue_with(&comments);
+            let end = issue_with(&comments[comments.len() - 5..]);
+            let in_full = detail(&format!(
+                r#"{{"data":{{"repository":{{"issue":{whole}}}}}}}"#
+            ))
+            .unwrap();
+            let in_list = page(&format!(
+                r#"{{"data":{{"repository":{{"hasIssuesEnabled":true,"issues":{{"totalCount":1,"pageInfo":{{"hasNextPage":false,"endCursor":null}},"nodes":[{end}]}}}},"viewer":{{"login":"ada"}}}}}}"#
+            ))
+            .unwrap();
+            assert_eq!(in_full.comments.len(), comments.len(), "all of it is shown");
+            assert_eq!(
+                in_full.task.needs_answer, in_list.tasks[0].needs_answer,
+                "{comments:?}"
+            );
+            // Five bots are nobody, so it is the opener — an outsider — who is waiting.
+            assert!(in_list.tasks[0].needs_answer);
+        }
+        // Within the last five, the last person decides in both.
+        let recent = [("User", "NONE"), ("User", "MEMBER"), ("Bot", "NONE")];
+        let in_full = detail(&format!(
+            r#"{{"data":{{"repository":{{"issue":{}}}}}}}"#,
+            issue_with(&recent)
+        ))
+        .unwrap();
+        assert!(!in_full.task.needs_answer);
+    }
+
+    #[test]
+    fn a_links_repository_is_read_and_a_number_has_none() {
+        assert_eq!(
+            repository("https://GitHub.com/Example/Widgets/issues/91#issuecomment-5").as_deref(),
+            Some("github.com/example/widgets")
+        );
+        assert_eq!(
+            repository("https://www.github.com/o/r/issues/1").as_deref(),
+            Some("github.com/o/r")
+        );
+        assert_eq!(repository("91"), None);
+        assert_eq!(repository("#91"), None);
+        assert_eq!(repository("https://github.com/o/r/pull/91"), None);
+    }
+
     #[test]
     fn an_answer_that_is_not_one_is_an_error_and_not_an_empty_list() {
         assert!(page("{}").is_err());
@@ -738,8 +842,22 @@ mod tests {
         assert!(first[0].ends_with("-F number=14394"), "{}", first[0]);
         assert!(first[0].contains("issue(number:$number)"), "{}", first[0]);
 
+        // Its own link is as good as its number; another repository's is refused, by name,
+        // rather than answered with this project's issue of that number.
+        let linked = "https://github.com/Example/widgets/issues/14394";
+        assert_eq!(source.show(dir.path(), linked).unwrap().task.key, "#14394");
+        let elsewhere = source
+            .show(dir.path(), "https://github.com/someone/else/issues/14394")
+            .unwrap_err()
+            .to_string();
+        assert!(elsewhere.contains("github.com/someone/else"), "{elsewhere}");
+        assert!(
+            elsewhere.contains("github.com/example/widgets"),
+            "{elsewhere}"
+        );
+
         let refused = source.show(dir.path(), "soon").unwrap_err();
         assert!(refused.to_string().contains("not an issue's number"));
-        assert_eq!(asked(dir.path()).len(), 1, "nothing was asked for that");
+        assert_eq!(asked(dir.path()).len(), 3, "nothing was asked for that");
     }
 }

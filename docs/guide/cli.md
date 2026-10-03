@@ -308,7 +308,8 @@ given more than once and asks for all of them; `--assignee` and `--author` take 
 with or without its `#`. What [needs an answer](tasks.md#what-needs-an-answer-means) is the
 rule the app uses, from the same code.
 
-`show` takes `91`, `#91` or the issue's URL, and prints its state, labels, assignees, the
+`show` takes `91`, `#91` or the issue's URL — a URL of another repository's issue is refused,
+not answered with this project's issue of that number — and prints its state, labels, assignees, the
 description as it was written and the conversation, oldest first, with maintainers and bots
 marked. A comment hidden on GitHub is printed as hidden, not as its text.
 
