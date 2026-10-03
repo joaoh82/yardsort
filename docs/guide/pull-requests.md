@@ -110,11 +110,16 @@ is shown with care:
   run is run.
 - The boxes of a task list show what was ticked. They are not ticked from here.
 
-### What is not in it
+### Replying
 
-**Comments on particular lines of the code** are not shown yet. A review that has only such
-comments reads _Left comments on lines of the code_, and the foot of the conversation links to
-GitHub for them. You cannot reply from here yet either. **Open on GitHub ↗** has both.
+A box under the conversation posts a comment on it: write, then **Comment**, or
+`Ctrl+Enter` / `⌘Enter`. Pressing it is the confirmation; nothing is posted any other way, and
+the box keeps what you wrote if GitHub refuses. Markdown, as on GitHub. The conversation is read
+again as soon as it is posted.
+
+**Comments on particular lines of the code** are not in the conversation: they are under
+[**Code**](#comments-on-lines), beside the lines they are about. A review that has only such
+comments reads _Left comments on lines of the code_ here.
 
 ### Code
 
@@ -145,6 +150,43 @@ it. For one merged long ago, that is the base as it was then.
 The fetch uses git's own credentials — your SSH key or credential helper, the same as a push —
 and never asks for anything on screen. If it fails, the tab shows what git said, with **Retry**
 and **See the diff on GitHub ↗**. The Summary does not depend on it.
+
+### Comments on lines
+
+Each file in the list says how many comment threads it has. Open the file and each thread sits
+**under the lines it is about** — the first comment with its replies, who, when, and **↗** to it
+on GitHub. A comment on the old text sits under the line the new text has where the old one was;
+side by side, it sits in the left pane. A comment the diff has moved on from, or one about the
+file as a whole, is listed under the viewer instead, with where it was. They are read with the
+diff and again whenever the pull request changes.
+
+### A note on lines, for an agent
+
+Select lines in the diff — in either pane — and press **Note on lines…**. The dialog shows the
+lines, takes your note, and says before you press anything where it will go:
+
+- **The pull request has a workspace**: to the agent there, by the rules the
+  [conflict helper](commits-and-pull-requests.md#resolve-merge-conflicts) uses. Running and
+  quiet, it is typed into that conversation, along with anything you had typed there and not
+  sent. Ended, the conversation is resumed with it. One that cannot be continued gets a new
+  conversation of the same agent, given the note and the workspace's task. **A busy agent is
+  never typed into**: the dialog says so, and offers GitHub alone.
+- **No workspace yet**: **Start a workspace with it** gets the branch ready, as
+  [Start workspace](#start-a-workspace-from-a-pull-request) does, and opens the composer with
+  the note as the agent's first message. Nothing starts until you press Start there.
+
+The agent is told the pull request, the file, the lines and which side of the diff they are on,
+the lines themselves, and your note, and asked to act on it in the worktree and commit — never
+to rebase or force-push. Sending takes you to the workspace.
+
+**Also post it on GitHub** makes the same note a comment on those lines of the pull request, as
+well; **Post on GitHub only** posts it and asks no agent. GitHub goes first, because GitHub can
+refuse: it takes a comment only on lines the diff touches or shows around a change, and the
+viewer lets you select any line of the file. A refusal is shown in the dialog before the agent
+has heard anything, so pressing Send again gives the agent the note once. Should the agent be
+the one that cannot be reached after GitHub has the comment, the dialog says so, and sending
+again does not post it twice. Cancelling, or `Esc`, sends nothing anywhere; while a send is
+under way the dialog stays until it is done.
 
 ### Moving around
 
@@ -262,8 +304,7 @@ The view says why, on a line above the rows, without hiding the projects that ar
 
 ## What it does not do
 
-- Show comments made on particular lines of the diff — those are being built next.
-- Post a comment or a reply.
+- Reply to a comment on lines from here: the thread's **↗** opens it on GitHub.
 - Approve or request changes, edit a title, or change labels, assignees or reviewers.
 - Delete a branch, after a merge or ever.
 - List pull requests for GitLab, Bitbucket or Gitea.

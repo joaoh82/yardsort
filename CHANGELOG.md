@@ -5,6 +5,14 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Pull requests: comments, and a note on lines for an agent.** A box under a pull request's
+  conversation posts a comment on it. Under **Code**, each comment made on lines of the diff sits
+  beside those lines, with its replies, and each file says how many threads it has. Select lines
+  and press **Note on lines…** to send what you want done about them to the agent in the pull
+  request's workspace — typed in if it is running and quiet, resumed with it if it has ended,
+  never into a busy one — or, with no workspace yet, to start one with the note as the agent's
+  first message. The same note can also go on GitHub as a comment on those lines, or only there.
+  See [Pull requests](docs/guide/pull-requests.md#a-note-on-lines-for-an-agent).
 - **Pull requests: the Code tab.** A pull request's details now have two tabs, **Summary** and
   **Code**. Code lists the files it changes with their kinds and line counts, and opens each in
   the changes panel's own viewer, inline or side by side, highlighted, with unchanged stretches

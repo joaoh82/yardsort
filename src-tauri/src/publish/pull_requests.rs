@@ -13,12 +13,18 @@ use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
 
-use super::commands::{failed, project_root, pull_request_changed, still_mergeable};
-use super::ProjectPullRequests;
-use crate::changes::{Between, FileChange, FileDiff};
+use pty_host::TermSize;
+use yardsort_core::code_note::{self, Excerpt};
+
+use super::commands::{failed, found, project_root, pull_request_changed, still_mergeable};
+use super::conflicts::{deliver, plan, same_agent, ConflictHelper, ConflictsAsked, Plan};
+use super::{ensure_own, ProjectPullRequests};
+use crate::changes::commands::workspace;
+use crate::changes::{safe_relative, Between, FileChange, FileDiff};
 use crate::error::{IpcError, IpcResult};
 use crate::forge::{
-    parse_remote, ForgeError, Gh, MergeMethod, PullRequest, PullRequestState, PullRequestSummary,
+    parse_remote, ForgeError, Gh, LineComment, LinePlace, MergeMethod, PullRequest,
+    PullRequestState, PullRequestSummary,
 };
 use crate::git::{is_commit_id, pull_request_ref, Git, PULL_REQUEST_REFS};
 use crate::state::{blocking, AppState};
@@ -267,6 +273,191 @@ pub fn prune_refs(git: &Git, root: &Path, found: &ProjectPullRequests) {
             let _ = git.delete_ref(root, &name);
         }
     }
+}
+
+/// Post a comment on a pull request's conversation. The words are the user's, sent as they
+/// are; pressing Send was the confirmation.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_request_comment(
+    app: AppHandle,
+    project_id: String,
+    number: u32,
+    body: String,
+) -> IpcResult<()> {
+    let body = body.trim().to_owned();
+    if body.is_empty() {
+        return Err(IpcError::new("empty_comment", "Write something first."));
+    }
+    blocking(app, move |state| {
+        let root = project_root(state, &project_id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        let result = gh.comment(&root, number, &body);
+        // The conversation changed: the summary kept for it is from before.
+        state.forge.forget(&project_id);
+        result.map_err(failed)
+    })
+    .await
+}
+
+/// Every comment on lines of a pull request's diff. Not cached: it is asked for with the
+/// diff, and again when the list says the pull request changed.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_request_line_comments(
+    app: AppHandle,
+    project_id: String,
+    number: u32,
+) -> IpcResult<Vec<LineComment>> {
+    blocking(app, move |state| {
+        let root = project_root(state, &project_id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        gh.line_comments(&root, number).map_err(failed)
+    })
+    .await
+}
+
+/// Post a comment on particular lines of a pull request's diff.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_request_line_comment(
+    app: AppHandle,
+    project_id: String,
+    number: u32,
+    place: LinePlace,
+    body: String,
+) -> IpcResult<()> {
+    let body = body.trim().to_owned();
+    if body.is_empty() {
+        return Err(IpcError::new("empty_comment", "Write something first."));
+    }
+    // The place came back from the window; it reaches `gh` as arguments.
+    commit_id(&place.commit)?;
+    let place = LinePlace {
+        path: safe_relative(&place.path)?,
+        ..place
+    };
+    if place.line == 0
+        || place
+            .start_line
+            .is_some_and(|start| start == 0 || start > place.line)
+    {
+        return Err(IpcError::new(
+            "bad_lines",
+            "Those lines are not in the file.",
+        ));
+    }
+    blocking(app, move |state| {
+        let root = project_root(state, &project_id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        let result = gh.line_comment(&root, number, &place, &body);
+        state.forge.forget(&project_id);
+        result.map_err(failed)
+    })
+    .await
+}
+
+/// Who in a workspace would be given a note about pull request `number`'s lines, and how — for
+/// the confirmation, before anything is sent. The same choice as for merge conflicts: the
+/// conversation that opened the pull request, else the one given the task, else the newest.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_request_note_helper(
+    app: AppHandle,
+    workspace_id: String,
+    number: u32,
+) -> IpcResult<ConflictHelper> {
+    blocking(app, move |state| {
+        let (row, root) = workspace(state, &workspace_id)?;
+        let requests = found(state, &row.project_id, false).pull_requests;
+        ensure_own(&Git::new(&state.env())?, &root, &row, &requests, number)?;
+        let opened_at = requests
+            .iter()
+            .find(|pr| pr.number == number)
+            .and_then(|pr| pr.created_at);
+        let Plan { record, reach } = plan(state, &row, opened_at)?;
+        Ok(ConflictHelper {
+            session_id: record.id,
+            harness_label: record.harness_label,
+            title: record.title,
+            reach,
+        })
+    })
+    .await
+}
+
+/// Give the agent in a workspace a note about lines of its pull request: typed into it if it is
+/// running and quiet, into it once resumed if it has ended, or as the first message of a new
+/// conversation of the same agent. Never into a busy one. `session_id` is the conversation the
+/// user agreed to ask ([`pull_request_note_helper`]); if another has become the one to ask,
+/// nothing is sent.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_request_send_note(
+    app: AppHandle,
+    workspace_id: String,
+    number: u32,
+    session_id: String,
+    excerpt: Excerpt,
+    note: String,
+    size: TermSize,
+) -> IpcResult<ConflictsAsked> {
+    let note = note.trim().to_owned();
+    if note.is_empty() {
+        return Err(IpcError::new(
+            "empty_note",
+            "Write what you want done first.",
+        ));
+    }
+    blocking(app, move |state| {
+        let (row, root) = workspace(state, &workspace_id)?;
+        let requests = found(state, &row.project_id, false).pull_requests;
+        let git = Git::new(&state.env())?;
+        ensure_own(&git, &root, &row, &requests, number)?;
+        let pr = requests
+            .iter()
+            .find(|pr| pr.number == number)
+            .cloned()
+            .ok_or_else(pull_request_changed)?;
+        let Plan { record, reach } = plan(state, &row, pr.created_at)?;
+        same_agent(&record, &session_id)?;
+        let session = deliver(
+            state,
+            &row,
+            &record,
+            reach,
+            |task| code_note::prompt(&pr, &excerpt, &note, task),
+            &format!("Note on #{number}"),
+            size,
+        )?;
+        Ok(ConflictsAsked { reach, session })
+    })
+    .await
+}
+
+/// The note as the composer's first message, for a pull request with no workspace yet: what
+/// [`pull_request_prepare_branch`] is followed by.
+#[tauri::command]
+#[specta::specta]
+pub async fn pull_request_note_text(
+    app: AppHandle,
+    project_id: String,
+    number: u32,
+    excerpt: Excerpt,
+    note: String,
+) -> IpcResult<String> {
+    blocking(app, move |state| {
+        let pr = match state.forge.find(&project_id, number) {
+            Some(pr) => pr,
+            None => {
+                let root = project_root(state, &project_id)?;
+                let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+                gh.pull_request(&root, number).map_err(failed)?
+            }
+        };
+        Ok(code_note::prompt(&pr, &excerpt, &note, None))
+    })
+    .await
 }
 
 fn no_longer(number: u32, what: &str) -> IpcError {

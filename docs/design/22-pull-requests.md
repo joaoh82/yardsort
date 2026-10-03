@@ -1,8 +1,8 @@
 # Pull requests
 
-_Proposed 2026-10-02. Slices 1 to 3 are built — see [slice 1](#slice-1-what-shipped),
-[slice 2](#slice-2-what-shipped) and [slice 3](#slice-3-what-shipped), which also say where they
-differ from the proposal below. Slice 4 is still a proposal._
+_Proposed 2026-10-02. All four slices are built — see [slice 1](#slice-1-what-shipped),
+[slice 2](#slice-2-what-shipped), [slice 3](#slice-3-what-shipped) and
+[slice 4](#slice-4-what-shipped), which also say where they differ from the proposal below._
 
 Every pull request of every project in one place: a **Pull requests** row at the top of the
 sidebar opens a view in the center panel that lists them, filters them, shows one in detail —
@@ -452,7 +452,8 @@ Each is one pull request with its docs, tests and changelog line, in this order.
 3. **Code.** ✅ `Changes` between two revisions; the private refs and their cleanup; the file
    list, the viewer and the Files dropdown in the detail pane. See
    [slice 3](#slice-3-what-shipped).
-4. **Writing.** The reply box; comments on lines; send to an agent, with or without a workspace.
+4. **Writing.** ✅ The reply box; comments on lines; send to an agent, with or without a
+   workspace. See [slice 4](#slice-4-what-shipped).
 
 Slice 1 is the large one. If it grows past what one review can hold, steps 3–4 and the action
 buttons split off as their own pull request, leaving a list that only reads and links out.
@@ -601,6 +602,54 @@ empty repository.
 
 Still not done: the screenshot and the hands-on pass, as before.
 
+## Slice 4: what shipped
+
+Writing to the forge, and to an agent: the reply box, comments on lines, and a note on lines.
+
+- **`Gh::comment`** is `gh pr comment <n> --body-file -` with the words on standard input;
+  **`Gh::line_comment`** is `gh api -X POST …/pulls/<n>/comments` with `-F body=@-` and the
+  place — commit, path, side, line, start line — as fields. Nothing the user wrote is ever an
+  argument. One test writes down the arguments and what was read.
+- **`Gh::line_comments`** is `gh api --paginate --slurp …/pulls/<n>/comments`, pages of pages.
+  Each comment keeps its line, side, range, original line, whether the forge still places it
+  (`position`), whether it is about the whole file, and what it replies to. Recorded, as the
+  others, and anonymised.
+- **Beside the lines.** `CodeView` gained `notes` — blocks under lines, one per comment thread,
+  drawn by React through portals into nodes CodeMirror places as block widgets — and `onSelect`,
+  which reports the selected lines, whole, and which pane they are in. A comment on the old
+  text goes under the line the new text has where the old one was, worked out from the merge
+  view's own chunks; side by side, it sits in the left pane. Tested against the real editor.
+- **Where a note goes** is the conflict helper's decision, now shared: `plan` picks the
+  conversation and `deliver` reaches it — typed in, resumed, or started — with the words made
+  by `code_note::prompt`. Never into a busy agent. With no workspace, the note becomes the
+  composer's first message after `prepare_branch`, and `compose` learned to carry one.
+- **The dialog says where the note goes before Send**, by asking `pull_request_note_helper`,
+  and refuses nothing silently: an agent that cannot be asked is a line in the dialog, with
+  GitHub still on offer. The checkbox posts the same words on GitHub too; a second button posts
+  them there alone.
+- **GitHub first, and once.** Of the two places a note goes, GitHub is the one that can refuse:
+  its review-comment endpoint takes only a line inside the diff's hunks, and the viewer lets
+  the user select any line of the file. So the comment is posted before the agent is given the
+  note, and a refusal leaves nothing half done. Should the agent be the step that fails after
+  GitHub has the comment, the dialog remembers that and a second Send does not post it again.
+  Neither `Esc` nor the backdrop closes the dialog while a send is under way, as Cancel is
+  already disabled then: a send that outlives its dialog would still type into the agent.
+- **Posting returns as soon as the words are on the forge.** Reading everything back — the
+  list, the summary, the threads — is `gh` over the network and is not awaited by the store's
+  `comment` and `lineComment`. Otherwise the reply box kept its text and its button for those
+  seconds, and a second press posted the same comment twice. Found in review; a test with a
+  refresh that never answers covers it.
+- **Not built**: replying to a comment on lines from here, and marking threads resolved. The
+  thread's link opens it on GitHub.
+
+How it was checked: the parsers and the argument lists against fixtures and a stand-in `gh`;
+`code_note::prompt` with tests of its own; the editor's notes and selection against the real
+CodeMirror in jsdom; the reply box, the threads, the counts and every path through the dialog —
+agent, agent and GitHub, GitHub alone, no workspace, a busy agent, a cancel — through Testing
+Library; and the threads beside their lines in headless Chromium with demo data.
+
+Still not done: the screenshot and the hands-on pass, which has rows for this slice now.
+
 ## Not in this version, on purpose
 
 - Other forges. GitLab's `glab` is the same idea and a second implementation of all of it.
@@ -610,7 +659,7 @@ Still not done: the screenshot and the hands-on pass, as before.
   without `read:org`, and a repository owned by a person rather than an organisation, would
   leave the filter disabled with the reason.
 - Approving or requesting changes from the app; editing a title or description; labels,
-  assignees, milestones; draft ↔ ready.
+  assignees, milestones; draft ↔ ready; replying to a comment on lines, or resolving one.
 - Deleting branches after a merge or a close. Yardsort keeps branches.
 - Searching the forge. Search is over what is loaded, and says when there is more.
 - Sort controls; saved filter sets; a pull request opened in a window of its own.

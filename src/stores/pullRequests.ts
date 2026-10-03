@@ -3,6 +3,8 @@ import {
   errorMessage,
   ipc,
   type MergeMethod,
+  type LineComment,
+  type LinePlace,
   type PullRequest,
   type PullRequestChanges,
   type PullRequestSummary,
@@ -57,6 +59,15 @@ export interface ChangesState {
 
 export type DetailTab = "summary" | "code";
 
+/** The comments on lines of a pull request's diff, or the reading of them. */
+export interface LineCommentsState {
+  comments: LineComment[];
+  loading: boolean;
+  error: string | null;
+  /** As `SummaryState::stamp`: a comment moves `updatedAt`, so the stamp says when to ask again. */
+  stamp: string;
+}
+
 interface PullRequestsStore {
   /** The row open in the detail pane. */
   selected: string | null;
@@ -68,6 +79,8 @@ interface PullRequestsStore {
   summaries: Record<string, SummaryState>;
   /** The files each pull request changes, by row key: what Code shows. */
   changes: Record<string, ChangesState>;
+  /** The comments on lines of each pull request's diff, by row key: shown beside the lines. */
+  lineComments: Record<string, LineCommentsState>;
   /** The row something is being done to. One at a time: each action moves the others' ground. */
   busy: string | null;
   error: string | null;
@@ -87,6 +100,12 @@ interface PullRequestsStore {
    * which is git over the network, and can take a moment or fail.
    */
   loadChanges: (target: Target, force?: boolean) => Promise<void>;
+  /** Read the comments on lines, unless that was done for what the list says now. */
+  loadLineComments: (target: Target, force?: boolean) => Promise<void>;
+  /** Post a comment on the conversation. Resolves to whether it was posted; the error is kept. */
+  comment: (target: Target, body: string) => Promise<boolean>;
+  /** Post a comment on lines of the diff. */
+  lineComment: (target: Target, place: LinePlace, body: string) => Promise<boolean>;
   merge: (target: Target, method: MergeMethod, label: string) => Promise<void>;
   close: (target: Target) => Promise<void>;
   reopen: (target: Target) => Promise<void>;
@@ -114,6 +133,24 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
   /** The latest request per row: an answer that is no longer the latest is dropped. */
   const asked = new Map<string, number>();
   const askedChanges = new Map<string, number>();
+  const askedComments = new Map<string, number>();
+
+  /**
+   * After something was posted: the list, the summary and the comments are all from before.
+   *
+   * Not awaited by the actions that post. Reading it all back is `gh` over the network, and
+   * while that runs the words are already on the forge: the box they came from must clear and
+   * the button must be free *now*, or a second press in those seconds posts them again.
+   */
+  function posted(target: Target) {
+    const refresh = async () => {
+      await usePublishStore.getState().loadProject(target.projectId, true, true);
+      const latest = get();
+      if (latest.summaries[target.key]) await latest.loadSummary(target, true);
+      if (latest.lineComments[target.key]) await latest.loadLineComments(target, true);
+    };
+    void refresh().catch(console.error);
+  }
   const patch = (key: string, next: Partial<SummaryState>) =>
     set((s) => {
       const before = s.summaries[key];
@@ -147,6 +184,7 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
     tab: "summary",
     summaries: {},
     changes: {},
+    lineComments: {},
 
     showTab(tab) {
       set({ tab });
@@ -205,6 +243,64 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
         if (askedChanges.get(key) === request) put({ changes, loading: false });
       } catch (error) {
         if (askedChanges.get(key) === request) put({ loading: false, error: errorMessage(error) });
+      }
+    },
+
+    async loadLineComments(target, force = false) {
+      const { key } = target;
+      const stamp = summaryStamp(target.pr);
+      const before = get().lineComments[key];
+      if (!force && before && before.stamp === stamp && (before.loading || !before.error)) return;
+      const request = (askedComments.get(key) ?? 0) + 1;
+      askedComments.set(key, request);
+      const put = (next: Partial<LineCommentsState>) =>
+        set((s) => {
+          const now = s.lineComments[key];
+          return now ? { lineComments: { ...s.lineComments, [key]: { ...now, ...next } } } : s;
+        });
+      set((s) => ({
+        lineComments: {
+          ...s.lineComments,
+          [key]: { comments: before?.comments ?? [], loading: true, error: null, stamp },
+        },
+      }));
+      try {
+        const comments = await ipc.pullRequestLineComments(target.projectId, target.pr.number);
+        if (askedComments.get(key) === request) put({ comments, loading: false });
+      } catch (error) {
+        if (askedComments.get(key) === request) put({ loading: false, error: errorMessage(error) });
+      }
+    },
+
+    async comment(target, body) {
+      if (get().busy) return false;
+      set({ busy: target.key, error: null, notice: null });
+      try {
+        await ipc.pullRequestComment(target.projectId, target.pr.number, body);
+        set({ notice: `Commented on #${target.pr.number}.` });
+        return true;
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return false;
+      } finally {
+        set({ busy: null });
+        posted(target);
+      }
+    },
+
+    async lineComment(target, place, body) {
+      if (get().busy) return false;
+      set({ busy: target.key, error: null, notice: null });
+      try {
+        await ipc.pullRequestLineComment(target.projectId, target.pr.number, place, body);
+        set({ notice: `Commented on ${place.path} in #${target.pr.number}.` });
+        return true;
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return false;
+      } finally {
+        set({ busy: null });
+        posted(target);
       }
     },
 

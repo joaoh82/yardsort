@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import type { Content, FileDiff } from "@/lib/ipc";
+import type { LineNote, LineSelection } from "./CodeView";
 import { asText, obstacle, type DiffMode } from "./viewing";
 
 // CodeMirror is the heaviest thing in the app; load it when a file is first opened.
@@ -28,10 +29,17 @@ export function DiffBody({
   path,
   diff,
   mode,
+  notes,
+  renderNote,
+  onSelect,
 }: {
   path: string;
   diff: FileDiff | null;
   mode: DiffMode;
+  /** Blocks under lines, and what to draw in them: comment threads, for a pull request. */
+  notes?: LineNote[];
+  renderNote?: (key: string) => ReactNode;
+  onSelect?: (selection: LineSelection | null) => void;
 }) {
   if (!diff) return <Note>Loading…</Note>;
   if (diff.new.type === "image" || diff.old.type === "image") {
@@ -75,6 +83,9 @@ export function DiffBody({
         text={asText(diff.new)}
         original={asText(diff.old)}
         split={mode === "split"}
+        notes={notes}
+        renderNote={renderNote}
+        onSelect={onSelect}
       />
     </Suspense>
   );

@@ -1,0 +1,104 @@
+[
+  [
+    {
+      "url": "https://api.github.com/repos/o/r/pulls/comments/3294165756",
+      "pull_request_review_id": 4352058303,
+      "id": 3294165756,
+      "node_id": "PRRC_0",
+      "diff_hunk": "@@ -30,7 +30,8 @@\n context\n+changed",
+      "path": "script/build.ps1",
+      "commit_id": "cccccccccccccccccccccccccccccccccccccccc",
+      "original_commit_id": "cccccccccccccccccccccccccccccccccccccccc",
+      "user": {
+        "login": "linus",
+        "id": 1
+      },
+      "body": "Is this the right encoding?",
+      "created_at": "2026-05-24T09:02:27Z",
+      "updated_at": "2026-05-24T09:02:28Z",
+      "html_url": "https://github.com/o/r/pull/13506#discussion_r3294165756",
+      "pull_request_url": "https://api.github.com/repos/o/r/pulls/13506",
+      "_links": {},
+      "reactions": {
+        "total_count": 0
+      },
+      "start_line": null,
+      "original_start_line": null,
+      "start_side": null,
+      "line": 36,
+      "original_line": 36,
+      "side": "RIGHT",
+      "author_association": "CONTRIBUTOR",
+      "original_position": 4,
+      "position": 4,
+      "subject_type": "line"
+    },
+    {
+      "url": "https://api.github.com/repos/o/r/pulls/comments/3294165761",
+      "pull_request_review_id": 4352058303,
+      "id": 3294165761,
+      "node_id": "PRRC_1",
+      "diff_hunk": "@@ -30,7 +30,8 @@\n context\n+changed",
+      "path": "script/build.ps1",
+      "commit_id": "cccccccccccccccccccccccccccccccccccccccc",
+      "original_commit_id": "cccccccccccccccccccccccccccccccccccccccc",
+      "user": {
+        "login": "linus",
+        "id": 1
+      },
+      "body": "These eight lines could be one loop.",
+      "created_at": "2026-05-24T09:02:28Z",
+      "updated_at": "2026-05-24T09:02:28Z",
+      "html_url": "https://github.com/o/r/pull/13506#discussion_r3294165761",
+      "pull_request_url": "https://api.github.com/repos/o/r/pulls/13506",
+      "_links": {},
+      "reactions": {
+        "total_count": 0
+      },
+      "start_line": 43,
+      "original_start_line": 43,
+      "start_side": "RIGHT",
+      "line": 49,
+      "original_line": 49,
+      "side": "RIGHT",
+      "author_association": "CONTRIBUTOR",
+      "original_position": 17,
+      "position": 17,
+      "subject_type": "line"
+    },
+    {
+      "url": "https://api.github.com/repos/o/r/pulls/comments/3294172846",
+      "pull_request_review_id": 4352064319,
+      "id": 3294172846,
+      "node_id": "PRRC_2",
+      "diff_hunk": "@@ -30,7 +30,8 @@\n context\n+changed",
+      "path": "script/build.ps1",
+      "commit_id": "cccccccccccccccccccccccccccccccccccccccc",
+      "original_commit_id": "cccccccccccccccccccccccccccccccccccccccc",
+      "user": {
+        "login": "grace",
+        "id": 2
+      },
+      "body": "It is: the file is read as UTF-16.",
+      "created_at": "2026-05-24T09:09:10Z",
+      "updated_at": "2026-05-24T09:09:10Z",
+      "html_url": "https://github.com/o/r/pull/13506#discussion_r3294172846",
+      "pull_request_url": "https://api.github.com/repos/o/r/pulls/13506",
+      "_links": {},
+      "reactions": {
+        "total_count": 0
+      },
+      "start_line": null,
+      "original_start_line": null,
+      "start_side": null,
+      "line": 36,
+      "original_line": 36,
+      "side": "RIGHT",
+      "in_reply_to_id": 3294165756,
+      "author_association": "MEMBER",
+      "original_position": 4,
+      "position": 4,
+      "subject_type": "line"
+    }
+  ]
+]

@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PullRequest, PullRequestSummary } from "@/lib/ipc";
 import { project, pullRequest, pullRequestsOf, pullRequestSummary } from "@/test/fixtures";
 
-const core = vi.hoisted(() => ({ pullRequestSummary: vi.fn() }));
+const core = vi.hoisted(() => ({
+  pullRequestSummary: vi.fn(),
+  pullRequestComment: vi.fn(),
+  projectPullRequests: vi.fn(),
+}));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -42,6 +46,8 @@ const answer = (summary: Partial<PullRequestSummary> = {}, pr: PullRequest = lis
 beforeEach(() => {
   vi.resetAllMocks();
   opener.openUrl.mockResolvedValue(undefined);
+  core.pullRequestComment.mockResolvedValue(undefined);
+  core.projectPullRequests.mockResolvedValue(pullRequestsOf([listed]));
   usePullRequestsStore.setState({
     selected: null,
     summaries: {},
@@ -190,7 +196,7 @@ describe("the conversation", () => {
     ]);
     // A review with no words of its own is one whose words are on lines.
     expect(posts[0]).toHaveTextContent("Left comments on lines of the code.");
-    expect(await within(posts[1]!).findByText("last")).toBeVisible();
+    await waitFor(() => expect(within(posts[1]!).getByText("last")).toBeVisible());
     expect(posts[1]!.querySelector("strong")).toHaveTextContent("last");
     // What the forge hid stays hidden, and says so.
     expect(posts[2]).toHaveTextContent("Hidden on GitHub as off topic.");
@@ -199,15 +205,68 @@ describe("the conversation", () => {
 
     await user.click(within(posts[1]!).getByRole("button", { name: "Open on GitHub" }));
     expect(opener.openUrl).toHaveBeenCalledWith(`${listed.url}#issuecomment-1`);
-    // Comments on lines are not here yet, and the view says where they are.
-    await user.click(within(section).getByRole("button", { name: /Read them on GitHub/ }));
-    expect(opener.openUrl).toHaveBeenLastCalledWith(listed.url);
+    // Comments on lines are under Code, and the conversation says so.
+    expect(section).toHaveTextContent("Comments on particular lines are under Code");
   });
 
   it("says so when nothing has been said", async () => {
     answer();
     show();
     expect(await screen.findByText("Nobody has commented or reviewed yet.")).toBeVisible();
+  });
+});
+
+describe("replying", () => {
+  it("posts what was written, with Ctrl+Enter, and reads everything again", async () => {
+    answer();
+    const { user } = show();
+    const box = await screen.findByRole("textbox", { name: "Your comment" });
+    const send = screen.getByRole("button", { name: "Comment" });
+    expect(send).toBeDisabled();
+    await user.type(box, "Looks right to me.{Control>}{Enter}{/Control}");
+    await waitFor(() =>
+      expect(core.pullRequestComment).toHaveBeenCalledWith(alpha.id, 8, "Looks right to me."),
+    );
+    await waitFor(() => expect(box).toHaveValue(""));
+    // The list, and the summary past the core's cache: the conversation has moved.
+    await waitFor(() =>
+      expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true),
+    );
+    await waitFor(() =>
+      expect(core.pullRequestSummary).toHaveBeenLastCalledWith(alpha.id, 8, true),
+    );
+    expect(usePullRequestsStore.getState().notice).toBe("Commented on #8.");
+  });
+
+  it("clears the box as soon as the post lands, not after everything is read again", async () => {
+    answer();
+    // The reading-again is `gh` over the network. Here it never comes back at all.
+    core.projectPullRequests.mockReturnValue(new Promise(() => {}));
+    const { user } = show();
+    const box = await screen.findByRole("textbox", { name: "Your comment" });
+    await user.type(box, "Once.");
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(core.pullRequestComment).toHaveBeenCalledTimes(1));
+    // Were the box still full and the button still live, a second press would post it again.
+    await waitFor(() => expect(box).toHaveValue(""));
+    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true);
+    await user.type(box, "Twice.{Control>}{Enter}{/Control}");
+    await waitFor(() => expect(core.pullRequestComment).toHaveBeenCalledTimes(2));
+    expect(core.pullRequestComment).toHaveBeenLastCalledWith(alpha.id, 8, "Twice.");
+  });
+
+  it("keeps what was written when the forge refuses, and says why", async () => {
+    answer();
+    core.pullRequestComment.mockRejectedValue({
+      code: "gh_failed",
+      message: "`gh pr comment 8` failed: HTTP 403",
+    });
+    const { user } = show();
+    const box = await screen.findByRole("textbox", { name: "Your comment" });
+    await user.type(box, "Not posted");
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(usePullRequestsStore.getState().error).toContain("HTTP 403"));
+    expect(box).toHaveValue("Not posted");
   });
 });
 
@@ -228,7 +287,7 @@ describe("keeping up with the forge", () => {
 
     answer({ body: "Second time lucky." });
     await user.click(within(alert).getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Second time lucky.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("Second time lucky.")).toBeVisible());
     expect(core.pullRequestSummary).toHaveBeenLastCalledWith(alpha.id, 8, true);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -236,7 +295,7 @@ describe("keeping up with the forge", () => {
   it("is read once while the list says the same, and again when the list says it changed", async () => {
     answer({ body: "As first written." });
     const { polled } = show();
-    expect(await screen.findByText("As first written.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("As first written.")).toBeVisible());
 
     // The minute's poll: a new object that says the same thing.
     polled(pullRequest(8, { ...listed, details: { ...listed.details } }));
@@ -257,7 +316,7 @@ describe("keeping up with the forge", () => {
     expect(screen.getByText("As first written.")).toBeVisible();
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
     arrive(pullRequestSummary(moved, { body: "As edited." }));
-    expect(await screen.findByText("As edited.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("As edited.")).toBeVisible());
 
     // Checks finishing move nothing but the counts, and that is enough.
     polled(
@@ -283,7 +342,7 @@ describe("keeping up with the forge", () => {
     await waitFor(() => expect(answers).toHaveLength(2));
     // The second question is answered first, then the first one turns up late.
     answers[1]!(pullRequestSummary(moved, { body: "The newer answer." }));
-    expect(await screen.findByText("The newer answer.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("The newer answer.")).toBeVisible());
     answers[0]!(pullRequestSummary(listed, { body: "The older answer." }));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.getByText("The newer answer.")).toBeVisible();
