@@ -27,7 +27,11 @@ const POINTS = [
   },
   {
     title: "Every pull request in one place",
-    body: "One list of the pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks, reviewers and size, filtered by project, author and review status. Open one to read its description, its checks and the conversation. Start a workspace on one, merge it, close it or reopen it, each confirmed first. It reads GitHub through gh; Yardsort still holds no credential.",
+    body: "One list of the pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks, reviewers and size, filtered by project, author and review status. Open one to read its description, its checks, the conversation and its diff, with every comment beside the lines it is about; reply, or select lines and send a note about them to the agent working on it. Start a workspace on one, merge it, close it or reopen it, each confirmed first. It reads GitHub through gh; Yardsort still holds no credential.",
+  },
+  {
+    title: "Your issues, where the agents are",
+    body: "Tasks lists every project's open GitHub issues and counts the ones that need an answer — where the last person to speak was not a maintainer. Open one, then Delegate: the composer opens with the issue as the agent's first message, marked as text other people wrote, and nothing starts until you say so. The workspace remembers the task it came from. Open a new task, answer one, close, label and assign it from the same view; ys task does all of it from a terminal, so an agent can tell you what is open and file an issue when you ask. Everything goes through gh.",
   },
   {
     title: "Choose how agents start",

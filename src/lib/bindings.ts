@@ -103,6 +103,52 @@ export const commands = {
 	 */
 	pullRequestSummary: (projectId: string, number: number, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("pull_request_summary", { projectId, number, refresh })),
 	/**
+	 *  The files a pull request changes. Fetches its commits into refs of Yardsort's own if they
+	 *  are not here yet — nothing is checked out, and no branch or remote-tracking ref moves.
+	 * 
+	 *  Which head and base: the ones the project's list names. The list is what the window shows,
+	 *  it is what notices a push, and it is already here — so this asks the forge for nothing. A
+	 *  pull request the list does not have (the list was emptied by an action a moment ago, say)
+	 *  is asked about afresh, never out of a cache: a diff is only as good as its head.
+	 */
+	pullRequestChanges: (projectId: string, number: number) => typedError<PullRequestChanges, IpcError>(__TAURI_INVOKE("pull_request_changes", { projectId, number })),
+	/**
+	 *  Both sides of one file of a pull request, between the two commits
+	 *  [`pull_request_changes`] answered with.
+	 */
+	pullRequestDiff: (projectId: string, baseOid: string, headOid: string, path: string, oldPath: string | null) => typedError<FileDiff, IpcError>(__TAURI_INVOKE("pull_request_diff", { projectId, baseOid, headOid, path, oldPath })),
+	/**
+	 *  Post a comment on a pull request's conversation. The words are the user's, sent as they
+	 *  are; pressing Send was the confirmation.
+	 */
+	pullRequestComment: (projectId: string, number: number, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("pull_request_comment", { projectId, number, body })),
+	/**
+	 *  Every comment on lines of a pull request's diff. Not cached: it is asked for with the
+	 *  diff, and again when the list says the pull request changed.
+	 */
+	pullRequestLineComments: (projectId: string, number: number) => typedError<LineComment[], IpcError>(__TAURI_INVOKE("pull_request_line_comments", { projectId, number })),
+	/**  Post a comment on particular lines of a pull request's diff. */
+	pullRequestLineComment: (projectId: string, number: number, place: LinePlace, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("pull_request_line_comment", { projectId, number, place, body })),
+	/**
+	 *  Who in a workspace would be given a note about pull request `number`'s lines, and how — for
+	 *  the confirmation, before anything is sent. The same choice as for merge conflicts: the
+	 *  conversation that opened the pull request, else the one given the task, else the newest.
+	 */
+	pullRequestNoteHelper: (workspaceId: string, number: number) => typedError<ConflictHelper, IpcError>(__TAURI_INVOKE("pull_request_note_helper", { workspaceId, number })),
+	/**
+	 *  Give the agent in a workspace a note about lines of its pull request: typed into it if it is
+	 *  running and quiet, into it once resumed if it has ended, or as the first message of a new
+	 *  conversation of the same agent. Never into a busy one. `session_id` is the conversation the
+	 *  user agreed to ask ([`pull_request_note_helper`]); if another has become the one to ask,
+	 *  nothing is sent.
+	 */
+	pullRequestSendNote: (workspaceId: string, number: number, sessionId: string, excerpt: Excerpt, note: string, size: TermSize) => typedError<ConflictsAsked, IpcError>(__TAURI_INVOKE("pull_request_send_note", { workspaceId, number, sessionId, excerpt, note, size })),
+	/**
+	 *  The note as the composer's first message, for a pull request with no workspace yet: what
+	 *  [`pull_request_prepare_branch`] is followed by.
+	 */
+	pullRequestNoteText: (projectId: string, number: number, excerpt: Excerpt, note: string) => typedError<string, IpcError>(__TAURI_INVOKE("pull_request_note_text", { projectId, number, excerpt, note })),
+	/**
 	 *  Merge a pull request of this project, if it is still open, still not a draft and still at
 	 *  the head commit the user confirmed. Never deletes a branch, never bypasses a protection.
 	 */
@@ -117,6 +163,37 @@ export const commands = {
 	 *  composer's, with the agent and the message the user gives it.
 	 */
 	pullRequestPrepareBranch: (projectId: string, number: number) => typedError<PreparedBranch, IpcError>(__TAURI_INVOKE("pull_request_prepare_branch", { projectId, number })),
+	/**
+	 *  A project's tasks: every open one up to the cap, and with `closed` the most recently
+	 *  closed as well. Never an `Err` — a source that cannot be reached is a notice above the list,
+	 *  and the reason travels in [`ProjectTasks::problem`].
+	 */
+	projectTasks: (projectId: string, refresh: boolean, closed: boolean) => typedError<ProjectTasks, IpcError>(__TAURI_INVOKE("project_tasks", { projectId, refresh, closed })),
+	/**
+	 *  One task in full: its description and its conversation. What the Tasks view's detail pane
+	 *  shows, read when a row is opened.
+	 */
+	taskDetail: (projectId: string, key: string, refresh: boolean) => typedError<TaskDetail, IpcError>(__TAURI_INVOKE("task_detail", { projectId, key, refresh })),
+	/**
+	 *  A task made ready to hand to an agent: the first message, built from the task as its
+	 *  source has it this moment, and what to record against the workspace that is started. The
+	 *  composer shows the message for the user to read and edit; nothing starts here.
+	 */
+	taskPrompt: (projectId: string, key: string) => typedError<Delegated, IpcError>(__TAURI_INVOKE("task_prompt", { projectId, key })),
+	/**  Open a new task in a project. Pressing Create was the confirmation. */
+	taskCreate: (projectId: string, task: NewTask) => typedError<CreatedTask, IpcError>(__TAURI_INVOKE("task_create", { projectId, task })),
+	/**
+	 *  Post a comment on a task. The words are the user's, sent as they are; pressing Send was the
+	 *  confirmation.
+	 */
+	taskComment: (projectId: string, key: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("task_comment", { projectId, key, body })),
+	/**  Close a task. The window asks first; nothing is posted on it and nothing is deleted. */
+	taskClose: (projectId: string, key: string, reason: CloseReason) => typedError<null, IpcError>(__TAURI_INVOKE("task_close", { projectId, key, reason })),
+	/**  Reopen a closed task. The window asks first: it tells everyone following it. */
+	taskReopen: (projectId: string, key: string) => typedError<null, IpcError>(__TAURI_INVOKE("task_reopen", { projectId, key })),
+	/**  Change a task's labels, assignees or title. */
+	taskEdit: (projectId: string, key: string, change: TaskEdit) => typedError<null, IpcError>(__TAURI_INVOKE("task_edit", { projectId, key, change })),
+	projectTaskChoices: (projectId: string) => typedError<TaskChoices, IpcError>(__TAURI_INVOKE("project_task_choices", { projectId })),
 	/**
 	 *  Who would be asked to resolve pull request `number`'s conflicts, and how — for the
 	 *  confirmation, before anything is sent. Reads the project's list, cached when it is fresh.
@@ -609,6 +686,16 @@ export type Checks =
 /**  Nothing is configured, or nothing has reported yet. */
 "none" | "running" | "passing" | "failing";
 
+/**  Why a task is being closed. */
+export type CloseReason = 
+/**  It is done. */
+"completed" | 
+/**  It will not be done. */
+"notPlanned";
+
+/**  Why a closed task was closed, when its source says. */
+export type ClosedAs = "completed" | "notPlanned" | "duplicate";
+
 /**  One commit, as much of it as a pull request needs. */
 export type Commit = {
 	subject: string,
@@ -653,6 +740,12 @@ export type ContextUsage = {
 	compactCommand: string | null,
 };
 
+/**  A task that was just made: what its source now calls it. */
+export type CreatedTask = {
+	key: string,
+	url: string,
+};
+
 export type CreatedWorkspace = {
 	workspace: Workspace,
 	session: SessionInfo,
@@ -686,6 +779,14 @@ export type DayUsage = {
 	tokens: (number | null)[],
 };
 
+/**  A task made ready to hand to an agent. */
+export type Delegated = {
+	/**  The agent's first message. The user reads and edits it in the composer. */
+	prompt: string,
+	/**  What to record against the workspace that is started. */
+	task: TaskRef,
+};
+
 /**  A workflow a model wrote from a description, checked, for the editor. Nothing is saved. */
 export type Described = {
 	text: string,
@@ -715,6 +816,13 @@ export type DevFlags = {
 	/**  `YARDSORT_RENDERER`: force the terminal renderer (`webgl` or `dom`). */
 	renderer: string | null,
 };
+
+/**  Which side of a diff a comment on a line is about. */
+export type DiffSide = 
+/**  The file as it was: a removed or unchanged line of the old version. */
+"left" | 
+/**  The file as the pull request has it. */
+"right";
 
 export type DownloadProgress = {
 	downloaded: number,
@@ -783,6 +891,17 @@ export type Evidence = {
 	prState: string | null,
 	/**  `archived` or `deleted`, when the workspace ended. */
 	ended: string | null,
+};
+
+/**  The lines the note is about. */
+export type Excerpt = {
+	path: string,
+	side: DiffSide,
+	/**  The first and last line, 1-based, of the file on that side. */
+	from: number,
+	to: number,
+	/**  The lines themselves, as the viewer had them. */
+	text: string,
 };
 
 export type ExitInfo = {
@@ -1055,6 +1174,48 @@ export type LimitWindowDto = {
 	resetsAt: number | null,
 };
 
+/**  A comment on particular lines of a pull request's diff, as the forge's API lists them. */
+export type LineComment = {
+	/**  The forge's id, as text: it does not fit a JavaScript number. */
+	id: string,
+	path: string,
+	/**
+	 *  The line it is on now, in the file as the pull request has it (or as it was, for
+	 *  [`DiffSide::Left`]). `None` when the diff has moved on from under it, or when it is about
+	 *  the file as a whole.
+	 */
+	line: number | null,
+	/**  The first line of a range, when it is on several. */
+	startLine: number | null,
+	side: DiffSide,
+	/**  The line it was made on, which is all that is left of where an outdated one went. */
+	originalLine: number | null,
+	/**  The diff has changed since and the forge no longer places it on a line. */
+	outdated: boolean,
+	/**  About the file as a whole, not a line of it. */
+	wholeFile: boolean,
+	author: string | null,
+	/**  In epoch milliseconds. */
+	at: number | null,
+	/**  Markdown. */
+	body: string,
+	url: string | null,
+	/**  The comment this one answers, when it is a reply. */
+	inReplyTo: string | null,
+};
+
+/**  Where a comment on lines goes: what the forge needs to place it. */
+export type LinePlace = {
+	/**  The head commit the lines are of, as the diff was read. */
+	commit: string,
+	path: string,
+	side: DiffSide,
+	/**  The last line, or the only one. */
+	line: number,
+	/**  The first line of a range. */
+	startLine: number | null,
+};
+
 export type Load = {
 	/**  Percent of the whole machine: every core counted, so it never passes 100. */
 	cpu: number | null,
@@ -1137,6 +1298,15 @@ export type ModelUsage = {
 	knownCost: number | null,
 };
 
+/**  A task to be made. */
+export type NewTask = {
+	title: string,
+	/**  The description, as Markdown. May be empty. */
+	body: string,
+	labels: string[],
+	assignees: string[],
+};
+
 export type NewWorkspace = {
 	projectId: string,
 	/**  `None` starts from the project's default branch. */
@@ -1145,6 +1315,11 @@ export type NewWorkspace = {
 	existingBranch: string | null,
 	harness: HarnessRequest,
 	size: TermSize,
+	/**
+	 *  The task this workspace is being started from, when it is: it names the workspace and
+	 *  is recorded against it. See `crate::tasks::delegate`.
+	 */
+	task: TaskRef | null,
 };
 
 /**  One tool call that was executing when the file was last written. */
@@ -1306,6 +1481,37 @@ export type ProjectPullRequests = {
 	openProblem: string | null,
 };
 
+/**  What a project's source says about its tasks. */
+export type ProjectTasks = {
+	/**  `gh` is installed. Without it there are no tasks anywhere in the app. */
+	gh: boolean,
+	/**
+	 *  The open ones, then the closed ones when they were read; each most recently updated
+	 *  first.
+	 */
+	tasks: Task[],
+	/**  Why the list is short or empty when it should not have been. */
+	problem: string | null,
+	/**  The problem is that nobody is logged in, which has its own one-line fix. */
+	loggedOut: boolean,
+	/**
+	 *  The project's remote read as a repository on a forge: how the view knows a project is
+	 *  not on GitHub. `None` for a remote that is a path on disk, and for no remote at all.
+	 */
+	repo: Repo | null,
+	/**  Who `gh` is logged in as: what "me" means in the view's filters. */
+	viewer: string | null,
+	/**
+	 *  How many open tasks the source says there are. More than the list holds when there are
+	 *  more than it reads. `None` until it has answered.
+	 */
+	openTotal: number | null,
+	/**  The repository has issues switched off. */
+	disabled: boolean,
+	/**  The closed tasks are part of the list. */
+	closed: boolean,
+};
+
 export type PromptTransport = 
 /**  The prompt is an argument. Simple and reliable. */
 "argv" | 
@@ -1402,6 +1608,15 @@ export type PullRequest = {
 	createdAt: number | null,
 };
 
+/**  A pull request's diff: the files it changes, and the two commits they are read between. */
+export type PullRequestChanges = {
+	files: FileChange[],
+	/**  The pull request's head, as fetched. [`pull_request_diff`] is asked with it. */
+	headOid: string,
+	/**  Where the pull request left its base branch: what the diff is measured from. */
+	baseOid: string,
+};
+
 export type PullRequestCheck = {
 	name: string,
 	state: Checks,
@@ -1415,6 +1630,11 @@ export type PullRequestCheck = {
 export type PullRequestDetails = {
 	base: string,
 	headOid: string,
+	/**
+	 *  The commit of the base branch the forge measures the pull request against. For one
+	 *  merged long ago it is the base as it was then, which is what still gives its diff back.
+	 */
+	baseOid: string,
 	additions: number,
 	deletions: number,
 	review: string,
@@ -1752,6 +1972,102 @@ export type SystemLoad = {
 	loadOne: number | null,
 };
 
+/**  A task, as much of it as a row in the list needs. */
+export type Task = {
+	source: TaskSourceKind,
+	/**  What a person types and reads: `#91`. Unique within a project's source. */
+	key: string,
+	url: string,
+	title: string,
+	state: TaskState,
+	closedAs: ClosedAs | null,
+	/**  Who opened it, by login. `None` for an account that no longer exists. */
+	author: string | null,
+	labels: TaskLabel[],
+	assignees: string[],
+	/**  How many comments it has, all told. */
+	comments: number,
+	/**  As the source wrote them: `2026-10-02T17:43:03Z`. */
+	createdAt: string,
+	updatedAt: string,
+	/**  The last word on it is not a maintainer's: see [`needs_answer`]. */
+	needsAnswer: boolean,
+	/**  Open pull requests that will close it when they merge, by number. */
+	linkedPullRequests: number[],
+};
+
+/**
+ *  What a task of this project can be labelled with and who it can be assigned to: what the
+ *  pickers offer. Asked for when one is opened, not kept.
+ */
+export type TaskChoices = {
+	labels: TaskLabel[],
+	assignees: string[],
+};
+
+/**  One comment in a task's conversation. */
+export type TaskComment = {
+	author: string | null,
+	createdAt: string,
+	/**  Empty for one its source hid: what was hidden there is not shown by another door. */
+	body: string,
+	url: string | null,
+	/**  Why the source hid it, when it did: `spam`, `off-topic`, … */
+	hidden: string | null,
+	/**  Written by a program, not a person. */
+	bot: boolean,
+	/**  Written by someone who maintains the project. */
+	maintainer: boolean,
+};
+
+/**  One task in full: the row, its description and its conversation. */
+export type TaskDetail = {
+	task: Task,
+	body: string,
+	/**
+	 *  Oldest first. The latest ones only, when there are more than the source hands over in
+	 *  one answer: [`Task::comments`] is how many there are.
+	 */
+	comments: TaskComment[],
+};
+
+/**
+ *  What to change about a task. Everything is optional; one that changes nothing is refused
+ *  rather than sent.
+ */
+export type TaskEdit = {
+	title: string | null,
+	addLabels: string[],
+	removeLabels: string[],
+	addAssignees: string[],
+	removeAssignees: string[],
+};
+
+export type TaskLabel = {
+	name: string,
+	/**  Six hexadecimal digits, without the `#`. */
+	color: string,
+};
+
+/**
+ *  Which task a workspace was started from: enough to find it again and to name it without
+ *  asking its source.
+ */
+export type TaskRef = {
+	source: TaskSourceKind,
+	/**  Which of the source's projects: `host/owner/name`. */
+	repo: string,
+	key: string,
+	url: string,
+	/**  As it was when the workspace was started. */
+	title: string,
+};
+
+/**  Where a task is kept. */
+export type TaskSourceKind = "github";
+
+export type TaskState = "open" | "closed";
+
 export type TermSize = {
 	cols: number,
 	rows: number,
@@ -1937,6 +2253,8 @@ export type Workspace = {
 	 *  already gone, and a git that will not answer counts as "the branch is still there".
 	 */
 	branchGone: boolean,
+	/**  The tasks it was started from, oldest first. Nearly always none or one. */
+	tasks: TaskRef[],
 };
 
 /**  Something changed on disk in the watched workspace; ask again. */

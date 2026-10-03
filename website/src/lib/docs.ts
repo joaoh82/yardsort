@@ -71,6 +71,12 @@ export const DOCS_NAV: DocSection[] = [
           "See every GitHub pull request of every project in one list. Filter by project, author and review status, start a workspace on one, merge, close or reopen it.",
       },
       {
+        slug: "guide/tasks",
+        title: "Tasks",
+        description:
+          "See every project's GitHub issues in one list. Find the ones that need an answer, filter by label, assignee and author, read one in full, and list them from the ys command line.",
+      },
+      {
         slug: "guide/settings",
         title: "Settings & harnesses",
         description:

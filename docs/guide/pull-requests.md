@@ -7,6 +7,8 @@ requests** at the very top of the sidebar, or from the
 takes over the center panel the way a workflow and [Usage](usage.md) do; **×** in its header
 closes it, and so does pressing the row again or selecting a workspace.
 
+![The Pull requests view: the list on the left, one pull request open on the right with its description, checks and reviewers](../images/pull-requests.png)
+
 The number on the sidebar row is how many pull requests are open across your projects, with a
 **+** after it when a repository has more open than the list reads.
 
@@ -75,7 +77,10 @@ GitHub has more open than it read, rather than letting a search come up empty.
 ## The details
 
 Press a row and its details open beside the list. At the top: the project, who opened it and
-when, and [what you can do](#what-you-can-do) with it. Under that, its **Summary**:
+when, and [what you can do](#what-you-can-do) with it. Under that, two tabs: **Summary** and
+[**Code**](#code). The tab you are on is kept as you go from one pull request to the next.
+
+The **Summary**:
 
 - **What it is** — number, state and review decision, the title, **branch → base**, the lines
   added and removed, whether it conflicts with its base, and when it last changed.
@@ -107,12 +112,85 @@ is shown with care:
   run is run.
 - The boxes of a task list show what was ticked. They are not ticked from here.
 
-### What is not in it
+### Replying
 
-**Comments on particular lines of the code** are not shown yet. A review that has only such
-comments reads _Left comments on lines of the code_, and the foot of the conversation links to
-GitHub for them. You cannot reply from here yet either, and the diff itself is the next piece
-being built; **Open on GitHub ↗** has all three.
+A box under the conversation posts a comment on it: write, then **Comment**, or
+`Ctrl+Enter` / `⌘Enter`. Pressing it is the confirmation; nothing is posted any other way, and
+the box keeps what you wrote if GitHub refuses. Markdown, as on GitHub. The conversation is read
+again as soon as it is posted.
+
+**Comments on particular lines of the code** are not in the conversation: they are under
+[**Code**](#comments-on-lines), beside the lines they are about. A review that has only such
+comments reads _Left comments on lines of the code_ here.
+
+### Code
+
+The pull request's diff, in the viewer the [changes panel](changes-and-files.md) uses.
+
+It opens on the **files**: how many changed and by how many lines, then each file with what
+happened to it — **M** modified, **A** added, **D** deleted, **R** renamed — and its lines added
+and removed. Hover a renamed file for where it came from.
+
+Press a file to read it:
+
+- the diff, syntax-highlighted, with the stretches that did not change folded away;
+- **Side by side** / **Inline** switches between two panes and one. It is the same setting as
+  the changes panel's, and remembered;
+- the **Files** box and **‹ ›** go to another file without going back to the list, and **← All
+  files** goes back to it;
+- an image is shown before and after; a binary file, or one too large to show, says so.
+
+**Nothing is checked out for this.** The first time you open Code for a pull request, Yardsort
+fetches its commits with git and keeps them under names of its own in the project's repository
+(`refs/yardsort/pull/…`). No branch of yours moves, no remote-tracking branch moves, and no
+files appear anywhere. After a push to the pull request they are fetched again; when the pull
+request leaves the list, what was kept for it is removed.
+
+The diff is what the pull request changes from where it left its base branch, as GitHub shows
+it. For one merged long ago, that is the base as it was then.
+
+The fetch uses git's own credentials — your SSH key or credential helper, the same as a push —
+and never asks for anything on screen. If it fails, the tab shows what git said, with **Retry**
+and **See the diff on GitHub ↗**. The Summary does not depend on it.
+
+### Comments on lines
+
+Each file in the list says how many comment threads it has. Open the file and each thread sits
+**under the lines it is about** — the first comment with its replies, who, when, and **↗** to it
+on GitHub. A comment on the old text sits under the line the new text has where the old one was;
+side by side, it sits in the left pane. A comment the diff has moved on from, or one about the
+file as a whole, is listed under the viewer instead, with where it was. They are read with the
+diff and again whenever the pull request changes.
+
+![The Code tab: a changed file, with a review thread and its reply under the line they are about](../images/pull-requests-code.png)
+
+### A note on lines, for an agent
+
+Select lines in the diff — in either pane — and press **Note on lines…**. The dialog shows the
+lines, takes your note, and says before you press anything where it will go:
+
+- **The pull request has a workspace**: to the agent there, by the rules the
+  [conflict helper](commits-and-pull-requests.md#resolve-merge-conflicts) uses. Running and
+  quiet, it is typed into that conversation, along with anything you had typed there and not
+  sent. Ended, the conversation is resumed with it. One that cannot be continued gets a new
+  conversation of the same agent, given the note and the workspace's task. **A busy agent is
+  never typed into**: the dialog says so, and offers GitHub alone.
+- **No workspace yet**: **Start a workspace with it** gets the branch ready, as
+  [Start workspace](#start-a-workspace-from-a-pull-request) does, and opens the composer with
+  the note as the agent's first message. Nothing starts until you press Start there.
+
+The agent is told the pull request, the file, the lines and which side of the diff they are on,
+the lines themselves, and your note, and asked to act on it in the worktree and commit — never
+to rebase or force-push. Sending takes you to the workspace.
+
+**Also post it on GitHub** makes the same note a comment on those lines of the pull request, as
+well; **Post on GitHub only** posts it and asks no agent. GitHub goes first, because GitHub can
+refuse: it takes a comment only on lines the diff touches or shows around a change, and the
+viewer lets you select any line of the file. A refusal is shown in the dialog before the agent
+has heard anything, so pressing Send again gives the agent the note once. Should the agent be
+the one that cannot be reached after GitHub has the comment, the dialog says so, and sending
+again does not post it twice. Cancelling, or `Esc`, sends nothing anywhere; while a send is
+under way the dialog stays until it is done.
 
 ### Moving around
 
@@ -204,6 +282,11 @@ A pull request's Summary is one more question, about a second, asked when you op
 is reused for half a minute, and asked for again when the list says something about the pull
 request changed.
 
+Code asks GitHub nothing the list has not already asked: the two commits it reads between are
+the ones the list names. It asks _git_, once for each head commit — when you first open the tab
+for a pull request, and again when the list notices a push to it. Going between files, and
+coming back to a pull request you have already read, costs no network at all.
+
 ## When something is missing
 
 The view says why, on a line above the rows, without hiding the projects that are fine:
@@ -220,11 +303,13 @@ The view says why, on a line above the rows, without hiding the projects that ar
   went wrong and **Retry**.
 - **One pull request could not be read** — its Summary says why, with **Retry**. The row and
   everything the list knows about it are still there.
+- **Its commits could not be fetched** — Code says what git said. `Permission denied` means git
+  has no credentials for the remote in a place it can use without asking: an SSH key that needs
+  a passphrase typed, most often. The same fetch from a shell tab will say more.
 
 ## What it does not do
 
-- Show the diff, or comments made on particular lines of it — those are being built next.
-- Post a comment or a reply.
+- Reply to a comment on lines from here: the thread's **↗** opens it on GitHub.
 - Approve or request changes, edit a title, or change labels, assignees or reviewers.
 - Delete a branch, after a merge or ever.
 - List pull requests for GitLab, Bitbucket or Gitea.

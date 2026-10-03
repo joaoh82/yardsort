@@ -1,0 +1,450 @@
+{
+  "data": {
+    "repository": {
+      "hasIssuesEnabled": true,
+      "issues": {
+        "totalCount": 9,
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "Y3Vyc29yOnYyOpK0"
+        },
+        "nodes": [
+          {
+            "number": 14386,
+            "url": "https://github.com/example/widgets/issues/14386",
+            "title": "Replaced title of issue 14386",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-09-08T10:31:38Z",
+            "updatedAt": "2026-10-03T13:13:15Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "grace"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "bug",
+                  "color": "d73a4a"
+                },
+                {
+                  "name": "priority-2",
+                  "color": "FFA501"
+                },
+                {
+                  "name": "gh-issue",
+                  "color": "430568"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 8,
+              "nodes": [
+                {
+                  "authorAssociation": "MEMBER",
+                  "author": {
+                    "__typename": "User",
+                    "login": "linus"
+                  }
+                },
+                {
+                  "authorAssociation": "MEMBER",
+                  "author": {
+                    "__typename": "User",
+                    "login": "margaret"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "grace"
+                  }
+                },
+                {
+                  "authorAssociation": "MEMBER",
+                  "author": {
+                    "__typename": "User",
+                    "login": "margaret"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "alan"
+                  }
+                }
+              ]
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 14584,
+            "url": "https://github.com/example/widgets/issues/14584",
+            "title": "Replaced title of issue 14584",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-10-03T08:49:07Z",
+            "updatedAt": "2026-10-03T08:53:39Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "barbara"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "needs-triage",
+                  "color": "D6393F"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                }
+              ]
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 14563,
+            "url": "https://github.com/example/widgets/issues/14563",
+            "title": "Replaced title of issue 14563",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-10-01T16:57:39Z",
+            "updatedAt": "2026-10-02T18:45:03Z",
+            "authorAssociation": "MEMBER",
+            "author": {
+              "__typename": "User",
+              "login": "margaret"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "enhancement",
+                  "color": "0dd8ac"
+                },
+                {
+                  "name": "core",
+                  "color": "e25944"
+                },
+                {
+                  "name": "gh-pr",
+                  "color": "DD04FD"
+                },
+                {
+                  "name": "gh-issue",
+                  "color": "430568"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 2,
+              "nodes": [
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "label-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                }
+              ]
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 14467,
+            "url": "https://github.com/example/widgets/issues/14467",
+            "title": "Replaced title of issue 14467",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-09-17T14:26:49Z",
+            "updatedAt": "2026-10-02T14:40:36Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "ken"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "blocked",
+                  "color": "ff5451"
+                },
+                {
+                  "name": "enhancement",
+                  "color": "0dd8ac"
+                },
+                {
+                  "name": "gh-issue",
+                  "color": "430568"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 3,
+              "nodes": [
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "label-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "dennis"
+                  }
+                }
+              ]
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 13840,
+            "url": "https://github.com/example/widgets/issues/13840",
+            "title": "Replaced title of issue 13840",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-07-10T13:54:15Z",
+            "updatedAt": "2026-10-01T15:52:27Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "Bot",
+              "login": "triage-bot"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "agentic-workflows",
+                  "color": "ededed"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 149,
+              "nodes": [
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                }
+              ]
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 14558,
+            "url": "https://github.com/example/widgets/issues/14558",
+            "title": "Replaced title of issue 14558",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-10-01T09:50:59Z",
+            "updatedAt": "2026-10-01T12:04:39Z",
+            "authorAssociation": "NONE",
+            "author": null,
+            "labels": {
+              "nodes": [
+                {
+                  "name": "enhancement",
+                  "color": "0dd8ac"
+                },
+                {
+                  "name": "gh-codespace",
+                  "color": "373A15"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 4,
+              "nodes": [
+                {
+                  "authorAssociation": "MEMBER",
+                  "author": {
+                    "__typename": "User",
+                    "login": "linus"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": null
+                },
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "label-bot"
+                  }
+                }
+              ]
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            }
+          },
+          {
+            "number": 13876,
+            "url": "https://github.com/example/widgets/issues/13876",
+            "title": "Replaced title of issue 13876",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-07-14T11:37:45Z",
+            "updatedAt": "2026-09-16T03:11:35Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "edsger"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "bug",
+                  "color": "d73a4a"
+                },
+                {
+                  "name": "priority-3",
+                  "color": "eded04"
+                },
+                {
+                  "name": "stale",
+                  "color": "333333"
+                },
+                {
+                  "name": "gh-skill",
+                  "color": "f7481e"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": [
+                {
+                  "login": "donald"
+                }
+              ]
+            },
+            "comments": {
+              "totalCount": 2,
+              "nodes": [
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "frances"
+                  }
+                }
+              ]
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": [
+                {
+                  "number": 13894
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "viewer": {
+      "login": "ada"
+    }
+  }
+}

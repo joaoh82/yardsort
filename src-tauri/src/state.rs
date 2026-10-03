@@ -27,6 +27,8 @@ pub struct AppState {
     pub assist: Assist,
     /// What the forge last said about each project's pull requests. See `crate::publish`.
     pub forge: crate::publish::Forge,
+    /// What each project's source last said about its tasks. See `crate::publish::tasks`.
+    pub tasks: crate::publish::tasks::TaskCache,
     /// Held while catching up with git, so overlapping project listings reconcile one at a time.
     pub reconciling: Mutex<()>,
     /// The file watcher of the workspace on screen, if any.
@@ -54,6 +56,7 @@ impl AppState {
             settings,
             assist: Assist::default(),
             forge: crate::publish::Forge::default(),
+            tasks: crate::publish::tasks::TaskCache::default(),
             reconciling: Mutex::new(()),
             watcher: Mutex::new(None),
             inbox_watcher: Mutex::new(None),

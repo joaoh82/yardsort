@@ -1,0 +1,18 @@
+{
+  "data": {
+    "repository": {
+      "hasIssuesEnabled": false,
+      "issues": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      }
+    },
+    "viewer": {
+      "login": "ada"
+    }
+  }
+}

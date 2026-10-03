@@ -27,7 +27,7 @@ mod ys;
 // `yardsort_core`. It is re-exported under the names this crate has always used, which is why
 // `crate::store`, `crate::git` and the rest still resolve everywhere below.
 pub use yardsort_core::{
-    daemon, env, error, forge, git, harness, legacy, program, settings, store,
+    daemon, env, error, forge, git, harness, legacy, program, settings, store, tasks,
 };
 
 /// The domain modules whose commands live here but whose logic lives in the core.
@@ -92,10 +92,27 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             publish::commands::workspace_merge_pull_request,
             publish::commands::project_pull_requests,
             publish::pull_requests::pull_request_summary,
+            publish::pull_requests::pull_request_changes,
+            publish::pull_requests::pull_request_diff,
+            publish::pull_requests::pull_request_comment,
+            publish::pull_requests::pull_request_line_comments,
+            publish::pull_requests::pull_request_line_comment,
+            publish::pull_requests::pull_request_note_helper,
+            publish::pull_requests::pull_request_send_note,
+            publish::pull_requests::pull_request_note_text,
             publish::pull_requests::pull_request_merge,
             publish::pull_requests::pull_request_close,
             publish::pull_requests::pull_request_reopen,
             publish::pull_requests::pull_request_prepare_branch,
+            publish::tasks::project_tasks,
+            publish::tasks::task_detail,
+            publish::tasks::task_prompt,
+            publish::tasks::task_create,
+            publish::tasks::task_comment,
+            publish::tasks::task_close,
+            publish::tasks::task_reopen,
+            publish::tasks::task_edit,
+            publish::tasks::project_task_choices,
             publish::conflicts::workspace_conflict_helper,
             publish::conflicts::workspace_resolve_conflicts,
             draft::commands::draft_status,

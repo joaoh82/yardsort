@@ -1,29 +1,10 @@
-import { lazy, Suspense, useState } from "react";
 import { errorMessage, ipc, type Content } from "@/lib/ipc";
 import { useChangesStore, type Viewing } from "@/stores/changes";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { ReportedLine } from "./ReportedBadges";
 import { FileEditor } from "./FileEditor";
-import { titleOf } from "./viewing";
-
-/** Inline or two panes, remembered across restarts like the composer's last picks. */
-const DIFF_MODE_KEY = "changes.diffMode";
-type DiffMode = "inline" | "split";
-
-// CodeMirror is the heaviest thing in the app; load it when a file is first opened.
-const CodeView = lazy(() => import("./CodeView").then((module) => ({ default: module.CodeView })));
-
-const asText = (content: Content) => (content.type === "text" ? content.text : "");
-
-/** Why a side cannot be shown as text, if it cannot. */
-function obstacle(content: Content): string | null {
-  if (content.type === "notEditable") return content.reason;
-  if (content.type === "binary") return "Binary file — not shown.";
-  if (content.type === "tooLarge") {
-    return `File too large to show (${(content.bytes / 1_048_576).toFixed(1)} MB).`;
-  }
-  return null;
-}
+import { DiffBody, ImagePreview, Note } from "./DiffBody";
+import { DIFF_MODE_KEY, obstacle, titleOf, type DiffMode } from "./viewing";
 
 /** The open file or diff, with its header. `expanded` renders the same thing in the big overlay. */
 export function Viewer({
@@ -162,97 +143,20 @@ function Body(props: {
       />
     );
   }
-  const note = (text: string, alert = false) => (
-    <p
-      role={alert ? "alert" : undefined}
-      className={`p-3 ${alert ? "text-red-400" : "text-ink-faint"}`}
-    >
-      {text}
-    </p>
-  );
-  if (error) return note(error, true);
-  let view: { text: string; original?: string };
-  if (viewing.kind === "file") {
-    if (!file) return note("Loading…");
-    if (file.type === "absent") return note("This file no longer exists.");
-    const blocked = obstacle(file);
-    if (blocked) return note(blocked);
-    if (file.type === "image") return <ImagePreview content={file} path={path} />;
-    if (file.type === "text")
-      return (
-        <FileEditor
-          key={`${workspaceId}:${path}`}
-          workspaceId={workspaceId}
-          path={path}
-          text={file.text}
-        />
-      );
-    view = { text: asText(file) };
-  } else {
-    if (!diff) return note("Loading…");
-    if (diff.new.type === "image" || diff.old.type === "image") {
-      return (
-        <div className="flex h-full gap-2 overflow-auto p-2">
-          {(
-            [
-              ["Before", diff.old],
-              ["After", diff.new],
-            ] as const
-          ).map(([label, content]) => (
-            <figure key={label} className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <figcaption className="text-ink-faint">{label}</figcaption>
-              <div className="min-h-0 flex-1">
-                {content.type === "image" ? (
-                  <ImagePreview content={content} path={`${path} — ${label}`} />
-                ) : content.type === "text" ? (
-                  <Suspense fallback={note("Loading…")}>
-                    <CodeView path={path} text={content.text} />
-                  </Suspense>
-                ) : (
-                  note(
-                    content.type === "absent"
-                      ? "No file"
-                      : (obstacle(content) ?? "Cannot display this file."),
-                  )
-                )}
-              </div>
-            </figure>
-          ))}
-        </div>
-      );
-    }
-    const blocked = obstacle(diff.new) ?? obstacle(diff.old);
-    if (blocked) return note(blocked);
-    // A deleted file is shown as its old text, all removed; an added one as all new.
-    view = { text: asText(diff.new), original: asText(diff.old) };
-  }
+  if (error) return <Note alert>{error}</Note>;
+  if (viewing.kind === "diff") return <DiffBody path={path} diff={diff} mode={mode} />;
+  if (!file) return <Note>Loading…</Note>;
+  if (file.type === "absent") return <Note>This file no longer exists.</Note>;
+  const blocked = obstacle(file);
+  if (blocked) return <Note>{blocked}</Note>;
+  if (file.type === "image") return <ImagePreview content={file} path={path} />;
+  if (file.type !== "text") return <Note>Cannot display this file.</Note>;
   return (
-    <Suspense fallback={note("Loading…")}>
-      <CodeView path={path} text={view.text} original={view.original} split={mode === "split"} />
-    </Suspense>
-  );
-}
-
-function ImagePreview({
-  content,
-  path,
-}: {
-  content: Extract<Content, { type: "image" }>;
-  path: string;
-}) {
-  const [failed, setFailed] = useState<string | null>(null);
-  return (
-    <div className="flex h-full items-center justify-center overflow-auto p-3">
-      {failed === content.data ? (
-        <p role="alert">This image could not be displayed.</p>
-      ) : (
-        <img
-          src={`data:${content.mime};base64,${content.data}`}
-          alt={path}
-          onError={() => setFailed(content.data)}
-          className="max-h-full max-w-full object-contain"
-        />
-      )}
-    </div>
+    <FileEditor
+      key={`${workspaceId}:${path}`}
+      workspaceId={workspaceId}
+      path={path}
+      text={file.text}
+    />
   );
 }

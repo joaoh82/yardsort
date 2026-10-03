@@ -21,6 +21,7 @@ walks through both tabs and explains what the local figures include.
 | [Changes & files](guide/changes-and-files.md)                 | Reviewing what an agent did: changed files and who wrote them, diffs, the file tree            |
 | [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row                         |
 | [Pull requests](guide/pull-requests.md)                       | Every project's pull requests in one view: filter them, start a workspace on one, merge, close |
+| [Tasks](guide/tasks.md)                                       | Every project's GitHub issues in one view: which need an answer, what was said; `ys task` too  |
 | [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor                                   |
 | [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer                            |
 | [Activity](guide/activity.md)                                 | The local record of what ran, what each agent reports, and the experimental timeline           |

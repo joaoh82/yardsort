@@ -70,6 +70,15 @@ The line under the box says when the branch comes from a fork — Yardsort will 
 when a branch you already had is behind the pull request. See
 [Start a workspace from a pull request](pull-requests.md#start-a-workspace-from-a-pull-request).
 
+### From a task
+
+**Delegate** on a task in the [Tasks](tasks.md) view opens this same composer with the message
+written from the task — its title, description and latest comments, marked as text other people
+wrote. A line above the box says which task, and to read the message before you start. The
+workspace is named after the task rather than the message, and remembers it: its row shows the
+task's key until it has a pull request. See
+[Handing a task to an agent](tasks.md#handing-a-task-to-an-agent).
+
 ### Where the folders go
 
 `~/yardsort/<project>/<workspace>` by default. Change the folder and the `ys/` branch prefix in
@@ -174,7 +183,8 @@ you are not asked about the same workspace twice.
 
 ## Workspace previews
 
-Hover or keyboard-focus a workspace row for its name, branch and pull request details. The PR
+Hover or keyboard-focus a workspace row for its name, branch and pull request details, and the
+[task it was started from](tasks.md#handing-a-task-to-an-agent) when there is one. The PR
 preview includes review status, line counts and expandable checks; see
 [Commits & pull requests](commits-and-pull-requests.md).
 
