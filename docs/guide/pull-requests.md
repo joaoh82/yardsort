@@ -7,6 +7,8 @@ requests** at the very top of the sidebar, or from the
 takes over the center panel the way a workflow and [Usage](usage.md) do; **×** in its header
 closes it, and so does pressing the row again or selecting a workspace.
 
+![The Pull requests view: the list on the left, one pull request open on the right with its description, checks and reviewers](../images/pull-requests.png)
+
 The number on the sidebar row is how many pull requests are open across your projects, with a
 **+** after it when a repository has more open than the list reads.
 
@@ -159,6 +161,8 @@ on GitHub. A comment on the old text sits under the line the new text has where 
 side by side, it sits in the left pane. A comment the diff has moved on from, or one about the
 file as a whole, is listed under the viewer instead, with where it was. They are read with the
 diff and again whenever the pull request changes.
+
+![The Code tab: a changed file, with a review thread and its reply under the line they are about](../images/pull-requests-code.png)
 
 ### A note on lines, for an agent
 
