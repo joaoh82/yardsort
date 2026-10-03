@@ -315,6 +315,16 @@ base — the same `FileChange` and `FileDiff` a workspace's changes are, which i
 viewer shows both. Measuring from the recorded base rather than the base branch's tip is what
 keeps a merged pull request's diff from coming out empty.
 
+**Writing to the forge** is three `gh` calls with the user's words on standard input, never in
+an argument: `gh pr comment --body-file -`, and `gh api -X POST …/pulls/<n>/comments` with
+`-F body=@-` for a comment on lines. Comments on lines are read with `gh api --paginate --slurp`,
+which `gh pr view` does not return. **A note on lines for an agent** reuses the conflict
+helper's two halves — `plan` chooses the conversation, `deliver` reaches it, never a busy one —
+with words from `code_note::prompt`; with no workspace, `prepare_branch` and the composer, the
+note as its first message. The window shows each comment thread under its lines as a block
+widget in CodeMirror, mapping a comment on the old text to the new text through the merge
+view's chunks.
+
 **A pull request's branch, for a workspace** (`prepare_branch`): a branch already here is never
 moved; one in the project's remote is fetched into its remote-tracking ref and a local branch
 made to track it; one from a fork becomes `pr/<n>` at `refs/pull/<n>/head`, with that ref

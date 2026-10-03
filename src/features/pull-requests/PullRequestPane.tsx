@@ -130,7 +130,7 @@ export function PullRequestPane({
       ) : (
         // Keyed by the pull request: the file in view belongs to it, not to the next one.
         <div className="min-h-0 flex-1">
-          <Code key={row.key} row={row} />
+          <Code key={row.key} row={row} now={now} />
         </div>
       )}
     </section>

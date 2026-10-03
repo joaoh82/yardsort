@@ -84,8 +84,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Every pull request in one place.** **Pull requests**, at the top of the sidebar, lists the
   pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks,
   reviewers and size, filtered by project, author and review status. Open one to read its
-  description, its checks, the conversation and its diff. Start a workspace on one, merge it, close it or
-  reopen it from there, each confirmed first and naming whose it is. It
+  description, its checks, the conversation and its diff, with every comment beside the lines it
+  is about; reply, or select lines and send a note about them to the agent working on it. Start
+  a workspace on one, merge it, close it or reopen it from there, each confirmed first and naming
+  whose it is. It
   reads GitHub through `gh`; Yardsort still holds no credential. See
   [Pull requests](docs/guide/pull-requests.md).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a

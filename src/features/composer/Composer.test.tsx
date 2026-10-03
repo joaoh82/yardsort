@@ -111,6 +111,7 @@ describe("Composer", () => {
       selectedWorkspaceId: "w-app",
       composingProjectId: "p-app",
       composingBranch: null,
+      composingPrompt: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
@@ -212,6 +213,25 @@ describe("Composer", () => {
     // Another branch chosen by hand is not the pull request's, and is not described as one.
     await user.selectOptions(screen.getByRole("combobox", { name: "Branch" }), "open:develop");
     expect(screen.getByText(/Enter to start/)).not.toHaveTextContent("pull request");
+  });
+
+  it("starts with a note about the pull request as its first message, when one came with the branch", async () => {
+    const created = worktree("app", "kept-earlier");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    useProjectsStore.setState({
+      composingBranch: { branch: "ys/kept-earlier", behind: 0, fork: false },
+      composingPrompt: "Pull request #8: fold these lines.",
+    });
+    const user = await renderComposer();
+    const box = screen.getByRole("textbox", { name: /work on/ });
+    expect(box).toHaveValue("Pull request #8: fold these lines.");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingBranch: "ys/kept-earlier",
+        harness: expect.objectContaining({ prompt: "Pull request #8: fold these lines." }),
+      }),
+    );
   });
 
   it("starts from the default branch when the pull request's branch was checked out meanwhile", async () => {
@@ -402,6 +422,7 @@ describe("Composer with Assist", () => {
       selectedWorkspaceId: "w-app",
       composingProjectId: "p-app",
       composingBranch: null,
+      composingPrompt: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });

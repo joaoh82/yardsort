@@ -13,6 +13,7 @@
 pub mod activity;
 pub mod assist;
 pub mod changes;
+pub mod code_note;
 pub mod conflicts;
 pub mod daemon;
 pub mod draft;

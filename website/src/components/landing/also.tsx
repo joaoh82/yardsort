@@ -27,7 +27,7 @@ const POINTS = [
   },
   {
     title: "Every pull request in one place",
-    body: "One list of the pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks, reviewers and size, filtered by project, author and review status. Open one to read its description, its checks, the conversation and its diff. Start a workspace on one, merge it, close it or reopen it, each confirmed first. It reads GitHub through gh; Yardsort still holds no credential.",
+    body: "One list of the pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks, reviewers and size, filtered by project, author and review status. Open one to read its description, its checks, the conversation and its diff, with every comment beside the lines it is about; reply, or select lines and send a note about them to the agent working on it. Start a workspace on one, merge it, close it or reopen it, each confirmed first. It reads GitHub through gh; Yardsort still holds no credential.",
   },
   {
     title: "Choose how agents start",

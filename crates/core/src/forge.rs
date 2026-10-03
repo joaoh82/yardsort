@@ -354,6 +354,70 @@ pub struct PullRequestSummary {
     pub posts: Vec<PullRequestPost>,
 }
 
+/// Which side of a diff a comment on a line is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffSide {
+    /// The file as it was: a removed or unchanged line of the old version.
+    Left,
+    /// The file as the pull request has it.
+    Right,
+}
+
+impl DiffSide {
+    fn as_api(self) -> &'static str {
+        match self {
+            Self::Left => "LEFT",
+            Self::Right => "RIGHT",
+        }
+    }
+}
+
+/// A comment on particular lines of a pull request's diff, as the forge's API lists them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LineComment {
+    /// The forge's id, as text: it does not fit a JavaScript number.
+    pub id: String,
+    pub path: String,
+    /// The line it is on now, in the file as the pull request has it (or as it was, for
+    /// [`DiffSide::Left`]). `None` when the diff has moved on from under it, or when it is about
+    /// the file as a whole.
+    pub line: Option<u32>,
+    /// The first line of a range, when it is on several.
+    pub start_line: Option<u32>,
+    pub side: DiffSide,
+    /// The line it was made on, which is all that is left of where an outdated one went.
+    pub original_line: Option<u32>,
+    /// The diff has changed since and the forge no longer places it on a line.
+    pub outdated: bool,
+    /// About the file as a whole, not a line of it.
+    pub whole_file: bool,
+    pub author: Option<String>,
+    /// In epoch milliseconds.
+    #[specta(type = f64)]
+    pub at: i64,
+    /// Markdown.
+    pub body: String,
+    pub url: Option<String>,
+    /// The comment this one answers, when it is a reply.
+    pub in_reply_to: Option<String>,
+}
+
+/// Where a comment on lines goes: what the forge needs to place it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LinePlace {
+    /// The head commit the lines are of, as the diff was read.
+    pub commit: String,
+    pub path: String,
+    pub side: DiffSide,
+    /// The last line, or the only one.
+    pub line: u32,
+    /// The first line of a range.
+    pub start_line: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum PullRequestPostKind {
@@ -776,6 +840,72 @@ impl Gh {
             .to_owned())
     }
 
+    /// Run `gh` with `stdin` on its standard input: for text that is the user's words, which
+    /// never go in an argument — an argument list has a length Windows caps, and a shell is not
+    /// involved either way, but a `--body` of a few thousand characters is a thing to avoid.
+    fn run_with_stdin(&self, cwd: &Path, args: &[&str], stdin: &str) -> ForgeResult<String> {
+        use std::io::Write;
+        let mut child = self
+            .command(cwd, args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        if let Some(mut pipe) = child.stdin.take() {
+            // A program that has already failed may have closed its end; what matters then is
+            // what it says, which `wait_with_output` reads.
+            let _ = pipe.write_all(stdin.as_bytes());
+        }
+        let output = child.wait_with_output()?;
+        Self::answer(args, &output)
+    }
+
+    /// Post `body` as a comment on pull request `number`'s conversation.
+    pub fn comment(&self, root: &Path, number: u32, body: &str) -> ForgeResult<()> {
+        self.run_with_stdin(
+            root,
+            &["pr", "comment", &number.to_string(), "--body-file", "-"],
+            body,
+        )?;
+        Ok(())
+    }
+
+    /// Every comment made on lines of pull request `number`'s diff, oldest first. `gh pr view`
+    /// does not return these; the forge's API does, a page at a time.
+    pub fn line_comments(&self, root: &Path, number: u32) -> ForgeResult<Vec<LineComment>> {
+        let endpoint = format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments");
+        let out = self.run(root, &["api", "--paginate", "--slurp", &endpoint])?;
+        line_comments(&out)
+    }
+
+    /// Post `body` as a comment on the lines `place` names, on pull request `number`.
+    pub fn line_comment(
+        &self,
+        root: &Path,
+        number: u32,
+        place: &LinePlace,
+        body: &str,
+    ) -> ForgeResult<()> {
+        let endpoint = format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments");
+        let commit = format!("commit_id={}", place.commit);
+        let path = format!("path={}", place.path);
+        let side = format!("side={}", place.side.as_api());
+        let line = format!("line={}", place.line);
+        // `-f` sends a string as it is; `-F` turns a number into one. `body=@-` is read from
+        // standard input.
+        let mut args = vec![
+            "api", "-X", "POST", &endpoint, "-F", "body=@-", "-f", &commit, "-f", &path, "-f",
+            &side, "-F", &line,
+        ];
+        let start = place.start_line.map(|start| format!("start_line={start}"));
+        let start_side = format!("start_side={}", place.side.as_api());
+        if let Some(start) = &start {
+            args.extend(["-F", start, "-f", &start_side]);
+        }
+        self.run_with_stdin(root, &args, body)?;
+        Ok(())
+    }
+
     /// Close pull request `number` without merging it. Its branch is left where it is, and no
     /// comment is posted.
     pub fn close_pull_request(&self, root: &Path, number: u32) -> ForgeResult<()> {
@@ -956,6 +1086,69 @@ pub fn pull_request_summary(json: &str) -> ForgeResult<PullRequestSummary> {
         posts,
         pull_request,
     })
+}
+
+/// Read what `gh api --paginate --slurp` printed for the comments on a pull request's lines:
+/// an array of pages, each an array of comments.
+pub fn line_comments(json: &str) -> ForgeResult<Vec<LineComment>> {
+    let pages: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+    let pages = pages
+        .as_array()
+        .ok_or_else(|| ForgeError::Unreadable("expected pages of comments".to_owned()))?;
+    let number = |v: Option<&serde_json::Value>| {
+        v.and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+    };
+    let id = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_u64()).map(|v| v.to_string());
+    let mut comments = Vec::new();
+    for comment in pages.iter().flat_map(|page| items(Some(page))) {
+        let (Some(id), Some(at)) = (
+            id(comment.get("id")),
+            comment
+                .get("created_at")
+                .and_then(|t| t.as_str())
+                .and_then(crate::activity::iso_to_ms),
+        ) else {
+            continue;
+        };
+        let whole_file = comment
+            .get("subject_type")
+            .and_then(|v| v.as_str())
+            .is_some_and(|kind| kind == "file");
+        let line = number(comment.get("line"));
+        comments.push(LineComment {
+            id: id.clone(),
+            path: string_field(comment, "path"),
+            line,
+            start_line: number(comment.get("start_line")),
+            side: match comment.get("side").and_then(|v| v.as_str()) {
+                Some("LEFT") => DiffSide::Left,
+                _ => DiffSide::Right,
+            },
+            original_line: number(comment.get("original_line")),
+            // The forge drops `position` once the diff no longer has the line.
+            outdated: !whole_file && comment.get("position").is_none_or(|p| p.is_null()),
+            whole_file,
+            author: comment
+                .get("user")
+                .and_then(|user| user.get("login"))
+                .and_then(|login| login.as_str())
+                .map(str::to_owned),
+            at,
+            body: string_field(comment, "body"),
+            url: comment
+                .get("html_url")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
+            in_reply_to: match comment.get("in_reply_to_id") {
+                Some(reply) if !reply.is_null() => reply.as_u64().map(|v| v.to_string()),
+                _ => None,
+            },
+        });
+    }
+    comments.sort_by_key(|comment| comment.at);
+    Ok(comments)
 }
 
 /// The open pull requests of a repository, fifty to the page. The fields are the ones
@@ -1881,6 +2074,98 @@ mod tests {
             "{asked}"
         );
         assert_eq!(asked.lines().count(), 1);
+    }
+
+    #[test]
+    fn reads_recorded_comments_on_lines() {
+        let comments = line_comments(&fixture("pr-line-comments.json")).unwrap();
+        assert_eq!(comments.len(), 3);
+        let first = &comments[0];
+        assert_eq!(first.path, "script/build.ps1");
+        assert_eq!(first.line, Some(36));
+        assert_eq!(first.start_line, None);
+        assert_eq!(first.side, DiffSide::Right);
+        assert_eq!(first.author.as_deref(), Some("linus"));
+        assert_eq!(first.body, "Is this the right encoding?");
+        assert_eq!(first.in_reply_to, None);
+        assert!(!first.outdated && !first.whole_file);
+        assert!(first.url.as_deref().unwrap().contains("#discussion_r"));
+
+        let range = &comments[1];
+        assert_eq!((range.start_line, range.line), (Some(43), Some(49)));
+
+        let reply = &comments[2];
+        assert_eq!(reply.in_reply_to.as_deref(), Some(first.id.as_str()));
+        assert!(reply.at > first.at);
+    }
+
+    #[test]
+    fn a_comment_the_diff_moved_on_from_and_one_on_the_whole_file_are_told_apart() {
+        let json = serde_json::json!([[
+            {"id": 1, "path": "a.rs", "line": null, "original_line": 12, "side": "LEFT",
+             "position": null, "subject_type": "line", "body": "gone", "created_at": "2026-09-28T10:00:00Z",
+             "user": {"login": "ada"}},
+            {"id": 2, "path": "a.rs", "line": null, "original_line": null, "side": "RIGHT",
+             "position": null, "subject_type": "file", "body": "the whole file",
+             "created_at": "2026-09-28T09:00:00Z", "user": null},
+            {"id": 3, "path": "a.rs", "line": 4, "side": "RIGHT", "position": 2,
+             "body": "", "created_at": "not a time"}
+        ]]);
+        let comments = line_comments(&json.to_string()).unwrap();
+        assert_eq!(comments.len(), 2, "one without a time is nothing to place");
+        let (whole, gone) = (&comments[0], &comments[1]);
+        assert!(whole.whole_file && !whole.outdated);
+        assert_eq!(whole.author, None);
+        assert!(gone.outdated && !gone.whole_file);
+        assert_eq!(gone.side, DiffSide::Left);
+        assert_eq!(gone.original_line, Some(12));
+        assert!(line_comments("[]").unwrap().is_empty());
+        assert!(line_comments("{}").is_err());
+    }
+
+    /// The words go on standard input, never in the argument list; the place goes as fields.
+    #[cfg(unix)]
+    #[test]
+    fn comments_are_posted_with_their_words_on_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().display().to_string();
+        // A `gh` that writes down its arguments and what it read.
+        let gh = paged_gh(dir.path(), "true", "true");
+        std::fs::write(
+            dir.path().join("gh"),
+            format!("#!/bin/sh\necho \"$*\" >> '{here}/asked'\ncat >> '{here}/read'\n"),
+        )
+        .unwrap();
+        gh.comment(dir.path(), 7, "Thanks — one question.\n")
+            .unwrap();
+        gh.line_comment(
+            dir.path(),
+            7,
+            &LinePlace {
+                commit: "c".repeat(40),
+                path: "src/a.rs".into(),
+                side: DiffSide::Right,
+                line: 12,
+                start_line: Some(10),
+            },
+            "Could this be one loop?",
+        )
+        .unwrap();
+        let asked = std::fs::read_to_string(format!("{here}/asked")).unwrap();
+        let asked: Vec<&str> = asked.lines().collect();
+        assert_eq!(asked[0], "pr comment 7 --body-file -");
+        assert_eq!(
+            asked[1],
+            format!(
+                "api -X POST repos/{{owner}}/{{repo}}/pulls/7/comments -F body=@- -f commit_id={} \
+                 -f path=src/a.rs -f side=RIGHT -F line=12 -F start_line=10 -f start_side=RIGHT",
+                "c".repeat(40)
+            )
+        );
+        assert_eq!(
+            std::fs::read_to_string(format!("{here}/read")).unwrap(),
+            "Thanks — one question.\nCould this be one loop?"
+        );
     }
 
     /// A team in `gh pr list`'s own shape, which has a name and a slug and no login.
