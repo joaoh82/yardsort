@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.18.0
 
 - **Install ys no longer, now and then, says the copy it just made is "not Yardsort's".** Right
   after the copy, the file could still be held open for a moment, and running it to read its
