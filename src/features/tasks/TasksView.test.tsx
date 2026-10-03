@@ -729,6 +729,27 @@ describe("managing a task", () => {
       );
     });
 
+    it("still says what was done when the closed task leaves the list, as GitHub has it", async () => {
+      native.confirm.mockResolvedValue(true);
+      // After the close the source no longer lists #12 among the open ones.
+      core.taskClose.mockImplementation(async () => {
+        core.projectTasks.mockImplementation(async (id: string) =>
+          id === alpha.id ? tasksOf([daemon]) : answers()[id],
+        );
+      });
+      const user = await open();
+      await user.click(within(pane()).getByRole("button", { name: "Close" }));
+      await user.click(screen.getByRole("menuitem", { name: "Close as completed" }));
+
+      await waitFor(() =>
+        expect(screen.queryByRole("region", { name: "Task #12" })).not.toBeInTheDocument(),
+      );
+      expect(titles()).toEqual(["Document the daemon", "Dark mode"]);
+      expect(screen.getByRole("status")).toHaveTextContent("Closed #12 as completed.");
+      await user.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
     it("offers Reopen on a closed task, and reopens only on a yes", async () => {
       const user = show(answers(), { [FILTERS_KEY]: JSON.stringify({ state: "closed" }) });
       await user.click(row(/Crash on an empty repository/));

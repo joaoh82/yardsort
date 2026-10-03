@@ -640,6 +640,13 @@ Where it differs from the proposal:
 - **The reply box clears when the comment has landed**, not after the list and the detail have
   been read again: those are the network, and a full box with a live button is a second post.
 
+Changed after review, before merging:
+
+- **What was done to a task is still said when the task leaves the list.** Closing from the
+  Open tab drops the row, and the details with it, which is where the line saying _Closed #12_
+  was. The view says it above the list when no details are open. The test that should have
+  caught it had a stand-in that kept the closed task among the open ones; it now drops it.
+
 Found:
 
 - **jsdom lays nothing out, and the panels' divider takes the focus on every pointer press

@@ -200,14 +200,15 @@ sends nothing, and if GitHub refuses, what you typed stays where it was.
 ### Answering
 
 The box under a task's conversation posts a comment. **Comment**, or **Ctrl+Enter** / **⌘Enter**,
-sends it; sending is the confirmation. The box clears when the comment has landed and the
-conversation is read again. A task you answer stops [needing an answer](#what-needs-an-answer-means)
+sends it; sending is the confirmation. The box clears as soon as the comment has landed; the
+conversation is read again right after. A task you answer stops [needing an answer](#what-needs-an-answer-means)
 — if you are one of the repository's maintainers.
 
 ### Closing and reopening
 
 **Close ▾** on an open task offers **Close as completed** and **Close as not planned**.
-**Reopen** is on a closed one. Both ask first, naming the task and who opened it, because both
+**Reopen** is on a closed one. A task closed from the **Open** tab leaves that list, and its
+details with it; a line above the list says it was closed. Both ask first, naming the task and who opened it, because both
 tell people something: closing says their issue is finished with, and reopening notifies
 everyone following it. A _no_ sends nothing. Closing posts no comment and deletes nothing.
 
