@@ -135,12 +135,21 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
   const askedChanges = new Map<string, number>();
   const askedComments = new Map<string, number>();
 
-  /** After something was posted: the list, the summary and the comments are all from before. */
-  async function posted(target: Target) {
-    await usePublishStore.getState().loadProject(target.projectId, true, true);
-    const latest = get();
-    if (latest.summaries[target.key]) await latest.loadSummary(target, true);
-    if (latest.lineComments[target.key]) await latest.loadLineComments(target, true);
+  /**
+   * After something was posted: the list, the summary and the comments are all from before.
+   *
+   * Not awaited by the actions that post. Reading it all back is `gh` over the network, and
+   * while that runs the words are already on the forge: the box they came from must clear and
+   * the button must be free *now*, or a second press in those seconds posts them again.
+   */
+  function posted(target: Target) {
+    const refresh = async () => {
+      await usePublishStore.getState().loadProject(target.projectId, true, true);
+      const latest = get();
+      if (latest.summaries[target.key]) await latest.loadSummary(target, true);
+      if (latest.lineComments[target.key]) await latest.loadLineComments(target, true);
+    };
+    void refresh().catch(console.error);
   }
   const patch = (key: string, next: Partial<SummaryState>) =>
     set((s) => {
@@ -275,7 +284,7 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
         return false;
       } finally {
         set({ busy: null });
-        await posted(target);
+        posted(target);
       }
     },
 
@@ -291,7 +300,7 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
         return false;
       } finally {
         set({ busy: null });
-        await posted(target);
+        posted(target);
       }
     },
 

@@ -627,6 +627,18 @@ Writing to the forge, and to an agent: the reply box, comments on lines, and a n
   and refuses nothing silently: an agent that cannot be asked is a line in the dialog, with
   GitHub still on offer. The checkbox posts the same words on GitHub too; a second button posts
   them there alone.
+- **GitHub first, and once.** Of the two places a note goes, GitHub is the one that can refuse:
+  its review-comment endpoint takes only a line inside the diff's hunks, and the viewer lets
+  the user select any line of the file. So the comment is posted before the agent is given the
+  note, and a refusal leaves nothing half done. Should the agent be the step that fails after
+  GitHub has the comment, the dialog remembers that and a second Send does not post it again.
+  Neither `Esc` nor the backdrop closes the dialog while a send is under way, as Cancel is
+  already disabled then: a send that outlives its dialog would still type into the agent.
+- **Posting returns as soon as the words are on the forge.** Reading everything back — the
+  list, the summary, the threads — is `gh` over the network and is not awaited by the store's
+  `comment` and `lineComment`. Otherwise the reply box kept its text and its button for those
+  seconds, and a second press posted the same comment twice. Found in review; a test with a
+  refresh that never answers covers it.
 - **Not built**: replying to a comment on lines from here, and marking threads resolved. The
   thread's link opens it on GitHub.
 

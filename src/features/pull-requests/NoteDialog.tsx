@@ -53,15 +53,28 @@ export function NoteDialog({
   const [helper, setHelper] = useState<ConflictHelper | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Whether GitHub has the comment already. Once it does, a retry after some later step failed
+  // must not post it a second time.
+  const [postedOnGitHub, setPostedOnGitHub] = useState(false);
+  // The same two, for the handlers that are not re-created on every render.
+  const busyRef = useRef(false);
+  const postedRef = useRef(false);
   const titleId = useId();
   const dialogRef = useRef<HTMLFormElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   useModalFocus(dialogRef);
   const workspace = row.workspace;
 
+  // Closing is cancelling, and cancelling sends nothing: once a send is under way, neither Esc
+  // nor the backdrop closes the dialog, the same as the disabled Cancel button.
+  const cancel = () => {
+    if (!busyRef.current) onClose();
+  };
   useEffect(() => {
     noteRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busyRef.current) onClose();
+    };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
@@ -89,19 +102,38 @@ export function NoteDialog({
   const lines =
     excerpt.from === excerpt.to ? `line ${excerpt.from}` : `lines ${excerpt.from}–${excerpt.to}`;
   const ready = note.trim() !== "" && !busy;
-
-  const postOnGitHub = async () => {
-    const ok = await usePullRequestsStore.getState().lineComment(target, place, note.trim());
-    if (!ok) throw new Error(usePullRequestsStore.getState().error ?? "Could not comment.");
-  };
-
-  const send = async () => {
-    if (!ready) return;
+  const start = () => {
+    busyRef.current = true;
     setBusy(true);
     setProblem(null);
+  };
+  const failed = (error: unknown) => {
+    setProblem(errorMessage(error));
+    busyRef.current = false;
+    setBusy(false);
+  };
+
+  /** Post the note on GitHub, once: the second time through it is already there. */
+  const postOnGitHub = async () => {
+    if (postedRef.current) return;
+    const ok = await usePullRequestsStore.getState().lineComment(target, place, note.trim());
+    if (!ok) throw new Error(usePullRequestsStore.getState().error ?? "Could not comment.");
+    postedRef.current = true;
+    setPostedOnGitHub(true);
+  };
+
+  /**
+   * GitHub goes first, because GitHub can refuse — it takes a comment only on a line inside the
+   * diff's hunks, and the viewer lets you select any line of the file. A refusal before the agent
+   * has the note leaves nothing half done: Send tries again, and the agent still gets it once.
+   */
+  const send = async () => {
+    if (!ready) return;
+    start();
     try {
       if (workspace) {
         if (!helper) throw new Error("Still finding out who to ask. Try again in a moment.");
+        if (post) await postOnGitHub();
         const terminals = useTerminalStore.getState();
         const asked = await ipc.pullRequestSendNote(
           workspace.id,
@@ -111,7 +143,6 @@ export function NoteDialog({
           note.trim(),
           terminals.lastSize,
         );
-        if (post) await postOnGitHub();
         if (asked.reach === "type") terminals.activate(asked.session.id);
         else terminals.adopt(asked.session);
         onClose();
@@ -123,34 +154,31 @@ export function NoteDialog({
           excerpt,
           note.trim(),
         );
-        const prepared = await ipc.pullRequestPrepareBranch(row.project.id, row.pr.number);
         if (post) await postOnGitHub();
+        const prepared = await ipc.pullRequestPrepareBranch(row.project.id, row.pr.number);
         onClose();
         useProjectsStore.getState().compose(row.project.id, prepared, text);
       }
     } catch (error) {
-      setProblem(errorMessage(error));
-      setBusy(false);
+      failed(error);
     }
   };
 
   const postOnly = async () => {
     if (!ready) return;
-    setBusy(true);
-    setProblem(null);
+    start();
     try {
       await postOnGitHub();
       onClose();
     } catch (error) {
-      setProblem(errorMessage(error));
-      setBusy(false);
+      failed(error);
     }
   };
 
   return (
     <div
       className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[16vh]"
-      onPointerDown={(event) => event.target === event.currentTarget && onClose()}
+      onPointerDown={(event) => event.target === event.currentTarget && cancel()}
     >
       <form
         ref={dialogRef}
@@ -195,11 +223,13 @@ export function NoteDialog({
           <input
             type="checkbox"
             checked={post}
-            disabled={busy}
+            disabled={busy || postedOnGitHub}
             onChange={(event) => setPost(event.target.checked)}
             className="accent-(--color-accent)"
           />
-          Also post it on GitHub, as a comment on these lines
+          {postedOnGitHub
+            ? "Posted on GitHub as a comment on these lines. Sending again does not post it twice."
+            : "Also post it on GitHub, as a comment on these lines"}
         </label>
         {problem && (
           <p role="alert" className="mt-2 text-red-400 select-text">
@@ -209,7 +239,7 @@ export function NoteDialog({
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={cancel}
             disabled={busy}
             className="px-3 py-1.5 text-ink-muted hover:text-ink"
           >
@@ -217,7 +247,7 @@ export function NoteDialog({
           </button>
           <button
             type="button"
-            disabled={!ready}
+            disabled={!ready || postedOnGitHub}
             onClick={() => void postOnly()}
             className="rounded border border-line px-3 py-1.5 hover:bg-raised disabled:opacity-40"
           >

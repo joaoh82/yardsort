@@ -238,6 +238,23 @@ describe("replying", () => {
     expect(usePullRequestsStore.getState().notice).toBe("Commented on #8.");
   });
 
+  it("clears the box as soon as the post lands, not after everything is read again", async () => {
+    answer();
+    // The reading-again is `gh` over the network. Here it never comes back at all.
+    core.projectPullRequests.mockReturnValue(new Promise(() => {}));
+    const { user } = show();
+    const box = await screen.findByRole("textbox", { name: "Your comment" });
+    await user.type(box, "Once.");
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(core.pullRequestComment).toHaveBeenCalledTimes(1));
+    // Were the box still full and the button still live, a second press would post it again.
+    await waitFor(() => expect(box).toHaveValue(""));
+    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true);
+    await user.type(box, "Twice.{Control>}{Enter}{/Control}");
+    await waitFor(() => expect(core.pullRequestComment).toHaveBeenCalledTimes(2));
+    expect(core.pullRequestComment).toHaveBeenLastCalledWith(alpha.id, 8, "Twice.");
+  });
+
   it("keeps what was written when the forge refuses, and says why", async () => {
     answer();
     core.pullRequestComment.mockRejectedValue({

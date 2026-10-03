@@ -364,6 +364,20 @@ describe("comments on lines", () => {
 });
 
 describe("a note on selected lines", () => {
+  /** The agent's terminal, as the core describes it once the note has gone to it. */
+  const session = (id: string) => ({
+    id,
+    program: "claude",
+    args: [],
+    cwd: null,
+    pid: 1,
+    size: { cols: 80, rows: 24 },
+    labels: { workspace: "w-alpha-branch-8", harness: "claude", record: "rec-1" },
+    state: { status: "running" as const },
+    hasOutput: false,
+    busy: false,
+    idleMs: 0,
+  });
   const openNote = async (user: ReturnType<typeof userEvent.setup>) => {
     await user.click(await screen.findByRole("button", { name: /upload\.rs/ }));
     const button = screen.getByRole("button", { name: "Note on lines…" });
@@ -383,7 +397,7 @@ describe("a note on selected lines", () => {
     });
     core.pullRequestSendNote.mockResolvedValue({
       reach: "type",
-      session: { id: "s1", labels: { workspace: "w-alpha-branch-8" } },
+      session: session("s1"),
     });
     const { user } = show(listed, withWorkspace);
     const dialog = await openNote(user);
@@ -422,7 +436,7 @@ describe("a note on selected lines", () => {
     });
     core.pullRequestSendNote.mockResolvedValue({
       reach: "resume",
-      session: { id: "s2", labels: { workspace: "w-alpha-branch-8" } },
+      session: session("s2"),
     });
     const { user } = show(listed, withWorkspace);
     const dialog = await openNote(user);
@@ -437,7 +451,12 @@ describe("a note on selected lines", () => {
         "Fold these.",
       ),
     );
-    expect(core.pullRequestSendNote).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(core.pullRequestSendNote).toHaveBeenCalledTimes(1);
+    // GitHub first: it is the one that can refuse.
+    expect(core.pullRequestLineComment.mock.invocationCallOrder[0]).toBeLessThan(
+      core.pullRequestSendNote.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("starts a workspace with the note when the pull request has none", async () => {
@@ -488,6 +507,94 @@ describe("a note on selected lines", () => {
     await waitFor(() => expect(core.pullRequestLineComment).toHaveBeenCalledTimes(1));
     expect(core.pullRequestSendNote).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("posts on GitHub before the agent hears of it, so a refusal leaves nothing half done", async () => {
+    core.pullRequestNoteHelper.mockResolvedValue({
+      sessionId: "rec-1",
+      harnessLabel: "Claude Code",
+      title: "t",
+      reach: "start",
+    });
+    core.pullRequestSendNote.mockResolvedValue({
+      reach: "start",
+      session: session("s3"),
+    });
+    // What GitHub says about a line outside the diff's hunks.
+    core.pullRequestLineComment.mockRejectedValueOnce({
+      code: "gh_failed",
+      message: "HTTP 422: Validation Failed (line must be part of the diff)",
+    });
+    const { user } = show(listed, withWorkspace);
+    const dialog = await openNote(user);
+    await user.type(within(dialog).getByRole("textbox", { name: "Note" }), "Fold these.");
+    await user.click(within(dialog).getByRole("checkbox"));
+    await user.click(within(dialog).getByRole("button", { name: "Send to agent" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("part of the diff");
+    expect(core.pullRequestLineComment).toHaveBeenCalledTimes(1);
+    expect(core.pullRequestSendNote).not.toHaveBeenCalled();
+    expect(dialog).toBeInTheDocument();
+
+    // Sending again, now that GitHub accepts it: the agent hears of it once.
+    await user.click(within(dialog).getByRole("button", { name: "Send to agent" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(core.pullRequestSendNote).toHaveBeenCalledTimes(1);
+    expect(core.pullRequestLineComment).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not post on GitHub twice when the agent could not be reached the first time", async () => {
+    core.pullRequestNoteHelper.mockResolvedValue({
+      sessionId: "rec-1",
+      harnessLabel: "Claude Code",
+      title: "t",
+      reach: "type",
+    });
+    core.pullRequestSendNote
+      .mockRejectedValueOnce({ code: "agent_busy", message: "Claude Code is working right now." })
+      .mockResolvedValueOnce({
+        reach: "type",
+        session: session("s1"),
+      });
+    const { user } = show(listed, withWorkspace);
+    const dialog = await openNote(user);
+    await user.type(within(dialog).getByRole("textbox", { name: "Note" }), "Fold these.");
+    await user.click(within(dialog).getByRole("checkbox"));
+    await user.click(within(dialog).getByRole("button", { name: "Send to agent" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("working right now");
+    expect(core.pullRequestLineComment).toHaveBeenCalledTimes(1);
+    expect(dialog).toHaveTextContent("Posted on GitHub as a comment on these lines.");
+    expect(within(dialog).getByRole("checkbox")).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Post on GitHub only" })).toBeDisabled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Send to agent" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(core.pullRequestSendNote).toHaveBeenCalledTimes(2);
+    expect(core.pullRequestLineComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("cannot be closed with Esc or the backdrop while a send is under way", async () => {
+    core.pullRequestNoteHelper.mockResolvedValue({
+      sessionId: "rec-1",
+      harnessLabel: "Claude Code",
+      title: "t",
+      reach: "type",
+    });
+    let finish: (asked: unknown) => void = () => {};
+    core.pullRequestSendNote.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const { user } = show(listed, withWorkspace);
+    const dialog = await openNote(user);
+    await user.type(within(dialog).getByRole("textbox", { name: "Note" }), "Fold these.");
+    await user.click(within(dialog).getByRole("button", { name: "Send to agent" }));
+    await waitFor(() => expect(core.pullRequestSendNote).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByRole("button", { name: "Sending…" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.pointer({ keys: "[MouseLeft]", target: dialog.parentElement! });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    finish({ reach: "type", session: session("s1") });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("says when the agent cannot be asked, and does not pretend otherwise", async () => {

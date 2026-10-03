@@ -50,8 +50,10 @@ pub fn prompt(pr: &PullRequest, excerpt: &Excerpt, note: &str, task: Option<&str
     if let Some(task) = task.map(str::trim).filter(|task| !task.is_empty()) {
         text.push_str(&format!("The task it was opened for:\n\n{task}\n\n"));
     }
+    let fence = fence_for(&excerpt.text);
     text.push_str(&format!(
-        "A note from me about `{path}`, {lines}, {where_}:\n\n```\n{excerpt}\n```\n\n{note}\n\n\
+        "A note from me about `{path}`, {lines}, {where_}:\n\n{fence}\n{excerpt}\n{fence}\n\n\
+         {note}\n\n\
          Act on it in this worktree, run the project's checks, and commit. Do not rebase or \
          force-push: the pull request's history stays as it is. If the note needs a decision \
          the code cannot settle, stop and ask me.",
@@ -60,6 +62,14 @@ pub fn prompt(pr: &PullRequest, excerpt: &Excerpt, note: &str, task: Option<&str
         note = note.trim(),
     ));
     text
+}
+
+/// A code fence the excerpt cannot close early: one backtick longer than its longest run of
+/// them, and never shorter than three. Markdown's own rule, and a Markdown file with a code
+/// block in it is an ordinary thing to select lines of.
+fn fence_for(text: &str) -> String {
+    let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    "`".repeat((longest + 1).max(3))
 }
 
 #[cfg(test)]
@@ -114,5 +124,27 @@ mod tests {
         assert!(text.contains("The task it was opened for:\n\nMake login work\n\n"));
         assert!(text.contains("`a.rs`, line 4, as it was before the pull request:"));
         assert!(text.contains("```\ngone()\n```"));
+    }
+
+    #[test]
+    fn an_excerpt_with_a_code_block_in_it_gets_a_longer_fence() {
+        let excerpt = Excerpt {
+            path: "docs/guide.md".into(),
+            side: DiffSide::Right,
+            from: 1,
+            to: 3,
+            text: "Run it:\n\n```sh\njust dev\n```\n".into(),
+        };
+        let text = prompt(&pr(), &excerpt, "Say what it does first.", None);
+        assert!(
+            text.contains("````\nRun it:\n\n```sh\njust dev\n```\n````\n\nSay what it does first.")
+        );
+        // Four backticks in the text would have closed a four-backtick fence; five do not.
+        let excerpt = Excerpt {
+            text: "````\nx\n````".into(),
+            ..excerpt
+        };
+        let text = prompt(&pr(), &excerpt, "n", None);
+        assert!(text.contains("`````\n````\nx\n````\n`````\n\nn\n\n"));
     }
 }

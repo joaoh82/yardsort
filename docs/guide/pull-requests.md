@@ -180,8 +180,13 @@ the lines themselves, and your note, and asked to act on it in the worktree and 
 to rebase or force-push. Sending takes you to the workspace.
 
 **Also post it on GitHub** makes the same note a comment on those lines of the pull request, as
-well; **Post on GitHub only** posts it and asks no agent. Cancelling, or `Esc`, sends nothing
-anywhere.
+well; **Post on GitHub only** posts it and asks no agent. GitHub goes first, because GitHub can
+refuse: it takes a comment only on lines the diff touches or shows around a change, and the
+viewer lets you select any line of the file. A refusal is shown in the dialog before the agent
+has heard anything, so pressing Send again gives the agent the note once. Should the agent be
+the one that cannot be reached after GitHub has the comment, the dialog says so, and sending
+again does not post it twice. Cancelling, or `Esc`, sends nothing anywhere; while a send is
+under way the dialog stays until it is done.
 
 ### Moving around
 

@@ -14,10 +14,6 @@ pr-view.json
 pr-line-comments.json
     `gh api --paginate --slurp repos/{owner}/{repo}/pulls/<n>/comments`: one page, cut down to
     three comments on lines — one on a single line, one on a range, and a reply to the first.
-
-pr-line-comments.json
-    `gh api --paginate --slurp repos/{owner}/{repo}/pulls/<n>/comments`: one page, cut down to
-    three comments on lines — one on a single line, one on a range, and a reply to the first.
     A reply carries `in_reply_to_id`; a first comment has no such key at all.
 
 pr-list.json
