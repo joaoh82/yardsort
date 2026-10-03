@@ -297,6 +297,9 @@ pub struct PullRequest {
 pub struct PullRequestDetails {
     pub base: String,
     pub head_oid: String,
+    /// The commit of the base branch the forge measures the pull request against. For one
+    /// merged long ago it is the base as it was then, which is what still gives its diff back.
+    pub base_oid: String,
     pub additions: u32,
     pub deletions: u32,
     pub review: String,
@@ -346,9 +349,6 @@ pub struct PullRequestSummary {
     /// The description, as its author wrote it: Markdown. Empty when there is none.
     pub body: String,
     pub changed_files: u32,
-    /// The commit of the base branch the forge measures this pull request against. For one
-    /// merged long ago it is the base as it was then, which is what still gives its diff back.
-    pub base_oid: String,
     /// The conversation: comments and reviews as they were given, oldest first. Comments made
     /// on particular lines are not among them — `gh pr view` does not return those.
     pub posts: Vec<PullRequestPost>,
@@ -697,7 +697,7 @@ impl Gh {
         number: u32,
         limit: Duration,
     ) -> ForgeResult<PullRequestSummary> {
-        let fields = format!("{PULL_REQUEST_FIELDS},body,comments,reviews,changedFiles,baseRefOid");
+        let fields = format!("{PULL_REQUEST_FIELDS},body,comments,reviews,changedFiles");
         let out = self.run_within(
             root,
             &["pr", "view", &number.to_string(), "--json", &fields],
@@ -948,7 +948,6 @@ pub fn pull_request_summary(json: &str) -> ForgeResult<PullRequestSummary> {
 
     Ok(PullRequestSummary {
         body: string_field(&row, "body"),
-        base_oid: string_field(&row, "baseRefOid"),
         changed_files: row
             .get("changedFiles")
             .and_then(|v| v.as_u64())
@@ -966,7 +965,7 @@ repository(owner:$owner,name:$name){\
 pullRequests(states:OPEN,first:50,after:$after,orderBy:{field:UPDATED_AT,direction:DESC}){\
 totalCount pageInfo{hasNextPage endCursor} \
 nodes{number url title isDraft state createdAt updatedAt headRefName headRefOid baseRefName \
-isCrossRepository additions deletions mergeable reviewDecision author{login} \
+baseRefOid isCrossRepository additions deletions mergeable reviewDecision author{login} \
 reviewRequests(first:10){nodes{requestedReviewer{__typename ...on User{login} ...on Team{slug}}}} \
 latestReviews(first:10){nodes{state author{login}}} \
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:1){\
@@ -1080,8 +1079,8 @@ pub fn open_page(json: &str) -> ForgeResult<OpenPage> {
 
 /// What is asked of `gh` about each pull request.
 const PULL_REQUEST_FIELDS: &str = "number,url,title,headRefName,state,isDraft,statusCheckRollup,\
-createdAt,baseRefName,headRefOid,additions,deletions,reviewDecision,updatedAt,mergeable,\
-author,reviewRequests,latestReviews,isCrossRepository";
+createdAt,baseRefName,headRefOid,baseRefOid,additions,deletions,reviewDecision,updatedAt,\
+mergeable,author,reviewRequests,latestReviews,isCrossRepository";
 
 fn pull_requests(out: &str) -> ForgeResult<Vec<PullRequest>> {
     let parsed: serde_json::Value =
@@ -1158,6 +1157,7 @@ fn read(
         details: Some(PullRequestDetails {
             base: string_field(row, "baseRefName"),
             head_oid: string_field(row, "headRefOid"),
+            base_oid: string_field(row, "baseRefOid"),
             additions: row
                 .get("additions")
                 .and_then(|v| v.as_u64())
@@ -1742,14 +1742,14 @@ mod tests {
         assert_eq!(pr.author.as_deref(), Some("dennis"));
         assert!(summary.body.starts_with("## What\n"));
         assert_eq!(summary.changed_files, 2);
-        assert!(
-            crate::git::is_commit_id(&summary.base_oid),
-            "{}",
-            summary.base_oid
-        );
 
         // Every check, by name, with the workflow it belongs to and where to read its run.
         let details = pr.details.as_ref().unwrap();
+        assert!(
+            crate::git::is_commit_id(&details.base_oid),
+            "{}",
+            details.base_oid
+        );
         assert_eq!(details.checks.len(), 3);
         assert_eq!(
             details.checks[0],
@@ -1877,7 +1877,7 @@ mod tests {
         assert!(
             asked
                 .trim_end()
-                .ends_with(",body,comments,reviews,changedFiles,baseRefOid"),
+                .ends_with(",body,comments,reviews,changedFiles"),
             "{asked}"
         );
         assert_eq!(asked.lines().count(), 1);
@@ -2061,6 +2061,11 @@ mod tests {
         let asked: Vec<&str> = asked.lines().collect();
         assert_eq!(asked.len(), 3, "three pages, three questions");
         assert!(asked[0].starts_with("api graphql --hostname github.example.com "));
+        assert!(
+            asked[0].contains("headRefOid baseRefName baseRefOid "),
+            "{}",
+            asked[0]
+        );
         assert!(asked[0].contains("-F owner={owner} -F name={repo} -f query=query("));
         assert!(!asked[0].contains("after="), "the first page has no cursor");
         assert!(asked[1].ends_with("-f after=c1"));

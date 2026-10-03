@@ -71,6 +71,11 @@ pub struct PullRequestChanges {
 
 /// The files a pull request changes. Fetches its commits into refs of Yardsort's own if they
 /// are not here yet — nothing is checked out, and no branch or remote-tracking ref moves.
+///
+/// Which head and base: the ones the project's list names. The list is what the window shows,
+/// it is what notices a push, and it is already here — so this asks the forge for nothing. A
+/// pull request the list does not have (the list was emptied by an action a moment ago, say)
+/// is asked about afresh, never out of a cache: a diff is only as good as its head.
 #[tauri::command]
 #[specta::specta]
 pub async fn pull_request_changes(
@@ -80,17 +85,15 @@ pub async fn pull_request_changes(
 ) -> IpcResult<PullRequestChanges> {
     blocking(app, move |state| {
         let root = project_root(state, &project_id)?;
-        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
-        // What the Summary read a moment ago, when it did: the head and the base it names are
-        // only where to start, and the fetch below is what decides.
-        let summary = state
-            .forge
-            .summary(&project_id, number, false, || {
-                gh.pull_request_summary(&root, number, SUMMARY_LIMIT)
-            })
-            .map_err(failed)?;
+        let pr = match state.forge.find(&project_id, number) {
+            Some(pr) => pr,
+            None => {
+                let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+                gh.pull_request(&root, number).map_err(failed)?
+            }
+        };
         let git = Git::new(&state.env())?;
-        changes_of(&git, &root, &summary)
+        changes_of(&git, &root, &pr)
     })
     .await
 }
@@ -135,15 +138,11 @@ fn commit_id(text: &str) -> IpcResult<()> {
     }
 }
 
-/// See [`pull_request_changes`].
-pub fn changes_of(
-    git: &Git,
-    root: &Path,
-    summary: &PullRequestSummary,
-) -> IpcResult<PullRequestChanges> {
-    let pr = &summary.pull_request;
+/// See [`pull_request_changes`]. `pr` is the pull request as the list has it now.
+pub fn changes_of(git: &Git, root: &Path, pr: &PullRequest) -> IpcResult<PullRequestChanges> {
     let details = pr.details.as_ref();
     let head = details.map(|d| d.head_oid.as_str()).unwrap_or_default();
+    let base = details.map(|d| d.base_oid.as_str()).unwrap_or_default();
     let base_branch = details.map(|d| d.base.as_str()).unwrap_or_default();
     let remote = remote_of(git, root, &pr.url)?.ok_or_else(|| {
         IpcError::new(
@@ -151,15 +150,8 @@ pub fn changes_of(
             "This project has no remote to fetch the pull request from.",
         )
     })?;
-    let (head_oid, base_oid) = fetch_for_diff(
-        git,
-        root,
-        &remote,
-        pr.number,
-        head,
-        &summary.base_oid,
-        base_branch,
-    )?;
+    let (head_oid, base_oid) =
+        fetch_for_diff(git, root, &remote, pr.number, head, base, base_branch)?;
     let files = Between {
         git,
         root,
@@ -177,11 +169,13 @@ pub fn changes_of(
 /// Make sure pull request `number`'s commits are in the repository, and say which two the diff
 /// is between: its head, and the commit where it left its base.
 ///
-/// `head` and `base` are what the forge named. Both are kept under refs of Yardsort's own
-/// ([`PULL_REQUEST_REFS`]), so git does not collect them and nothing the user has is touched.
-/// When they are here already, nothing is fetched. The head that is answered with is the one
-/// that was *fetched*: if the pull request moved on since the forge was asked, that is newer
-/// than `head`, and the newer one is the truth.
+/// `head` and `base` are what the forge named, as the project's list has them. Both are kept
+/// under refs of Yardsort's own ([`PULL_REQUEST_REFS`]), so git does not collect them and
+/// nothing the user has is touched. When the ref already *is* `head` and the base is here,
+/// nothing is fetched — which is why `head` must be the newest the list knows, not something
+/// remembered from an earlier look. The head that is answered with is the one that was
+/// fetched: if the pull request moved on between the list and the fetch, the newer one is the
+/// truth.
 ///
 /// The base is asked for by its commit id, which a forge answers. If the server will not, the
 /// head is fetched alone and the base branch by name: its tip rather than the commit the forge
@@ -506,6 +500,7 @@ mod tests {
             details: Some(PullRequestDetails {
                 base: "trunk".into(),
                 head_oid: "abc".into(),
+                base_oid: String::new(),
                 additions: 1,
                 deletions: 0,
                 review: String::new(),
@@ -769,17 +764,13 @@ mod tests {
         );
     }
 
-    /// The pull request of [`fixture`] read in full, as the forge would name its two commits.
-    fn in_full(pr: PullRequest, head: &str, base: &str) -> PullRequestSummary {
+    /// The pull request of [`fixture`] as the list would have it, naming its two commits.
+    fn in_full(pr: PullRequest, head: &str, base: &str) -> PullRequest {
         let mut pr = pr;
-        pr.details.as_mut().unwrap().head_oid = head.to_owned();
-        PullRequestSummary {
-            pull_request: pr,
-            body: String::new(),
-            changed_files: 1,
-            base_oid: base.to_owned(),
-            posts: vec![],
-        }
+        let details = pr.details.as_mut().unwrap();
+        details.head_oid = head.to_owned();
+        details.base_oid = base.to_owned();
+        pr
     }
 
     fn text_of(content: &crate::changes::Content) -> &str {
@@ -856,6 +847,51 @@ mod tests {
         // A head the repository has not got is a reason to fetch, and then the failure shows.
         let moved = in_full(pr(7, "theirs", false), &"1".repeat(40), &trunk);
         assert!(changes_of(&git, repo.path(), &moved).is_err());
+    }
+
+    /// Someone pushes after the diff was first read. The list names the new head, so the next
+    /// look fetches again — the ref sitting on the old head is not "already here".
+    #[test]
+    fn a_push_the_list_has_noticed_is_fetched_however_fresh_the_last_look_was() {
+        let (git, repo, remote, head) = fixture();
+        let trunk = rev(&git, repo.path(), "trunk").unwrap();
+        let first = changes_of(
+            &git,
+            repo.path(),
+            &in_full(pr(7, "theirs", false), &head, &trunk),
+        )
+        .unwrap();
+        assert_eq!(first.head_oid, head);
+
+        let theirs = tempfile::tempdir().unwrap();
+        let url = remote.path().to_string_lossy().into_owned();
+        git.run(
+            theirs.path(),
+            &["clone", "--quiet", "--branch", "theirs", &url, "."],
+        )
+        .unwrap();
+        std::fs::write(theirs.path().join("more.txt"), "more").unwrap();
+        git.commit_all(theirs.path(), "More of their work").unwrap();
+        git.run(
+            theirs.path(),
+            &["push", "--quiet", "origin", "theirs:refs/pull/7/head"],
+        )
+        .unwrap();
+        let pushed = git.run(theirs.path(), &["rev-parse", "HEAD"]).unwrap();
+
+        let again = changes_of(
+            &git,
+            repo.path(),
+            &in_full(pr(7, "theirs", false), &pushed, &trunk),
+        )
+        .unwrap();
+        assert_eq!(again.head_oid, pushed);
+        let paths: Vec<&str> = again.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["more.txt", "work.txt"]);
+        assert_eq!(
+            rev(&git, repo.path(), "refs/yardsort/pull/7/head").as_deref(),
+            Some(pushed.as_str())
+        );
     }
 
     /// The forge was asked a moment before someone pushed: what is fetched is the newer head,

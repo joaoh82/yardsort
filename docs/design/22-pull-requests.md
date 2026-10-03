@@ -559,8 +559,8 @@ Code: the pull request's diff, with nothing checked out. And the tabs, now that 
   the base commit by its id in the same round trip, pins the base under
   `refs/yardsort/pull/<n>/base` so git does not collect it, and answers with the head _as
   fetched_ and its merge base with the base. When both are here already it fetches nothing.
-- **The base is the commit the forge recorded** (`baseRefOid`, which the summary's question
-  gained), not the base branch as it is now. For a pull request merged with a merge commit the
+- **The base is the commit the forge recorded** (`baseRefOid`, which both list queries now ask
+  for, so every `PullRequest` carries it), not the base branch as it is now. For a pull request merged with a merge commit the
   branch's tip contains the head, and a diff against it is empty. There is a test for exactly
   that.
 - **A server that will not give a commit by its id** gets a second try: the head alone, then the
@@ -574,6 +574,12 @@ Code: the pull request's diff, with nothing checked out. And the tabs, now that 
   `pull_request_diff(project_id, base_oid, head_oid, path, old_path)` reads one file between
   the two commits the first one named. The window hands them back rather than a number, so a
   file is always read from the same pair the list was.
+- **The head and the base come from the project's list** (`Forge::find`), never from the
+  summary's cache. Review found the first cut taking them from a summary read up to 30 s
+  earlier: after a push inside that window the ref already matched the stale head, nothing was
+  fetched, and the old diff stayed with no error to retry from. The list is what notices a
+  push, so it is what names the head; a pull request the list does not have is asked about
+  afresh. Code therefore asks the forge for nothing at all. There is a test for the push.
 - **The window**: `DiffBody` was lifted out of the changes panel's viewer so both show a diff
   the same way — inline or two panes, images side by side, a line for what cannot be shown —
   and the remembered `changes.diffMode` is shared. The tab opens on the list of files and a

@@ -235,9 +235,10 @@ A pull request's Summary is one more question, about a second, asked when you op
 is reused for half a minute, and asked for again when the list says something about the pull
 request changed.
 
-Code asks GitHub nothing more: it asks _git_, once for each head commit — when you first open
-the tab for a pull request, and again when someone pushes to it. Going between files and coming
-back to a pull request you have already read costs no network at all.
+Code asks GitHub nothing the list has not already asked: the two commits it reads between are
+the ones the list names. It asks _git_, once for each head commit — when you first open the tab
+for a pull request, and again when the list notices a push to it. Going between files, and
+coming back to a pull request you have already read, costs no network at all.
 
 ## When something is missing
 

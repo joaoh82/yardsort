@@ -105,6 +105,11 @@ export const commands = {
 	/**
 	 *  The files a pull request changes. Fetches its commits into refs of Yardsort's own if they
 	 *  are not here yet — nothing is checked out, and no branch or remote-tracking ref moves.
+	 * 
+	 *  Which head and base: the ones the project's list names. The list is what the window shows,
+	 *  it is what notices a push, and it is already here — so this asks the forge for nothing. A
+	 *  pull request the list does not have (the list was emptied by an action a moment ago, say)
+	 *  is asked about afresh, never out of a cache: a diff is only as good as its head.
 	 */
 	pullRequestChanges: (projectId: string, number: number) => typedError<PullRequestChanges, IpcError>(__TAURI_INVOKE("pull_request_changes", { projectId, number })),
 	/**
@@ -1434,6 +1439,11 @@ export type PullRequestCheck = {
 export type PullRequestDetails = {
 	base: string,
 	headOid: string,
+	/**
+	 *  The commit of the base branch the forge measures the pull request against. For one
+	 *  merged long ago it is the base as it was then, which is what still gives its diff back.
+	 */
+	baseOid: string,
 	additions: number,
 	deletions: number,
 	review: string,
@@ -1507,11 +1517,6 @@ export type PullRequestSummary = {
 	/**  The description, as its author wrote it: Markdown. Empty when there is none. */
 	body: string,
 	changedFiles: number,
-	/**
-	 *  The commit of the base branch the forge measures this pull request against. For one
-	 *  merged long ago it is the base as it was then, which is what still gives its diff back.
-	 */
-	baseOid: string,
 	/**
 	 *  The conversation: comments and reviews as they were given, oldest first. Comments made
 	 *  on particular lines are not among them — `gh pr view` does not return those.

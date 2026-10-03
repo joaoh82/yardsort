@@ -129,6 +129,7 @@ export const pullRequest = (
     details: {
       base: "main",
       headOid: `head-${number}`,
+      baseOid: "b".repeat(40),
       additions: 10,
       deletions: 2,
       review: "",
@@ -169,7 +170,6 @@ export const pullRequestSummary = (
   pullRequest: pr,
   body: `What ${pr.title} is about.`,
   changedFiles: 2,
-  baseOid: "b".repeat(40),
   posts: [],
   ...overrides,
 });
