@@ -496,7 +496,11 @@ describe("one task in full", () => {
       "Could not read this task: HTTP 502",
     );
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("What Worktrees on a network drive is about.")).toBeVisible();
+    // Asked for again on each try: the plain paragraph shown first is replaced when the
+    // Markdown renderer arrives.
+    await waitFor(() =>
+      expect(screen.getByText("What Worktrees on a network drive is about.")).toBeVisible(),
+    );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(core.taskDetail).toHaveBeenLastCalledWith(alpha.id, "#12", true);
   });
