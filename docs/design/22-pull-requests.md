@@ -648,7 +648,15 @@ CodeMirror in jsdom; the reply box, the threads, the counts and every path throu
 agent, agent and GitHub, GitHub alone, no workspace, a busy agent, a cancel — through Testing
 Library; and the threads beside their lines in headless Chromium with demo data.
 
-Still not done: the screenshot and the hands-on pass, which has rows for this slice now.
+The screenshots, `docs/images/pull-requests.png` and `pull-requests-code.png`, were taken after
+the four slices had merged, with `scripts/screenshots.sh`: its stand-in `gh` now answers the
+list, one pull request in full, the open ones and the comments on lines for three demo
+repositories, and the pull request the Code tab shows has real commits on a real branch, with
+the refs the diff is read from already in place, so nothing is fetched. Taking them turned up
+one thing worth knowing: a window with a little transparency puts the terminal behind it into
+every dark area of the shot, faintly; `shoot` makes the window opaque first.
+
+Still not done: the hands-on pass, which has rows for this slice now.
 
 ## Not in this version, on purpose
 

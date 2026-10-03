@@ -27,8 +27,10 @@ the documentation says so, in the same commit or pull request.**
   must never show a real user's name, paths, projects or account details — use a throwaway
   profile (`YARDSORT_DATA_DIR`, `YARDSORT_WORKTREE_ROOT`) and demo repositories.
   `scripts/screenshots.sh` sets all of that up, prints the launch line, and captures the window
-  at the size the existing images use; it is the short way through everything below. Two things a
-  throwaway profile does **not** isolate, and both have leaked into a shot already:
+  at the size the existing images use; it is the short way through everything below. Its `seed`
+  adds the demo projects to the running profile, and its stand-in `gh` answers for their pull
+  requests, so the Pull requests view has something to show without a network. Three things a
+  throwaway profile does **not** isolate, and all three have leaked into a shot already:
   - **Agent paths.** Settings → Harnesses prints "Found at …", which is a real install path under
     your home. Put shims on `PATH` — `/tmp/agents/claude` exec'ing the real one — and point the
     profile's environment probe at them (`SHELL` matters: the probe runs your login shell).
@@ -37,6 +39,9 @@ the documentation says so, in the same commit or pull request.**
     press Forget to clear it. Make the store unreachable for that one process instead — on Linux,
     `DBUS_SESSION_BUS_ADDRESS` pointed at a path that does not exist. Leave `XDG_RUNTIME_DIR`
     alone; the Wayland socket is under it and the app will not open a window without it.
+  - **What is behind the window.** Omarchy's Hyprland gives every window a little transparency,
+    and through it the terminal behind — with your own work in it — shows faintly in every dark
+    area. `shoot` makes the window opaque first; without it, put nothing behind the window.
 - Before finishing, reread the docs you touched against the code. Do not document behaviour you
   have not verified.
 
