@@ -93,8 +93,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   GitHub issues and counts the ones that need an answer — where the last person to speak was
   not a maintainer. Open one to read it, then **Delegate**: the composer opens with the issue
   as the agent's first message, marked as text other people wrote, and nothing starts until you
-  say so. The workspace remembers the task it came from. `ys task` lists, shows and starts
-  tasks from a terminal, so an agent can tell you what is open. It reads GitHub through `gh`.
+  say so. The workspace remembers the task it came from. Open a new task, answer one, close,
+  label and assign it from the same view. `ys task` does all of it from a terminal, so an agent
+  can tell you what is open and file an issue when you ask. Everything goes through `gh`.
   See [Tasks](docs/guide/tasks.md).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere.

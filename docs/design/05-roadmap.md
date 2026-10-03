@@ -757,8 +757,8 @@ changes.
 
 ## M24 — Tasks
 
-Proposed in [23-tasks](23-tasks.md), after a four-question design pass on 2026-10-03. Slices 1
-and 2 are built.
+Proposed in [23-tasks](23-tasks.md), after a four-question design pass on 2026-10-03. All three
+slices are built.
 
 - A **Tasks** row in the sidebar, under Pull requests, opens a view in the center panel: every
   project's GitHub issues, with state, project, label, assignee, author and _needs an answer_
@@ -787,7 +787,12 @@ and 2 are built.
       wrote between two lines carrying a mark made for that message, and leaves bots out. Found:
       a test that makes workspaces must say where worktrees go, or it makes them in the real
       place. Recorded in [23 § slice 2](23-tasks.md#slice-2-what-shipped).
-- [ ] Slice 3: manage — the writes, in the view and in `ys task`; the screenshot.
+- [x] Slice 3: manage — the writes, in the view and in `ys task`. New task, reply, close and
+      reopen (each confirmed, a _no_ sending nothing), labels, assignees; `ys task create`,
+      `comment`, `close`, `reopen`, `edit`, the last two wanting `--yes`. Measured first, as
+      asked: a page of assignable people is 2 s on a repository with 178 of them. Not done: the
+      screenshot, and a write to a real repository — every write is tested against a stand-in
+      `gh`. Recorded in [23 § slice 3](23-tasks.md#slice-3-what-shipped).
 
 _Exit:_ on all three platforms, a project's issues are listed, filtered and read; one is
 delegated through the composer and its workspace is found again from the task; a _no_ to Close

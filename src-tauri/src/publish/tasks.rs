@@ -23,7 +23,10 @@ use crate::forge::{ForgeError, ForgeResult, Gh, Repo};
 use crate::state::{blocking, AppState};
 use crate::tasks::delegate::{delegated, Delegated, TaskRef};
 use crate::tasks::github::{coverage, Coverage, GitHub};
-use crate::tasks::{Task, TaskDetail, TaskList, TaskSource, TaskState, CLOSED_CAP, OPEN_CAP};
+use crate::tasks::{
+    CloseReason, CreatedTask, NewTask, Task, TaskDetail, TaskEdit, TaskLabel, TaskList, TaskSource,
+    TaskState, CLOSED_CAP, OPEN_CAP,
+};
 
 /// How long an answer is reused before the source is asked again: the pull requests' interval,
 /// for the same reasons.
@@ -60,6 +63,8 @@ pub struct ProjectTasks {
 struct Tier {
     at: Instant,
     found: TaskList,
+    /// Something has happened that the answer does not know about: see [`TaskCache::forget`].
+    stale: bool,
 }
 
 /// (project, closed)
@@ -92,7 +97,7 @@ impl TaskCache {
             let tiers = self.tiers.lock().unwrap_or_else(PoisonError::into_inner);
             if tiers
                 .get(&key)
-                .is_some_and(|tier| tier.at.elapsed() < FRESH_FOR)
+                .is_some_and(|tier| !tier.stale && tier.at.elapsed() < FRESH_FOR)
             {
                 return;
             }
@@ -124,6 +129,7 @@ impl TaskCache {
             Tier {
                 at: Instant::now(),
                 found,
+                stale: false,
             },
         );
     }
@@ -166,6 +172,26 @@ impl TaskCache {
             }
         }
         answer
+    }
+
+    /// Something was just written to this project's source: what is kept is from before. The
+    /// rows stay — a list that empties and refills is worse than one a moment out of date —
+    /// but the next look asks again, and an answer still on its way is dropped.
+    fn forget(&self, project_id: &str) {
+        self.requests
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(project, _), _| project != project_id);
+        let mut tiers = self.tiers.lock().unwrap_or_else(PoisonError::into_inner);
+        for ((project, _), tier) in tiers.iter_mut() {
+            if project == project_id {
+                tier.stale = true;
+            }
+        }
+        self.details
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(project, _), _| project != project_id);
     }
 
     /// Remember that `task` was made ready to delegate in this project.
@@ -321,6 +347,131 @@ pub async fn task_prompt(app: AppHandle, project_id: String, key: String) -> Ipc
     .await
 }
 
+/// Run `write` against a project's source, and forget what was known of the project whatever
+/// came of it: a refusal usually means the list was out of date.
+fn writing<T>(
+    state: &AppState,
+    project_id: &str,
+    write: impl FnOnce(&GitHub<'_>, &std::path::Path) -> ForgeResult<T>,
+) -> IpcResult<T> {
+    let root = project_root(state, project_id)?;
+    let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+    let Coverage::Covered(host) = coverage(repo_at(state, &root).as_ref()) else {
+        return Err(crate::error::IpcError::new(
+            "tasks_not_covered",
+            "This project's tasks cannot be changed: it is not on GitHub.",
+        ));
+    };
+    let result = write(&GitHub::new(&gh, host), &root);
+    state.tasks.forget(project_id);
+    result.map_err(failed)
+}
+
+/// Open a new task in a project. Pressing Create was the confirmation.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_create(
+    app: AppHandle,
+    project_id: String,
+    task: NewTask,
+) -> IpcResult<CreatedTask> {
+    blocking(app, move |state| {
+        writing(state, &project_id, |source, root| {
+            source.create(root, &task)
+        })
+    })
+    .await
+}
+
+/// Post a comment on a task. The words are the user's, sent as they are; pressing Send was the
+/// confirmation.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_comment(
+    app: AppHandle,
+    project_id: String,
+    key: String,
+    body: String,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        writing(state, &project_id, |source, root| {
+            source.comment(root, &key, body.trim())
+        })
+    })
+    .await
+}
+
+/// Close a task. The window asks first; nothing is posted on it and nothing is deleted.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_close(
+    app: AppHandle,
+    project_id: String,
+    key: String,
+    reason: CloseReason,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        writing(state, &project_id, |source, root| {
+            source.close(root, &key, reason)
+        })
+    })
+    .await
+}
+
+/// Reopen a closed task. The window asks first: it tells everyone following it.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_reopen(app: AppHandle, project_id: String, key: String) -> IpcResult<()> {
+    blocking(app, move |state| {
+        writing(state, &project_id, |source, root| source.reopen(root, &key))
+    })
+    .await
+}
+
+/// Change a task's labels, assignees or title.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_edit(
+    app: AppHandle,
+    project_id: String,
+    key: String,
+    change: TaskEdit,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        writing(state, &project_id, |source, root| {
+            source.edit(root, &key, &change)
+        })
+    })
+    .await
+}
+
+/// What a task of this project can be labelled with and who it can be assigned to: what the
+/// pickers offer. Asked for when one is opened, not kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskChoices {
+    pub labels: Vec<TaskLabel>,
+    pub assignees: Vec<String>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn project_task_choices(app: AppHandle, project_id: String) -> IpcResult<TaskChoices> {
+    blocking(app, move |state| {
+        let root = project_root(state, &project_id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        let Coverage::Covered(host) = coverage(repo_at(state, &root).as_ref()) else {
+            return Ok(TaskChoices::default());
+        };
+        let source = GitHub::new(&gh, host);
+        Ok(TaskChoices {
+            labels: source.labels(&root).map_err(failed)?,
+            assignees: source.assignees(&root).map_err(failed)?,
+        })
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +592,42 @@ mod tests {
         assert_eq!(found.problem.as_deref(), Some("HTTP 502"));
         assert!(!found.closed, "they were not read");
         assert_eq!(cache.composed("p", false, None).problem, None);
+    }
+
+    #[test]
+    fn after_a_write_the_rows_stay_and_the_next_look_asks_again() {
+        let cache = TaskCache::default();
+        let detail = TaskDetail {
+            task: task("#2", TaskState::Open),
+            body: "Before.".to_owned(),
+            comments: vec![],
+        };
+        cache.load("p", false, false, || {
+            answered(&["#2", "#1"], TaskState::Open)
+        });
+        cache.load("q", false, false, || answered(&["#9"], TaskState::Open));
+        cache
+            .detail("p", "#2", false, || Ok(detail.clone()))
+            .unwrap();
+
+        cache.forget("p");
+        assert_eq!(
+            keys(&cache.composed("p", false, None)),
+            ["#2", "#1"],
+            "the list is not emptied"
+        );
+        // Not refreshing, and still asked: what was kept is from before the write.
+        cache.load("p", false, false, || answered(&["#1"], TaskState::Open));
+        assert_eq!(keys(&cache.composed("p", false, None)), ["#1"]);
+        let again = cache.detail("p", "#2", false, || {
+            Ok(TaskDetail {
+                body: "After.".to_owned(),
+                ..detail.clone()
+            })
+        });
+        assert_eq!(again.unwrap().body, "After.");
+        // Another project's is its own.
+        cache.load("q", false, false, || panic!("nothing was written there"));
     }
 
     #[test]

@@ -31,7 +31,7 @@ const POINTS = [
   },
   {
     title: "Your issues, where the agents are",
-    body: "Tasks lists every project's open GitHub issues and counts the ones that need an answer — where the last person to speak was not a maintainer. Open one, then Delegate: the composer opens with the issue as the agent's first message, marked as text other people wrote, and nothing starts until you say so. The workspace remembers the task it came from, and ys task lists, shows and starts tasks from a terminal. It reads GitHub through gh.",
+    body: "Tasks lists every project's open GitHub issues and counts the ones that need an answer — where the last person to speak was not a maintainer. Open one, then Delegate: the composer opens with the issue as the agent's first message, marked as text other people wrote, and nothing starts until you say so. The workspace remembers the task it came from. Open a new task, answer one, close, label and assign it from the same view; ys task does all of it from a terminal, so an agent can tell you what is open and file an issue when you ask. Everything goes through gh.",
   },
   {
     title: "Choose how agents start",

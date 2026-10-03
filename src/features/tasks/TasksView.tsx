@@ -17,6 +17,7 @@ import {
   visible,
   type Filters,
 } from "./filters";
+import { NewTaskDialog } from "./NewTaskDialog";
 import { TaskFilters } from "./TaskFilters";
 import { TaskList } from "./TaskList";
 import { TaskPane } from "./TaskPane";
@@ -40,6 +41,7 @@ export function TasksView() {
   const [search, setSearch] = useState("");
   const [listHidden, setListHidden] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [creating, setCreating] = useState(false);
   const frame = useRef<HTMLDivElement>(null);
   const narrow = useNarrowerThan(frame, STACK_BELOW_PX);
 
@@ -99,6 +101,15 @@ export function TasksView() {
     if (panel && detailed) setListHidden(panel.isCollapsed());
   };
   const viewer = listed.map((project) => byProject[project.id]?.viewer).find(Boolean) ?? null;
+  // Where a task can be opened: on GitHub, with issues on, and somebody logged in.
+  const writable = useMemo(
+    () =>
+      listed.filter((project) => {
+        const found = byProject[project.id];
+        return covered(found) && !found?.disabled && !found?.loggedOut;
+      }),
+    [listed, byProject],
+  );
   const active = filtering(filters, search);
   const loading =
     listed.length > 0 &&
@@ -194,10 +205,23 @@ export function TasksView() {
         </div>
         <button
           type="button"
+          disabled={writable.length === 0}
+          title={
+            writable.length === 0
+              ? "No project here has GitHub issues to add to"
+              : "Open a new issue on a project's repository"
+          }
+          onClick={() => setCreating(true)}
+          className="ml-auto rounded border border-line px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+        >
+          New task
+        </button>
+        <button
+          type="button"
           disabled={refreshing || listed.length === 0}
           title="Ask GitHub again"
           onClick={() => void refresh(listed.map((project) => project.id))}
-          className="ml-auto rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+          className="rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
         >
           {refreshing ? "Refreshing…" : "Refresh"}
         </button>
@@ -231,6 +255,18 @@ export function TasksView() {
         onRetry={(id) => void refresh([id])}
         retrying={refreshing}
       />
+      {creating && writable.length > 0 && (
+        <NewTaskDialog
+          projects={writable}
+          // The one whose task is open, or the only one being looked at, or the first.
+          initial={
+            writable.find((project) => project.id === current?.project.id)?.id ??
+            writable.find((project) => filters.projects.includes(project.id))?.id ??
+            writable[0]!.id
+          }
+          onClose={() => setCreating(false)}
+        />
+      )}
       <div ref={frame} onKeyDown={onKeyDown} className="min-h-0 flex-1">
         {/* The list keeps its place in the tree whether or not the details are open: a row that
             was just pressed must still be there, focused, for Escape and the arrow keys. */}

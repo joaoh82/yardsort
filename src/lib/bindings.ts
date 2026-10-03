@@ -180,6 +180,20 @@ export const commands = {
 	 *  composer shows the message for the user to read and edit; nothing starts here.
 	 */
 	taskPrompt: (projectId: string, key: string) => typedError<Delegated, IpcError>(__TAURI_INVOKE("task_prompt", { projectId, key })),
+	/**  Open a new task in a project. Pressing Create was the confirmation. */
+	taskCreate: (projectId: string, task: NewTask) => typedError<CreatedTask, IpcError>(__TAURI_INVOKE("task_create", { projectId, task })),
+	/**
+	 *  Post a comment on a task. The words are the user's, sent as they are; pressing Send was the
+	 *  confirmation.
+	 */
+	taskComment: (projectId: string, key: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("task_comment", { projectId, key, body })),
+	/**  Close a task. The window asks first; nothing is posted on it and nothing is deleted. */
+	taskClose: (projectId: string, key: string, reason: CloseReason) => typedError<null, IpcError>(__TAURI_INVOKE("task_close", { projectId, key, reason })),
+	/**  Reopen a closed task. The window asks first: it tells everyone following it. */
+	taskReopen: (projectId: string, key: string) => typedError<null, IpcError>(__TAURI_INVOKE("task_reopen", { projectId, key })),
+	/**  Change a task's labels, assignees or title. */
+	taskEdit: (projectId: string, key: string, change: TaskEdit) => typedError<null, IpcError>(__TAURI_INVOKE("task_edit", { projectId, key, change })),
+	projectTaskChoices: (projectId: string) => typedError<TaskChoices, IpcError>(__TAURI_INVOKE("project_task_choices", { projectId })),
 	/**
 	 *  Who would be asked to resolve pull request `number`'s conflicts, and how — for the
 	 *  confirmation, before anything is sent. Reads the project's list, cached when it is fresh.
@@ -672,6 +686,13 @@ export type Checks =
 /**  Nothing is configured, or nothing has reported yet. */
 "none" | "running" | "passing" | "failing";
 
+/**  Why a task is being closed. */
+export type CloseReason = 
+/**  It is done. */
+"completed" | 
+/**  It will not be done. */
+"notPlanned";
+
 /**  Why a closed task was closed, when its source says. */
 export type ClosedAs = "completed" | "notPlanned" | "duplicate";
 
@@ -717,6 +738,12 @@ export type ContextUsage = {
 	suggest: boolean,
 	/**  What to type to compact, from the harness definition. */
 	compactCommand: string | null,
+};
+
+/**  A task that was just made: what its source now calls it. */
+export type CreatedTask = {
+	key: string,
+	url: string,
 };
 
 export type CreatedWorkspace = {
@@ -1269,6 +1296,15 @@ export type ModelUsage = {
 	tokens: number | null,
 	/**  `None` when the model's price is not known. */
 	knownCost: number | null,
+};
+
+/**  A task to be made. */
+export type NewTask = {
+	title: string,
+	/**  The description, as Markdown. May be empty. */
+	body: string,
+	labels: string[],
+	assignees: string[],
 };
 
 export type NewWorkspace = {
@@ -1960,6 +1996,15 @@ export type Task = {
 	linkedPullRequests: number[],
 };
 
+/**
+ *  What a task of this project can be labelled with and who it can be assigned to: what the
+ *  pickers offer. Asked for when one is opened, not kept.
+ */
+export type TaskChoices = {
+	labels: TaskLabel[],
+	assignees: string[],
+};
+
 /**  One comment in a task's conversation. */
 export type TaskComment = {
 	author: string | null,
@@ -1984,6 +2029,18 @@ export type TaskDetail = {
 	 *  one answer: [`Task::comments`] is how many there are.
 	 */
 	comments: TaskComment[],
+};
+
+/**
+ *  What to change about a task. Everything is optional; one that changes nothing is refused
+ *  rather than sent.
+ */
+export type TaskEdit = {
+	title: string | null,
+	addLabels: string[],
+	removeLabels: string[],
+	addAssignees: string[],
+	removeAssignees: string[],
 };
 
 export type TaskLabel = {

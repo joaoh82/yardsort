@@ -55,7 +55,7 @@ pub enum ClosedAs {
     Duplicate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskLabel {
     pub name: String,
@@ -135,6 +135,53 @@ pub struct TaskList {
     pub logged_out: bool,
 }
 
+/// A task to be made.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTask {
+    pub title: String,
+    /// The description, as Markdown. May be empty.
+    pub body: String,
+    pub labels: Vec<String>,
+    pub assignees: Vec<String>,
+}
+
+/// A task that was just made: what its source now calls it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedTask {
+    pub key: String,
+    pub url: String,
+}
+
+/// Why a task is being closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CloseReason {
+    /// It is done.
+    Completed,
+    /// It will not be done.
+    NotPlanned,
+}
+
+/// What to change about a task. Everything is optional; one that changes nothing is refused
+/// rather than sent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskEdit {
+    pub title: Option<String>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<String>,
+    pub add_assignees: Vec<String>,
+    pub remove_assignees: Vec<String>,
+}
+
+impl TaskEdit {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Somewhere tasks are kept. `root` is the project's checkout, which is how a source knows
 /// which project is meant.
 pub trait TaskSource {
@@ -146,6 +193,26 @@ pub trait TaskSource {
 
     /// The task `key` in full, asked of the source now.
     fn show(&self, root: &Path, key: &str) -> ForgeResult<TaskDetail>;
+
+    // Everything below writes to the source, where other people see it and are told of it.
+    // Nothing here confirms anything: whoever calls these has already been asked.
+
+    fn create(&self, root: &Path, new: &NewTask) -> ForgeResult<CreatedTask>;
+
+    /// Add `text` to the task's conversation.
+    fn comment(&self, root: &Path, key: &str, text: &str) -> ForgeResult<()>;
+
+    fn close(&self, root: &Path, key: &str, reason: CloseReason) -> ForgeResult<()>;
+
+    fn reopen(&self, root: &Path, key: &str) -> ForgeResult<()>;
+
+    fn edit(&self, root: &Path, key: &str, change: &TaskEdit) -> ForgeResult<()>;
+
+    /// The labels a task of this project can be given.
+    fn labels(&self, root: &Path) -> ForgeResult<Vec<TaskLabel>>;
+
+    /// Who a task of this project can be assigned to, by login.
+    fn assignees(&self, root: &Path) -> ForgeResult<Vec<String>>;
 }
 
 /// Someone who said something on a task: its opener, or the author of a comment.

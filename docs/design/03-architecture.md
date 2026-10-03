@@ -313,8 +313,14 @@ and it is about to be read by an agent with a shell. The window passes the `Task
 it asks for the workspace, and the core records it only if it is one it handed out for that
 project (`TaskCache::issued`). The link is a row in `workspace_tasks` (migration 0014), written
 only when a workspace is created from a task and gone with the workspace; `Workspace.tasks`
-carries it to the window, which matches tasks to workspaces by URL. Nothing is written to the
-forge. See [23-tasks](23-tasks.md).
+carries it to the window, which matches tasks to workspaces by URL. Delegating writes nothing to the forge.
+
+**Managing tasks** does: `TaskSource` has `create`, `comment`, `close`, `reopen` and `edit`,
+each one `gh issue …` with any words on standard input, and the app's commands run them through
+`publish::tasks::writing`, which marks the project's cache out of date whatever came of it. The
+core confirms nothing; the window asks before closing and reopening, and `ys` wants `--yes` for
+the same two. A link is looked up before anything is written through it, so another
+repository's issue is never the one changed. See [23-tasks](23-tasks.md).
 
 **Acting on any pull request of a project** is `publish::pull_requests`: merge, close, reopen.
 Each asks the forge about that one pull request again first (`gh pr view`), and refuses if it
