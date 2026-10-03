@@ -169,6 +169,7 @@ export const pullRequestSummary = (
   pullRequest: pr,
   body: `What ${pr.title} is about.`,
   changedFiles: 2,
+  baseOid: "b".repeat(40),
   posts: [],
   ...overrides,
 });

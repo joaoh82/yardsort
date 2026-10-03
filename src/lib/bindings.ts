@@ -103,6 +103,16 @@ export const commands = {
 	 */
 	pullRequestSummary: (projectId: string, number: number, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("pull_request_summary", { projectId, number, refresh })),
 	/**
+	 *  The files a pull request changes. Fetches its commits into refs of Yardsort's own if they
+	 *  are not here yet — nothing is checked out, and no branch or remote-tracking ref moves.
+	 */
+	pullRequestChanges: (projectId: string, number: number) => typedError<PullRequestChanges, IpcError>(__TAURI_INVOKE("pull_request_changes", { projectId, number })),
+	/**
+	 *  Both sides of one file of a pull request, between the two commits
+	 *  [`pull_request_changes`] answered with.
+	 */
+	pullRequestDiff: (projectId: string, baseOid: string, headOid: string, path: string, oldPath: string | null) => typedError<FileDiff, IpcError>(__TAURI_INVOKE("pull_request_diff", { projectId, baseOid, headOid, path, oldPath })),
+	/**
 	 *  Merge a pull request of this project, if it is still open, still not a draft and still at
 	 *  the head commit the user confirmed. Never deletes a branch, never bypasses a protection.
 	 */
@@ -1402,6 +1412,15 @@ export type PullRequest = {
 	createdAt: number | null,
 };
 
+/**  A pull request's diff: the files it changes, and the two commits they are read between. */
+export type PullRequestChanges = {
+	files: FileChange[],
+	/**  The pull request's head, as fetched. [`pull_request_diff`] is asked with it. */
+	headOid: string,
+	/**  Where the pull request left its base branch: what the diff is measured from. */
+	baseOid: string,
+};
+
 export type PullRequestCheck = {
 	name: string,
 	state: Checks,
@@ -1488,6 +1507,11 @@ export type PullRequestSummary = {
 	/**  The description, as its author wrote it: Markdown. Empty when there is none. */
 	body: string,
 	changedFiles: number,
+	/**
+	 *  The commit of the base branch the forge measures this pull request against. For one
+	 *  merged long ago it is the base as it was then, which is what still gives its diff back.
+	 */
+	baseOid: string,
 	/**
 	 *  The conversation: comments and reviews as they were given, oldest first. Comments made
 	 *  on particular lines are not among them — `gh pr view` does not return those.

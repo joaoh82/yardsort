@@ -42,7 +42,14 @@ const answer = (summary: Partial<PullRequestSummary> = {}, pr: PullRequest = lis
 beforeEach(() => {
   vi.resetAllMocks();
   opener.openUrl.mockResolvedValue(undefined);
-  usePullRequestsStore.setState({ selected: null, summaries: {}, busy: null, error: null });
+  usePullRequestsStore.setState({
+    selected: null,
+    summaries: {},
+    changes: {},
+    tab: "summary",
+    busy: null,
+    error: null,
+  });
 });
 
 describe("the description", () => {

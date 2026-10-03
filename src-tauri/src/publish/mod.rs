@@ -1265,6 +1265,7 @@ mod tests {
             pull_request: numbered(number, PullRequestState::Open),
             body: body.into(),
             changed_files: 1,
+            base_oid: String::new(),
             posts: vec![],
         }
     }

@@ -1,8 +1,8 @@
 # Pull requests
 
-_Proposed 2026-10-02. Slices 1 and 2 are built — see [slice 1](#slice-1-what-shipped) and
-[slice 2](#slice-2-what-shipped), which also say where they differ from the proposal below.
-Slices 3 and 4 are still a proposal._
+_Proposed 2026-10-02. Slices 1 to 3 are built — see [slice 1](#slice-1-what-shipped),
+[slice 2](#slice-2-what-shipped) and [slice 3](#slice-3-what-shipped), which also say where they
+differ from the proposal below. Slice 4 is still a proposal._
 
 Every pull request of every project in one place: a **Pull requests** row at the top of the
 sidebar opens a view in the center panel that lists them, filters them, shows one in detail —
@@ -449,8 +449,9 @@ Each is one pull request with its docs, tests and changelog line, in this order.
       [what this touches](#documentation-this-touches), and a screenshot.
 2. **Summary.** ✅ `pull_request_summary`; the Markdown renderer and its rules; checks with links,
    reviewers, the conversation, read-only. See [slice 2](#slice-2-what-shipped).
-3. **Code.** `Changes` between two revisions; the private refs and their cleanup; the file list,
-   the viewer and the Files dropdown in the detail pane.
+3. **Code.** ✅ `Changes` between two revisions; the private refs and their cleanup; the file
+   list, the viewer and the Files dropdown in the detail pane. See
+   [slice 3](#slice-3-what-shipped).
 4. **Writing.** The reply box; comments on lines; send to an agent, with or without a workspace.
 
 Slice 1 is the large one. If it grows past what one review can hold, steps 3–4 and the action
@@ -545,6 +546,54 @@ its table, task list and code, no image element existed, and the template commen
 
 Still not done: the screenshot, and the hands-on pass ([08 §23](08-manual-checklist.md)), which
 has rows for the Summary now.
+
+## Slice 3: what shipped
+
+Code: the pull request's diff, with nothing checked out. And the tabs, now that there are two.
+
+- **`changes::Between`** in the core lists what differs between two commits and reads both
+  sides of a file, with the parsers and the per-revision reader `Changes` already had. Same
+  `FileChange`, same `FileDiff`.
+- **`fetch_for_diff`** makes sure the commits are in the project's repository and says which two
+  the diff is between. It fetches `refs/pull/<n>/head` into `refs/yardsort/pull/<n>/head` and
+  the base commit by its id in the same round trip, pins the base under
+  `refs/yardsort/pull/<n>/base` so git does not collect it, and answers with the head _as
+  fetched_ and its merge base with the base. When both are here already it fetches nothing.
+- **The base is the commit the forge recorded** (`baseRefOid`, which the summary's question
+  gained), not the base branch as it is now. For a pull request merged with a merge commit the
+  branch's tip contains the head, and a diff against it is empty. There is a test for exactly
+  that.
+- **A server that will not give a commit by its id** gets a second try: the head alone, then the
+  base branch by name. Its tip stands in for the recorded commit — the same thing for an open
+  pull request.
+- **Ids from the forge and from the window are checked to be ids** (`git::is_commit_id`) before
+  git sees them as arguments, and the base branch's name goes through `check-ref-format`.
+- **`prune_refs`** deletes the refs kept for pull requests the list no longer has, on each full
+  read of the list — and only when that list is whole: `gh` answered, for both tiers.
+- **Two commands.** `pull_request_changes(project_id, number)` fetches and lists;
+  `pull_request_diff(project_id, base_oid, head_oid, path, old_path)` reads one file between
+  the two commits the first one named. The window hands them back rather than a number, so a
+  file is always read from the same pair the list was.
+- **The window**: `DiffBody` was lifted out of the changes panel's viewer so both show a diff
+  the same way — inline or two panes, images side by side, a line for what cannot be shown —
+  and the remembered `changes.diffMode` is shared. The tab opens on the list of files and a
+  file opens in the viewer, with a Files box and previous/next. It is not every file in one
+  long scroll: each would be its own CodeMirror.
+- **Fetched once per head.** The store keeps the list of files with the head commit the pull
+  request list named when it was asked for. A comment does not move that; a push does.
+- **The tabs** are Summary and Code, and the one in view is kept from one pull request to the
+  next until you quit. Code is only fetched when it is looked at.
+- Found on the way: the test fixture from slice 1 made its "pull request" branch in a clone that
+  had checked nothing out, so it shared no history with the base. Slice 1's tests never
+  compared the two. It grows from the base now.
+
+How it was checked: `Between` and the fetch against real repositories, including a merged pull
+request, a head that moved on, the fallback, and a second look with the remote gone; the tab
+through Testing Library with the viewer stubbed; the real viewer in headless Chromium; and
+`changes_of` against a real, long-merged pull request from a fork on GitHub, fetched into an
+empty repository.
+
+Still not done: the screenshot and the hands-on pass, as before.
 
 ## Not in this version, on purpose
 

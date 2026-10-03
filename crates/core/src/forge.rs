@@ -346,6 +346,9 @@ pub struct PullRequestSummary {
     /// The description, as its author wrote it: Markdown. Empty when there is none.
     pub body: String,
     pub changed_files: u32,
+    /// The commit of the base branch the forge measures this pull request against. For one
+    /// merged long ago it is the base as it was then, which is what still gives its diff back.
+    pub base_oid: String,
     /// The conversation: comments and reviews as they were given, oldest first. Comments made
     /// on particular lines are not among them — `gh pr view` does not return those.
     pub posts: Vec<PullRequestPost>,
@@ -694,7 +697,7 @@ impl Gh {
         number: u32,
         limit: Duration,
     ) -> ForgeResult<PullRequestSummary> {
-        let fields = format!("{PULL_REQUEST_FIELDS},body,comments,reviews,changedFiles");
+        let fields = format!("{PULL_REQUEST_FIELDS},body,comments,reviews,changedFiles,baseRefOid");
         let out = self.run_within(
             root,
             &["pr", "view", &number.to_string(), "--json", &fields],
@@ -945,6 +948,7 @@ pub fn pull_request_summary(json: &str) -> ForgeResult<PullRequestSummary> {
 
     Ok(PullRequestSummary {
         body: string_field(&row, "body"),
+        base_oid: string_field(&row, "baseRefOid"),
         changed_files: row
             .get("changedFiles")
             .and_then(|v| v.as_u64())
@@ -1738,6 +1742,11 @@ mod tests {
         assert_eq!(pr.author.as_deref(), Some("dennis"));
         assert!(summary.body.starts_with("## What\n"));
         assert_eq!(summary.changed_files, 2);
+        assert!(
+            crate::git::is_commit_id(&summary.base_oid),
+            "{}",
+            summary.base_oid
+        );
 
         // Every check, by name, with the workflow it belongs to and where to read its run.
         let details = pr.details.as_ref().unwrap();
@@ -1868,7 +1877,7 @@ mod tests {
         assert!(
             asked
                 .trim_end()
-                .ends_with(",body,comments,reviews,changedFiles"),
+                .ends_with(",body,comments,reviews,changedFiles,baseRefOid"),
             "{asked}"
         );
         assert_eq!(asked.lines().count(), 1);

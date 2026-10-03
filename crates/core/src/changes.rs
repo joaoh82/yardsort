@@ -253,20 +253,69 @@ impl Changes<'_> {
     }
 
     fn at_revision(&self, revision: &str, path: &str) -> IpcResult<Content> {
-        let spec = format!("{revision}:{path}");
-        match self.git.run_bytes(self.root, &["cat-file", "-s", &spec]) {
-            Ok(size) => {
-                let bytes: usize = String::from_utf8_lossy(&size).trim().parse().unwrap_or(0);
-                if bytes > MAX_VIEW_BYTES {
-                    return Ok(Content::TooLarge {
-                        bytes: u32::try_from(bytes).unwrap_or(u32::MAX),
-                    });
-                }
-                Ok(classify(self.git.run_bytes(self.root, &["show", &spec])?))
+        at_revision(self.git, self.root, revision, path)
+    }
+}
+
+/// A file as it was at `revision`, or [`Content::Absent`] if it was not there.
+fn at_revision(git: &Git, root: &Path, revision: &str, path: &str) -> IpcResult<Content> {
+    let spec = format!("{revision}:{path}");
+    match git.run_bytes(root, &["cat-file", "-s", &spec]) {
+        Ok(size) => {
+            let bytes: usize = String::from_utf8_lossy(&size).trim().parse().unwrap_or(0);
+            if bytes > MAX_VIEW_BYTES {
+                return Ok(Content::TooLarge {
+                    bytes: u32::try_from(bytes).unwrap_or(u32::MAX),
+                });
             }
-            Err(GitError::Failed { .. }) => Ok(Content::Absent),
-            Err(other) => Err(other.into()),
+            Ok(classify(git.run_bytes(root, &["show", &spec])?))
         }
+        Err(GitError::Failed { .. }) => Ok(Content::Absent),
+        Err(other) => Err(other.into()),
+    }
+}
+
+/// What changed between two commits, with no working tree involved: a pull request's diff,
+/// read from commits that were fetched and never checked out.
+///
+/// The same lists and the same two-sided files as [`Changes`] gives for a workspace, so the
+/// same viewer shows them. `old` and `new` are commits the caller has already made sure of —
+/// they go to git as they are.
+pub struct Between<'a> {
+    pub git: &'a Git,
+    pub root: &'a Path,
+    pub old: &'a str,
+    pub new: &'a str,
+}
+
+impl Between<'_> {
+    /// Every file that differs, with its kind and line counts; renames followed.
+    pub fn list(&self) -> IpcResult<Vec<FileChange>> {
+        let names = self.git.run_bytes(
+            self.root,
+            &["diff", "--name-status", "-z", "-M", self.old, self.new],
+        )?;
+        let stats = self.git.run_bytes(
+            self.root,
+            &["diff", "--numstat", "-z", "-M", self.old, self.new],
+        )?;
+        Ok(with_stats(
+            parse_name_status(&names),
+            &parse_numstat(&stats),
+        ))
+    }
+
+    /// Both sides of one file. A renamed file's old side is read from where it used to be.
+    pub fn diff(&self, path: &str, old_path: Option<&str>) -> IpcResult<FileDiff> {
+        let path = safe_relative(path)?;
+        let old_path = old_path
+            .map(safe_relative)
+            .transpose()?
+            .unwrap_or_else(|| path.clone());
+        Ok(FileDiff {
+            old: at_revision(self.git, self.root, self.old, &old_path)?,
+            new: at_revision(self.git, self.root, self.new, &path)?,
+        })
     }
 }
 
@@ -843,6 +892,60 @@ mod tests {
         let diff = repo.diff("docs.md", Some("README.md"), Scope::Uncommitted);
         assert_eq!(text_of(&diff.old), "# project\n\nline two\n");
         assert_eq!(text_of(&diff.new), "# project\n\nline two\n");
+    }
+
+    /// Two commits compared with no working tree in the picture: the checkout sits on a third.
+    #[test]
+    fn two_commits_are_compared_wherever_the_checkout_is() {
+        let repo = Repo::new();
+        let old = repo.git.run(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        repo.run(&["checkout", "-q", "-b", "feature"]);
+        repo.run(&["mv", "README.md", "docs.md"]);
+        repo.write("src/new.rs", "fn main() {}\n");
+        repo.write("logo.bin", "\u{0}\u{1}binary");
+        repo.commit("feature work");
+        let new = repo.git.run(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        // Somewhere else entirely, with something uncommitted lying about.
+        repo.run(&["checkout", "-q", "main"]);
+        repo.write("scratch.txt", "not part of either commit");
+
+        let between = Between {
+            git: &repo.git,
+            root: repo.path(),
+            old: &old,
+            new: &new,
+        };
+        let files = between.list().unwrap();
+        assert_eq!(
+            summary(&files),
+            [
+                ("docs.md".to_owned(), ChangeKind::Renamed, Some(0), Some(0)),
+                ("logo.bin".to_owned(), ChangeKind::Added, None, None),
+                ("src/new.rs".to_owned(), ChangeKind::Added, Some(1), Some(0)),
+            ]
+        );
+        assert_eq!(files[0].old_path.as_deref(), Some("README.md"));
+
+        // A renamed file's old side is read from where it used to be.
+        let renamed = between.diff("docs.md", Some("README.md")).unwrap();
+        assert_eq!(text_of(&renamed.old), "# project\n\nline two\n");
+        assert_eq!(text_of(&renamed.new), "# project\n\nline two\n");
+        let added = between.diff("src/new.rs", None).unwrap();
+        assert_eq!(added.old, Content::Absent);
+        assert_eq!(text_of(&added.new), "fn main() {}\n");
+        assert_eq!(between.diff("logo.bin", None).unwrap().new, Content::Binary);
+        // The other way round, the new file is a deleted one.
+        let back = Between {
+            git: &repo.git,
+            root: repo.path(),
+            old: &new,
+            new: &old,
+        };
+        assert_eq!(back.diff("src/new.rs", None).unwrap().new, Content::Absent);
+        assert!(
+            between.diff("../outside", None).is_err(),
+            "paths stay inside"
+        );
     }
 
     #[test]
