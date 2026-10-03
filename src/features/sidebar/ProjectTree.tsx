@@ -15,6 +15,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { ForgetDialog } from "./ForgetDialog";
 import { ImportWorktreesDialog } from "./ImportWorktreesDialog";
 import { PullRequestBadge } from "./PullRequestBadge";
+import { TaskBadge } from "@/features/tasks/TaskBadge";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
@@ -329,6 +330,19 @@ function WorkspaceNode({
               <p className="font-mono break-all text-ink-muted">{head?.label ?? "No branch"}</p>
             )}
             {workspace.archived && <p className="text-ink-faint">Archived workspace</p>}
+            {workspace.tasks.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-ink-faint">Started from</p>
+                <ul className="space-y-1">
+                  {workspace.tasks.map((task) => (
+                    <li key={task.url} className="flex min-w-0 items-center gap-2">
+                      <TaskBadge projectId={projectId} task={task} />
+                      <span className="truncate text-ink-muted">{task.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {pr ? (
               <>
                 <PullRequestDetails pr={pr} />
@@ -413,6 +427,13 @@ function WorkspaceNode({
           </span>
         </button>
         <WorkspaceHarnesses tabs={tabs} workspaceId={workspace.id} />
+        {/* The task gives way to the pull request once there is one: a row has room for one
+            number, and the pull request is the later word. The task stays in the hover. */}
+        {!pr && workspace.tasks[0] && (
+          <span className="flex h-full shrink-0 items-center pr-0.5 pl-1">
+            <TaskBadge projectId={projectId} task={workspace.tasks[0]} />
+          </span>
+        )}
         {pr && (
           <span className="flex h-full shrink-0 items-center gap-0.5 pr-0.5 pl-1">
             <PullRequestBadge pr={pr} />

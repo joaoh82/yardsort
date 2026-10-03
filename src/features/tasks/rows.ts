@@ -1,4 +1,4 @@
-import type { Project, ProjectTasks, Task } from "@/lib/ipc";
+import type { Project, ProjectTasks, Task, Workspace } from "@/lib/ipc";
 
 /** A task in the list: the task, and the project it belongs to. */
 export interface Row {
@@ -8,7 +8,13 @@ export interface Row {
   task: Task;
   /** Who the source says is asking: what "me" means for this row. */
   viewer: string | null;
+  /** The workspaces started from this task that there is somewhere to go to, oldest first. */
+  workspaces: Workspace[];
 }
+
+/** Whether a workspace was started from this task. By link: a key alone is not unique. */
+export const startedFrom = (workspace: Workspace, task: Pick<Task, "url">): boolean =>
+  workspace.tasks.some((from) => from.url.toLowerCase() === task.url.toLowerCase());
 
 export const rowKey = (projectId: string, taskKey: string) => `${projectId}${taskKey}`;
 
@@ -28,8 +34,18 @@ export function rowsOf(projects: Project[], byProject: Record<string, ProjectTas
   for (const project of projects) {
     const found = byProject[project.id];
     if (project.missing || !found) continue;
+    // A folder that is gone is not somewhere to go.
+    const there = project.workspaces.filter(
+      (workspace) => !workspace.archived && !workspace.missing,
+    );
     for (const task of found.tasks) {
-      rows.push({ key: rowKey(project.id, task.key), project, task, viewer: found.viewer });
+      rows.push({
+        key: rowKey(project.id, task.key),
+        project,
+        task,
+        viewer: found.viewer,
+        workspaces: there.filter((workspace) => startedFrom(workspace, task)),
+      });
     }
   }
   const number = (row: Row) => Number(row.task.key.replace(/\D/g, "")) || 0;

@@ -1,7 +1,8 @@
 # Tasks
 
-_Proposed 2026-10-03. Slice 1 is built — see [slice 1](#slice-1-what-shipped), which also says
-where it differs from the proposal below. Slices 2 and 3 are still a proposal._
+_Proposed 2026-10-03. Slices 1 and 2 are built — see [slice 1](#slice-1-what-shipped) and
+[slice 2](#slice-2-what-shipped), which also say where they differ from the proposal below.
+Slice 3 is still a proposal._
 
 A **Tasks** row in the sidebar opens a view in the center panel that lists the work waiting in
 every project — to begin with, each project's GitHub issues — filters it, shows one in full with
@@ -385,8 +386,8 @@ first message in a GitHub project should carry a hint, as project memory's does,
 | --------------------------------------------------------------------------- | ----- |
 | `project_tasks(project_id, refresh, closed)` ✅                             | 1     |
 | `task_detail(project_id, key, refresh)` ✅                                  | 1     |
-| `task_prompt(project_id, key)` — the message for the composer               | 2     |
-| `workspace_create` gains the task it was started from                       | 2     |
+| `task_prompt(project_id, key)` — the message for the composer ✅            | 2     |
+| `workspace_create` gains the task it was started from ✅                    | 2     |
 | `task_create` · `task_comment` · `task_close` · `task_reopen` · `task_edit` | 3     |
 | `project_task_labels(project_id)` · `project_task_assignees(project_id)`    | 3     |
 
@@ -428,7 +429,7 @@ README, website — when the third is in.
    answer_; the cache; the sidebar row, the view, the filters, the detail with description and
    conversation, **Open on GitHub**. `ys task list` and `ys task show`. A new
    `docs/guide/tasks.md`.
-2. **Delegate.** The message; the composer reading a prompt for a new workspace; migration
+2. **Delegate.** ✅ See [slice 2](#slice-2-what-shipped). The message; the composer reading a prompt for a new workspace; migration
    0014; **Go to workspace**; the key on the workspace's row; `ys task start`.
 3. **Manage.** **New task**, reply, close, reopen, labels, assignees — in the view and in
    `ys task create`, `comment`, `close`, `reopen`, `edit`. The screenshot, taken with a
@@ -506,6 +507,83 @@ Not done:
 - **macOS and Windows by hand**: [08 §24](08-manual-checklist.md) is written and unticked, and
   so is Linux's — the view was driven in a browser engine with demo data, not in the app's own
   window against GitHub.
+
+## Slice 2: what shipped
+
+Built on 2026-10-03, as proposed except where said.
+
+- **The message** (`crates/core/src/tasks/delegate.rs`): `message`, `delegated`, `TaskRef`,
+  `workspace_name`. One function, used by the app's `task_prompt` and by `ys task start`.
+- **The link**: migration `0014_workspace_tasks.sql`; `Store::link_task` and
+  `Store::workspace_tasks`. Written by `workspace_create` when its request carries a task, and
+  by `ys task start`; by nothing else. Every `Workspace` the core describes now has `tasks`.
+- **Naming**: `Workspaces::create_named`, which `create` is now a case of. A workspace started
+  from a task is `<number>-<what the title is about>`, with `-2` for a second attempt.
+- **The app**: `task_prompt` asks the source again and answers with the message and the
+  reference; `NewWorkspace` gained `task`. The store's `compose` takes the task beside the
+  prompt, and the composer reads both, says which task above the box, and hands the task back
+  when it creates the workspace.
+- **The view**: **Delegate** on an open task; **Go to workspace**, with a menu when there are
+  several; **Delegate again**; the workspace under the task's row. On the sidebar's workspace
+  row, the task's key, which opens the task; _Started from_ in the row's preview.
+- **`ys task start`**, with `ys workspace new`'s flags, and `tasks` on each entry of
+  `ys workspace list --json`.
+- **Docs**: the guide's _Handing a task to an agent_, the CLI guide, the workspaces guide, the
+  changelog, and — now that it can delegate — the README's highlight and the landing page.
+
+Where it differs from the proposal:
+
+- **The quoted part sits between two marked lines**, and everything a stranger wrote is inside
+  them — the title and the labels too, which the proposal had above the frame. See _changed
+  after review_ below for what makes the lines theirs alone.
+- **Bots' comments and hidden comments are left out of the message.** The proposal took the
+  latest ten comments; these are the latest ten a person wrote and the forge did not hide.
+- **The message does not mention `ys task comment`**, which does not exist until slice 3.
+- **A closed task cannot be delegated**, in the view or from `ys`. The proposal did not say.
+- **The row shows the task's key only until the workspace has a pull request.** A sidebar row
+  has room for one number, and the pull request is the later word; the task stays in the
+  preview.
+- **A task the list has no row for** — closed since, or past the cap — is opened on GitHub when
+  its key is pressed on a workspace, rather than opening the view with nothing selected.
+- **The link is matched by the task's URL**, not by `(source, repo, key)`: it is what both
+  sides already hold, and it cannot confuse two repositories' `#7`.
+- **`created_at` is a number**, milliseconds, like every other time in the store.
+- **`ys task start` refuses before it creates**: an agent that is not installed is refused
+  before `gh` is asked, and a closed task or another repository's link before anything is made.
+
+Changed after review, before merging:
+
+- **The two lines carry a mark made for each message**, eight hexadecimal digits, named again
+  in the paragraph after them. Breaking up runs of dashes was not a guarantee — nine dashes
+  still left five — and could never have been one: an agent reads the lines, it does not
+  compare bytes, so em dashes or a ruler of equals signs pass for the closing line just as
+  well. Nobody writing an issue can know the mark. The issue's text is no longer altered.
+- **A task's workspace name stays within the cap on names**, 32 characters: the title gives up
+  whole words to make room for the number.
+- **`ys task start --print`** writes the message and stops, so a person or the agent calling it
+  can read exactly what would be sent. `ys task show` prints the issue, which is not that.
+- **The core records only a reference it handed out.** `task_prompt` remembers the `TaskRef`
+  it returned, per project, and `workspace_create` refuses one it did not issue for that
+  project — the window holds no truth. Checking the reference against the project's remote was
+  the suggestion; it would wrongly refuse a clone of a fork, where `gh` answers for the parent,
+  and a remote under an ssh alias.
+
+Found:
+
+- **The composer read a first message for a new workspace only when a branch came with it** —
+  a pull request's note. It now reads it whenever there is one.
+- **A test that runs `ys workspace new` must be told where worktrees go.** The first run of the
+  new CLI tests left three empty folders under the real `~/yardsort`, because the helper that
+  runs `ys` with a stand-in `gh` did not set `YARDSORT_WORKTREE_ROOT`. They were removed and
+  the helper sets it.
+
+Not done:
+
+- **The app's own window was not driven**: the composer path is covered through Testing
+  Library and the core through `ys task start` against real git, not by a hand on the window.
+  [08 §24](08-manual-checklist.md) has the rows.
+- **The screenshot**, still with slice 3.
+- **An agent was not started from a real issue** to see what it makes of the message.
 
 ## Not in this version, on purpose
 

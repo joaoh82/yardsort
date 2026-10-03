@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { errorMessage, ipc, type ProjectTasks, type Task, type TaskDetail } from "@/lib/ipc";
+import { useProjectsStore } from "./projects";
 
 const NO_TASKS: ProjectTasks = {
   gh: false,
@@ -48,6 +49,10 @@ interface TasksStore {
   selected: string | null;
   /** Tasks read in full, by row key. */
   details: Record<string, DetailState>;
+  /** The row being got ready for an agent. One at a time. */
+  busy: string | null;
+  /** Why the last thing asked of a task could not be done. */
+  error: string | null;
 
   /** Load one project's tasks. Never throws: a source that will not answer says so. */
   loadProject: (projectId: string, refresh?: boolean, closed?: boolean) => Promise<void>;
@@ -59,6 +64,13 @@ interface TasksStore {
    * the detail is read again. `force` reads it regardless — Retry.
    */
   loadDetail: (target: Target, force?: boolean) => Promise<void>;
+  /**
+   * Hand a task to an agent: have the core write the first message from the task as it stands
+   * now, and open the composer on it. The composer is where it is read, changed and started;
+   * nothing starts here.
+   */
+  delegate: (target: Target) => Promise<void>;
+  dismiss: () => void;
 }
 
 export const useTasksStore = create<TasksStore>((set, get) => {
@@ -77,6 +89,25 @@ export const useTasksStore = create<TasksStore>((set, get) => {
     closedWanted: false,
     selected: null,
     details: {},
+    busy: null,
+    error: null,
+
+    async delegate(target) {
+      if (get().busy) return;
+      set({ busy: target.key, error: null });
+      try {
+        const { prompt, task } = await ipc.taskPrompt(target.projectId, target.task.key);
+        useProjectsStore.getState().compose(target.projectId, undefined, prompt, task);
+      } catch (error) {
+        set({ error: errorMessage(error) });
+      } finally {
+        set({ busy: null });
+      }
+    },
+
+    dismiss() {
+      set({ error: null });
+    },
 
     async loadProject(projectId, refresh = false, closed = false) {
       const request = (projectRequests.get(projectId) ?? 0) + 1;
@@ -102,7 +133,7 @@ export const useTasksStore = create<TasksStore>((set, get) => {
     },
 
     select(key) {
-      set({ selected: key });
+      set({ selected: key, error: null });
     },
 
     async loadDetail(target, force = false) {

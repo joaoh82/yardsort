@@ -1,6 +1,8 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { selectWorkspace } from "@/features/keyboard/commands";
+import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import type { TaskComment } from "@/lib/ipc";
 import { age } from "@/features/pull-requests/rows";
 import { useTasksStore, type Target } from "@/stores/tasks";
@@ -12,15 +14,16 @@ import { at, stateColour, stateLabel, type Row } from "./rows";
 const Markdown = lazy(() => import("@/lib/Markdown").then((m) => ({ default: m.Markdown })));
 
 const heading = "text-[11px] font-semibold tracking-wider text-ink-muted uppercase";
-const button = "h-7 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised";
+const button =
+  "h-7 rounded border border-line px-2.5 whitespace-nowrap hover:bg-raised disabled:opacity-40 disabled:hover:bg-transparent";
 const quiet = "size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink";
 
 const ago = (time: number, now: number) =>
   age(time, now) === "now" ? "just now" : `${age(time, now)} ago`;
 
 /**
- * One task, beside the list: what it is, what its author says it is, and what has been said.
- * Read-only for now; delegating it and replying on it arrive in later slices.
+ * One task, beside the list: what it is, what its author says it is, what has been said, and a
+ * way to hand it to an agent. Replying on it and closing it arrive in a later slice.
  *
  * The top of it comes from the list, which is already here. The description and the
  * conversation are asked for when the row is opened and again whenever the list says the task
@@ -39,8 +42,12 @@ export function TaskPane({
   onToggleList: () => void;
   onClose: () => void;
 }) {
-  const { task, project } = row;
+  const { task, project, workspaces } = row;
   const state = useTasksStore((s) => s.details[row.key]);
+  const busy = useTasksStore((s) => s.busy);
+  const failed = useTasksStore((s) => s.error);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const goButton = useRef<HTMLButtonElement>(null);
   // Which row's link was copied, so the word does not follow to the next task opened.
   const [copied, setCopied] = useState<string | null>(null);
   const projectId = project.id;
@@ -87,6 +94,62 @@ export function TaskPane({
           </button>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {workspaces.length === 1 && (
+            <button
+              type="button"
+              title={`Go to the workspace ${workspaces[0]!.name}`}
+              onClick={() => selectWorkspace(workspaces[0]!.id)}
+              className={button}
+            >
+              Go to workspace
+            </button>
+          )}
+          {workspaces.length > 1 && (
+            <>
+              <button
+                ref={goButton}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={!!menu}
+                title="The workspaces started from this task"
+                onClick={(event) => {
+                  const box = event.currentTarget.getBoundingClientRect();
+                  setMenu(menu ? null : { x: box.left, y: box.bottom + 4 });
+                }}
+                className={button}
+              >
+                Go to workspace <span aria-hidden>▾</span>
+              </button>
+              {menu && (
+                <ContextMenu
+                  at={menu}
+                  onClose={() => {
+                    setMenu(null);
+                    goButton.current?.focus();
+                  }}
+                  items={workspaces.map((workspace) => ({
+                    label: workspace.name,
+                    onSelect: () => selectWorkspace(workspace.id),
+                  }))}
+                />
+              )}
+            </>
+          )}
+          {task.state === "open" && (
+            <button
+              type="button"
+              disabled={busy !== null}
+              title="Open the composer with this task as the agent's first message. Nothing starts until you say so."
+              onClick={() => void useTasksStore.getState().delegate(target)}
+              className={button}
+            >
+              {busy === row.key
+                ? "Preparing…"
+                : workspaces.length > 0
+                  ? "Delegate again"
+                  : "Delegate"}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void openUrl(task.url).catch(console.error)}
@@ -107,6 +170,20 @@ export function TaskPane({
             {copied === row.key ? "Copied" : "Copy link"}
           </button>
         </div>
+        {failed && (
+          <div className="mt-2 flex items-start gap-2">
+            <p role="alert" className="min-w-0 flex-1 break-words text-red-400 select-text">
+              {failed}
+            </p>
+            <button
+              type="button"
+              onClick={() => useTasksStore.getState().dismiss()}
+              className="shrink-0 text-ink-faint hover:text-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 select-text">

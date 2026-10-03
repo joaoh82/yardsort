@@ -31,6 +31,7 @@ export function project(name: string, overrides: Partial<Project> = {}): Project
         missing: false,
         archived: false,
         branchGone: false,
+        tasks: [],
       },
     ],
     ...overrides,
@@ -60,6 +61,7 @@ export const worktree = (
   missing: false,
   archived: false,
   branchGone: false,
+  tasks: [],
   ...overrides,
 });
 

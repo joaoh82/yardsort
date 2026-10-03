@@ -190,7 +190,7 @@ impl TaskSource for GitHub<'_> {
 
 /// The repository an issue's URL is in, as `host/owner/name` in lower case. `None` for
 /// anything that is not such a URL — a bare number most of all.
-fn repository(url: &str) -> Option<String> {
+pub(crate) fn repository(url: &str) -> Option<String> {
     let (before, _) = url.trim().rsplit_once("/issues/")?;
     let (_, rest) = before.split_once("://")?;
     let rest = rest.trim_start_matches("www.");

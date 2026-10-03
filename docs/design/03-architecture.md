@@ -303,8 +303,18 @@ what `ys task list` narrows by. `publish::tasks::TaskCache` keeps each project's
 separately, its closed ones for 30 s, each with a request counter so an older answer never
 replaces a newer one; a reading that got nothing keeps what was known and says why. Tasks are
 read once per project at start and then only while the Tasks view is showing
-(`project_tasks(…, closed)`). `ys` has no cache: it asks `gh` when it is run. See
-[23-tasks](23-tasks.md).
+(`project_tasks(…, closed)`). `ys` has no cache: it asks `gh` when it is run.
+
+**Delegating a task** is `tasks::delegate`: the first message, written in the core so the
+composer and `ys task start` send the same one, and `TaskRef`, what a workspace keeps of the
+task it was started from. The message quotes the issue between two lines carrying a mark made for that
+one message, which nobody who wrote the issue could have known — issue text is a stranger's,
+and it is about to be read by an agent with a shell. The window passes the `TaskRef` back when
+it asks for the workspace, and the core records it only if it is one it handed out for that
+project (`TaskCache::issued`). The link is a row in `workspace_tasks` (migration 0014), written
+only when a workspace is created from a task and gone with the workspace; `Workspace.tasks`
+carries it to the window, which matches tasks to workspaces by URL. Nothing is written to the
+forge. See [23-tasks](23-tasks.md).
 
 **Acting on any pull request of a project** is `publish::pull_requests`: merge, close, reopen.
 Each asks the forge about that one pull request again first (`gh pr view`), and refuses if it

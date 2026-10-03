@@ -757,8 +757,8 @@ changes.
 
 ## M24 — Tasks
 
-Proposed in [23-tasks](23-tasks.md), after a four-question design pass on 2026-10-03. Slice 1 is
-built.
+Proposed in [23-tasks](23-tasks.md), after a four-question design pass on 2026-10-03. Slices 1
+and 2 are built.
 
 - A **Tasks** row in the sidebar, under Pull requests, opens a view in the center panel: every
   project's GitHub issues, with state, project, label, assignee, author and _needs an answer_
@@ -782,7 +782,11 @@ built.
       `gh issue view` cannot say whether an answer is owed, so one issue in full is a query of
       our own too. Not done: the screenshot and the README, which wait for the slice that
       delegates. Recorded in [23 § slice 1](23-tasks.md#slice-1-what-shipped).
-- [ ] Slice 2: delegate — the message, the composer, the link, `ys task start`.
+- [x] Slice 2: delegate — the message, the composer, the link, `ys task start`. Migration 0014
+      records which task a workspace was started from. The message puts everything a stranger
+      wrote between two lines carrying a mark made for that message, and leaves bots out. Found:
+      a test that makes workspaces must say where worktrees go, or it makes them in the real
+      place. Recorded in [23 § slice 2](23-tasks.md#slice-2-what-shipped).
 - [ ] Slice 3: manage — the writes, in the view and in `ys task`; the screenshot.
 
 _Exit:_ on all three platforms, a project's issues are listed, filtered and read; one is

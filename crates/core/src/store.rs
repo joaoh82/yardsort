@@ -23,6 +23,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0011_workspace_outcomes.sql"),
     include_str!("../migrations/0012_workflow_runs.sql"),
     include_str!("../migrations/0013_workflow_run_context.sql"),
+    include_str!("../migrations/0014_workspace_tasks.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -42,6 +43,19 @@ pub struct ProjectRow {
     pub id: String,
     pub name: String,
     pub root_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceTaskRow {
+    /// Where the task is kept: `github`.
+    pub source: String,
+    /// Which of that source's projects: `host/owner/name`.
+    pub repo: String,
+    /// What a person calls it there: `#91`.
+    pub key: String,
+    pub url: String,
+    /// As it was when the workspace was started.
+    pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -648,6 +662,44 @@ impl Store {
                 workspace_from_row,
             )
             .optional()?)
+    }
+
+    /// Record that a workspace was started from a task. Saying so twice changes nothing.
+    pub fn link_task(&self, workspace_id: &str, task: &WorkspaceTaskRow) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT OR IGNORE INTO workspace_tasks
+                 (workspace_id, source, repo, key, url, title, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                workspace_id,
+                task.source,
+                task.repo,
+                task.key,
+                task.url,
+                task.title,
+                now_ms()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The tasks a workspace was started from, oldest first.
+    pub fn workspace_tasks(&self, workspace_id: &str) -> StoreResult<Vec<WorkspaceTaskRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT source, repo, key, url, title FROM workspace_tasks
+             WHERE workspace_id = ? ORDER BY created_at, rowid",
+        )?;
+        let rows = stmt.query_map([workspace_id], |row| {
+            Ok(WorkspaceTaskRow {
+                source: row.get(0)?,
+                repo: row.get(1)?,
+                key: row.get(2)?,
+                url: row.get(3)?,
+                title: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// The forgotten row for a path, if there is one: importing that worktree again revives it.
@@ -2131,6 +2183,54 @@ mod tests {
             store.workspace(&workspaces[0].id).unwrap(),
             Some(workspaces[0].clone())
         );
+    }
+
+    #[test]
+    fn a_workspace_remembers_the_task_it_was_started_from_until_it_is_deleted() {
+        let store = Store::in_memory();
+        let project = store.add_project("app", "/code/app").unwrap();
+        let made = store
+            .add_worktree(
+                &project.id,
+                "fix",
+                "/trees/fix",
+                Some("ys/fix"),
+                Some("main"),
+            )
+            .unwrap();
+        let other = store
+            .add_worktree(
+                &project.id,
+                "other",
+                "/trees/other",
+                Some("ys/other"),
+                Some("main"),
+            )
+            .unwrap();
+        let task = |key: &str| WorkspaceTaskRow {
+            source: "github".into(),
+            repo: "github.com/o/r".into(),
+            key: key.into(),
+            url: format!("https://github.com/o/r/issues/{}", &key[1..]),
+            title: format!("Task {key}"),
+        };
+        assert!(store.workspace_tasks(&made.id).unwrap().is_empty());
+
+        store.link_task(&made.id, &task("#91")).unwrap();
+        store.link_task(&made.id, &task("#91")).unwrap();
+        store.link_task(&made.id, &task("#92")).unwrap();
+        assert_eq!(
+            store.workspace_tasks(&made.id).unwrap(),
+            [task("#91"), task("#92")],
+            "each once, oldest first"
+        );
+        assert!(
+            store.workspace_tasks(&other.id).unwrap().is_empty(),
+            "nothing is written for a workspace made any other way"
+        );
+
+        assert!(store.remove_worktree(&made.id).unwrap());
+        assert!(store.workspace_tasks(&made.id).unwrap().is_empty());
     }
 
     #[test]

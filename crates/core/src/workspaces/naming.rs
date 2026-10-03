@@ -3,7 +3,7 @@
 
 /// Longest slug we generate. Branch and folder names this long still read well in a sidebar,
 /// and keep Windows paths short.
-const MAX_LEN: usize = 32;
+pub(crate) const MAX_LEN: usize = 32;
 const MAX_WORDS: usize = 4;
 
 /// Words that carry no meaning in a task description.

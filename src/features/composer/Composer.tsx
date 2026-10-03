@@ -59,11 +59,9 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // about the pull request may be the first message. Read once, like the handoff; the view
   // that sets them is closed by opening this.
   const [prepared] = useState(() => (runIn ? null : useProjectsStore.getState().composingBranch));
-  const [note] = useState(() =>
-    runIn || !useProjectsStore.getState().composingBranch
-      ? null
-      : useProjectsStore.getState().composingPrompt,
-  );
+  // The same for a task handed over from the Tasks view, which brings its message and itself.
+  const [note] = useState(() => (runIn ? null : useProjectsStore.getState().composingPrompt));
+  const [task] = useState(() => (runIn ? null : useProjectsStore.getState().composingTask));
   const [message, setMessage] = useState(handoff ?? note ?? "");
   const [harnessId, setHarnessId] = useState<string | null>(null);
   const [model, setModel] = useState(last.model ?? "");
@@ -279,6 +277,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       existingBranch: mode === "open" ? branch : null,
       harness: request,
       size: useTerminalStore.getState().lastSize,
+      task,
     });
     setBusy(false);
     if ("error" in result) return setError(result.error);
@@ -324,12 +323,20 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             change it, then start. The task on record stays what you first asked.
           </p>
         )}
+        {task && (
+          <p className="mb-2 text-[12px] text-ink-faint">
+            For task <span className="font-mono text-ink-muted">{task.key}</span>{" "}
+            <span className="text-ink-muted">{task.title}</span>. The message quotes the issue as it
+            was written on GitHub, by whoever wrote it: read it before you start. The workspace will
+            be named after the task and remember it.
+          </p>
+        )}
         <textarea
           ref={messageRef}
           aria-label="What should the agent work on?"
           placeholder="What should the agent work on?"
           value={message}
-          rows={handoff !== null ? 18 : 5}
+          rows={handoff !== null || task ? 18 : 5}
           disabled={busy}
           onChange={(event) => setMessage(event.target.value)}
           onKeyDown={(event) => {

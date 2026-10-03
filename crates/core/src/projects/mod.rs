@@ -8,6 +8,7 @@ use specta::Type;
 use crate::error::{IpcError, IpcResult};
 use crate::git::{normalize, Git, Head};
 use crate::store::{ProjectRow, Store, WorkspaceRow};
+use crate::tasks::delegate::TaskRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +50,8 @@ pub struct Workspace {
     /// its branch was deleted too (or it never had one). Only asked of git when the folder is
     /// already gone, and a git that will not answer counts as "the branch is still there".
     pub branch_gone: bool,
+    /// The tasks it was started from, oldest first. Nearly always none or one.
+    pub tasks: Vec<TaskRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -287,6 +290,14 @@ impl Projects<'_> {
             .then(|| self.git.head(&path).ok())
             .flatten()
             .map(HeadInfo::from);
+        // A store that will not answer is a workspace with no badge, not one that cannot be listed.
+        let tasks = self
+            .store
+            .workspace_tasks(&row.id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(TaskRef::from_row)
+            .collect();
         Workspace {
             kind: if row.kind == "local" {
                 WorkspaceKind::Local
@@ -300,6 +311,7 @@ impl Projects<'_> {
             project_id: row.project_id,
             name: row.name,
             path: row.path,
+            tasks,
             head,
             archived: row.archived,
         }

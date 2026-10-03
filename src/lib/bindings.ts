@@ -175,6 +175,12 @@ export const commands = {
 	 */
 	taskDetail: (projectId: string, key: string, refresh: boolean) => typedError<TaskDetail, IpcError>(__TAURI_INVOKE("task_detail", { projectId, key, refresh })),
 	/**
+	 *  A task made ready to hand to an agent: the first message, built from the task as its
+	 *  source has it this moment, and what to record against the workspace that is started. The
+	 *  composer shows the message for the user to read and edit; nothing starts here.
+	 */
+	taskPrompt: (projectId: string, key: string) => typedError<Delegated, IpcError>(__TAURI_INVOKE("task_prompt", { projectId, key })),
+	/**
 	 *  Who would be asked to resolve pull request `number`'s conflicts, and how — for the
 	 *  confirmation, before anything is sent. Reads the project's list, cached when it is fresh.
 	 */
@@ -746,6 +752,14 @@ export type DayUsage = {
 	tokens: (number | null)[],
 };
 
+/**  A task made ready to hand to an agent. */
+export type Delegated = {
+	/**  The agent's first message. The user reads and edits it in the composer. */
+	prompt: string,
+	/**  What to record against the workspace that is started. */
+	task: TaskRef,
+};
+
 /**  A workflow a model wrote from a description, checked, for the editor. Nothing is saved. */
 export type Described = {
 	text: string,
@@ -1265,6 +1279,11 @@ export type NewWorkspace = {
 	existingBranch: string | null,
 	harness: HarnessRequest,
 	size: TermSize,
+	/**
+	 *  The task this workspace is being started from, when it is: it names the workspace and
+	 *  is recorded against it. See `crate::tasks::delegate`.
+	 */
+	task: TaskRef | null,
 };
 
 /**  One tool call that was executing when the file was last written. */
@@ -1973,6 +1992,20 @@ export type TaskLabel = {
 	color: string,
 };
 
+/**
+ *  Which task a workspace was started from: enough to find it again and to name it without
+ *  asking its source.
+ */
+export type TaskRef = {
+	source: TaskSourceKind,
+	/**  Which of the source's projects: `host/owner/name`. */
+	repo: string,
+	key: string,
+	url: string,
+	/**  As it was when the workspace was started. */
+	title: string,
+};
+
 /**  Where a task is kept. */
 export type TaskSourceKind = "github";
 
@@ -2163,6 +2196,8 @@ export type Workspace = {
 	 *  already gone, and a git that will not answer counts as "the branch is still there".
 	 */
 	branchGone: boolean,
+	/**  The tasks it was started from, oldest first. Nearly always none or one. */
+	tasks: TaskRef[],
 };
 
 /**  Something changed on disk in the watched workspace; ask again. */

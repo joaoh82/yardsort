@@ -21,6 +21,7 @@ use super::commands::{failed, project_root, repo_at};
 use crate::error::IpcResult;
 use crate::forge::{ForgeError, ForgeResult, Gh, Repo};
 use crate::state::{blocking, AppState};
+use crate::tasks::delegate::{delegated, Delegated, TaskRef};
 use crate::tasks::github::{coverage, Coverage, GitHub};
 use crate::tasks::{Task, TaskDetail, TaskList, TaskSource, TaskState, CLOSED_CAP, OPEN_CAP};
 
@@ -73,6 +74,8 @@ pub struct TaskCache {
     next_request: AtomicU64,
     /// Tasks read in full, by project and key.
     details: Mutex<HashMap<(String, String), (Instant, TaskDetail)>>,
+    /// The references handed out for delegating, by project: see [`TaskCache::issued`].
+    issued: Mutex<HashMap<String, Vec<TaskRef>>>,
 }
 
 impl TaskCache {
@@ -163,6 +166,28 @@ impl TaskCache {
             }
         }
         answer
+    }
+
+    /// Remember that `task` was made ready to delegate in this project.
+    fn issue(&self, project_id: &str, task: &TaskRef) {
+        let mut issued = self.issued.lock().unwrap_or_else(PoisonError::into_inner);
+        let known = issued.entry(project_id.to_owned()).or_default();
+        if !known.contains(task) {
+            known.push(task.clone());
+        }
+    }
+
+    /// Whether `task` is one the core itself read for this project and handed to the window.
+    ///
+    /// A workspace records the task it was started from, and the window passes that task back
+    /// when it asks for the workspace. The window holds no truth: only a reference that came
+    /// from the source, for this project, in this run of the app, is written down. One made up,
+    /// altered, or prepared for another project is refused.
+    pub fn issued(&self, project_id: &str, task: &TaskRef) -> bool {
+        let issued = self.issued.lock().unwrap_or_else(PoisonError::into_inner);
+        issued
+            .get(project_id)
+            .is_some_and(|known| known.contains(task))
     }
 
     /// One task in full, from the cache when it was read less than [`FRESH_FOR`] ago. Unlike
@@ -265,6 +290,33 @@ pub async fn task_detail(
             .tasks
             .detail(&project_id, &key, refresh, || source.show(&root, &key))
             .map_err(failed)
+    })
+    .await
+}
+
+/// A task made ready to hand to an agent: the first message, built from the task as its
+/// source has it this moment, and what to record against the workspace that is started. The
+/// composer shows the message for the user to read and edit; nothing starts here.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_prompt(app: AppHandle, project_id: String, key: String) -> IpcResult<Delegated> {
+    blocking(app, move |state| {
+        let root = project_root(state, &project_id)?;
+        let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
+        let Coverage::Covered(host) = coverage(repo_at(state, &root).as_ref()) else {
+            return Err(crate::error::IpcError::new(
+                "tasks_not_covered",
+                "This project's tasks cannot be read: it is not on GitHub.",
+            ));
+        };
+        let source = GitHub::new(&gh, host);
+        let detail = state
+            .tasks
+            .detail(&project_id, &key, true, || source.show(&root, &key))
+            .map_err(failed)?;
+        let delegated = delegated(&detail);
+        state.tasks.issue(&project_id, &delegated.task);
+        Ok(delegated)
     })
     .await
 }
@@ -389,6 +441,25 @@ mod tests {
         assert_eq!(found.problem.as_deref(), Some("HTTP 502"));
         assert!(!found.closed, "they were not read");
         assert_eq!(cache.composed("p", false, None).problem, None);
+    }
+
+    #[test]
+    fn only_a_reference_the_core_handed_out_for_that_project_is_one_it_issued() {
+        let cache = TaskCache::default();
+        let it = TaskRef::of(&task("#7", TaskState::Open));
+        assert!(!cache.issued("p", &it), "nothing has been prepared");
+        cache.issue("p", &it);
+        cache.issue("p", &it);
+        assert!(cache.issued("p", &it));
+        assert!(
+            !cache.issued("q", &it),
+            "it was prepared for another project"
+        );
+        let altered = TaskRef {
+            url: "https://github.com/someone/else/issues/7".to_owned(),
+            ..it.clone()
+        };
+        assert!(!cache.issued("p", &altered));
     }
 
     #[test]

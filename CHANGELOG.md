@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Tasks: hand one to an agent.** **Delegate** on an open task opens the composer with the
+  first message written from the issue — title, description, the latest comments — between two
+  lines that mark it as text other people wrote, with what the agent should do if that text
+  asks for more than the work. Nothing starts until you press Start. The workspace is named
+  after the task and remembers it: the task names its workspaces and goes to them, **Delegate
+  again** starts another attempt, and the workspace's row shows the task's key. Nothing is
+  written to GitHub. `ys task start <task>` does the same from a terminal, and
+  `ys workspace list --json` says which task each workspace came from. See
+  [Tasks](docs/guide/tasks.md#handing-a-task-to-an-agent).
 - **Tasks: every project's GitHub issues, in one place.** **Tasks**, under Pull requests in the
   sidebar or in the command palette, lists the open issues of every project on GitHub — up to
   the 200 most recently updated — with who opened each, its labels, assignees, comments and any
