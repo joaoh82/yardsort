@@ -534,9 +534,8 @@ Built on 2026-10-03, as proposed except where said.
 Where it differs from the proposal:
 
 - **The quoted part sits between two marked lines**, and everything a stranger wrote is inside
-  them — the title and the labels too, which the proposal had above the frame. Any run of five
-  dashes in the quoted text is broken up, so nothing inside can pass for the closing line.
-  There is a test with a description that tries.
+  them — the title and the labels too, which the proposal had above the frame. See _changed
+  after review_ below for what makes the lines theirs alone.
 - **Bots' comments and hidden comments are left out of the message.** The proposal took the
   latest ten comments; these are the latest ten a person wrote and the forge did not hide.
 - **The message does not mention `ys task comment`**, which does not exist until slice 3.
@@ -551,6 +550,23 @@ Where it differs from the proposal:
 - **`created_at` is a number**, milliseconds, like every other time in the store.
 - **`ys task start` refuses before it creates**: an agent that is not installed is refused
   before `gh` is asked, and a closed task or another repository's link before anything is made.
+
+Changed after review, before merging:
+
+- **The two lines carry a mark made for each message**, eight hexadecimal digits, named again
+  in the paragraph after them. Breaking up runs of dashes was not a guarantee — nine dashes
+  still left five — and could never have been one: an agent reads the lines, it does not
+  compare bytes, so em dashes or a ruler of equals signs pass for the closing line just as
+  well. Nobody writing an issue can know the mark. The issue's text is no longer altered.
+- **A task's workspace name stays within the cap on names**, 32 characters: the title gives up
+  whole words to make room for the number.
+- **`ys task start --print`** writes the message and stops, so a person or the agent calling it
+  can read exactly what would be sent. `ys task show` prints the issue, which is not that.
+- **The core records only a reference it handed out.** `task_prompt` remembers the `TaskRef`
+  it returned, per project, and `workspace_create` refuses one it did not issue for that
+  project — the window holds no truth. Checking the reference against the project's remote was
+  the suggestion; it would wrongly refuse a clone of a fork, where `gh` answers for the parent,
+  and a remote under an ssh alias.
 
 Found:
 

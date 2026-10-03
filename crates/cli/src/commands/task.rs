@@ -83,6 +83,13 @@ pub enum Command {
         /// Make the workspace and record the task, but start nothing in it.
         #[arg(long)]
         no_agent: bool,
+        /// Write the message an agent would be given, and stop: nothing is created or started.
+        ///
+        /// For reading what a stranger's issue turns into before an agent is set to it. The
+        /// mark on its two lines is made anew for each message, so a later start carries
+        /// another; the rest is the same unless the issue changed in between.
+        #[arg(long, conflicts_with = "no_agent")]
+        print: bool,
     },
 }
 
@@ -184,10 +191,11 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             model,
             effort,
             no_agent,
+            print,
         } => {
             let project = project_of(ys, project.as_deref())?;
             // The harness is checked before `gh` is asked, and both before anything is made.
-            if !no_agent {
+            if !no_agent && !print {
                 super::workspace::choose_harness(ys, harness.as_deref())?;
             }
             let gh = gh(ys)?;
@@ -206,6 +214,9 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 )));
             }
             let delegated = delegate::delegated(&detail);
+            if print {
+                return out.emit(&delegated, || print!("{}", delegated.prompt));
+            }
             super::workspace::new(
                 ys,
                 project.id,

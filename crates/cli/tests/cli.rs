@@ -2175,3 +2175,61 @@ fn a_task_that_cannot_be_started_leaves_nothing_behind() {
     assert!(tasks.asked().is_empty(), "{:?}", tasks.asked());
     nothing_made(&tasks);
 }
+
+#[cfg(unix)]
+#[test]
+fn the_message_can_be_read_without_anything_being_made() {
+    let tasks = Tasks::recorded();
+    let printed = tasks
+        .ys(
+            None,
+            // No such agent: `--print` starts nothing, so which one does not matter.
+            &[
+                "task",
+                "start",
+                "14394",
+                "--project",
+                "Demo",
+                "--print",
+                "--harness",
+                "nope",
+            ],
+        )
+        .ok();
+    assert!(
+        printed.starts_with("Work on this GitHub issue: #14394, https://github.com/example/"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("Title: Replaced title of issue 14394"),
+        "{printed}"
+    );
+    assert!(printed.contains("Replaced description."), "{printed}");
+    assert!(printed.contains("stop and ask me first"), "{printed}");
+    assert!(
+        !printed.contains("triage-bot"),
+        "bots are left out: {printed}"
+    );
+
+    let json = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "start",
+                "14394",
+                "--project",
+                "Demo",
+                "--print",
+                "--json",
+            ],
+        )
+        .ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["task"]["key"], "#14394");
+    assert!(parsed["prompt"].as_str().unwrap().contains("Fixes #14394"));
+
+    let listed = tasks.ys(None, &["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&listed).expect("valid JSON");
+    assert!(worktrees_in(&listed).is_empty(), "{listed}");
+}

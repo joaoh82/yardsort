@@ -307,9 +307,11 @@ read once per project at start and then only while the Tasks view is showing
 
 **Delegating a task** is `tasks::delegate`: the first message, written in the core so the
 composer and `ys task start` send the same one, and `TaskRef`, what a workspace keeps of the
-task it was started from. The message quotes the issue between two marked lines and breaks up
-anything inside that could pass for them — issue text is a stranger's, and it is about to be
-read by an agent with a shell. The link is a row in `workspace_tasks` (migration 0014), written
+task it was started from. The message quotes the issue between two lines carrying a mark made for that
+one message, which nobody who wrote the issue could have known — issue text is a stranger's,
+and it is about to be read by an agent with a shell. The window passes the `TaskRef` back when
+it asks for the workspace, and the core records it only if it is one it handed out for that
+project (`TaskCache::issued`). The link is a row in `workspace_tasks` (migration 0014), written
 only when a workspace is created from a task and gone with the workspace; `Workspace.tasks`
 carries it to the window, which matches tasks to workspaces by URL. Nothing is written to the
 forge. See [23-tasks](23-tasks.md).

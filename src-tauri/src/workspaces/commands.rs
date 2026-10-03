@@ -357,6 +357,17 @@ pub async fn workspace_create(
             .filter(|def| def.enabled)
             .ok_or_else(|| IpcError::new("unknown_harness", "That harness is not configured."))?;
 
+        // The task comes back from the window, which holds no truth: only one the core read
+        // for this project and handed out is recorded. Refused before anything is made.
+        if let Some(task) = &request.task {
+            if !state.tasks.issued(&request.project_id, task) {
+                return Err(IpcError::new(
+                    "unknown_task",
+                    "That task was not made ready for this project. Press Delegate again.",
+                ));
+            }
+        }
+
         let git = Git::new(&state.env())?;
         let root = state.worktree_root()?;
         let settings = state.settings.get();

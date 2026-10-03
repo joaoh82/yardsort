@@ -784,7 +784,7 @@ and 2 are built.
       delegates. Recorded in [23 § slice 1](23-tasks.md#slice-1-what-shipped).
 - [x] Slice 2: delegate — the message, the composer, the link, `ys task start`. Migration 0014
       records which task a workspace was started from. The message puts everything a stranger
-      wrote between two marked lines nothing inside can imitate, and leaves bots out. Found:
+      wrote between two lines carrying a mark made for that message, and leaves bots out. Found:
       a test that makes workspaces must say where worktrees go, or it makes them in the real
       place. Recorded in [23 § slice 2](23-tasks.md#slice-2-what-shipped).
 - [ ] Slice 3: manage — the writes, in the view and in `ys task`; the screenshot.

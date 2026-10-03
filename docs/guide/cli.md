@@ -293,6 +293,7 @@ ys task list                          # open tasks, most recently updated first
 ys task list --needs-answer           # the ones waiting on a maintainer
 ys task list --state all --label bug --assignee @me --author grace --search "worktree" --limit 20
 ys task show 91                       # one in full: description and conversation
+ys task start 91 --print              # the message an agent would be given; nothing is made
 ys task start 91                      # a workspace and an agent on it, started from the task
 ```
 
@@ -331,8 +332,11 @@ in [Tasks](tasks.md#handing-a-task-to-an-agent) — the workspace named after th
 `--harness`, `--model`, `--effort` and `--no-agent`, and prints the same thing with a `task`
 line. A closed task is refused, and so is a link to another repository's issue; nothing is
 created in either case. There is no composer in a terminal, so **the message is not shown
-before the agent starts**: read the task with `ys task show` first when someone you do not know
-wrote it.
+before the agent starts**. `ys task start 91 --print` writes the message an agent would be
+given and stops — nothing is created or started — so read that first when someone you do not
+know wrote the issue; with `--json` it is `{ prompt, task }`. The mark on the message's two
+lines is made anew each time, so the one a later start sends differs in that and in nothing
+else, unless the issue changed in between.
 
 `ys workspace list --json` says which task each workspace was started from, in `tasks`.
 
