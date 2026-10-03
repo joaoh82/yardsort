@@ -23,12 +23,15 @@
 #   The demo repositories point at remotes that do not exist, so `setup` also puts a stand-in
 #   `gh` on that PATH. It answers what the Pull requests view, the workflow-run shot and the
 #   pull-request badges ask — the list, one pull request in full, the open ones, the comments
-#   on lines — from files `setup` writes under the demo folder, and refuses everything else.
+#   on lines — and what the Tasks view asks — the open and closed issues, one in full, the
+#   labels and who can be assigned — from files `setup` writes under the demo folder, and
+#   refuses everything else, every write among it.
 #   The pull request the Code tab shows has real commits on a real branch, and the refs the
 #   diff is read from are already there, so nothing is fetched.
 #
-# `seed` writes the three demo projects, and a workspace on the pull request's branch, into the
-# profile's database once the app has created it, so nothing has to be typed into the window.
+# `seed` writes the three demo projects, and a workspace on the pull request's branch that was
+# started from one of the demo tasks, into the profile's database once the app has created it,
+# so nothing has to be typed into the window.
 #
 # See AGENTS.md. `shoot` finds the window by the profile behind it, so an ordinary copy of
 # Yardsort left open cannot be captured by mistake. It needs Hyprland, grim and jq; on anything
@@ -117,7 +120,17 @@ case "$1 $2" in
     fi
     ;;
   "pr view") cat "$dir/view-$number.json" ;;
-  "api graphql") cat "$dir/open.json" ;;
+  "api graphql")
+    # One endpoint, several questions: told apart by what the query asks for.
+    case "$*" in
+      *"issue(number:"*) cat "$dir/issue-$(printf '%s\n' "$@" | sed -n 's|^number=\([0-9]*\)$|\1|p').json" ;;
+      *"issues(states:CLOSED"*) cat "$dir/issues-closed.json" ;;
+      *"issues(states:OPEN"*) cat "$dir/issues-open.json" ;;
+      *assignableUsers*) cat "$dir/assignees.json" ;;
+      *) cat "$dir/open.json" ;;
+    esac
+    ;;
+  "label list") cat "$dir/labels.json" ;;
   "api --paginate")
     if [ -f "$dir/comments-$number.json" ]; then cat "$dir/comments-$number.json"; else echo '[[]]'; fi
     ;;
@@ -145,6 +158,7 @@ EOF
 
   demo_projects
   demo_pull_requests
+  demo_tasks
   echo
   echo "Start the app with the throwaway profile, then run 'scripts/screenshots.sh seed' to add"
   echo "the demo projects to it (or add them by hand, in this order: weather-cli, api-gateway,"
@@ -607,6 +621,164 @@ print("  pull requests for weather-cli, api-gateway and docs-site under", os.pat
 EOF
 }
 
+# What the Tasks view shows: each demo repository's issues, as `gh api graphql` would answer for
+# them, with invented people. Times are counted back from now, so the ages read well whenever
+# the shot is taken.
+demo_tasks() {
+  DEMO="$DEMO" python3 - <<'EOF'
+import json, os
+from datetime import datetime, timedelta, timezone
+
+demo = os.environ["DEMO"]
+now = datetime.now(timezone.utc)
+ago = lambda hours: (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+LABELS = {
+    "bug": "d73a4a", "enhancement": "a2eeef", "documentation": "0075ca", "question": "d876e3",
+    "good first issue": "7057ff", "windows": "1d76db", "performance": "fbca04",
+}
+MAINTAINERS = {"ada", "hedy"}
+BOTS = {"triage-bot"}
+
+def who(login):
+    if login is None:
+        return None
+    return {"__typename": "Bot" if login in BOTS else "User", "login": login}
+
+def association(login):
+    return "MEMBER" if login in MAINTAINERS else "NONE"
+
+def issue(repo, number, title, author, hours, labels=(), assignees=(), comments=(), body="",
+          state="OPEN", reason=None, updated=None, closes=()):
+    said = [{
+        "authorAssociation": association(login),
+        "author": who(login),
+        "body": text,
+        "createdAt": ago(at),
+        "url": f"https://github.com/yardsort-demo/{repo}/issues/{number}#issuecomment-{9000 + number * 10 + i}",
+        "isMinimized": False,
+        "minimizedReason": None,
+    } for i, (login, text, at) in enumerate(comments)]
+    return {
+        "number": number,
+        "url": f"https://github.com/yardsort-demo/{repo}/issues/{number}",
+        "title": title,
+        "state": state,
+        "stateReason": reason,
+        "createdAt": ago(hours),
+        "updatedAt": ago(updated if updated is not None else (comments[-1][2] if comments else hours)),
+        "authorAssociation": association(author),
+        "author": who(author),
+        "labels": {"nodes": [{"name": name, "color": LABELS[name]} for name in labels]},
+        "assignees": {"nodes": [{"login": login} for login in assignees]},
+        "closedByPullRequestsReferences": {"nodes": [{"number": n} for n in closes]},
+        "body": body,
+        "comments": {"totalCount": len(said), "nodes": said},
+    }
+
+repos = {
+    "weather-cli": [
+        issue("weather-cli", 14, "Wind speed is wrong for cities above 60° north", "grace", 30,
+              labels=["bug"], comments=[
+                  ("triage-bot", "Thanks for the report. A maintainer will take a look.", 29.9),
+                  ("ada", "Which city, and what did you expect to see? `weather Tromsø` gives me "
+                          "`wind 14 km/h`, which matches the service.", 26),
+                  ("grace", "Tromsø and Reykjavik both. The service reports **m/s** for those "
+                            "stations, not km/h, so the number is right and the unit is not:\n\n"
+                            "```sh\n$ weather Tromsø\nTromsø: 4°C, wind 14 km/h\n```\n\n"
+                            "14 m/s is about 50 km/h, which is what it felt like.", 1.2),
+              ],
+              body="`weather` prints a wind speed that is far too low for northern cities.\n\n"
+                   "## To reproduce\n\n```sh\nweather Tromsø\n```\n\n"
+                   "## Expected\n\nA wind speed that agrees with the forecast on the "
+                   "service's own site.\n\n- weather-cli 1.2.0\n- macOS 15"),
+        issue("weather-cli", 9, "Print the temperature in Fahrenheit", "linus", 150,
+              labels=["enhancement"], assignees=["ada"], closes=[12], comments=[
+                  ("ada", "Agreed. `--units imperial`, converting before rendering.", 140),
+                  ("linus", "That would do it. Miles per hour for the wind too, please.", 139),
+                  ("ada", "Both are in #12.", 5),
+              ],
+              body="I read the weather in °F. A flag would be enough."),
+        issue("weather-cli", 13, "`weather` with no city should use the last one", "ken", 52,
+              labels=["enhancement", "good first issue"],
+              body="Typing the city every time is most of the typing."),
+        issue("weather-cli", 11, "Document the exit codes", "hedy", 200,
+              labels=["documentation"], comments=[
+                  ("ken", "Is 2 always \"city not found\"? I am scripting around it.", 60),
+              ],
+              body="Scripts need to tell \"no such city\" from \"no network\"."),
+        issue("weather-cli", 8, "Crash when the city name has an apostrophe", "grace", 400,
+              labels=["bug"], state="CLOSED", reason="COMPLETED", updated=300, comments=[
+                  ("ada", "Fixed in 1.1.2.", 300),
+              ], body="`weather \"Coeur d'Alene\"` throws."),
+        issue("weather-cli", 6, "Support a second weather service", "ken", 700,
+              labels=["enhancement"], state="CLOSED", reason="NOT_PLANNED", updated=650,
+              body="For when the first one is down."),
+    ],
+    "api-gateway": [
+        issue("api-gateway", 231, "Rate limiter counts retried requests twice", "linus", 20,
+              labels=["bug", "performance"], comments=[
+                  ("hedy", "Reproduced. The retry middleware runs before the limiter.", 9),
+              ], assignees=["hedy"],
+              body="A client that retries once is limited at half its quota."),
+        issue("api-gateway", 228, "Which header carries the request id?", "margaret", 75,
+              labels=["question"],
+              body="The docs say `X-Request-Id`; the gateway sends `X-Trace`."),
+        issue("api-gateway", 219, "Health check times out behind the load balancer", "ken", 310,
+              labels=["bug"], comments=[
+                  ("ada", "What is the balancer's idle timeout?", 300),
+                  ("ken", "Thirty seconds. The check holds its connection for sixty.", 298),
+                  ("triage-bot", "This issue has had no activity for 10 days.", 58),
+              ],
+              body="`/healthz` answers locally and never through the balancer."),
+    ],
+    "docs-site": [
+        issue("docs-site", 47, "Search finds nothing for words with a hyphen", "margaret", 95,
+              labels=["bug"], comments=[
+                  ("ada", "The tokenizer splits on it. I will look at the index settings.", 90),
+              ], assignees=["ada"],
+              body="Searching for `rate-limit` finds no page; `rate limit` finds four."),
+    ],
+}
+
+for repo, issues in repos.items():
+    out = os.path.join(demo, "gh", repo)
+    os.makedirs(out, exist_ok=True)
+    def page(state):
+        nodes = []
+        for it in sorted((i for i in issues if i["state"] == state),
+                         key=lambda i: i["updatedAt"], reverse=True):
+            row = {k: v for k, v in it.items() if k != "body"}
+            # A list is given the end of each conversation, and who wrote it, not the words.
+            row["comments"] = {
+                "totalCount": it["comments"]["totalCount"],
+                "nodes": [{"authorAssociation": c["authorAssociation"], "author": c["author"]}
+                          for c in it["comments"]["nodes"][-5:]],
+            }
+            nodes.append(row)
+        return {"data": {
+            "repository": {"hasIssuesEnabled": True, "issues": {
+                "totalCount": len(nodes),
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": nodes,
+            }},
+            "viewer": {"login": "ada"},
+        }}
+    for name, state in (("issues-open.json", "OPEN"), ("issues-closed.json", "CLOSED")):
+        with open(os.path.join(out, name), "w") as f:
+            json.dump(page(state), f, indent=1)
+    for it in issues:
+        with open(os.path.join(out, f"issue-{it['number']}.json"), "w") as f:
+            json.dump({"data": {"repository": {"issue": it}}}, f, indent=1)
+    with open(os.path.join(out, "labels.json"), "w") as f:
+        json.dump([{"name": name, "color": color} for name, color in LABELS.items()], f, indent=1)
+    with open(os.path.join(out, "assignees.json"), "w") as f:
+        json.dump({"data": {"repository": {"assignableUsers": {
+            "nodes": [{"login": login} for login in ("ada", "hedy", "grace")]}}}}, f, indent=1)
+print("  tasks for weather-cli, api-gateway and docs-site under", os.path.join(demo, "gh"))
+EOF
+}
+
 # The demo projects, into the profile the app is running on. The app makes the database on its
 # first start, so this comes after that; the sidebar reads the projects again when the window
 # is next focused, so nothing needs restarting.
@@ -633,6 +805,11 @@ INSERT INTO workspaces (id, project_id, kind, name, path, branch, base_branch, c
   ('demo-weather-cli-pr', 'demo-weather-cli', 'worktree', 'celsius-fahrenheit', '$DEMO/wt/weather-cli/celsius-fahrenheit', 'ys/celsius-fahrenheit', 'main', $now),
   ('demo-api-gateway-local', 'demo-api-gateway', 'local', 'local', '$DEMO/repos/api-gateway', NULL, NULL, $now),
   ('demo-docs-site-local', 'demo-docs-site', 'local', 'local', '$DEMO/repos/docs-site', NULL, NULL, $now);
+-- The workspace on the pull request's branch was started from the task that asked for it, so
+-- the Tasks view names it under that task's row.
+INSERT INTO workspace_tasks (workspace_id, source, repo, key, url, title, created_at) VALUES
+  ('demo-weather-cli-pr', 'github', 'github.com/yardsort-demo/weather-cli', '#9',
+   'https://github.com/yardsort-demo/weather-cli/issues/9', 'Print the temperature in Fahrenheit', $now);
 -- The welcome tour wants no screenshot of its own but the onboarding one, taken by hand.
 INSERT OR REPLACE INTO ui_state (key, value) VALUES ('onboarding.welcomeSeen', 'true');
 EOF

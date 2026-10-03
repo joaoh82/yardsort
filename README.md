@@ -96,7 +96,7 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   say so. The workspace remembers the task it came from. Open a new task, answer one, close,
   label and assign it from the same view. `ys task` does all of it from a terminal, so an agent
   can tell you what is open and file an issue when you ask. Everything goes through `gh`.
-  See [Tasks](docs/guide/tasks.md).
+  [More below](#your-issues-where-the-agents-are).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
@@ -201,6 +201,30 @@ search a title or a number.
 It needs the [GitHub CLI](https://cli.github.com), logged in; everything here is `gh` with the
 permissions you already have, and nothing you write reaches `gh` as a command-line argument.
 See [Pull requests](docs/guide/pull-requests.md).
+
+## Your issues, where the agents are
+
+![Tasks: every project's open issues in one list, with one open beside it showing its description and conversation, and buttons to delegate, close, label and assign it](docs/images/tasks.png)
+
+**Tasks**, under Pull requests in the sidebar, is one list of the open GitHub issues of every
+project, most recently updated first. The number beside it is not how many are open but how many
+**need an answer**: the last person to speak was not an owner, a member or a collaborator, and a
+bot's comment counts as nobody's. Filter by project, label, assignee, author and _Needs an
+answer_, or search a title or a number.
+
+- **Delegate** opens the composer with the issue as the agent's first message — its title,
+  description and latest comments, between two lines marked as text other people wrote, followed
+  by what the agent should do if that text asks for more than the work. Nothing starts until you
+  press Start. The workspace is named after the task and remembers it, so the task names its
+  workspaces and the workspace's row shows the task.
+- **New task**, a reply box, **Close** and **Reopen**, **Labels** and **Assignees** manage issues
+  without leaving the app. Closing and reopening ask first, naming who opened the task.
+- **`ys task`** does all of it from a terminal — `list --needs-answer`, `show`, `start`,
+  `create`, `comment`, `close`, `reopen`, `edit`, each with `--json` — so an agent in a
+  workspace can tell you what is open and file an issue when you ask.
+
+It needs the [GitHub CLI](https://cli.github.com), logged in; everything here is `gh` with the
+permissions you already have. See [Tasks](docs/guide/tasks.md).
 
 ## Hand the work to another agent
 

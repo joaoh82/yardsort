@@ -166,6 +166,8 @@ to reopen it with its conversation intact.
 
 - [Workspaces](guide/workspaces.md) — branches, archiving, cleaning up
 - [Terminals & sessions](guide/terminals-and-sessions.md) — resume, fork, notifications
+- [Tasks](guide/tasks.md) — your projects' GitHub issues: which need an answer, and handing one
+  to an agent
 - [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review
 - [Usage](guide/usage.md) — tokens, estimated API costs, plan limits and live CPU and memory
 - [Settings & harnesses](guide/settings.md) — make an agent start the way you like

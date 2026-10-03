@@ -7,6 +7,8 @@ you. Open it with **Tasks**, under Pull requests at the top of the sidebar, or f
 over the center panel the way [Pull requests](pull-requests.md) and [Usage](usage.md) do; **×**
 in its header closes it, and so does pressing the row again or selecting a workspace.
 
+![The Tasks view: every project's open issues on the left, one open on the right with its description and conversation, and buttons to delegate, close, label and assign it](../images/tasks.png)
+
 It needs the [GitHub CLI](https://cli.github.com), installed and logged in, and it is for
 projects on GitHub. Yardsort holds no credential of its own: everything here is `gh`, with the
 permissions you already have.
