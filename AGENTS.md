@@ -29,7 +29,8 @@ the documentation says so, in the same commit or pull request.**
   `scripts/screenshots.sh` sets all of that up, prints the launch line, and captures the window
   at the size the existing images use; it is the short way through everything below. Its `seed`
   adds the demo projects to the running profile, and its stand-in `gh` answers for their pull
-  requests, so the Pull requests view has something to show without a network. Three things a
+  requests and their issues, so the Pull requests and Tasks views have something to show without
+  a network. Three things a
   throwaway profile does **not** isolate, and all three have leaked into a shot already:
   - **Agent paths.** Settings → Harnesses prints "Found at …", which is a real install path under
     your home. Put shims on `PATH` — `/tmp/agents/claude` exec'ing the real one — and point the

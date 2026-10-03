@@ -667,8 +667,10 @@ Not done:
   pickers were run against the real one. Creating, commenting on and closing a real issue is
   public and tells people, and was left for a hand on the window:
   [08 §24](08-manual-checklist.md).
-- **The screenshot.** It needs the real window on a real screen, and `scripts/screenshots.sh`'s
-  stand-in `gh` to answer for issues as it does for pull requests.
+- **The screenshot** was taken afterwards: `docs/images/tasks.png`, with
+  `scripts/screenshots.sh`, whose stand-in `gh` now answers for three demo repositories' issues
+  — the open ones, the closed ones, one in full, the labels and who can be assigned — and
+  refuses every write. `seed` records the demo workspace as started from one of the tasks.
 - **macOS and Windows by hand.**
 
 ## Not in this version, on purpose

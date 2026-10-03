@@ -27,6 +27,10 @@ const LINES: { command: string; note: string }[] = [
     note: "in a workspace's folder: a second agent reviews its pull request",
   },
   {
+    command: "ys task list --needs-answer",
+    note: "the GitHub issues waiting on you — and ys task create files one",
+  },
+  {
     command: "ys workspace delete fix-the-flaky-login-test",
     note: "the folder goes; the branch stays",
   },
