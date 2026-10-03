@@ -252,7 +252,8 @@ function WorkspaceNode({
       s.composingProjectId === null &&
       s.workflowId === null &&
       !s.usageOpen &&
-      !s.pullRequestsOpen,
+      !s.pullRequestsOpen &&
+      !s.tasksOpen,
   );
   // Select the project's own entry, never a derived object: a selector that built one would
   // hand back a new value on every render and re-render for ever.

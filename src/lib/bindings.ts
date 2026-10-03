@@ -164,6 +164,17 @@ export const commands = {
 	 */
 	pullRequestPrepareBranch: (projectId: string, number: number) => typedError<PreparedBranch, IpcError>(__TAURI_INVOKE("pull_request_prepare_branch", { projectId, number })),
 	/**
+	 *  A project's tasks: every open one up to the cap, and with `closed` the most recently
+	 *  closed as well. Never an `Err` — a source that cannot be reached is a notice above the list,
+	 *  and the reason travels in [`ProjectTasks::problem`].
+	 */
+	projectTasks: (projectId: string, refresh: boolean, closed: boolean) => typedError<ProjectTasks, IpcError>(__TAURI_INVOKE("project_tasks", { projectId, refresh, closed })),
+	/**
+	 *  One task in full: its description and its conversation. What the Tasks view's detail pane
+	 *  shows, read when a row is opened.
+	 */
+	taskDetail: (projectId: string, key: string, refresh: boolean) => typedError<TaskDetail, IpcError>(__TAURI_INVOKE("task_detail", { projectId, key, refresh })),
+	/**
 	 *  Who would be asked to resolve pull request `number`'s conflicts, and how — for the
 	 *  confirmation, before anything is sent. Reads the project's list, cached when it is fresh.
 	 */
@@ -654,6 +665,9 @@ export type CheckCounts = {
 export type Checks = 
 /**  Nothing is configured, or nothing has reported yet. */
 "none" | "running" | "passing" | "failing";
+
+/**  Why a closed task was closed, when its source says. */
+export type ClosedAs = "completed" | "notPlanned" | "duplicate";
 
 /**  One commit, as much of it as a pull request needs. */
 export type Commit = {
@@ -1412,6 +1426,37 @@ export type ProjectPullRequests = {
 	openProblem: string | null,
 };
 
+/**  What a project's source says about its tasks. */
+export type ProjectTasks = {
+	/**  `gh` is installed. Without it there are no tasks anywhere in the app. */
+	gh: boolean,
+	/**
+	 *  The open ones, then the closed ones when they were read; each most recently updated
+	 *  first.
+	 */
+	tasks: Task[],
+	/**  Why the list is short or empty when it should not have been. */
+	problem: string | null,
+	/**  The problem is that nobody is logged in, which has its own one-line fix. */
+	loggedOut: boolean,
+	/**
+	 *  The project's remote read as a repository on a forge: how the view knows a project is
+	 *  not on GitHub. `None` for a remote that is a path on disk, and for no remote at all.
+	 */
+	repo: Repo | null,
+	/**  Who `gh` is logged in as: what "me" means in the view's filters. */
+	viewer: string | null,
+	/**
+	 *  How many open tasks the source says there are. More than the list holds when there are
+	 *  more than it reads. `None` until it has answered.
+	 */
+	openTotal: number | null,
+	/**  The repository has issues switched off. */
+	disabled: boolean,
+	/**  The closed tasks are part of the list. */
+	closed: boolean,
+};
+
 export type PromptTransport = 
 /**  The prompt is an argument. Simple and reliable. */
 "argv" | 
@@ -1871,6 +1916,67 @@ export type SystemLoad = {
 	/**  The one-minute load average. Windows has none. */
 	loadOne: number | null,
 };
+
+/**  A task, as much of it as a row in the list needs. */
+export type Task = {
+	source: TaskSourceKind,
+	/**  What a person types and reads: `#91`. Unique within a project's source. */
+	key: string,
+	url: string,
+	title: string,
+	state: TaskState,
+	closedAs: ClosedAs | null,
+	/**  Who opened it, by login. `None` for an account that no longer exists. */
+	author: string | null,
+	labels: TaskLabel[],
+	assignees: string[],
+	/**  How many comments it has, all told. */
+	comments: number,
+	/**  As the source wrote them: `2026-10-02T17:43:03Z`. */
+	createdAt: string,
+	updatedAt: string,
+	/**  The last word on it is not a maintainer's: see [`needs_answer`]. */
+	needsAnswer: boolean,
+	/**  Open pull requests that will close it when they merge, by number. */
+	linkedPullRequests: number[],
+};
+
+/**  One comment in a task's conversation. */
+export type TaskComment = {
+	author: string | null,
+	createdAt: string,
+	/**  Empty for one its source hid: what was hidden there is not shown by another door. */
+	body: string,
+	url: string | null,
+	/**  Why the source hid it, when it did: `spam`, `off-topic`, … */
+	hidden: string | null,
+	/**  Written by a program, not a person. */
+	bot: boolean,
+	/**  Written by someone who maintains the project. */
+	maintainer: boolean,
+};
+
+/**  One task in full: the row, its description and its conversation. */
+export type TaskDetail = {
+	task: Task,
+	body: string,
+	/**
+	 *  Oldest first. The latest ones only, when there are more than the source hands over in
+	 *  one answer: [`Task::comments`] is how many there are.
+	 */
+	comments: TaskComment[],
+};
+
+export type TaskLabel = {
+	name: string,
+	/**  Six hexadecimal digits, without the `#`. */
+	color: string,
+};
+
+/**  Where a task is kept. */
+export type TaskSourceKind = "github";
+
+export type TaskState = "open" | "closed";
 
 export type TermSize = {
 	cols: number,

@@ -13,6 +13,8 @@ import { ProjectTree } from "./ProjectTree";
 import { WorkflowsSection } from "@/features/workflows/WorkflowsSection";
 import { PullRequestsRow } from "@/features/pull-requests/PullRequestsRow";
 import { usePullRequestPolling } from "@/features/pull-requests/usePullRequestPolling";
+import { TasksRow } from "@/features/tasks/TasksRow";
+import { useTaskPolling } from "@/features/tasks/useTaskPolling";
 
 /** Left panel: projects and their workspaces. */
 export function Sidebar() {
@@ -38,6 +40,7 @@ export function Sidebar() {
     if (searching) searchInput.current?.focus();
   }, [searching]);
   usePullRequestPolling();
+  useTaskPolling();
 
   useEffect(() => {
     if (!hasCore()) return;
@@ -54,6 +57,7 @@ export function Sidebar() {
   return (
     <aside aria-label="Projects" className="flex h-full flex-col bg-surface">
       <PullRequestsRow />
+      <TasksRow />
       <WorkflowsSection />
       <PanelHeader
         title="Projects"

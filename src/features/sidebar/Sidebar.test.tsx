@@ -1,7 +1,16 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { added, project, pullRequest, pullRequestsOf, record, worktree } from "@/test/fixtures";
+import {
+  added,
+  project,
+  pullRequest,
+  pullRequestsOf,
+  record,
+  task,
+  tasksOf,
+  worktree,
+} from "@/test/fixtures";
 
 const core = vi.hoisted(() => ({
   uiStateLoad: vi.fn(),
@@ -21,6 +30,7 @@ const core = vi.hoisted(() => ({
   workspacesImport: vi.fn(),
   sessionsList: vi.fn(),
   projectPullRequests: vi.fn(),
+  projectTasks: vi.fn(),
   ptySpawn: vi.fn(),
   ptyClose: vi.fn(),
   memoryWaiting: vi.fn(),
@@ -48,6 +58,7 @@ vi.mock("@tauri-apps/plugin-opener", () => opener);
 import { useAppStore } from "@/stores/app";
 import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
+import { useTasksStore } from "@/stores/tasks";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
@@ -112,6 +123,8 @@ describe("Sidebar", () => {
       loggedOut: false,
       workspaces: {},
     });
+    core.projectTasks.mockResolvedValue(tasksOf([]));
+    useTasksStore.setState({ byProject: {}, closedWanted: false, selected: null, details: {} });
     useSessionsStore.setState({ byWorkspace: {}, error: null });
     usePublishStore.setState({ byProject: {}, workspaceId: null, state: null, busy: null });
     useProjectsStore.setState({
@@ -122,6 +135,7 @@ describe("Sidebar", () => {
       selectedWorkspaceId: null,
       composingProjectId: null,
       pullRequestsOpen: false,
+      tasksOpen: false,
       usageOpen: false,
       workflowId: null,
       collapsed: [],
@@ -152,6 +166,71 @@ describe("Sidebar", () => {
 
     await user.click(row);
     expect(useProjectsStore.getState().pullRequestsOpen).toBe(false);
+  });
+
+  it("counts the tasks that need an answer under Pull requests, and opens and closes the view", async () => {
+    core.projectTasks.mockImplementation(async (id: string) =>
+      id === "p-alpha"
+        ? tasksOf([task(1, { needsAnswer: true }), task(2)])
+        : tasksOf([task(1, { needsAnswer: true }), task(3, { needsAnswer: true })]),
+    );
+    const user = userEvent.setup();
+    await renderSidebar("alpha", "beta");
+    const row = await screen.findByRole("button", { name: "Tasks, 3 need an answer" });
+    expect(row).not.toHaveAttribute("aria-current");
+
+    act(() => useProjectsStore.setState({ pullRequestsOpen: true }));
+    await user.click(row);
+    expect(useProjectsStore.getState().tasksOpen).toBe(true);
+    expect(useProjectsStore.getState().pullRequestsOpen, "one view at a time").toBe(false);
+    expect(row).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("button", { name: /^Pull requests/ }));
+    expect(useProjectsStore.getState().tasksOpen, "and the other way round").toBe(false);
+    await user.click(row);
+    await user.click(row);
+    expect(useProjectsStore.getState().tasksOpen).toBe(false);
+  });
+
+  it("shows no number on Tasks when nothing is waiting, and says one in the singular", async () => {
+    core.projectTasks.mockResolvedValue(tasksOf([task(1), task(2)]));
+    await renderSidebar("alpha");
+    expect(await screen.findByRole("button", { name: "Tasks" })).toBeVisible();
+
+    act(() =>
+      useTasksStore.setState({
+        byProject: { "p-alpha": tasksOf([task(1, { needsAnswer: true }), task(2)]) },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Tasks, 1 needs an answer" })).toBeVisible();
+  });
+
+  it("reads tasks once at the start, then only while the Tasks view is open", async () => {
+    await renderSidebar("alpha");
+    await waitFor(() => expect(core.projectTasks).toHaveBeenCalledTimes(1));
+    expect(core.projectTasks).toHaveBeenLastCalledWith("p-alpha", false, false);
+
+    // Coming back to the window with the view closed asks nothing.
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(core.projectTasks).toHaveBeenCalledTimes(1);
+
+    // Opening the view asks, from the core's copy when that is fresh…
+    act(() => useProjectsStore.getState().openTasks(true));
+    await waitFor(() => expect(core.projectTasks).toHaveBeenCalledTimes(2));
+    expect(core.projectTasks).toHaveBeenLastCalledWith("p-alpha", false, false);
+    // …and coming back while it is open asks the source again.
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(core.projectTasks).toHaveBeenCalledTimes(3));
+    expect(core.projectTasks).toHaveBeenLastCalledWith("p-alpha", true, false);
+
+    // Closed tasks are a second question, asked when the view turns to them.
+    act(() => useTasksStore.getState().wantClosed(true));
+    await waitFor(() => expect(core.projectTasks).toHaveBeenCalledTimes(4));
+    expect(core.projectTasks).toHaveBeenLastCalledWith("p-alpha", false, true);
+
+    act(() => useProjectsStore.getState().openTasks(false));
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(core.projectTasks).toHaveBeenCalledTimes(4);
   });
 
   it("gives the panel back to a workspace when one is chosen", async () => {

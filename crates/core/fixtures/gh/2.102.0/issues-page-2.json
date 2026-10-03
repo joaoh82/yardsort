@@ -1,0 +1,179 @@
+{
+  "data": {
+    "repository": {
+      "hasIssuesEnabled": true,
+      "issues": {
+        "totalCount": 9,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "Y3Vyc29yOnYyOpK1"
+        },
+        "nodes": [
+          {
+            "number": 14302,
+            "url": "https://github.com/example/widgets/issues/14302",
+            "title": "Replaced title of issue 14302",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2026-08-31T15:13:28Z",
+            "updatedAt": "2026-09-13T12:27:45Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "hedy"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "blocked",
+                  "color": "ff5451"
+                },
+                {
+                  "name": "enhancement",
+                  "color": "0dd8ac"
+                },
+                {
+                  "name": "platform",
+                  "color": "6E4A8E"
+                },
+                {
+                  "name": "gh-pr",
+                  "color": "DD04FD"
+                },
+                {
+                  "name": "gh-issue",
+                  "color": "430568"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 5,
+              "nodes": [
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "label-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "label-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "radia"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "tim"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 7428,
+            "url": "https://github.com/example/widgets/issues/7428",
+            "title": "Replaced title of issue 7428",
+            "state": "OPEN",
+            "stateReason": null,
+            "createdAt": "2023-05-11T15:03:16Z",
+            "updatedAt": "2026-09-11T15:15:46Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "guido"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "enhancement",
+                  "color": "0dd8ac"
+                },
+                {
+                  "name": "docs",
+                  "color": "6cafc9"
+                },
+                {
+                  "name": "gh-repo",
+                  "color": "d4c5f9"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 5,
+              "nodes": [
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "User",
+                    "login": "bjarne"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "guido"
+                  }
+                },
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "User",
+                    "login": "bjarne"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "guido"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "niklaus"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "viewer": {
+      "login": "ada"
+    }
+  }
+}

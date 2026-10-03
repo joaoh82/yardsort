@@ -212,3 +212,32 @@ From the design pass in [22-pull-requests](22-pull-requests.md).
     choosing. Screenshots in a description are also half of why people open it. Lean: stay with
     links, and hear whether it is missed. Slice 2 shipped the lean: an image is a link labelled
     with its alt text. Still open, for what use says.
+
+## Tasks
+
+From the design pass in [23-tasks](23-tasks.md).
+
+28. ~~**What does the count on the sidebar's Tasks row count?**~~ **Settled 2026-10-03, before
+    slice 1, as the lean said.** The open tasks that need an answer, not every open task as the
+    Pull requests row counts open pull requests: it is the number that asks something of you,
+    and it can reach zero.
+29. **Should the delegated message be a template in settings?** Its wording is fixed in the core
+    and edited per task in the composer. A template — per project, or per agent — lets a
+    project say "run the tests first" once. Lean: not yet; project memory and `AGENTS.md`
+    already say such things to every agent, and a template that drops the paragraph marking the
+    issue as other people's text would be a quiet loss.
+30. **Should every agent in a GitHub project be told about `ys task`?** The delegated message
+    names it; other sessions learn of it from `ys --help` or the project's own instructions.
+    Project memory adds a hint to first messages already. Lean: no — every added line is the
+    user's context spent, and two lines in `AGENTS.md` do it for the projects that want it.
+31. **Where does a second source's credential live, so that `ys` can read it?** GitHub needs
+    none: `gh` holds it. Linear or Marvin would need a key, the app keeps keys in the OS
+    credential store, and that code is in the app's crate, not the core `ys` is built on. Either
+    the keychain moves into the core, or `ys task` for such a source asks the running app. With
+    it comes the choice of source per project. To settle before the second source, not before
+    the first.
+32. **Should an issue an agent files be recorded in the workspace's activity?** `ys task create`
+    run by an agent Yardsort launched knows its run. A line in the activity — _filed #93_ —
+    would make what an agent did on the forge visible afterwards without parsing anything it
+    printed. Lean: yes, for `create`, `comment`, `close` and `reopen`, if the event layer takes
+    a new kind without a migration; look in slice 3.

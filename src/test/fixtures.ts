@@ -3,9 +3,12 @@ import type {
   HarnessInfo,
   Project,
   ProjectPullRequests,
+  ProjectTasks,
   PullRequest,
   PullRequestSummary,
   SessionRecord,
+  Task,
+  TaskDetail,
   Workspace,
 } from "@/lib/ipc";
 
@@ -171,5 +174,46 @@ export const pullRequestSummary = (
   body: `What ${pr.title} is about.`,
   changedFiles: 2,
   posts: [],
+  ...overrides,
+});
+
+/** An open task nobody has answered yet, as the core would describe a GitHub issue. */
+export const task = (number: number, overrides: Partial<Task> = {}): Task => ({
+  source: "github",
+  key: `#${number}`,
+  url: `https://github.com/demo/app/issues/${number}`,
+  title: `Task ${number}`,
+  state: "open",
+  closedAs: null,
+  author: "grace",
+  labels: [],
+  assignees: [],
+  comments: 0,
+  createdAt: "2026-09-28T09:00:00Z",
+  updatedAt: "2026-09-28T10:00:00Z",
+  needsAnswer: false,
+  linkedPullRequests: [],
+  ...overrides,
+});
+
+/** What the core says about one project's tasks: `gh` there, logged in as `ada`. */
+export const tasksOf = (tasks: Task[], overrides: Partial<ProjectTasks> = {}): ProjectTasks => ({
+  gh: true,
+  tasks,
+  problem: null,
+  loggedOut: false,
+  repo: { host: "github.com", owner: "demo", name: "app", kind: "github" },
+  viewer: "ada",
+  openTotal: tasks.filter((it) => it.state === "open").length,
+  disabled: false,
+  closed: false,
+  ...overrides,
+});
+
+/** A task read in full: a description, and nothing said about it yet. */
+export const taskDetail = (it: Task, overrides: Partial<TaskDetail> = {}): TaskDetail => ({
+  task: it,
+  body: `What ${it.title} is about.`,
+  comments: [],
   ...overrides,
 });

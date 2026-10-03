@@ -5,6 +5,19 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Tasks: every project's GitHub issues, in one place.** **Tasks**, under Pull requests in the
+  sidebar or in the command palette, lists the open issues of every project on GitHub — up to
+  the 200 most recently updated — with who opened each, its labels, assignees, comments and any
+  pull request that will close it. The number on the sidebar row is how many **need an
+  answer**: open, and the last person to speak was not an owner, member or collaborator; bots
+  are nobody's word. Filter by state, project, label, assignee, author and _Needs an answer_,
+  and search; the filters are remembered. Open one for its description and conversation, as
+  Markdown that loads no images. Reading only, for now: handing a task to an agent and managing
+  tasks from the app come next. See [the guide](docs/guide/tasks.md).
+- **`ys task list` and `ys task show`.** The same tasks from a terminal, with `--needs-answer`,
+  `--state`, `--label`, `--assignee`, `--author`, `--search` and `--json`, so an agent in a
+  workspace can be asked which issues are open and which are waiting. See
+  [the `ys` guide](docs/guide/cli.md#ys-task).
 - **Pull requests: comments, and a note on lines for an agent.** A box under a pull request's
   conversation posts a comment on it. Under **Code**, each comment made on lines of the diff sits
   beside those lines, with its replies, and each file says how many threads it has. Select lines

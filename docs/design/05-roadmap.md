@@ -755,6 +755,42 @@ read, diffed and started as a workspace; a _no_ to Merge, Close and Reopen sends
 without `gh`, logged out, or on another forge, the view says which and nothing else in the app
 changes.
 
+## M24 — Tasks
+
+Proposed in [23-tasks](23-tasks.md), after a four-question design pass on 2026-10-03. Slice 1 is
+built.
+
+- A **Tasks** row in the sidebar, under Pull requests, opens a view in the center panel: every
+  project's GitHub issues, with state, project, label, assignee, author and _needs an answer_
+  filters and a search. GitHub through `gh` only; other sources later, behind one trait in the
+  core.
+- **Delegate** opens the composer with the issue as the first message, framed as text other
+  people wrote; the workspace started from it is recorded against the task (migration 0014) and
+  never guessed.
+- Managing from the view — new task, reply, close, reopen, labels, assignees — and all of it in
+  `ys task`, with `--json`, so an agent can list what is open, say which need an answer, and
+  file an issue. `ys` writes straight to GitHub; `close` and `reopen` want `--yes`.
+- Measured before any code: issues are cheap beside pull requests — 50 rows in under 2 s on a
+  repository with 11,238 open. The numbers are in
+  [23 § what was measured](23-tasks.md#what-was-measured).
+- Three slices, each its own pull request:
+- [x] Slice 1: read — the source, the list, the filters, the detail; `ys task list` and `show`.
+      The sidebar's number is the tasks that need an answer, which settled
+      [open question 28](06-open-questions.md). Found: bots comment on most issues of a busy
+      repository and some carry a contributor's association, so what is a bot is the author's
+      type, and the last five comments are asked for rather than the last one; and
+      `gh issue view` cannot say whether an answer is owed, so one issue in full is a query of
+      our own too. Not done: the screenshot and the README, which wait for the slice that
+      delegates. Recorded in [23 § slice 1](23-tasks.md#slice-1-what-shipped).
+- [ ] Slice 2: delegate — the message, the composer, the link, `ys task start`.
+- [ ] Slice 3: manage — the writes, in the view and in `ys task`; the screenshot.
+
+_Exit:_ on all three platforms, a project's issues are listed, filtered and read; one is
+delegated through the composer and its workspace is found again from the task; a _no_ to Close
+and Reopen sends nothing; an agent asked which issues need an answer answers from
+`ys task list --needs-answer --json`, and one asked to file an issue does; and without `gh`,
+logged out, or on another forge, the view and `ys` say which and nothing else changes.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

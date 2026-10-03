@@ -19,6 +19,7 @@ export const COMMANDS = [
   { id: "nextTerminal", label: "Next terminal tab", key: "ArrowRight" },
   { id: "usage", label: "Usage: machine resources and tokens", key: null },
   { id: "pullRequests", label: "Pull requests", key: null },
+  { id: "tasks", label: "Tasks", key: null },
   { id: "tour", label: "Take the welcome tour", key: null },
 ] as const;
 export type CommandId = (typeof COMMANDS)[number]["id"];

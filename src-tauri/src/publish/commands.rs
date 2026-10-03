@@ -10,9 +10,7 @@ use tauri::AppHandle;
 use super::{pull_requests_of, state, ProjectPullRequests, PublishState};
 use crate::changes::commands::workspace;
 use crate::error::{IpcError, IpcResult};
-use crate::forge::{
-    parse_remote, ForgeError, Gh, MergeMethod, PullRequest, PullRequestState, Repo,
-};
+use crate::forge::{ForgeError, Gh, MergeMethod, PullRequest, PullRequestState, Repo};
 use crate::git::Git;
 use crate::state::{blocking, AppState};
 use crate::store::WorkspaceRow;
@@ -50,11 +48,8 @@ fn look(state: &AppState, project_id: &str, refresh: bool, full: bool) -> Projec
 }
 
 /// The project's remote as a repository on a forge: the one a push would go to.
-fn repo_at(state: &AppState, root: &Path) -> Option<Repo> {
-    let git = Git::new(&state.env()).ok()?;
-    let remote = git.push_remote(root).ok()??;
-    let url = git.remote_url(root, &remote).ok()??;
-    parse_remote(&url)
+pub(super) fn repo_at(state: &AppState, root: &Path) -> Option<Repo> {
+    crate::forge::repo_at(&Git::new(&state.env()).ok()?, root)
 }
 
 fn publish_state(
