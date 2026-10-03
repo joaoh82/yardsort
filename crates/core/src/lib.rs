@@ -32,6 +32,7 @@ pub mod project_automation;
 pub mod projects;
 pub mod settings;
 pub mod store;
+pub mod tasks;
 pub mod usage;
 pub mod workflow;
 pub mod workspaces;

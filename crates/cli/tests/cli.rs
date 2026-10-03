@@ -1657,3 +1657,336 @@ fn a_run_says_what_it_will_find_nothing_for_before_it_goes() {
     let json = fx.ys(&["workflow", "runs", "--json"]).ok();
     assert!(json.contains("task-note"), "queued all the same: {json}");
 }
+
+/// A profile whose project is on GitHub as far as its remote says, and a `gh` that answers
+/// from the recorded fixtures and writes down what it was asked. `PATH` is that `gh` and git,
+/// and nothing else: the machine's own `gh`, if it has one, is never run.
+#[cfg(unix)]
+struct Tasks {
+    fx: Fixture,
+    bin: tempfile::TempDir,
+}
+
+#[cfg(unix)]
+impl Tasks {
+    fn new(remote: Option<&str>, gh: Option<&str>) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let fx = Fixture::new();
+        if let Some(remote) = remote {
+            fx.git()
+                .run(&fx.repo, &["remote", "add", "origin", remote])
+                .unwrap();
+        }
+        let bin = tempfile::tempdir().unwrap();
+        let git = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|dir| dir.join("git"))
+            .find(|path| path.is_file())
+            .expect("git on PATH");
+        std::os::unix::fs::symlink(git, bin.path().join("git")).unwrap();
+        if let Some(body) = gh {
+            let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../core/fixtures/gh/2.102.0");
+            let script = format!(
+                // `PATH` has nothing but git and this, so `cat` is spelled out.
+                "#!/bin/sh\necho \"$*\" >> '{}/asked'\nfixtures='{}'\n\
+                 cat() {{ while IFS= read -r line || [ -n \"$line\" ]; do \
+                 printf '%s\\n' \"$line\"; done < \"$1\"; }}\n{body}\n",
+                bin.path().display(),
+                fixtures.display()
+            );
+            let path = bin.path().join("gh");
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        Self { fx, bin }
+    }
+
+    /// On GitHub, with a `gh` that has the recorded issues.
+    fn recorded() -> Self {
+        Self::new(
+            Some("git@github.com:example/widgets.git"),
+            Some(
+                "case \"$*\" in\n\
+                 *'issue(number:'*) cat \"$fixtures/issue-view.json\" ;;\n\
+                 *states:CLOSED*) cat \"$fixtures/issues-closed.json\" ;;\n\
+                 *after=*) cat \"$fixtures/issues-page-2.json\" ;;\n\
+                 *) cat \"$fixtures/issues-page-1.json\" ;;\nesac",
+            ),
+        )
+    }
+
+    fn ys(&self, cwd: Option<&std::path::Path>, args: &[&str]) -> Run {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ys"));
+        command
+            .args(["--data-dir", &self.fx.data_dir.to_string_lossy()])
+            .args(args)
+            .env("YARDSORT_NO_DAEMON", "1")
+            .env("PATH", self.bin.path())
+            // No login shell to ask, so the environment is this one: see `ShellEnv::resolve`.
+            .env("SHELL", self.bin.path().join("no-such-shell"));
+        for name in [
+            yardsort_core::activity::RUN_ENV,
+            yardsort_core::activity::WORKSPACE_ENV,
+            yardsort_core::activity::RECORD_ENV,
+        ] {
+            command.env_remove(name);
+        }
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let output = command.output().expect("ys should run");
+        Run {
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+
+    fn asked(&self) -> Vec<String> {
+        std::fs::read_to_string(self.bin.path().join("asked"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+#[cfg(unix)]
+fn keys(json: &str) -> Vec<String> {
+    let parsed: serde_json::Value = serde_json::from_str(json).expect("valid JSON");
+    parsed
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|task| task["key"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn tasks_are_listed_as_a_table_and_as_json_from_every_page() {
+    let tasks = Tasks::recorded();
+    let table = tasks.ys(None, &["task", "list", "--project", "Demo"]).ok();
+    let lines: Vec<&str> = table.lines().collect();
+    assert!(lines[0].starts_with("KEY"), "{table}");
+    assert_eq!(lines.len(), 10, "a heading and nine tasks: {table}");
+    assert!(lines[1].starts_with("#14386"), "{table}");
+    assert!(lines[1].contains("open, needs answer"), "{table}");
+    assert!(lines[1].contains("2026-10-03"), "{table}");
+    assert!(table.contains("Replaced title of issue 7428"), "{table}");
+    assert!(table.contains("ghost"), "an account that is gone: {table}");
+    let asked = tasks.asked();
+    assert_eq!(asked.len(), 2, "two pages: {asked:?}");
+    assert!(asked[1].contains("after="), "{asked:?}");
+
+    let json = tasks
+        .ys(None, &["task", "list", "--project", "Demo", "--json"])
+        .ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed.as_array().unwrap().len(), 9);
+    let first = &parsed[0];
+    assert_eq!(first["source"], "github");
+    assert_eq!(first["key"], "#14386");
+    assert_eq!(first["state"], "open");
+    assert_eq!(first["needsAnswer"], true);
+    assert_eq!(first["comments"], 8);
+    assert_eq!(first["author"], "grace");
+    assert_eq!(
+        first["url"],
+        "https://github.com/example/widgets/issues/14386"
+    );
+    assert!(first["labels"][0]["name"].is_string());
+}
+
+#[cfg(unix)]
+#[test]
+fn tasks_are_narrowed_by_what_is_asked_for() {
+    let tasks = Tasks::recorded();
+    let list = |args: &[&str]| {
+        let mut all = vec!["task", "list", "--project", "Demo", "--json"];
+        all.extend(args);
+        keys(&tasks.ys(None, &all).ok())
+    };
+    let waiting = list(&["--needs-answer"]);
+    assert!(waiting.contains(&"#14584".to_owned()), "{waiting:?}");
+    assert!(
+        !waiting.contains(&"#14563".to_owned()),
+        "a member's own issue with only bots on it: {waiting:?}"
+    );
+    assert!(waiting.len() < 9);
+
+    assert_eq!(list(&["--assignee", "donald"]), ["#13876"]);
+    assert_eq!(list(&["--author", "EDSGER"]), ["#13876"]);
+    assert_eq!(list(&["--search", "#1387"]), ["#13876"]);
+    assert_eq!(list(&["--search", "issue 7428"]), ["#7428"]);
+    assert_eq!(list(&["--limit", "2"]), ["#14386", "#14584"]);
+    assert!(list(&["--label", "no-such-label"]).is_empty());
+    // `@me` is whoever gh says is logged in — "ada", who opened and is assigned none of them.
+    assert!(list(&["--author", "@me"]).is_empty());
+
+    let nothing = tasks
+        .ys(
+            None,
+            &["task", "list", "--project", "Demo", "--label", "no-such"],
+        )
+        .ok();
+    assert_eq!(nothing.trim(), "No open tasks match.");
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_tasks_are_asked_for_only_when_wanted() {
+    let tasks = Tasks::recorded();
+    let closed = tasks
+        .ys(
+            None,
+            &["task", "list", "--project", "Demo", "--state", "closed"],
+        )
+        .ok();
+    assert!(closed.contains("closed (not planned)"), "{closed}");
+    assert!(closed.contains("closed (duplicate)"), "{closed}");
+    let asked = tasks.asked();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(asked[0].contains("states:CLOSED"), "{asked:?}");
+
+    let all = tasks
+        .ys(
+            None,
+            &[
+                "task",
+                "list",
+                "--project",
+                "Demo",
+                "--state",
+                "all",
+                "--json",
+            ],
+        )
+        .ok();
+    let all = keys(&all);
+    assert_eq!(all.len(), 12, "nine open and three closed: {all:?}");
+    assert!(all.contains(&"#14495".to_owned()));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_project_is_the_one_the_command_is_run_in() {
+    let tasks = Tasks::recorded();
+    let here = tasks
+        .ys(Some(&tasks.fx.repo), &["task", "list", "--json"])
+        .ok();
+    assert_eq!(keys(&here).len(), 9);
+
+    let elsewhere = tasks.ys(Some(tasks.bin.path()), &["task", "list"]).failed();
+    assert!(elsewhere.contains("--project"), "{elsewhere}");
+    assert!(tasks.asked().len() == 2, "nothing was asked for the second");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_task_is_shown_in_full_by_number_key_or_link() {
+    let tasks = Tasks::recorded();
+    for wanted in [
+        "14394",
+        "#14394",
+        "https://github.com/example/widgets/issues/14394",
+    ] {
+        let shown = tasks
+            .ys(None, &["task", "show", wanted, "--project", "Demo"])
+            .ok();
+        assert!(
+            shown.starts_with("#14394 Replaced title of issue 14394\n"),
+            "{shown}"
+        );
+        assert!(shown.contains("open, needs answer · opened by"), "{shown}");
+        assert!(shown.contains("labels: bug, priority-3"), "{shown}");
+        assert!(shown.contains("Replaced description."), "{shown}");
+        assert!(shown.contains("5 comments:"), "{shown}");
+        assert!(shown.contains("triage-bot (bot), "), "{shown}");
+        assert!(shown.contains("linus (maintainer), "), "{shown}");
+        assert!(shown.contains("Replaced comment 5."), "{shown}");
+    }
+    assert!(tasks.asked().iter().all(|a| a.ends_with("-F number=14394")));
+
+    let json = tasks
+        .ys(
+            None,
+            &["task", "show", "14394", "--project", "Demo", "--json"],
+        )
+        .ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["task"]["key"], "#14394");
+    assert_eq!(parsed["comments"].as_array().unwrap().len(), 5);
+    assert_eq!(parsed["comments"][0]["bot"], true);
+    assert!(parsed["body"].as_str().unwrap().contains("Replaced"));
+
+    let refused = tasks
+        .ys(None, &["task", "show", "soon", "--project", "Demo"])
+        .failed();
+    assert!(refused.contains("not an issue's number"), "{refused}");
+}
+
+#[cfg(unix)]
+#[test]
+fn tasks_that_cannot_be_read_say_why() {
+    let logged_out = "echo 'To get started with GitHub CLI, please run: gh auth login' >&2\nexit 4";
+    let cases: [(Option<&str>, Option<&str>, &str); 6] = [
+        (None, Some("exit 1"), "no remote on a forge"),
+        (
+            Some("git@gitlab.com:example/widgets.git"),
+            Some("exit 1"),
+            "is on GitLab",
+        ),
+        (
+            Some("git@github.com:example/widgets.git"),
+            None,
+            "`gh` is not installed",
+        ),
+        (
+            Some("git@github.com:example/widgets.git"),
+            Some(logged_out),
+            "gh auth login",
+        ),
+        (
+            Some("git@github.com:example/widgets.git"),
+            Some("cat \"$fixtures/issues-disabled.json\""),
+            "issues switched off",
+        ),
+        (
+            Some("git@github.com:example/widgets.git"),
+            Some("echo 'HTTP 502: Bad Gateway' >&2\nexit 1"),
+            "HTTP 502",
+        ),
+    ];
+    for (remote, gh, expected) in cases {
+        let tasks = Tasks::new(remote, gh);
+        let said = tasks
+            .ys(None, &["task", "list", "--project", "Demo"])
+            .failed();
+        assert!(said.contains(expected), "{expected}: {said}");
+        assert!(!said.contains("query("), "not gh's command line: {said}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_list_that_stops_short_says_so_beside_the_answer() {
+    // The first page arrives and the second does not.
+    let tasks = Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some(
+            "case \"$*\" in\n\
+             *after=*) echo 'HTTP 502: Bad Gateway' >&2; exit 1 ;;\n\
+             *) cat \"$fixtures/issues-page-1.json\" ;;\nesac",
+        ),
+    );
+    let run = tasks.ys(None, &["task", "list", "--project", "Demo", "--json"]);
+    assert_eq!(run.code, Some(0));
+    assert_eq!(keys(&run.stdout).len(), 7, "what arrived is the answer");
+    assert!(
+        run.stderr.contains("Not every open task could be read"),
+        "{}",
+        run.stderr
+    );
+    assert!(run.stderr.contains("HTTP 502"), "{}", run.stderr);
+}

@@ -61,6 +61,7 @@ beforeEach(() => {
     workflowId: null,
     usageOpen: false,
     pullRequestsOpen: false,
+    tasksOpen: false,
   });
   useTerminalStore.setState({ tabs: [], active: {} });
 });
@@ -83,6 +84,21 @@ describe("keyboard navigation", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Background" })).toHaveFocus();
+  });
+  it("opens Tasks from the palette, where a new shell tab is then not on offer", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    fireEvent.keyDown(window, { key: "K", ...mod });
+    await user.type(screen.getByRole("combobox"), "tasks");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(useProjectsStore.getState().tasksOpen).toBe(true));
+
+    fireEvent.keyDown(window, { key: "K", ...mod });
+    await user.type(screen.getByRole("combobox"), "new shell");
+    expect(screen.getByRole("option", { name: /New shell tab/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
   it("opens Pull requests from the palette, where a new shell tab is then not on offer", async () => {
     const user = userEvent.setup();

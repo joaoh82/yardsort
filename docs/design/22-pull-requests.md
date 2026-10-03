@@ -559,7 +559,7 @@ has rows for the Summary now.
 - Deleting branches after a merge or a close. Yardsort keeps branches.
 - Searching the forge. Search is over what is loaded, and says when there is more.
 - Sort controls; saved filter sets; a pull request opened in a window of its own.
-- Issues.
+- Issues. They became their own view: [23-tasks](23-tasks.md).
 
 ## Open questions
 

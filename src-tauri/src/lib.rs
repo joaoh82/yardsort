@@ -27,7 +27,7 @@ mod ys;
 // `yardsort_core`. It is re-exported under the names this crate has always used, which is why
 // `crate::store`, `crate::git` and the rest still resolve everywhere below.
 pub use yardsort_core::{
-    daemon, env, error, forge, git, harness, legacy, program, settings, store,
+    daemon, env, error, forge, git, harness, legacy, program, settings, store, tasks,
 };
 
 /// The domain modules whose commands live here but whose logic lives in the core.
@@ -96,6 +96,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             publish::pull_requests::pull_request_close,
             publish::pull_requests::pull_request_reopen,
             publish::pull_requests::pull_request_prepare_branch,
+            publish::tasks::project_tasks,
+            publish::tasks::task_detail,
             publish::conflicts::workspace_conflict_helper,
             publish::conflicts::workspace_resolve_conflicts,
             draft::commands::draft_status,

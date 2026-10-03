@@ -1,0 +1,171 @@
+{
+  "data": {
+    "repository": {
+      "hasIssuesEnabled": true,
+      "issues": {
+        "totalCount": 3,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0wOS0yMVQxNzo1NTo1NVrPAAAAAUmlqEM="
+        },
+        "nodes": [
+          {
+            "number": 14579,
+            "url": "https://github.com/example/widgets/issues/14579",
+            "title": "Replaced title of issue 14579",
+            "state": "CLOSED",
+            "stateReason": "NOT_PLANNED",
+            "createdAt": "2026-10-02T18:01:33Z",
+            "updatedAt": "2026-10-02T18:05:31Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "john"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "suspected-spam",
+                  "color": "c62946"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "label-bot"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 14495,
+            "url": "https://github.com/example/widgets/issues/14495",
+            "title": "Replaced title of issue 14495",
+            "state": "CLOSED",
+            "stateReason": "COMPLETED",
+            "createdAt": "2026-09-22T09:07:23Z",
+            "updatedAt": "2026-10-02T12:39:03Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "leslie"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "name": "bug",
+                  "color": "d73a4a"
+                },
+                {
+                  "name": "enhancement",
+                  "color": "0dd8ac"
+                },
+                {
+                  "name": "priority-3",
+                  "color": "eded04"
+                },
+                {
+                  "name": "gh-pr",
+                  "color": "DD04FD"
+                }
+              ]
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": [
+                {
+                  "number": 14516
+                }
+              ]
+            },
+            "comments": {
+              "totalCount": 4,
+              "nodes": [
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "CONTRIBUTOR",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "label-bot"
+                  }
+                },
+                {
+                  "authorAssociation": "MEMBER",
+                  "author": {
+                    "__typename": "User",
+                    "login": "linus"
+                  }
+                },
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "User",
+                    "login": "shafi"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 14557,
+            "url": "https://github.com/example/widgets/issues/14557",
+            "title": "Replaced title of issue 14557",
+            "state": "CLOSED",
+            "stateReason": "DUPLICATE",
+            "createdAt": "2026-09-30T15:14:32Z",
+            "updatedAt": "2026-09-30T15:38:53Z",
+            "authorAssociation": "NONE",
+            "author": {
+              "__typename": "User",
+              "login": "sophie"
+            },
+            "labels": {
+              "nodes": []
+            },
+            "assignees": {
+              "nodes": []
+            },
+            "closedByPullRequestsReferences": {
+              "nodes": []
+            },
+            "comments": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "authorAssociation": "NONE",
+                  "author": {
+                    "__typename": "Bot",
+                    "login": "triage-bot"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "viewer": {
+      "login": "ada"
+    }
+  }
+}

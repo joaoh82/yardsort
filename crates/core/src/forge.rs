@@ -141,6 +141,14 @@ fn kind_of(host: &str) -> ForgeKind {
     }
 }
 
+/// The remote a push from `root` would go to, read as a repository on a forge. `None` with no
+/// remote, and for one that is a path on disk.
+pub fn repo_at(git: &crate::git::Git, root: &Path) -> Option<Repo> {
+    let remote = git.push_remote(root).ok()??;
+    let url = git.remote_url(root, &remote).ok()??;
+    parse_remote(&url)
+}
+
 /// Read a git remote URL as a repository on a forge.
 ///
 /// Handles the three shapes git hands out — `git@host:owner/repo.git`,
@@ -804,19 +812,40 @@ impl Gh {
         after: Option<&str>,
         limit: Duration,
     ) -> ForgeResult<OpenPage> {
-        let query = format!("query={OPEN_QUERY}");
         let after = after.map(|cursor| format!("after={cursor}"));
+        let mut extra = Vec::new();
+        if let Some(after) = &after {
+            extra.extend(["-f", after.as_str()]);
+        }
+        let out = self.graphql(root, host, OPEN_QUERY, &extra, limit)?;
+        open_page(&out)
+    }
+
+    /// Ask GitHub a question of our own through `gh api graphql`, about the repository of the
+    /// folder `root`. `limit` is how long `gh` may take.
+    ///
+    /// `{owner}` and `{repo}` are `gh`'s own placeholders, filled in from the folder's remote,
+    /// so the repository is the one `gh pr list` would have picked there — in a clone of a
+    /// fork, the parent. `host` is needed for a GitHub that is not github.com: `gh api` asks
+    /// its default host otherwise, whatever the remote says. `extra` is further arguments, for
+    /// the query's other variables.
+    pub(crate) fn graphql(
+        &self,
+        root: &Path,
+        host: Option<&str>,
+        query: &str,
+        extra: &[&str],
+        limit: Duration,
+    ) -> ForgeResult<String> {
+        let query = format!("query={query}");
         let mut args = vec!["api", "graphql"];
         if let Some(host) = host {
             args.extend(["--hostname", host]);
         }
         // `-F` fills the placeholders in; `-f` sends the rest exactly as written.
         args.extend(["-F", "owner={owner}", "-F", "name={repo}", "-f", &query]);
-        if let Some(after) = &after {
-            args.extend(["-f", after]);
-        }
-        let out = self
-            .run_within(root, &args, limit)
+        args.extend(extra);
+        self.run_within(root, &args, limit)
             .map_err(|error| match error {
                 // The command is the whole query otherwise, which helps nobody read the reason.
                 ForgeError::Failed { stderr, .. } => ForgeError::Failed {
@@ -824,8 +853,7 @@ impl Gh {
                     stderr,
                 },
                 other => other,
-            })?;
-        open_page(&out)
+            })
     }
 
     /// Every open pull request, a page at a time, up to `cap`.

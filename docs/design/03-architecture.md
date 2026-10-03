@@ -293,6 +293,19 @@ invalidation keeps its rows and marks them out of date rather than dropping them
 nothing would read them again until the view opened. `CheckCounts` is the one place a check's
 state is classified, and `Checks` is worked out from it, so a badge and a row cannot disagree.
 
+**Tasks** are a project's GitHub issues, and the same idea one step further out: the reading and
+the rules are in the core (`yardsort_core::tasks`) so that the app and `ys task` share them, and
+what the app adds is a cache. `TaskSource` is the seam a second source goes behind; `GitHub` is
+the one implementation, two queries of our own through `gh api graphql` — a page of issues with
+the last five comments' authors, and one issue with its conversation. Whether a task **needs an
+answer** is decided there, once, from who spoke last (`tasks::needs_answer`), and `Filter` is
+what `ys task list` narrows by. `publish::tasks::TaskCache` keeps each project's open tasks and,
+separately, its closed ones for 30 s, each with a request counter so an older answer never
+replaces a newer one; a reading that got nothing keeps what was known and says why. Tasks are
+read once per project at start and then only while the Tasks view is showing
+(`project_tasks(…, closed)`). `ys` has no cache: it asks `gh` when it is run. See
+[23-tasks](23-tasks.md).
+
 **Acting on any pull request of a project** is `publish::pull_requests`: merge, close, reopen.
 Each asks the forge about that one pull request again first (`gh pr view`), and refuses if it
 is no longer what the confirmation showed. Unlike the toolbar's commands these do not require

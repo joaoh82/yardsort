@@ -1,0 +1,104 @@
+{
+  "data": {
+    "repository": {
+      "issue": {
+        "number": 14394,
+        "url": "https://github.com/example/widgets/issues/14394",
+        "title": "Replaced title of issue 14394",
+        "state": "OPEN",
+        "stateReason": "REOPENED",
+        "createdAt": "2026-09-08T15:14:56Z",
+        "updatedAt": "2026-09-15T03:26:56Z",
+        "authorAssociation": "NONE",
+        "author": {
+          "__typename": "User",
+          "login": "person-20"
+        },
+        "labels": {
+          "nodes": [
+            {
+              "name": "bug",
+              "color": "d73a4a"
+            },
+            {
+              "name": "priority-3",
+              "color": "eded04"
+            }
+          ]
+        },
+        "assignees": {
+          "nodes": []
+        },
+        "closedByPullRequestsReferences": {
+          "nodes": []
+        },
+        "body": "Replaced description.\n\nWith a second paragraph and a `code span`.",
+        "comments": {
+          "totalCount": 5,
+          "nodes": [
+            {
+              "authorAssociation": "NONE",
+              "author": {
+                "__typename": "Bot",
+                "login": "triage-bot"
+              },
+              "body": "Replaced comment 1.",
+              "createdAt": "2026-09-08T15:27:32Z",
+              "url": "https://github.com/example/widgets/issues/14394#issuecomment-1000",
+              "isMinimized": false,
+              "minimizedReason": null
+            },
+            {
+              "authorAssociation": "MEMBER",
+              "author": {
+                "__typename": "User",
+                "login": "linus"
+              },
+              "body": "Replaced comment 2.",
+              "createdAt": "2026-09-08T15:34:17Z",
+              "url": "https://github.com/example/widgets/issues/14394#issuecomment-1001",
+              "isMinimized": false,
+              "minimizedReason": null
+            },
+            {
+              "authorAssociation": "NONE",
+              "author": {
+                "__typename": "User",
+                "login": "person-20"
+              },
+              "body": "Replaced comment 3.",
+              "createdAt": "2026-09-08T20:59:45Z",
+              "url": "https://github.com/example/widgets/issues/14394#issuecomment-1002",
+              "isMinimized": false,
+              "minimizedReason": null
+            },
+            {
+              "authorAssociation": "MEMBER",
+              "author": {
+                "__typename": "User",
+                "login": "linus"
+              },
+              "body": "Replaced comment 4.",
+              "createdAt": "2026-09-09T04:39:58Z",
+              "url": "https://github.com/example/widgets/issues/14394#issuecomment-1003",
+              "isMinimized": false,
+              "minimizedReason": null
+            },
+            {
+              "authorAssociation": "NONE",
+              "author": {
+                "__typename": "User",
+                "login": "person-21"
+              },
+              "body": "Replaced comment 5.",
+              "createdAt": "2026-09-15T03:26:56Z",
+              "url": "https://github.com/example/widgets/issues/14394#issuecomment-1004",
+              "isMinimized": false,
+              "minimizedReason": null
+            }
+          ]
+        }
+      }
+    }
+  }
+}

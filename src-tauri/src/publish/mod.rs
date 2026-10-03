@@ -18,6 +18,7 @@
 pub mod commands;
 pub mod conflicts;
 pub mod pull_requests;
+pub mod tasks;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;

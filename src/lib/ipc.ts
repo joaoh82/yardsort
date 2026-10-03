@@ -58,6 +58,11 @@ import {
   type Project,
   type ProjectAutomation,
   type ProjectPullRequests,
+  type ProjectTasks,
+  type Task,
+  type TaskComment,
+  type TaskDetail,
+  type TaskLabel,
   type PublishState,
   type PullRequest,
   type PullRequestOpened,
@@ -169,6 +174,11 @@ export type {
   Preflight,
   Project,
   ProjectPullRequests,
+  ProjectTasks,
+  Task,
+  TaskComment,
+  TaskDetail,
+  TaskLabel,
   PublishState,
   PullRequest,
   PullRequestOpened,
@@ -473,6 +483,13 @@ export const ipc = {
   /** Fetch a pull request's branch so the composer can open a workspace on it. */
   pullRequestPrepareBranch: (projectId: string, number: number) =>
     unwrap(commands.pullRequestPrepareBranch(projectId, number)),
+
+  /** A project's tasks: every open one, and with `closed` the most recently closed too. */
+  projectTasks: (projectId: string, refresh = false, closed = false) =>
+    unwrap(commands.projectTasks(projectId, refresh, closed)),
+  /** One task in full: its description and its conversation. */
+  taskDetail: (projectId: string, key: string, refresh = false) =>
+    unwrap(commands.taskDetail(projectId, key, refresh)),
 
   /**
    * Whether a model can write a commit message or a pull request here, and which one would.

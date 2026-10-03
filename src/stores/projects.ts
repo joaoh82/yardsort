@@ -40,6 +40,8 @@ interface ProjectsState {
   usageOpen: boolean;
   /** The Pull requests view is open in the center panel, which it takes over the same way. */
   pullRequestsOpen: boolean;
+  /** The Tasks view is open in the center panel, which it takes over the same way. */
+  tasksOpen: boolean;
   /** The branch the composer should open rather than start from: a pull request's, got ready
    *  by the core. Cleared with the composer. */
   composingBranch: PreparedBranch | null;
@@ -80,6 +82,8 @@ interface ProjectsState {
   openUsage: (open: boolean) => void;
   /** Show the Pull requests view in the center panel, or close it. */
   openPullRequests: (open: boolean) => void;
+  /** Show the Tasks view in the center panel, or close it. */
+  openTasks: (open: boolean) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
   composeIn: (workspace: Workspace, prompt?: string) => void;
   /**
@@ -161,6 +165,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     workflowId: null,
     usageOpen: false,
     pullRequestsOpen: false,
+    tasksOpen: false,
     ui: {},
     collapsed: [],
     lastParentDir: null,
@@ -289,6 +294,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           workflowId: null,
           usageOpen: false,
           pullRequestsOpen: false,
+          tasksOpen: false,
         });
       }
       set({
@@ -300,6 +306,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
+        tasksOpen: false,
       });
       save(KEYS.selected, workspaceId);
     },
@@ -313,6 +320,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
+        tasksOpen: false,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
@@ -323,6 +331,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         workflowId,
         usageOpen: false,
         pullRequestsOpen: false,
+        tasksOpen: false,
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
@@ -334,6 +343,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({
         usageOpen: open,
         pullRequestsOpen: false,
+        tasksOpen: false,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -345,6 +355,20 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     openPullRequests(open) {
       set({
         pullRequestsOpen: open,
+        tasksOpen: false,
+        usageOpen: false,
+        workflowId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+      });
+    },
+
+    openTasks(open) {
+      set({
+        tasksOpen: open,
+        pullRequestsOpen: false,
         usageOpen: false,
         workflowId: null,
         composingProjectId: null,
@@ -364,6 +388,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
+        tasksOpen: false,
       });
       save(KEYS.selected, workspace.id);
     },

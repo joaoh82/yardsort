@@ -166,6 +166,21 @@ the list why a project has no rows. The fixes, in the order they usually apply:
 
 See [Pull requests](pull-requests.md#when-something-is-missing).
 
+## The Tasks view is empty, or `ys task` says it cannot read tasks
+
+Tasks are a project's GitHub issues, read through the same [GitHub CLI](https://cli.github.com),
+so the first three causes above are the same and so are their fixes. Two more are its own:
+
+- **The repository has issues switched off** — then it has no tasks. Forks often have.
+- **A task you expected is not there** — the list holds every open issue up to the 200 most
+  recently updated, and closed ones only on the **Closed** and **All** tabs, the 50 most
+  recently updated. A pull request is not a task.
+
+`ys task` says the same things in a sentence and exits with an error; when only part of a list
+could be read it prints what arrived and says so on standard error.
+
+See [Tasks](tasks.md#when-something-is-missing).
+
 ## Coming from Switchyard
 
 Yardsort was called Switchyard until v0.2. The first time Yardsort starts it **copies** your
