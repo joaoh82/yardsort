@@ -3,6 +3,12 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **The Homebrew cask is published again.** `brew style` started requiring every app cask to say
+  `depends_on :macos`, so the 0.18.0 tap update was refused; the cask now says it, still with no
+  minimum version.
+
 ## 0.18.0
 
 - **Install ys no longer, now and then, says the copy it just made is "not Yardsort's".** Right
