@@ -339,7 +339,9 @@ describe("comments on lines", () => {
     const thread = await screen.findByRole("article", { name: "Comment on line 3" });
     expect(thread.closest("[data-note]")).toHaveAttribute("data-note", "new:3");
     expect(thread).toHaveTextContent("linus");
-    expect(await within(thread).findByText("comment 1")).toBeVisible();
+    // The body is Markdown, loaded lazily: until it comes the plain text stands in for it, and
+    // a node found just before the swap is gone a moment later. Ask until the answer holds.
+    await waitFor(() => expect(within(thread).getByText("comment 1")).toBeVisible());
     expect(thread).toHaveTextContent("Agreed.");
     const old = screen.getByRole("article", { name: "Comment on lines 7–9 of the old text" });
     expect(old.closest("[data-note]")).toHaveAttribute("data-note", "old:9");

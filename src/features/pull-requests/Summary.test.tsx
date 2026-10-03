@@ -196,7 +196,7 @@ describe("the conversation", () => {
     ]);
     // A review with no words of its own is one whose words are on lines.
     expect(posts[0]).toHaveTextContent("Left comments on lines of the code.");
-    expect(await within(posts[1]!).findByText("last")).toBeVisible();
+    await waitFor(() => expect(within(posts[1]!).getByText("last")).toBeVisible());
     expect(posts[1]!.querySelector("strong")).toHaveTextContent("last");
     // What the forge hid stays hidden, and says so.
     expect(posts[2]).toHaveTextContent("Hidden on GitHub as off topic.");
@@ -287,7 +287,7 @@ describe("keeping up with the forge", () => {
 
     answer({ body: "Second time lucky." });
     await user.click(within(alert).getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Second time lucky.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("Second time lucky.")).toBeVisible());
     expect(core.pullRequestSummary).toHaveBeenLastCalledWith(alpha.id, 8, true);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -295,7 +295,7 @@ describe("keeping up with the forge", () => {
   it("is read once while the list says the same, and again when the list says it changed", async () => {
     answer({ body: "As first written." });
     const { polled } = show();
-    expect(await screen.findByText("As first written.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("As first written.")).toBeVisible());
 
     // The minute's poll: a new object that says the same thing.
     polled(pullRequest(8, { ...listed, details: { ...listed.details } }));
@@ -316,7 +316,7 @@ describe("keeping up with the forge", () => {
     expect(screen.getByText("As first written.")).toBeVisible();
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
     arrive(pullRequestSummary(moved, { body: "As edited." }));
-    expect(await screen.findByText("As edited.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("As edited.")).toBeVisible());
 
     // Checks finishing move nothing but the counts, and that is enough.
     polled(
@@ -342,7 +342,7 @@ describe("keeping up with the forge", () => {
     await waitFor(() => expect(answers).toHaveLength(2));
     // The second question is answered first, then the first one turns up late.
     answers[1]!(pullRequestSummary(moved, { body: "The newer answer." }));
-    expect(await screen.findByText("The newer answer.")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("The newer answer.")).toBeVisible());
     answers[0]!(pullRequestSummary(listed, { body: "The older answer." }));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.getByText("The newer answer.")).toBeVisible();
