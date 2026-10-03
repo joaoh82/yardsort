@@ -194,7 +194,8 @@ shell tab to the fork's URL and branch.
 - **While the view is open**: when you open it, when you come back to the window, once a minute,
   on **Refresh**, and after anything you do to a pull request.
 - **While it is closed**, only the newest fifty per project are read, as they always have been
-  for the workspace badges.
+  for the workspace badges — plus, one at a time, any older open pull request a workspace shows,
+  so its badge does not stay as it was when Yardsort started.
 
 The open pull requests are read fifty at a time. On a busy repository that is a few seconds a
 page, which is why the whole list is only kept fresh while you are looking at it.

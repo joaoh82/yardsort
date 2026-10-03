@@ -192,7 +192,10 @@ a minute. It asks again when you come back to the window, every minute while it 
 straight after anything you do that changes the answer. What it asks for is the newest fifty pull
 requests; every _open_ one is read as well when Yardsort starts and while the
 [Pull requests](pull-requests.md#how-often-github-is-asked) view is open, so a workspace whose
-open pull request has fifty newer ones in front of it still gets its badge.
+open pull request has fifty newer ones in front of it still gets its badge. That pull request is
+also asked about by itself every minute while the view is closed, so its checks and its merge
+show up as soon as they would for any other. The pull request link in the Changes panel follows
+the same answer.
 
 ![Workspace pull request preview with review status and checks](../images/pull-request-preview.png)
 

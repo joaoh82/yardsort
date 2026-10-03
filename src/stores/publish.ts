@@ -179,6 +179,10 @@ export const usePublishStore = create<PublishStore>((set, get) => {
         const found = await ipc.projectPullRequests(projectId, refresh, full);
         if (projectRequests.get(projectId) !== request) return;
         set((s) => ({ byProject: { ...s.byProject, [projectId]: found } }));
+        // The right panel's pull request is worked out from the same answer, so it follows the
+        // poll too: otherwise it would say "checks running" until the workspace's files moved.
+        // The core has that answer cached, so this asks the forge nothing.
+        if (projectOf(get().workspaceId) === projectId) await get().refresh();
       } catch (error) {
         if (projectRequests.get(projectId) !== request) return;
         set((s) => ({

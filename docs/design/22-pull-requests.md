@@ -132,7 +132,9 @@ filters compare against. This query was run against both repositories above, and
 The open tier is fetched **once per project when the app starts** (so the sidebar's count is
 right and the view opens with rows in it), and then **only while the view is showing**: when it
 opens, on focus, every minute, on **Refresh**, and after any action. With the view closed, the
-forge traffic is what it is today.
+forge traffic is what it is today, plus one `gh pr view` per minute for each older open pull
+request a workspace shows (`Forge::follow_open`, at most ten): without it, such a badge stayed as
+it was read at startup — running, open — however long ago it went green or was merged.
 
 How the two meet:
 
