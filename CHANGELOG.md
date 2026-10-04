@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.19.0
 
 - **A pull request's checks going green, or its merge, now shows without you doing anything.**
   The `#42 · checks running` link in the Changes panel only caught up when the workspace's files
