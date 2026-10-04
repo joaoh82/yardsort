@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.19.1
 
 - **A merged pull request now counts as _kept_ without you opening Outcomes.** Attempts are
   matched to pull requests whenever Yardsort reads a project's pull requests, not only when the
