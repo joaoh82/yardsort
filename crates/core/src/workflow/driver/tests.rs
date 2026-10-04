@@ -283,6 +283,10 @@ fn a_run_starts_an_agent_waits_for_it_to_settle_types_to_it_and_says_so() {
     assert_eq!(started[0].id, "shell");
     assert_eq!(started[0].prompt.as_deref(), Some("Work on fix-login"));
     assert!(!started[0].skip_memory);
+    assert!(
+        started[0].quiet_memory,
+        "a workflow's agent is not asked to propose memory"
+    );
     assert_eq!(
         engine::parse_outputs(&fx.step(&run, "settle").outputs)["outcome"],
         "settled"

@@ -603,6 +603,42 @@ mod tests {
         assert_eq!(store.outcome(&second).unwrap().unwrap().pr_number, Some(9));
     }
 
+    /// Reading a project's pull requests is enough: a live workspace nobody has looked at gets
+    /// its outcome row and its pull request there and then, without the Outcomes view. Nothing
+    /// read from the forge writes nothing, and another project's workspaces are left alone.
+    #[test]
+    fn reading_the_projects_pull_requests_records_a_live_attempt() {
+        let (_dir, store, _git, project, ws) = repo();
+        let other = store.add_project("other", "/code/other").unwrap();
+        let elsewhere = store
+            .add_worktree(&other.id, "same", "/wt/same", Some("ys/fix"), Some("main"))
+            .unwrap()
+            .id;
+        assert_eq!(store.outcome(&ws).unwrap(), None, "never snapshotted");
+
+        observe_project(&store, &project, &[]).unwrap();
+        assert_eq!(
+            store.outcome(&ws).unwrap(),
+            None,
+            "nothing read, nothing written"
+        );
+
+        let opened = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        observe_project(
+            &store,
+            &project,
+            &[seen("ys/fix", 7, "merged", Some(opened))],
+        )
+        .unwrap();
+        let row = store.outcome(&ws).unwrap().unwrap();
+        assert_eq!((row.pr_number, outcome(&row)), (Some(7), Outcome::Merged));
+        assert!(row.began_at.is_some());
+        assert_eq!(store.outcome(&elsewhere).unwrap(), None);
+    }
+
     /// Work that was seen ahead and then thrown away — the branch reset to its base — is not a
     /// merge; the same branch really merged later is. A branch deleted after a real merge still
     /// counts, since the tip is what is checked.

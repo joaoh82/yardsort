@@ -50,6 +50,9 @@ should be told nothing, and it stays off. While it is ticked:
   it says the memory is empty and how to propose — and the composer says _nothing is approved
   yet_. This is how a memory gets its first entries: an agent that is never told about
   `ys memory propose` never runs it.
+- **Agents a [workflow](workflows.md) starts** get the approved entries too, but are not asked
+  to propose, and get nothing while the memory is empty: a workflow that starts several agents
+  would otherwise leave a proposal from each. They can still run `ys memory propose`.
 - **Handoffs** carry the same section in their packet, where you see and edit it with the rest.
 - **What the workspace was asked stays your own words.** The memory goes to the agent, not into
   the conversation's record, so Assist and the next handoff read your task, not the memory.

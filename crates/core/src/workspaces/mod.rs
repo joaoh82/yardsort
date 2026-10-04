@@ -635,6 +635,56 @@ mod tests {
         assert_eq!(fx.store.outcome(&archived.id).unwrap().unwrap().ended, None);
     }
 
+    /// Git's evidence is read as a workspace ends, though nobody ever opened Outcomes: a branch
+    /// with commits of its own has its tip on record after a delete or an archive, so a later
+    /// merge is recognised even if the branch is deleted in between.
+    #[test]
+    fn deleting_or_archiving_records_what_git_says_of_the_branch() {
+        let fx = Fixture::new();
+        let ws = fx.workspaces();
+        let commit = |row: &WorkspaceRow| {
+            let path = Path::new(&row.path);
+            std::fs::write(path.join("work.rs"), "fn work() {}\n").unwrap();
+            fx.git.run(path, &["add", "-A"]).unwrap();
+            fx.git
+                .run(
+                    path,
+                    &[
+                        "-c",
+                        "user.name=t",
+                        "-c",
+                        "user.email=t@t",
+                        "commit",
+                        "-qm",
+                        "work",
+                    ],
+                )
+                .unwrap();
+            fx.git
+                .run(path, &["rev-parse", "HEAD"])
+                .unwrap()
+                .trim()
+                .to_owned()
+        };
+        let deleted = ws.create(&fx.project_id, None, "Fix the login").unwrap();
+        let archived = ws.create(&fx.project_id, None, "Try another way").unwrap();
+        let untouched = ws.create(&fx.project_id, None, "Nothing done").unwrap();
+        let (deleted_tip, archived_tip) = (commit(&deleted), commit(&archived));
+        assert_eq!(
+            fx.store.outcome(&deleted.id).unwrap(),
+            None,
+            "never looked at"
+        );
+
+        ws.delete(&deleted.id, false).unwrap();
+        ws.archive(&archived.id, false).unwrap();
+        ws.delete(&untouched.id, false).unwrap();
+        let tip = |id: &str| fx.store.outcome(id).unwrap().unwrap().ahead_tip;
+        assert_eq!(tip(&deleted.id), Some(deleted_tip));
+        assert_eq!(tip(&archived.id), Some(archived_tip));
+        assert_eq!(tip(&untouched.id), None, "an empty branch was never ahead");
+    }
+
     #[test]
     fn preparation_copies_ignored_files_then_executes_setup_and_restores() {
         use crate::project_automation::{ProjectAutomation, ProjectCommand};

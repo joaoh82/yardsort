@@ -237,6 +237,7 @@ pub(super) fn deliver(
                     prompt: Some(text(task.as_deref())),
                     handoff: true,
                     skip_memory: false,
+                    quiet_memory: false,
                 }),
                 size,
             )?;

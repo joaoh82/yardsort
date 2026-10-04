@@ -22,7 +22,8 @@ has the downloads and the full commit lists.
   but has nothing approved yet used to add nothing to a first message, so no agent ever heard of
   `ys memory propose` and the memory stayed empty. The first message now says the memory is empty
   and asks the agent to propose what the next one should know; with entries, it asks the same
-  before the agent finishes. See [Memory](docs/guide/memory.md#how-it-fills-up).
+  before the agent finishes. Agents a workflow starts are not asked. See
+  [Memory](docs/guide/memory.md#how-it-fills-up).
 
 ## 0.19.0
 

@@ -235,9 +235,25 @@ pub fn prompt_section(store: &Store, project_id: &str) -> IpcResult<Option<Strin
     Ok(Some(render(&approved(store, project_id)?)))
 }
 
+/// The approved entries alone, for a launch the user did not make by hand — an agent a workflow
+/// starts, a workflow's `{{ memory }}`: the same cited notes without the request to propose
+/// more, and `None` with nothing approved. A workflow that starts several agents would
+/// otherwise leave a proposal from each, most about that one run.
+pub fn notes_section(store: &Store, project_id: &str) -> IpcResult<Option<String>> {
+    if !store.memory_shared(project_id)? {
+        return Ok(None);
+    }
+    let entries = approved(store, project_id)?;
+    Ok((!entries.is_empty()).then(|| section(&entries, false)))
+}
+
 /// The section itself. Framed as the user's notes, not as instructions, and each entry quoted as
 /// one cited list item — `clean` has already folded anything that could break out of it.
 pub fn render(entries: &[MemoryRow]) -> String {
+    section(entries, true)
+}
+
+fn section(entries: &[MemoryRow], ask: bool) -> String {
     let mut out = String::from("## Project memory\n\n");
     if entries.is_empty() {
         out.push_str(
@@ -267,6 +283,10 @@ pub fn render(entries: &[MemoryRow]) -> String {
     }
     if !entries.is_empty() {
         out.push_str("\nTo look for more: `ys memory search <words>`.");
+    }
+    if !ask {
+        out.push('\n');
+        return out;
     }
     out.push_str(
         "\nBefore you finish, if you learned something the next agent in this project should \
@@ -600,6 +620,26 @@ mod tests {
         assert!(text.contains("`ys memory propose \"<one sentence>\"`"));
         assert!(!text.contains("ys memory search"));
         assert!(!text.contains("bun"), "a candidate reaches no agent");
+    }
+
+    /// What a workflow's agents get: the approved notes, cited, and how to search — never the
+    /// request to propose, and nothing while there is nothing approved or the project does not
+    /// share.
+    #[test]
+    fn the_notes_alone_carry_no_request_to_propose() {
+        let store = Store::in_memory();
+        let (p, _) = project(&store);
+        assert_eq!(notes_section(&store, &p).unwrap(), None, "nothing approved");
+        let id = write(&store, &p, "The tests need TZ=UTC.").unwrap();
+        let text = notes_section(&store, &p).unwrap().unwrap();
+        assert!(text.contains(&format!(
+            "- The tests need TZ=UTC. (memory {}, from the user)\n",
+            short_id(&id)
+        )));
+        assert!(text.contains("`ys memory search <words>`.\n"));
+        assert!(!text.contains("propose"));
+        store.set_memory_shared(&p, false).unwrap();
+        assert_eq!(notes_section(&store, &p).unwrap(), None, "not shared");
     }
 
     /// A project nobody has decided about shares its memory: the first agent started in it is

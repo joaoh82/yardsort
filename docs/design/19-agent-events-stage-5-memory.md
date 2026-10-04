@@ -77,6 +77,11 @@ Further decisions made in building:
   with nothing approved it says so, offers no search, and asks for proposals. The request is
   also firmer and placed at the end of the work: _before you finish_, one lesson at a time, not
   what the repository's own instructions already say.
+- **A workflow's agents are not asked** (found in review of the above). `start_session` and
+  `{{ memory }}` go through `memory::notes_section`: the approved entries and the search hint,
+  no request to propose, and nothing with nothing approved (`HarnessRequest.quiet_memory`, set
+  by the workflow driver). Otherwise a fan-out of reviewers leaves one proposal each, mostly
+  about that one review. The user's own launches and handoffs keep the request.
 - **Sharing is on until turned off** (4 October 2026; the user's decision, reversing the gate's
   _injection is opt-in_). The reasoning: what is shared is the user's own approved notes, about
   their own project, with agents they start in it — and with the switch off by default a project
