@@ -25,6 +25,10 @@ has the downloads and the full commit lists.
   before the agent finishes. Agents a workflow starts are not asked. See
   [Memory](docs/guide/memory.md#how-it-fills-up).
 
+- **Usage: the plan-limits card has its own heading.** It is labelled **Plan limits**, with a
+  note that only agents that record their limits appear. Today that is Codex alone, and the card
+  no longer reads as a header for the whole tab.
+
 ## 0.19.0
 
 - **A pull request's checks going green, or its merge, now shows without you doing anything.**
