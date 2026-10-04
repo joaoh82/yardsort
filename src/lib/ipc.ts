@@ -58,6 +58,18 @@ import {
   type Project,
   type ProjectAutomation,
   type ProjectPullRequests,
+  type ProjectTasks,
+  type Task,
+  type TaskComment,
+  type TaskDetail,
+  type TaskLabel,
+  type TaskRef,
+  type TaskChoices,
+  type TaskEdit,
+  type NewTask,
+  type CreatedTask,
+  type CloseReason,
+  type Delegated,
   type PublishState,
   type PullRequest,
   type PullRequestOpened,
@@ -65,6 +77,11 @@ import {
   type CheckCounts,
   type Checks,
   type PreparedBranch,
+  type DiffSide,
+  type Excerpt,
+  type LineComment,
+  type LinePlace,
+  type PullRequestChanges,
   type PullRequestCheck,
   type PullRequestPost,
   type PullRequestReview,
@@ -169,6 +186,18 @@ export type {
   Preflight,
   Project,
   ProjectPullRequests,
+  ProjectTasks,
+  Task,
+  TaskComment,
+  TaskDetail,
+  TaskLabel,
+  TaskRef,
+  TaskChoices,
+  TaskEdit,
+  NewTask,
+  CreatedTask,
+  CloseReason,
+  Delegated,
   PublishState,
   PullRequest,
   PullRequestOpened,
@@ -176,6 +205,11 @@ export type {
   CheckCounts,
   Checks,
   PreparedBranch,
+  DiffSide,
+  Excerpt,
+  LineComment,
+  LinePlace,
+  PullRequestChanges,
   PullRequestCheck,
   PullRequestPost,
   PullRequestReview,
@@ -462,6 +496,48 @@ export const ipc = {
   /** One pull request in full: description, checks with links, reviewers, conversation. */
   pullRequestSummary: (projectId: string, number: number, refresh = false) =>
     unwrap(commands.pullRequestSummary(projectId, number, refresh)),
+  /** The files a pull request changes. Fetches its commits first if they are not here. */
+  pullRequestChanges: (projectId: string, number: number) =>
+    unwrap(commands.pullRequestChanges(projectId, number)),
+  /** Both sides of one of those files, between the two commits `pullRequestChanges` named. */
+  pullRequestDiff: (
+    projectId: string,
+    commits: Pick<PullRequestChanges, "baseOid" | "headOid">,
+    change: Pick<FileChange, "path" | "oldPath">,
+  ) =>
+    unwrap(
+      commands.pullRequestDiff(
+        projectId,
+        commits.baseOid,
+        commits.headOid,
+        change.path,
+        change.oldPath,
+      ),
+    ),
+  /** Post a comment on a pull request's conversation. */
+  pullRequestComment: (projectId: string, number: number, body: string) =>
+    done(commands.pullRequestComment(projectId, number, body)),
+  /** Every comment made on lines of a pull request's diff. */
+  pullRequestLineComments: (projectId: string, number: number) =>
+    unwrap(commands.pullRequestLineComments(projectId, number)),
+  /** Post a comment on particular lines of a pull request's diff. */
+  pullRequestLineComment: (projectId: string, number: number, place: LinePlace, body: string) =>
+    done(commands.pullRequestLineComment(projectId, number, place, body)),
+  /** Who in a workspace would be given a note about its pull request's lines, and how. */
+  pullRequestNoteHelper: (workspaceId: string, number: number) =>
+    unwrap(commands.pullRequestNoteHelper(workspaceId, number)),
+  /** Give that agent the note: typed in, resumed with it, or as a new conversation's first message. */
+  pullRequestSendNote: (
+    workspaceId: string,
+    number: number,
+    sessionId: string,
+    excerpt: Excerpt,
+    note: string,
+    size: TermSize,
+  ) => unwrap(commands.pullRequestSendNote(workspaceId, number, sessionId, excerpt, note, size)),
+  /** The note as a composer's first message, for a pull request with no workspace yet. */
+  pullRequestNoteText: (projectId: string, number: number, excerpt: Excerpt, note: string) =>
+    unwrap(commands.pullRequestNoteText(projectId, number, excerpt, note)),
   /** Merge any pull request of a project, at the head commit the user confirmed. */
   pullRequestMerge: (projectId: string, number: number, headOid: string, method: MergeMethod) =>
     done(commands.pullRequestMerge(projectId, number, headOid, method)),
@@ -473,6 +549,28 @@ export const ipc = {
   /** Fetch a pull request's branch so the composer can open a workspace on it. */
   pullRequestPrepareBranch: (projectId: string, number: number) =>
     unwrap(commands.pullRequestPrepareBranch(projectId, number)),
+
+  /** A project's tasks: every open one, and with `closed` the most recently closed too. */
+  projectTasks: (projectId: string, refresh = false, closed = false) =>
+    unwrap(commands.projectTasks(projectId, refresh, closed)),
+  /** One task in full: its description and its conversation. */
+  taskDetail: (projectId: string, key: string, refresh = false) =>
+    unwrap(commands.taskDetail(projectId, key, refresh)),
+  /** A task made ready to hand to an agent: the first message, and what to record. */
+  taskPrompt: (projectId: string, key: string) => unwrap(commands.taskPrompt(projectId, key)),
+  /** Open a new task on the project's source. Public at once. */
+  taskCreate: (projectId: string, task: NewTask) => unwrap(commands.taskCreate(projectId, task)),
+  /** Post a comment on a task. */
+  taskComment: (projectId: string, key: string, body: string) =>
+    done(commands.taskComment(projectId, key, body)),
+  taskClose: (projectId: string, key: string, reason: CloseReason) =>
+    done(commands.taskClose(projectId, key, reason)),
+  taskReopen: (projectId: string, key: string) => done(commands.taskReopen(projectId, key)),
+  /** Change a task's labels, assignees or title. */
+  taskEdit: (projectId: string, key: string, change: TaskEdit) =>
+    done(commands.taskEdit(projectId, key, change)),
+  /** The labels and people a project's tasks can be given. */
+  projectTaskChoices: (projectId: string) => unwrap(commands.projectTaskChoices(projectId)),
 
   /**
    * Whether a model can write a commit message or a pull request here, and which one would.

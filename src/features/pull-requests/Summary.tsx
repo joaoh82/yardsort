@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { PullRequest, PullRequestCheck, PullRequestPost } from "@/lib/ipc";
 import { usePullRequestsStore, type Target } from "@/stores/pullRequests";
@@ -93,12 +93,61 @@ export function Summary({ row, now }: { row: Row; now: number }) {
         )}
         {summary && (
           <p className="mt-3 text-[11px] text-ink-faint">
-            Comments made on particular lines of the code are not shown here.{" "}
-            <Out url={pr.url}>Read them on GitHub</Out>
+            Comments on particular lines are under <b>Code</b>, beside the lines they are about.
           </p>
         )}
+        {summary && <Reply target={target} />}
       </Section>
     </div>
+  );
+}
+
+/** A comment on the conversation. Sending is the confirmation: nothing is posted any other way. */
+function Reply({ target }: { target: Target }) {
+  const [text, setText] = useState("");
+  const busy = usePullRequestsStore((s) => s.busy !== null);
+  const ready = text.trim() !== "" && !busy;
+  const send = async () => {
+    if (!ready) return;
+    const sent = await usePullRequestsStore.getState().comment(target, text.trim());
+    if (sent) setText("");
+  };
+  return (
+    <form
+      aria-label="Reply"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void send();
+      }}
+      className="mt-3"
+    >
+      <textarea
+        aria-label="Your comment"
+        placeholder="Write a comment…"
+        value={text}
+        rows={text.includes("\n") ? 5 : 2}
+        disabled={busy}
+        spellCheck
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            void send();
+          }
+        }}
+        className="w-full resize-y rounded border border-line bg-canvas px-2 py-1.5 outline-none select-text focus:border-accent disabled:opacity-50"
+      />
+      <div className="mt-1.5 flex items-center justify-end gap-3 text-[11px] text-ink-faint">
+        <span>Markdown, as on GitHub. Ctrl+Enter or ⌘Enter sends.</span>
+        <button
+          type="submit"
+          disabled={!ready}
+          className="rounded bg-accent px-3 py-1 font-medium text-canvas disabled:opacity-40"
+        >
+          Comment
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -123,18 +172,6 @@ function Words({ text }: { text: string }) {
         <Markdown text={text} />
       </Suspense>
     </div>
-  );
-}
-
-function Out({ url, children }: { url: string; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={() => void openUrl(url).catch(console.error)}
-      className="underline hover:text-ink"
-    >
-      {children} <span aria-hidden>↗</span>
-    </button>
   );
 }
 

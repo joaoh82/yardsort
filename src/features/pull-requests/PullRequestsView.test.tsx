@@ -14,6 +14,7 @@ const core = vi.hoisted(() => ({
   uiStateSave: vi.fn(),
   projectPullRequests: vi.fn(),
   pullRequestSummary: vi.fn(),
+  pullRequestChanges: vi.fn(),
   pullRequestMerge: vi.fn(),
   pullRequestClose: vi.fn(),
   pullRequestReopen: vi.fn(),
@@ -144,6 +145,8 @@ beforeEach(() => {
   usePullRequestsStore.setState({
     selected: null,
     summaries: {},
+    changes: {},
+    tab: "summary",
     busy: null,
     error: null,
     notice: null,
@@ -390,9 +393,11 @@ describe("the details", () => {
     expect(row(/Add a retry/)).toHaveAttribute("aria-current", "true");
     expect(within(pane).getByText("grace/retry → main")).toBeVisible();
     expect(within(pane).getByText("Review required")).toBeVisible();
-    expect(
-      await within(pane).findByText("What Add a retry to the uploader is about."),
-    ).toBeVisible();
+    // Asked for again on each try: the words are first shown plain, and that paragraph is
+    // replaced when the Markdown renderer arrives. One found a moment before is gone by then.
+    await waitFor(() =>
+      expect(within(pane).getByText("What Add a retry to the uploader is about.")).toBeVisible(),
+    );
     expect(core.pullRequestSummary).toHaveBeenCalledWith(alpha.id, 8, false);
     const reviewers = within(pane).getByRole("region", { name: "Reviewers" });
     expect(reviewers).toHaveTextContent("linuscommented");
@@ -401,6 +406,37 @@ describe("the details", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("region", { name: "Pull request #8" })).not.toBeInTheDocument();
     await waitFor(() => expect(row(/Add a retry/)).toHaveFocus());
+  });
+
+  it("has two tabs, and stays on Code from one pull request to the next", async () => {
+    core.pullRequestChanges.mockResolvedValue({
+      files: [{ path: "src/a.rs", oldPath: null, kind: "modified", additions: 2, deletions: 1 }],
+      baseOid: "b".repeat(40),
+      headOid: "a".repeat(40),
+    });
+    const user = show();
+    await user.click(row(/Add a retry/));
+    const pane = screen.getByRole("region", { name: "Pull request #8" });
+    expect(within(pane).getByRole("tab", { name: "Summary" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // The diff is not fetched for someone who only came to read the description.
+    expect(core.pullRequestChanges).not.toHaveBeenCalled();
+
+    await user.click(within(pane).getByRole("tab", { name: "Code" }));
+    expect(await screen.findByRole("list", { name: "Changed files" })).toBeVisible();
+    expect(core.pullRequestChanges).toHaveBeenCalledWith(alpha.id, 8);
+    expect(within(pane).queryByRole("region", { name: "Description" })).not.toBeInTheDocument();
+    // The actions are above the tabs, and so still there.
+    expect(within(pane).getByRole("button", { name: /^Merge/ })).toBeVisible();
+
+    await user.click(row(/Speed up the first paint/));
+    expect(screen.getByRole("tab", { name: "Code" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(core.pullRequestChanges).toHaveBeenLastCalledWith(beta.id, 3));
+
+    await user.click(screen.getByRole("tab", { name: "Summary" }));
+    expect(screen.getByRole("region", { name: "Description" })).toBeVisible();
   });
 
   it("can have the list out of the way, and back", async () => {

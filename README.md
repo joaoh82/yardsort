@@ -84,10 +84,19 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Every pull request in one place.** **Pull requests**, at the top of the sidebar, lists the
   pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks,
   reviewers and size, filtered by project, author and review status. Open one to read its
-  description, its checks and the conversation. Start a workspace on one, merge it, close it or
-  reopen it from there, each confirmed first and naming whose it is. It
-  reads GitHub through `gh`; Yardsort still holds no credential. See
-  [Pull requests](docs/guide/pull-requests.md).
+  description, its checks, the conversation and its diff, with every comment beside the lines it
+  is about; reply, or select lines and send a note about them to the agent working on it. Start
+  a workspace on one, merge it, close it or reopen it from there, each confirmed first and naming
+  whose it is. It reads GitHub through `gh`; Yardsort still holds no credential.
+  [More below](#every-pull-request-in-one-place).
+- **Your issues, where the agents are.** **Tasks**, in the sidebar, lists every project's open
+  GitHub issues and counts the ones that need an answer — where the last person to speak was
+  not a maintainer. Open one to read it, then **Delegate**: the composer opens with the issue
+  as the agent's first message, marked as text other people wrote, and nothing starts until you
+  say so. The workspace remembers the task it came from. Open a new task, answer one, close,
+  label and assign it from the same view. `ys task` does all of it from a terminal, so an agent
+  can tell you what is open and file an issue when you ask. Everything goes through `gh`.
+  [More below](#your-issues-where-the-agents-are).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
@@ -164,6 +173,58 @@ All figures stay on your machine. Token history covers only logs still present t
 not include other computers. Machine resources covers all agents Yardsort runs, while token
 totals currently cover Claude Code, Codex and Grok. See the [Usage guide](docs/guide/usage.md)
 for sources, pricing limits and the option to hide the sidebar button.
+
+## Every pull request in one place
+
+![Pull requests: every project's pull requests in one list, with one open beside it showing its description, checks and reviewers](docs/images/pull-requests.png)
+
+**Pull requests**, at the very top of the sidebar, is one list of the pull requests of every
+project on GitHub — the ones agents opened, the ones you opened, the ones a teammate opened last
+week — most recently updated first. Each row says who opened it, how the checks stand, how big it
+is, and which workspace holds its branch. Filter by state, project, author and review status, or
+search a title or a number.
+
+- **Summary** is the pull request as GitHub has it: the description, every check with a link to
+  its run, who was asked to review and what they said, and the conversation, with a box to reply.
+- **Code** is its diff, read with git into the project's own repository: the files it changes,
+  each with the number of comment threads on it, and the viewer with every thread under the
+  lines it is about. Select lines and **Note on lines…** sends what you want done to the agent
+  that has the pull request's workspace — typed into it if it is running and quiet, resumed if it
+  has ended, or a new workspace started with the note as its first message — and, if you like,
+  posts the same note on GitHub as a comment on those lines.
+- **Start workspace**, **Merge**, **Close** and **Reopen** act on any pull request from here,
+  each confirmed first and naming whose it is. A fork's pull request gets a workspace too, on a
+  branch Yardsort will not push.
+
+![Pull requests, Code tab: a changed file with a review thread sitting under the line it is about](docs/images/pull-requests-code.png)
+
+It needs the [GitHub CLI](https://cli.github.com), logged in; everything here is `gh` with the
+permissions you already have, and nothing you write reaches `gh` as a command-line argument.
+See [Pull requests](docs/guide/pull-requests.md).
+
+## Your issues, where the agents are
+
+![Tasks: every project's open issues in one list, with one open beside it showing its description and conversation, and buttons to delegate, close, label and assign it](docs/images/tasks.png)
+
+**Tasks**, under Pull requests in the sidebar, is one list of the open GitHub issues of every
+project, most recently updated first. The number beside it is not how many are open but how many
+**need an answer**: the last person to speak was not an owner, a member or a collaborator, and a
+bot's comment counts as nobody's. Filter by project, label, assignee, author and _Needs an
+answer_, or search a title or a number.
+
+- **Delegate** opens the composer with the issue as the agent's first message — its title,
+  description and latest comments, between two lines marked as text other people wrote, followed
+  by what the agent should do if that text asks for more than the work. Nothing starts until you
+  press Start. The workspace is named after the task and remembers it, so the task names its
+  workspaces and the workspace's row shows the task.
+- **New task**, a reply box, **Close** and **Reopen**, **Labels** and **Assignees** manage issues
+  without leaving the app. Closing and reopening ask first, naming who opened the task.
+- **`ys task`** does all of it from a terminal — `list --needs-answer`, `show`, `start`,
+  `create`, `comment`, `close`, `reopen`, `edit`, each with `--json` — so an agent in a
+  workspace can tell you what is open and file an issue when you ask.
+
+It needs the [GitHub CLI](https://cli.github.com), logged in; everything here is `gh` with the
+permissions you already have. See [Tasks](docs/guide/tasks.md).
 
 ## Hand the work to another agent
 
@@ -354,24 +415,25 @@ says no.
 
 ## Documentation
 
-|                                                                                                  |                                                                 |
-| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                         |
-| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                    |
-| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off  |
-| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                     |
-| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file        |
-| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                 |
-| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history           |
-| [Pull requests](docs/guide/pull-requests.md)                                                     | Every project's pull requests: filter, start a workspace, merge |
-| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own    |
-| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent           |
-| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                      |
-| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                  |
-| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints               |
-| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs   |
-| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                 |
-| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions            |
+|                                                                                                  |                                                                           |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                                   |
+| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                              |
+| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off            |
+| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                               |
+| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                  |
+| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                           |
+| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history                     |
+| [Pull requests](docs/guide/pull-requests.md)                                                     | Every project's pull requests: filter, start a workspace, merge           |
+| [Tasks](docs/guide/tasks.md)                                                                     | Every project's GitHub issues: which need an answer, hand one to an agent |
+| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own              |
+| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                     |
+| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                |
+| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                            |
+| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints                         |
+| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs             |
+| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                           |
+| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions                      |
 
 ## Build from source
 

@@ -1,8 +1,8 @@
 # Pull requests
 
-_Proposed 2026-10-02. Slices 1 and 2 are built — see [slice 1](#slice-1-what-shipped) and
-[slice 2](#slice-2-what-shipped), which also say where they differ from the proposal below.
-Slices 3 and 4 are still a proposal._
+_Proposed 2026-10-02. All four slices are built — see [slice 1](#slice-1-what-shipped),
+[slice 2](#slice-2-what-shipped), [slice 3](#slice-3-what-shipped) and
+[slice 4](#slice-4-what-shipped), which also say where they differ from the proposal below._
 
 Every pull request of every project in one place: a **Pull requests** row at the top of the
 sidebar opens a view in the center panel that lists them, filters them, shows one in detail —
@@ -132,7 +132,9 @@ filters compare against. This query was run against both repositories above, and
 The open tier is fetched **once per project when the app starts** (so the sidebar's count is
 right and the view opens with rows in it), and then **only while the view is showing**: when it
 opens, on focus, every minute, on **Refresh**, and after any action. With the view closed, the
-forge traffic is what it is today.
+forge traffic is what it is today, plus one `gh pr view` per minute for each older open pull
+request a workspace shows (`Forge::follow_open`, at most ten): without it, such a badge stayed as
+it was read at startup — running, open — however long ago it went green or was merged.
 
 How the two meet:
 
@@ -449,9 +451,11 @@ Each is one pull request with its docs, tests and changelog line, in this order.
       [what this touches](#documentation-this-touches), and a screenshot.
 2. **Summary.** ✅ `pull_request_summary`; the Markdown renderer and its rules; checks with links,
    reviewers, the conversation, read-only. See [slice 2](#slice-2-what-shipped).
-3. **Code.** `Changes` between two revisions; the private refs and their cleanup; the file list,
-   the viewer and the Files dropdown in the detail pane.
-4. **Writing.** The reply box; comments on lines; send to an agent, with or without a workspace.
+3. **Code.** ✅ `Changes` between two revisions; the private refs and their cleanup; the file
+   list, the viewer and the Files dropdown in the detail pane. See
+   [slice 3](#slice-3-what-shipped).
+4. **Writing.** ✅ The reply box; comments on lines; send to an agent, with or without a
+   workspace. See [slice 4](#slice-4-what-shipped).
 
 Slice 1 is the large one. If it grows past what one review can hold, steps 3–4 and the action
 buttons split off as their own pull request, leaving a list that only reads and links out.
@@ -546,6 +550,116 @@ its table, task list and code, no image element existed, and the template commen
 Still not done: the screenshot, and the hands-on pass ([08 §23](08-manual-checklist.md)), which
 has rows for the Summary now.
 
+## Slice 3: what shipped
+
+Code: the pull request's diff, with nothing checked out. And the tabs, now that there are two.
+
+- **`changes::Between`** in the core lists what differs between two commits and reads both
+  sides of a file, with the parsers and the per-revision reader `Changes` already had. Same
+  `FileChange`, same `FileDiff`.
+- **`fetch_for_diff`** makes sure the commits are in the project's repository and says which two
+  the diff is between. It fetches `refs/pull/<n>/head` into `refs/yardsort/pull/<n>/head` and
+  the base commit by its id in the same round trip, pins the base under
+  `refs/yardsort/pull/<n>/base` so git does not collect it, and answers with the head _as
+  fetched_ and its merge base with the base. When both are here already it fetches nothing.
+- **The base is the commit the forge recorded** (`baseRefOid`, which both list queries now ask
+  for, so every `PullRequest` carries it), not the base branch as it is now. For a pull request merged with a merge commit the
+  branch's tip contains the head, and a diff against it is empty. There is a test for exactly
+  that.
+- **A server that will not give a commit by its id** gets a second try: the head alone, then the
+  base branch by name. Its tip stands in for the recorded commit — the same thing for an open
+  pull request.
+- **Ids from the forge and from the window are checked to be ids** (`git::is_commit_id`) before
+  git sees them as arguments, and the base branch's name goes through `check-ref-format`.
+- **`prune_refs`** deletes the refs kept for pull requests the list no longer has, on each full
+  read of the list — and only when that list is whole: `gh` answered, for both tiers.
+- **Two commands.** `pull_request_changes(project_id, number)` fetches and lists;
+  `pull_request_diff(project_id, base_oid, head_oid, path, old_path)` reads one file between
+  the two commits the first one named. The window hands them back rather than a number, so a
+  file is always read from the same pair the list was.
+- **The head and the base come from the project's list** (`Forge::find`), never from the
+  summary's cache. Review found the first cut taking them from a summary read up to 30 s
+  earlier: after a push inside that window the ref already matched the stale head, nothing was
+  fetched, and the old diff stayed with no error to retry from. The list is what notices a
+  push, so it is what names the head; a pull request the list does not have is asked about
+  afresh. Code therefore asks the forge for nothing at all. There is a test for the push.
+- **The window**: `DiffBody` was lifted out of the changes panel's viewer so both show a diff
+  the same way — inline or two panes, images side by side, a line for what cannot be shown —
+  and the remembered `changes.diffMode` is shared. The tab opens on the list of files and a
+  file opens in the viewer, with a Files box and previous/next. It is not every file in one
+  long scroll: each would be its own CodeMirror.
+- **Fetched once per head.** The store keeps the list of files with the head commit the pull
+  request list named when it was asked for. A comment does not move that; a push does.
+- **The tabs** are Summary and Code, and the one in view is kept from one pull request to the
+  next until you quit. Code is only fetched when it is looked at.
+- Found on the way: the test fixture from slice 1 made its "pull request" branch in a clone that
+  had checked nothing out, so it shared no history with the base. Slice 1's tests never
+  compared the two. It grows from the base now.
+
+How it was checked: `Between` and the fetch against real repositories, including a merged pull
+request, a head that moved on, the fallback, and a second look with the remote gone; the tab
+through Testing Library with the viewer stubbed; the real viewer in headless Chromium; and
+`changes_of` against a real, long-merged pull request from a fork on GitHub, fetched into an
+empty repository.
+
+Still not done: the screenshot and the hands-on pass, as before.
+
+## Slice 4: what shipped
+
+Writing to the forge, and to an agent: the reply box, comments on lines, and a note on lines.
+
+- **`Gh::comment`** is `gh pr comment <n> --body-file -` with the words on standard input;
+  **`Gh::line_comment`** is `gh api -X POST …/pulls/<n>/comments` with `-F body=@-` and the
+  place — commit, path, side, line, start line — as fields. Nothing the user wrote is ever an
+  argument. One test writes down the arguments and what was read.
+- **`Gh::line_comments`** is `gh api --paginate --slurp …/pulls/<n>/comments`, pages of pages.
+  Each comment keeps its line, side, range, original line, whether the forge still places it
+  (`position`), whether it is about the whole file, and what it replies to. Recorded, as the
+  others, and anonymised.
+- **Beside the lines.** `CodeView` gained `notes` — blocks under lines, one per comment thread,
+  drawn by React through portals into nodes CodeMirror places as block widgets — and `onSelect`,
+  which reports the selected lines, whole, and which pane they are in. A comment on the old
+  text goes under the line the new text has where the old one was, worked out from the merge
+  view's own chunks; side by side, it sits in the left pane. Tested against the real editor.
+- **Where a note goes** is the conflict helper's decision, now shared: `plan` picks the
+  conversation and `deliver` reaches it — typed in, resumed, or started — with the words made
+  by `code_note::prompt`. Never into a busy agent. With no workspace, the note becomes the
+  composer's first message after `prepare_branch`, and `compose` learned to carry one.
+- **The dialog says where the note goes before Send**, by asking `pull_request_note_helper`,
+  and refuses nothing silently: an agent that cannot be asked is a line in the dialog, with
+  GitHub still on offer. The checkbox posts the same words on GitHub too; a second button posts
+  them there alone.
+- **GitHub first, and once.** Of the two places a note goes, GitHub is the one that can refuse:
+  its review-comment endpoint takes only a line inside the diff's hunks, and the viewer lets
+  the user select any line of the file. So the comment is posted before the agent is given the
+  note, and a refusal leaves nothing half done. Should the agent be the step that fails after
+  GitHub has the comment, the dialog remembers that and a second Send does not post it again.
+  Neither `Esc` nor the backdrop closes the dialog while a send is under way, as Cancel is
+  already disabled then: a send that outlives its dialog would still type into the agent.
+- **Posting returns as soon as the words are on the forge.** Reading everything back — the
+  list, the summary, the threads — is `gh` over the network and is not awaited by the store's
+  `comment` and `lineComment`. Otherwise the reply box kept its text and its button for those
+  seconds, and a second press posted the same comment twice. Found in review; a test with a
+  refresh that never answers covers it.
+- **Not built**: replying to a comment on lines from here, and marking threads resolved. The
+  thread's link opens it on GitHub.
+
+How it was checked: the parsers and the argument lists against fixtures and a stand-in `gh`;
+`code_note::prompt` with tests of its own; the editor's notes and selection against the real
+CodeMirror in jsdom; the reply box, the threads, the counts and every path through the dialog —
+agent, agent and GitHub, GitHub alone, no workspace, a busy agent, a cancel — through Testing
+Library; and the threads beside their lines in headless Chromium with demo data.
+
+The screenshots, `docs/images/pull-requests.png` and `pull-requests-code.png`, were taken after
+the four slices had merged, with `scripts/screenshots.sh`: its stand-in `gh` now answers the
+list, one pull request in full, the open ones and the comments on lines for three demo
+repositories, and the pull request the Code tab shows has real commits on a real branch, with
+the refs the diff is read from already in place, so nothing is fetched. Taking them turned up
+one thing worth knowing: a window with a little transparency puts the terminal behind it into
+every dark area of the shot, faintly; `shoot` makes the window opaque first.
+
+Still not done: the hands-on pass, which has rows for this slice now.
+
 ## Not in this version, on purpose
 
 - Other forges. GitLab's `glab` is the same idea and a second implementation of all of it.
@@ -555,11 +669,11 @@ has rows for the Summary now.
   without `read:org`, and a repository owned by a person rather than an organisation, would
   leave the filter disabled with the reason.
 - Approving or requesting changes from the app; editing a title or description; labels,
-  assignees, milestones; draft ↔ ready.
+  assignees, milestones; draft ↔ ready; replying to a comment on lines, or resolving one.
 - Deleting branches after a merge or a close. Yardsort keeps branches.
 - Searching the forge. Search is over what is loaded, and says when there is more.
 - Sort controls; saved filter sets; a pull request opened in a window of its own.
-- Issues.
+- Issues. They became their own view: [23-tasks](23-tasks.md).
 
 ## Open questions
 

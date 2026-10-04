@@ -24,6 +24,7 @@ const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 vi.mock("@/lib/native", () => ({ native }));
 
 import { useDraftStore } from "@/stores/draft";
+import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
 import { PublishBar } from "./PublishBar";
 
@@ -99,6 +100,8 @@ function show(paths: string[] = ["src/login.rs"]) {
 describe("PublishBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // No workspace is placed in a project unless a case says so.
+    useProjectsStore.setState({ projects: [] });
     opener.openUrl.mockResolvedValue(undefined);
     native.confirm.mockResolvedValue(true);
     // Nothing can write unless a case says so, so the ✦ button stays out of the way.
@@ -378,6 +381,27 @@ describe("PublishBar", () => {
     seed({ pullRequest: pr(), canOpen: false });
     show([]);
     expect(screen.queryByRole("button", { name: /^Open/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /#42 · checks passing/ })).toBeInTheDocument();
+  });
+
+  it("follows the project's poll, so a check finishing shows without touching a file", async () => {
+    // Only enough of the projects store for the publish store to place w1 in p1.
+    useProjectsStore.setState({
+      projects: [{ id: "p1", workspaces: [{ id: "w1" }] }] as never,
+    });
+    seed({ pullRequest: pr({ checks: "running" }), canOpen: false });
+    show([]);
+    expect(screen.getByRole("button", { name: /#42 · checks running/ })).toBeInTheDocument();
+
+    core.workspacePublishState.mockResolvedValue(
+      state({ pullRequest: pr({ checks: "passing" }), canOpen: false }),
+    );
+    // Another project's poll is not this workspace's news.
+    await act(() => usePublishStore.getState().loadProject("p2", true));
+    expect(core.workspacePublishState).not.toHaveBeenCalled();
+
+    await act(() => usePublishStore.getState().loadProject("p1", true));
+    expect(core.workspacePublishState).toHaveBeenCalledWith("w1", false);
     expect(screen.getByRole("button", { name: /#42 · checks passing/ })).toBeInTheDocument();
   });
 

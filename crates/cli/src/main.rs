@@ -81,6 +81,9 @@ enum Command {
     /// A project's memory: approved lessons for its agents, and proposals for the user.
     #[command(subcommand)]
     Memory(commands::memory::Command),
+    /// What is waiting to be done in a project: its GitHub issues.
+    #[command(subcommand)]
+    Task(commands::task::Command),
     /// Named sequences of agent work, written in YAML: the built-in ones and yours.
     #[command(subcommand)]
     Workflow(commands::workflow::Command),
@@ -134,6 +137,9 @@ fn main() {
                 .and_then(|ys| commands::activity::run(&ys, command, &out)),
             Command::Memory(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::memory::run(&ys, command, &out)),
+            Command::Task(command) => {
+                Yardsort::open(cli.data_dir).and_then(|ys| commands::task::run(&ys, command, &out))
+            }
             // `validate` needs no profile, so this one opens it only when it has to.
             Command::Workflow(command) => commands::workflow::run(cli.data_dir, command, &out),
         };

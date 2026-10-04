@@ -13,6 +13,7 @@ use crate::git::Git;
 use crate::harness::{self, HarnessDef};
 use crate::projects::{Projects, Workspace};
 use crate::state::{blocking, AppState};
+use crate::tasks::delegate::{self, TaskRef};
 use crate::terminal::{spawn_in_workspace, HarnessRequest, Launch};
 
 /// A harness definition plus whether its command can be found on this machine.
@@ -113,6 +114,9 @@ pub struct NewWorkspace {
     pub existing_branch: Option<String>,
     pub harness: HarnessRequest,
     pub size: TermSize,
+    /// The task this workspace is being started from, when it is: it names the workspace and
+    /// is recorded against it. See `crate::tasks::delegate`.
+    pub task: Option<TaskRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -353,6 +357,17 @@ pub async fn workspace_create(
             .filter(|def| def.enabled)
             .ok_or_else(|| IpcError::new("unknown_harness", "That harness is not configured."))?;
 
+        // The task comes back from the window, which holds no truth: only one the core read
+        // for this project and handed out is recorded. Refused before anything is made.
+        if let Some(task) = &request.task {
+            if !state.tasks.issued(&request.project_id, task) {
+                return Err(IpcError::new(
+                    "unknown_task",
+                    "That task was not made ready for this project. Press Delegate again.",
+                ));
+            }
+        }
+
         let git = Git::new(&state.env())?;
         let root = state.worktree_root()?;
         let settings = state.settings.get();
@@ -366,10 +381,24 @@ pub async fn workspace_create(
         let prompt = request.harness.prompt.clone().unwrap_or_default();
         let row = match request.existing_branch.as_deref() {
             Some(branch) => workspaces.open_branch(&request.project_id, branch)?,
-            None => {
-                workspaces.create(&request.project_id, request.base_branch.as_deref(), &prompt)?
-            }
+            None => match &request.task {
+                Some(task) => workspaces.create_named(
+                    &request.project_id,
+                    request.base_branch.as_deref(),
+                    &delegate::workspace_name(task),
+                )?,
+                None => workspaces.create(
+                    &request.project_id,
+                    request.base_branch.as_deref(),
+                    &prompt,
+                )?,
+            },
         };
+        // Recorded before the agent starts: a workspace that is kept after its agent failed to
+        // start was still started from that task.
+        if let Some(task) = &request.task {
+            state.store.link_task(&row.id, &task.row())?;
+        }
 
         match spawn_in_workspace(
             state,

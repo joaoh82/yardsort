@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import type { Project, ProjectPullRequests } from "@/lib/ipc";
@@ -18,28 +18,11 @@ import {
 import { PullRequestFilters } from "./PullRequestFilters";
 import { PullRequestList } from "./PullRequestList";
 import { PullRequestPane } from "./PullRequestPane";
+import { separator, useNarrowerThan } from "./layout";
 import { moreOpenThanListed, openIn, rowsOf } from "./rows";
 
 /** Narrower than this, the list and the details stack instead of sitting side by side. */
 const STACK_BELOW_PX = 720;
-
-const separator =
-  "bg-line outline-none transition-colors hover:bg-accent focus-visible:bg-accent data-[separator=active]:bg-accent";
-
-/** Whether `ref`'s element is narrower than `px`. False until it has been measured. */
-function useNarrowerThan(ref: RefObject<HTMLElement | null>, px: number): boolean {
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setNarrow(entry.contentRect.width < px);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [ref, px]);
-  return narrow;
-}
 
 /**
  * Every project's pull requests, in the center panel: a list to filter, and one of them in
@@ -409,7 +392,13 @@ function Notices({
   return lines.length > 0 ? <>{lines}</> : null;
 }
 
-function Notice({ children, alert = false }: { children: React.ReactNode; alert?: boolean }) {
+export function Notice({
+  children,
+  alert = false,
+}: {
+  children: React.ReactNode;
+  alert?: boolean;
+}) {
   return (
     <p
       role={alert ? "alert" : "note"}
@@ -420,7 +409,7 @@ function Notice({ children, alert = false }: { children: React.ReactNode; alert?
   );
 }
 
-function Link({ url, children }: { url: string; children: React.ReactNode }) {
+export function Link({ url, children }: { url: string; children: React.ReactNode }) {
   return (
     <button
       type="button"

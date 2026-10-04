@@ -159,9 +159,12 @@ the check runs against the Homebrew users have rather than the one in the runner
 Gatekeeper's verdict (`spctl`, which must say _Notarized Developer ID_) and the installed
 version. Only then does it push to the tap.
 
-The cask declares no minimum macOS. The app's own minimum is older than any macOS Homebrew still
-runs on, and Homebrew refuses a `depends_on macos:` that names a release it has dropped — which
-is how the cask stopped installing in September 2026.
+The cask says `depends_on :macos` and names no minimum version. The app's own minimum is older
+than any macOS Homebrew still runs on, and Homebrew refuses a `depends_on macos:` that names a
+release it has dropped — which is how the cask stopped installing in September 2026 (#90). Since
+October 2026 `brew style` also rejects a named minimum at or below Homebrew's oldest release as
+redundant, and requires the bare stanza on every cask that installs an app; leaving it out broke
+the 0.18.0 tap update.
 
 It needs `HOMEBREW_TAP_DEPLOY_KEY`: the private half of an SSH **deploy key** registered, with
 write access, on the tap repository only — it can touch nothing else.

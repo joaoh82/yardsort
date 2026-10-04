@@ -10,9 +10,7 @@ use tauri::AppHandle;
 use super::{pull_requests_of, state, ProjectPullRequests, PublishState};
 use crate::changes::commands::workspace;
 use crate::error::{IpcError, IpcResult};
-use crate::forge::{
-    parse_remote, ForgeError, Gh, MergeMethod, PullRequest, PullRequestState, Repo,
-};
+use crate::forge::{ForgeError, Gh, MergeMethod, PullRequest, PullRequestState, Repo};
 use crate::git::Git;
 use crate::state::{blocking, AppState};
 use crate::store::WorkspaceRow;
@@ -50,11 +48,8 @@ fn look(state: &AppState, project_id: &str, refresh: bool, full: bool) -> Projec
 }
 
 /// The project's remote as a repository on a forge: the one a push would go to.
-fn repo_at(state: &AppState, root: &Path) -> Option<Repo> {
-    let git = Git::new(&state.env()).ok()?;
-    let remote = git.push_remote(root).ok()??;
-    let url = git.remote_url(root, &remote).ok()??;
-    parse_remote(&url)
+pub(super) fn repo_at(state: &AppState, root: &Path) -> Option<Repo> {
+    crate::forge::repo_at(&Git::new(&state.env()).ok()?, root)
 }
 
 fn publish_state(
@@ -98,11 +93,39 @@ pub async fn project_pull_requests(
 ) -> IpcResult<ProjectPullRequests> {
     blocking(app, move |state| {
         let mut found = look(state, &project_id, refresh, full);
-        let owned = state
+        // The whole list is in hand: the moment to let go of what was fetched for pull requests
+        // that are no longer on it.
+        if full {
+            if let (Ok(git), Ok(root)) = (Git::new(&state.env()), project_root(state, &project_id))
+            {
+                super::pull_requests::prune_refs(&git, &root, &found);
+            }
+        }
+        let mut owned = state
             .forge
             .owned(&project_id, &found.pull_requests, refresh, || {
                 by_workspace(state, &project_id, &found.pull_requests)
             });
+        // A full look has just read every open one. Otherwise the ones workspaces show that
+        // only the open tier has are asked about, or they would stay as they were at startup.
+        if refresh && !full {
+            let shown: Vec<u32> = owned.values().flatten().copied().collect();
+            let followed = match (project_root(state, &project_id), Gh::find(&state.env())) {
+                (Ok(root), Some(gh)) => state.forge.follow_open(&project_id, &shown, |number| {
+                    gh.pull_request_within(&root, number, super::PAGE_LIMIT)
+                }),
+                _ => false,
+            };
+            if followed {
+                // The recent tier is fresh in the cache, so this asks nobody.
+                found = look(state, &project_id, false, false);
+                owned = state
+                    .forge
+                    .owned(&project_id, &found.pull_requests, false, || {
+                        by_workspace(state, &project_id, &found.pull_requests)
+                    });
+            }
+        }
         found.workspaces = owned;
         Ok(found)
     })

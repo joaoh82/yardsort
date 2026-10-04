@@ -141,7 +141,7 @@ fn print(rows: &[MemoryRow], out: &Output, empty: &str) -> Result<(), Failure> {
 
 /// The project a command is about, and where it came from: `--project` when given; otherwise
 /// the launch environment of the agent running it, or the folder it runs in.
-fn locate(ys: &Yardsort, project: Option<&str>) -> Result<(String, Source), Failure> {
+pub(super) fn locate(ys: &Yardsort, project: Option<&str>) -> Result<(String, Source), Failure> {
     let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
     let run = env(yardsort_core::activity::RUN_ENV);
     let workspace = env(yardsort_core::activity::WORKSPACE_ENV);

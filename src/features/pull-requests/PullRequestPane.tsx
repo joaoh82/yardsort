@@ -4,7 +4,8 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { selectWorkspace } from "@/features/keyboard/commands";
 import type { MergeMethod } from "@/lib/ipc";
-import { usePullRequestsStore, type Target } from "@/stores/pullRequests";
+import { usePullRequestsStore, type DetailTab, type Target } from "@/stores/pullRequests";
+import { Code } from "./Code";
 import { Summary } from "./Summary";
 import { mergeBlocked } from "./appearance";
 import { age, type Row } from "./rows";
@@ -20,9 +21,8 @@ const button =
 const quiet = "size-6 shrink-0 rounded text-ink-muted hover:bg-raised hover:text-ink";
 
 /**
- * One pull request, beside the list: who and when, what can be done to it, and its Summary —
- * description, checks, reviewers, conversation. The Code of the design arrives in a later slice,
- * and the two become tabs then.
+ * One pull request, beside the list: who and when, what can be done to it, and two tabs —
+ * **Summary** (description, checks, reviewers, conversation) and **Code** (its diff).
  */
 export function PullRequestPane({
   row,
@@ -40,6 +40,12 @@ export function PullRequestPane({
   const { pr, project } = row;
   const error = usePullRequestsStore((s) => s.error);
   const notice = usePullRequestsStore((s) => s.notice);
+  const tab = usePullRequestsStore((s) => s.tab);
+  const choose = usePullRequestsStore.getState().showTab;
+  const tabClass = (which: DetailTab) =>
+    `rounded-full px-3 py-1 whitespace-nowrap ${
+      tab === which ? "bg-raised text-ink" : "text-ink-muted hover:text-ink"
+    }`;
 
   return (
     <section
@@ -93,9 +99,40 @@ export function PullRequestPane({
           </div>
         )}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 select-text">
-        <Summary row={row} now={now} />
+      <div
+        role="tablist"
+        aria-label="Pull request"
+        className="flex shrink-0 gap-1 border-b border-line px-3 py-1.5"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "summary"}
+          onClick={() => choose("summary")}
+          className={tabClass("summary")}
+        >
+          Summary
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "code"}
+          onClick={() => choose("code")}
+          className={tabClass("code")}
+        >
+          Code
+        </button>
       </div>
+      {tab === "summary" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 select-text">
+          <Summary row={row} now={now} />
+        </div>
+      ) : (
+        // Keyed by the pull request: the file in view belongs to it, not to the next one.
+        <div className="min-h-0 flex-1">
+          <Code key={row.key} row={row} now={now} />
+        </div>
+      )}
     </section>
   );
 }

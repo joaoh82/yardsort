@@ -111,6 +111,8 @@ describe("Composer", () => {
       selectedWorkspaceId: "w-app",
       composingProjectId: "p-app",
       composingBranch: null,
+      composingPrompt: null,
+      composingTask: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
@@ -129,6 +131,7 @@ describe("Composer", () => {
       existingBranch: null,
       harness: { id: "claude", model: null, effort: null, prompt: "Fix the login bug" },
       size: { cols: 100, rows: 30 },
+      task: null,
     });
     const projects = useProjectsStore.getState();
     expect(projects.projects[0]!.workspaces.map((w) => w.name)).toEqual(["local", "fix-login"]);
@@ -212,6 +215,67 @@ describe("Composer", () => {
     // Another branch chosen by hand is not the pull request's, and is not described as one.
     await user.selectOptions(screen.getByRole("combobox", { name: "Branch" }), "open:develop");
     expect(screen.getByText(/Enter to start/)).not.toHaveTextContent("pull request");
+  });
+
+  it("starts from a task with its message filled in, and tells the core which task it was", async () => {
+    const created = worktree("app", "91-network-drive");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const task = {
+      source: "github" as const,
+      repo: "github.com/demo/app",
+      key: "#91",
+      url: "https://github.com/demo/app/issues/91",
+      title: "Worktrees on a network drive",
+    };
+    useProjectsStore.setState({
+      composingPrompt: "Work on this GitHub issue: #91",
+      composingTask: task,
+    });
+    const user = await renderComposer();
+    const box = screen.getByRole("textbox", { name: /work on/ });
+    expect(box).toHaveValue("Work on this GitHub issue: #91");
+    // Which task, and that the message quotes a stranger: said before anything starts.
+    expect(screen.getByText(/For task/)).toHaveTextContent(
+      "For task #91 Worktrees on a network drive. The message quotes the issue",
+    );
+    expect(core.workspaceCreate, "nothing starts by itself").not.toHaveBeenCalled();
+
+    await user.type(box, " Start with the tests.");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseBranch: "main",
+        existingBranch: null,
+        harness: expect.objectContaining({
+          prompt: "Work on this GitHub issue: #91 Start with the tests.",
+        }),
+        task,
+      }),
+    );
+  });
+
+  it("says nothing about a task when there is none", async () => {
+    await renderComposer();
+    expect(screen.queryByText(/For task/)).not.toBeInTheDocument();
+  });
+
+  it("starts with a note about the pull request as its first message, when one came with the branch", async () => {
+    const created = worktree("app", "kept-earlier");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    useProjectsStore.setState({
+      composingBranch: { branch: "ys/kept-earlier", behind: 0, fork: false },
+      composingPrompt: "Pull request #8: fold these lines.",
+    });
+    const user = await renderComposer();
+    const box = screen.getByRole("textbox", { name: /work on/ });
+    expect(box).toHaveValue("Pull request #8: fold these lines.");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingBranch: "ys/kept-earlier",
+        harness: expect.objectContaining({ prompt: "Pull request #8: fold these lines." }),
+      }),
+    );
   });
 
   it("starts from the default branch when the pull request's branch was checked out meanwhile", async () => {
@@ -402,6 +466,7 @@ describe("Composer with Assist", () => {
       selectedWorkspaceId: "w-app",
       composingProjectId: "p-app",
       composingBranch: null,
+      composingPrompt: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });

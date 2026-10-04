@@ -707,7 +707,7 @@ fixture; the docs list every action and variable that exists and none that does 
 ## M23 — Pull requests
 
 Proposed in [22-pull-requests](22-pull-requests.md), after a ten-question design pass on
-2026-10-02. Slices 1 and 2 are built.
+2026-10-02. All four slices are built; the screenshot and the hands-on pass remain.
 
 - A **Pull requests** row at the top of the sidebar, above Workflows, opens a view in the center
   panel: every pull request of every project's repository, with state, project, author and
@@ -738,15 +738,67 @@ Proposed in [22-pull-requests](22-pull-requests.md), after a ten-question design
       browser; every check with its workflow and a link to its run; a summary that is read again
       when the list says the pull request changed. Recorded in
       [22 § slice 2](22-pull-requests.md#slice-2-what-shipped).
-- [ ] Slice 3: Code.
-- [ ] Slice 4: writing — a reply box, comments on lines, and selected lines of a diff sent to a
-      workspace's agent.
+- [x] Slice 3: Code. A pull request's commits fetched into `refs/yardsort/pull/<n>/`, never
+      checked out; its diff measured from the base commit the forge recorded, so one merged long
+      ago still shows; the changes panel's viewer shared rather than copied; refs dropped when a
+      pull request leaves a list that is whole. Recorded in
+      [22 § slice 3](22-pull-requests.md#slice-3-what-shipped).
+- [x] Slice 4: writing. A reply box; every comment on lines beside the lines it is about, in
+      the viewer; selected lines sent with a note to the pull request's agent by the conflict
+      helper's rules, or as a new workspace's first message, and optionally to GitHub as a
+      comment on those lines. Recorded in
+      [22 § slice 4](22-pull-requests.md#slice-4-what-shipped).
 
 _Exit:_ on all three platforms, a repository with more open pull requests than one page lists
 them, filters them and says when there are more than it shows; a pull request from a fork can be
 read, diffed and started as a workspace; a _no_ to Merge, Close and Reopen sends nothing; and
 without `gh`, logged out, or on another forge, the view says which and nothing else in the app
 changes.
+
+## M24 — Tasks
+
+Proposed in [23-tasks](23-tasks.md), after a four-question design pass on 2026-10-03. All three
+slices are built.
+
+- A **Tasks** row in the sidebar, under Pull requests, opens a view in the center panel: every
+  project's GitHub issues, with state, project, label, assignee, author and _needs an answer_
+  filters and a search. GitHub through `gh` only; other sources later, behind one trait in the
+  core.
+- **Delegate** opens the composer with the issue as the first message, framed as text other
+  people wrote; the workspace started from it is recorded against the task (migration 0014) and
+  never guessed.
+- Managing from the view — new task, reply, close, reopen, labels, assignees — and all of it in
+  `ys task`, with `--json`, so an agent can list what is open, say which need an answer, and
+  file an issue. `ys` writes straight to GitHub; `close` and `reopen` want `--yes`.
+- Measured before any code: issues are cheap beside pull requests — 50 rows in under 2 s on a
+  repository with 11,238 open. The numbers are in
+  [23 § what was measured](23-tasks.md#what-was-measured).
+- Three slices, each its own pull request:
+- [x] Slice 1: read — the source, the list, the filters, the detail; `ys task list` and `show`.
+      The sidebar's number is the tasks that need an answer, which settled
+      [open question 28](06-open-questions.md). Found: bots comment on most issues of a busy
+      repository and some carry a contributor's association, so what is a bot is the author's
+      type, and the last five comments are asked for rather than the last one; and
+      `gh issue view` cannot say whether an answer is owed, so one issue in full is a query of
+      our own too. Not done: the screenshot and the README, which wait for the slice that
+      delegates. Recorded in [23 § slice 1](23-tasks.md#slice-1-what-shipped).
+- [x] Slice 2: delegate — the message, the composer, the link, `ys task start`. Migration 0014
+      records which task a workspace was started from. The message puts everything a stranger
+      wrote between two lines carrying a mark made for that message, and leaves bots out. Found:
+      a test that makes workspaces must say where worktrees go, or it makes them in the real
+      place. Recorded in [23 § slice 2](23-tasks.md#slice-2-what-shipped).
+- [x] Slice 3: manage — the writes, in the view and in `ys task`. New task, reply, close and
+      reopen (each confirmed, a _no_ sending nothing), labels, assignees; `ys task create`,
+      `comment`, `close`, `reopen`, `edit`, the last two wanting `--yes`. Measured first, as
+      asked: a page of assignable people is 2 s on a repository with 178 of them. Not done: the
+      screenshot, and a write to a real repository — every write is tested against a stand-in
+      `gh`. Recorded in [23 § slice 3](23-tasks.md#slice-3-what-shipped).
+
+_Exit:_ on all three platforms, a project's issues are listed, filtered and read; one is
+delegated through the composer and its workspace is found again from the task; a _no_ to Close
+and Reopen sends nothing; an agent asked which issues need an answer answers from
+`ys task list --needs-answer --json`, and one asked to file an issue does; and without `gh`,
+logged out, or on another forge, the view and `ys` say which and nothing else changes.
 
 ## Later (unordered)
 
@@ -764,8 +816,9 @@ changes.
   base in and pushes (see [commits & pull requests](../guide/commits-and-pull-requests.md#resolve-merge-conflicts)).
   Found while building it: a workspace can own several pull requests, and the branch name alone
   cannot say which — the worktree's own `HEAD` reflog can.
-- Diff comments sent back to the agent as a prompt. Planned for a pull request's diff as slice 4
-  of [M23](#m23--pull-requests).
+- ~~Diff comments sent back to the agent as a prompt.~~ **Done** for a pull request's diff, as
+  slice 4 of [M23](#m23--pull-requests): selected lines and a note go to the agent in the pull
+  request's workspace by the conflict helper's rules.
 - Multi-repo projects; remote/SSH workspaces.
 - ~~**Usage / cost view per workspace.**~~ **Done**, as the Usage view: token usage from the
   agents' own logs, and machine resources per terminal. What was found: the figures were already

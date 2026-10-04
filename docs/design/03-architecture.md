@@ -293,6 +293,35 @@ invalidation keeps its rows and marks them out of date rather than dropping them
 nothing would read them again until the view opened. `CheckCounts` is the one place a check's
 state is classified, and `Checks` is worked out from it, so a badge and a row cannot disagree.
 
+**Tasks** are a project's GitHub issues, and the same idea one step further out: the reading and
+the rules are in the core (`yardsort_core::tasks`) so that the app and `ys task` share them, and
+what the app adds is a cache. `TaskSource` is the seam a second source goes behind; `GitHub` is
+the one implementation, two queries of our own through `gh api graphql` — a page of issues with
+the last five comments' authors, and one issue with its conversation. Whether a task **needs an
+answer** is decided there, once, from who spoke last (`tasks::needs_answer`), and `Filter` is
+what `ys task list` narrows by. `publish::tasks::TaskCache` keeps each project's open tasks and,
+separately, its closed ones for 30 s, each with a request counter so an older answer never
+replaces a newer one; a reading that got nothing keeps what was known and says why. Tasks are
+read once per project at start and then only while the Tasks view is showing
+(`project_tasks(…, closed)`). `ys` has no cache: it asks `gh` when it is run.
+
+**Delegating a task** is `tasks::delegate`: the first message, written in the core so the
+composer and `ys task start` send the same one, and `TaskRef`, what a workspace keeps of the
+task it was started from. The message quotes the issue between two lines carrying a mark made for that
+one message, which nobody who wrote the issue could have known — issue text is a stranger's,
+and it is about to be read by an agent with a shell. The window passes the `TaskRef` back when
+it asks for the workspace, and the core records it only if it is one it handed out for that
+project (`TaskCache::issued`). The link is a row in `workspace_tasks` (migration 0014), written
+only when a workspace is created from a task and gone with the workspace; `Workspace.tasks`
+carries it to the window, which matches tasks to workspaces by URL. Delegating writes nothing to the forge.
+
+**Managing tasks** does: `TaskSource` has `create`, `comment`, `close`, `reopen` and `edit`,
+each one `gh issue …` with any words on standard input, and the app's commands run them through
+`publish::tasks::writing`, which marks the project's cache out of date whatever came of it. The
+core confirms nothing; the window asks before closing and reopening, and `ys` wants `--yes` for
+the same two. A link is looked up before anything is written through it, so another
+repository's issue is never the one changed. See [23-tasks](23-tasks.md).
+
 **Acting on any pull request of a project** is `publish::pull_requests`: merge, close, reopen.
 Each asks the forge about that one pull request again first (`gh pr view`), and refuses if it
 is no longer what the confirmation showed. Unlike the toolbar's commands these do not require
@@ -305,6 +334,25 @@ project and number. It is what the view's Summary shows, and it is read when a r
 again when the list says the row changed. Descriptions and comments are other people's text:
 the window renders them as Markdown with raw HTML dropped, no image loaded, and links handed to
 the opener, and a comment the forge has hidden loses its words in the core.
+
+**A pull request's diff** needs its commits and no checkout. `fetch_for_diff` fetches
+`refs/pull/<n>/head` into `refs/yardsort/pull/<n>/head`, and with it the base commit the forge
+recorded, by id; it is pinned under `…/base`. Those refs are Yardsort's own namespace: no branch
+or remote-tracking ref moves, and they are deleted when a pull request leaves a list that is
+whole (`prune_refs`). The diff is `changes::Between` over the head and its merge base with that
+base — the same `FileChange` and `FileDiff` a workspace's changes are, which is why the same
+viewer shows both. Measuring from the recorded base rather than the base branch's tip is what
+keeps a merged pull request's diff from coming out empty.
+
+**Writing to the forge** is three `gh` calls with the user's words on standard input, never in
+an argument: `gh pr comment --body-file -`, and `gh api -X POST …/pulls/<n>/comments` with
+`-F body=@-` for a comment on lines. Comments on lines are read with `gh api --paginate --slurp`,
+which `gh pr view` does not return. **A note on lines for an agent** reuses the conflict
+helper's two halves — `plan` chooses the conversation, `deliver` reaches it, never a busy one —
+with words from `code_note::prompt`; with no workspace, `prepare_branch` and the composer, the
+note as its first message. The window shows each comment thread under its lines as a block
+widget in CodeMirror, mapping a comment on the old text to the new text through the merge
+view's chunks.
 
 **A pull request's branch, for a workspace** (`prepare_branch`): a branch already here is never
 moved; one in the project's remote is fetched into its remote-tracking ref and a local branch

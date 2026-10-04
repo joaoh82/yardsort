@@ -9,6 +9,61 @@ has the downloads and the full commit lists.
   note that only agents that record their limits appear. Today that is Codex alone, and the card
   no longer reads as a header for the whole tab.
 
+## 0.19.0
+
+- **A pull request's checks going green, or its merge, now shows without you doing anything.**
+  The `#42 · checks running` link in the Changes panel only caught up when the workspace's files
+  changed or the window came back into focus; it now follows the once-a-minute poll like the
+  sidebar does. And a workspace whose open pull request has fifty newer ones in front of it no
+  longer shows it as it was when Yardsort started while the Pull requests view is closed: that
+  pull request is asked about by itself each minute.
+- **Tasks: manage them from Yardsort.** **New task** opens an issue on a project's repository,
+  with a title, a description and labels. A box under a task's conversation posts a comment.
+  **Close ▾** closes one as completed or as not planned, and **Reopen** reopens one — each
+  asked about first, naming who opened it. **Labels ▾** and **Assignees ▾** tick and untick.
+  Everything goes through `gh`, as you; a refusal from GitHub is shown in its own words.
+- **`ys task create`, `comment`, `close`, `reopen` and `edit`.** An agent in a workspace can
+  now file an issue, answer one, label and assign it. They write to GitHub at once; `close` and
+  `reopen` do nothing without `--yes`. See [the `ys` guide](docs/guide/cli.md#ys-task).
+- **Tasks: hand one to an agent.** **Delegate** on an open task opens the composer with the
+  first message written from the issue — title, description, the latest comments — between two
+  lines that mark it as text other people wrote, with what the agent should do if that text
+  asks for more than the work. Nothing starts until you press Start. The workspace is named
+  after the task and remembers it: the task names its workspaces and goes to them, **Delegate
+  again** starts another attempt, and the workspace's row shows the task's key. Nothing is
+  written to GitHub. `ys task start <task>` does the same from a terminal, and
+  `ys workspace list --json` says which task each workspace came from. See
+  [Tasks](docs/guide/tasks.md#handing-a-task-to-an-agent).
+- **Tasks: every project's GitHub issues, in one place.** **Tasks**, under Pull requests in the
+  sidebar or in the command palette, lists the open issues of every project on GitHub — up to
+  the 200 most recently updated — with who opened each, its labels, assignees, comments and any
+  pull request that will close it. The number on the sidebar row is how many **need an
+  answer**: open, and the last person to speak was not an owner, member or collaborator; bots
+  are nobody's word. Filter by state, project, label, assignee, author and _Needs an answer_,
+  and search; the filters are remembered. Open one for its description and conversation, as
+  Markdown that loads no images. Reading only, for now: handing a task to an agent and managing
+  tasks from the app come next. See [the guide](docs/guide/tasks.md).
+- **`ys task list` and `ys task show`.** The same tasks from a terminal, with `--needs-answer`,
+  `--state`, `--label`, `--assignee`, `--author`, `--search` and `--json`, so an agent in a
+  workspace can be asked which issues are open and which are waiting. See
+  [the `ys` guide](docs/guide/cli.md#ys-task).
+- **Pull requests: comments, and a note on lines for an agent.** A box under a pull request's
+  conversation posts a comment on it. Under **Code**, each comment made on lines of the diff sits
+  beside those lines, with its replies, and each file says how many threads it has. Select lines
+  and press **Note on lines…** to send what you want done about them to the agent in the pull
+  request's workspace — typed in if it is running and quiet, resumed with it if it has ended,
+  never into a busy one — or, with no workspace yet, to start one with the note as the agent's
+  first message. The same note can also go on GitHub as a comment on those lines, or only there.
+  See [Pull requests](docs/guide/pull-requests.md#a-note-on-lines-for-an-agent).
+- **Pull requests: the Code tab.** A pull request's details now have two tabs, **Summary** and
+  **Code**. Code lists the files it changes with their kinds and line counts, and opens each in
+  the changes panel's own viewer, inline or side by side, highlighted, with unchanged stretches
+  folded. Nothing is checked out for it: the pull request's commits are fetched into refs of
+  Yardsort's own, no branch or remote-tracking branch moves, and what was fetched is let go when
+  the pull request leaves the list. The diff is measured from where the pull request left its
+  base, so one merged long ago still shows its files. See
+  [Pull requests](docs/guide/pull-requests.md#code).
+
 ## 0.18.0
 
 - **Install ys no longer, now and then, says the copy it just made is "not Yardsort's".** Right
@@ -21,8 +76,11 @@ has the downloads and the full commit lists.
   carries. See [the `ys` guide](docs/guide/cli.md#without-the-app).
 
 - **`brew install --cask joaoh82/yardsort/yardsort` works again.** Current Homebrew refused the
-  cask over a minimum-macOS line it no longer accepts. The line is gone, and releases now test the
-  cask against an up-to-date Homebrew.
+  cask over a minimum-macOS line it no longer accepts (#90). The cask now says `depends_on :macos`
+  with no minimum version — the one form today's `brew style` takes, which also insists on the
+  stanza for every app cask and on its exact placement — and releases test the cask against an
+  up-to-date Homebrew before publishing it, so a rule change like this is caught there rather
+  than by users.
 
 - **Usage is easier to find in the docs and website.** The README and homepage now explain both
   tabs, supported token sources and API cost estimates. The quick start introduces Usage, and

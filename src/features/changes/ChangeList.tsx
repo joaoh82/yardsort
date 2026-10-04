@@ -6,15 +6,7 @@ import { AssistBadges, AssistNote } from "./AssistBadges";
 import { ProvenanceNote, ReportedBadges } from "./ReportedBadges";
 import { useReports } from "./reported";
 import { useFileContextMenu } from "./useFileContextMenu";
-
-const KIND: Record<FileChange["kind"], { letter: string; label: string; colour: string }> = {
-  added: { letter: "A", label: "Added", colour: "text-green-400" },
-  modified: { letter: "M", label: "Modified", colour: "text-accent" },
-  deleted: { letter: "D", label: "Deleted", colour: "text-red-400" },
-  renamed: { letter: "R", label: "Renamed", colour: "text-blue-400" },
-  untracked: { letter: "U", label: "Untracked", colour: "text-green-400" },
-  conflicted: { letter: "!", label: "Conflicted", colour: "text-red-400" },
-};
+import { CHANGE_KIND } from "./viewing";
 
 export function ChangeList({ changes }: { changes: ChangeSet }) {
   if (changes.uncommitted.length === 0 && changes.committed.length === 0) {
@@ -64,7 +56,7 @@ function Group({ title, scope, files }: { title: string; scope: Scope; files: Fi
       {context.menu}
       <ul>
         {files.map((change) => {
-          const kind = KIND[change.kind];
+          const kind = CHANGE_KIND[change.kind];
           const selected =
             viewing?.kind === "diff" &&
             viewing.scope === scope &&
