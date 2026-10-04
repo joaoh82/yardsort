@@ -111,9 +111,9 @@ pub async fn project_pull_requests(
         if refresh && !full {
             let shown: Vec<u32> = owned.values().flatten().copied().collect();
             let followed = match (project_root(state, &project_id), Gh::find(&state.env())) {
-                (Ok(root), Some(gh)) => state
-                    .forge
-                    .follow_open(&project_id, &shown, |number| gh.pull_request(&root, number)),
+                (Ok(root), Some(gh)) => state.forge.follow_open(&project_id, &shown, |number| {
+                    gh.pull_request_within(&root, number, super::PAGE_LIMIT)
+                }),
                 _ => false,
             };
             if followed {

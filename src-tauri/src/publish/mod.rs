@@ -375,8 +375,8 @@ impl Forge {
     /// closed a workspace whose pull request has fifty newer ones in front of it would show
     /// that pull request as it was when Yardsort started — checks running, open — however long
     /// ago it went green or was merged. `numbers` are the ones workspaces show; at most
-    /// [`FOLLOW_LIMIT`] are asked about. A merged or closed one stays, with its new state, until
-    /// the next full read drops it.
+    /// [`FOLLOW_LIMIT`] are asked about, newest first. A merged or closed one stays, with its new
+    /// state, until the next full read drops it, and is not asked about again meanwhile.
     pub fn follow_open(
         &self,
         project_id: &str,
@@ -396,14 +396,17 @@ impl Forge {
                 .iter()
                 .copied()
                 .filter(|number| !recent.iter().any(|pr| pr.number == *number))
+                // Merged and closed are final, or nearly: asking again would only crowd out the
+                // open ones this is for.
                 .filter(|number| {
                     tier.found
                         .pull_requests
                         .iter()
-                        .any(|pr| pr.number == *number)
+                        .any(|pr| pr.number == *number && pr.state == PullRequestState::Open)
                 })
                 .collect();
-            wanted.sort_unstable();
+            // Newest first, so the cap drops the oldest.
+            wanted.sort_unstable_by(|a, b| b.cmp(a));
             wanted.dedup();
             wanted.truncate(FOLLOW_LIMIT);
             wanted
@@ -1390,6 +1393,10 @@ mod tests {
         assert_eq!(state(2), Some(PullRequestState::Open), "not asked about");
         assert_eq!(state(10), Some(PullRequestState::Open));
         assert_eq!(answer.open_total, Some(2), "one fewer open than was read");
+        assert!(
+            !forge.follow_open("p1", &[3], fetch),
+            "merged is final: not asked about again"
+        );
 
         asked.borrow_mut().clear();
         assert!(!forge.follow_open("p1", &[10], fetch), "nothing to ask");

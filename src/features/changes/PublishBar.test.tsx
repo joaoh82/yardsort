@@ -100,6 +100,8 @@ function show(paths: string[] = ["src/login.rs"]) {
 describe("PublishBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // No workspace is placed in a project unless a case says so.
+    useProjectsStore.setState({ projects: [] });
     opener.openUrl.mockResolvedValue(undefined);
     native.confirm.mockResolvedValue(true);
     // Nothing can write unless a case says so, so the ✦ button stays out of the way.
