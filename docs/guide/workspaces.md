@@ -25,7 +25,7 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 Under the pickers, **Import worktrees…** opens the same dialog as the project menu, for worktrees
 that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere).
 
-When the project [shares its memory](memory.md#giving-agents-the-memory), a line under the pickers says its approved entries go after your message — **Show** reads them, and unticking leaves them out of this one launch. Your message stays the task on record.
+When the project [shares its memory](memory.md#giving-agents-the-memory), a line under the pickers says its approved entries go after your message — or, while nothing is approved yet, that the agent will be asked to propose some — **Show** reads what is added, and unticking leaves it out of this one launch. Your message stays the task on record.
 
 Under the pickers, the composer also shows your history with the agent you picked, across your projects — _kept 3 of 5_, or _too few to say yet_ — from the [outcomes](outcomes.md) you have recorded. It is shown, never used to choose for you.
 

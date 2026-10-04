@@ -40,11 +40,14 @@ fn look(state: &AppState, project_id: &str, refresh: bool, full: bool) -> Projec
         return ProjectPullRequests::default();
     };
     let gh = Gh::find(&state.env());
-    state
+    let found = state
         .forge
         .pull_requests(gh.as_ref(), &root, project_id, refresh, full, &|| {
             repo_at(state, &root)
-        })
+        });
+    // Every look at the forge is also a look at what became of the project's attempts.
+    crate::outcomes::observe(state, project_id, &found.pull_requests);
+    found
 }
 
 /// The project's remote as a repository on a forge: the one a push would go to.

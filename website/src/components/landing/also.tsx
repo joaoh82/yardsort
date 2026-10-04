@@ -19,7 +19,7 @@ const POINTS = [
   },
   {
     title: "Project memory, approved by you",
-    body: "Short lessons about a project for its agents — the tests need TZ=UTC. You write them; agents propose them with ys memory propose, and those wait for you. Only what you approve reaches an agent, after its first message and in handoffs.",
+    body: "Short lessons about a project for its agents — the tests need TZ=UTC. You write them; agents propose them with ys memory propose, and those wait for you. Only what you approve reaches an agent, after its first message and in handoffs — unless you turn that off for the project.",
   },
   {
     title: "Outcomes, in your words",

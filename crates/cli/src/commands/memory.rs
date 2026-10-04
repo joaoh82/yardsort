@@ -1,6 +1,7 @@
 //! `ys memory …` — a project's memory, as an agent sees it.
 //!
-//! `list` and `search` read the approved entries, when the project shares them with its agents;
+//! `list` and `search` read the approved entries, unless the user has stopped the project sharing
+//! them with its agents;
 //! `propose` adds a candidate for the user to review in the app, shared or not. There is no approve, edit, reject or revoke here, on purpose: an agent in
 //! a Yardsort terminal can run anything `ys` offers, and no agent may approve what it proposed.
 //! The user decides in the app's Memory view. See `yardsort_core::memory`.
@@ -117,8 +118,8 @@ fn shared(ys: &Yardsort, project: &str) -> Result<(), Failure> {
         return Ok(());
     }
     Err(Failure::new(
-        "This project does not give its agents its memory. The user turns that on in \
-         Yardsort: Memory… in the project's menu.",
+        "This project does not give its agents its memory: the user turned that off in \
+         Yardsort (Memory… in the project's menu).",
     ))
 }
 

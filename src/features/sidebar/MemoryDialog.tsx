@@ -123,7 +123,7 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
           <label className="mt-3 flex items-start gap-2">
             <input
               type="checkbox"
-              checked={memory?.shared ?? false}
+              checked={memory?.shared ?? true}
               disabled={busy || !memory}
               onChange={(event) =>
                 void run(() => ipc.memoryShare(project.id, event.target.checked))
@@ -136,7 +136,7 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
                 Approved entries go after the first message of each agent you start here, and into
                 handoffs, cited, as notes rather than instructions. Agents can also run{" "}
                 <code className="font-mono text-[11px]">ys memory search</code>. What the workspace
-                was asked stays your own words.
+                was asked stays your own words. On unless you turn it off.
               </span>
             </span>
           </label>

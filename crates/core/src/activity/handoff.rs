@@ -1195,6 +1195,7 @@ mod tests {
         let ws = workspace(&store);
         let project = store.workspace(&ws).unwrap().unwrap().project_id;
         crate::memory::write(&store, &project, "The tests need TZ=UTC.").unwrap();
+        store.set_memory_shared(&project, false).unwrap();
         let without = render(&from_store(&store, &ws, &[]).unwrap());
         assert!(!without.contains("Project memory"));
         store.set_memory_shared(&project, true).unwrap();

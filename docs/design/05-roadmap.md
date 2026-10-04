@@ -637,7 +637,9 @@ four-question design pass.
 - Not built: model extraction of candidates, an MCP server, directory and global scopes.
 
 _Exit:_ unapproved candidates never reach an agent (launch, handoff and `ys` tests); revocation
-and edits work with history; injection is opt-in per project and per launch; the gates green.
+and edits work with history; injection is opt-in per project and per launch (since 4 October
+2026 on until turned off, per project: [19 §2](19-agent-events-stage-5-memory.md#2--decisions));
+the gates green.
 On Linux, writing an entry, an agent's proposal through `ys` and approving it were tried by hand.
 Owed: the rest of [08 §20](08-manual-checklist.md#20--project-memory) — sharing into a launch,
 the opt-out, revoke and restore, the handoff section, Jev's tags — and macOS and Windows.

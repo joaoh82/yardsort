@@ -1626,7 +1626,8 @@ mod tests {
                 effort: None,
                 prompt: Some("exit 0".into()),
                 handoff: false,
-                skip_memory: false,
+                // The command line is what is looked at here, not what goes after the message.
+                skip_memory: true,
             })
         };
         let on = ActivitySettings {

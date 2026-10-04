@@ -775,6 +775,11 @@ fn memory_is_proposed_by_agents_approved_only_in_the_app_and_read_by_anyone() {
     assert!(again.contains("Already there"), "{again}");
 
     // Nothing is read while the project does not share its memory with its agents.
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .set_memory_shared(&workspace.project_id, false)
+        .unwrap();
+    drop(store);
     let (code, _, refused) = as_agent(&["memory", "list"]);
     assert_eq!(code, Some(1));
     assert!(

@@ -487,9 +487,18 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
                 className="accent-(--color-accent)"
               />
               <span>
-                Add this project&rsquo;s memory after the message —{" "}
-                {memory.count === 1 ? "1 approved entry" : `${memory.count} approved entries`}. Your
-                message stays the task on record.
+                {memory.count === 0 ? (
+                  <>
+                    Ask the agent, after the message, to propose entries for this project&rsquo;s
+                    memory — nothing is approved yet.
+                  </>
+                ) : (
+                  <>
+                    Add this project&rsquo;s memory after the message —{" "}
+                    {memory.count === 1 ? "1 approved entry" : `${memory.count} approved entries`}.
+                  </>
+                )}{" "}
+                Your message stays the task on record.
               </span>
               <button
                 type="button"

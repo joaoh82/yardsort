@@ -69,6 +69,22 @@ Further decisions made in building:
 - **Jev's tags follow the approved list.** A verdict depends on the approved entries as much as on
   the proposal, so the view asks again when either changes and shows an answer only while it
   still matches what it was judged against.
+- **An empty shared memory still sends its section** (4 October 2026). The first cut added
+  nothing to a launch with nothing approved, and the invitation to propose lived only inside
+  that section — so in a project with an empty memory no agent was ever told `ys memory propose`
+  existed, and the memory stayed empty: found on the user's own profile, shared for days with no
+  entry and no proposal. `prompt_section` now returns the section whenever the project shares;
+  with nothing approved it says so, offers no search, and asks for proposals. The request is
+  also firmer and placed at the end of the work: _before you finish_, one lesson at a time, not
+  what the repository's own instructions already say.
+- **Sharing is on until turned off** (4 October 2026; the user's decision, reversing the gate's
+  _injection is opt-in_). The reasoning: what is shared is the user's own approved notes, about
+  their own project, with agents they start in it — and with the switch off by default a project
+  never asked an agent for a proposal, so the feature looked dead. A project with no
+  `project_memory` row shares (`Store::memory_shared`); unticking writes the row and is kept.
+  This turns it on for existing projects that never touched the switch. Still true: only
+  approved entries are given, a launch can leave them out, and an unshared project adds
+  nothing and answers no `ys memory list`.
 - **Waiting counts are polled**, on focus and on every activity event: `ys` writes the database
   without the window hearing of it.
 

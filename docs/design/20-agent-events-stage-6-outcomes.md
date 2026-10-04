@@ -59,6 +59,20 @@ Further decisions made in building:
 - **The forge's state is read from the cache only.** `outcomes_get` uses `Forge::cached`, which
   never fetches, whatever its age; the publish panel keeps it current. (Found in review: the first
   cut's "not a refresh" still fetched on a stale cache, so opening Outcomes could wait on `gh`.)
+- **An attempt begins when its workspace did** (4 October 2026, migration `0015`). The window
+  above was measured from the outcome row's `created_at`, which is when the row was first
+  written — and for a workspace nobody opened Outcomes on, that is the moment it was deleted. So
+  a pull request had to be opened in the ten minutes before the delete to be matched; on the
+  user's own profile seven attempts, most merged through pull requests, had no evidence at all.
+  `began_at` is the workspace's creation time, copied by the snapshot. Rows from before it,
+  whose workspace is gone, have none: their lower bound is the end of the attempt before them on
+  the same branch, which is all a reused branch name could confuse.
+- **Evidence is gathered where it is seen, not where it is shown.** Every read of a project's
+  pull requests (`publish::commands::look`) snapshots its live workspaces and matches attempts
+  (`outcomes::observe_project`), so a merge counts without the Outcomes view being opened.
+  Archiving or deleting reads git's evidence for that attempt once more
+  (`outcomes::observe_ending`), while the branch certainly exists. `outcomes_get` still never
+  fetches.
 - **Shared work counts for each agent.** An attempt two agents worked in counts in both
   histories.
 - **Five outcomes before a history says anything** (`MIN_SAMPLE`); below that, "too few to say

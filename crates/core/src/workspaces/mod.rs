@@ -203,15 +203,24 @@ impl Workspaces<'_> {
     /// thrown away here. Without `force`, uncommitted work makes this fail with `worktree_dirty`.
     pub fn delete(&self, workspace_id: &str, force: bool) -> IpcResult<()> {
         let workspace = self.deletable(workspace_id)?;
-        // What the attempt was, kept before its row and sessions go: the moment an attempt is
-        // deleted is the moment it is most often judged. Never a reason not to delete.
-        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
+        // Kept before its row and sessions go: the moment an attempt is deleted is the moment
+        // it is most often judged.
+        self.record_ending(&workspace);
         if !workspace.archived {
             self.remove_worktree(&workspace, force)?;
         }
         self.store.remove_worktree(&workspace.id)?;
         let _ = self.store.outcome_ended(&workspace.id, Some("deleted"));
         Ok(())
+    }
+
+    /// What the attempt was, and what git says of its branch, kept as it ends. Never a reason
+    /// not to delete or archive.
+    fn record_ending(&self, workspace: &WorkspaceRow) {
+        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
+        if let Ok(root) = self.project_root(workspace) {
+            let _ = crate::outcomes::observe_ending(self.store, self.git, &root, &workspace.id);
+        }
     }
 
     /// Put a workspace away: its worktree leaves the disk, while its row, its branch and its
@@ -228,7 +237,7 @@ impl Workspaces<'_> {
                 "This workspace is not on a branch, so there would be nothing to restore it from. Delete it instead.",
             ));
         }
-        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
+        self.record_ending(&workspace);
         self.remove_worktree(&workspace, force)?;
         self.store.set_workspace_archived(&workspace.id, true)?;
         let _ = self.store.outcome_ended(&workspace.id, Some("archived"));

@@ -5,7 +5,7 @@
 use serde::Serialize;
 use specta::Type;
 use tauri::AppHandle;
-use yardsort_core::forge::PullRequestState;
+use yardsort_core::forge::{PullRequest, PullRequestState};
 use yardsort_core::outcomes::{self, AgentHistory, Outcome, PullRequestSeen};
 use yardsort_core::store::OutcomeRow;
 
@@ -104,7 +104,7 @@ fn attempt(row: OutcomeRow) -> Attempt {
         label: row.label,
         outcome,
         outcome_source: source,
-        created_at: row.created_at as f64,
+        created_at: row.began_at.unwrap_or(row.created_at) as f64,
     }
 }
 
@@ -122,6 +122,30 @@ fn agents(rows: &[OutcomeRow]) -> Vec<AgentOutcomes> {
             discarded: h.discarded,
         })
         .collect()
+}
+
+/// Match a project's attempts to its pull requests, as just read from the forge. Called
+/// wherever the list is read — the workspace rows ask for it as the window comes into focus — so
+/// a merge counts without the Outcomes view ever being opened. Never an error to the caller:
+/// reading pull requests must not fail over bookkeeping.
+pub fn observe(state: &AppState, project_id: &str, pull_requests: &[PullRequest]) {
+    let seen: Vec<PullRequestSeen> = pull_requests
+        .iter()
+        .map(|pr| PullRequestSeen {
+            state: match pr.state {
+                PullRequestState::Open => "open",
+                PullRequestState::Merged => "merged",
+                PullRequestState::Closed => "closed",
+            }
+            .to_owned(),
+            branch: pr.branch.clone(),
+            number: i64::from(pr.number),
+            created_at: pr.created_at,
+        })
+        .collect();
+    if let Err(error) = outcomes::observe_project(&state.store, project_id, &seen) {
+        eprintln!("outcomes: could not record pull requests for {project_id}: {error}");
+    }
 }
 
 fn project_outcomes(state: &AppState, project_id: &str) -> IpcResult<ProjectOutcomes> {
@@ -151,26 +175,8 @@ pub async fn outcomes_get(app: AppHandle, project_id: String) -> IpcResult<Proje
             let git = crate::git::Git::new(&state.env())?;
             outcomes::refresh(&state.store, &git, &project_id, &root)?;
         }
-        let pull_requests: Vec<PullRequestSeen> = state
-            .forge
-            .cached(&project_id)
-            .map(|known| known.pull_requests)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|pr| PullRequestSeen {
-                state: match pr.state {
-                    PullRequestState::Open => "open",
-                    PullRequestState::Merged => "merged",
-                    PullRequestState::Closed => "closed",
-                }
-                .to_owned(),
-                branch: pr.branch,
-                number: i64::from(pr.number),
-                created_at: pr.created_at,
-            })
-            .collect();
-        let rows = state.store.outcomes(Some(&project_id))?;
-        outcomes::observe_pull_requests(&state.store, &rows, &pull_requests)?;
+        let known = state.forge.cached(&project_id).unwrap_or_default();
+        observe(state, &project_id, &known.pull_requests);
         project_outcomes(state, &project_id)
     })
     .await

@@ -277,7 +277,7 @@ ys memory propose "The tests need TZ=UTC."
 ```
 
 Run inside a workspace, it is about that workspace's project; elsewhere, name it with
-`--project <project>`. `list` and `search` answer only in a project that shares its memory with its agents — the switch in the Memory view — and say so otherwise; `propose` works either way. `propose` adds a proposal for you to review in the Memory view and says
+`--project <project>`. `list` and `search` answer in a project that shares its memory with its agents — which it does unless you turned the switch in the Memory view off — and say so otherwise; `propose` works either way. `propose` adds a proposal for you to review in the Memory view and says
 so; when an agent Yardsort started runs it, the proposal records which agent and which
 workspace. There is no command to approve, edit, reject or revoke: those are yours, in the app,
 because an agent can run anything `ys` offers. `--json` works as everywhere.
