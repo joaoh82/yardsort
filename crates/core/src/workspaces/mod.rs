@@ -203,15 +203,24 @@ impl Workspaces<'_> {
     /// thrown away here. Without `force`, uncommitted work makes this fail with `worktree_dirty`.
     pub fn delete(&self, workspace_id: &str, force: bool) -> IpcResult<()> {
         let workspace = self.deletable(workspace_id)?;
-        // What the attempt was, kept before its row and sessions go: the moment an attempt is
-        // deleted is the moment it is most often judged. Never a reason not to delete.
-        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
+        // Kept before its row and sessions go: the moment an attempt is deleted is the moment
+        // it is most often judged.
+        self.record_ending(&workspace);
         if !workspace.archived {
             self.remove_worktree(&workspace, force)?;
         }
         self.store.remove_worktree(&workspace.id)?;
         let _ = self.store.outcome_ended(&workspace.id, Some("deleted"));
         Ok(())
+    }
+
+    /// What the attempt was, and what git says of its branch, kept as it ends. Never a reason
+    /// not to delete or archive.
+    fn record_ending(&self, workspace: &WorkspaceRow) {
+        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
+        if let Ok(root) = self.project_root(workspace) {
+            let _ = crate::outcomes::observe_ending(self.store, self.git, &root, &workspace.id);
+        }
     }
 
     /// Put a workspace away: its worktree leaves the disk, while its row, its branch and its
@@ -228,7 +237,7 @@ impl Workspaces<'_> {
                 "This workspace is not on a branch, so there would be nothing to restore it from. Delete it instead.",
             ));
         }
-        let _ = crate::outcomes::snapshot(self.store, &workspace.id);
+        self.record_ending(&workspace);
         self.remove_worktree(&workspace, force)?;
         self.store.set_workspace_archived(&workspace.id, true)?;
         let _ = self.store.outcome_ended(&workspace.id, Some("archived"));
@@ -624,6 +633,56 @@ mod tests {
         assert_eq!(away.ended.as_deref(), Some("archived"));
         ws.restore(&archived.id).unwrap();
         assert_eq!(fx.store.outcome(&archived.id).unwrap().unwrap().ended, None);
+    }
+
+    /// Git's evidence is read as a workspace ends, though nobody ever opened Outcomes: a branch
+    /// with commits of its own has its tip on record after a delete or an archive, so a later
+    /// merge is recognised even if the branch is deleted in between.
+    #[test]
+    fn deleting_or_archiving_records_what_git_says_of_the_branch() {
+        let fx = Fixture::new();
+        let ws = fx.workspaces();
+        let commit = |row: &WorkspaceRow| {
+            let path = Path::new(&row.path);
+            std::fs::write(path.join("work.rs"), "fn work() {}\n").unwrap();
+            fx.git.run(path, &["add", "-A"]).unwrap();
+            fx.git
+                .run(
+                    path,
+                    &[
+                        "-c",
+                        "user.name=t",
+                        "-c",
+                        "user.email=t@t",
+                        "commit",
+                        "-qm",
+                        "work",
+                    ],
+                )
+                .unwrap();
+            fx.git
+                .run(path, &["rev-parse", "HEAD"])
+                .unwrap()
+                .trim()
+                .to_owned()
+        };
+        let deleted = ws.create(&fx.project_id, None, "Fix the login").unwrap();
+        let archived = ws.create(&fx.project_id, None, "Try another way").unwrap();
+        let untouched = ws.create(&fx.project_id, None, "Nothing done").unwrap();
+        let (deleted_tip, archived_tip) = (commit(&deleted), commit(&archived));
+        assert_eq!(
+            fx.store.outcome(&deleted.id).unwrap(),
+            None,
+            "never looked at"
+        );
+
+        ws.delete(&deleted.id, false).unwrap();
+        ws.archive(&archived.id, false).unwrap();
+        ws.delete(&untouched.id, false).unwrap();
+        let tip = |id: &str| fx.store.outcome(id).unwrap().unwrap().ahead_tip;
+        assert_eq!(tip(&deleted.id), Some(deleted_tip));
+        assert_eq!(tip(&archived.id), Some(archived_tip));
+        assert_eq!(tip(&untouched.id), None, "an empty branch was never ahead");
     }
 
     #[test]

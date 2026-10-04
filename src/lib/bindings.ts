@@ -1080,6 +1080,12 @@ export type HarnessRequest = {
 	 *  it. The composer's per-launch opt-out; see `crate::memory`.
 	 */
 	skipMemory?: boolean,
+	/**
+	 *  Give the approved entries only, without the request to propose more, and nothing at all
+	 *  when none is approved. For launches the user did not make by hand: a workflow that
+	 *  starts five reviewers must not leave five proposals about that one review.
+	 */
+	quietMemory?: boolean,
 };
 
 export type HarnessStatus = {

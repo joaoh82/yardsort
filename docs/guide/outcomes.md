@@ -24,11 +24,19 @@ it back.
   labelled_. A squash merge leaves no trace in git, which is why the pull request is read too.
   Resetting a branch back to its base throws its work away, and is not a merge. An attempt keeps
   the pull request opened while it was going; a later one on the same branch belongs to the
-  attempt that opened it. The view reads the pull requests Yardsort already knows about from the
-  publish panel, and never waits on the network.
+  attempt that opened it. Yardsort matches attempts to pull requests each time it reads the
+  project's pull requests — for the badges on its workspace rows, the publish panel, the Pull
+  requests view — so a merge is counted without you opening anything. The Outcomes view itself
+  reads what is already known, and never waits on the network.
 - **Nothing else.** A closed pull request, a branch ahead of its base, an archived or deleted
   workspace, an agent that exited with an error — each is shown as evidence beside the attempt,
   and none is ever counted as an outcome. An attempt with no label and no merge has no outcome.
+
+What Yardsort can see for itself is limited to those two. A squash merge is only visible
+through the pull request, so a project with no GitHub CLI, or a pull request older than the
+newest fifty when Yardsort first looks, leaves the attempt for you to label. When a workspace is
+archived or deleted its branch is checked one last time, so work that was ahead is on record
+even if the branch is deleted afterwards.
 
 Deleting a workspace keeps its attempt: its name, branch, task and agents are copied before the
 workspace goes, so it can still be judged. Removing a project from Yardsort without keeping its

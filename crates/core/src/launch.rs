@@ -39,6 +39,11 @@ pub struct HarnessRequest {
     /// it. The composer's per-launch opt-out; see `crate::memory`.
     #[serde(default)]
     pub skip_memory: bool,
+    /// Give the approved entries only, without the request to propose more, and nothing at all
+    /// when none is approved. For launches the user did not make by hand: a workflow that
+    /// starts five reviewers must not leave five proposals about that one review.
+    #[serde(default)]
+    pub quiet_memory: bool,
 }
 
 /// What to run in a workspace.
@@ -167,7 +172,11 @@ impl Launcher<'_> {
                         .as_deref()
                         .is_some_and(|p| !p.trim().is_empty()) =>
             {
-                crate::memory::prompt_section(self.store, &workspace.project_id)?
+                if request.quiet_memory {
+                    crate::memory::notes_section(self.store, &workspace.project_id)?
+                } else {
+                    crate::memory::prompt_section(self.store, &workspace.project_id)?
+                }
             }
             _ => None,
         };
@@ -642,6 +651,7 @@ mod tests {
             prompt: Some("fix it".into()),
             handoff: false,
             skip_memory: false,
+            quiet_memory: false,
         };
         let claude = resolve_launch(Launch::Harness(request("claude")), &[]).unwrap();
         assert_eq!(claude.program.as_deref(), Some("claude"));
@@ -678,6 +688,7 @@ mod tests {
             prompt: Some(prompt),
             handoff: false,
             skip_memory: false,
+            quiet_memory: false,
         };
         let stdin = [HarnessOverride {
             id: "claude".into(),
@@ -867,6 +878,7 @@ mod tests {
         let harnesses = [shell_harness()];
         let activity = ActivitySettings::default();
         let launcher = launcher(&store, &host, &env, &harnesses, &activity, dir.path());
+        let quiet = std::cell::Cell::new(false);
         let start = |prompt: Option<&str>, handoff: bool, skip_memory: bool| {
             launcher
                 .in_workspace(
@@ -878,6 +890,7 @@ mod tests {
                         prompt: prompt.map(str::to_owned),
                         handoff,
                         skip_memory,
+                        quiet_memory: quiet.get(),
                     }),
                     SIZE,
                 )
@@ -893,6 +906,15 @@ mod tests {
             ["exit 0"],
             "the task on record is the user's words alone"
         );
+
+        assert!(sent.contains("ys memory propose"), "{sent}");
+        // A launch the user did not make by hand — a workflow's — gets the notes, not the
+        // request to propose more.
+        quiet.set(true);
+        let sent = start(Some("exit 0"), false, false);
+        assert!(sent.contains("The tests need TZ=UTC."), "{sent}");
+        assert!(!sent.contains("ys memory propose"), "{sent}");
+        quiet.set(false);
 
         assert!(
             !start(Some("exit 0"), true, false).contains("Project memory"),
@@ -911,6 +933,16 @@ mod tests {
             !start(Some("exit 0"), false, false).contains("Project memory"),
             "not shared"
         );
+
+        // With nothing approved, the user's own launch is asked to propose; a quiet one gets
+        // nothing at all.
+        store.set_memory_shared(&project, true).unwrap();
+        for entry in crate::memory::approved(&store, &project).unwrap() {
+            crate::memory::decide(&store, &entry.id, crate::memory::Decision::Revoke).unwrap();
+        }
+        assert!(start(Some("exit 0"), false, false).contains("Nothing is in it yet."));
+        quiet.set(true);
+        assert!(!start(Some("exit 0"), false, false).contains("Project memory"));
     }
 
     #[test]
@@ -934,6 +966,7 @@ mod tests {
                     prompt: Some("exit 0".into()),
                     handoff: false,
                     skip_memory: false,
+                    quiet_memory: false,
                 }),
                 SIZE,
             )
@@ -1179,6 +1212,7 @@ mod tests {
                     prompt: Some("exit 3".into()),
                     handoff: false,
                     skip_memory: false,
+                    quiet_memory: false,
                 }),
                 SIZE,
             )
@@ -1283,6 +1317,7 @@ mod tests {
                     prompt: Some("exit 0".into()),
                     handoff: false,
                     skip_memory: false,
+                    quiet_memory: false,
                 }),
                 SIZE,
             )
@@ -1345,6 +1380,7 @@ mod tests {
                 prompt: Some("exit 0".into()),
                 handoff: false,
                 skip_memory: false,
+                quiet_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1409,6 +1445,7 @@ mod tests {
                     prompt: Some("exit 0".into()),
                     handoff: false,
                     skip_memory: false,
+                    quiet_memory: false,
                 }),
                 SIZE,
             )
@@ -1458,6 +1495,7 @@ mod tests {
                 prompt: Some("exit 0".into()),
                 handoff: false,
                 skip_memory: false,
+                quiet_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1538,6 +1576,7 @@ mod tests {
                 prompt: Some("exit 0".into()),
                 handoff: false,
                 skip_memory: false,
+                quiet_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1626,7 +1665,9 @@ mod tests {
                 effort: None,
                 prompt: Some("exit 0".into()),
                 handoff: false,
-                skip_memory: false,
+                // The command line is what is looked at here, not what goes after the message.
+                skip_memory: true,
+                quiet_memory: false,
             })
         };
         let on = ActivitySettings {
@@ -1704,6 +1745,7 @@ mod tests {
                 prompt: Some("exit 0".into()),
                 handoff: false,
                 skip_memory: false,
+                quiet_memory: false,
             })
         };
         let omp_only = ActivitySettings {
@@ -1769,6 +1811,7 @@ mod tests {
                 prompt: Some("exit 0".into()),
                 handoff: false,
                 skip_memory: false,
+                quiet_memory: false,
             })
         };
         let off = ActivitySettings::default();

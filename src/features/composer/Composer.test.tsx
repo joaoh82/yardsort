@@ -631,6 +631,23 @@ describe("Composer with Assist", () => {
     });
   });
 
+  it("says an empty shared memory only asks the agent to propose", async () => {
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-app",
+      shared: true,
+      preview: "## Project memory\n\nNothing is in it yet.\n",
+      entries: [],
+    });
+    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    const ask = await screen.findByRole("checkbox", {
+      name: /propose entries for this project.s memory/,
+    });
+    expect(ask).toBeChecked();
+    expect(screen.getByText(/nothing is approved yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/approved entries/)).not.toBeInTheDocument();
+  });
+
   it("shows your history with the chosen agent, and says when it is too little to go on", async () => {
     core.outcomesAgents.mockResolvedValue([
       {

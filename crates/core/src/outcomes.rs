@@ -137,9 +137,25 @@ pub struct PullRequestSeen {
     pub created_at: Option<i64>,
 }
 
-/// How much earlier than an attempt's first record a pull request may have been opened and
-/// still be its own: the record is written when the workspace is first seen, not when it began.
+/// How much earlier than an attempt began a pull request may have been opened and still be its
+/// own: the forge's clock and this machine's are not the same clock.
 const OPENED_BEFORE_SLACK_MS: i64 = 10 * 60 * 1000;
+
+/// The earliest a pull request may have been opened and still belong to `row`. An attempt that
+/// knows when it began says so. One recorded before that was kept does not — its record was
+/// often first written as its workspace was deleted — so its bound is the end of the attempt
+/// before it on the same branch, which is all that reusing a branch name could confuse.
+fn opened_from(row: &OutcomeRow, rows: &[OutcomeRow]) -> i64 {
+    if let Some(began) = row.began_at {
+        return began - OPENED_BEFORE_SLACK_MS;
+    }
+    rows.iter()
+        .filter(|other| other.id != row.id && other.branch == row.branch)
+        .filter_map(|other| other.ended_at)
+        .filter(|ended| row.ended_at.is_none_or(|own| *ended < own))
+        .max()
+        .unwrap_or(i64::MIN)
+}
 
 /// The forge's evidence. An attempt keeps the pull request it was first matched to and only
 /// follows that one's state; branch names are reused (`open_branch`), so a later pull request on
@@ -165,8 +181,7 @@ pub fn observe_pull_requests(
         };
         let during = |pr: &&PullRequestSeen| match pr.created_at {
             Some(opened) => {
-                opened >= row.created_at - OPENED_BEFORE_SLACK_MS
-                    && row.ended_at.is_none_or(|ended| opened <= ended)
+                opened >= opened_from(row, rows) && row.ended_at.is_none_or(|ended| opened <= ended)
             }
             None => row.ended.is_none(),
         };
@@ -180,6 +195,34 @@ pub fn observe_pull_requests(
         }
     }
     Ok(())
+}
+
+/// Git's evidence for one attempt as its workspace ends, while its branch is certainly still
+/// there: whoever deletes the branch afterwards, the tip that was ahead is already recorded.
+pub fn observe_ending(store: &Store, git: &Git, root: &Path, id: &str) -> StoreResult<()> {
+    match store.outcome(id)? {
+        Some(row) => observe_git(store, git, root, &row),
+        None => Ok(()),
+    }
+}
+
+/// The forge's evidence for a project, whenever its pull requests have just been read: every
+/// live attempt is snapshotted first, so one that was never looked at can still be matched.
+pub fn observe_project(
+    store: &Store,
+    project_id: &str,
+    pull_requests: &[PullRequestSeen],
+) -> StoreResult<()> {
+    if pull_requests.is_empty() {
+        return Ok(());
+    }
+    for workspace in store.workspaces()? {
+        if workspace.project_id == project_id && !workspace.forgotten {
+            snapshot(store, &workspace.id)?;
+        }
+    }
+    let rows = store.outcomes(Some(project_id))?;
+    observe_pull_requests(store, &rows, pull_requests)
 }
 
 /// Bring a project's outcomes up to date: snapshot every live attempt, and read git's evidence
@@ -432,7 +475,7 @@ mod tests {
         let (_dir, store, _git, project, first) = repo();
         snapshot(&store, &first).unwrap();
         let mut earlier = store.outcome(&first).unwrap().unwrap();
-        earlier.created_at = 1_000;
+        earlier.began_at = Some(1_000);
         observe_pull_requests(
             &store,
             &[earlier],
@@ -441,7 +484,7 @@ mod tests {
         .unwrap();
         store.outcome_ended(&first, Some("deleted")).unwrap();
         let mut earlier = store.outcome(&first).unwrap().unwrap();
-        earlier.created_at = 1_000;
+        earlier.began_at = Some(1_000);
         earlier.ended_at = Some(3_000);
 
         // A second attempt on the same branch, and its own pull request, opened later.
@@ -457,7 +500,7 @@ mod tests {
             .id;
         snapshot(&store, &second).unwrap();
         let mut later = store.outcome(&second).unwrap().unwrap();
-        later.created_at = 4_000;
+        later.began_at = Some(4_000);
         let prs = [
             seen("ys/fix", 8, "open", Some(5_000)),
             seen("ys/fix", 7, "merged", Some(2_000)),
@@ -492,7 +535,7 @@ mod tests {
             .id;
         snapshot(&store, &third).unwrap();
         let mut gone = store.outcome(&third).unwrap().unwrap();
-        gone.created_at = 1_000;
+        gone.began_at = Some(1_000);
         gone.ended = Some("deleted".into());
         gone.ended_at = Some(3_000);
         observe_pull_requests(
@@ -502,6 +545,98 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.outcome(&third).unwrap().unwrap().pr_number, None);
+    }
+
+    /// A pull request opened hours before its workspace was deleted is the attempt's own, though
+    /// the outcome was first recorded only at the delete: the attempt began when the workspace
+    /// did. One recorded before that was kept is bounded by the attempt before it on the branch.
+    #[test]
+    fn a_pull_request_opened_long_before_the_delete_is_still_matched() {
+        const HOUR: i64 = 60 * 60 * 1000;
+        let (_dir, store, _git, project, ws) = repo();
+        // Never looked at while it lived: the outcome is first written at the delete.
+        snapshot(&store, &ws).unwrap();
+        store.remove_worktree(&ws).unwrap();
+        store.outcome_ended(&ws, Some("deleted")).unwrap();
+        let mut row = store.outcome(&ws).unwrap().unwrap();
+        assert!(row.began_at.is_some(), "the workspace's own start is kept");
+        row.began_at = Some(0);
+        row.created_at = 10 * HOUR;
+        row.ended_at = Some(10 * HOUR);
+        observe_pull_requests(&store, &[row], &[seen("ys/fix", 7, "merged", Some(HOUR))]).unwrap();
+        let row = store.outcome(&ws).unwrap().unwrap();
+        assert_eq!((row.pr_number, outcome(&row)), (Some(7), Outcome::Merged));
+
+        // Two attempts on one branch from before the start was kept: each takes the pull
+        // request opened after the one before it ended, and before its own end.
+        let attempt = |name: &str| {
+            let id = store
+                .add_worktree(
+                    &project,
+                    name,
+                    &format!("/wt/{name}"),
+                    Some("ys/old"),
+                    Some("main"),
+                )
+                .unwrap()
+                .id;
+            snapshot(&store, &id).unwrap();
+            store.remove_worktree(&id).unwrap();
+            store.outcome_ended(&id, Some("deleted")).unwrap();
+            id
+        };
+        let (first, second) = (attempt("old-one"), attempt("old-two"));
+        let legacy = |id: &str, ended: i64| {
+            let mut row = store.outcome(id).unwrap().unwrap();
+            row.began_at = None;
+            row.created_at = ended;
+            row.ended_at = Some(ended);
+            row
+        };
+        let rows = [legacy(&first, 2 * HOUR), legacy(&second, 10 * HOUR)];
+        let prs = [
+            seen("ys/old", 8, "closed", Some(HOUR)),
+            seen("ys/old", 9, "merged", Some(5 * HOUR)),
+        ];
+        observe_pull_requests(&store, &rows, &prs).unwrap();
+        assert_eq!(store.outcome(&first).unwrap().unwrap().pr_number, Some(8));
+        assert_eq!(store.outcome(&second).unwrap().unwrap().pr_number, Some(9));
+    }
+
+    /// Reading a project's pull requests is enough: a live workspace nobody has looked at gets
+    /// its outcome row and its pull request there and then, without the Outcomes view. Nothing
+    /// read from the forge writes nothing, and another project's workspaces are left alone.
+    #[test]
+    fn reading_the_projects_pull_requests_records_a_live_attempt() {
+        let (_dir, store, _git, project, ws) = repo();
+        let other = store.add_project("other", "/code/other").unwrap();
+        let elsewhere = store
+            .add_worktree(&other.id, "same", "/wt/same", Some("ys/fix"), Some("main"))
+            .unwrap()
+            .id;
+        assert_eq!(store.outcome(&ws).unwrap(), None, "never snapshotted");
+
+        observe_project(&store, &project, &[]).unwrap();
+        assert_eq!(
+            store.outcome(&ws).unwrap(),
+            None,
+            "nothing read, nothing written"
+        );
+
+        let opened = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        observe_project(
+            &store,
+            &project,
+            &[seen("ys/fix", 7, "merged", Some(opened))],
+        )
+        .unwrap();
+        let row = store.outcome(&ws).unwrap().unwrap();
+        assert_eq!((row.pr_number, outcome(&row)), (Some(7), Outcome::Merged));
+        assert!(row.began_at.is_some());
+        assert_eq!(store.outcome(&elsewhere).unwrap(), None);
     }
 
     /// Work that was seen ahead and then thrown away — the branch reset to its base — is not a

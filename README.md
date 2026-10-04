@@ -119,8 +119,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   `ys activity export` writes it out. See [Activity](docs/guide/activity.md).
 - **Project memory, approved by you.** Short lessons about a project for its agents — "the tests
   need `TZ=UTC`". You write them; agents propose them with `ys memory propose`, and those wait for
-  you. Only what you approve reaches an agent: after its first message, cited, and in handoffs.
-  See [Memory](docs/guide/memory.md).
+  you. Only what you approve reaches an agent: after its first message, cited, and in handoffs —
+  unless you turn that off for the project. See [Memory](docs/guide/memory.md).
 - **Outcomes, in your words.** After you archive or delete a workspace, one optional click says
   how it went; a merged pull request counts as kept until you say otherwise. Each agent's history
   on your own work sits beside the composer's picker — and says "too few to say" until there is

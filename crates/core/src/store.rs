@@ -24,6 +24,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0012_workflow_runs.sql"),
     include_str!("../migrations/0013_workflow_run_context.sql"),
     include_str!("../migrations/0014_workspace_tasks.sql"),
+    include_str!("../migrations/0015_outcome_began.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -198,6 +199,10 @@ pub struct OutcomeRow {
     pub pr_state: Option<String>,
     pub ended: Option<String>,
     pub ended_at: Option<i64>,
+    /// When the workspace was created. `None` for a row first written before this was kept,
+    /// whose workspace was already gone.
+    pub began_at: Option<i64>,
+    /// When this row was first written, which may be as late as the workspace's deletion.
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -1066,10 +1071,13 @@ impl Store {
         let at = now_ms();
         self.conn().execute(
             "INSERT INTO workspace_outcomes (id, project_id, workspace_id, workspace_name, branch,
-                                             base_branch, task, harnesses, created_at, updated_at)
-             VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                                             base_branch, task, harnesses, began_at, created_at,
+                                             updated_at)
+             VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6, ?7,
+                     (SELECT created_at FROM workspaces WHERE id = ?1), ?8, ?8)
              ON CONFLICT(id) DO UPDATE SET
                  workspace_name = excluded.workspace_name,
+                 began_at = COALESCE(began_at, excluded.began_at),
                  branch = COALESCE(excluded.branch, branch),
                  base_branch = COALESCE(excluded.base_branch, base_branch),
                  task = COALESCE(excluded.task, task),
@@ -1103,7 +1111,8 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!(
             "SELECT {OUTCOME_COLUMNS} FROM workspace_outcomes
-             WHERE ?1 IS NULL OR project_id = ?1 ORDER BY created_at DESC, rowid DESC"
+             WHERE ?1 IS NULL OR project_id = ?1
+             ORDER BY COALESCE(began_at, created_at) DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map([project_id], outcome_from_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -1324,7 +1333,8 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Whether a project's approved entries go into its agents' first messages.
+    /// Whether a project's approved entries go into its agents' first messages. They do until
+    /// the user says otherwise: a project with no row here has never been asked, and shares.
     pub fn memory_shared(&self, project_id: &str) -> StoreResult<bool> {
         let conn = self.conn();
         Ok(conn
@@ -1334,7 +1344,7 @@ impl Store {
                 |r| r.get::<_, i64>(0),
             )
             .optional()?
-            .is_some_and(|share| share != 0))
+            .is_none_or(|share| share != 0))
     }
 
     pub fn set_memory_shared(&self, project_id: &str, share: bool) -> StoreResult<()> {
@@ -2031,7 +2041,7 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRow> {
 
 const OUTCOME_COLUMNS: &str = "id, project_id, workspace_id, workspace_name, branch, base_branch, \
      task, harnesses, label, labeled_at, ahead_at, ahead_tip, merged_at, pr_number, pr_state, ended, \
-     ended_at, created_at, updated_at";
+     ended_at, began_at, created_at, updated_at";
 
 fn outcome_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutcomeRow> {
     Ok(OutcomeRow {
@@ -2052,8 +2062,9 @@ fn outcome_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutcomeRow> {
         pr_state: row.get(14)?,
         ended: row.get(15)?,
         ended_at: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        began_at: row.get(17)?,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
     })
 }
 

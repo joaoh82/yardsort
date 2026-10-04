@@ -317,6 +317,7 @@ pub(super) fn new(
                 prompt: Some(prompt),
                 handoff: false,
                 skip_memory: false,
+                quiet_memory: false,
             }),
             DETACHED_SIZE,
         )?;

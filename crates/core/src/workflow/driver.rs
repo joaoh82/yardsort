@@ -427,6 +427,8 @@ fn carry_out(
                 prompt,
                 handoff: false,
                 skip_memory,
+                // Started by a workflow, not by hand: the notes, without asking for proposals.
+                quiet_memory: true,
             };
             done(hands.start(&place.workspace.id, request).map(|session| {
                 let mut outputs = Outputs::new();
@@ -509,7 +511,7 @@ impl World for Seen<'_> {
             [whole] if whole == "memory" => self
                 .memory
                 .get_or_init(|| {
-                    crate::memory::prompt_section(self.store, &self.place.project.id)
+                    crate::memory::notes_section(self.store, &self.place.project.id)
                         .ok()
                         .flatten()
                 })

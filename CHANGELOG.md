@@ -5,6 +5,26 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A merged pull request now counts as _kept_ without you opening Outcomes.** Attempts are
+  matched to pull requests whenever Yardsort reads a project's pull requests, not only when the
+  Outcomes view is open. And the match no longer misses: an attempt nobody had looked at was
+  recorded as beginning when its workspace was deleted, so a pull request opened more than ten
+  minutes before that was never taken as its own — which was nearly every one. Attempts deleted
+  before this update are matched too. See [Outcomes](docs/guide/outcomes.md#what-counts).
+
+- **A project gives its agents its memory unless you turn that off.** _Give this project's agents
+  its memory_ used to start unticked, and a project nobody had ticked it in never asked an agent
+  for anything. It now starts ticked — in the projects you already have, too, unless you ticked
+  and unticked it there. Untick it in **Memory…** and it stays off. Only entries you approved are
+  ever given.
+
+- **An empty project memory asks agents to fill it.** A project that gives its agents its memory
+  but has nothing approved yet used to add nothing to a first message, so no agent ever heard of
+  `ys memory propose` and the memory stayed empty. The first message now says the memory is empty
+  and asks the agent to propose what the next one should know; with entries, it asks the same
+  before the agent finishes. Agents a workflow starts are not asked. See
+  [Memory](docs/guide/memory.md#how-it-fills-up).
+
 - **Usage: the plan-limits card has its own heading.** It is labelled **Plan limits**, with a
   note that only agents that record their limits appear. Today that is Codex alone, and the card
   no longer reads as a header for the whole tab.
