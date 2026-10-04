@@ -55,6 +55,10 @@ const OPEN_LIMIT: usize = 200;
 /// seconds itself; this is for a network that went away instead.
 const PAGE_LIMIT: Duration = Duration::from_secs(20);
 
+/// How many of a project's older open pull requests [`Forge::follow_open`] asks about on each
+/// poll, one `gh pr view` apiece. Only those a workspace shows are, so this is rarely reached.
+const FOLLOW_LIMIT: usize = 10;
+
 /// Commits offered as a starting point for a pull request's title and body.
 const MAX_COMMITS: usize = 20;
 
@@ -364,6 +368,90 @@ impl Forge {
         );
     }
 
+    /// Ask again about each of `numbers` that only the open tier has, one pull request at a
+    /// time, and put the answer in its place. Returns whether anything was asked.
+    ///
+    /// The open tier is only read in full while the Pull requests view is showing, so with it
+    /// closed a workspace whose pull request has fifty newer ones in front of it would show
+    /// that pull request as it was when Yardsort started — checks running, open — however long
+    /// ago it went green or was merged. `numbers` are the ones workspaces show; at most
+    /// [`FOLLOW_LIMIT`] are asked about, newest first. A merged or closed one stays, with its new
+    /// state, until the next full read drops it, and is not asked about again meanwhile.
+    pub fn follow_open(
+        &self,
+        project_id: &str,
+        numbers: &[u32],
+        fetch: impl Fn(u32) -> ForgeResult<PullRequest>,
+    ) -> bool {
+        let wanted: Vec<u32> = {
+            let cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
+            let recent = cached
+                .get(project_id)
+                .map_or(&[][..], |(_, answer)| answer.pull_requests.as_slice());
+            let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(tier) = open.get(project_id) else {
+                return false;
+            };
+            let mut wanted: Vec<u32> = numbers
+                .iter()
+                .copied()
+                .filter(|number| !recent.iter().any(|pr| pr.number == *number))
+                // Merged and closed are final, or nearly: asking again would only crowd out the
+                // open ones this is for.
+                .filter(|number| {
+                    tier.found
+                        .pull_requests
+                        .iter()
+                        .any(|pr| pr.number == *number && pr.state == PullRequestState::Open)
+                })
+                .collect();
+            // Newest first, so the cap drops the oldest.
+            wanted.sort_unstable_by(|a, b| b.cmp(a));
+            wanted.dedup();
+            wanted.truncate(FOLLOW_LIMIT);
+            wanted
+        };
+        if wanted.is_empty() {
+            return false;
+        }
+        let before = self.forgotten.load(Ordering::Relaxed);
+        // One that cannot be read now keeps what was known of it.
+        let read: Vec<PullRequest> = wanted
+            .into_iter()
+            .filter_map(|number| fetch(number).ok())
+            .collect();
+        // Something was done to the project meanwhile; these are from before it.
+        if self.forgotten.load(Ordering::Relaxed) != before {
+            return true;
+        }
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(tier) = open.get_mut(project_id) {
+            for pr in read {
+                if let Some(held) = tier
+                    .found
+                    .pull_requests
+                    .iter_mut()
+                    .find(|held| held.number == pr.number)
+                {
+                    // The forge's count of open ones moves with it, or the sidebar would say
+                    // there are more than it lists.
+                    let open_now = pr.state == PullRequestState::Open;
+                    if (held.state == PullRequestState::Open) != open_now {
+                        tier.found.total = tier.found.total.map(|total| {
+                            if open_now {
+                                total + 1
+                            } else {
+                                total.saturating_sub(1)
+                            }
+                        });
+                    }
+                    *held = pr;
+                }
+            }
+        }
+        true
+    }
+
     fn load(
         &self,
         project_id: &str,
@@ -629,7 +717,7 @@ fn compose(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::forge::Checks;
+    use crate::forge::{Checks, ForgeError};
     use crate::git::testing;
 
     fn row(path: &Path, base: Option<&str>) -> WorkspaceRow {
@@ -1264,6 +1352,80 @@ mod tests {
         let tier = open.get("p1").unwrap();
         assert_eq!(tier.found.pull_requests[0].number, 2);
         assert!(tier.at.is_none(), "and it is still due to be read again");
+    }
+
+    /// With the view closed, a workspace's pull request that only the open tier has is asked
+    /// about by itself, so it goes green or merged in the sidebar rather than staying as it was
+    /// when Yardsort started.
+    #[test]
+    fn a_workspaces_older_pull_request_is_followed_without_the_view() {
+        let forge = Forge::default();
+        let dir = tempfile::tempdir().unwrap();
+        forge.load_open("p1", true, || open_tier(&[10, 3, 2]));
+        // The recent tier has #10; #3 and #2 are older than the newest fifty.
+        forge.load("p1", true, || ProjectPullRequests {
+            gh: true,
+            pull_requests: vec![numbered(10, PullRequestState::Open)],
+            ..Default::default()
+        });
+        let asked = std::cell::RefCell::new(Vec::new());
+        let fetch = |number: u32| {
+            asked.borrow_mut().push(number);
+            Ok(numbered(number, PullRequestState::Merged))
+        };
+
+        // #10 is the recent tier's, #2 no workspace shows, #7 is in neither tier.
+        assert!(forge.follow_open("p1", &[10, 3, 7], fetch));
+        assert_eq!(
+            *asked.borrow(),
+            [3],
+            "only the one nothing else keeps fresh"
+        );
+        let answer = forge.pull_requests(None, dir.path(), "p1", false, false, &|| None);
+        let state = |number: u32| {
+            answer
+                .pull_requests
+                .iter()
+                .find(|pr| pr.number == number)
+                .map(|pr| pr.state)
+        };
+        assert_eq!(state(3), Some(PullRequestState::Merged));
+        assert_eq!(state(2), Some(PullRequestState::Open), "not asked about");
+        assert_eq!(state(10), Some(PullRequestState::Open));
+        assert_eq!(answer.open_total, Some(2), "one fewer open than was read");
+        assert!(
+            !forge.follow_open("p1", &[3], fetch),
+            "merged is final: not asked about again"
+        );
+
+        asked.borrow_mut().clear();
+        assert!(!forge.follow_open("p1", &[10], fetch), "nothing to ask");
+        assert!(!forge.follow_open("p2", &[3], fetch), "no open tier");
+        assert!(asked.borrow().is_empty());
+
+        // One that cannot be read keeps what was known of it.
+        assert!(forge.follow_open("p1", &[2], |_| Err(ForgeError::NotInstalled)));
+        let answer = forge.pull_requests(None, dir.path(), "p1", false, false, &|| None);
+        assert!(answer
+            .pull_requests
+            .iter()
+            .any(|pr| pr.number == 2 && pr.state == PullRequestState::Open));
+    }
+
+    /// An answer read across a merge or a close is from before it, and is not kept.
+    #[test]
+    fn a_followed_pull_request_read_before_the_project_changed_is_dropped() {
+        let forge = Forge::default();
+        forge.load_open("p1", true, || open_tier(&[3]));
+        assert!(forge.follow_open("p1", &[3], |number| {
+            forge.forget("p1");
+            Ok(numbered(number, PullRequestState::Merged))
+        }));
+        let open = forge.open.lock().unwrap();
+        assert_eq!(
+            open.get("p1").unwrap().found.pull_requests[0].state,
+            PullRequestState::Open
+        );
     }
 
     /// Without the view asking, the open tier is not read — and what it last said is still in

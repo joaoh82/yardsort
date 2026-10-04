@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A pull request's checks going green, or its merge, now shows without you doing anything.**
+  The `#42 · checks running` link in the Changes panel only caught up when the workspace's files
+  changed or the window came back into focus; it now follows the once-a-minute poll like the
+  sidebar does. And a workspace whose open pull request has fifty newer ones in front of it no
+  longer shows it as it was when Yardsort started while the Pull requests view is closed: that
+  pull request is asked about by itself each minute.
 - **Tasks: manage them from Yardsort.** **New task** opens an issue on a project's repository,
   with a title, a description and labels. A box under a task's conversation posts a comment.
   **Close ▾** closes one as completed or as not planned, and **Reopen** reopens one — each

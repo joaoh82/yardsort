@@ -745,18 +745,30 @@ impl Gh {
     /// Pull request `number`, asked of the forge now rather than out of the project's list:
     /// for an action that must not rest on an answer half a minute old.
     pub fn pull_request(&self, root: &Path, number: u32) -> ForgeResult<PullRequest> {
-        let out = self.run(
-            root,
-            &[
-                "pr",
-                "view",
-                &number.to_string(),
-                "--json",
-                PULL_REQUEST_FIELDS,
-            ],
-        )?;
+        let out = self.run(root, &Self::pull_request_args(&number.to_string()))?;
+        Self::read_pull_request(&out)
+    }
+
+    /// [`Gh::pull_request`], stopped after `limit`: for a background poll, which must not hang
+    /// on a network that went away.
+    pub fn pull_request_within(
+        &self,
+        root: &Path,
+        number: u32,
+        limit: Duration,
+    ) -> ForgeResult<PullRequest> {
+        let number = number.to_string();
+        let out = self.run_within(root, &Self::pull_request_args(&number), limit)?;
+        Self::read_pull_request(&out)
+    }
+
+    fn pull_request_args(number: &str) -> [&str; 5] {
+        ["pr", "view", number, "--json", PULL_REQUEST_FIELDS]
+    }
+
+    fn read_pull_request(out: &str) -> ForgeResult<PullRequest> {
         let row: serde_json::Value =
-            serde_json::from_str(&out).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+            serde_json::from_str(out).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
         pull_request(&row)
             .ok_or_else(|| ForgeError::Unreadable("expected a pull request".to_owned()))
     }

@@ -101,11 +101,31 @@ pub async fn project_pull_requests(
                 super::pull_requests::prune_refs(&git, &root, &found);
             }
         }
-        let owned = state
+        let mut owned = state
             .forge
             .owned(&project_id, &found.pull_requests, refresh, || {
                 by_workspace(state, &project_id, &found.pull_requests)
             });
+        // A full look has just read every open one. Otherwise the ones workspaces show that
+        // only the open tier has are asked about, or they would stay as they were at startup.
+        if refresh && !full {
+            let shown: Vec<u32> = owned.values().flatten().copied().collect();
+            let followed = match (project_root(state, &project_id), Gh::find(&state.env())) {
+                (Ok(root), Some(gh)) => state.forge.follow_open(&project_id, &shown, |number| {
+                    gh.pull_request_within(&root, number, super::PAGE_LIMIT)
+                }),
+                _ => false,
+            };
+            if followed {
+                // The recent tier is fresh in the cache, so this asks nobody.
+                found = look(state, &project_id, false, false);
+                owned = state
+                    .forge
+                    .owned(&project_id, &found.pull_requests, false, || {
+                        by_workspace(state, &project_id, &found.pull_requests)
+                    });
+            }
+        }
         found.workspaces = owned;
         Ok(found)
     })
