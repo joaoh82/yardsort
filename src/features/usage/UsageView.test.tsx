@@ -172,6 +172,7 @@ describe("Usage", () => {
 
     // Codex's plan limit, as it last heard it.
     const limits = screen.getByRole("region", { name: "Plan limits" });
+    expect(within(limits).getByRole("heading", { name: "Plan limits" })).toBeInTheDocument();
     expect(within(limits).getByRole("meter", { name: "Weekly limit used" })).toHaveAttribute(
       "aria-valuenow",
       "14",

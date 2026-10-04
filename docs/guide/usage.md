@@ -78,7 +78,8 @@ out, shown as **—**, and named under the total as _Not priced_. A near match i
 - **Plan limits.** Codex writes its plan's rate limits into its log each time its vendor tells it:
   the plan, how much of each window is used, and when the window resets. They are shown as Codex
   last heard them — _as of 3h ago_ — and a window that has reset since says so. Claude Code and
-  Grok do not write theirs down, so they are not shown.
+  Grok do not write theirs down, so they are not shown; the section is headed **Plan limits** and
+  says so.
 - **Range and unit.** **7d**, **30d** and **90d** cover the last seven, thirty or ninety days,
   today included, in your time zone. **Cost** and **Tokens** switch the total, agent shares,
   daily bars and workspace figures between US dollars and tokens. The token breakdown keeps

@@ -134,60 +134,70 @@ function Limits({ limits, now }: { limits: AgentLimits[]; now: number }) {
   const name = useAgentName();
   if (limits.length === 0) return null;
   return (
-    <section aria-label="Plan limits" className="grid gap-3 lg:grid-cols-2">
-      {limits.map((agent) => (
-        <div key={agent.agent} className="rounded-lg border border-line bg-surface p-3">
-          <header className="mb-2 flex items-center gap-2">
-            <HarnessIcon id={agent.agent} />
-            <span className="text-ink">{name(agent.agent)}</span>
-            {agent.plan && (
-              <span className="rounded border border-line px-1.5 text-[10px] tracking-wider text-ink-muted uppercase">
-                {agent.plan}
-              </span>
-            )}
-            <span
-              className="ml-auto text-[11px] text-ink-faint"
-              title={new Date(agent.observedAt).toLocaleString()}
-            >
-              as of {formatUntil(now - agent.observedAt)} ago
-            </span>
-          </header>
-          {agent.windows.map((window) => {
-            const reset = window.resetsAt !== null && window.resetsAt <= now;
-            return (
-              <div
-                key={window.minutes ?? "limit"}
-                className="grid grid-cols-[7rem_1fr_3rem_5rem] items-center gap-3 py-0.5"
+    <section aria-label="Plan limits" className="grid gap-3">
+      <header className="flex flex-wrap items-center gap-3">
+        <h3 className="m-0 text-[12px] font-semibold tracking-wider text-ink-muted uppercase">
+          Plan limits
+        </h3>
+        <span className="text-ink-faint">
+          as each agent last logged them · only agents that record their limits appear
+        </span>
+      </header>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {limits.map((agent) => (
+          <div key={agent.agent} className="rounded-lg border border-line bg-surface p-3">
+            <header className="mb-2 flex items-center gap-2">
+              <HarnessIcon id={agent.agent} />
+              <span className="text-ink">{name(agent.agent)}</span>
+              {agent.plan && (
+                <span className="rounded border border-line px-1.5 text-[10px] tracking-wider text-ink-muted uppercase">
+                  {agent.plan}
+                </span>
+              )}
+              <span
+                className="ml-auto text-[11px] text-ink-faint"
+                title={new Date(agent.observedAt).toLocaleString()}
               >
-                <span className="text-ink-muted">{windowName(window.minutes)}</span>
+                as of {formatUntil(now - agent.observedAt)} ago
+              </span>
+            </header>
+            {agent.windows.map((window) => {
+              const reset = window.resetsAt !== null && window.resetsAt <= now;
+              return (
                 <div
-                  role="meter"
-                  aria-label={`${windowName(window.minutes)} limit used`}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={reset ? 0 : window.usedPercent}
-                  className="h-1 rounded-full bg-raised"
+                  key={window.minutes ?? "limit"}
+                  className="grid grid-cols-[7rem_1fr_3rem_5rem] items-center gap-3 py-0.5"
                 >
+                  <span className="text-ink-muted">{windowName(window.minutes)}</span>
                   <div
-                    className="h-1 rounded-full bg-ink"
-                    style={{ width: `${reset ? 0 : Math.min(100, window.usedPercent)}%` }}
-                  />
+                    role="meter"
+                    aria-label={`${windowName(window.minutes)} limit used`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={reset ? 0 : window.usedPercent}
+                    className="h-1 rounded-full bg-raised"
+                  >
+                    <div
+                      className="h-1 rounded-full bg-ink"
+                      style={{ width: `${reset ? 0 : Math.min(100, window.usedPercent)}%` }}
+                    />
+                  </div>
+                  <span className="text-right text-ink tabular-nums">
+                    {reset ? "—" : `${Math.round(window.usedPercent)}%`}
+                  </span>
+                  <span className="text-right text-ink-muted tabular-nums">
+                    {window.resetsAt === null
+                      ? ""
+                      : reset
+                        ? "reset since"
+                        : `↻ ${formatUntil(window.resetsAt - now)}`}
+                  </span>
                 </div>
-                <span className="text-right text-ink tabular-nums">
-                  {reset ? "—" : `${Math.round(window.usedPercent)}%`}
-                </span>
-                <span className="text-right text-ink-muted tabular-nums">
-                  {window.resetsAt === null
-                    ? ""
-                    : reset
-                      ? "reset since"
-                      : `↻ ${formatUntil(window.resetsAt - now)}`}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ))}
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
