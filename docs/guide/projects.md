@@ -78,6 +78,10 @@ normalized to HTTPS. Anything else is refused: a folder on disk, `git://`, a pla
 another host, a host without its scheme, a password in the URL. **Name** starts with the
 repository's name, without `.git`, and follows the field until you edit the name yourself.
 
+[**Start from a link…**](tasks.md#starting-from-a-link) lands here too, with the repository
+filled in, when the issue or pull request you pasted belongs to a repository that is not a
+project yet; the item opens once the clone is done.
+
 A project from another host works like any other — commits, pushes and
 [**Open merge request**](commits-and-pull-requests.md#open-a-pull-request) included — but its
 issues and pull requests are not listed: the [Pull requests](pull-requests.md) and

@@ -349,7 +349,8 @@ never sees their credentials.
 
 1. Open Yardsort and press **+** next to _Projects_ → **Open a folder** → choose a git repository,
    or **Clone a repository** to pick one of yours on GitHub from a list — or paste a URL from
-   any git host — and download it into a new local folder.
+   any git host — and download it into a new local folder. Or paste an issue's link into
+   **Start from a link…** and let Yardsort clone its repository on the way.
 2. Press **+** on the project (or `Ctrl+Shift+N` / `⌘N`), type what you want done, press **Enter**.
 3. Watch the agent in the middle, and its changes on the right. Start more workspaces in parallel.
    Open **Usage** in the sidebar to compare their tokens and inspect live CPU and memory.

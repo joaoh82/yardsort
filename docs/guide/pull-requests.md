@@ -233,6 +233,12 @@ deleted**, and nothing is forced past a protection. On a branch that requires a 
 posted. **Reopen** is confirmed too, for what it sets off rather than for any risk: reviewers
 are notified, and checks may run again.
 
+### From a link
+
+**From a link…** in the header takes a pull request's or an issue's address and opens it here or
+in Tasks, cloning its repository first when it is not a project yet. It is the same as the
+Tasks view's, described in [Tasks](tasks.md#starting-from-a-link).
+
 ### Start a workspace from a pull request
 
 **Start workspace** gets the pull request's branch into the project's repository and opens the

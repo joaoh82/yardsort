@@ -13,6 +13,7 @@ import {
   tasksOf,
   worktree,
 } from "@/test/fixtures";
+import type { ResolvedLink } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   uiStateLoad: vi.fn(),
@@ -21,6 +22,7 @@ const core = vi.hoisted(() => ({
   projectOpen: vi.fn(),
   projectCreate: vi.fn(),
   projectClone: vi.fn(),
+  forgeResolveLink: vi.fn(),
   forgeRepositories: vi.fn(),
   forgeSearchRepositories: vi.fn(),
   projectRemove: vi.fn(),
@@ -69,6 +71,9 @@ import { useUpdatesStore } from "@/stores/updates";
 import { useMemoryStore } from "@/stores/memory";
 import { useOutcomesStore } from "@/stores/outcomes";
 import { Sidebar } from "./Sidebar";
+import { StartFromLinkDialog } from "./StartFromLinkDialog";
+import { runCommand } from "@/features/keyboard/commands";
+import { usePullRequestsStore } from "@/stores/pullRequests";
 
 const shellIn = (workspace: string) => ({
   id: `s-${workspace}`,
@@ -136,6 +141,8 @@ describe("Sidebar", () => {
       projects: [],
       pendingClones: [],
       lastParentDir: null,
+      adding: null,
+      linkOpen: false,
       repositories: {
         status: "idle",
         list: [],
@@ -1205,6 +1212,149 @@ describe("Sidebar", () => {
     await user.click(within(list).getByRole("button", { name: "Retry" }));
     expect(await screen.findByText(/Nobody is logged in to the GitHub CLI/)).toBeInTheDocument();
     expect(core.forgeRepositories).toHaveBeenCalledTimes(2);
+  });
+
+  describe("starting from a link", () => {
+    /** The shell mounts the link dialog beside the sidebar; here, the same, in miniature. */
+    function Shell() {
+      const linkOpen = useProjectsStore((s) => s.linkOpen);
+      return (
+        <>
+          <Sidebar />
+          {linkOpen && (
+            <StartFromLinkDialog onClose={() => useProjectsStore.getState().openLink(false)} />
+          )}
+        </>
+      );
+    }
+    const github = { host: "github.com", owner: "demo", name: "app", kind: "github" as const };
+    const resolved = (overrides: Partial<ResolvedLink> = {}): ResolvedLink => ({
+      repo: github,
+      kind: "issue",
+      number: 91,
+      url: "https://github.com/demo/app/issues/91",
+      cloneUrl: "https://github.com/demo/app.git",
+      projectId: "p-alpha",
+      ...overrides,
+    });
+    async function open(user: ReturnType<typeof userEvent.setup>, text: string) {
+      core.projectsList.mockResolvedValue([project("alpha")]);
+      render(<Shell />);
+      await screen.findByRole("treeitem", { name: "alpha" });
+      act(() => runCommand("startFromLink"));
+      await user.type(screen.getByLabelText("Issue or pull request"), text);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+    }
+
+    it("opens an issue of a project in the Tasks view, selected", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(resolved());
+      core.projectTasks.mockResolvedValue(tasksOf([task(91)]));
+      await open(user, "demo/app#91");
+      expect(core.forgeResolveLink).toHaveBeenCalledWith("demo/app#91");
+      await waitFor(() => expect(useProjectsStore.getState().tasksOpen).toBe(true));
+      expect(useTasksStore.getState().selected).toBe("p-alpha#91");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(opener.openUrl).not.toHaveBeenCalled();
+    });
+
+    it("opens a pull request of a project in the Pull requests view, selected", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({ kind: "pullRequest", number: 12, url: "https://github.com/demo/app/pull/12" }),
+      );
+      core.projectPullRequests.mockResolvedValue(pullRequestsOf([pullRequest(12)]));
+      await open(user, "https://github.com/demo/app/pull/12");
+      await waitFor(() => expect(useProjectsStore.getState().pullRequestsOpen).toBe(true));
+      expect(usePullRequestsStore.getState().selected).toBe("p-alpha#12");
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true);
+    });
+
+    it("sends an item the view has no row for, or on another forge, to the browser", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({ number: 5, url: "https://github.com/demo/app/issues/5" }),
+      );
+      core.projectTasks.mockResolvedValue(tasksOf([task(91)]));
+      await open(user, "demo/app#5");
+      await waitFor(() =>
+        expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/demo/app/issues/5"),
+      );
+      expect(useProjectsStore.getState().tasksOpen).toBe(false);
+
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({
+          repo: { ...github, host: "gitlab.com", kind: "gitlab" },
+          url: "https://gitlab.com/demo/app/-/issues/3",
+          number: 3,
+        }),
+      );
+      const asked = core.projectTasks.mock.calls.length;
+      act(() => runCommand("startFromLink"));
+      await user.type(
+        screen.getByLabelText("Issue or pull request"),
+        "https://gitlab.com/demo/app/-/issues/3",
+      );
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      await waitFor(() =>
+        expect(opener.openUrl).toHaveBeenCalledWith("https://gitlab.com/demo/app/-/issues/3"),
+      );
+      expect(
+        core.projectTasks,
+        "nothing asked of GitHub for a GitLab project",
+      ).toHaveBeenCalledTimes(asked);
+    });
+
+    it("clones a repository that is not a project yet, then opens the item", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({
+          repo: { ...github, owner: "o", name: "fresh" },
+          url: "https://github.com/o/fresh/issues/7",
+          cloneUrl: "https://github.com/o/fresh.git",
+          number: 7,
+          projectId: null,
+        }),
+      );
+      core.projectClone.mockResolvedValue(added("fresh"));
+      core.projectTasks.mockImplementation(async (projectId: string) =>
+        tasksOf(projectId === "p-fresh" ? [task(7)] : []),
+      );
+      await open(user, "https://github.com/o/fresh/issues/7");
+      const dialog = await screen.findByRole("dialog", { name: "Clone a repository" });
+      expect(within(dialog).getByLabelText("Repository")).toHaveValue(
+        "https://github.com/o/fresh.git",
+      );
+      expect(within(dialog).getByLabelText("Name")).toHaveValue("fresh");
+      await user.type(within(dialog).getByLabelText("Location"), "/code");
+      await user.click(within(dialog).getByRole("button", { name: "Clone project" }));
+      expect(core.projectClone).toHaveBeenCalledWith(
+        "https://github.com/o/fresh.git",
+        "fresh",
+        "/code",
+        null,
+      );
+      await waitFor(() => expect(useProjectsStore.getState().tasksOpen).toBe(true));
+      expect(useTasksStore.getState().selected).toBe("p-fresh#7");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(core.ptySpawn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId: "w-fresh" }),
+      );
+    });
+
+    it("says what it takes when the text is not a link, and stays open", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockRejectedValue({
+        code: "invalid_link",
+        message:
+          "Paste a link to an issue or a pull request, or owner/repository#number on GitHub.",
+      });
+      await open(user, "not a link");
+      expect(await screen.findByRole("alert")).toHaveTextContent("Paste a link to an issue");
+      expect(screen.getByRole("dialog", { name: "Start from a link" })).toBeInTheDocument();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 
   it("keeps the dialog open and shows why when creation fails", async () => {

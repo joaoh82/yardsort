@@ -1,8 +1,9 @@
 # Repositories
 
-_Proposed 2026-10-08, from [issue #91](https://github.com/joaoh82/yardsort/issues/91). Slices 1
-and 3 are built — see [slice 1](#slice-1-what-shipped) and [slice 3](#slice-3-what-shipped),
-which also say where they differ from the proposal below. Slice 2 is not._
+_Proposed 2026-10-08, from [issue #91](https://github.com/joaoh82/yardsort/issues/91). All three
+slices are built, in the order 1, 3, 2 — see [slice 1](#slice-1-what-shipped),
+[slice 3](#slice-3-what-shipped) and [slice 2](#slice-2-what-shipped), which also say where
+they differ from the proposal below._
 
 The issue asks for the forge to be the front door: a new piece of work starts from a repository,
 an issue or a pull request, not from a folder on disk. Most of that arrived the day after the
@@ -257,8 +258,8 @@ Each is one pull request with its docs, tests and changelog line, built in the o
   screenshot. `docs/guide/projects.md` rewritten for it.
 - **Slice 3 — any host.** ✅ See [slice 3](#slice-3-what-shipped). The validator, the renamed
   choice, the guide and the README line.
-- **Slice 2 — from a link.** `forge_resolve_link`, the palette entry, the two headers' field,
-  the clone-then-open path.
+- **Slice 2 — from a link.** ✅ See [slice 2](#slice-2-what-shipped). `forge_resolve_link`,
+  the palette entry, the two headers' field, the clone-then-open path.
 
 ## Slice 1: what shipped
 
@@ -318,6 +319,34 @@ Built 2026-10-08, as proposed, with these differences:
   section 25 gained a row — and listing those hosts' issues and pull requests, which stays
   deferred as decided.
 
+## Slice 2: what shipped
+
+Built 2026-10-08, as proposed, with these differences:
+
+- **A dialog, not a field in the headers.** _From a link…_ in the Tasks and Pull requests
+  headers and _Start from a link…_ in the palette all open one small dialog with the field,
+  rendered by the shell beside the palette; a field in each header would have been two copies
+  of the same thing and no room for its error line.
+- **The parser reads every forge's shape**, not GitHub's alone: `/issues/n` and `/pull/n`,
+  GitLab's `/-/issues/n` and `/-/merge_requests/n`, the Gitea family's `/pulls/n`, Bitbucket's
+  `/pull-requests/n`, with anything after the number dropped and subgroups kept. Which forge a
+  host is comes from the one rule `forge::parse_remote` already applies to remotes.
+- **`owner/repo#12` asks GitHub which it is** through `gh api repos/…/issues/12`, which answers
+  for both and carries a `pull_request` key on the one that is a pull request; a link that said
+  what it is keeps its word. Without `gh` the short form cannot be settled and says so; a full
+  address needs no `gh` at all.
+- **The view is opened only once the row is known to be there.** `followLink` loads the
+  project's list first and opens the view selected on the row; a closed issue, or one past the
+  cap, goes to the browser without a view opening on nothing — the rule `showTask` already
+  follows for a workspace's task badge.
+- **The clone-then-open path keeps the link in the dialog's preset**, not in the store: the Add
+  dialog became store-driven (`adding`, so the palette and the link dialog can open it with a
+  repository filled in), and the clone's continuation runs only while that dialog is still
+  mounted. A clone sent to the background finishes as any other and the link is let go — opening
+  a view under a user who has moved on was the thing to avoid.
+- **Not done**: a run against a real link from the window (the manual checklist gained two
+  rows); a link remembered across a restart, as decided.
+
 ## Not in this version, on purpose
 
 - Organisation repositories as a list. They are reached by search; a per-organisation list is
@@ -330,6 +359,7 @@ Built 2026-10-08, as proposed, with these differences:
 - Cloning with `gh repo clone`. It would add `upstream` for us, but it would also make the
   clone itself depend on `gh` and on its choice of protocol, and today's clone needs neither.
 - Remembering a pasted link across a restart, or a queue of links.
+- A field for a link in each view's header; one dialog serves both and the palette.
 
 ## Open questions
 

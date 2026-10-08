@@ -14,6 +14,13 @@ has the downloads and the full commit lists.
   `upstream`. Pasting a URL still works, with or without `gh`. See
   [Projects](docs/guide/projects.md#clone-a-repository).
 
+- **Start from a link.** **From a link…**, in the Tasks and Pull requests headers and in the
+  command palette, takes an issue's or a pull request's address — `owner/repository#12` works
+  too — and opens it in its view, selected, with **Delegate** or **Start workspace** the next
+  press. A repository that is not a project yet goes to the clone dialog with the URL filled
+  in, and the item opens when the clone is done. See
+  [Tasks](docs/guide/tasks.md#starting-from-a-link).
+
 - **Clone from any git host.** The same dialog takes an HTTPS or SSH clone URL from GitLab,
   Bitbucket, Gitea, Forgejo or a host of your own — subgroups included — where it used to refuse
   anything but GitHub. `owner/repository` on its own still means GitHub. Commits, pushes and

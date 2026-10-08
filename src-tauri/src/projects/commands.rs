@@ -5,10 +5,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tauri::AppHandle;
-use yardsort_core::repositories::{CloneProtocol, RemoteRepository, Repositories};
+use yardsort_core::repositories::{
+    parse_link, CloneProtocol, RemoteRepository, Repositories, ResolvedLink,
+};
 
 use super::{AddedProject, Project, Projects};
-use crate::error::IpcResult;
+use crate::error::{IpcError, IpcResult};
 use crate::forge::{self, ForgeError, Gh, Repo};
 use crate::git::Git;
 use crate::publish::commands::failed as forge_failed;
@@ -104,6 +106,50 @@ pub async fn project_clone(
     .await
 }
 
+/// Each project's push remote, read as a repository on a forge, for matching against the forge's
+/// answers. A project with no remote, or a folder that has gone, is simply not matched.
+fn project_repos(state: &AppState) -> IpcResult<Vec<(String, Repo)>> {
+    let git = Git::new(&state.env())?;
+    Ok(state
+        .store
+        .projects()?
+        .into_iter()
+        .filter_map(|project| {
+            let repo = forge::repo_at(&git, Path::new(&project.root_path))?;
+            Some((project.id, repo))
+        })
+        .collect())
+}
+
+/// A pasted link to an issue or a pull request, settled: which project has its repository,
+/// and whether it is an issue or a pull request — asked of GitHub for `owner/repo#12`, which
+/// does not say.
+#[tauri::command]
+#[specta::specta]
+pub async fn forge_resolve_link(app: AppHandle, text: String) -> IpcResult<ResolvedLink> {
+    blocking(app, move |state| {
+        let link = parse_link(&text).ok_or_else(|| {
+            IpcError::new(
+                "invalid_link",
+                "Paste a link to an issue or a pull request, or owner/repository#number on GitHub.",
+            )
+        })?;
+        let kind = match link.kind {
+            Some(_) => None,
+            None => {
+                let (gh, cwd, _) = gh_for_the_account(state)?;
+                Some(
+                    gh.link_kind(&cwd, &link.repo, link.number, Duration::from_secs(20))
+                        .map_err(forge_failed)?,
+                )
+            }
+        };
+        let projects = project_repos(state)?;
+        Ok(link.resolve(projects.iter().map(|(id, repo)| (id.as_str(), repo)), kind))
+    })
+    .await
+}
+
 /// `gh` is asked from the profile's folder: these questions name no repository, so no checkout
 /// is needed, and a project's folder may have gone.
 fn gh_for_the_account(state: &AppState) -> IpcResult<(Gh, PathBuf, CloneProtocol)> {
@@ -122,16 +168,7 @@ pub async fn forge_repositories(app: AppHandle) -> IpcResult<Repositories> {
     blocking(app, move |state| {
         let (gh, cwd, protocol) = gh_for_the_account(state)?;
         let mut found = gh.repositories(&cwd, protocol, 200, Duration::from_secs(20));
-        let git = Git::new(&state.env())?;
-        let projects: Vec<(String, Repo)> = state
-            .store
-            .projects()?
-            .into_iter()
-            .filter_map(|project| {
-                let repo = forge::repo_at(&git, Path::new(&project.root_path))?;
-                Some((project.id, repo))
-            })
-            .collect();
+        let projects = project_repos(state)?;
         found.mark_projects(projects.iter().map(|(id, repo)| (id.as_str(), repo)));
         Ok(found)
     })
@@ -151,16 +188,7 @@ pub async fn forge_search_repositories(
         let mut found = gh
             .search_repositories(&cwd, &text, protocol, Duration::from_secs(20))
             .map_err(forge_failed)?;
-        let git = Git::new(&state.env())?;
-        let projects: Vec<(String, Repo)> = state
-            .store
-            .projects()?
-            .into_iter()
-            .filter_map(|project| {
-                let repo = forge::repo_at(&git, Path::new(&project.root_path))?;
-                Some((project.id, repo))
-            })
-            .collect();
+        let projects = project_repos(state)?;
         let mut marked = Repositories {
             repositories: std::mem::take(&mut found),
             ..Default::default()

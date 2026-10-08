@@ -15,7 +15,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::forge::{ForgeError, ForgeResult, Gh, Repo};
+use crate::forge::{ForgeError, ForgeKind, ForgeResult, Gh, Repo};
 
 /// Which URL `git clone` is given: the one `gh` itself would use, by its `git_protocol` setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -464,7 +464,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn stand_in(dir: &Path, script: &str) -> Gh {
+    pub(super) fn stand_in(dir: &Path, script: &str) -> Gh {
         use std::os::unix::fs::PermissionsExt;
         let path = dir.join("gh");
         std::fs::write(&path, script).unwrap();
@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn asked(dir: &Path) -> Vec<String> {
+    pub(super) fn asked(dir: &Path) -> Vec<String> {
         std::fs::read_to_string(dir.join("asked"))
             .unwrap_or_default()
             .lines()
@@ -617,6 +617,319 @@ mod tests {
         assert_eq!(
             asked[1],
             "api -X GET search/repositories -f q=weather in:name -F per_page=20"
+        );
+    }
+}
+
+/// What a pasted link points at: an issue or a pull request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum LinkKind {
+    Issue,
+    PullRequest,
+}
+
+/// A link to an issue or a pull request, read but not yet looked up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub repo: Repo,
+    /// `None` for `owner/repo#12`, which does not say: the forge is asked.
+    pub kind: Option<LinkKind>,
+    pub number: u32,
+    /// The address as it was given, without its fragment; built for the shorthand.
+    pub url: String,
+}
+
+/// Read a link to an issue or a pull request. Takes GitHub's `owner/repo#12` shorthand and the
+/// web addresses of GitHub (`/issues/12`, `/pull/12`), GitLab (`/-/issues/12`,
+/// `/-/merge_requests/12`), the Gitea family (`/issues/12`, `/pulls/12`) and Bitbucket
+/// (`/issues/12`, `/pull-requests/12`), with anything after the number ignored.
+pub fn parse_link(text: &str) -> Option<Link> {
+    let text = text.trim();
+    if let Some((repository, number)) = text.split_once('#') {
+        if !text.contains("://") && !repository.contains(':') {
+            let number: u32 = number.parse().ok().filter(|n| *n > 0)?;
+            let (owner, name) = repository.split_once('/')?;
+            if owner.is_empty() || name.is_empty() || name.contains('/') {
+                return None;
+            }
+            return Some(Link {
+                repo: Repo {
+                    host: "github.com".to_owned(),
+                    owner: owner.to_owned(),
+                    name: name.to_owned(),
+                    kind: ForgeKind::GitHub,
+                },
+                kind: None,
+                number,
+                url: format!("https://github.com/{owner}/{name}/issues/{number}"),
+            });
+        }
+    }
+    let (scheme, rest) = text.split_once("://")?;
+    if scheme != "https" && scheme != "http" {
+        return None;
+    }
+    let rest = rest.split(['#', '?']).next()?;
+    let (host, path) = rest.split_once('/')?;
+    if host.is_empty() || host.contains('@') {
+        return None;
+    }
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    // …/<repository path>/[-/]<what>/<number>[/…]
+    let (index, kind) = segments.iter().enumerate().find_map(|(i, segment)| {
+        let kind = match *segment {
+            "issues" => LinkKind::Issue,
+            "pull" | "pulls" | "merge_requests" | "pull-requests" => LinkKind::PullRequest,
+            _ => return None,
+        };
+        segments
+            .get(i + 1)
+            .and_then(|n| n.parse::<u32>().ok())
+            .filter(|n| *n > 0)
+            .map(|_| (i, kind))
+    })?;
+    let number: u32 = segments[index + 1].parse().ok()?;
+    let mut repository = &segments[..index];
+    if repository.last() == Some(&"-") {
+        repository = &repository[..repository.len() - 1];
+    }
+    if repository.len() < 2 {
+        return None;
+    }
+    let (name, owner) = repository.split_last()?;
+    let kept = segments[..=index + 1].join("/");
+    Some(Link {
+        repo: Repo {
+            host: host.to_owned(),
+            owner: owner.join("/"),
+            name: (*name).to_owned(),
+            kind: kind_of_host(host),
+        },
+        kind: Some(kind),
+        number,
+        url: format!("{scheme}://{host}/{kept}"),
+    })
+}
+
+fn kind_of_host(host: &str) -> ForgeKind {
+    // The same rule as a remote URL's: one place decides what a host is.
+    crate::forge::parse_remote(&format!("https://{host}/o/r.git"))
+        .map(|repo| repo.kind)
+        .unwrap_or(ForgeKind::Unknown)
+}
+
+/// A link looked up: which project has the repository, if any, and what the link is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedLink {
+    pub repo: Repo,
+    pub kind: LinkKind,
+    pub number: u32,
+    /// The item's web address.
+    pub url: String,
+    /// What to clone, when the repository is not a project yet: HTTPS, on the link's host.
+    pub clone_url: String,
+    /// The project whose push remote is this repository.
+    pub project_id: Option<String>,
+}
+
+impl Link {
+    /// Settle the link against the projects. `kind` is what the forge said for a link that did
+    /// not say; `None` keeps an issue, which is what the shorthand's URL already points at.
+    pub fn resolve<'a>(
+        self,
+        projects: impl IntoIterator<Item = (&'a str, &'a Repo)>,
+        kind: Option<LinkKind>,
+    ) -> ResolvedLink {
+        let same = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+        let project_id = projects
+            .into_iter()
+            .find(|(_, repo)| {
+                same(&repo.host, &self.repo.host)
+                    && same(&repo.owner, &self.repo.owner)
+                    && same(&repo.name, &self.repo.name)
+            })
+            .map(|(id, _)| id.to_owned());
+        let kind = self.kind.or(kind).unwrap_or(LinkKind::Issue);
+        let url = if self.kind.is_none() && kind == LinkKind::PullRequest {
+            self.url.replace("/issues/", "/pull/")
+        } else {
+            self.url
+        };
+        ResolvedLink {
+            clone_url: format!(
+                "https://{}/{}/{}.git",
+                self.repo.host, self.repo.owner, self.repo.name
+            ),
+            repo: self.repo,
+            kind,
+            number: self.number,
+            url,
+            project_id,
+        }
+    }
+}
+
+impl Gh {
+    /// Whether `number` in the GitHub repository is an issue or a pull request: GitHub numbers
+    /// them together, and `repos/…/issues/<n>` answers for both, with a `pull_request` key on
+    /// the one that is a pull request.
+    pub fn link_kind(
+        &self,
+        cwd: &Path,
+        repo: &Repo,
+        number: u32,
+        limit: Duration,
+    ) -> ForgeResult<LinkKind> {
+        let path = format!("repos/{}/{}/issues/{number}", repo.owner, repo.name);
+        let mut args = vec!["api"];
+        if !repo.host.eq_ignore_ascii_case("github.com") {
+            args.extend(["--hostname", &repo.host]);
+        }
+        args.push(&path);
+        let out = self.run_within(cwd, &args, limit)?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&out).map_err(|e| ForgeError::Unreadable(e.to_string()))?;
+        Ok(
+            if parsed.get("pull_request").is_some_and(|v| !v.is_null()) {
+                LinkKind::PullRequest
+            } else {
+                LinkKind::Issue
+            },
+        )
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    fn link(text: &str) -> Link {
+        parse_link(text).unwrap_or_else(|| panic!("{text} should be a link"))
+    }
+
+    #[test]
+    fn every_forge_shape_is_read_and_the_rest_is_not() {
+        let l = link("https://github.com/joaoh82/yardsort/issues/91#issuecomment-1");
+        assert_eq!(
+            (l.repo.owner.as_str(), l.repo.name.as_str()),
+            ("joaoh82", "yardsort")
+        );
+        assert_eq!(l.kind, Some(LinkKind::Issue));
+        assert_eq!(l.number, 91);
+        assert_eq!(l.url, "https://github.com/joaoh82/yardsort/issues/91");
+        assert_eq!(l.repo.kind, ForgeKind::GitHub);
+
+        let l = link("https://github.com/o/r/pull/12/files?diff=split");
+        assert_eq!(l.kind, Some(LinkKind::PullRequest));
+        assert_eq!(l.url, "https://github.com/o/r/pull/12");
+
+        let l = link("https://gitlab.com/group/sub/repo/-/merge_requests/7");
+        assert_eq!(l.repo.owner, "group/sub");
+        assert_eq!(l.repo.name, "repo");
+        assert_eq!(l.kind, Some(LinkKind::PullRequest));
+        assert_eq!(l.repo.kind, ForgeKind::GitLab);
+        assert_eq!(
+            l.url,
+            "https://gitlab.com/group/sub/repo/-/merge_requests/7"
+        );
+        assert_eq!(
+            link("https://gitlab.com/group/repo/-/issues/3").kind,
+            Some(LinkKind::Issue)
+        );
+
+        let l = link("https://codeberg.org/o/r/pulls/5");
+        assert_eq!(l.kind, Some(LinkKind::PullRequest));
+        assert_eq!(l.repo.kind, ForgeKind::Unknown);
+        let l = link("https://bitbucket.org/o/r/pull-requests/9/");
+        assert_eq!(l.kind, Some(LinkKind::PullRequest));
+        assert_eq!(l.repo.kind, ForgeKind::Bitbucket);
+
+        let l = link(" o/r#12 ");
+        assert_eq!(l.kind, None);
+        assert_eq!(l.repo.host, "github.com");
+        assert_eq!(l.url, "https://github.com/o/r/issues/12");
+
+        for text in [
+            "",
+            "#12",
+            "o/r",
+            "o/r#0",
+            "o/r#abc",
+            "o/r/s#12",
+            "https://github.com/o/r",
+            "https://github.com/o/r/issues",
+            "https://github.com/o/r/issues/x",
+            "https://github.com/issues/12",
+            "ssh://git@github.com/o/r/issues/12",
+            "https://user@github.com/o/r/issues/12",
+            "git@github.com:o/r#12",
+        ] {
+            assert_eq!(parse_link(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_link_is_matched_to_a_project_by_its_remote_and_takes_the_forges_word_on_its_kind() {
+        let here = crate::forge::parse_remote("git@github.com:O/R.git").unwrap();
+        let elsewhere = crate::forge::parse_remote("https://gitlab.com/o/r.git").unwrap();
+        let projects = [("p1", &here), ("p2", &elsewhere)];
+
+        let resolved = link("o/r#12").resolve(projects, Some(LinkKind::PullRequest));
+        assert_eq!(resolved.project_id.as_deref(), Some("p1"));
+        assert_eq!(resolved.kind, LinkKind::PullRequest);
+        assert_eq!(resolved.url, "https://github.com/o/r/pull/12");
+        assert_eq!(resolved.clone_url, "https://github.com/o/r.git");
+
+        let resolved = link("o/r#12").resolve(projects, None);
+        assert_eq!(resolved.kind, LinkKind::Issue);
+        assert_eq!(resolved.url, "https://github.com/o/r/issues/12");
+
+        // A link that said what it is keeps its word over the forge's.
+        let resolved =
+            link("https://github.com/o/r/pull/3").resolve(projects, Some(LinkKind::Issue));
+        assert_eq!(resolved.kind, LinkKind::PullRequest);
+
+        let resolved = link("https://gitlab.com/o/r/-/issues/1").resolve(projects, None);
+        assert_eq!(resolved.project_id.as_deref(), Some("p2"));
+        let resolved = link("https://gitlab.com/other/r/-/issues/1").resolve(projects, None);
+        assert_eq!(resolved.project_id, None);
+        assert_eq!(resolved.clone_url, "https://gitlab.com/other/r.git");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_forge_is_asked_which_a_number_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().display();
+        let gh = super::tests::stand_in(
+            dir.path(),
+            &format!(
+                "#!/bin/sh\necho \"$*\" >> '{here}/asked'\ncase \"$*\" in\n\
+                 *issues/12) echo '{{\"number\":12,\"pull_request\":{{\"url\":\"u\"}}}}' ;;\n\
+                 *) echo '{{\"number\":13}}' ;;\nesac\n"
+            ),
+        );
+        let repo = crate::forge::parse_remote("https://github.com/o/r.git").unwrap();
+        assert_eq!(
+            gh.link_kind(dir.path(), &repo, 12, Duration::from_secs(10))
+                .unwrap(),
+            LinkKind::PullRequest
+        );
+        assert_eq!(
+            gh.link_kind(dir.path(), &repo, 13, Duration::from_secs(10))
+                .unwrap(),
+            LinkKind::Issue
+        );
+        let enterprise = crate::forge::parse_remote("https://github.example.com/o/r.git").unwrap();
+        gh.link_kind(dir.path(), &enterprise, 1, Duration::from_secs(10))
+            .unwrap();
+        let asked = super::tests::asked(dir.path());
+        assert_eq!(asked[0], "api repos/o/r/issues/12");
+        assert_eq!(
+            asked[2],
+            "api --hostname github.example.com repos/o/r/issues/1"
         );
     }
 }

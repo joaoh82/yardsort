@@ -20,6 +20,7 @@ export const COMMANDS = [
   { id: "usage", label: "Usage: machine resources and tokens", key: null },
   { id: "pullRequests", label: "Pull requests", key: null },
   { id: "tasks", label: "Tasks", key: null },
+  { id: "startFromLink", label: "Start from a link…", key: null },
   { id: "tour", label: "Take the welcome tour", key: null },
 ] as const;
 export type CommandId = (typeof COMMANDS)[number]["id"];

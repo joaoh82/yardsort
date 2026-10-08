@@ -122,11 +122,15 @@ import {
   type PrFacts,
   type RemoteRepository,
   type Repositories,
+  type ResolvedLink,
+  type LinkKind,
 } from "./bindings";
 
 export type {
   RemoteRepository,
   Repositories,
+  ResolvedLink,
+  LinkKind,
   Described,
   WorkflowItem,
   WorkflowCheck,
@@ -322,6 +326,9 @@ export const ipc = {
   forgeRepositories: () => unwrap(commands.forgeRepositories()),
   /** Repositories anywhere on the forge whose name contains `text`, the twenty it ranks first. */
   forgeSearchRepositories: (text: string) => unwrap(commands.forgeSearchRepositories(text)),
+  /** A pasted link to an issue or a pull request, settled: its repository's project if any,
+   *  and which of the two it is. Fails with `invalid_link` for anything else. */
+  forgeResolveLink: (text: string) => unwrap(commands.forgeResolveLink(text)),
   projectCreate: (name: string, parent: string) => unwrap(commands.projectCreate(name, parent)),
   /** Take a project off the list. With `keepHistory` it comes back whole when opened again. */
   projectRemove: (id: string, keepHistory: boolean) =>

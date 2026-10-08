@@ -30,6 +30,12 @@ export const commands = {
 	 */
 	forgeSearchRepositories: (text: string) => typedError<RemoteRepository[], IpcError>(__TAURI_INVOKE("forge_search_repositories", { text })),
 	/**
+	 *  A pasted link to an issue or a pull request, settled: which project has its repository,
+	 *  and whether it is an issue or a pull request — asked of GitHub for `owner/repo#12`, which
+	 *  does not say.
+	 */
+	forgeResolveLink: (text: string) => typedError<ResolvedLink, IpcError>(__TAURI_INVOKE("forge_resolve_link", { text })),
+	/**
 	 *  Take a project off the list. With `keep_history` its workspaces and their conversations
 	 *  wait for the folder to be opened again. Files on disk are never touched.
 	 */
@@ -1233,6 +1239,9 @@ export type LinePlace = {
 	startLine: number | null,
 };
 
+/**  What a pasted link points at: an issue or a pull request. */
+export type LinkKind = "issue" | "pullRequest";
+
 export type Load = {
 	/**  Percent of the whole machine: every core counted, so it never passes 100. */
 	cpu: number | null,
@@ -1808,6 +1817,19 @@ export type Repositories = {
 	/**  Why the reading stopped short, when it did. */
 	problem: string | null,
 	loggedOut: boolean,
+};
+
+/**  A link looked up: which project has the repository, if any, and what the link is. */
+export type ResolvedLink = {
+	repo: Repo,
+	kind: LinkKind,
+	number: number,
+	/**  The item's web address. */
+	url: string,
+	/**  What to clone, when the repository is not a project yet: HTTPS, on the link's host. */
+	cloneUrl: string,
+	/**  The project whose push remote is this repository. */
+	projectId: string | null,
 };
 
 export type Review = {

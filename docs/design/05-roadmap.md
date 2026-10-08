@@ -806,7 +806,7 @@ logged out, or on another forge, the view and `ys` say which and nothing else ch
 
 Proposed in [24-repositories](24-repositories.md) on 2026-10-08, from
 [issue #91](https://github.com/joaoh82/yardsort/issues/91), which asked for the forge to be the
-front door. Slices 1 and 3 are built. Delegating a task and starting a workspace from a pull request had shipped the day
+front door. All three slices are built; the screenshot and the hands-on pass remain. Delegating a task and starting a workspace from a pull request had shipped the day
 after it was opened; what remained is adding the project without typing a URL or thinking about
 a folder.
 
@@ -831,7 +831,10 @@ a folder.
 - [x] Slice 3: any host — the validator, the renamed choice. A bare `host/path` stays refused
       for any host but GitHub, since the shorthand has to keep meaning GitHub. Recorded in
       [24 § slice 3](24-repositories.md#slice-3-what-shipped).
-- [ ] Slice 2: from a link — the palette entry, the field in the two views, clone then open.
+- [x] Slice 2: from a link — the palette entry, **From a link…** in the two views, clone then
+      open. The parser reads GitLab's, Gitea's and Bitbucket's shapes too; `owner/repo#12`
+      asks GitHub which it is. The view opens only once the row is known to be there. Recorded
+      in [24 § slice 2](24-repositories.md#slice-2-what-shipped).
 
 _Exit:_ on all three platforms, a repository is picked from the list and cloned without a folder
 being chosen; one already added is selected instead; a GitLab URL clones; a pasted issue link

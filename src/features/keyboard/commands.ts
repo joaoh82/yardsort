@@ -92,6 +92,9 @@ export function runCommand(id: CommandId) {
     case "tasks":
       projects.openTasks(true);
       break;
+    case "startFromLink":
+      projects.openLink(true);
+      break;
     case "tour":
       layout.setTourOpen(true);
       break;

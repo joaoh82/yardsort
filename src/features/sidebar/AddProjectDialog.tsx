@@ -1,14 +1,27 @@
 import { useModalFocus } from "@/lib/useModalFocus";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { native } from "@/lib/native";
-import { errorMessage, type RemoteRepository } from "@/lib/ipc";
+import { errorMessage, type RemoteRepository, type ResolvedLink } from "@/lib/ipc";
 import { age } from "@/features/pull-requests/rows";
 import { useProjectsStore, type RemoteRepositories } from "@/stores/projects";
 import { enterWorkspace, openProjectFromDisk } from "./actions";
+import { followLink } from "./links";
+
+/** What the dialog opens on: the clone step with `repository` filled in, and the issue or pull
+ *  request to go on to once the clone is done. */
+export type AddProjectPreset = { repository?: string; link?: ResolvedLink };
 
 /** Add an existing folder, create a repository, or clone one from the forge. */
-export function AddProjectDialog({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<"choose" | "create" | "clone">("choose");
+export function AddProjectDialog({
+  preset = {},
+  onClose,
+}: {
+  preset?: AddProjectPreset;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"choose" | "create" | "clone">(
+    preset.repository ? "clone" : "choose",
+  );
   const [busy, setBusy] = useState(false);
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -67,6 +80,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
           </div>
         ) : mode === "clone" ? (
           <CloneForm
+            preset={preset}
             busy={busy}
             setBusy={setBusy}
             onBack={() => setMode("choose")}
@@ -319,13 +333,19 @@ const rowKey = (row: Row) =>
 /** Typed text that is a place to clone from rather than a word to look for. */
 const looksLikeRepository = (text: string) => /^[^\s/]+\/[^\s/]+$/.test(text) || /[:/]/.test(text);
 
-function CloneForm({ onBack, onDone, busy, setBusy }: FormProps) {
+function CloneForm({
+  preset,
+  onBack,
+  onDone,
+  busy,
+  setBusy,
+}: FormProps & { preset: AddProjectPreset }) {
   const lastParentDir = useProjectsStore((s) => s.lastParentDir);
   const error = useProjectsStore((s) => s.error);
   const repositories = useProjectsStore((s) => s.repositories);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(preset.repository ?? "");
   const [chosen, setChosen] = useState<RemoteRepository | null>(null);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(suggestedName(preset.repository ?? ""));
   const [nameEdited, setNameEdited] = useState(false);
   const [parent, setParent] = useState(lastParentDir ?? "");
   const [changingLocation, setChangingLocation] = useState(!lastParentDir);
@@ -420,6 +440,12 @@ function CloneForm({ onBack, onDone, busy, setBusy }: FormProps) {
     if (!mounted.current) return;
     setBusy(false);
     if (!created) return;
+    if (preset.link) {
+      // The clone was the way to the issue or pull request, not the destination.
+      onDone();
+      await followLink(preset.link, created.project.id);
+      return;
+    }
     const selected = useProjectsStore.getState().selectedWorkspaceId;
     if (selected) enterWorkspace(selected);
     onDone();

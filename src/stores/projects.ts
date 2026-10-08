@@ -10,6 +10,7 @@ import {
   type TaskRef,
   type Project,
   type RemoteRepository,
+  type ResolvedLink,
   type Workspace,
   type SessionInfo,
 } from "@/lib/ipc";
@@ -82,6 +83,11 @@ interface ProjectsState {
   pendingClones: { id: number; name: string }[];
   /** The repositories offered by the clone dialog; read when it opens, kept while the app runs. */
   repositories: RemoteRepositories;
+  /** The Add-a-project dialog is open. With `repository`, on the clone step with that filled
+   *  in; with `link`, the item to open once the clone is done, if the dialog is still open. */
+  adding: { repository?: string; link?: ResolvedLink } | null;
+  /** The Start-from-a-link dialog is open. */
+  linkOpen: boolean;
   error: string | null;
   notice: string | null;
 
@@ -97,7 +103,10 @@ interface ProjectsState {
     parent: string,
     select?: () => boolean,
     upstream?: string | null,
-  ) => Promise<boolean>;
+  ) => Promise<AddedProject | null>;
+  openAddProject: (preset?: { repository?: string; link?: ResolvedLink }) => void;
+  closeAddProject: () => void;
+  openLink: (open: boolean) => void;
   /** Read the account's repositories for the clone dialog; again only with `refresh`. */
   loadRepositories: (refresh?: boolean) => Promise<void>;
   /** Ask the forge for repositories named like `text`. Throws with `gh`'s reason. */
@@ -211,6 +220,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     collapsed: [],
     lastParentDir: null,
     repositories: noRepositories,
+    adding: null,
+    linkOpen: false,
     pendingClones: [],
     error: null,
     notice: null,
@@ -264,15 +275,27 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           ...(!foreground && { notice: `${added.project.name} cloned.` }),
         });
         save(KEYS.lastParent, parent);
-        return true;
+        return added;
       } catch (error) {
         set({ error: `${request.name}: ${errorMessage(error)}` });
-        return false;
+        return null;
       } finally {
         set((state) => ({
           pendingClones: state.pendingClones.filter((pending) => pending.id !== request.id),
         }));
       }
+    },
+
+    openAddProject(preset = {}) {
+      set({ adding: preset, linkOpen: false });
+    },
+
+    closeAddProject() {
+      set({ adding: null });
+    },
+
+    openLink(open) {
+      set({ linkOpen: open });
     },
 
     async loadRepositories(refresh = false) {

@@ -26,7 +26,7 @@ export function Sidebar() {
   const pendingClones = useProjectsStore((s) => s.pendingClones);
   const notice = useProjectsStore((s) => s.notice);
   const dismiss = useProjectsStore((s) => s.dismiss);
-  const [adding, setAdding] = useState(false);
+  const adding = useProjectsStore((s) => s.adding);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const searchButton = useRef<HTMLButtonElement>(null);
@@ -118,7 +118,7 @@ export function Sidebar() {
             type="button"
             aria-label="Add project"
             title={`Add project (open a folder: ${openKey})`}
-            onClick={() => setAdding(true)}
+            onClick={() => useProjectsStore.getState().openAddProject()}
             className="size-6 rounded text-ink-muted hover:bg-raised hover:text-ink"
           >
             +
@@ -131,7 +131,7 @@ export function Sidebar() {
           <p>No projects yet.</p>
           <button
             type="button"
-            onClick={() => setAdding(true)}
+            onClick={() => useProjectsStore.getState().openAddProject()}
             className="mt-2 rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink"
           >
             Add a project
@@ -180,7 +180,12 @@ export function Sidebar() {
         <UsageButton />
         <UpdatePill />
       </div>
-      {adding && <AddProjectDialog onClose={() => setAdding(false)} />}
+      {adding && (
+        <AddProjectDialog
+          preset={adding}
+          onClose={() => useProjectsStore.getState().closeAddProject()}
+        />
+      )}
     </aside>
   );
 }

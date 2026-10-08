@@ -66,6 +66,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             projects::commands::project_clone,
             projects::commands::forge_repositories,
             projects::commands::forge_search_repositories,
+            projects::commands::forge_resolve_link,
             projects::commands::project_remove,
             projects::commands::projects_reorder,
             projects::commands::ui_state_load,
