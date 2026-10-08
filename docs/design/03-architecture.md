@@ -610,7 +610,14 @@ and the commit confirmation still stands between it and git.
 
 `Projects::clone_github` validates GitHub HTTPS/SSH URLs or owner/repository shorthand,
 reserves a new destination directory, clones with the existing git environment, and registers
-the repository only after success. A failed clone removes only an empty directory; files left
+the repository only after success. With an `upstream` — a fork's parent, from the list below —
+it adds that as a second remote and fetches it, and a fetch that fails does not fail the clone.
+The list the dialog offers is `repositories.rs` in the core: the account's own repositories and
+collaborations through one `gh api graphql` query, paged, capped at 200, never an error once
+`gh` is there; a forge search through `gh api search/repositories` with the text as a parameter;
+and `Repositories::mark_projects`, which says which rows are already projects by matching each
+project's push remote (`forge::repo_at`) on host, owner and name. Organisation repositories are
+not listed, by measurement ([24](24-repositories.md#what-was-measured)). A failed clone removes only an empty directory; files left
 behind are reported and preserved. Cloning runs off the UI thread without holding the
 worktree reconciliation lock. The frontend tracks pending command requests for the sidebar;
 closing the clone dialog leaves the command running. Completion registers the project but

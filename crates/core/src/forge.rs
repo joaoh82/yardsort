@@ -628,7 +628,12 @@ impl Gh {
 
     /// As [`Gh::run`], but `gh` gets `limit` to answer and is stopped after that, so nothing
     /// waiting on it waits for ever on a network that went away.
-    fn run_within(&self, cwd: &Path, args: &[&str], limit: Duration) -> ForgeResult<String> {
+    pub(crate) fn run_within(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        limit: Duration,
+    ) -> ForgeResult<String> {
         use std::io::Read;
         let mut child = self
             .command(cwd, args)

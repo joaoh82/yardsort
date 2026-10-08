@@ -170,18 +170,28 @@ impl Projects<'_> {
         self.add(&normalize(&target), false)
     }
 
-    /// Clone a GitHub repository into a new folder, then register its local workspace.
+    /// Clone a GitHub repository into a new folder, then register its local workspace. With
+    /// `upstream` — a fork's parent — that repository becomes the clone's `upstream` remote,
+    /// which is where a pull request from the fork is measured against.
     pub fn clone_github(
         &self,
         repository: &str,
         name: &str,
         parent: &Path,
+        upstream: Option<&str>,
     ) -> IpcResult<AddedProject> {
         let url = github_url(repository)?;
-        self.clone_repository(&url, name, parent)
+        let upstream = upstream.map(github_url).transpose()?;
+        self.clone_repository(&url, name, parent, upstream.as_deref())
     }
 
-    fn clone_repository(&self, url: &str, name: &str, parent: &Path) -> IpcResult<AddedProject> {
+    fn clone_repository(
+        &self,
+        url: &str,
+        name: &str,
+        parent: &Path,
+        upstream: Option<&str>,
+    ) -> IpcResult<AddedProject> {
         let name = validate_name(name)?;
         if !parent.is_dir() {
             return Err(IpcError::new(
@@ -212,6 +222,19 @@ impl Projects<'_> {
                 "Could not clone the repository: {error}. Check the URL and your git credentials.{}",
                 if retained { format!(" Files were kept at {}; choose another name or inspect that folder before retrying.", target.display()) } else { String::new() }
             )));
+        }
+        if let Some(upstream) = upstream {
+            // The clone is good whatever happens here: the parent's branches are a convenience
+            // for later, and fetching them can wait for a network that is there.
+            self.git
+                .run(&target, &["remote", "add", "upstream", "--", upstream])
+                .map_err(|error| {
+                    IpcError::new(
+                        "clone_failed",
+                        format!("Could not add the upstream remote: {error}"),
+                    )
+                })?;
+            let _ = self.git.run(&target, &["fetch", "upstream"]);
         }
         self.add(&target, false)
     }
@@ -496,7 +519,7 @@ mod tests {
         fx.git.initial_commit(&source).unwrap();
         let added = fx
             .projects()
-            .clone_repository(&source.to_string_lossy(), "my clone", &fx.path())
+            .clone_repository(&source.to_string_lossy(), "my clone", &fx.path(), None)
             .unwrap();
         let target = PathBuf::from(&added.project.root_path);
         assert_eq!(
@@ -513,10 +536,74 @@ mod tests {
         assert_eq!(fx.projects().list().unwrap().len(), 1);
         let error = fx
             .projects()
-            .clone_repository(&source.to_string_lossy(), "my clone", &fx.path())
+            .clone_repository(&source.to_string_lossy(), "my clone", &fx.path(), None)
             .unwrap_err();
         assert_eq!(error.code, "already_exists");
         assert!(fx.git.has_commits(&target).unwrap());
+    }
+
+    #[test]
+    fn a_fork_gets_its_parent_as_upstream_and_its_branches_fetched() {
+        let fx = Fixture::new();
+        let parent = fx.path().join("parent");
+        std::fs::create_dir(&parent).unwrap();
+        fx.git.init(&parent).unwrap();
+        fx.git.initial_commit(&parent).unwrap();
+        fx.git
+            .run(&parent, &["branch", "only-upstream-has-this"])
+            .unwrap();
+        let fork = fx.path().join("fork");
+        fx.git
+            .run(
+                &fx.path(),
+                &[
+                    "clone",
+                    "--",
+                    &parent.to_string_lossy(),
+                    &fork.to_string_lossy(),
+                ],
+            )
+            .unwrap();
+        let added = fx
+            .projects()
+            .clone_repository(
+                &fork.to_string_lossy(),
+                "mine",
+                &fx.path(),
+                Some(&parent.to_string_lossy()),
+            )
+            .unwrap();
+        let target = PathBuf::from(&added.project.root_path);
+        assert_eq!(
+            fx.git
+                .run(&target, &["remote", "get-url", "origin"])
+                .unwrap(),
+            fork.to_string_lossy()
+        );
+        assert_eq!(
+            fx.git
+                .run(&target, &["remote", "get-url", "upstream"])
+                .unwrap(),
+            parent.to_string_lossy()
+        );
+        assert!(fx
+            .git
+            .run(
+                &target,
+                &["rev-parse", "--verify", "upstream/only-upstream-has-this"]
+            )
+            .is_ok());
+        // Not a fork, nothing added.
+        let plain = fx
+            .projects()
+            .clone_repository(&parent.to_string_lossy(), "plain", &fx.path(), None)
+            .unwrap();
+        assert_eq!(
+            fx.git
+                .remotes(&PathBuf::from(&plain.project.root_path))
+                .unwrap(),
+            ["origin"]
+        );
     }
 
     #[test]
@@ -525,7 +612,7 @@ mod tests {
         let source = fx.path().join("missing");
         assert_eq!(
             fx.projects()
-                .clone_repository(&source.to_string_lossy(), "failed", &fx.path())
+                .clone_repository(&source.to_string_lossy(), "failed", &fx.path(), None)
                 .unwrap_err()
                 .code,
             "clone_failed"
@@ -536,7 +623,7 @@ mod tests {
         std::fs::write(fx.path().join("taken/keep"), "user work").unwrap();
         assert_eq!(
             fx.projects()
-                .clone_repository(&source.to_string_lossy(), "taken", &fx.path())
+                .clone_repository(&source.to_string_lossy(), "taken", &fx.path(), None)
                 .unwrap_err()
                 .code,
             "already_exists"
@@ -547,7 +634,7 @@ mod tests {
         );
         assert_eq!(
             fx.projects()
-                .clone_repository(&source.to_string_lossy(), "../escape", &fx.path())
+                .clone_repository(&source.to_string_lossy(), "../escape", &fx.path(), None)
                 .unwrap_err()
                 .code,
             "invalid_name"

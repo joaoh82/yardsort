@@ -1,0 +1,48 @@
+{
+  "data": {
+    "viewer": {
+      "login": "o",
+      "repositories": {
+        "totalCount": 6,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAxNi0xMS0yN1QxMzozODo0MFrOBHa0OA=="
+        },
+        "nodes": [
+          {
+            "nameWithOwner": "o/weather-api",
+            "description": null,
+            "url": "https://github.com/o/weather-api",
+            "sshUrl": "git@github.com:o/weather-api.git",
+            "isPrivate": false,
+            "isFork": false,
+            "isArchived": false,
+            "hasIssuesEnabled": true,
+            "pushedAt": "2026-09-19T11:47:41Z",
+            "primaryLanguage": {
+              "name": "Go"
+            },
+            "parent": null
+          },
+          {
+            "nameWithOwner": "o/pkgs",
+            "description": "Package manifests",
+            "url": "https://github.com/o/pkgs",
+            "sshUrl": "git@github.com:o/pkgs.git",
+            "isPrivate": false,
+            "isFork": true,
+            "isArchived": false,
+            "hasIssuesEnabled": true,
+            "pushedAt": "2016-11-27T13:38:40Z",
+            "primaryLanguage": null,
+            "parent": {
+              "nameWithOwner": "upstream/pkgs",
+              "url": "https://github.com/upstream/pkgs",
+              "sshUrl": "git@github.com:upstream/pkgs.git"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -243,3 +243,19 @@ From the design pass in [23-tasks](23-tasks.md).
     a new kind without a migration; look in slice 3. Looked at in slice 3: it does — a kind is
     free text — and it was left out all the same, as a change of its own: kinds, payloads, the
     timeline's wording, `ys activity list` and the activity guide. Still open.
+
+## Repositories
+
+From the design pass in [24-repositories](24-repositories.md).
+
+33. **Should organisation repositories be listed per organisation, rather than reached by
+    search?** The list is your own repositories and your collaborations; an organisation
+    member's can number in the tens of thousands and take 5–8 s a page, so they are searched.
+    A picker that opens an organisation and lists _its_ repositories, most recently pushed
+    first, would serve someone whose work is all in one organisation of ordinary size. Lean:
+    hear whether the search row is enough first; the query is one more field on the same
+    answer when it is not.
+34. **Should a GitHub Enterprise host be offered in the list?** `gh` can be logged into several
+    hosts and the pull requests view already passes `--hostname` for a project whose remote is
+    not github.com. The list has no project to read a host from. Lean: github.com only until
+    someone with an Enterprise host asks; a pasted URL from such a host clones already.

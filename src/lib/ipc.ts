@@ -120,9 +120,13 @@ import {
   type Problem,
   type Source,
   type PrFacts,
+  type RemoteRepository,
+  type Repositories,
 } from "./bindings";
 
 export type {
+  RemoteRepository,
+  Repositories,
   Described,
   WorkflowItem,
   WorkflowCheck,
@@ -310,8 +314,14 @@ export const ipc = {
   projectsList: () => unwrap(commands.projectsList()),
   /** Rejects with code `not_a_git_repo` unless `initGit` is set. */
   projectOpen: (path: string, initGit = false) => unwrap(commands.projectOpen(path, initGit)),
-  projectClone: (repository: string, name: string, parent: string) =>
-    unwrap(commands.projectClone(repository, name, parent)),
+  /** `upstream` is a fork's parent, which becomes the clone's `upstream` remote. */
+  projectClone: (repository: string, name: string, parent: string, upstream: string | null) =>
+    unwrap(commands.projectClone(repository, name, parent, upstream)),
+  /** The repositories the `gh` account owns or collaborates on, with the ones that are already
+   *  projects marked. Fails only without `gh`; a page that fails is said in `problem`. */
+  forgeRepositories: () => unwrap(commands.forgeRepositories()),
+  /** Repositories anywhere on the forge whose name contains `text`, the twenty it ranks first. */
+  forgeSearchRepositories: (text: string) => unwrap(commands.forgeSearchRepositories(text)),
   projectCreate: (name: string, parent: string) => unwrap(commands.projectCreate(name, parent)),
   /** Take a project off the list. With `keepHistory` it comes back whole when opened again. */
   projectRemove: (id: string, keepHistory: boolean) =>

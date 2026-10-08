@@ -39,7 +39,8 @@ commit because a worktree has to branch from something.
 ### Create a new project
 
 Give it a **name** and a **location**. Yardsort creates `<location>/<name>`, runs `git init`
-and makes an empty first commit. The location is remembered for next time.
+and makes an empty first commit. The location is remembered for next time and shown as a line;
+**Change…** opens the field again.
 
 The name becomes a folder name, so characters that are illegal on some system (`/ \ : * ? " < > |`)
 are refused, and an existing folder is never touched. If any step fails, the half-made folder is
@@ -47,16 +48,43 @@ removed again.
 
 ### Clone a GitHub repository
 
-Choose **Clone a GitHub repository** and enter an HTTPS or SSH clone URL, or
-`owner/repository`. Links such as `github.com/owner/repository`, `www.github.com/…`, and
-`http://github.com/…` are accepted and normalized to HTTPS. **Name** starts with the repository's
-name, without `.git`, and follows URL edits until you edit the name yourself. Choose a
-**Location** with **Browse…** or type it in.
+Choose **Clone a GitHub repository**. Under the **Repository** field is a list of the
+repositories your GitHub account owns or collaborates on, most recently pushed first, each with
+its language, when it was last pushed to, and whether it is private, archived or a fork of
+something. The list comes from the [GitHub CLI](https://cli.github.com), logged in as you;
+Yardsort holds no credential of its own.
+
+Type to narrow the list, by name or by description. **↑** and **↓** move through it, **Enter**
+picks the highlighted row, and so does a click. Picking a repository fills in the field and the
+**Name**. The last row, once you have typed three characters, is **Search GitHub for “…”** — it
+asks GitHub for repositories named like that, anywhere: your organisations', other people's
+public ones, up to the twenty GitHub ranks first. Nothing is sent until you press it.
+**Your repositories** brings your own list back.
+
+The list holds the 200 you pushed to most recently and says when you have more; search finds
+the rest. Organisation repositories are not in the list — an account in a large organisation
+can reach tens of thousands — and are found by searching.
+
+A repository that is already one of your projects says **Already added**. Picking it turns the
+button into **Go to project**, which selects that project instead of cloning it twice. The match
+is by the project's push remote, not by its folder's name.
+
+You can also paste an HTTPS or SSH clone URL, or type `owner/repository`, with or without a
+list. Links such as `github.com/owner/repository`, `www.github.com/…`, and `http://github.com/…`
+are accepted and normalized to HTTPS. **Name** starts with the repository's name, without
+`.git`, and follows the field until you edit the name yourself.
+
+**Location** is where the last clone or new project went, shown as a line; press **Change…** to
+choose another folder with **Browse…** or by typing it in. The first time, with nothing
+remembered yet, the field is shown directly.
 
 **Clone project** downloads the repository into `<location>/<name>`, adds it to the sidebar,
 and selects its **local** workspace if the dialog is still open. Its history and `origin`
 remote are preserved; the location is remembered for next time. Existing folders, including
-empty ones, are refused.
+empty ones, are refused. A repository picked from the list is cloned over HTTPS or SSH as your
+`gh config get git_protocol` says; a pasted URL is cloned as pasted. A fork picked from the list
+gets its parent as a second remote, `upstream`, and fetches it — the dialog says so under the
+field. That is where a pull request from the fork is measured against.
 
 Cloning uses your installed git and its existing credentials. For private repositories, set up
 git access before cloning. While git runs, choose **Run in background**, press **Escape**, or
@@ -68,6 +96,10 @@ Errors appear in the dialog, or in the sidebar when it is closed. Correct the UR
 or destination and retry (open the clone dialog again if you closed it). If a failed clone
 leaves files behind, the error names the folder; inspect it or choose another name before
 retrying. Yardsort does not recursively delete that folder.
+
+Without `gh`, or with nobody logged in to it, there is no list: the dialog says which, and the
+field still takes a URL. If reading the list stops short — a page GitHub did not answer — what
+arrived is shown with the reason and **Retry**.
 
 ## The `local` workspace
 

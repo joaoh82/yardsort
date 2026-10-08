@@ -50,3 +50,20 @@ issue-view-hidden.json
 
 Replaced in all of them, as above: logins, titles, descriptions, comments and URLs. Label names
 and colours are as recorded.
+
+The repositories were recorded on 2026-10-08, against the recording account itself.
+
+repos-page-1.json, repos-page-2.json
+    Two pages of repositories::REPOSITORIES_QUERY through `gh api graphql`, the second asked
+    for with the first's cursor. Cut down to four and two repositories out of 100 and 100,
+    `totalCount` set to 6 to match, and `hasNextPage` on the second set to false. Kept, one of
+    each: a repository with no description and no language, a fork with its parent, and an
+    archived one — the last made by hand, since the account has none that is public.
+
+repos-search.json
+    `gh api search/repositories?q=<text>+in:name&per_page=5`, cut down to the eleven fields
+    repositories::search_results reads out of the 83 each item carries; one of the two items
+    made private, with issues switched off, by hand.
+
+Replaced in all of them, as above: owners, names, descriptions and URLs. Only public
+repositories were kept.

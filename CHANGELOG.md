@@ -3,6 +3,17 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Clone a repository by picking it from a list.** **Clone a GitHub repository** now lists the
+  repositories your `gh` account owns or collaborates on, most recently pushed first; type to
+  narrow it, pick one, and **Clone project** — the location is remembered from last time and
+  shown as a line, so the usual path asks nothing about folders. **Search GitHub for “…”** finds
+  the rest, including your organisations', when you press it. A repository that is already a
+  project says so and **Go to project** selects it instead. A fork gets its parent as
+  `upstream`. Pasting a URL still works, with or without `gh`. See
+  [Projects](docs/guide/projects.md#clone-a-github-repository).
+
 ## 0.19.1
 
 - **A merged pull request now counts as _kept_ without you opening Outcomes.** Attempts are
