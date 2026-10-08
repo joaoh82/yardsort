@@ -170,18 +170,19 @@ impl Projects<'_> {
         self.add(&normalize(&target), false)
     }
 
-    /// Clone a GitHub repository into a new folder, then register its local workspace. With
-    /// `upstream` — a fork's parent — that repository becomes the clone's `upstream` remote,
-    /// which is where a pull request from the fork is measured against.
-    pub fn clone_github(
+    /// Clone a repository — GitHub by `owner/repository`, any host by URL — into a new folder,
+    /// then register its local workspace. With `upstream` — a fork's parent — that repository
+    /// becomes the clone's `upstream` remote, which is where a pull request from the fork is
+    /// measured against.
+    pub fn clone_from(
         &self,
         repository: &str,
         name: &str,
         parent: &Path,
         upstream: Option<&str>,
     ) -> IpcResult<AddedProject> {
-        let url = github_url(repository)?;
-        let upstream = upstream.map(github_url).transpose()?;
+        let url = clone_url(repository)?;
+        let upstream = upstream.map(clone_url).transpose()?;
         self.clone_repository(&url, name, parent, upstream.as_deref())
     }
 
@@ -357,8 +358,99 @@ impl Projects<'_> {
 }
 
 /// Accept GitHub's HTTPS/SSH clone URLs or the convenient owner/repository form.
-fn github_url(repository: &str) -> IpcResult<String> {
+/// The URL `git clone` is given, from what the user typed or picked.
+///
+/// `owner/repository` and every GitHub spelling mean GitHub, normalized as before. Any other
+/// host takes an HTTPS URL, an `ssh://` URL or git's `user@host:path` form, with as many path
+/// segments as the forge wants (GitLab subgroups). Nothing else: no local path, no `file://`
+/// or `git://`, no credentials in an HTTPS URL, nothing that could be read as an option.
+fn clone_url(repository: &str) -> IpcResult<String> {
     let repository = repository.trim();
+    let invalid = || {
+        IpcError::new(
+            "invalid_repository",
+            "Enter a repository as owner/repository on GitHub, an HTTPS clone URL, or an SSH clone URL.",
+        )
+    };
+    if let Some(url) = github_url(repository) {
+        return url;
+    }
+    let (prefix, path) = if let Some((scheme, rest)) = repository.split_once("://") {
+        // scheme://[user@]host[:port]/path
+        let (authority, path) = rest.split_once('/').ok_or_else(invalid)?;
+        let (user, host_port) = match authority.split_once('@') {
+            Some((user, host_port)) => (Some(user), host_port),
+            None => (None, authority),
+        };
+        match (scheme, user) {
+            ("https", None) => {}
+            ("ssh", None | Some(_)) => {}
+            _ => return Err(invalid()),
+        }
+        let (host, port) = match host_port.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (host_port, None),
+        };
+        if !valid_host(host)
+            || !port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+            || !user.is_none_or(valid_user)
+        {
+            return Err(invalid());
+        }
+        (format!("{scheme}://{authority}/"), path)
+    } else if let Some((authority, path)) = repository.split_once(':') {
+        // [user@]host:path — git's scp-like form. A Windows path (`C:\…`) has a one-letter host
+        // and a path that is not one; both fall out below.
+        let host = authority
+            .split_once('@')
+            .map_or(authority, |(_, host)| host);
+        let user = authority.split_once('@').map(|(user, _)| user);
+        if !valid_host(host) || !host.contains('.') || !user.is_none_or(valid_user) {
+            return Err(invalid());
+        }
+        (format!("{authority}:"), path)
+    } else {
+        return Err(invalid());
+    };
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() < 2 || !parts.iter().all(|part| valid_segment(part)) {
+        return Err(invalid());
+    }
+    Ok(format!("{prefix}{path}.git"))
+}
+
+fn valid_host(host: &str) -> bool {
+    !host.is_empty()
+        && !host.starts_with('-')
+        && !host.starts_with('.')
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+}
+
+fn valid_user(user: &str) -> bool {
+    !user.is_empty()
+        && !user.starts_with('-')
+        && user
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+}
+
+fn valid_segment(part: &str) -> bool {
+    !part.is_empty()
+        && part != "."
+        && part != ".."
+        && !part.starts_with('-')
+        && part
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+}
+
+/// `Some` when `repository` is one of the GitHub spellings, with the verdict on it; `None` when
+/// it is something else entirely.
+fn github_url(repository: &str) -> Option<IpcResult<String>> {
     let (path, ssh) = if let Some(path) = [
         "https://github.com/",
         "https://www.github.com/",
@@ -375,33 +467,27 @@ fn github_url(repository: &str) -> IpcResult<String> {
         (path, true)
     } else if let Some(path) = repository.strip_prefix("ssh://git@github.com/") {
         (path, true)
-    } else {
+    } else if !repository.contains("://") && !repository.contains(':') {
+        // owner/repository, or something that is neither a URL nor a shorthand: GitHub's verdict
+        // either way, since nothing else takes a bare path.
         (repository, false)
+    } else {
+        return None;
     };
     let path = path.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let parts: Vec<_> = path.split('/').collect();
-    if parts.len() != 2
-        || parts.iter().any(|part| {
-            part.is_empty()
-                || *part == "."
-                || *part == ".."
-                || part.starts_with('-')
-                || !part
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
-        })
-    {
-        return Err(IpcError::new(
+    if parts.len() != 2 || !parts.iter().all(|part| valid_segment(part)) {
+        return Some(Err(IpcError::new(
             "invalid_repository",
-            "Enter a GitHub repository as owner/repository, an HTTPS URL, or an SSH clone URL.",
-        ));
+            "Enter a repository as owner/repository on GitHub, an HTTPS clone URL, or an SSH clone URL.",
+        )));
     }
-    Ok(if ssh {
+    Some(Ok(if ssh {
         format!("git@github.com:{path}.git")
     } else {
         format!("https://github.com/{path}.git")
-    })
+    }))
 }
 
 /// A project name becomes a folder name, so it has to be one on every OS we run on.
@@ -475,35 +561,96 @@ mod tests {
             "http://www.github.com/owner/repo.git/",
         ] {
             assert_eq!(
-                github_url(input).unwrap(),
-                "https://github.com/owner/repo.git"
+                clone_url(input).unwrap(),
+                "https://github.com/owner/repo.git",
+                "{input}"
             );
         }
         for input in [
             "git@github.com:owner/repo.git",
             "ssh://git@github.com/owner/repo",
         ] {
-            assert_eq!(github_url(input).unwrap(), "git@github.com:owner/repo.git");
+            assert_eq!(clone_url(input).unwrap(), "git@github.com:owner/repo.git");
         }
         for input in [
             "",
             "--upload-pack=bad",
-            "https://elsewhere.test/a/b",
             "a/../b",
             "a/b/tree/main",
             "a/b?token=secret",
             "a/b c",
             "file:///tmp/repo",
-            "https://github.com.evil/a/b",
             "github.com.evil/a/b",
             "www.github.com.evil/a/b",
-            "http://github.com.evil/a/b",
-            "https://www.github.com.evil/a/b",
             "https://token@github.com/a/b",
             "github.com/a/b?token=secret",
         ] {
             assert_eq!(
-                github_url(input).unwrap_err().code,
+                clone_url(input).unwrap_err().code,
+                "invalid_repository",
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn any_host_is_cloned_by_url_but_never_by_path_or_option() {
+        for (input, url) in [
+            (
+                "https://gitlab.com/group/subgroup/repo",
+                "https://gitlab.com/group/subgroup/repo.git",
+            ),
+            (
+                "https://gitlab.com/group/repo.git/",
+                "https://gitlab.com/group/repo.git",
+            ),
+            (
+                "https://forge.example.org:3000/owner/repo",
+                "https://forge.example.org:3000/owner/repo.git",
+            ),
+            (
+                "ssh://git@gitlab.com/group/sub/repo.git",
+                "ssh://git@gitlab.com/group/sub/repo.git",
+            ),
+            (
+                "ssh://forgejo@codeberg.org:2222/owner/repo",
+                "ssh://forgejo@codeberg.org:2222/owner/repo.git",
+            ),
+            (
+                "git@gitlab.com:group/sub/repo.git",
+                "git@gitlab.com:group/sub/repo.git",
+            ),
+            ("codeberg.org:owner/repo", "codeberg.org:owner/repo.git"),
+            // These used to be refused as not GitHub; they are ordinary clone URLs.
+            (
+                "https://elsewhere.test/a/b",
+                "https://elsewhere.test/a/b.git",
+            ),
+            (
+                "https://github.com.evil/a/b",
+                "https://github.com.evil/a/b.git",
+            ),
+        ] {
+            assert_eq!(clone_url(input).unwrap(), url, "{input}");
+        }
+        for input in [
+            "gitlab.com/group/repo",
+            "/tmp/repo",
+            "C:\\Users\\me\\repo",
+            "git://gitlab.com/group/repo",
+            "http://gitlab.com/group/repo",
+            "https://user:token@gitlab.com/group/repo",
+            "https://gitlab.com/repo",
+            "https://gitlab.com/group/-repo",
+            "https://gitlab.com/group/repo?x=1",
+            "https://-bad.host/a/b",
+            "ssh://git@gitlab.com:port/a/b",
+            "-user@gitlab.com:a/b",
+            "git@localhost:a/b",
+            "https://gitlab.com/a/b c",
+        ] {
+            assert_eq!(
+                clone_url(input).unwrap_err().code,
                 "invalid_repository",
                 "{input}"
             );

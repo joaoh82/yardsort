@@ -806,7 +806,7 @@ logged out, or on another forge, the view and `ys` say which and nothing else ch
 
 Proposed in [24-repositories](24-repositories.md) on 2026-10-08, from
 [issue #91](https://github.com/joaoh82/yardsort/issues/91), which asked for the forge to be the
-front door. Slice 1 is built. Delegating a task and starting a workspace from a pull request had shipped the day
+front door. Slices 1 and 3 are built. Delegating a task and starting a workspace from a pull request had shipped the day
 after it was opened; what remained is adding the project without typing a URL or thinking about
 a folder.
 
@@ -828,7 +828,9 @@ a folder.
       organisations reaches 64,812 repositories, so the list is your own and your
       collaborations and the rest is a search you press. Not done: the screenshot. Recorded in
       [24 § slice 1](24-repositories.md#slice-1-what-shipped).
-- [ ] Slice 3: any host — the validator, the renamed choice.
+- [x] Slice 3: any host — the validator, the renamed choice. A bare `host/path` stays refused
+      for any host but GitHub, since the shorthand has to keep meaning GitHub. Recorded in
+      [24 § slice 3](24-repositories.md#slice-3-what-shipped).
 - [ ] Slice 2: from a link — the palette entry, the field in the two views, clone then open.
 
 _Exit:_ on all three platforms, a repository is picked from the list and cloned without a folder

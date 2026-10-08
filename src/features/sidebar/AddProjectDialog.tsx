@@ -40,7 +40,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
           {mode === "choose"
             ? "Add a project"
             : mode === "clone"
-              ? "Clone a GitHub repository"
+              ? "Clone a repository"
               : "Create a project"}
         </h2>
         {mode === "choose" ? (
@@ -55,8 +55,8 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               }}
             />
             <Choice
-              title="Clone a GitHub repository"
-              detail="Pick one of yours, search GitHub, or paste a URL."
+              title="Clone a repository"
+              detail="Pick one of yours on GitHub, search it, or paste a URL from any host."
               onClick={() => setMode("clone")}
             />
             <Choice
@@ -500,7 +500,7 @@ function CloneForm({ onBack, onDone, busy, setBusy }: FormProps) {
           <span className="text-xs text-ink-faint">
             {chosen?.parent
               ? `A fork: ${chosen.parent.nameWithOwner} becomes its upstream remote.`
-              : "HTTPS, SSH, or owner/repository. Uses your existing git credentials."}
+              : "owner/repository on GitHub, or an HTTPS or SSH URL from any host. Uses your existing git credentials."}
           </span>
         </div>
         <Destination

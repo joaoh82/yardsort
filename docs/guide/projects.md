@@ -46,10 +46,10 @@ The name becomes a folder name, so characters that are illegal on some system (`
 are refused, and an existing folder is never touched. If any step fails, the half-made folder is
 removed again.
 
-### Clone a GitHub repository
+### Clone a repository
 
-Choose **Clone a GitHub repository**. Under the **Repository** field is a list of the
-repositories your GitHub account owns or collaborates on, most recently pushed first, each with
+Choose **Clone a repository**. Under the **Repository** field is a list of the repositories
+your GitHub account owns or collaborates on, most recently pushed first, each with
 its language, when it was last pushed to, and whether it is private, archived or a fork of
 something. The list comes from the [GitHub CLI](https://cli.github.com), logged in as you;
 Yardsort holds no credential of its own.
@@ -69,10 +69,19 @@ A repository that is already one of your projects says **Already added**. Pickin
 button into **Go to project**, which selects that project instead of cloning it twice. The match
 is by the project's push remote, not by its folder's name.
 
-You can also paste an HTTPS or SSH clone URL, or type `owner/repository`, with or without a
-list. Links such as `github.com/owner/repository`, `www.github.com/…`, and `http://github.com/…`
-are accepted and normalized to HTTPS. **Name** starts with the repository's name, without
-`.git`, and follows the field until you edit the name yourself.
+You can also paste a clone URL, with or without a list, and it need not be GitHub's: an HTTPS
+URL (`https://gitlab.com/group/subgroup/repository`), an `ssh://` URL, or git's
+`git@host:path` form from GitLab, Bitbucket, Gitea, Forgejo or a host of your own, with as many
+path segments as that forge uses. `owner/repository` on its own means GitHub, and GitHub links
+such as `github.com/owner/repository`, `www.github.com/…`, and `http://github.com/…` are
+normalized to HTTPS. Anything else is refused: a folder on disk, `git://`, a plain `http://` to
+another host, a host without its scheme, a password in the URL. **Name** starts with the
+repository's name, without `.git`, and follows the field until you edit the name yourself.
+
+A project from another host works like any other — commits, pushes and
+[**Open merge request**](commits-and-pull-requests.md#open-a-pull-request) included — but its
+issues and pull requests are not listed: the [Pull requests](pull-requests.md) and
+[Tasks](tasks.md) views are for GitHub, and say so per project.
 
 **Location** is where the last clone or new project went, shown as a line; press **Change…** to
 choose another folder with **Browse…** or by typing it in. The first time, with nothing

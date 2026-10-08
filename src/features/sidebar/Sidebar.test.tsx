@@ -927,7 +927,7 @@ describe("Sidebar", () => {
     await renderSidebar();
     core.projectClone.mockResolvedValue(added("cloned"));
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
     expect(screen.getByRole("button", { name: "Clone project" })).toBeDisabled();
     await user.type(screen.getByLabelText("Repository"), "owner/repo");
     await user.clear(screen.getByLabelText("Name"));
@@ -950,7 +950,7 @@ describe("Sidebar", () => {
       }),
     );
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
     await user.type(screen.getByLabelText("Repository"), "owner/private");
     await user.type(screen.getByLabelText("Location"), "/code");
     await user.click(screen.getByRole("button", { name: "Clone project" }));
@@ -977,7 +977,7 @@ describe("Sidebar", () => {
         }),
       );
       await user.click(screen.getByRole("button", { name: "Add project" }));
-      await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+      await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
       await user.type(screen.getByLabelText("Repository"), "owner/repo");
       await user.type(screen.getByLabelText("Location"), "/code");
       await user.click(screen.getByRole("button", { name: "Clone project" }));
@@ -1013,7 +1013,7 @@ describe("Sidebar", () => {
       }),
     );
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
     await user.type(screen.getByLabelText("Repository"), "owner/private");
     await user.type(screen.getByLabelText("Location"), "/code");
     await user.click(screen.getByRole("button", { name: "Clone project" }));
@@ -1037,7 +1037,7 @@ describe("Sidebar", () => {
     await renderSidebar();
     native.pickFolder.mockResolvedValue("/code");
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
     const input = screen.getByLabelText("Repository");
     const name = screen.getByLabelText("Name");
     await user.type(input, repository);
@@ -1060,7 +1060,7 @@ describe("Sidebar", () => {
 
   async function openCloneStep(user: ReturnType<typeof userEvent.setup>) {
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
   }
 
   it("lists the account's repositories, filters them as you type, and clones the chosen one", async () => {

@@ -94,7 +94,7 @@ pub async fn project_clone(
             store: &state.store,
             git: &git,
         }
-        .clone_github(
+        .clone_from(
             &repository,
             &name,
             &PathBuf::from(parent),

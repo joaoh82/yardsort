@@ -101,8 +101,8 @@ screen points you at the next step: adding a project. It also offers to install 
 Open Yardsort and press **+** next to _Projects_ (or `Ctrl+Shift+O` / `⌘O`).
 
 - **Open a folder** — pick any git repository on your machine.
-- **Clone a GitHub repository** — pick one of yours from the list, search GitHub, or paste a
-  URL; the location is remembered from the last time.
+- **Clone a repository** — pick one of yours on GitHub from the list, search GitHub, or paste a
+  clone URL from any host; the location is remembered from the last time.
 - **Create a new project** — Yardsort makes the folder, runs `git init` and adds a first commit.
 
 Your project appears on the left with one entry under it, **local**: your repository exactly as it

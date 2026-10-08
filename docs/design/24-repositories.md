@@ -1,8 +1,8 @@
 # Repositories
 
-_Proposed 2026-10-08, from [issue #91](https://github.com/joaoh82/yardsort/issues/91). Slice 1
-is built — see [slice 1](#slice-1-what-shipped), which also says where it differs from the
-proposal below. Slices 3 and 2 are not._
+_Proposed 2026-10-08, from [issue #91](https://github.com/joaoh82/yardsort/issues/91). Slices 1
+and 3 are built — see [slice 1](#slice-1-what-shipped) and [slice 3](#slice-3-what-shipped),
+which also say where they differ from the proposal below. Slice 2 is not._
 
 The issue asks for the forge to be the front door: a new piece of work starts from a repository,
 an issue or a pull request, not from a folder on disk. Most of that arrived the day after the
@@ -249,15 +249,16 @@ types beside `Repo`. `bindings.ts` is regenerated, never edited. The dialog's li
 
 ## Slices
 
-Each is one pull request with its docs, tests and changelog line.
+Each is one pull request with its docs, tests and changelog line, built in the order 1, 3, 2.
 
-1. **The list.** ✅ See [slice 1](#slice-1-what-shipped). `RemoteRepository`, the query,
-   paging, the cap; the search row; the protocol; **Already added**; `upstream` for a fork; the
-   remembered location collapsed; the dialog, its fallback without `gh`, and the screenshot.
-   `docs/guide/projects.md` rewritten for it.
-2. **Any host.** The validator, the renamed choice, the guide and the README line.
-3. **From a link.** `forge_resolve_link`, the palette entry, the two headers' field, the
-   clone-then-open path.
+- **Slice 1 — the list.** ✅ See [slice 1](#slice-1-what-shipped). `RemoteRepository`, the
+  query, paging, the cap; the search row; the protocol; **Already added**; `upstream` for a
+  fork; the remembered location collapsed; the dialog, its fallback without `gh`, and the
+  screenshot. `docs/guide/projects.md` rewritten for it.
+- **Slice 3 — any host.** ✅ See [slice 3](#slice-3-what-shipped). The validator, the renamed
+  choice, the guide and the README line.
+- **Slice 2 — from a link.** `forge_resolve_link`, the palette entry, the two headers' field,
+  the clone-then-open path.
 
 ## Slice 1: what shipped
 
@@ -294,6 +295,28 @@ git_protocol` runs before the list and before each search, and the clone URL in 
 - **Not done**: the screenshot, which wants a real window; a run against a real `gh` from the
   window, which the manual checklist's new section 25 covers; GitHub Enterprise hosts
   ([open question 34](06-open-questions.md)).
+
+## Slice 3: what shipped
+
+Built 2026-10-08, as proposed, with these differences:
+
+- **`github_url` stayed, under `clone_url`.** The GitHub spellings are still normalized exactly
+  as before — the same tests pass unchanged — and `clone_url` only takes over for an input
+  with a scheme or a `host:` that is not GitHub's. `Projects::clone_github` is now
+  `Projects::clone_from`.
+- **A bare `host/path` is refused** for any host but GitHub. `gitlab.com/group/repo` cannot be
+  told from `owner/repo/subdir`, and the shorthand had to keep meaning GitHub; so another host
+  wants its scheme, or git's `user@host:path`. The guide says so.
+- **Credentials in an HTTPS URL are refused** on every host, as they were on GitHub, and
+  `http://` to another host too: a password or a plain-text clone are not things a dialog
+  should pass to git without a word. `ssh://user@host:port/path` takes any user and a numeric
+  port. The scp form wants a dot in the host, so `C:…` and `localhost:…` fall out; `ssh://`
+  covers `localhost`.
+- **Output is normalized with `.git`** on every host, as it was for GitHub; every forge named
+  accepts it.
+- **Not done**: a clone from a real GitLab or Forgejo from the window — the manual checklist's
+  section 25 gained a row — and listing those hosts' issues and pull requests, which stays
+  deferred as decided.
 
 ## Not in this version, on purpose
 

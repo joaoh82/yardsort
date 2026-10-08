@@ -608,8 +608,10 @@ and the commit confirmation still stands between it and git.
 
 ## Project cloning and file locations
 
-`Projects::clone_github` validates GitHub HTTPS/SSH URLs or owner/repository shorthand,
-reserves a new destination directory, clones with the existing git environment, and registers
+`Projects::clone_from` validates the clone URL — `owner/repository` and every GitHub spelling
+normalized to GitHub; any other host as HTTPS, `ssh://` or `user@host:path`, with subgroups,
+and never a local path, `git://`, `http://` elsewhere or credentials in the URL — reserves a
+new destination directory, clones with the existing git environment, and registers
 the repository only after success. With an `upstream` — a fork's parent, from the list below —
 it adds that as a second remote and fetches it, and a fetch that fails does not fail the clone.
 The list the dialog offers is `repositories.rs` in the core: the account's own repositories and

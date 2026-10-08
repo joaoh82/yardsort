@@ -183,7 +183,7 @@ See [Tasks](tasks.md#when-something-is-missing).
 
 ## The clone dialog has no list of repositories
 
-**Clone a GitHub repository** lists your repositories through the same
+**Clone a repository** lists your GitHub repositories through the same
 [GitHub CLI](https://cli.github.com). Without it, or with nobody logged in, the dialog says so
 on the line where the list would be, and the field still takes a URL or `owner/repository`.
 Install `gh`, run `gh auth login` in a terminal, close the dialog and open it again.
@@ -196,7 +196,7 @@ Install `gh`, run `gh auth login` in a terminal, close the dialog and open it ag
 - **It is marked _Already added_ but you cannot see it** — the match is by push remote, so the
   project is there under whatever name its folder has; **Go to project** selects it.
 
-See [Projects](projects.md#clone-a-github-repository).
+See [Projects](projects.md#clone-a-repository).
 
 ## Coming from Switchyard
 
