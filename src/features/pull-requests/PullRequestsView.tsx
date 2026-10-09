@@ -177,10 +177,18 @@ export function PullRequestsView() {
         </div>
         <button
           type="button"
+          title="Open an issue or a pull request from its address, cloning its repository first if needed"
+          onClick={() => useProjectsStore.getState().openLink(true)}
+          className="ml-auto rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink"
+        >
+          From a link…
+        </button>
+        <button
+          type="button"
           disabled={refreshing || listed.length === 0}
           title="Ask the forge again"
           onClick={() => void refresh(listed.map((project) => project.id))}
-          className="ml-auto rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+          className="rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
         >
           {refreshing ? "Refreshing…" : "Refresh"}
         </button>

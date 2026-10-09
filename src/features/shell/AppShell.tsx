@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChangesPanel } from "@/features/changes/ChangesPanel";
 import { CommandPalette } from "@/features/keyboard/CommandPalette";
+import { StartFromLinkDialog } from "@/features/sidebar/StartFromLinkDialog";
 import { useAppShortcuts } from "@/features/keyboard/useAppShortcuts";
 import { WelcomeTour } from "@/features/onboarding/WelcomeTour";
 import { usePreferencesStore } from "@/stores/preferences";
@@ -15,6 +16,7 @@ import { hasCore } from "@/lib/ipc";
 import { useAppStore } from "@/stores/app";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useLayoutStore, type SidePanel } from "@/stores/layout";
+import { useProjectsStore } from "@/stores/projects";
 import { listenForQuitRequests } from "@/stores/quit";
 import { listenForWorkflowRuns } from "@/stores/workflows";
 import { useUpdatesStore } from "@/stores/updates";
@@ -30,6 +32,7 @@ export function AppShell() {
   const collapsed = useLayoutStore((s) => s.collapsed);
   useAppShortcuts();
   const paletteOpen = useLayoutStore((s) => s.paletteOpen);
+  const linkOpen = useProjectsStore((s) => s.linkOpen);
   const setCollapsed = useLayoutStore((s) => s.setCollapsed);
   const settingsOpen = useLayoutStore((s) => s.settingsOpen);
   const updateOpen = useUpdatesStore((s) => s.open);
@@ -120,6 +123,9 @@ export function AppShell() {
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {updateOpen && <UpdateDialog />}
       {paletteOpen && <CommandPalette />}
+      {linkOpen && (
+        <StartFromLinkDialog onClose={() => useProjectsStore.getState().openLink(false)} />
+      )}
       <WelcomeTour />
       <QuitDialog />
     </div>

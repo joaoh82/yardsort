@@ -17,7 +17,24 @@ export const commands = {
 	projectAutomationSave: (projectId: string, config: ProjectAutomation) => typedError<null, IpcError>(__TAURI_INVOKE("project_automation_save", { projectId, config })),
 	workspaceRun: (workspaceId: string, size: TermSize) => typedError<SessionInfo, IpcError>(__TAURI_INVOKE("workspace_run", { workspaceId, size })),
 	projectCreate: (name: string, parent: string) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_create", { name, parent })),
-	projectClone: (repository: string, name: string, parent: string) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_clone", { repository, name, parent })),
+	projectClone: (repository: string, name: string, parent: string, upstream: string | null) => typedError<AddedProject, IpcError>(__TAURI_INVOKE("project_clone", { repository, name, parent, upstream })),
+	/**
+	 *  The repositories the `gh` account owns or collaborates on, most recently pushed first, up to
+	 *  200, with the ones that are already projects marked. Never an error once `gh` is there: a
+	 *  page that fails keeps the pages before it and says why in `problem`.
+	 */
+	forgeRepositories: () => typedError<Repositories, IpcError>(__TAURI_INVOKE("forge_repositories")),
+	/**
+	 *  Repositories on the forge whose name contains `text` — the account's, its organisations',
+	 *  anyone's public ones — the twenty the forge ranks first.
+	 */
+	forgeSearchRepositories: (text: string) => typedError<RemoteRepository[], IpcError>(__TAURI_INVOKE("forge_search_repositories", { text })),
+	/**
+	 *  A pasted link to an issue or a pull request, settled: which project has its repository,
+	 *  and whether it is an issue or a pull request — asked of GitHub for `owner/repo#12`, which
+	 *  does not say.
+	 */
+	forgeResolveLink: (text: string) => typedError<ResolvedLink, IpcError>(__TAURI_INVOKE("forge_resolve_link", { text })),
 	/**
 	 *  Take a project off the list. With `keep_history` its workspaces and their conversations
 	 *  wait for the folder to be opened again. Files on disk are never touched.
@@ -1222,6 +1239,9 @@ export type LinePlace = {
 	startLine: number | null,
 };
 
+/**  What a pasted link points at: an issue or a pull request. */
+export type LinkKind = "issue" | "pullRequest";
+
 export type Load = {
 	/**  Percent of the whole machine: every core counted, so it never passes 100. */
 	cpu: number | null,
@@ -1755,6 +1775,30 @@ export type Relevance =
 /**  The model had no clear read. */
 "unsure";
 
+export type RemoteParent = {
+	nameWithOwner: string,
+	cloneUrl: string,
+};
+
+/**  A repository on the forge, as the clone dialog lists it. */
+export type RemoteRepository = {
+	/**  `owner/name`, as the forge writes it. */
+	nameWithOwner: string,
+	description: string | null,
+	/**  The URL to clone, HTTPS or SSH by [`CloneProtocol`]. */
+	cloneUrl: string,
+	isPrivate: boolean,
+	isFork: boolean,
+	isArchived: boolean,
+	/**  The repository this one was forked from, when the forge said which. */
+	parent: RemoteParent | null,
+	language: string | null,
+	/**  When it was last pushed to, as the forge wrote it; `None` for one never pushed to. */
+	pushedAt: string | null,
+	/**  The project that is a clone of it, when one of yours is. */
+	projectId: string | null,
+};
+
 /**  A repository on a forge, as read out of a remote URL. */
 export type Repo = {
 	host: string,
@@ -1762,6 +1806,36 @@ export type Repo = {
 	owner: string,
 	name: string,
 	kind: ForgeKind,
+};
+
+/**  What [`Gh::repositories`] managed to read. */
+export type Repositories = {
+	repositories: RemoteRepository[],
+	total: number | null,
+	/**  At least one page arrived. */
+	answered: boolean,
+	/**  Why the reading stopped short, when it did. */
+	problem: string | null,
+	loggedOut: boolean,
+};
+
+/**  A link looked up: which project has the repository, if any, and what the link is. */
+export type ResolvedLink = {
+	repo: Repo,
+	kind: LinkKind,
+	number: number,
+	/**  The item's web address. */
+	url: string,
+	/**  What to clone, when the repository is not a project yet: HTTPS, on the link's host. */
+	cloneUrl: string,
+	/**  The project one of whose remotes is this repository. */
+	projectId: string | null,
+	/**
+	 *  Whether that project's Tasks and Pull requests views answer for this repository — its
+	 *  first remote in `gh`'s order. In a clone of a fork, true for the parent and false for the
+	 *  fork itself, whose issues no view lists.
+	 */
+	listed: boolean,
 };
 
 export type Review = {

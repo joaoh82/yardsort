@@ -802,6 +802,45 @@ and Reopen sends nothing; an agent asked which issues need an answer answers fro
 `ys task list --needs-answer --json`, and one asked to file an issue does; and without `gh`,
 logged out, or on another forge, the view and `ys` say which and nothing else changes.
 
+## M25 — Repositories
+
+Proposed in [24-repositories](24-repositories.md) on 2026-10-08, from
+[issue #91](https://github.com/joaoh82/yardsort/issues/91), which asked for the forge to be the
+front door. All three slices are built; the screenshot and the hands-on pass remain. Delegating a task and starting a workspace from a pull request had shipped the day
+after it was opened; what remained is adding the project without typing a URL or thinking about
+a folder.
+
+- **Clone a repository** lists your own repositories and your collaborations through `gh`,
+  most recently pushed first, filtered as you type, with a row that searches the forge for the
+  rest; a repository that is already a project says so and is selected instead of cloned; a
+  fork gets its parent as `upstream`; the remembered location collapses to a line.
+- Cloning accepts any https or ssh URL, so a project on GitLab, Forgejo, Gitea or Bitbucket is
+  added the same way; its issues and pull requests stay unlisted, and the views say so.
+- **Start from a link**: an issue's or pull request's address opens it in its view, cloning the
+  repository first when it is not a project yet.
+- Measured before any code: your own and collaborated repositories are a list (230 here, a page
+  of 100 in under 2 s); an organisation member's are not (64,812, 5–8 s a page), so those are
+  reached by search. The numbers are in
+  [24 § what was measured](24-repositories.md#what-was-measured).
+- Three slices, each its own pull request, built 1, 3, 2:
+- [x] Slice 1: the list — the query, the search row, `git_protocol`, **Already added**,
+      `upstream`, the dialog and its fallback without `gh`. Found: an account in sixteen
+      organisations reaches 64,812 repositories, so the list is your own and your
+      collaborations and the rest is a search you press. Not done: the screenshot. Recorded in
+      [24 § slice 1](24-repositories.md#slice-1-what-shipped).
+- [x] Slice 3: any host — the validator, the renamed choice. A bare `host/path` stays refused
+      for any host but GitHub, since the shorthand has to keep meaning GitHub. Recorded in
+      [24 § slice 3](24-repositories.md#slice-3-what-shipped).
+- [x] Slice 2: from a link — the palette entry, **From a link…** in the two views, clone then
+      open. The parser reads GitLab's, Gitea's and Bitbucket's shapes too; `owner/repo#12`
+      asks GitHub which it is. The view opens only once the row is known to be there. Recorded
+      in [24 § slice 2](24-repositories.md#slice-2-what-shipped).
+
+_Exit:_ on all three platforms, a repository is picked from the list and cloned without a folder
+being chosen; one already added is selected instead; a GitLab URL clones; a pasted issue link
+ends in that issue's **Delegate**; and without `gh`, logged out, or offline, the clone step still
+takes a URL and says why there is no list.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

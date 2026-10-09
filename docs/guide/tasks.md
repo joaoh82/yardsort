@@ -115,6 +115,31 @@ resizes the two. **Esc** or **×** closes the details.
 While the details are open they follow the list: a new comment on GitHub appears within about a
 minute, without pressing anything.
 
+## Starting from a link
+
+**From a link…**, in the view's header or in the [command palette](shortcuts.md#navigate-without-the-mouse)
+as _Start from a link…_, takes an issue's or a pull request's address and opens it here, with
+**Delegate** or **Start workspace** the next press. It takes `https://github.com/owner/repository/issues/12`,
+`…/pull/12`, or `owner/repository#12` — GitHub numbers issues and pull requests together, so
+for the short form GitHub is asked which it is — and the addresses GitLab, Bitbucket, Gitea and
+Forgejo give their issues and merge requests.
+
+- **The repository is one of your projects** — the issue opens in Tasks, the pull request in
+  Pull requests, selected. One the view has no row for — closed, or past what it reads — opens
+  on GitHub instead, in your browser.
+- **It is not a project yet** — the [clone dialog](projects.md#clone-a-repository) opens with the
+  repository filled in. **Clone project**, and when the clone is done the item opens as above.
+  Close the dialog while git runs and the clone still finishes, but the link is let go: the
+  project appears with its notice and nothing else moves.
+- **The project is on another forge** — Tasks and Pull requests are for GitHub, so the item
+  opens in your browser.
+- **The project is a clone of a fork** — its views list the parent's issues and pull requests,
+  as `gh` resolves it, so a link to the parent opens there. A link to the fork's own issue is
+  known — no clone is offered — but has no row to open on, and opens in your browser.
+
+Nothing starts on its own: both views hand over to the composer, where the agent, the model and
+the message are yours to settle.
+
 ## Handing a task to an agent
 
 **Delegate**, in an open task's details, opens the [composer](workspaces.md#starting-one-the-composer)

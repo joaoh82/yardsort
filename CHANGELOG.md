@@ -3,6 +3,31 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Clone a repository by picking it from a list.** **Clone a repository** now lists the
+  repositories your `gh` account owns or collaborates on, most recently pushed first; type to
+  narrow it, pick one, and **Clone project** — the location is remembered from last time and
+  shown as a line, so the usual path asks nothing about folders. **Search GitHub for “…”** finds
+  the rest, including your organisations', when you press it. A repository that is already a
+  project says so and **Go to project** selects it instead. A fork gets its parent as
+  `upstream`. Pasting a URL still works, with or without `gh`. See
+  [Projects](docs/guide/projects.md#clone-a-repository).
+
+- **Start from a link.** **From a link…**, in the Tasks and Pull requests headers and in the
+  command palette, takes an issue's or a pull request's address — `owner/repository#12` works
+  too — and opens it in its view, selected, with **Delegate** or **Start workspace** the next
+  press. A repository that is not a project yet goes to the clone dialog with the URL filled
+  in, and the item opens when the clone is done. See
+  [Tasks](docs/guide/tasks.md#starting-from-a-link).
+
+- **Clone from any git host.** The same dialog takes an HTTPS or SSH clone URL from GitLab,
+  Bitbucket, Gitea, Forgejo or a host of your own — subgroups included — where it used to refuse
+  anything but GitHub. `owner/repository` on its own still means GitHub. Commits, pushes and
+  **Open merge request** already worked on those hosts; their issues and pull requests are still
+  not listed, and the views say so. See
+  [Projects](docs/guide/projects.md#clone-a-repository).
+
 ## 0.19.1
 
 - **A merged pull request now counts as _kept_ without you opening Outcomes.** Attempts are

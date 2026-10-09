@@ -9,9 +9,33 @@ import {
   type PreparedBranch,
   type TaskRef,
   type Project,
+  type RemoteRepository,
+  type ResolvedLink,
   type Workspace,
   type SessionInfo,
 } from "@/lib/ipc";
+
+/** What the clone dialog knows of the `gh` account's repositories. */
+export type RemoteRepositories = {
+  status: "idle" | "loading" | "ready" | "failed";
+  /** The ones listed, most recently pushed first, up to the core's cap. */
+  list: RemoteRepository[];
+  /** How many the account has, when the forge said; more than `list` holds past the cap. */
+  total: number | null;
+  /** Why the reading stopped short, or why there is no list at all. */
+  problem: string | null;
+  notInstalled: boolean;
+  loggedOut: boolean;
+};
+
+const noRepositories: RemoteRepositories = {
+  status: "idle",
+  list: [],
+  total: null,
+  problem: null,
+  notInstalled: false,
+  loggedOut: false,
+};
 
 const KEYS = {
   selected: "sidebar.selectedWorkspace",
@@ -57,6 +81,13 @@ interface ProjectsState {
   lastParentDir: string | null;
   /** In-flight clone requests; the Rust command owns the actual operation. */
   pendingClones: { id: number; name: string }[];
+  /** The repositories offered by the clone dialog; read when it opens, kept while the app runs. */
+  repositories: RemoteRepositories;
+  /** The Add-a-project dialog is open. With `repository`, on the clone step with that filled
+   *  in; with `link`, the item to open once the clone is done, if the dialog is still open. */
+  adding: { repository?: string; link?: ResolvedLink } | null;
+  /** The Start-from-a-link dialog is open. */
+  linkOpen: boolean;
   error: string | null;
   notice: string | null;
 
@@ -64,13 +95,22 @@ interface ProjectsState {
   /** Re-read projects from the core (branches change behind our back). */
   refresh: () => Promise<void>;
   openFolder: (path: string, initGit?: boolean) => Promise<OpenResult>;
-  /** `select` is checked on completion, so closing the dialog keeps the current workspace. */
+  /** `select` is checked on completion, so closing the dialog keeps the current workspace.
+   *  `upstream` is a fork's parent, which the clone gets as a second remote. */
   cloneProject: (
     repository: string,
     name: string,
     parent: string,
     select?: () => boolean,
-  ) => Promise<boolean>;
+    upstream?: string | null,
+  ) => Promise<AddedProject | null>;
+  openAddProject: (preset?: { repository?: string; link?: ResolvedLink }) => void;
+  closeAddProject: () => void;
+  openLink: (open: boolean) => void;
+  /** Read the account's repositories for the clone dialog; again only with `refresh`. */
+  loadRepositories: (refresh?: boolean) => Promise<void>;
+  /** Ask the forge for repositories named like `text`. Throws with `gh`'s reason. */
+  searchRepositories: (text: string) => Promise<RemoteRepository[]>;
   createProject: (name: string, parent: string) => Promise<boolean>;
   /** Take a project off the list. Nothing on disk changes; with `keepHistory` its workspaces
    *  and conversations come back when the same folder is opened again. */
@@ -145,6 +185,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     const { project } = added;
     const local = project.workspaces[0]?.id ?? null;
     set((state) => ({
+      // The clone dialog's "Already added" marks were computed against the projects of a
+      // moment ago; the list is read again when the dialog next opens.
+      repositories: noRepositories,
       projects: state.projects.some((p) => p.id === project.id)
         ? state.projects.map((p) => (p.id === project.id ? project : p))
         : [...state.projects, project],
@@ -179,6 +222,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     ui: {},
     collapsed: [],
     lastParentDir: null,
+    repositories: noRepositories,
+    adding: null,
+    linkOpen: false,
     pendingClones: [],
     error: null,
     notice: null,
@@ -220,11 +266,11 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       }
     },
 
-    async cloneProject(repository, name, parent, select = () => true) {
+    async cloneProject(repository, name, parent, select = () => true, upstream = null) {
       const request = { id: nextCloneId++, name: name.trim() };
       set((state) => ({ pendingClones: [...state.pendingClones, request] }));
       try {
-        const added = await ipc.projectClone(repository, name, parent);
+        const added = await ipc.projectClone(repository, name, parent, upstream);
         const foreground = select();
         adopt(added, foreground);
         set({
@@ -232,15 +278,61 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           ...(!foreground && { notice: `${added.project.name} cloned.` }),
         });
         save(KEYS.lastParent, parent);
-        return true;
+        return added;
       } catch (error) {
         set({ error: `${request.name}: ${errorMessage(error)}` });
-        return false;
+        return null;
       } finally {
         set((state) => ({
           pendingClones: state.pendingClones.filter((pending) => pending.id !== request.id),
         }));
       }
+    },
+
+    openAddProject(preset = {}) {
+      set({ adding: preset, linkOpen: false });
+    },
+
+    closeAddProject() {
+      set({ adding: null });
+    },
+
+    openLink(open) {
+      set({ linkOpen: open });
+    },
+
+    async loadRepositories(refresh = false) {
+      const { status, loggedOut } = get().repositories;
+      // A list is kept while the app runs; no list — nothing read yet, a failure, or nobody
+      // logged in — is asked for again each time the dialog opens, so a login counts.
+      if (!refresh && (status === "loading" || (status === "ready" && !loggedOut))) return;
+      set({ repositories: { ...noRepositories, status: "loading" } });
+      try {
+        const found = await ipc.forgeRepositories();
+        set({
+          repositories: {
+            status: "ready",
+            list: found.repositories,
+            total: found.total,
+            problem: found.problem,
+            notInstalled: false,
+            loggedOut: found.loggedOut,
+          },
+        });
+      } catch (error) {
+        set({
+          repositories: {
+            ...noRepositories,
+            status: "failed",
+            problem: errorMessage(error),
+            notInstalled: isIpcError(error) && error.code === "gh_not_installed",
+          },
+        });
+      }
+    },
+
+    async searchRepositories(text) {
+      return ipc.forgeSearchRepositories(text);
     },
 
     async createProject(name, parent) {
@@ -266,6 +358,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       }
       const gone = new Set(project.workspaces.map((workspace) => workspace.id));
       set((state) => ({
+        repositories: noRepositories,
         projects: state.projects.filter((p) => p.id !== id),
         collapsed: state.collapsed.filter((c) => c !== id),
         selectedWorkspaceId:

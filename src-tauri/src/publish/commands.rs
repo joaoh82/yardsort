@@ -15,7 +15,7 @@ use crate::git::Git;
 use crate::state::{blocking, AppState};
 use crate::store::WorkspaceRow;
 
-pub(super) fn failed(error: ForgeError) -> IpcError {
+pub(crate) fn failed(error: ForgeError) -> IpcError {
     IpcError::new(error.code(), error.to_string())
 }
 

@@ -207,6 +207,14 @@ export function TasksView() {
         </div>
         <button
           type="button"
+          title="Open an issue or a pull request from its address, cloning its repository first if needed"
+          onClick={() => useProjectsStore.getState().openLink(true)}
+          className="ml-auto rounded px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink"
+        >
+          From a link…
+        </button>
+        <button
+          type="button"
           disabled={writable.length === 0}
           title={
             writable.length === 0
@@ -214,7 +222,7 @@ export function TasksView() {
               : "Open a new issue on a project's repository"
           }
           onClick={() => setCreating(true)}
-          className="ml-auto rounded border border-line px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+          className="rounded border border-line px-2 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
         >
           New task
         </button>

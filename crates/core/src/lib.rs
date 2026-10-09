@@ -31,6 +31,7 @@ pub mod presence;
 pub mod program;
 pub mod project_automation;
 pub mod projects;
+pub mod repositories;
 pub mod settings;
 pub mod store;
 pub mod tasks;

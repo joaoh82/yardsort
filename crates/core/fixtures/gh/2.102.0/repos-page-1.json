@@ -1,0 +1,78 @@
+{
+  "data": {
+    "viewer": {
+      "login": "o",
+      "repositories": {
+        "totalCount": 6,
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wMVQxMjowMDowMFrOBHa0OA=="
+        },
+        "nodes": [
+          {
+            "nameWithOwner": "o/weather-cli",
+            "description": "A weather forecast on the command line",
+            "url": "https://github.com/o/weather-cli",
+            "sshUrl": "git@github.com:o/weather-cli.git",
+            "isPrivate": false,
+            "isFork": false,
+            "isArchived": false,
+            "hasIssuesEnabled": true,
+            "pushedAt": "2026-10-08T16:30:18Z",
+            "primaryLanguage": {
+              "name": "Rust"
+            },
+            "parent": null
+          },
+          {
+            "nameWithOwner": "o/o",
+            "description": null,
+            "url": "https://github.com/o/o",
+            "sshUrl": "git@github.com:o/o.git",
+            "isPrivate": false,
+            "isFork": false,
+            "isArchived": false,
+            "hasIssuesEnabled": true,
+            "pushedAt": "2024-05-31T10:28:15Z",
+            "primaryLanguage": null,
+            "parent": null
+          },
+          {
+            "nameWithOwner": "o/awesome-tools",
+            "description": "A curated list of tools",
+            "url": "https://github.com/o/awesome-tools",
+            "sshUrl": "git@github.com:o/awesome-tools.git",
+            "isPrivate": false,
+            "isFork": true,
+            "isArchived": false,
+            "hasIssuesEnabled": true,
+            "pushedAt": "2026-09-23T14:48:46Z",
+            "primaryLanguage": {
+              "name": "JavaScript"
+            },
+            "parent": {
+              "nameWithOwner": "upstream/awesome-tools",
+              "url": "https://github.com/upstream/awesome-tools",
+              "sshUrl": "git@github.com:upstream/awesome-tools.git"
+            }
+          },
+          {
+            "nameWithOwner": "o/old-site",
+            "description": "The site before the site",
+            "url": "https://github.com/o/old-site",
+            "sshUrl": "git@github.com:o/old-site.git",
+            "isPrivate": false,
+            "isFork": false,
+            "isArchived": true,
+            "hasIssuesEnabled": true,
+            "pushedAt": "2023-02-11T09:12:40Z",
+            "primaryLanguage": {
+              "name": "HTML"
+            },
+            "parent": null
+          }
+        ]
+      }
+    }
+  }
+}

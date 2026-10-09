@@ -181,6 +181,23 @@ could be read it prints what arrived and says so on standard error.
 
 See [Tasks](tasks.md#when-something-is-missing).
 
+## The clone dialog has no list of repositories
+
+**Clone a repository** lists your GitHub repositories through the same
+[GitHub CLI](https://cli.github.com). Without it, or with nobody logged in, the dialog says so
+on the line where the list would be, and the field still takes a URL or `owner/repository`.
+Install `gh`, run `gh auth login` in a terminal, close the dialog and open it again.
+
+- **A repository is not in the list** — it holds the 200 you pushed to most recently, of those
+  you own or collaborate on. Organisation repositories are not listed at all: type three
+  characters of the name and press **Search GitHub for “…”**.
+- **The list stopped short** — a page GitHub did not answer: what arrived is shown, with the
+  reason and **Retry**.
+- **It is marked _Already added_ but you cannot see it** — the match is by remote, so the
+  project is there under whatever name its folder has; **Go to project** selects it.
+
+See [Projects](projects.md#clone-a-repository).
+
 ## Coming from Switchyard
 
 Yardsort was called Switchyard until v0.2. The first time Yardsort starts it **copies** your

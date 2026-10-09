@@ -7,10 +7,13 @@ import {
   pullRequest,
   pullRequestsOf,
   record,
+  repositoriesOf,
+  repository,
   task,
   tasksOf,
   worktree,
 } from "@/test/fixtures";
+import type { ResolvedLink } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   uiStateLoad: vi.fn(),
@@ -19,6 +22,9 @@ const core = vi.hoisted(() => ({
   projectOpen: vi.fn(),
   projectCreate: vi.fn(),
   projectClone: vi.fn(),
+  forgeResolveLink: vi.fn(),
+  forgeRepositories: vi.fn(),
+  forgeSearchRepositories: vi.fn(),
   projectRemove: vi.fn(),
   projectsReorder: vi.fn(),
   workspaceDelete: vi.fn(),
@@ -65,6 +71,9 @@ import { useUpdatesStore } from "@/stores/updates";
 import { useMemoryStore } from "@/stores/memory";
 import { useOutcomesStore } from "@/stores/outcomes";
 import { Sidebar } from "./Sidebar";
+import { StartFromLinkDialog } from "./StartFromLinkDialog";
+import { runCommand } from "@/features/keyboard/commands";
+import { usePullRequestsStore } from "@/stores/pullRequests";
 
 const shellIn = (workspace: string) => ({
   id: `s-${workspace}`,
@@ -124,6 +133,7 @@ describe("Sidebar", () => {
       workspaces: {},
     });
     core.projectTasks.mockResolvedValue(tasksOf([]));
+    core.forgeRepositories.mockResolvedValue(repositoriesOf([]));
     useTasksStore.setState({ byProject: {}, closedWanted: false, selected: null, details: {} });
     useSessionsStore.setState({ byWorkspace: {}, error: null });
     usePublishStore.setState({ byProject: {}, workspaceId: null, state: null, busy: null });
@@ -131,6 +141,16 @@ describe("Sidebar", () => {
       projects: [],
       pendingClones: [],
       lastParentDir: null,
+      adding: null,
+      linkOpen: false,
+      repositories: {
+        status: "idle",
+        list: [],
+        total: null,
+        problem: null,
+        notInstalled: false,
+        loggedOut: false,
+      },
       loaded: false,
       selectedWorkspaceId: null,
       composingProjectId: null,
@@ -914,14 +934,14 @@ describe("Sidebar", () => {
     await renderSidebar();
     core.projectClone.mockResolvedValue(added("cloned"));
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
     expect(screen.getByRole("button", { name: "Clone project" })).toBeDisabled();
-    await user.type(screen.getByLabelText("GitHub repository"), "owner/repo");
+    await user.type(screen.getByLabelText("Repository"), "owner/repo");
     await user.clear(screen.getByLabelText("Name"));
     await user.type(screen.getByLabelText("Name"), "cloned");
     await user.type(screen.getByLabelText("Location"), "/code");
     await user.click(screen.getByRole("button", { name: "Clone project" }));
-    expect(core.projectClone).toHaveBeenCalledWith("owner/repo", "cloned", "/code");
+    expect(core.projectClone).toHaveBeenCalledWith("owner/repo", "cloned", "/code", null);
     expect(await screen.findByRole("treeitem", { name: "cloned" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-cloned");
@@ -937,8 +957,8 @@ describe("Sidebar", () => {
       }),
     );
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
-    await user.type(screen.getByLabelText("GitHub repository"), "owner/private");
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
+    await user.type(screen.getByLabelText("Repository"), "owner/private");
     await user.type(screen.getByLabelText("Location"), "/code");
     await user.click(screen.getByRole("button", { name: "Clone project" }));
     expect(screen.getByRole("button", { name: "Cloning…" })).toBeDisabled();
@@ -964,8 +984,8 @@ describe("Sidebar", () => {
         }),
       );
       await user.click(screen.getByRole("button", { name: "Add project" }));
-      await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
-      await user.type(screen.getByLabelText("GitHub repository"), "owner/repo");
+      await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
+      await user.type(screen.getByLabelText("Repository"), "owner/repo");
       await user.type(screen.getByLabelText("Location"), "/code");
       await user.click(screen.getByRole("button", { name: "Clone project" }));
       if (close === "Escape") await user.keyboard("{Escape}");
@@ -1000,8 +1020,8 @@ describe("Sidebar", () => {
       }),
     );
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
-    await user.type(screen.getByLabelText("GitHub repository"), "owner/private");
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
+    await user.type(screen.getByLabelText("Repository"), "owner/private");
     await user.type(screen.getByLabelText("Location"), "/code");
     await user.click(screen.getByRole("button", { name: "Clone project" }));
     await user.click(screen.getByRole("button", { name: "Run in background" }));
@@ -1024,8 +1044,8 @@ describe("Sidebar", () => {
     await renderSidebar();
     native.pickFolder.mockResolvedValue("/code");
     await user.click(screen.getByRole("button", { name: "Add project" }));
-    await user.click(screen.getByRole("button", { name: /Clone a GitHub repository/ }));
-    const input = screen.getByLabelText("GitHub repository");
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
+    const input = screen.getByLabelText("Repository");
     const name = screen.getByLabelText("Name");
     await user.type(input, repository);
     expect(name).toHaveValue("repo");
@@ -1043,6 +1063,347 @@ describe("Sidebar", () => {
     expect(name).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "Browse…" }));
     expect(native.pickFolder).toHaveBeenCalledWith("Clone the repository into…", undefined);
+  });
+
+  async function openCloneStep(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await user.click(screen.getByRole("button", { name: /Clone a repository/ }));
+  }
+
+  it("lists the account's repositories, filters them as you type, and clones the chosen one", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.forgeRepositories.mockResolvedValue(
+      repositoriesOf([
+        repository("o/weather-cli", { language: "Rust", description: "A forecast" }),
+        repository("o/weather-api"),
+        repository("o/notes", { isPrivate: true, isArchived: true }),
+      ]),
+    );
+    core.projectClone.mockResolvedValue(added("weather-api"));
+    useProjectsStore.setState({ lastParentDir: "/code" });
+    await openCloneStep(user);
+    const list = await screen.findByRole("listbox", { name: "Your repositories" });
+    expect(within(list).getAllByRole("option")).toHaveLength(3);
+    expect(within(list).getByRole("option", { name: "o/notes" })).toHaveTextContent(
+      "private · archived",
+    );
+    // The remembered location is a line, not a question.
+    expect(screen.queryByLabelText("Location")).not.toBeInTheDocument();
+    expect(screen.getByText("/code")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Repository"), "api");
+    expect(
+      within(list)
+        .getAllByRole("option")
+        .map((o) => o.getAttribute("aria-label") ?? o.textContent),
+    ).toEqual(["o/weather-api", "Search GitHub for “api”…"]);
+    await user.click(within(list).getByRole("option", { name: "o/weather-api" }));
+    expect(screen.getByLabelText("Repository")).toHaveValue("o/weather-api");
+    expect(screen.getByLabelText("Name")).toHaveValue("weather-api");
+    expect(screen.getByText("/code/weather-api")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    expect(core.projectClone).toHaveBeenCalledWith(
+      "https://github.com/o/weather-api.git",
+      "weather-api",
+      "/code",
+      null,
+    );
+    expect(await screen.findByRole("treeitem", { name: "weather-api" })).toBeInTheDocument();
+  });
+
+  it("reads the list again after a clone, so the clone is marked, and after a login", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.forgeRepositories
+      .mockResolvedValueOnce(repositoriesOf([], { loggedOut: true }))
+      .mockResolvedValueOnce(repositoriesOf([repository("o/fresh")]))
+      .mockResolvedValueOnce(repositoriesOf([repository("o/fresh", { projectId: "p-fresh" })]));
+    core.projectClone.mockResolvedValue(added("fresh"));
+    useProjectsStore.setState({ lastParentDir: "/code" });
+    await openCloneStep(user);
+    expect(await screen.findByText(/Nobody is logged in/)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    // Logged in since: opening again asks again.
+    await openCloneStep(user);
+    const list = await screen.findByRole("listbox", { name: "Your repositories" });
+    await user.click(await within(list).findByRole("option", { name: "o/fresh" }));
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    await screen.findByRole("treeitem", { name: "fresh" });
+    // Cloned since: the list is read again and the clone is marked.
+    await openCloneStep(user);
+    expect(
+      await screen.findByRole("option", { name: "o/fresh, already added" }),
+    ).toBeInTheDocument();
+    expect(core.forgeRepositories).toHaveBeenCalledTimes(3);
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Go to project" })).toBeInTheDocument();
+  });
+
+  it("walks the list with the keyboard, says which are already projects, and goes to one instead of cloning it", async () => {
+    const user = userEvent.setup();
+    await renderSidebar("alpha");
+    core.forgeRepositories.mockResolvedValue(
+      repositoriesOf([
+        repository("o/alpha", { projectId: "p-alpha" }),
+        repository("o/beta", { isFork: true, parent: "upstream/beta" }),
+      ]),
+    );
+    core.projectClone.mockResolvedValue(added("beta"));
+    useProjectsStore.setState({ lastParentDir: "/code" });
+    await openCloneStep(user);
+    const list = await screen.findByRole("listbox", { name: "Your repositories" });
+    expect(within(list).getByRole("option", { name: "o/alpha, already added" })).toHaveTextContent(
+      "Already added",
+    );
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByLabelText("Repository")).toHaveValue("o/beta");
+    expect(screen.getByText(/upstream\/beta becomes its upstream remote/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    expect(core.projectClone).toHaveBeenCalledWith(
+      "https://github.com/o/beta.git",
+      "beta",
+      "/code",
+      "https://github.com/upstream/beta.git",
+    );
+    await screen.findByRole("treeitem", { name: "beta" });
+
+    await openCloneStep(user);
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("Repository")).toHaveValue("o/alpha");
+    const go = screen.getByRole("button", { name: "Go to project" });
+    await user.click(go);
+    expect(core.projectClone).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useProjectsStore.getState().selectedWorkspaceId).toBe("w-alpha");
+  });
+
+  it("searches the forge only when asked, and comes back to the list", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.forgeRepositories.mockResolvedValue(
+      repositoriesOf([repository("o/mine")], { total: 230 }),
+    );
+    core.forgeSearchRepositories.mockResolvedValue([repository("acme/tools")]);
+    await openCloneStep(user);
+    const list = await screen.findByRole("listbox", { name: "Your repositories" });
+    expect(within(list).getByText(/Showing the 1 most recently pushed of 230/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Repository"), "tools");
+    expect(within(list).getByText("Nothing of yours is named like “tools”.")).toBeInTheDocument();
+    expect(core.forgeSearchRepositories).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("option", { name: "Search GitHub for “tools”…" }));
+    expect(core.forgeSearchRepositories).toHaveBeenCalledWith("tools");
+    const found = await screen.findByRole("listbox", { name: "Repositories on GitHub" });
+    expect(within(found).getByRole("option", { name: "acme/tools" })).toBeInTheDocument();
+    expect(within(found).getByText(/On GitHub, the 1 the forge ranks first/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Your repositories" }));
+    expect(screen.getByRole("listbox", { name: "Your repositories" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Search GitHub for “tools”…" })).toBeInTheDocument();
+  });
+
+  it("still takes a URL without gh, and says why there is no list", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.forgeRepositories.mockRejectedValue({
+      code: "gh_not_installed",
+      message: "gh is not installed, or not on PATH",
+    });
+    core.projectClone.mockResolvedValue(added("repo"));
+    await openCloneStep(user);
+    expect(await screen.findByText(/needs the GitHub CLI/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Repository"), "https://github.com/owner/repo.git");
+    expect(screen.getByRole("option", { name: /^Clone https:/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Search GitHub/ })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Location"), "/code");
+    await user.keyboard("{Enter}");
+    expect(core.projectClone).toHaveBeenCalledWith(
+      "https://github.com/owner/repo.git",
+      "repo",
+      "/code",
+      null,
+    );
+  });
+
+  it("keeps what was read when a page fails, and offers to retry when logged out", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.forgeRepositories.mockResolvedValueOnce(
+      repositoriesOf([repository("o/first")], { problem: "`gh api graphql` failed: 502" }),
+    );
+    await openCloneStep(user);
+    const list = await screen.findByRole("listbox", { name: "Your repositories" });
+    expect(within(list).getByRole("option", { name: "o/first" })).toBeInTheDocument();
+    expect(
+      within(list).getByText(/Stopped short: `gh api graphql` failed: 502/),
+    ).toBeInTheDocument();
+    core.forgeRepositories.mockResolvedValueOnce(repositoriesOf([], { loggedOut: true }));
+    await user.click(within(list).getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText(/Nobody is logged in to the GitHub CLI/)).toBeInTheDocument();
+    expect(core.forgeRepositories).toHaveBeenCalledTimes(2);
+  });
+
+  describe("starting from a link", () => {
+    /** The shell mounts the link dialog beside the sidebar; here, the same, in miniature. */
+    function Shell() {
+      const linkOpen = useProjectsStore((s) => s.linkOpen);
+      return (
+        <>
+          <Sidebar />
+          {linkOpen && (
+            <StartFromLinkDialog onClose={() => useProjectsStore.getState().openLink(false)} />
+          )}
+        </>
+      );
+    }
+    const github = { host: "github.com", owner: "demo", name: "app", kind: "github" as const };
+    const resolved = (overrides: Partial<ResolvedLink> = {}): ResolvedLink => ({
+      repo: github,
+      kind: "issue",
+      number: 91,
+      url: "https://github.com/demo/app/issues/91",
+      cloneUrl: "https://github.com/demo/app.git",
+      projectId: "p-alpha",
+      listed: true,
+      ...overrides,
+    });
+    async function open(user: ReturnType<typeof userEvent.setup>, text: string) {
+      core.projectsList.mockResolvedValue([project("alpha")]);
+      render(<Shell />);
+      await screen.findByRole("treeitem", { name: "alpha" });
+      act(() => runCommand("startFromLink"));
+      await user.type(screen.getByLabelText("Issue or pull request"), text);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+    }
+
+    it("opens an issue of a project in the Tasks view, selected", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(resolved());
+      core.projectTasks.mockResolvedValue(tasksOf([task(91)]));
+      await open(user, "demo/app#91");
+      expect(core.forgeResolveLink).toHaveBeenCalledWith("demo/app#91");
+      await waitFor(() => expect(useProjectsStore.getState().tasksOpen).toBe(true));
+      expect(useTasksStore.getState().selected).toBe("p-alpha#91");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(opener.openUrl).not.toHaveBeenCalled();
+    });
+
+    it("opens a pull request of a project in the Pull requests view, selected", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({ kind: "pullRequest", number: 12, url: "https://github.com/demo/app/pull/12" }),
+      );
+      core.projectPullRequests.mockResolvedValue(pullRequestsOf([pullRequest(12)]));
+      await open(user, "https://github.com/demo/app/pull/12");
+      await waitFor(() => expect(useProjectsStore.getState().pullRequestsOpen).toBe(true));
+      expect(usePullRequestsStore.getState().selected).toBe("p-alpha#12");
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true);
+    });
+
+    it("sends an item the view has no row for, or on another forge, to the browser", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({ number: 5, url: "https://github.com/demo/app/issues/5" }),
+      );
+      core.projectTasks.mockResolvedValue(tasksOf([task(91)]));
+      await open(user, "demo/app#5");
+      await waitFor(() =>
+        expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/demo/app/issues/5"),
+      );
+      expect(useProjectsStore.getState().tasksOpen).toBe(false);
+
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({
+          repo: { ...github, host: "gitlab.com", kind: "gitlab" },
+          url: "https://gitlab.com/demo/app/-/issues/3",
+          number: 3,
+        }),
+      );
+      const asked = core.projectTasks.mock.calls.length;
+      act(() => runCommand("startFromLink"));
+      await user.type(
+        screen.getByLabelText("Issue or pull request"),
+        "https://gitlab.com/demo/app/-/issues/3",
+      );
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      await waitFor(() =>
+        expect(opener.openUrl).toHaveBeenCalledWith("https://gitlab.com/demo/app/-/issues/3"),
+      );
+      expect(
+        core.projectTasks,
+        "nothing asked of GitHub for a GitLab project",
+      ).toHaveBeenCalledTimes(asked);
+    });
+
+    it("sends a fork's own issue to the browser: the project lists its parent's, and #3 is not #3", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({
+          repo: { ...github, owner: "me" },
+          url: "https://github.com/me/app/issues/3",
+          number: 3,
+          listed: false,
+        }),
+      );
+      core.projectTasks.mockResolvedValue(tasksOf([task(3)]));
+      await open(user, "me/app#3");
+      await waitFor(() =>
+        expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/me/app/issues/3"),
+      );
+      expect(useProjectsStore.getState().tasksOpen).toBe(false);
+      expect(useTasksStore.getState().selected).toBeNull();
+      expect(screen.queryByRole("dialog", { name: /Clone/ }), "no clone offered").toBeNull();
+    });
+
+    it("clones a repository that is not a project yet, then opens the item", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({
+          repo: { ...github, owner: "o", name: "fresh" },
+          url: "https://github.com/o/fresh/issues/7",
+          cloneUrl: "https://github.com/o/fresh.git",
+          number: 7,
+          projectId: null,
+        }),
+      );
+      core.projectClone.mockResolvedValue(added("fresh"));
+      core.projectTasks.mockImplementation(async (projectId: string) =>
+        tasksOf(projectId === "p-fresh" ? [task(7)] : []),
+      );
+      await open(user, "https://github.com/o/fresh/issues/7");
+      const dialog = await screen.findByRole("dialog", { name: "Clone a repository" });
+      expect(within(dialog).getByLabelText("Repository")).toHaveValue(
+        "https://github.com/o/fresh.git",
+      );
+      expect(within(dialog).getByLabelText("Name")).toHaveValue("fresh");
+      await user.type(within(dialog).getByLabelText("Location"), "/code");
+      await user.click(within(dialog).getByRole("button", { name: "Clone project" }));
+      expect(core.projectClone).toHaveBeenCalledWith(
+        "https://github.com/o/fresh.git",
+        "fresh",
+        "/code",
+        null,
+      );
+      await waitFor(() => expect(useProjectsStore.getState().tasksOpen).toBe(true));
+      expect(useTasksStore.getState().selected).toBe("p-fresh#7");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(core.ptySpawn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId: "w-fresh" }),
+      );
+    });
+
+    it("says what it takes when the text is not a link, and stays open", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockRejectedValue({
+        code: "invalid_link",
+        message:
+          "Paste a link to an issue or a pull request, or owner/repository#number on GitHub.",
+      });
+      await open(user, "not a link");
+      expect(await screen.findByRole("alert")).toHaveTextContent("Paste a link to an issue");
+      expect(screen.getByRole("dialog", { name: "Start from a link" })).toBeInTheDocument();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 
   it("keeps the dialog open and shows why when creation fails", async () => {

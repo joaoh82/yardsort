@@ -1,0 +1,32 @@
+{
+  "total_count": 2,
+  "incomplete_results": false,
+  "items": [
+    {
+      "full_name": "o/weather-cli",
+      "description": "A weather forecast on the command line",
+      "html_url": "https://github.com/o/weather-cli",
+      "clone_url": "https://github.com/o/weather-cli.git",
+      "ssh_url": "git@github.com:o/weather-cli.git",
+      "private": false,
+      "fork": false,
+      "archived": false,
+      "has_issues": true,
+      "pushed_at": "2026-10-04T20:29:33Z",
+      "language": "Rust"
+    },
+    {
+      "full_name": "someone/weather-cli-plugins",
+      "description": null,
+      "html_url": "https://github.com/someone/weather-cli-plugins",
+      "clone_url": "https://github.com/someone/weather-cli-plugins.git",
+      "ssh_url": "git@github.com:someone/weather-cli-plugins.git",
+      "private": true,
+      "fork": false,
+      "archived": false,
+      "has_issues": false,
+      "pushed_at": "2026-10-04T20:52:14Z",
+      "language": null
+    }
+  ]
+}

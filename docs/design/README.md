@@ -28,6 +28,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 21  | [Workflows](21-workflows.md)                                            | Proposal: named agent sequences in YAML, a DAG of steps, run from the app or `ys`; manual only          |
 | 22  | [Pull requests](22-pull-requests.md)                                    | Every project's pull requests in one view. All four slices built: list, actions, Summary, Code, writing |
 | 23  | [Tasks](23-tasks.md)                                                    | Every project's GitHub issues in one view, and `ys task`. All three slices built                        |
+| 24  | [Repositories](24-repositories.md)                                      | Pick a repository from the forge, clone from any host, start from an issue or pull request link. Built  |
 
 ## Vocabulary
 

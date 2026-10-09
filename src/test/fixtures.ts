@@ -10,6 +10,8 @@ import type {
   Task,
   TaskDetail,
   Workspace,
+  RemoteRepository,
+  Repositories,
 } from "@/lib/ipc";
 
 /** A project with its `local` workspace, as the core would describe it. */
@@ -217,5 +219,40 @@ export const taskDetail = (it: Task, overrides: Partial<TaskDetail> = {}): TaskD
   task: it,
   body: `What ${it.title} is about.`,
   comments: [],
+  ...overrides,
+});
+
+/** A repository on the forge as the clone dialog lists it: public, not a fork, pushed to
+ *  within the hour. `parent` names a fork's parent, which gets both URLs from its name. */
+export const repository = (
+  nameWithOwner: string,
+  overrides: Partial<Omit<RemoteRepository, "parent">> & { parent?: string } = {},
+): RemoteRepository => {
+  const { parent, ...rest } = overrides;
+  return {
+    nameWithOwner,
+    description: null,
+    cloneUrl: `https://github.com/${nameWithOwner}.git`,
+    isPrivate: false,
+    isFork: !!parent,
+    isArchived: false,
+    parent: parent ? { nameWithOwner: parent, cloneUrl: `https://github.com/${parent}.git` } : null,
+    language: null,
+    pushedAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    projectId: null,
+    ...rest,
+  };
+};
+
+/** What `forge_repositories` answers: every page read, nothing wrong. */
+export const repositoriesOf = (
+  repositories: RemoteRepository[],
+  overrides: Partial<Repositories> = {},
+): Repositories => ({
+  repositories,
+  total: repositories.length,
+  answered: true,
+  problem: null,
+  loggedOut: false,
   ...overrides,
 });
