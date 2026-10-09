@@ -106,18 +106,20 @@ pub async fn project_clone(
     .await
 }
 
-/// Each project's push remote, read as a repository on a forge, for matching against the forge's
-/// answers. A project with no remote, or a folder that has gone, is simply not matched.
-fn project_repos(state: &AppState) -> IpcResult<Vec<(String, Repo)>> {
+/// Each project's remotes, read as repositories on a forge and in `gh`'s order, for matching
+/// against the forge's answers. A project with no remote, or a folder that has gone, is simply
+/// not matched.
+fn project_repos(state: &AppState) -> IpcResult<Vec<(String, Vec<Repo>)>> {
     let git = Git::new(&state.env())?;
     Ok(state
         .store
         .projects()?
         .into_iter()
-        .filter_map(|project| {
-            let repo = forge::repo_at(&git, Path::new(&project.root_path))?;
-            Some((project.id, repo))
+        .map(|project| {
+            let repos = forge::repos_at(&git, Path::new(&project.root_path));
+            (project.id, repos)
         })
+        .filter(|(_, repos)| !repos.is_empty())
         .collect())
 }
 
@@ -145,7 +147,12 @@ pub async fn forge_resolve_link(app: AppHandle, text: String) -> IpcResult<Resol
             }
         };
         let projects = project_repos(state)?;
-        Ok(link.resolve(projects.iter().map(|(id, repo)| (id.as_str(), repo)), kind))
+        Ok(link.resolve(
+            projects
+                .iter()
+                .map(|(id, repos)| (id.as_str(), repos.as_slice())),
+            kind,
+        ))
     })
     .await
 }
@@ -169,7 +176,11 @@ pub async fn forge_repositories(app: AppHandle) -> IpcResult<Repositories> {
         let (gh, cwd, protocol) = gh_for_the_account(state)?;
         let mut found = gh.repositories(&cwd, protocol, 200, Duration::from_secs(20));
         let projects = project_repos(state)?;
-        found.mark_projects(projects.iter().map(|(id, repo)| (id.as_str(), repo)));
+        found.mark_projects(
+            projects
+                .iter()
+                .map(|(id, repos)| (id.as_str(), repos.as_slice())),
+        );
         Ok(found)
     })
     .await
@@ -193,7 +204,11 @@ pub async fn forge_search_repositories(
             repositories: std::mem::take(&mut found),
             ..Default::default()
         };
-        marked.mark_projects(projects.iter().map(|(id, repo)| (id.as_str(), repo)));
+        marked.mark_projects(
+            projects
+                .iter()
+                .map(|(id, repos)| (id.as_str(), repos.as_slice())),
+        );
         Ok(marked.repositories)
     })
     .await

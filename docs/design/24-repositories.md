@@ -285,8 +285,9 @@ git_protocol` runs before the list and before each search, and the clone URL in 
   the _Clone <url>_ row it submits, which is the same as the button.
 - **The index into the list is clamped, not reset**: typing resets it to the first row, and a
   list that shrinks under it keeps it on the last row rather than on nothing.
-- **Already added** matches by push remote through `forge::repo_at`, as proposed, for the list
-  and for search results alike; the first match wins when two projects share a remote.
+- **Already added** matched by push remote through `forge::repo_at` as proposed; after review
+  (below) by every remote, through `forge::repos_at`, for the list and for search results alike.
+  The first match wins when two projects share a remote.
 - **Create a project** got the collapsed location too, since the two forms share
   `Destination`; it had no reason to keep asking either.
 - **Found**: an account in sixteen organisations reaches 64,812 repositories, which is why the
@@ -346,6 +347,33 @@ Built 2026-10-08, as proposed, with these differences:
   a view under a user who has moved on was the thing to avoid.
 - **Not done**: a run against a real link from the window (the manual checklist gained two
   rows); a link remembered across a restart, as decided.
+
+## After review (2026-10-09)
+
+The review of the pull request found three things, each right, each fixed there:
+
+- **A clone of a fork was matched by its push remote — the fork — while its views answer for
+  the parent**, since `gh` resolves `{owner}/{repo}` to `upstream` before `origin`. A link to
+  the parent's issue offered a second clone, and a link to the fork's own issue matched the
+  project and then selected the parent's issue of the same number. Now `forge::repos_at` reads
+  every remote of a project in `gh`'s order — the one `gh repo set-default` chose, else
+  `upstream`, `github`, `origin`, then the rest — and both `mark_projects` and `Link::resolve`
+  match against all of them. `ResolvedLink` gained `listed`: whether the match is the first
+  remote, the one the views list. A link that is known but not listed opens in the browser,
+  and offers no clone; a fresh clone of the link's own repository lists it. Tested with a
+  project of two remotes, in the core and through the dialog.
+- **The repository list was kept for the life of the app, so _Already added_ went stale**
+  after a clone or a removal, and a logged-out answer was kept as if it were a list. Now the
+  store forgets the list whenever a project is added or removed — it is read again the next
+  time the dialog opens, two seconds the dialog says so — and a logged-out answer is asked
+  again on every open, so logging in counts. Reading again rather than re-marking locally
+  keeps the marks in the core, where the remotes are.
+- **A failed `git remote add upstream` failed the clone after the clone was done**, leaving a
+  whole repository on disk under a name Yardsort would then refuse, while the comment beside it
+  said the opposite. Now the remote and its fetch are both best effort: the project is
+  registered either way, and the guide says so.
+- Also from the review: the cursor goes to `gh` as `-f after=…`, not `-F`, so it can never be
+  read as a file or a number.
 
 ## Not in this version, on purpose
 

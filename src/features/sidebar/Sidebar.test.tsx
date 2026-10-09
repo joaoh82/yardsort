@@ -1112,6 +1112,34 @@ describe("Sidebar", () => {
     expect(await screen.findByRole("treeitem", { name: "weather-api" })).toBeInTheDocument();
   });
 
+  it("reads the list again after a clone, so the clone is marked, and after a login", async () => {
+    const user = userEvent.setup();
+    await renderSidebar();
+    core.forgeRepositories
+      .mockResolvedValueOnce(repositoriesOf([], { loggedOut: true }))
+      .mockResolvedValueOnce(repositoriesOf([repository("o/fresh")]))
+      .mockResolvedValueOnce(repositoriesOf([repository("o/fresh", { projectId: "p-fresh" })]));
+    core.projectClone.mockResolvedValue(added("fresh"));
+    useProjectsStore.setState({ lastParentDir: "/code" });
+    await openCloneStep(user);
+    expect(await screen.findByText(/Nobody is logged in/)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    // Logged in since: opening again asks again.
+    await openCloneStep(user);
+    const list = await screen.findByRole("listbox", { name: "Your repositories" });
+    await user.click(await within(list).findByRole("option", { name: "o/fresh" }));
+    await user.click(screen.getByRole("button", { name: "Clone project" }));
+    await screen.findByRole("treeitem", { name: "fresh" });
+    // Cloned since: the list is read again and the clone is marked.
+    await openCloneStep(user);
+    expect(
+      await screen.findByRole("option", { name: "o/fresh, already added" }),
+    ).toBeInTheDocument();
+    expect(core.forgeRepositories).toHaveBeenCalledTimes(3);
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Go to project" })).toBeInTheDocument();
+  });
+
   it("walks the list with the keyboard, says which are already projects, and goes to one instead of cloning it", async () => {
     const user = userEvent.setup();
     await renderSidebar("alpha");
@@ -1235,6 +1263,7 @@ describe("Sidebar", () => {
       url: "https://github.com/demo/app/issues/91",
       cloneUrl: "https://github.com/demo/app.git",
       projectId: "p-alpha",
+      listed: true,
       ...overrides,
     });
     async function open(user: ReturnType<typeof userEvent.setup>, text: string) {
@@ -1303,6 +1332,26 @@ describe("Sidebar", () => {
         core.projectTasks,
         "nothing asked of GitHub for a GitLab project",
       ).toHaveBeenCalledTimes(asked);
+    });
+
+    it("sends a fork's own issue to the browser: the project lists its parent's, and #3 is not #3", async () => {
+      const user = userEvent.setup();
+      core.forgeResolveLink.mockResolvedValue(
+        resolved({
+          repo: { ...github, owner: "me" },
+          url: "https://github.com/me/app/issues/3",
+          number: 3,
+          listed: false,
+        }),
+      );
+      core.projectTasks.mockResolvedValue(tasksOf([task(3)]));
+      await open(user, "me/app#3");
+      await waitFor(() =>
+        expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/me/app/issues/3"),
+      );
+      expect(useProjectsStore.getState().tasksOpen).toBe(false);
+      expect(useTasksStore.getState().selected).toBeNull();
+      expect(screen.queryByRole("dialog", { name: /Clone/ }), "no clone offered").toBeNull();
     });
 
     it("clones a repository that is not a project yet, then opens the item", async () => {

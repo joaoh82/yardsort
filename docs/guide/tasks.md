@@ -133,6 +133,9 @@ Forgejo give their issues and merge requests.
   project appears with its notice and nothing else moves.
 - **The project is on another forge** — Tasks and Pull requests are for GitHub, so the item
   opens in your browser.
+- **The project is a clone of a fork** — its views list the parent's issues and pull requests,
+  as `gh` resolves it, so a link to the parent opens there. A link to the fork's own issue is
+  known — no clone is offered — but has no row to open on, and opens in your browser.
 
 Nothing starts on its own: both views hand over to the composer, where the agent, the model and
 the message are yours to settle.

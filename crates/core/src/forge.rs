@@ -149,6 +149,43 @@ pub fn repo_at(git: &crate::git::Git, root: &Path) -> Option<Repo> {
     parse_remote(&url)
 }
 
+/// Every remote of `root` that is a repository on a forge, in the order `gh` resolves
+/// `{owner}/{repo}` from them: the one `gh repo set-default` chose, else `upstream`, `github`,
+/// `origin`, then the rest as git lists them. So the first is the repository the Pull requests
+/// and Tasks views answer for — in a clone of a fork, the parent — and the others are the same
+/// project under its other names.
+pub fn repos_at(git: &crate::git::Git, root: &Path) -> Vec<Repo> {
+    let Ok(remotes) = git.remotes(root) else {
+        return Vec::new();
+    };
+    let rank = |name: &str| -> u8 {
+        let chosen = git
+            .run(
+                root,
+                &["config", "--get", &format!("remote.{name}.gh-resolved")],
+            )
+            .is_ok_and(|value| value.trim() == "base");
+        match name {
+            _ if chosen => 0,
+            "upstream" => 1,
+            "github" => 2,
+            "origin" => 3,
+            _ => 4,
+        }
+    };
+    let mut ranked: Vec<(u8, usize, &str)> = remotes
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (rank(name), index, name.as_str()))
+        .collect();
+    ranked.sort();
+    ranked
+        .into_iter()
+        .filter_map(|(_, _, name)| git.remote_url(root, name).ok()?)
+        .filter_map(|url| parse_remote(&url))
+        .collect()
+}
+
 /// Read a git remote URL as a repository on a forge.
 ///
 /// Handles the three shapes git hands out — `git@host:owner/repo.git`,
@@ -1513,6 +1550,41 @@ fn count(rollup: Option<&serde_json::Value>) -> CheckCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remotes_are_read_in_the_order_gh_resolves_them() {
+        let git = crate::git::testing::git();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git.init(root).unwrap();
+        let add = |name: &str, url: &str| git.run(root, &["remote", "add", name, url]).unwrap();
+        add("origin", "git@github.com:me/tool.git");
+        add("mirror", "https://gitlab.com/me/tool.git");
+        add("upstream", "https://github.com/acme/tool.git");
+        add("disk", "/srv/git/tool.git");
+        let names = |repos: Vec<Repo>| -> Vec<String> {
+            repos
+                .iter()
+                .map(|r| format!("{}/{}", r.owner, r.name))
+                .collect()
+        };
+        // upstream first, then origin, then the rest as git lists them; a path is no repository.
+        assert_eq!(
+            names(repos_at(&git, root)),
+            ["acme/tool", "me/tool", "me/tool"]
+        );
+        assert_eq!(repos_at(&git, root)[2].host, "gitlab.com");
+        // `gh repo set-default` wins over the names.
+        git.run(root, &["config", "remote.mirror.gh-resolved", "base"])
+            .unwrap();
+        assert_eq!(repos_at(&git, root)[0].host, "gitlab.com");
+        assert_eq!(
+            repo_at(&git, root).unwrap().owner,
+            "me",
+            "the push remote is still origin"
+        );
+        assert!(repos_at(&git, dir.path().join("nowhere").as_path()).is_empty());
+    }
 
     #[cfg(unix)]
     #[test]

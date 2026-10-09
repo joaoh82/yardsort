@@ -617,13 +617,14 @@ it adds that as a second remote and fetches it, and a fetch that fails does not 
 The list the dialog offers is `repositories.rs` in the core: the account's own repositories and
 collaborations through one `gh api graphql` query, paged, capped at 200, never an error once
 `gh` is there; a forge search through `gh api search/repositories` with the text as a parameter;
-and `Repositories::mark_projects`, which says which rows are already projects by matching each
-project's push remote (`forge::repo_at`) on host, owner and name. Organisation repositories are
+and `Repositories::mark_projects`, which says which rows are already projects by matching every
+remote of each project (`forge::repos_at`, in the order `gh` resolves them) on host, owner and
+name. Organisation repositories are
 not listed, by measurement ([24](24-repositories.md#what-was-measured)). `repositories::parse_link`
 reads an issue's or a pull request's address on any of the forges, and `Link::resolve` matches it
-to a project the same way; `forge_resolve_link` asks `gh` which of the two an `owner/repo#12`
-is. The frontend's `followLink` then opens the view on the row, or the browser when there is
-no row to open on. A failed clone removes only an empty directory; files left
+to a project the same way, saying with `listed` whether the match is the remote the views answer
+for; `forge_resolve_link` asks `gh` which of the two an `owner/repo#12` is. The frontend's
+`followLink` then opens the view on the row, or the browser when there is no row to open on. A failed clone removes only an empty directory; files left
 behind are reported and preserved. Cloning runs off the UI thread without holding the
 worktree reconciliation lock. The frontend tracks pending command requests for the sidebar;
 closing the clone dialog leaves the command running. Completion registers the project but

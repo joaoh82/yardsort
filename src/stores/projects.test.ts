@@ -146,17 +146,38 @@ describe("projects store", () => {
     expect(store().error).toBe("/code/fresh already exists.");
   });
 
-  it("clears the selection when the selected project is removed", async () => {
+  it("clears the selection when the selected project is removed, and forgets the clone dialog's list", async () => {
     useProjectsStore.setState({
       projects: [project("a"), project("b")],
       selectedWorkspaceId: "w-a",
       collapsed: ["p-a"],
+      repositories: {
+        ...store().repositories,
+        status: "ready",
+        list: [
+          {
+            nameWithOwner: "o/a",
+            description: null,
+            cloneUrl: "https://github.com/o/a.git",
+            isPrivate: false,
+            isFork: false,
+            isArchived: false,
+            parent: null,
+            language: null,
+            pushedAt: null,
+            projectId: "p-a",
+          },
+        ],
+      },
     });
     await store().remove("p-a", true);
     expect(core.projectRemove).toHaveBeenCalledWith("p-a", true);
     expect(store().projects.map((p) => p.name)).toEqual(["b"]);
     expect(store().selectedWorkspaceId).toBeNull();
     expect(store().collapsed).toEqual([]);
+    // "Already added" would now point at nothing: the list is read again next time.
+    expect(store().repositories.status).toBe("idle");
+    expect(store().repositories.list).toEqual([]);
   });
 
   it("moves projects and tells the core the whole new order", async () => {

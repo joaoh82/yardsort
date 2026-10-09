@@ -97,18 +97,31 @@ pub struct Repositories {
 }
 
 impl Repositories {
-    /// Say which repositories are already projects. A project is matched by its push remote —
-    /// host, owner and name, in any case — never by its folder's name.
-    pub fn mark_projects<'a>(&mut self, projects: impl IntoIterator<Item = (&'a str, &'a Repo)>) {
-        let projects: Vec<(&str, String)> = projects
+    /// Say which repositories are already projects. A project is matched by any of its remotes
+    /// — host, owner and name, in any case — never by its folder's name; so a clone of a fork
+    /// stands for the fork and for its parent.
+    pub fn mark_projects<'a>(&mut self, projects: impl IntoIterator<Item = (&'a str, &'a [Repo])>) {
+        let projects: Vec<(&str, Vec<String>)> = projects
             .into_iter()
-            .filter(|(_, repo)| repo.host.eq_ignore_ascii_case("github.com"))
-            .map(|(id, repo)| (id, format!("{}/{}", repo.owner, repo.name)))
+            .map(|(id, repos)| {
+                (
+                    id,
+                    repos
+                        .iter()
+                        .filter(|repo| repo.host.eq_ignore_ascii_case("github.com"))
+                        .map(|repo| format!("{}/{}", repo.owner, repo.name))
+                        .collect(),
+                )
+            })
             .collect();
         for repository in &mut self.repositories {
             repository.project_id = projects
                 .iter()
-                .find(|(_, name)| name.eq_ignore_ascii_case(&repository.name_with_owner))
+                .find(|(_, names)| {
+                    names
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(&repository.name_with_owner))
+                })
                 .map(|(id, _)| (*id).to_owned());
         }
     }
@@ -255,7 +268,8 @@ impl Gh {
         let mut args = vec!["api", "graphql", "-f", &query];
         let after = after.map(|cursor| format!("after={cursor}"));
         if let Some(after) = after.as_deref() {
-            args.extend(["-F", after]);
+            // `-f`, not `-F`: the cursor is sent as the string it is, never read as a file.
+            args.extend(["-f", after]);
         }
         let out = self
             .run_within(cwd, &args, limit)
@@ -453,14 +467,29 @@ mod tests {
                 .repositories,
             ..Default::default()
         };
-        let github = crate::forge::parse_remote("git@github.com:O/Weather-CLI.git").unwrap();
-        let elsewhere = crate::forge::parse_remote("https://gitlab.com/o/old-site.git").unwrap();
-        found.mark_projects([("p1", &github), ("p2", &elsewhere)]);
+        let github = [crate::forge::parse_remote("git@github.com:O/Weather-CLI.git").unwrap()];
+        let elsewhere = [crate::forge::parse_remote("https://gitlab.com/o/old-site.git").unwrap()];
+        // A clone of a fork: the parent first, as gh resolves it, then the fork.
+        let fork = [
+            crate::forge::parse_remote("https://github.com/upstream/awesome-tools.git").unwrap(),
+            crate::forge::parse_remote("https://github.com/o/awesome-tools.git").unwrap(),
+        ];
+        found.mark_projects([
+            ("p1", &github[..]),
+            ("p2", &elsewhere[..]),
+            ("p3", &fork[..]),
+        ]);
         assert_eq!(found.repositories[0].project_id.as_deref(), Some("p1"));
-        assert_eq!(found.repositories[3].project_id, None);
-        assert!(found.repositories[1..]
-            .iter()
-            .all(|r| r.project_id.is_none()));
+        assert_eq!(found.repositories[1].project_id, None);
+        assert_eq!(
+            found.repositories[2].project_id.as_deref(),
+            Some("p3"),
+            "the fork itself"
+        );
+        assert_eq!(
+            found.repositories[3].project_id, None,
+            "GitLab is not GitHub"
+        );
     }
 
     #[cfg(unix)]
@@ -531,7 +560,7 @@ mod tests {
         );
         assert!(!asked[0].contains("{owner}"), "{}", asked[0]);
         assert!(
-            asked[1].ends_with("-F after=Y3Vyc29yOnYyOpK0MjAyNi0xMC0wMVQxMjowMDowMFrOBHa0OA=="),
+            asked[1].ends_with("-f after=Y3Vyc29yOnYyOpK0MjAyNi0xMC0wMVQxMjowMDowMFrOBHa0OA=="),
             "{}",
             asked[1]
         );
@@ -730,8 +759,12 @@ pub struct ResolvedLink {
     pub url: String,
     /// What to clone, when the repository is not a project yet: HTTPS, on the link's host.
     pub clone_url: String,
-    /// The project whose push remote is this repository.
+    /// The project one of whose remotes is this repository.
     pub project_id: Option<String>,
+    /// Whether that project's Tasks and Pull requests views answer for this repository — its
+    /// first remote in `gh`'s order. In a clone of a fork, true for the parent and false for the
+    /// fork itself, whose issues no view lists.
+    pub listed: bool,
 }
 
 impl Link {
@@ -739,18 +772,34 @@ impl Link {
     /// not say; `None` keeps an issue, which is what the shorthand's URL already points at.
     pub fn resolve<'a>(
         self,
-        projects: impl IntoIterator<Item = (&'a str, &'a Repo)>,
+        projects: impl IntoIterator<Item = (&'a str, &'a [Repo])>,
         kind: Option<LinkKind>,
     ) -> ResolvedLink {
         let same = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
-        let project_id = projects
-            .into_iter()
-            .find(|(_, repo)| {
-                same(&repo.host, &self.repo.host)
-                    && same(&repo.owner, &self.repo.owner)
-                    && same(&repo.name, &self.repo.name)
-            })
-            .map(|(id, _)| id.to_owned());
+        let is_this = |repo: &Repo| {
+            same(&repo.host, &self.repo.host)
+                && same(&repo.owner, &self.repo.owner)
+                && same(&repo.name, &self.repo.name)
+        };
+        // A project whose listed repository this is comes before one that has it as another
+        // remote: a fork's clone and the parent's own clone are both projects of the parent.
+        let mut found: Option<(String, bool)> = None;
+        for (id, repos) in projects {
+            let Some(index) = repos.iter().position(is_this) else {
+                continue;
+            };
+            let listed = index == 0;
+            if listed || found.is_none() {
+                found = Some((id.to_owned(), listed));
+            }
+            if listed {
+                break;
+            }
+        }
+        let (project_id, listed) = match found {
+            Some((id, listed)) => (Some(id), listed),
+            None => (None, false),
+        };
         let kind = self.kind.or(kind).unwrap_or(LinkKind::Issue);
         let url = if self.kind.is_none() && kind == LinkKind::PullRequest {
             self.url.replace("/issues/", "/pull/")
@@ -767,6 +816,7 @@ impl Link {
             number: self.number,
             url,
             project_id,
+            listed,
         }
     }
 }
@@ -872,9 +922,9 @@ mod link_tests {
 
     #[test]
     fn a_link_is_matched_to_a_project_by_its_remote_and_takes_the_forges_word_on_its_kind() {
-        let here = crate::forge::parse_remote("git@github.com:O/R.git").unwrap();
-        let elsewhere = crate::forge::parse_remote("https://gitlab.com/o/r.git").unwrap();
-        let projects = [("p1", &here), ("p2", &elsewhere)];
+        let here = [crate::forge::parse_remote("git@github.com:O/R.git").unwrap()];
+        let elsewhere = [crate::forge::parse_remote("https://gitlab.com/o/r.git").unwrap()];
+        let projects = [("p1", &here[..]), ("p2", &elsewhere[..])];
 
         let resolved = link("o/r#12").resolve(projects, Some(LinkKind::PullRequest));
         assert_eq!(resolved.project_id.as_deref(), Some("p1"));
@@ -895,7 +945,55 @@ mod link_tests {
         assert_eq!(resolved.project_id.as_deref(), Some("p2"));
         let resolved = link("https://gitlab.com/other/r/-/issues/1").resolve(projects, None);
         assert_eq!(resolved.project_id, None);
+        assert!(!resolved.listed);
         assert_eq!(resolved.clone_url, "https://gitlab.com/other/r.git");
+    }
+
+    #[test]
+    fn a_clone_of_a_fork_is_the_parents_project_and_the_forks_own_issues_are_not_listed() {
+        // origin is the fork, upstream the parent; gh answers for the parent, so it comes first.
+        let fork = [
+            crate::forge::parse_remote("https://github.com/acme/tool.git").unwrap(),
+            crate::forge::parse_remote("git@github.com:me/tool.git").unwrap(),
+        ];
+        let projects = [("p-fork", &fork[..])];
+
+        let parent = link("https://github.com/acme/tool/issues/12").resolve(projects, None);
+        assert_eq!(
+            parent.project_id.as_deref(),
+            Some("p-fork"),
+            "no second clone offered"
+        );
+        assert!(
+            parent.listed,
+            "the Tasks view of that project lists acme/tool's issues"
+        );
+
+        let own = link("me/tool#3").resolve(projects, Some(LinkKind::Issue));
+        assert_eq!(
+            own.project_id.as_deref(),
+            Some("p-fork"),
+            "known, so no clone offered"
+        );
+        assert!(
+            !own.listed,
+            "me/tool#3 is not acme/tool#3: the view must not select that"
+        );
+
+        // Both the fork's clone and a clone of the parent itself: whichever lists it wins.
+        let own_clone = [crate::forge::parse_remote("https://github.com/acme/tool.git").unwrap()];
+        let both = [("p-fork", &fork[..]), ("p-parent", &own_clone[..])];
+        let resolved = link("acme/tool#1").resolve(both, Some(LinkKind::Issue));
+        assert_eq!(resolved.project_id.as_deref(), Some("p-fork"));
+        assert!(resolved.listed);
+        let swapped = [("p-parent", &own_clone[..]), ("p-fork", &fork[..])];
+        assert_eq!(
+            link("acme/tool#1")
+                .resolve(swapped, Some(LinkKind::Issue))
+                .project_id
+                .as_deref(),
+            Some("p-parent")
+        );
     }
 
     #[cfg(unix)]

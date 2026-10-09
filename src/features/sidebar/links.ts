@@ -11,10 +11,12 @@ import { useTasksStore } from "@/stores/tasks";
  * Open what a resolved link points at, in the project that has its repository: the Tasks view
  * on that issue, or the Pull requests view on that pull request, so Delegate or Start workspace
  * is the next press. A project on another forge has no such view, so the item opens in the
- * browser; so does one the view turns out to have no row for — closed, or past what is read.
+ * browser; so does one the view turns out to have no row for — closed, or past what is read —
+ * and a fork's own issue in a clone whose views answer for the parent.
  *
  * `projectId` is the link's own unless the repository was just cloned, in which case it is the
- * new project's. Returns whether a view was opened.
+ * new project's — and a fresh clone of the link's repository lists it. Returns whether a view
+ * was opened.
  */
 export async function followLink(
   link: ResolvedLink,
@@ -22,7 +24,9 @@ export async function followLink(
 ): Promise<boolean> {
   if (!projectId) return false;
   const browser = () => void openUrl(link.url).catch(console.error);
-  if (link.repo.kind !== "github") {
+  // Another forge has no view here; and a clone of a fork lists its parent's issues, not the
+  // fork's own, so a link to the fork is known but has no row — and #3 of the parent is not it.
+  if (link.repo.kind !== "github" || !link.listed) {
     browser();
     return false;
   }

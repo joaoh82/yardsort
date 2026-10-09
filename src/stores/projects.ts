@@ -185,6 +185,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     const { project } = added;
     const local = project.workspaces[0]?.id ?? null;
     set((state) => ({
+      // The clone dialog's "Already added" marks were computed against the projects of a
+      // moment ago; the list is read again when the dialog next opens.
+      repositories: noRepositories,
       projects: state.projects.some((p) => p.id === project.id)
         ? state.projects.map((p) => (p.id === project.id ? project : p))
         : [...state.projects, project],
@@ -299,8 +302,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     },
 
     async loadRepositories(refresh = false) {
-      const { status } = get().repositories;
-      if (!refresh && status !== "idle" && status !== "failed") return;
+      const { status, loggedOut } = get().repositories;
+      // A list is kept while the app runs; no list — nothing read yet, a failure, or nobody
+      // logged in — is asked for again each time the dialog opens, so a login counts.
+      if (!refresh && (status === "loading" || (status === "ready" && !loggedOut))) return;
       set({ repositories: { ...noRepositories, status: "loading" } });
       try {
         const found = await ipc.forgeRepositories();
@@ -353,6 +358,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       }
       const gone = new Set(project.workspaces.map((workspace) => workspace.id));
       set((state) => ({
+        repositories: noRepositories,
         projects: state.projects.filter((p) => p.id !== id),
         collapsed: state.collapsed.filter((c) => c !== id),
         selectedWorkspaceId:

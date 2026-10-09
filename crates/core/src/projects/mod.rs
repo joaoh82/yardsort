@@ -225,17 +225,14 @@ impl Projects<'_> {
             )));
         }
         if let Some(upstream) = upstream {
-            // The clone is good whatever happens here: the parent's branches are a convenience
-            // for later, and fetching them can wait for a network that is there.
-            self.git
+            // The clone is good whatever happens here, so it is registered whatever happens
+            // here: the parent is a second remote for later, and fetching it can wait for a
+            // network that is there. Failing the command instead would leave a whole clone on
+            // disk that Yardsort does not know about, under a name it then refuses.
+            let _ = self
+                .git
                 .run(&target, &["remote", "add", "upstream", "--", upstream])
-                .map_err(|error| {
-                    IpcError::new(
-                        "clone_failed",
-                        format!("Could not add the upstream remote: {error}"),
-                    )
-                })?;
-            let _ = self.git.run(&target, &["fetch", "upstream"]);
+                .and_then(|_| self.git.run(&target, &["fetch", "upstream"]));
         }
         self.add(&target, false)
     }
@@ -740,6 +737,20 @@ mod tests {
                 &["rev-parse", "--verify", "upstream/only-upstream-has-this"]
             )
             .is_ok());
+        // An upstream git cannot reach is no reason to lose the clone: the project is
+        // registered, with origin and an upstream that has no branches yet.
+        let unreachable = fx
+            .projects()
+            .clone_repository(
+                &fork.to_string_lossy(),
+                "unreachable",
+                &fx.path(),
+                Some(&fx.path().join("nowhere").to_string_lossy()),
+            )
+            .unwrap();
+        let target = PathBuf::from(&unreachable.project.root_path);
+        assert_eq!(fx.git.remotes(&target).unwrap(), ["origin", "upstream"]);
+        assert_eq!(fx.projects().list().unwrap().len(), 2);
         // Not a fork, nothing added.
         let plain = fx
             .projects()

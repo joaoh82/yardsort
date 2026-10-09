@@ -1828,8 +1828,14 @@ export type ResolvedLink = {
 	url: string,
 	/**  What to clone, when the repository is not a project yet: HTTPS, on the link's host. */
 	cloneUrl: string,
-	/**  The project whose push remote is this repository. */
+	/**  The project one of whose remotes is this repository. */
 	projectId: string | null,
+	/**
+	 *  Whether that project's Tasks and Pull requests views answer for this repository — its
+	 *  first remote in `gh`'s order. In a clone of a fork, true for the parent and false for the
+	 *  fork itself, whose issues no view lists.
+	 */
+	listed: boolean,
 };
 
 export type Review = {

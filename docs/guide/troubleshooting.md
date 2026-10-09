@@ -193,7 +193,7 @@ Install `gh`, run `gh auth login` in a terminal, close the dialog and open it ag
   characters of the name and press **Search GitHub for “…”**.
 - **The list stopped short** — a page GitHub did not answer: what arrived is shown, with the
   reason and **Retry**.
-- **It is marked _Already added_ but you cannot see it** — the match is by push remote, so the
+- **It is marked _Already added_ but you cannot see it** — the match is by remote, so the
   project is there under whatever name its folder has; **Go to project** selects it.
 
 See [Projects](projects.md#clone-a-repository).

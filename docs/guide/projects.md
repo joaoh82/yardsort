@@ -67,7 +67,9 @@ can reach tens of thousands — and are found by searching.
 
 A repository that is already one of your projects says **Already added**. Picking it turns the
 button into **Go to project**, which selects that project instead of cloning it twice. The match
-is by the project's push remote, not by its folder's name.
+is by the project's remotes, not by its folder's name, so a clone of a fork stands for the fork
+and for its parent. The list is read when the dialog opens and kept while Yardsort runs; it is
+read again after a project is added or removed, and after you log in to `gh`.
 
 You can also paste a clone URL, with or without a list, and it need not be GitHub's: an HTTPS
 URL (`https://gitlab.com/group/subgroup/repository`), an `ssh://` URL, or git's
@@ -97,7 +99,10 @@ remote are preserved; the location is remembered for next time. Existing folders
 empty ones, are refused. A repository picked from the list is cloned over HTTPS or SSH as your
 `gh config get git_protocol` says; a pasted URL is cloned as pasted. A fork picked from the list
 gets its parent as a second remote, `upstream`, and fetches it — the dialog says so under the
-field. That is where a pull request from the fork is measured against.
+field. That is where a pull request from the fork is measured against, and it is the
+repository the [Tasks](tasks.md) and [Pull requests](pull-requests.md) views answer for in that
+project, since `gh` resolves a clone of a fork to its parent. If git cannot add or fetch the
+remote, the clone is still added, without it.
 
 Cloning uses your installed git and its existing credentials. For private repositories, set up
 git access before cloning. While git runs, choose **Run in background**, press **Escape**, or

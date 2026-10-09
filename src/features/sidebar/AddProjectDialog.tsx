@@ -443,7 +443,7 @@ function CloneForm({
     if (preset.link) {
       // The clone was the way to the issue or pull request, not the destination.
       onDone();
-      await followLink(preset.link, created.project.id);
+      await followLink({ ...preset.link, listed: true }, created.project.id);
       return;
     }
     const selected = useProjectsStore.getState().selectedWorkspaceId;
