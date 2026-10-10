@@ -51,7 +51,9 @@ removed again.
 Choose **Clone a repository**. Under the **Repository** field is a list of the repositories
 your GitHub account owns or collaborates on, most recently pushed first, each with
 its language, when it was last pushed to, and whether it is private, archived or a fork of
-something. The list comes from the [GitHub CLI](https://cli.github.com), logged in as you;
+something.
+
+![The clone dialog: a list of the account's repositories under the Repository field, three of them marked Already added, one private, one a fork, one archived; the location remembered as a line](../images/clone-repository.png) The list comes from the [GitHub CLI](https://cli.github.com), logged in as you;
 Yardsort holds no credential of its own.
 
 Type to narrow the list, by name or by description. **↑** and **↓** move through it, **Enter**

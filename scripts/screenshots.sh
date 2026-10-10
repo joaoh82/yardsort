@@ -23,9 +23,10 @@
 #   The demo repositories point at remotes that do not exist, so `setup` also puts a stand-in
 #   `gh` on that PATH. It answers what the Pull requests view, the workflow-run shot and the
 #   pull-request badges ask — the list, one pull request in full, the open ones, the comments
-#   on lines — and what the Tasks view asks — the open and closed issues, one in full, the
-#   labels and who can be assigned — from files `setup` writes under the demo folder, and
-#   refuses everything else, every write among it.
+#   on lines — what the Tasks view asks — the open and closed issues, one in full, the
+#   labels and who can be assigned — and what the clone dialog asks of the account — your
+#   repositories, a search, the clone protocol — from files `setup` writes under the demo
+#   folder, and refuses everything else, every write among it.
 #   The pull request the Code tab shows has real commits on a real branch, and the refs the
 #   diff is read from are already there, so nothing is fetched.
 #
@@ -101,9 +102,16 @@ setup() {
 DEMO=$DEMO
 EOF
   cat >>"$AGENTS/gh" <<'EOF'
+# The clone dialog asks about the account, from no repository at all: the list of your
+# repositories, a search, and which protocol to clone with.
+case "$*" in
+  "config get git_protocol") echo https; exit 0 ;;
+  *"viewer{login repositories"*) cat "$DEMO/gh/repositories.json"; exit 0 ;;
+  "api -X GET search/repositories"*) cat "$DEMO/gh/search.json"; exit 0 ;;
+esac
 repo=$(git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||')
 dir="$DEMO/gh/$repo"
-[ -d "$dir" ] || { echo "gh: this is the screenshot stand-in; no demo data for '$repo'" >&2; exit 1; }
+[ -n "$repo" ] && [ -d "$dir" ] || { echo "gh: this is the screenshot stand-in; no demo data for '$repo'" >&2; exit 1; }
 # The number after `pr view` or in `pulls/<n>/comments`; empty when there is none.
 number=$(printf '%s\n' "$@" | sed -n 's|^repos/.*/pulls/\([0-9]*\)/comments$|\1|p; /^[0-9][0-9]*$/p' | head -1)
 case "$1 $2" in
@@ -159,6 +167,7 @@ EOF
   demo_projects
   demo_pull_requests
   demo_tasks
+  demo_repositories
   echo
   echo "Start the app with the throwaway profile, then run 'scripts/screenshots.sh seed' to add"
   echo "the demo projects to it (or add them by hand, in this order: weather-cli, api-gateway,"
@@ -782,6 +791,51 @@ EOF
 # The demo projects, into the profile the app is running on. The app makes the database on its
 # first start, so this comes after that; the sidebar reads the projects again when the window
 # is next focused, so nothing needs restarting.
+# What the clone dialog lists: the account's repositories, as `gh api graphql` would answer
+# for them — the three demo projects among them, so they say "Already added" — and what a
+# search for "weather" finds on the forge.
+demo_repositories() {
+  python3 - "$DEMO/gh" <<'PY'
+import json, sys
+out = sys.argv[1]
+def repo(name, desc, lang, pushed, private=False, fork=None, archived=False):
+    owner, short = name.split("/")
+    return {
+        "nameWithOwner": name, "description": desc,
+        "url": f"https://github.com/{name}", "sshUrl": f"git@github.com:{name}.git",
+        "isPrivate": private, "isFork": fork is not None, "isArchived": archived,
+        "hasIssuesEnabled": True, "pushedAt": pushed,
+        "primaryLanguage": {"name": lang} if lang else None,
+        "parent": {"nameWithOwner": fork, "url": f"https://github.com/{fork}",
+                   "sshUrl": f"git@github.com:{fork}.git"} if fork else None,
+    }
+rows = [
+    repo("yardsort-demo/weather-cli", "Today's weather for a city, in one line", "JavaScript", "2026-10-09T16:30:18Z"),
+    repo("yardsort-demo/api-gateway", "Routes, rate limits and auth in front of the services", "Go", "2026-10-09T11:02:41Z"),
+    repo("yardsort-demo/weather-api", "The forecast service weather-cli talks to", "Rust", "2026-10-08T19:48:03Z"),
+    repo("yardsort-demo/docs-site", "The documentation site", "TypeScript", "2026-10-07T08:15:27Z"),
+    repo("yardsort-demo/infra", "Terraform for everything", "HCL", "2026-10-03T14:21:09Z", private=True),
+    repo("yardsort-demo/awesome-cli-tools", "A curated list of command-line tools", None, "2026-09-26T10:05:55Z", fork="cli-tools/awesome-cli-tools"),
+    repo("yardsort-demo/mobile-app", "The app, before it moved to the monorepo", "Kotlin", "2025-11-14T17:40:12Z", archived=True),
+    repo("yardsort-demo/design-tokens", None, "CSS", "2025-08-02T09:33:46Z"),
+]
+json.dump({"data": {"viewer": {"login": "demo", "repositories": {
+    "totalCount": len(rows), "pageInfo": {"hasNextPage": False, "endCursor": "Y3Vyc29y"},
+    "nodes": rows}}}}, open(f"{out}/repositories.json", "w"), indent=2)
+def item(name, desc, lang, pushed, private=False):
+    return {"full_name": name, "description": desc, "html_url": f"https://github.com/{name}",
+            "clone_url": f"https://github.com/{name}.git", "ssh_url": f"git@github.com:{name}.git",
+            "private": private, "fork": False, "archived": False, "has_issues": True,
+            "pushed_at": pushed, "language": lang}
+json.dump({"total_count": 3, "incomplete_results": False, "items": [
+    item("open-meteo/weather-widgets", "Embeddable weather widgets", "TypeScript", "2026-10-08T07:12:00Z"),
+    item("acme-platform/weather-ingest", "Pulls station readings into the lake", "Python", "2026-10-06T22:41:19Z", private=True),
+    item("someone/weather-cli-plugins", None, "JavaScript", "2026-09-30T15:02:48Z"),
+]}, open(f"{out}/search.json", "w"), indent=2)
+PY
+  echo "  repositories for the clone dialog in $DEMO/gh"
+}
+
 seed() {
   command -v sqlite3 >/dev/null || { echo "seed needs sqlite3." >&2; exit 1; }
   local db="$SHOT/data/yardsort.db"
