@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.20.0
 
 - **Clone a repository by picking it from a list.** **Clone a repository** now lists the
   repositories your `gh` account owns or collaborates on, most recently pushed first; type to
