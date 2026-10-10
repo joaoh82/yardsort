@@ -34,6 +34,10 @@ const POINTS = [
     body: "Tasks lists every project's open GitHub issues and counts the ones that need an answer — where the last person to speak was not a maintainer. Open one, then Delegate: the composer opens with the issue as the agent's first message, marked as text other people wrote, and nothing starts until you say so. The workspace remembers the task it came from. Open a new task, answer one, close, label and assign it from the same view; ys task does all of it from a terminal, so an agent can tell you what is open and file an issue when you ask. Everything goes through gh.",
   },
   {
+    title: "Start from a repository or a link",
+    body: "Clone a repository lists the repositories your gh account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from GitHub, GitLab, Bitbucket, Gitea, Forgejo or a host of your own. Start from a link takes an issue's or a pull request's address and opens it, ready to delegate; a repository that is not a project yet is cloned on the way.",
+  },
+  {
     title: "Choose how agents start",
     body: "Always start in auto mode is a per-agent choice in Harness settings, off until you enable it. For Claude Code and Codex, with activity capture on, a hint at 80% of the context window offers Compact to send the agent's own /compact command.",
   },

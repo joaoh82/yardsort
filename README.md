@@ -97,6 +97,11 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   label and assign it from the same view. `ys task` does all of it from a terminal, so an agent
   can tell you what is open and file an issue when you ask. Everything goes through `gh`.
   [More below](#your-issues-where-the-agents-are).
+- **Start from a repository or a link.** **Clone a repository** lists the repositories your `gh`
+  account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from
+  GitHub, GitLab, Bitbucket, Gitea, Forgejo or a host of your own. **Start from a link…** takes
+  an issue's or a pull request's address and opens it, ready to delegate; a repository that is
+  not a project yet is cloned on the way. See [Projects](docs/guide/projects.md#clone-a-repository).
 - **Know who needs you.** Status dots show which agents are working and which are waiting; a
   desktop notification tells you when one finishes while you are elsewhere.
 - **Careful with your work.** Deleting or archiving a workspace always keeps the branch, and
@@ -219,6 +224,8 @@ answer_, or search a title or a number.
   workspaces and the workspace's row shows the task.
 - **New task**, a reply box, **Close** and **Reopen**, **Labels** and **Assignees** manage issues
   without leaving the app. Closing and reopening ask first, naming who opened the task.
+- **From a link…** takes an issue's address — or `owner/repository#12` — and opens it here,
+  selected, cloning its repository first if it is not a project yet.
 - **`ys task`** does all of it from a terminal — `list --needs-answer`, `show`, `start`,
   `create`, `comment`, `close`, `reopen`, `edit`, each with `--json` — so an agent in a
   workspace can tell you what is open and file an issue when you ask.
