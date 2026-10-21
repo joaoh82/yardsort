@@ -494,10 +494,8 @@ mod tests {
 
     #[cfg(unix)]
     pub(super) fn stand_in(dir: &Path, script: &str) -> Gh {
-        use std::os::unix::fs::PermissionsExt;
         let path = dir.join("gh");
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::program::testing::executable(&path, script);
         let env = crate::env::ShellEnv {
             vars: std::env::vars().collect(),
             source: crate::env::EnvSource::Process,

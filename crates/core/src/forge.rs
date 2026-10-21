@@ -1589,11 +1589,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_gh_that_never_answers_is_stopped_at_the_limit() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("gh");
-        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::program::testing::executable(&script, "#!/bin/sh\nsleep 30\n");
         let env = crate::env::ShellEnv {
             vars: std::env::vars().collect(),
             source: crate::env::EnvSource::Process,
@@ -1615,15 +1613,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_gh_that_answers_in_time_is_read_whole() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("gh");
-        std::fs::write(
-            &script,
-            "#!/bin/sh\necho '{\"url\":\"u\",\"reviews\":[{\"submittedAt\":\"2026-09-28T16:17:20Z\"}],\"comments\":[]}'\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::program::testing::executable(&script, "#!/bin/sh\necho '{\"url\":\"u\",\"reviews\":[{\"submittedAt\":\"2026-09-28T16:17:20Z\"}],\"comments\":[]}'\n",
+        );
         let env = crate::env::ShellEnv {
             vars: std::env::vars().collect(),
             source: crate::env::EnvSource::Process,
@@ -2417,18 +2410,15 @@ mod tests {
     /// the pages after the cursors `c1` and `c2`, and writes down what it was asked.
     #[cfg(unix)]
     fn paged_gh(dir: &Path, second: &str, third: &str) -> Gh {
-        use std::os::unix::fs::PermissionsExt;
         let here = dir.display();
         let script = dir.join("gh");
-        std::fs::write(
+        crate::program::testing::executable(
             &script,
             format!(
                 "#!/bin/sh\necho \"$*\" >> '{here}/asked'\ncase \"$*\" in\n\
                  *after=c2*) {third} ;;\n*after=c1*) {second} ;;\n*) cat '{here}/1.json' ;;\nesac\n"
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let env = crate::env::ShellEnv {
             vars: std::env::vars().collect(),
             source: crate::env::EnvSource::Process,
@@ -2546,14 +2536,9 @@ mod tests {
     #[test]
     fn nobody_logged_in_is_said_once_and_nothing_is_claimed() {
         let dir = tempfile::tempdir().unwrap();
-        use std::os::unix::fs::PermissionsExt;
         let script = dir.path().join("gh");
-        std::fs::write(
-            &script,
-            "#!/bin/sh\necho 'To get started with GitHub CLI, please run: gh auth login' >&2\nexit 4\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::program::testing::executable(&script, "#!/bin/sh\necho 'To get started with GitHub CLI, please run: gh auth login' >&2\nexit 4\n",
+        );
         let env = crate::env::ShellEnv {
             vars: std::env::vars().collect(),
             source: crate::env::EnvSource::Process,

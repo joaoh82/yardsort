@@ -403,7 +403,6 @@ fn a_run_knows_its_project_and_workspace() {
 #[cfg(unix)]
 #[test]
 fn an_open_pull_request_behind_fifty_newer_ones_is_still_found() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let git = crate::git::testing::git();
     let repo = dir.path().join("repo");
@@ -431,16 +430,12 @@ fn an_open_pull_request_behind_fifty_newer_ones_is_still_found() {
     )
     .unwrap();
     let script = dir.path().join("gh");
-    std::fs::write(
-        &script,
-        format!(
+    crate::program::testing::executable(&script, format!(
             "#!/bin/sh\ncase \"$*\" in\n  *\"--head fix-login\"*\"--state open\"*) cat '{}' ;;\n  *) cat '{}' ;;\nesac\n",
             dir.path().join("head.json").display(),
             dir.path().join("recent.json").display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let env = crate::env::ShellEnv {
         vars: std::env::vars().collect(),
         source: crate::env::EnvSource::Process,

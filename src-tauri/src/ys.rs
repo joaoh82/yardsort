@@ -589,25 +589,22 @@ mod tests {
     /// A stand-in for the bundled `ys`: a script that answers `--version` the way clap does.
     #[cfg(unix)]
     fn fake_ys(dir: &Path, version: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let path = dir.join(EXE);
-        std::fs::write(&path, format!("#!/bin/sh\necho 'ys {version}'\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        yardsort_core::program::testing::executable(
+            &path,
+            format!("#!/bin/sh\necho 'ys {version}'\n"),
+        );
         path
     }
 
     #[cfg(unix)]
     fn stranger(path: &Path) {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::write(path, "#!/bin/sh\necho 'something else 1.0'\n").unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        yardsort_core::program::testing::executable(path, "#!/bin/sh\necho 'something else 1.0'\n");
     }
 
     #[cfg(unix)]
     fn script(path: &Path, body: &str) {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        yardsort_core::program::testing::executable(path, format!("#!/bin/sh\n{body}\n"));
     }
 
     /// What happens, now and then, right after `install` copies `ys`: the file is still open for

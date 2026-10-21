@@ -235,20 +235,17 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn the_new_version_is_not_started_with_the_old_ones_environment() {
-        use std::os::unix::fs::PermissionsExt;
         use std::time::Duration;
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env");
         let appimage = dir.path().join("Yardsort.AppImage");
-        std::fs::write(
+        yardsort_core::program::testing::executable(
             &appimage,
             format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > {0}\nenv >> {0}\n",
                 out.display()
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&appimage, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let old = "/tmp/.mount_YardsoIdMAJc";
         let new = "/tmp/.mount_YardsogDGmCf";
         let vars = [
