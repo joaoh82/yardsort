@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.20.2
 
 - **An AppImage updated from inside the app now starts the new version clean.** The old
   version used to start the new one with its own libraries still on the search path, so a
