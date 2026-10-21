@@ -10,6 +10,10 @@
 //! In case that crash is still out there, a Wayland start leaves a marker that the loaded page
 //! removes. A marker still present at the next start means Wayland never came up; that version
 //! then stays on X11. `YARDSORT_GDK_BACKEND` overrides all of this.
+//!
+//! Tauri CLI 2.12 (bundler 2.10, tauri-apps/tauri#16062) stopped the hook setting `GDK_BACKEND`,
+//! so an AppImage built with it starts on Wayland with nothing to undo and [`decide`] keeps the
+//! environment as it is. This stays for AppImages built with the older tooling.
 
 use std::path::{Path, PathBuf};
 

@@ -22,6 +22,8 @@ _Exit:_ a signed-or-not installer artifact is produced for all three OSes on eve
 - Login-shell environment resolution.
 - Run a plain shell, then `claude`, in the center panel.
 - WebGL renderer with automatic DOM-renderer fallback; evaluate the WebKitGTK/NVIDIA mitigations.
+  Evaluated (2026-10-21, [07](07-terminal-benchmarks.md#the-appimage-2026-10-21)): no WebKit flag
+  was needed; what put the released app on the wrong GPU was a library the AppImage bundled.
 
 _Exit:_ a full-screen TUI (Claude Code, plus `vim`/`htop` as torture tests) is usable — colours,
 resize, mouse, paste, unicode — on all three OSes, including Hyprland/Wayland. Throughput test:

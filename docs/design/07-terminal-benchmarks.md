@@ -66,6 +66,51 @@ Claude Code's full-screen TUI; plain Ctrl+B / Alt+X reaching the program; Ctrl+S
 reaching it; and detach → re-attach of a running Claude Code session with 60 lines of scrollback —
 the repainted screen differed from the original by 39 pixels (the blinking cursor).
 
+### The AppImage, 2026-10-21
+
+Every number above comes from a debug build, which runs on the system's WebKitGTK. The released
+AppImage does not: it bundles Ubuntu 24.04's WebKitGTK, and — until 0.20.0 — a `libwayland-client`
+1.22 that the host's Mesa (26.2 here; anything needing `wl_fixes_interface`) cannot load against.
+Inside that AppImage the only EGL vendor that could initialise was NVIDIA's, so on this hybrid
+laptop WebKit drew every frame on the NVIDIA card while Hyprland composited the screen on the AMD
+card (`nvidia-smi` listed the `WebKitWebProcess`; the dev build sat on `renderD129`, the AMD render
+node, with dma-buf buffers). That is where the lag reported on Linux came from, and nothing here
+had measured it, because the benchmark only ever ran the dev build. Forcing the dev build onto
+the NVIDIA card (`WEBKIT_WEB_RENDER_DEVICE_FILE=/dev/dri/renderD128`) reproduces the shape of it;
+window on the 60 Hz external monitor, webgl renderer, debug build:
+
+| Web process renders on  | paint p50 / p95 | repaint fps | frame p95 | p99   | web process CPU: latency run | repaint run |
+| ----------------------- | --------------- | ----------- | --------- | ----- | ---------------------------- | ----------- |
+| AMD (drives the screen) | 17 / 17 ms      | 63          | 17 ms     | 24 ms | 1.6 s                        | 3.8 s       |
+| NVIDIA                  | 17 / 17 ms      | 62          | 27 ms     | 44 ms | 4.5 s                        | 7.2 s       |
+
+Two things the table teaches about the benchmark itself:
+
+- `paintMs` is one frame of the monitor the window is on — 17 ms at 60 Hz, which is why it is
+  flat at 17 for both rows and was 5 ms on the laptop panel in September. It is taken at xterm's
+  render callback, so it ends where the compositor's work begins: the cross-GPU copy shows up only
+  as CPU time and frame-time jitter, never in `paintMs`. The delay a user feels after that callback
+  is not measured by anything on this page.
+- **Measure the artefact that ships.** The dev build and the AppImage are different programs on
+  Linux: different WebKitGTK, different libraries, and — it turned out — a different GPU.
+
+The fix is in the bundler, not the app: Tauri CLI 2.12 (tauri-bundler 2.10,
+[tauri-apps/tauri#16062](https://github.com/tauri-apps/tauri/pull/16062)) updates linuxdeploy to
+an exclude list that leaves `libwayland-client` to the system, and its GTK hook no longer sets
+`GDK_BACKEND=x11`. An AppImage built with it on this machine puts both WebKit processes on the AMD
+render node through Mesa, starts with NVIDIA's EGL hidden (`__EGL_VENDOR_LIBRARY_FILENAMES`
+pointing at Mesa only — the old one aborted with `EGL_BAD_PARAMETER`, which is what a machine
+without NVIDIA got), and opens a native Wayland window. The same bundled library breaks many
+Tauri AppImages on Fedora 42+, Arch and NixOS; see the tracker for the pull request above.
+
+To see which GPU a running Yardsort draws with:
+
+```sh
+pid=$(pgrep -f WebKitWebProcess | head -1)
+grep -oE '/usr/lib/(libEGL_[a-z]+|libgallium)[^ ]*' /proc/$pid/maps | sort -u   # vendor
+ls -l /proc/$pid/fd | grep -oE '/dev/(dri/renderD[0-9]+|nvidia0)' | sort | uniq -c   # device
+```
+
 ### macOS, Windows
 
 Not yet measured on hardware. CI runs the PTY host's integration tests (real processes in real
@@ -142,6 +187,8 @@ unmeasured — macOS needs a run on hardware, as the throughput rows do.
 
 1. **WebGL works on WebKitGTK here**, on the GPU/compositor combination known for trouble, without
    `WEBKIT_DISABLE_DMABUF_RENDERER` or any other workaround.
+   The released AppImage still drew on the wrong GPU for a different reason — a bundled library,
+   not a WebKit flag; see [The AppImage](#the-appimage-2026-10-21).
 2. **The DOM fallback is good enough to rely on.** For agent-shaped workloads it is
    indistinguishable from WebGL, so losing the GL context degrades nothing the user would notice.
 3. **The UI stays live under flood.** 24 MB in 3.7 s with p99 frame time ≤ 20 ms and a single long

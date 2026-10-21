@@ -81,13 +81,22 @@ section above. Agents you have switched off in Settings → Harnesses do not cou
 
 - **Blank or flickering window** (mostly NVIDIA on Wayland) — start with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1 yardsort`.
+- **Typing and selecting in the terminal feel late, or the window stays blank, with an AppImage
+  up to 0.20.0** on a distribution whose Mesa is recent (Arch, Fedora 42 and later, Ubuntu 25.10
+  and later). Those AppImages bundled a `libwayland-client` too old for the system's Mesa, so the
+  GPU driver could not load inside the app. With an NVIDIA GPU beside the one that drives the
+  screen, every frame was drawn on the NVIDIA card and copied across — `nvidia-smi` lists a
+  `WebKitWebProcess` under _Processes_ when that is happening; without NVIDIA, the app could not
+  start. Upgrade: later AppImages leave the library to the system. Until then, the `.deb` and
+  `.rpm` use the system's libraries and do not have the problem.
 - **Terminal drawing looks wrong** — Yardsort uses the GPU (WebGL) and falls back to a slower
   renderer automatically if the GPU context is lost. The status bar shows which is active
   (`webgl` or `dom`).
 - **No notifications** — you need a notification daemon (mako, dunst, or your desktop's own).
-- **Wayland or X11.** Yardsort runs as a native Wayland window on a Wayland desktop. (The AppImage's
-  launcher asks for X11. Yardsort overrides that, because under XWayland typing lags and dictation
-  tools that type for you, such as Omarchy's, drop or garble characters.) If a Wayland start of
+- **Wayland or X11.** Yardsort runs as a native Wayland window on a Wayland desktop. (The launcher
+  of AppImages up to 0.20.0 asks for X11, and Yardsort overrides that, because under XWayland
+  typing lags and dictation tools that type for you, such as Omarchy's, drop or garble
+  characters. Later AppImages do not ask.) If a Wayland start of
   the AppImage ever fails before the window appears, the next start uses X11 for that version by
   itself (a start that [stopped with a dialog](#yardsort-cannot-start) does not count). To choose,
   set `YARDSORT_GDK_BACKEND=wayland` or `YARDSORT_GDK_BACKEND=x11`. To let a version try Wayland
