@@ -203,7 +203,6 @@ fn relaunch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn only_copies_that_own_their_files_update_themselves() {
@@ -237,6 +236,7 @@ mod tests {
     #[test]
     fn the_new_version_is_not_started_with_the_old_ones_environment() {
         use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env");
         let appimage = dir.path().join("Yardsort.AppImage");
