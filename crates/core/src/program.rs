@@ -66,8 +66,9 @@ impl Program {
 }
 
 /// Helpers for tests, in this crate and in the app's. Behind a feature so they never reach a
-/// release build: `yardsort-core = { features = ["testing"] }` in dev-dependencies.
-#[cfg(any(test, feature = "testing"))]
+/// release build: `yardsort-core = { features = ["testing"] }` in dev-dependencies. Unix only:
+/// every stand-in is a shell script.
+#[cfg(all(unix, any(test, feature = "testing")))]
 pub mod testing {
     use super::*;
 
@@ -82,7 +83,6 @@ pub mod testing {
     /// file that any process holds open for writing. That is how
     /// `forge::tests::closing_and_reopening_ask_for_nothing_more` stopped a release check on
     /// 2026-10-21. A descriptor this process never had cannot be copied.
-    #[cfg(unix)]
     pub fn executable(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
         use std::os::unix::ffi::OsStrExt;
         let path = path.as_ref();
@@ -104,8 +104,9 @@ mod tests {
     /// Stubs are run while other tests are forking. Threads here fork without pause, each child
     /// keeping its copies of our descriptors a moment before it execs, as a PTY child does; a
     /// stub written with `std::fs::write` meanwhile is caught open by one of those forks within
-    /// a few dozen tries, and running it fails with "Text file busy".
-    #[cfg(unix)]
+    /// a hundred or two tries, and running it fails with "Text file busy". Only Linux refuses to run
+    /// a file that is open for writing, so only there does this test anything.
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_stub_runs_at_once_while_other_tests_are_forking() {
         use std::os::unix::process::CommandExt;
@@ -116,13 +117,14 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let stop = Arc::new(AtomicBool::new(false));
-        // `spawn` waits for its child to exec, so one thread forks once per hold; four give
-        // four forks per hold, and a fork in flight for almost every write.
-        let forking: Vec<_> = (0..4)
+        // `spawn` waits for its child to exec, so one thread forks once per hold; six give
+        // six forks per hold, and a fork in flight for almost every write. Each child is
+        // reaped at once: thousands left waiting would run into the process limit (macOS's is
+        // low) and starve every other test of forks.
+        let forking: Vec<_> = (0..6)
             .map(|_| {
                 let stop = Arc::clone(&stop);
                 std::thread::spawn(move || {
-                    let mut children = Vec::new();
                     while !stop.load(Ordering::Relaxed) {
                         let mut command = Command::new("true");
                         // A hook forces a plain fork, and keeps the child between fork and exec.
@@ -132,17 +134,14 @@ mod tests {
                                 Ok(())
                             });
                         }
-                        children.push(command.spawn().unwrap());
-                    }
-                    for mut child in children {
-                        child.wait().unwrap();
+                        command.spawn().unwrap().wait().unwrap();
                     }
                 })
             })
             .collect();
 
         let stub = dir.path().join("stub");
-        for round in 0..200 {
+        for round in 0..400 {
             super::testing::executable(&stub, format!("#!/bin/sh\necho {round}\n"));
             let output = Command::new(&stub)
                 .output()
