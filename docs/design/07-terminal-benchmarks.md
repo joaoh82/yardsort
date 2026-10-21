@@ -111,6 +111,15 @@ grep -oE '/usr/lib/(libEGL_[a-z]+|libgallium)[^ ]*' /proc/$pid/maps | sort -u   
 ls -l /proc/$pid/fd | grep -oE '/dev/(dri/renderD[0-9]+|nvidia0)' | sort | uniq -c   # device
 ```
 
+A postscript from the same day: the 0.20.1 AppImage, installed through the in-app update, still
+drew on NVIDIA. The old version had started it with the old mount's library directory still on
+`LD_LIBRARY_PATH` — the new launcher only prepends — and since the new bundle no longer had a
+`libwayland-client`, the loader found the old one. The mount outlives the version that made it
+for as long as the new process holds it. The check above tells the two apart: the executable in
+`/proc/<pid>/exe` is in one mount, the library in another. The relaunch now drops the old
+launcher's variables (`updates.rs`); a copy updated from 0.20.1 or earlier still needs one fresh
+start.
+
 ### macOS, Windows
 
 Not yet measured on hardware. CI runs the PTY host's integration tests (real processes in real

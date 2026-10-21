@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **An AppImage updated from inside the app now starts the new version clean.** The old
+  version used to start the new one with its own libraries still on the search path, so a
+  library the new version no longer bundles was still loaded from the old copy until Yardsort was
+  started afresh. That is how 0.20.1 kept drawing on the wrong GPU after an in-app update. The new
+  version now starts with the environment you launched the old one with. Updating _from_ 0.20.1
+  or earlier is still done by the old version, so after that one update, quit Yardsort and start
+  it again.
+
 ## 0.20.1
 
 - **The Linux AppImage draws on the GPU that drives your screen.** AppImages up to 0.20.0 carried
