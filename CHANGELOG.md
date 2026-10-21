@@ -3,6 +3,18 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **The Linux AppImage draws on the GPU that drives your screen.** AppImages up to 0.20.0 carried
+  a copy of `libwayland-client` too old for the Mesa drivers of current distributions (Arch,
+  Fedora 42 and later, Ubuntu 25.10 and later), so Mesa could not load inside the app. On a laptop
+  with an NVIDIA GPU beside the one driving the screen, every frame was drawn on the NVIDIA card
+  and copied across, which made typing and selecting in the terminal feel late; without NVIDIA,
+  the app could not start at all. The AppImage is now built with Tauri CLI 2.12, whose bundler
+  leaves that library to the system (tauri-apps/tauri#16062), and it starts as a native Wayland
+  window without Yardsort having to override its launcher. See
+  [Troubleshooting](docs/guide/troubleshooting.md#linux).
+
 ## 0.20.0
 
 - **Clone a repository by picking it from a list.** **Clone a repository** now lists the
