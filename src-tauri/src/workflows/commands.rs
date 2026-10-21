@@ -449,7 +449,6 @@ impl Look for AppLook<'_> {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use yardsort_core::env::{EnvSource, ShellEnv};
     use yardsort_core::git::testing::git;
@@ -461,12 +460,8 @@ mod tests {
     /// checks, then prints a workflow.
     fn writer_needing_a_repository(dir: &std::path::Path) -> (Program, HarnessDef) {
         let script = dir.join("picky-writer");
-        std::fs::write(
-            &script,
-            "#!/bin/sh\ngit rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo 'Not inside a trusted directory' >&2; exit 1; }\nprintf 'id: picky\\nname: Picky\\nversion: 1\\ntrigger:\\n  kind: manual\\nsteps:\\n  - id: tell\\n    action: notify\\n    title: Hi\\n'\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        yardsort_core::program::testing::executable(&script, "#!/bin/sh\ngit rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo 'Not inside a trusted directory' >&2; exit 1; }\nprintf 'id: picky\\nname: Picky\\nversion: 1\\ntrigger:\\n  kind: manual\\nsteps:\\n  - id: tell\\n    action: notify\\n    title: Hi\\n'\n",
+        );
         let env = ShellEnv {
             vars: std::env::vars().collect(),
             source: EnvSource::Process,

@@ -1675,7 +1675,6 @@ struct Tasks {
 #[cfg(unix)]
 impl Tasks {
     fn new(remote: Option<&str>, gh: Option<&str>) -> Self {
-        use std::os::unix::fs::PermissionsExt;
         let fx = Fixture::new();
         if let Some(remote) = remote {
             fx.git()
@@ -1700,8 +1699,7 @@ impl Tasks {
                 fixtures.display()
             );
             let path = bin.path().join("gh");
-            std::fs::write(&path, script).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            yardsort_core::program::testing::executable(&path, script);
         }
         Self { fx, bin }
     }
