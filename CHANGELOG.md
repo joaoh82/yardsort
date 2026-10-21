@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.20.1
 
 - **The Linux AppImage draws on the GPU that drives your screen.** AppImages up to 0.20.0 carried
   a copy of `libwayland-client` too old for the Mesa drivers of current distributions (Arch,
