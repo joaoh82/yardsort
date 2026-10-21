@@ -96,7 +96,14 @@ fn in_an_appimage_mount(entry: &str) -> bool {
 /// the new launcher prepends its own; the old mount is still there, and a `git` started with that
 /// `LD_LIBRARY_PATH` loads its libraries out of the version we just replaced. Outside an AppImage,
 /// and for paths that lead anywhere else, this changes nothing.
-fn without_appimage(mut vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
+///
+/// The relaunch itself goes through here too (`updates.rs` in the app), so the new version starts
+/// with the environment the user launched the old one with, and its launcher sets up only its
+/// own mount. Otherwise a library the new AppImage no longer bundles would still be found in the
+/// old mount, which stays mounted for as long as something uses it: that is how 0.20.1, which
+/// stopped bundling `libwayland-client`, kept loading the old one — and drawing on the wrong
+/// GPU — until the app was started afresh.
+pub fn without_appimage(mut vars: BTreeMap<String, String>) -> BTreeMap<String, String> {
     let appdir = vars
         .get("APPDIR")
         .filter(|_| vars.contains_key("APPIMAGE"))

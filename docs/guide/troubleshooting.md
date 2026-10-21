@@ -88,7 +88,10 @@ section above. Agents you have switched off in Settings → Harnesses do not cou
   screen, every frame was drawn on the NVIDIA card and copied across — `nvidia-smi` lists a
   `WebKitWebProcess` under _Processes_ when that is happening; without NVIDIA, the app could not
   start. Upgrade: later AppImages leave the library to the system. Until then, the `.deb` and
-  `.rpm` use the system's libraries and do not have the problem.
+  `.rpm` use the system's libraries and do not have the problem. If you updated from inside the
+  app, quit Yardsort and start it again once: versions up to 0.20.1 started the new version with
+  the old one's libraries still on its search path, so the first start after that update was
+  still drawing on the wrong GPU.
 - **Terminal drawing looks wrong** — Yardsort uses the GPU (WebGL) and falls back to a slower
   renderer automatically if the GPU context is lost. The status bar shows which is active
   (`webgl` or `dom`).

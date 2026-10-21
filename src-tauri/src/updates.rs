@@ -161,12 +161,49 @@ pub async fn update_install(app: AppHandle, progress: Channel<DownloadProgress>)
         .map_err(|e| failed("install the update", e))?;
 
     // On Windows the installer has already taken over; elsewhere, start the new version.
-    app.restart();
+    restart(&app)
+}
+
+/// Start the new version and leave.
+///
+/// Tauri's restart hands the new process our environment as it is, and ours is what the old
+/// AppImage's launcher made: its mount on `LD_LIBRARY_PATH`, `XDG_DATA_DIRS` and a dozen more.
+/// The new launcher only prepends its own, so a library the new version no longer bundles is
+/// still found in the old mount — which stays mounted while the new process holds it — and the
+/// user runs a mix of two versions until they start the app afresh. So an AppImage is started
+/// by hand, with the environment the user launched us with (see `without_appimage`). Everything
+/// else restarts as Tauri does it; the macOS app, for one, may have been renamed by the update.
+fn restart(app: &AppHandle) -> IpcResult<()> {
+    #[cfg(target_os = "linux")]
+    if let Some(appimage) = app.env().appimage.clone() {
+        let args = app.env().args_os.into_iter().skip(1);
+        relaunch(&appimage, args, std::env::vars().collect())
+            .map_err(|e| failed("start the new version", e))?;
+        app.exit(0);
+        return Ok(());
+    }
+    app.restart()
+}
+
+/// Start `appimage` with `args` and the user's part of `vars`, detached from us.
+#[cfg(target_os = "linux")]
+fn relaunch(
+    appimage: &std::ffi::OsStr,
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+    vars: std::collections::BTreeMap<String, String>,
+) -> std::io::Result<()> {
+    std::process::Command::new(appimage)
+        .args(args)
+        .env_clear()
+        .envs(yardsort_core::env::without_appimage(vars))
+        .spawn()
+        .map(drop)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn only_copies_that_own_their_files_update_themselves() {
@@ -192,6 +229,78 @@ mod tests {
                 "debug builds never update"
             );
         }
+    }
+
+    /// The relaunched AppImage sees the environment the user started us with: nothing that leads
+    /// into our mount or the one we replaced, and nothing the launcher's hook overwrote.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_new_version_is_not_started_with_the_old_ones_environment() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("env");
+        let appimage = dir.path().join("Yardsort.AppImage");
+        std::fs::write(
+            &appimage,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > {0}\nenv >> {0}\n",
+                out.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&appimage, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let old = "/tmp/.mount_YardsoIdMAJc";
+        let new = "/tmp/.mount_YardsogDGmCf";
+        let vars = [
+            ("APPDIR", new.to_owned()),
+            ("APPIMAGE", appimage.display().to_string()),
+            ("OWD", format!("{old}/usr")),
+            ("GDK_BACKEND", "wayland".to_owned()),
+            ("GTK_PATH", format!("{new}//usr/lib/gtk-3.0")),
+            (
+                "LD_LIBRARY_PATH",
+                format!("{new}/usr/lib/:{old}/usr/lib/:/opt/mine/lib"),
+            ),
+            (
+                "XDG_DATA_DIRS",
+                format!("{new}/usr/share/:{old}/usr/share:/usr/share"),
+            ),
+            ("PATH", std::env::var("PATH").unwrap()),
+            ("EDITOR", "nvim".to_owned()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v))
+        .collect();
+
+        relaunch(
+            appimage.as_os_str(),
+            [std::ffi::OsString::from("--flag")],
+            vars,
+        )
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        let dump = loop {
+            match std::fs::read_to_string(&out) {
+                Ok(text) if text.contains("EDITOR=") => break text,
+                _ if started.elapsed() > Duration::from_secs(10) => panic!("never started"),
+                _ => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        let mut lines = dump.lines();
+        assert_eq!(lines.next(), Some("--flag"), "arguments are passed on");
+        let env: Vec<&str> = lines.collect();
+        assert!(
+            !env.iter().any(|line| line.contains(".mount_")),
+            "a mount reached the new version:\n{dump}"
+        );
+        assert!(env.contains(&"EDITOR=nvim"));
+        assert!(env.contains(&"LD_LIBRARY_PATH=/opt/mine/lib"));
+        assert!(env.contains(&"XDG_DATA_DIRS=/usr/share"));
+        assert!(
+            !env.iter().any(|line| line.starts_with("GDK_BACKEND=")),
+            "the new version chooses its own display backend"
+        );
     }
 
     #[test]

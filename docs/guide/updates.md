@@ -34,7 +34,7 @@ installs it and starts the new version.
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | macOS app (`.dmg`)                                   | Updates itself.                                                                                                                                                                                                                             |
 | Windows installer (`-setup.exe`, `.msi`)             | Updates itself; Windows may show the installer's progress briefly.                                                                                                                                                                          |
-| Linux **AppImage**                                   | Updates itself, replacing the AppImage file in place.                                                                                                                                                                                       |
+| Linux **AppImage**                                   | Updates itself, replacing the AppImage file in place. Updating from 0.20.1 or earlier: quit and start Yardsort again once afterwards (see below).                                                                                           |
 | Linux `.deb` / `.rpm`, or the AUR package            | **Told, not updated.** Those files belong to your package manager, and an app must not change them behind its back. Update the way you installed — `yay -Syu`, or download the new `.deb`/`.rpm` from the release page the dialog links to. |
 | A build you made yourself (`just dev`, `just build`) | Never updates itself.                                                                                                                                                                                                                       |
 
@@ -48,6 +48,11 @@ replacing the copy it installed the next time it starts. See [Installing `ys`](c
   check stays silent about this; you only see it after pressing **Check now**.
 - **The install fails** — nothing has been changed; your current version keeps working. Try again,
   or download the release by hand from the link in the dialog.
+- **On Linux, after updating from 0.20.1 or earlier, quit Yardsort and start it again once.**
+  Those versions started the new one with their own libraries still on its search path, so the
+  freshly installed version ran partly out of the old copy — on a laptop with two GPUs, drawing
+  on the wrong one — until it was started afresh. Later versions start the new one with the
+  environment you launched the old one with, and there is nothing to do.
 - **On Linux, the AppImage cannot be replaced** — it must be somewhere you can write to. If it
   lives in a system folder, move it to your home directory. The quick start's
   [app menu setup](../quick-start.md#linux-add-the-appimage-to-your-app-menu) puts it in
