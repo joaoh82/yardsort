@@ -1,0 +1,24 @@
+{
+  "devices": [
+    {
+      "id": "4f1c2a3b-5d6e-4f70-8192-a3b4c5d6e7f8",
+      "name": "Example phone",
+      "kind": "phone",
+      "platform": "ios",
+      "createdAt": 1792000000000,
+      "lastSeenAt": 1792000600000,
+      "revokedAt": null,
+      "current": true
+    },
+    {
+      "id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      "name": "Workstation",
+      "kind": "host",
+      "platform": "linux",
+      "createdAt": 1791000000000,
+      "lastSeenAt": null,
+      "revokedAt": 1791500000000,
+      "current": false
+    }
+  ]
+}

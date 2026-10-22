@@ -56,6 +56,20 @@ fn responses_match_their_fixtures() {
 }
 
 #[test]
+fn account_messages_match_their_fixtures() {
+    use crate::account::*;
+    let server: ServerDescription = pinned("account-server.json");
+    assert_eq!(server.issuer, "https://auth.example.invalid");
+    let sign_in: TokenRequest = pinned("account-token-sign-in.json");
+    assert!(sign_in.validate().is_ok());
+    let refresh: TokenRequest = pinned("account-token-refresh.json");
+    assert!(refresh.validate().is_ok());
+    let _: Credentials = pinned("account-credentials.json");
+    let page: DevicePage = pinned("account-devices.json");
+    assert_eq!(page.devices[1].kind, DeviceKind::Host);
+}
+
+#[test]
 fn every_operation_has_the_name_it_is_sent_under() {
     let terminal = TerminalId::new("t").unwrap();
     let lease = LeaseRef {

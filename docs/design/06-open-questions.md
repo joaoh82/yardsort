@@ -277,3 +277,7 @@ still stands; these are what the code added to it.
     see?** Lean: the terminal listed as viewable later, with the reason ("this computer's
     terminals predate remote control; they will be available once these agents finish"), never
     a forced daemon restart.
+38. **Should a spent refresh credential be accepted again for a few seconds?** Today presenting
+    one revokes the device ([27](27-remote-r2.md#3--credentials)), which also signs out an honest
+    device whose answer was lost in transit. Lean: no grace window until reports show it
+    happening; a sign-in fixes it.

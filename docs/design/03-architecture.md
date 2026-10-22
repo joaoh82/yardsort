@@ -567,13 +567,19 @@ one app drives a profile's runs.
 
 ## Remote access (proposed; first slice built, not wired)
 
-Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the record is
-[26](26-remote-r0-r1.md). The daemon's socket stays local and file-permission protected. Nothing
+Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the records are
+[26](26-remote-r0-r1.md) and [27](27-remote-r2.md). The daemon's socket stays local and file-permission protected. Nothing
 remote ever talks to it directly. Instead:
 
 - `crates/remote-proto` defines the remote protocol. It is versioned on its own (major 1), with
   JSON requests and replies, binary terminal-output frames, size limits checked before parsing,
   and one id type per kind of thing. It does no I/O.
+- `crates/server` is the server's control service, a library so far
+  ([27](27-remote-r2.md)). A person signs in at the server's OIDC provider once per device; the
+  server checks the ID token, keeps the account as issuer and subject, and from then on issues
+  its own credentials (a 15-minute access, a single-use refresh), kept only as hashes. The
+  provider is never asked again for that device, and revoking it takes effect on its next
+  request.
 - `yardsort_core::remote::HostFacade` answers that protocol for one host, read-only, checking
   each request against a device's `Grant` (scopes plus projects). It is built field by field
   from what the app already shows, so paths, argv, environment, labels and terminal output have
@@ -718,7 +724,8 @@ yardsort/
 │  │  └─ migrations/
 │  ├─ pty-host/              # owns the sessions; no Tauri deps (M1)
 │  ├─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
-│  └─ remote-proto/          # the remote protocol's types and limits; no I/O (M26)
+│  ├─ remote-proto/          # the remote protocol's types and limits; no I/O (M26)
+│  └─ server/                # the remote server's control service: sign-in, devices (M26)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 

@@ -18,6 +18,7 @@
 //! defined (see [`terminal`]) but no host answers them yet: they need authenticated devices and
 //! enforced control leases first.
 
+pub mod account;
 pub mod grant;
 pub mod ids;
 pub mod model;
