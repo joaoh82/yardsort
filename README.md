@@ -1,11 +1,11 @@
 <div align="center">
   <img src="assets/icon.svg" width="96" alt="" />
   <h1>Yardsort</h1>
-  <p><strong>Run parallel coding tasks — each on its own track.</strong></p>
+  <p><strong>Orchestrate any coding agent — on Linux, macOS and Windows.</strong></p>
   <p>
-    Yardsort is an open-source desktop app for Linux, macOS and Windows. Every task gets its own git worktree; every
-    agent gets its own terminal. Run several agents in the same worktree, hand work between them, or fan tasks out onto
-    separate tracks — with Claude Code, Codex or any agent you already use.
+    Open-source desktop for Claude Code, Codex and any CLI agent you already use. Parallel tasks get their own git
+    worktrees; several agents can share one. Hand the work to the next agent with the context Yardsort already
+    recorded — no re-explaining the branch.
   </p>
   <p>
     <a href="https://yardsort.sh">yardsort.sh</a> ·
@@ -27,14 +27,15 @@
 ## What it is
 
 A sorting yard is where rail cars are sorted onto parallel tracks and later joined back into one
-train. That is the job: fan work out onto parallel branches, then merge it back.
+train. That is the job: fan work out onto parallel branches, then merge it back — and hand a car
+from one crew to another without retelling the whole journey.
 
 You describe a task, pick an agent, and press Enter. Yardsort creates a branch and a **git
 worktree** for it — a separate folder — and starts the agent there in a real terminal. Start
-another task, and another: each gets its own worktree, so they cannot disturb each other, or your
-own checkout. Inside one worktree you can still run several agents as tabs, hand the work from one
-to another, or leave a shell beside them. On the right you watch the files each one touches, live,
-with diffs.
+another task on another track, or start a second agent in the same worktree. **Hand off** writes
+the next agent a first message from what happened here: your task, the branch, who wrote each file,
+what every run did. Project memory carries the short lessons you approved. On the right you watch
+the files each one touches, live, with diffs.
 
 It is modeled on tools like Conductor and Superset, with the requirement they do not meet:
 **Linux, macOS and Windows are all first-class**, built and tested together on every change.

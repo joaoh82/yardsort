@@ -1,6 +1,6 @@
 [package]
 name = "yardsort"
-description = "Parallel coding tasks on git worktrees — any agent you already use"
+description = "Orchestrate coding agents on Linux, macOS and Windows — shared worktrees, handoff with context"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

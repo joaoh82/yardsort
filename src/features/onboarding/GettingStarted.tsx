@@ -47,7 +47,7 @@ export function GettingStarted() {
           <div className="text-center">
             <img src="/icon.svg" alt="" className="mx-auto mb-4 size-16 opacity-90" />
             <h1 className="text-lg font-semibold">Yardsort</h1>
-            <p className="mt-1 text-ink-muted">Every task on its own track.</p>
+            <p className="mt-1 text-ink-muted">Any OS. Any agent. Hand the work over.</p>
           </div>
           {report && (needsHelp || !hasProjects) ? (
             <Checklist report={report} hasProjects={hasProjects} />

@@ -51,7 +51,7 @@ cat > ~/.local/share/applications/yardsort.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=Yardsort
-Comment=Parallel coding tasks on git worktrees — any agent you already use
+Comment=Orchestrate coding agents on Linux, macOS and Windows
 Exec=$HOME/Applications/Yardsort.AppImage
 Icon=yardsort
 Terminal=false

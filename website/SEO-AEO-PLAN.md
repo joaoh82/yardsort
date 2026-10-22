@@ -35,9 +35,10 @@ text, image dimensions and lazy loading below the hero. Keep these properties.
 | Medium           | Product facts exist, but there is no dedicated concise question-and-answer section. Some feature headings favor metaphor over explicit task names.                              | Add direct answers and practical tutorials connected to existing guides.                                                                                                                                                                  |
 | Investigate      | Screenshots are served as original PNGs; the hero alone is about 774 KiB.                                                                                                       | Measure mobile performance, then generate responsive WebP/AVIF derivatives if beneficial. Do not claim a Core Web Vitals failure without measurements.                                                                                    |
 
-The current homepage title is **Yardsort — parallel coding tasks, any agent**. Keep the product
-claim accurate: a *task* gets a worktree; an *agent* gets a terminal; several agents can share one
-worktree. The description should name the brand, platforms and representative agents.
+The current homepage title is **Yardsort — orchestrate coding agents on any OS**. Keep the three
+pillars accurate: every OS first-class; agents can share a worktree; handoff and memory carry
+context so switching agents does not mean re-briefing. The description should name platforms and
+representative agents.
 
 Twitter tags are **present in live HTML**, including `summary_large_image`, even though there
 is no explicit Twitter object in the source. Next.js derives them from Open Graph metadata.
@@ -56,8 +57,8 @@ services using wider cards. Actual crop and caching vary by service.
 
 Create a dedicated 1200 × 630 PNG or JPEG, proposed path `/social/yardsort-v1.png`:
 
-- Prominent Yardsort logo/name and **Parallel coding tasks, any agent**.
-- Supporting line: **One task. One git worktree. Agents share it when you want.**
+- Prominent Yardsort logo/name and **Orchestrate coding agents on any OS**.
+- Supporting line: **Shared worktrees. Handoff with context. Linux · macOS · Windows.**
 - A restrained crop of the demo UI, with sufficient space around essential text.
 - A small Linux · macOS · Windows label; avoid a release number that rapidly becomes stale.
 - Target under 300 KB if image quality permits; inspect at roughly 600 × 315 and 300 × 158.
@@ -95,7 +96,7 @@ Estimated effort: 1–2 engineering days including the share card and validation
 
 Example proposed homepage description:
 
-> Yardsort is an open-source desktop app for Linux, macOS and Windows. Every task gets its own git worktree; every agent gets its own terminal. Run Claude Code, Codex and other agents side by side — in one worktree or across many.
+> Open-source desktop for Linux, macOS and Windows. Orchestrate Claude Code, Codex and any CLI agent in parallel — shared worktrees when you want, handoff with context so you do not re-explain the branch.
 
 Example workspaces metadata:
 

@@ -5,9 +5,9 @@ has the downloads and the full commit lists.
 
 ## 0.20.2
 
-- **Clearer homepage and README framing.** A task gets a git worktree; an agent gets a terminal.
-  Several agents can share one worktree (tabs, handoff, workflows). The tagline no longer reads as
-  if each agent lived alone on its own worktree.
+- **Homepage and README lead with what Yardsort is for.** Orchestrate agents on Linux, macOS and
+  Windows; share a worktree when you want; hand work to the next agent with recorded context so you
+  do not re-explain the branch.
 
 - **An AppImage updated from inside the app now starts the new version clean.** The old
   version used to start the new one with its own libraries still on the search path, so a
