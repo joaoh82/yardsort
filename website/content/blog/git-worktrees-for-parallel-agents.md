@@ -1,8 +1,9 @@
 # What git worktrees solve—and what they don’t—for parallel coding agents
 
 Two coding agents can work on the same repository without editing the same checkout. Give each
-task a branch in its own git worktree, and each agent gets a separate set of working files.
-That makes parallel work easier to inspect. It does not make every task independent.
+*task* a branch in its own git worktree, and agents on different tasks get separate working files.
+That makes parallel work easier to inspect. It does not make every task independent — and agents
+you start in the *same* worktree still share those files.
 
 ## A branch needs a working directory
 

@@ -43,7 +43,8 @@ export function Ideas() {
       </h2>
       <p className="mt-4 max-w-[640px] text-[17px] text-muted">
         Like a sorting yard bringing rail cars onto separate tracks, Yardsort gives each task a
-        branch and a worktree. Review each result before bringing the changes together.
+        branch and a worktree. Agents share a worktree when you want them to. Review each result
+        before bringing the changes together.
       </p>
 
       <div className="mt-[72px] space-y-[88px]">
@@ -59,8 +60,9 @@ export function Ideas() {
         >
           <p>
             You describe a task, pick an agent, and press Enter. Yardsort creates a branch and a git
-            worktree for it — a separate folder — and starts the agent there. Start another, and
-            another. They cannot disturb each other, or your own checkout.
+            worktree for it — a separate folder — and starts the agent there. Start another task, and
+            another: each gets its own worktree, so they cannot disturb each other, or your own
+            checkout. Inside one worktree you can still run several agents as tabs.
           </p>
           <p>
             Workspaces are ordinary worktrees and branches. Inspect or undo anything with{" "}

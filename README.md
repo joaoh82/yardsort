@@ -1,10 +1,11 @@
 <div align="center">
   <img src="assets/icon.svg" width="96" alt="" />
   <h1>Yardsort</h1>
-  <p><strong>Run AI coding agents in parallel — each on its own track.</strong></p>
+  <p><strong>Run parallel coding tasks — each on its own track.</strong></p>
   <p>
-    Yardsort is an open-source desktop app for Linux, macOS and Windows. Every task gets its own git worktree and its
-    own terminal, running the coding agent of your choice.
+    Yardsort is an open-source desktop app for Linux, macOS and Windows. Every task gets its own git worktree; every
+    agent gets its own terminal. Run several agents in the same worktree, hand work between them, or fan tasks out onto
+    separate tracks — with Claude Code, Codex or any agent you already use.
   </p>
   <p>
     <a href="https://yardsort.sh">yardsort.sh</a> ·
@@ -30,8 +31,10 @@ train. That is the job: fan work out onto parallel branches, then merge it back.
 
 You describe a task, pick an agent, and press Enter. Yardsort creates a branch and a **git
 worktree** for it — a separate folder — and starts the agent there in a real terminal. Start
-another, and another. They cannot disturb each other, or your own checkout. On the right you
-watch the files each one touches, live, with diffs.
+another task, and another: each gets its own worktree, so they cannot disturb each other, or your
+own checkout. Inside one worktree you can still run several agents as tabs, hand the work from one
+to another, or leave a shell beside them. On the right you watch the files each one touches, live,
+with diffs.
 
 It is modeled on tools like Conductor and Superset, with the requirement they do not meet:
 **Linux, macOS and Windows are all first-class**, built and tested together on every change.

@@ -1,6 +1,6 @@
 [package]
 name = "yardsort"
-description = "Run AI coding agents in parallel, each on its own track"
+description = "Parallel coding tasks on git worktrees — any agent you already use"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

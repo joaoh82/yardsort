@@ -2,9 +2,10 @@
 
 ## What is Yardsort, and who is it for?
 
-Yardsort is an open-source desktop app for developers running AI coding agents in parallel.
-Each task gets a git worktree and a terminal, so you can work on several branches, review the
-changes and open pull requests from one place. Start with the [quick start](../quick-start.md).
+Yardsort is an open-source desktop app for developers running coding agents on parallel tasks.
+Each task gets a git worktree; each agent gets a terminal. You can run several agents in the same
+worktree, hand work between them, or fan tasks out onto separate branches — then review the changes
+and open pull requests from one place. Start with the [quick start](../quick-start.md).
 
 ## Which agents and operating systems does it support?
 

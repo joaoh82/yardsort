@@ -51,7 +51,7 @@ cat > ~/.local/share/applications/yardsort.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=Yardsort
-Comment=Run AI coding agents in parallel, each in its own git worktree
+Comment=Parallel coding tasks on git worktrees — any agent you already use
 Exec=$HOME/Applications/Yardsort.AppImage
 Icon=yardsort
 Terminal=false
