@@ -43,7 +43,9 @@ closed was on this list and has since shipped — see M9:
 
 - PR creation / GitHub integration, review comments
 - Per-project setup/run scripts
-- Remote / SSH / cloud workspaces
+- Remote / SSH / cloud workspaces — reaching agents on your own machine from a phone or another
+  computer is now proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md), with optional
+  accounts on a server you choose; local use stays account-free. Progress: [26](26-remote-r0-r1.md)
 - Our own chat UI over agent protocols (ACP etc.)
 - Team features, accounts, telemetry
 

@@ -27,6 +27,27 @@ impl std::fmt::Display for SessionId {
 /// Identifies one attachment (one viewer) of a session.
 pub type AttachmentId = u32;
 
+/// A place in a session's output stream: how many items (batches of output, and resizes) it
+/// holds up to there. 0 is before anything. Counted per session, from its start, in memory: it
+/// means nothing for another session or after the host restarts.
+pub type OutputSeq = u64;
+
+/// What a numbered viewer is sent: see [`crate::PtyHost::attach_numbered`]. Every item after the
+/// snapshot carries the next number, with no gaps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Numbered<'a> {
+    /// First, once: the terminal exactly as it stood after item `seq`, at `size`.
+    Snapshot {
+        seq: OutputSeq,
+        size: TermSize,
+        bytes: &'a [u8],
+    },
+    /// A batch of the program's output, as it printed it.
+    Output { seq: OutputSeq, bytes: &'a [u8] },
+    /// The terminal was resized: output after this is drawn at `size`.
+    Resized { seq: OutputSeq, size: TermSize },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct TermSize {

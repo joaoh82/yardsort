@@ -1,0 +1,11 @@
+{
+  "requestId": "r-8",
+  "result": {
+    "kind": "attached",
+    "stream": 1,
+    "start": "snapshot",
+    "position": { "epoch": 1, "seq": 41 },
+    "size": { "cols": 120, "rows": 30 },
+    "controller": { "kind": "device", "device": "device-1", "name": "Example phone" }
+  }
+}

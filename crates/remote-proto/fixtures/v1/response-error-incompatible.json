@@ -1,0 +1,9 @@
+{
+  "requestId": "r-3",
+  "error": {
+    "code": "protocol_incompatible",
+    "message": "This host speaks a different version of the remote protocol. Update the app that is older.",
+    "retryable": false,
+    "supportedProtocols": [1]
+  }
+}

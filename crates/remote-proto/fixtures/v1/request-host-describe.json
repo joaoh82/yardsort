@@ -1,0 +1,5 @@
+{
+  "requestId": "r-0",
+  "protocol": { "major": 1, "minor": 0 },
+  "op": "host.describe"
+}

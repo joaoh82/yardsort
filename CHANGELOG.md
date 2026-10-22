@@ -3,6 +3,14 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **A terminal you come back to while it is printing no longer shows a stray fragment.**
+  Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
+  a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or
+  leave a character or the space after it missing from the repainted screen. The repaint now
+  carries the unfinished half, so the program's next output completes it as it would have.
+
 ## 0.20.2
 
 - **Homepage and README lead with what Yardsort is for.** Orchestrate agents on Linux, macOS and

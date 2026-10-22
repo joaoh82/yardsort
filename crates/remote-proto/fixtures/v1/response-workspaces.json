@@ -1,0 +1,30 @@
+{
+  "requestId": "r-1",
+  "result": {
+    "kind": "workspaces",
+    "projects": [
+      { "id": "6f0d2b1c-3a4e-4f5a-9b8c-7d6e5f4a3b2c", "name": "example-app", "missing": false }
+    ],
+    "workspaces": [
+      {
+        "id": "0b6c1f0e-8f8e-4a57-9a43-5c1d2a0e9f11",
+        "project": "6f0d2b1c-3a4e-4f5a-9b8c-7d6e5f4a3b2c",
+        "name": "fix-login",
+        "kind": "worktree",
+        "branch": { "label": "ys/fix-login", "detached": false, "unborn": false },
+        "archived": false,
+        "missing": false,
+        "tasks": [
+          {
+            "source": "github",
+            "key": "#12",
+            "title": "Login fails after timeout",
+            "url": "https://github.com/example/example-app/issues/12"
+          }
+        ],
+        "runningSessions": 1
+      }
+    ],
+    "next": "k1.0b6c1f0e-8f8e-4a57-9a43-5c1d2a0e9f11"
+  }
+}

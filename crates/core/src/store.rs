@@ -266,6 +266,26 @@ pub struct EventRow {
     pub payload: String,
 }
 
+/// Which events [`Store::events_window`] reads.
+#[derive(Debug, Clone, Copy)]
+pub struct EventFilter<'a> {
+    pub workspace_id: &'a str,
+    pub privacy_class: &'a str,
+    /// Only this session's, when given.
+    pub session_id: Option<&'a str>,
+}
+
+/// Where [`Store::events_window`] starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventBound {
+    /// The newest.
+    Newest,
+    /// The newest of those with a smaller sequence number.
+    Before(i64),
+    /// The oldest of those with a larger sequence number.
+    After(i64),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NewEvent<'a> {
     pub id: &'a str,
@@ -1607,6 +1627,64 @@ impl Store {
             event_from_row,
         )?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Up to `limit` of a workspace's events of one privacy class, optionally one session's, on
+    /// one side of a sequence number — oldest first whichever side. For readers that page in
+    /// both directions; the timeline uses [`Store::events`].
+    pub fn events_window(
+        &self,
+        filter: &EventFilter<'_>,
+        bound: EventBound,
+        limit: usize,
+    ) -> StoreResult<Vec<EventRow>> {
+        let (condition, order, seq) = match bound {
+            EventBound::Newest => ("seq < ?4", "DESC", i64::MAX),
+            EventBound::Before(seq) => ("seq < ?4", "DESC", seq),
+            EventBound::After(seq) => ("seq > ?4", "ASC", seq),
+        };
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM agent_events
+             WHERE workspace_id = ?1 AND privacy_class = ?2 AND (?3 IS NULL OR session_id = ?3)
+               AND {condition}
+             ORDER BY seq {order} LIMIT ?5"
+        ))?;
+        let rows = stmt.query_map(
+            params![
+                filter.workspace_id,
+                filter.privacy_class,
+                filter.session_id,
+                seq,
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            event_from_row,
+        )?;
+        let mut rows: Vec<EventRow> = rows.collect::<Result<_, _>>()?;
+        if order == "DESC" {
+            rows.reverse();
+        }
+        Ok(rows)
+    }
+
+    /// Whether the event at `seq` is still kept and matches `filter`.
+    pub fn event_matches(&self, filter: &EventFilter<'_>, seq: i64) -> StoreResult<bool> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT 1 FROM agent_events
+                 WHERE seq = ?1 AND workspace_id = ?2 AND privacy_class = ?3
+                   AND (?4 IS NULL OR session_id = ?4)",
+                params![
+                    seq,
+                    filter.workspace_id,
+                    filter.privacy_class,
+                    filter.session_id
+                ],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     /// A workspace's events of the given kinds, oldest first. For a join that reads one or

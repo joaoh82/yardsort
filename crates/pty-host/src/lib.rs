@@ -9,6 +9,7 @@
 //! ```text
 //! spawn(LaunchPlan) -> SessionInfo        list() -> [SessionInfo]
 //! attach(id, sink)  -> AttachmentId       detach(id, attachment)
+//! attach_numbered(id, sink) -> AttachmentId   (in-process only, for now)
 //! write(id, bytes) / paste(id, text)       resize(id, size)
 //! kill(id)                                remove(id)
 //! events: HostEvent::{Exited, Busy, Quiet}
@@ -19,12 +20,14 @@
 //! Each session keeps a headless terminal (`vt100`) fed with everything the process prints. A
 //! viewer that attaches — for the first time or the tenth — first receives a snapshot that
 //! repaints scrollback and screen, then the live stream, with nothing lost or duplicated between
-//! the two.
+//! the two — wherever the cut falls, even inside an escape sequence (see [`snapshot`]). A
+//! numbered viewer is also told which item of the stream the snapshot holds.
 
 mod prompt;
 mod session;
 pub mod snapshot;
 mod types;
+mod unfinished;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -32,15 +35,19 @@ use std::time::Duration;
 
 use session::Session;
 pub use types::{
-    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, PendingPrompt, Result, SessionId,
-    SessionInfo, SessionState, TermSize,
+    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, PendingPrompt,
+    Result, SessionId, SessionInfo, SessionState, TermSize,
 };
 
 /// Receives a session's output: first one snapshot, then live batches. Return `false` to detach.
 ///
-/// Called on the session's pump thread while it holds the session lock, so it must be quick and
-/// must not call back into the host.
+/// Called while the session's lock is held — on its pump thread, or on the thread attaching —
+/// so it must be quick and must not call back into the host.
 pub type OutputSink = Box<dyn FnMut(&[u8]) -> bool + Send>;
+
+/// Receives a session's output with its place in the stream: see [`PtyHost::attach_numbered`].
+/// Return `false` to detach. Called under the session's lock, like an [`OutputSink`].
+pub type NumberedSink = Box<dyn FnMut(Numbered<'_>) -> bool + Send>;
 
 /// Receives host-wide events. Called from session threads.
 pub type EventSink = Arc<dyn Fn(HostEvent) + Send + Sync>;
@@ -90,6 +97,17 @@ impl PtyHost {
     /// their final screen stays viewable.
     pub fn attach(&self, id: &SessionId, sink: OutputSink) -> Result<AttachmentId> {
         Ok(self.get(id)?.attach(sink))
+    }
+
+    /// Watch a session's output knowing where each piece falls: a snapshot tagged with the item
+    /// it reflects, then every later item numbered from there. What a viewer across a network
+    /// needs in order to prove it lost nothing and doubled nothing.
+    ///
+    /// A numbered viewer watches; it is not a terminal. It must not answer the program's
+    /// queries, and it does not stop the host from answering them when no terminal is attached.
+    /// It is not offered over the daemon's protocol yet. Detach with [`PtyHost::detach`].
+    pub fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
+        Ok(self.get(id)?.attach_numbered(sink))
     }
 
     pub fn detach(&self, id: &SessionId, attachment: AttachmentId) -> Result<()> {

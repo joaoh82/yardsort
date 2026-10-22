@@ -1,6 +1,8 @@
 # Yardsort Remote, Mobile, and Sync
 
 Status: implementation proposal and coding-agent handoff, not a claim of shipped functionality.
+Progress, the fit report against the live tree, and the adjustments it made to this proposal are
+in [26-remote-r0-r1](26-remote-r0-r1.md); its ledger is the record of which phase is where.
 Date: 2026-10-21. Repository: https://github.com/joaoh82/yardsort
 Audience: maintainers, contributors, and the coding harness implementing this work.
 

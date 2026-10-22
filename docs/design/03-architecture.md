@@ -125,9 +125,25 @@ of history) and can emit a **snapshot** — a byte sequence that repaints the
 current screen — followed by the live stream. This pays off immediately in v1 (clean switching
 between workspaces without keeping every xterm instance mounted) and is mandatory for the daemon.
 
+A snapshot can be cut between any two bytes, even inside an escape sequence or a character,
+because batches end wherever a read ended. `snapshot::Headless` makes that safe: it follows the
+parser's state machine (`unfinished.rs`) and ends every snapshot with the open sequence's raw
+bytes, so the next batch completes it in the viewer. A control such as LF or BS inside a
+sequence is carried out at once and the sequence goes on; the snapshot already shows its effect,
+so it is not among those bytes. It also gives the parser a split character
+whole, with the next batch, because `vt100` 0.16 drops the byte after a character split across
+two `process` calls. Viewers' own streams are never held back.
+
+`PtyHost::attach_numbered` is the same attach with positions: the snapshot says which item of
+the session's output it holds, and each later batch, and each resize, carries the next number.
+It is what a remote viewer will need to prove it lost and doubled nothing. It is in-process only
+for now: the daemon's protocol does not carry numbers until R2 of
+[remote access](26-remote-r0-r1.md).
+
 **The host is the terminal when nobody is watching.** Programs can query the terminal and wait for
 an answer — above all "where is the cursor?" (`ESC [ 6 n`). With a viewer attached, xterm.js
-replies. With none, the host replies from its headless terminal; the decision is made under the
+replies. With none, the host replies from its headless terminal (a numbered viewer does not
+count: it watches, and never answers); the decision is made under the
 same lock that delivers output, so exactly one reply is ever sent. This is load-bearing on Windows:
 `portable-pty` creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY
 ask that question at startup and run nothing until it is answered.
@@ -549,6 +565,26 @@ and wakes when the host reports a session quiet or exited. The app holds `app.lo
 directory for as long as it runs (`presence`), which is how `ys` knows it is there and why only
 one app drives a profile's runs.
 
+## Remote access (proposed; first slice built, not wired)
+
+Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the record is
+[26](26-remote-r0-r1.md). The daemon's socket stays local and file-permission protected. Nothing
+remote ever talks to it directly. Instead:
+
+- `crates/remote-proto` defines the remote protocol. It is versioned on its own (major 1), with
+  JSON requests and replies, binary terminal-output frames, size limits checked before parsing,
+  and one id type per kind of thing. It does no I/O.
+- `yardsort_core::remote::HostFacade` answers that protocol for one host, read-only, checking
+  each request against a device's `Grant` (scopes plus projects). It is built field by field
+  from what the app already shows, so paths, argv, environment, labels and terminal output have
+  nowhere to go. It answers host, workspace, session, activity and approved-memory reads, and
+  refuses every terminal operation. Activity is read only from the `metadata` class, through an
+  allowlist of fields each checked again on the way out (`remote/activity.rs`).
+
+Nothing calls the facade yet. It gets a caller only once devices are enrolled and authenticated
+(R2). Terminal control waits for a lease and a single query responder enforced **in the daemon**,
+since a lease the app and `ys attach` could bypass would be no lease.
+
 ## Assist (optional, off by default)
 
 Where ordinary code cannot tell what a change _means_, Assist asks TypeSafe's **Jev** — a model
@@ -681,7 +717,8 @@ yardsort/
 │  │  │                      # launching, the daemon client — no Tauri (M10)
 │  │  └─ migrations/
 │  ├─ pty-host/              # owns the sessions; no Tauri deps (M1)
-│  └─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
+│  ├─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
+│  └─ remote-proto/          # the remote protocol's types and limits; no I/O (M26)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 
