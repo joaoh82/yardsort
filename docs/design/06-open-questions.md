@@ -259,3 +259,21 @@ From the design pass in [24-repositories](24-repositories.md).
     hosts and the pull requests view already passes `--hostname` for a project whose remote is
     not github.com. The list has no project to read a host from. Lean: github.com only until
     someone with an Enterprise host asks; a pasted URL from such a host clones already.
+
+## Remote
+
+From the fit pass in [26-remote-r0-r1](26-remote-r0-r1.md). The proposal's own table of decisions
+([§16](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md#16-decisions-to-resolve-at-the-appropriate-gate))
+still stands; these are what the code added to it.
+
+35. **Where does a headless host keep its device credential?** The OS credential store is reached
+    only from `src-tauri` today (`keyring`, for Assist's key); the core has no credential layer.
+    Linux servers often have no Secret Service. Lean: a small credential trait in the core, the
+    keyring behind it for desktops, a `0600` file in a documented mount for headless. Decide in R2.
+36. **Should the session title cross to remote clients?** It may quote the first message. Without
+    it a phone cannot tell two conversations apart. Lean: yes, as now, marked user content that
+    clients never log; revisit if a title-only privacy mode is asked for.
+37. **When an old daemon with agents running cannot enforce leases, what does a remote client
+    see?** Lean: the terminal listed as viewable later, with the reason ("this computer's
+    terminals predate remote control; they will be available once these agents finish"), never
+    a forced daemon restart.

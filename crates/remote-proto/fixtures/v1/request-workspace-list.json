@@ -1,0 +1,11 @@
+{
+  "requestId": "r-1",
+  "protocol": { "major": 1, "minor": 0 },
+  "op": "workspace.list",
+  "params": {
+    "project": "6f0d2b1c-3a4e-4f5a-9b8c-7d6e5f4a3b2c",
+    "includeArchived": false,
+    "cursor": null,
+    "limit": 50
+  }
+}

@@ -1,0 +1,19 @@
+[package]
+name = "remote-proto"
+description = "Yardsort's remote protocol: versioned request, reply and terminal-frame contracts. Data and validation only — no transport, no store, no listener."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Kept this small on purpose. The host facade (in `yardsort-core`), a future server and a future
+# mobile client's conformance tests all depend on these types; none of them should have to drag
+# in SQLite, git or a PTY to agree on what a message looks like.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

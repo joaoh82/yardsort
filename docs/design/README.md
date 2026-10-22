@@ -29,6 +29,8 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 22  | [Pull requests](22-pull-requests.md)                                    | Every project's pull requests in one view. All four slices built: list, actions, Summary, Code, writing |
 | 23  | [Tasks](23-tasks.md)                                                    | Every project's GitHub issues in one view, and `ys task`. All three slices built                        |
 | 24  | [Repositories](24-repositories.md)                                      | Pick a repository from the forge, clone from any host, start from an issue or pull request link. Built  |
+| 25  | [Remote, mobile & sync](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md) | Proposal: reach your agents from a phone or another computer; self-hostable; durable sync after that    |
+| 26  | [Remote, R0–R1](26-remote-r0-r1.md)                                     | The fit report, the versioned protocol and a read-only host facade. Not wired; no terminals yet         |
 
 ## Vocabulary
 

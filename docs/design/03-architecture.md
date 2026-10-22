@@ -549,6 +549,25 @@ and wakes when the host reports a session quiet or exited. The app holds `app.lo
 directory for as long as it runs (`presence`), which is how `ys` knows it is there and why only
 one app drives a profile's runs.
 
+## Remote access (proposed; first slice built, not wired)
+
+Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the record is
+[26](26-remote-r0-r1.md). The daemon's socket stays local and file-permission protected. Nothing
+remote ever talks to it directly. Instead:
+
+- `crates/remote-proto` defines the remote protocol. It is versioned on its own (major 1), with
+  JSON requests and replies, binary terminal-output frames, size limits checked before parsing,
+  and one id type per kind of thing. It does no I/O.
+- `yardsort_core::remote::HostFacade` answers that protocol for one host, read-only, checking
+  each request against a device's `Grant` (scopes plus projects). It is built field by field
+  from what the app already shows, so paths, argv, environment, labels and terminal output have
+  nowhere to go. It answers host, workspace, session and approved-memory reads, and refuses
+  every terminal operation.
+
+Nothing calls the facade yet. It gets a caller only once devices are enrolled and authenticated
+(R2). Terminal control waits for a lease and a single query responder enforced **in the daemon**,
+since a lease the app and `ys attach` could bypass would be no lease.
+
 ## Assist (optional, off by default)
 
 Where ordinary code cannot tell what a change _means_, Assist asks TypeSafe's **Jev** — a model
@@ -681,7 +700,8 @@ yardsort/
 │  │  │                      # launching, the daemon client — no Tauri (M10)
 │  │  └─ migrations/
 │  ├─ pty-host/              # owns the sessions; no Tauri deps (M1)
-│  └─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
+│  ├─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
+│  └─ remote-proto/          # the remote protocol's types and limits; no I/O (M26)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 

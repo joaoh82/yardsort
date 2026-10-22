@@ -843,6 +843,27 @@ being chosen; one already added is selected instead; a GitLab URL clones; a past
 ends in that issue's **Delegate**; and without `gh`, logged out, or offline, the clone step still
 takes a URL and says why there is no list.
 
+## M26 — Remote access
+
+Proposed in [the remote, mobile and sync proposal](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
+on 2026-10-21. It covers your agents from a phone or another computer, on a server you choose or
+host yourself; local use stays account-free. Its phases R0–R7 are tracked in the ledger of
+[26-remote-r0-r1](26-remote-r0-r1.md#8--progress-ledger), not repeated here.
+
+- [x] R0: the fit report against the live tree. Two things the proposal assumed are not there
+      yet. Terminal queries have one responder only while at most one viewer is attached. Input
+      and resize have no controller at all. Both belong in the daemon.
+- [ ] R1: contracts and a host facade. **First slice built:** `crates/remote-proto` (versioned
+      envelope, errors, limits, read model, terminal attach/control schema, output frames) and a
+      read-only `HostFacade` in the core, tested against real stores, worktrees and PTYs. Not
+      wired to anything; no user-visible change. Left: activity reads, shell terminals, output
+      sequence numbers in `pty-host`.
+- [ ] R2–R7: identity and relay, the mobile app, hardening, headless hosts, sync, managed launch.
+
+_Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
+reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
+unchanged.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

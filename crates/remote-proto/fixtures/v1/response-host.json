@@ -1,0 +1,12 @@
+{
+  "requestId": "r-0",
+  "result": {
+    "kind": "host",
+    "host": "host-example",
+    "name": "Example workstation",
+    "platform": "linux",
+    "appVersion": "0.20.2",
+    "protocol": { "major": 1, "minor": 0 },
+    "capabilities": ["host.describe", "workspace.list"]
+  }
+}
