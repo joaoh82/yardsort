@@ -22,6 +22,10 @@
 //! Activity is read only from the `metadata` privacy class, and only through an allowlist of
 //! fields, each checked again on the way out: see [`activity`].
 //!
+//! Every response fits in [`remote_proto::MAX_CONTROL_FRAME`]. Text is [`clip`]ped to the
+//! protocol's limits as it is copied, which bounds one item of any list, and a page holds as
+//! many items as fit, never more than asked: see [`fitting`].
+//!
 //! The terminal operations stop after step 3 with `unsupported`, and the host does not advertise
 //! them: viewing and typing need control leases enforced across the desktop and every device,
 //! which do not exist yet. This facade never writes to a terminal, never resizes one and never
@@ -33,14 +37,16 @@
 
 use pty_host::{SessionInfo, SessionState, TerminalHost};
 use remote_proto::{
-    page_size, ActivityListParams, ActivityPage, BranchRef, Cursor, ErrorCode, Grant, Hello,
-    HostDescription, HostId, MemoryId, MemoryListParams, MemoryNote, MemoryPage, Operation,
-    Outcome, Platform, ProcessState, ProjectId, ProjectSummary, ProtocolVersion, RemoteError,
-    Reply, Request, Response, SessionListParams, SessionPage, SessionRecordId, SessionSummary,
-    TaskLink, TermSize, TerminalActivity, TerminalId, TerminalPurpose, TerminalSummary, Welcome,
-    WorkspaceDetail, WorkspaceId, WorkspaceKind, WorkspaceListParams, WorkspacePage,
-    WorkspaceSummary, WorkspaceTerminal, PROTOCOL_MAJOR,
+    clip, page_size, ActivityEvent, ActivityListParams, ActivityPage, BranchRef, Cursor, ErrorCode,
+    Grant, Hello, HostDescription, HostId, MemoryId, MemoryListParams, MemoryNote, MemoryPage,
+    Operation, Outcome, Platform, ProcessState, ProjectId, ProjectSummary, ProtocolVersion,
+    RemoteError, Reply, Request, Response, SessionListParams, SessionPage, SessionRecordId,
+    SessionSummary, TaskLink, TermSize, TerminalActivity, TerminalId, TerminalPurpose,
+    TerminalSummary, Welcome, WorkspaceDetail, WorkspaceId, WorkspaceKind, WorkspaceListParams,
+    WorkspacePage, WorkspaceSummary, WorkspaceTerminal, MAX_LABEL, MAX_LINK, MAX_NOTE, MAX_TASKS,
+    MAX_TERMINALS, MAX_TEXT, PROTOCOL_MAJOR,
 };
+use serde::Serialize;
 
 use crate::git::Git;
 use crate::launch::{HARNESS_LABEL, PROJECT_RUN_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
@@ -144,7 +150,7 @@ impl HostFacade<'_> {
     fn describe(&self) -> HostDescription {
         HostDescription {
             host: self.host.id.clone(),
-            name: self.host.name.clone(),
+            name: clip(&self.host.name, MAX_TEXT),
             platform: Platform::current(),
             app_version: env!("CARGO_PKG_VERSION").to_owned(),
             protocol: ProtocolVersion::CURRENT,
@@ -176,7 +182,7 @@ impl HostFacade<'_> {
             }
             shown.push(ProjectSummary {
                 id: id.clone(),
-                name: project.name.clone(),
+                name: clip(&project.name, MAX_TEXT),
                 missing: project.missing,
             });
             for workspace in project.workspaces {
@@ -197,16 +203,29 @@ impl HostFacade<'_> {
             return Err(RemoteError::not_found());
         }
 
+        // Only the projects a page needs, in the order they were listed.
+        let grouping = |workspaces: &[WorkspaceSummary]| -> Vec<ProjectSummary> {
+            shown
+                .iter()
+                .filter(|p| workspaces.iter().any(|w| w.project == p.id))
+                .cloned()
+                .collect()
+        };
         let (workspaces, next) = page(
             summaries,
             |w| w.id.as_str(),
             params.cursor.as_ref(),
             params.limit,
+            |workspaces| {
+                encoded_len(&WorkspacePage {
+                    projects: grouping(workspaces),
+                    workspaces: workspaces.to_vec(),
+                    next: None,
+                })
+            },
         )?;
-        // Only the projects this page needs, in the order they were listed.
-        shown.retain(|p| workspaces.iter().any(|w| w.project == p.id));
         Ok(WorkspacePage {
-            projects: shown,
+            projects: grouping(&workspaces),
             workspaces,
             next,
         })
@@ -231,7 +250,7 @@ impl HostFacade<'_> {
             project: ProjectSummary {
                 id: local_id(&project.id)?,
                 missing: !std::path::Path::new(&project.root_path).is_dir(),
-                name: project.name,
+                name: clip(&project.name, MAX_TEXT),
             },
         })
     }
@@ -258,6 +277,13 @@ impl HostFacade<'_> {
             |s| s.id.as_str(),
             params.cursor.as_ref(),
             params.limit,
+            |sessions| {
+                encoded_len(&SessionPage {
+                    sessions: sessions.to_vec(),
+                    terminals: terminals.clone(),
+                    next: None,
+                })
+            },
         )?;
         Ok(SessionPage {
             sessions,
@@ -289,8 +315,12 @@ impl HostFacade<'_> {
                 info.labels.get(WORKSPACE_LABEL).map(String::as_str) == Some(workspace_id)
             })
             .filter(|info| !belongs(info))
+            .take(MAX_TERMINALS)
             .map(|info| {
-                let harness = info.labels.get(HARNESS_LABEL).cloned();
+                let harness = info
+                    .labels
+                    .get(HARNESS_LABEL)
+                    .map(|harness| clip(harness, MAX_LABEL));
                 let purpose = if harness.is_some() {
                     TerminalPurpose::Agent
                 } else if info.labels.get(PROJECT_RUN_LABEL).map(String::as_str)
@@ -302,7 +332,10 @@ impl HostFacade<'_> {
                 };
                 Ok(WorkspaceTerminal {
                     purpose,
-                    program: crate::activity::program_name(Some(&info.program)),
+                    program: clip(
+                        &crate::activity::program_name(Some(&info.program)),
+                        MAX_LABEL,
+                    ),
                     harness,
                     terminal: terminal_summary(info)?,
                 })
@@ -363,7 +396,7 @@ impl HostFacade<'_> {
             .store
             .events_window(&filter, bound, size + 1)
             .map_err(|_| unreadable())?;
-        let more = rows.len() > size;
+        let mut more = rows.len() > size;
         if more {
             match bound {
                 // Oldest first: the extra one is the oldest, before the page.
@@ -371,20 +404,50 @@ impl HostFacade<'_> {
                 EventBound::After(_) => drop(rows.pop()),
             }
         }
-        let older = match (rows.first(), bound) {
+        // Each event's sequence, for the cursors, beside what of it is shown.
+        let mut events: Vec<(i64, Option<ActivityEvent>)> = rows
+            .iter()
+            .map(|row| (row.seq, activity::event(row)))
+            .collect();
+        let shown = |events: &[(i64, Option<ActivityEvent>)]| -> Vec<ActivityEvent> {
+            events.iter().filter_map(|(_, e)| e.clone()).collect()
+        };
+        let size_of = |events: &[(i64, Option<ActivityEvent>)]| {
+            encoded_len(&ActivityPage {
+                events: shown(events),
+                older: None,
+                newer: None,
+            })
+        };
+        let count = events.len();
+        // Too many to fit: keep those nearest the cursor, as the extra row above was dropped.
+        let fit = match bound {
+            EventBound::Newest | EventBound::Before(_) => {
+                fitting(count, |n| size_of(&events[count - n..]))?
+            }
+            EventBound::After(_) => fitting(count, |n| size_of(&events[..n]))?,
+        };
+        if fit < count {
+            more = true;
+            match bound {
+                EventBound::Newest | EventBound::Before(_) => drop(events.drain(..count - fit)),
+                EventBound::After(_) => events.truncate(fit),
+            }
+        }
+        let older = match (events.first(), bound) {
             // Walking forward from a cursor, the cursor's own event is older than this page.
-            (Some(first), EventBound::After(_)) => Some(activity_cursor('o', first.seq)?),
-            (Some(first), _) if more => Some(activity_cursor('o', first.seq)?),
+            (Some((first, _)), EventBound::After(_)) => Some(activity_cursor('o', *first)?),
+            (Some((first, _)), _) if more => Some(activity_cursor('o', *first)?),
             _ => None,
         };
-        let newer = match (rows.last(), bound) {
-            (Some(last), _) => Some(activity_cursor('n', last.seq)?),
+        let newer = match (events.last(), bound) {
+            (Some((last, _)), _) => Some(activity_cursor('n', *last)?),
             // Nothing new since the cursor: the same position, to ask from again.
             (None, EventBound::After(seq)) => Some(activity_cursor('n', seq)?),
             (None, _) => None,
         };
         Ok(ActivityPage {
-            events: rows.iter().filter_map(activity::event).collect(),
+            events: shown(&events),
             older,
             newer,
         })
@@ -405,9 +468,9 @@ impl HostFacade<'_> {
                 Ok(MemoryNote {
                     id: local_id::<MemoryId>(&entry.id)?,
                     project: params.project.clone(),
-                    text: entry.text,
-                    author: entry.author,
-                    harness: entry.harness_id,
+                    text: clip(&entry.text, MAX_NOTE),
+                    author: clip(&entry.author, MAX_LABEL),
+                    harness: entry.harness_id.map(|harness| clip(&harness, MAX_LABEL)),
                     created_at: entry.created_at,
                     updated_at: entry.updated_at,
                 })
@@ -418,6 +481,12 @@ impl HostFacade<'_> {
             |n| n.id.as_str(),
             params.cursor.as_ref(),
             params.limit,
+            |notes| {
+                encoded_len(&MemoryPage {
+                    notes: notes.to_vec(),
+                    next: None,
+                })
+            },
         )?;
         Ok(MemoryPage { notes, next })
     }
@@ -470,33 +539,42 @@ fn summary(workspace: &projects::Workspace, running: usize) -> Answer<WorkspaceS
     Ok(WorkspaceSummary {
         id: local_id(&workspace.id)?,
         project: local_id(&workspace.project_id)?,
-        name: workspace.name.clone(),
+        name: clip(&workspace.name, MAX_TEXT),
         kind: match workspace.kind {
             projects::WorkspaceKind::Local => WorkspaceKind::Local,
             projects::WorkspaceKind::Worktree => WorkspaceKind::Worktree,
         },
         branch: workspace.head.as_ref().map(|head| BranchRef {
-            label: head.label.clone(),
+            label: clip(&head.label, MAX_TEXT),
             detached: head.detached,
             unborn: head.unborn,
         }),
         archived: workspace.archived,
         missing: workspace.missing,
-        tasks: workspace.tasks.iter().map(task_link).collect(),
+        tasks: workspace
+            .tasks
+            .iter()
+            .filter_map(task_link)
+            .take(MAX_TASKS)
+            .collect(),
         running_sessions: u32::try_from(running).unwrap_or(u32::MAX),
     })
 }
 
-fn task_link(task: &TaskRef) -> TaskLink {
-    TaskLink {
+/// The task as a client sees it, unless its link is too long to send whole.
+fn task_link(task: &TaskRef) -> Option<TaskLink> {
+    if task.url.len() > MAX_LINK || task.url.chars().any(char::is_control) {
+        return None;
+    }
+    Some(TaskLink {
         source: serde_json::to_value(task.source)
             .ok()
-            .and_then(|v| v.as_str().map(str::to_owned))
+            .and_then(|v| v.as_str().map(|source| clip(source, MAX_LABEL)))
             .unwrap_or_default(),
-        key: task.key.clone(),
-        title: task.title.clone(),
+        key: clip(&task.key, MAX_TEXT),
+        title: clip(&task.title, MAX_TEXT),
         url: task.url.clone(),
-    }
+    })
 }
 
 /// One conversation, as its record and the daemon (if there is one) describe it.
@@ -525,10 +603,10 @@ fn session(
     Ok(SessionSummary {
         id: local_id::<SessionRecordId>(&row.id)?,
         workspace: local_id(&row.workspace_id)?,
-        harness: row.harness_id,
-        model: row.model,
-        effort: row.effort,
-        title: row.title,
+        harness: clip(&row.harness_id, MAX_LABEL),
+        model: row.model.map(|model| clip(&model, MAX_LABEL)),
+        effort: row.effort.map(|effort| clip(&effort, MAX_LABEL)),
+        title: clip(&row.title, MAX_TEXT),
         forked_from: row.forked_from.as_deref().map(local_id).transpose()?,
         started_at: row.started_at,
         ended_at: row.ended_at,
@@ -597,7 +675,8 @@ fn cursor_expired() -> RemoteError {
 /// cursors into `cursor_expired` rather than into the wrong page.
 const CURSOR_PREFIX: &str = "k1.";
 
-/// One page of `items`, in their order, starting after the cursor's item.
+/// One page of `items`, in their order, starting after the cursor's item: as many as asked, or
+/// as many as fit when `size` (the encoded page holding those given) says fewer do.
 ///
 /// An item that has gone since the cursor was issued leaves no way to know where the next page
 /// starts, so that is `cursor_expired`: the client starts the list again rather than silently
@@ -607,6 +686,7 @@ fn page<T>(
     key: impl Fn(&T) -> &str,
     cursor: Option<&Cursor>,
     limit: Option<u32>,
+    size: impl Fn(&[T]) -> usize,
 ) -> Answer<(Vec<T>, Option<Cursor>)> {
     let start = match cursor {
         None => 0,
@@ -622,9 +702,14 @@ fn page<T>(
                 + 1
         }
     };
-    let size = page_size(limit);
-    let more = items.len() > start + size;
-    let items: Vec<T> = items.into_iter().skip(start).take(size).collect();
+    let asked = page_size(limit);
+    let mut more = items.len() > start + asked;
+    let mut items: Vec<T> = items.into_iter().skip(start).take(asked).collect();
+    let fit = fitting(items.len(), |n| size(&items[..n]))?;
+    if fit < items.len() {
+        items.truncate(fit);
+        more = true;
+    }
     let next = match items.last() {
         Some(last) if more => {
             Some(Cursor::new(format!("{CURSOR_PREFIX}{}", key(last))).map_err(|_| unreadable())?)
@@ -632,6 +717,60 @@ fn page<T>(
         _ => None,
     };
     Ok((items, next))
+}
+
+/// Room a frame keeps beside a page: the response's request id (at most
+/// [`remote_proto::ids::MAX_ID_LEN`] bytes, none of them escaped), its field names and the
+/// reply's `kind`, and the page's cursors (at most [`remote_proto::MAX_CURSOR_LEN`] bytes each).
+const FRAME_RESERVE: usize = 1024;
+
+/// The most an encoded page may take.
+const PAGE_BUDGET: usize = remote_proto::MAX_CONTROL_FRAME - FRAME_RESERVE;
+
+/// How many of `count` items a page can hold, from the end it starts at: the most for which
+/// `size(n)`, the encoded page holding `n` of them, fits [`PAGE_BUDGET`].
+///
+/// One item always fits: every field it has is bounded, by an id's or the protocol's text limits
+/// (see `tests::the_largest_item_of_every_list_fits_in_a_frame`). Should one ever not, that is an
+/// internal error rather than a frame the client would have to refuse.
+fn fitting(count: usize, size: impl Fn(usize) -> usize) -> Answer<usize> {
+    if count == 0 || size(count) <= PAGE_BUDGET {
+        return Ok(count);
+    }
+    if size(1) > PAGE_BUDGET {
+        return Err(RemoteError::new(
+            ErrorCode::Internal,
+            "The host could not fit its answer in one message.",
+        ));
+    }
+    // `low` items fit and `high` do not; a page only grows with each item.
+    let (mut low, mut high) = (1, count);
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        if size(mid) <= PAGE_BUDGET {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    Ok(low)
+}
+
+/// How many bytes `value` takes as JSON, counted without keeping them.
+fn encoded_len(value: &impl Serialize) -> usize {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    // Nothing in a reply fails to serialise (see `remote_proto::encode_response`).
+    serde_json::to_writer(&mut count, value).map_or(usize::MAX, |()| count.0)
 }
 
 mod activity;

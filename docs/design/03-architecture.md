@@ -128,7 +128,9 @@ between workspaces without keeping every xterm instance mounted) and is mandator
 A snapshot can be cut between any two bytes, even inside an escape sequence or a character,
 because batches end wherever a read ended. `snapshot::Headless` makes that safe: it follows the
 parser's state machine (`unfinished.rs`) and ends every snapshot with the open sequence's raw
-bytes, so the next batch completes it in the viewer. It also gives the parser a split character
+bytes, so the next batch completes it in the viewer. A control such as LF or BS inside a
+sequence is carried out at once and the sequence goes on; the snapshot already shows its effect,
+so it is not among those bytes. It also gives the parser a split character
 whole, with the next batch, because `vt100` 0.16 drops the byte after a character split across
 two `process` calls. Viewers' own streams are never held back.
 

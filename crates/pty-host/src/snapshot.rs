@@ -174,6 +174,8 @@ mod tests {
         b"\x1b(0lqk\x1b(B box\r\n\x1bPq#0;2;0;0;0\x1b\\after dcs",
         b"\x1b[3\x18cancelled\x1b[32\x1b[33myellow\x1b[m\r\n",
         b"\x1b[4;1Hmoved\x1b[Kerased\x1b[1Aup\x1b[2@in\x1b[3Pdel\x1b[?2004h\x1b[5 q",
+        // Controls inside a sequence are carried out at once, and the sequence goes on.
+        b"abc\x1b[31\nmRED\x1b[1\t;4mtab\x08\x1b[\x08\x0832mback\x1b(\r0lqk\x1b(B\x1b\n=keypad\x1b>!",
     ];
 
     /// Screen, cursor, and the modes and attributes the next byte would be printed with.

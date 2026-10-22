@@ -12,6 +12,10 @@
 //! keeps that sequence's bytes. A snapshot ends with them, so the next batch completes the
 //! sequence in the viewer exactly as it does in the host. It only scans bytes; nothing is held
 //! back from viewers and nothing is delayed.
+//!
+//! A control such as LF, TAB or BS inside an escape or control sequence is carried out at once,
+//! and the sequence goes on. Its effect is already on the screen a snapshot renders, so it is not
+//! kept: replayed, it would move the viewer's cursor a second time.
 
 /// More than any sequence a terminal program prints in practice, short of an image or a
 /// clipboard copy. A string longer than this keeps only its introducer: the viewer then reads
@@ -58,7 +62,16 @@ impl Unfinished {
     pub(crate) fn feed(&mut self, data: &[u8]) {
         for &byte in data {
             let (next, restart) = step(self.state, byte);
+            let carried_out = !restart
+                && is_control(byte)
+                && matches!(
+                    self.state,
+                    State::Escape | State::EscapeIntermediate | State::Csi
+                );
             self.state = next;
+            if carried_out {
+                continue;
+            }
             if next == State::Ground || restart {
                 self.bytes.clear();
                 self.overflowed = false;
@@ -137,6 +150,12 @@ fn step(state: State, byte: u8) -> (State, bool) {
     (next, false)
 }
 
+/// A C0 control the parser carries out where it stands. ESC, CAN and SUB are not: they end the
+/// sequence instead (see [`step`]).
+fn is_control(byte: u8) -> bool {
+    byte < 0x20
+}
+
 /// What a byte starts when no sequence is open.
 fn ground(byte: u8) -> State {
     match byte {
@@ -167,6 +186,18 @@ mod tests {
         // An escape abandons the open sequence, and starts its own.
         unfinished.feed(b"\x1b[3\x1b]0;ti");
         assert_eq!(unfinished.bytes(), b"\x1b]0;ti");
+    }
+
+    #[test]
+    fn controls_carried_out_inside_a_sequence_are_not_kept() {
+        let mut unfinished = Unfinished::default();
+        unfinished.feed(b"\x1b[3\n1\t;\x08");
+        assert_eq!(unfinished.bytes(), b"\x1b[31;");
+        unfinished.feed(b"m\x1b\r(\n");
+        assert_eq!(unfinished.bytes(), b"\x1b(");
+        // A string's controls are its own: ignored, or part of what it carries.
+        unfinished.feed(b"0\x1bPq\n#0");
+        assert_eq!(unfinished.bytes(), b"\x1bPq\n#0");
     }
 
     #[test]

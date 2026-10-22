@@ -149,10 +149,17 @@ fn request(operation: Operation) -> Request {
     }
 }
 
-/// Ask, through the wire format: what a client sends and what it would get back.
+/// Ask, through the wire format: what a client sends and what it would get back. Every answer
+/// in these tests must also be one a client reads, so within a frame.
 fn ask(facade: &HostFacade<'_>, grant: &Grant, operation: Operation) -> Response {
     let bytes = serde_json::to_vec(&request(operation)).unwrap();
-    serde_json::from_slice(&facade.handle_bytes(grant, &bytes)).unwrap()
+    let answer = facade.handle_bytes(grant, &bytes);
+    assert!(
+        answer.len() <= remote_proto::MAX_CONTROL_FRAME,
+        "a {} byte response",
+        answer.len()
+    );
+    serde_json::from_slice(&answer).unwrap()
 }
 
 fn reply(response: Response) -> Reply {
@@ -1257,4 +1264,330 @@ fn activity_shows_its_listed_fields_and_nothing_a_producer_kept_for_this_host() 
     ] {
         assert!(!wire.contains(secret), "{secret} leaked: {wire}");
     }
+}
+
+/// The reproduction from review: fifty approved notes, each at the length limit in four-byte
+/// characters, are more than one frame at the default page size.
+#[test]
+fn a_page_of_large_notes_holds_fewer_and_its_cursor_finds_the_rest() {
+    let f = Fixture::new();
+    let facade = f.facade(None);
+    let mut written: Vec<String> = (0..50)
+        .map(|n| {
+            let text = format!("{}{n:02}", "\u{1f600}".repeat(crate::memory::MAX_CHARS - 2));
+            crate::memory::write(&f.store, &f.alpha.id, &text).unwrap()
+        })
+        .collect();
+
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    let mut pages = 0;
+    loop {
+        // `ask` checks each answer fits in a frame.
+        let Reply::Memory(page) = reply(ask(
+            &facade,
+            &everything(),
+            Operation::MemoryList(remote_proto::MemoryListParams {
+                project: ProjectId::new(&f.alpha.id).unwrap(),
+                cursor: cursor.take(),
+                limit: None,
+            }),
+        )) else {
+            panic!()
+        };
+        assert!(!page.notes.is_empty());
+        assert!(page
+            .notes
+            .iter()
+            .all(|n| n.text.ends_with(char::is_numeric)));
+        seen.extend(page.notes.iter().map(|n| n.id.as_str().to_owned()));
+        pages += 1;
+        match page.next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert!(pages > 1, "the default page of these is over a frame");
+    seen.sort();
+    written.sort();
+    assert_eq!(seen, written, "every note once, none skipped");
+}
+
+/// Activity trims a page from the end away from its cursor, whichever way it walks, and the
+/// next page starts where the short one stopped.
+#[test]
+fn large_events_page_back_and_forward_without_a_gap() {
+    let f = Fixture::new();
+    let ws = f.alpha.worktree.clone();
+    let wide = "\u{1f600}".repeat(super::activity::MAX_NAME);
+    let all: Vec<String> = (0..200).map(|n| format!("ev-{n:03}")).collect();
+    for id in &all {
+        event(
+            &f.store,
+            id,
+            &ws,
+            None,
+            "tool.completed",
+            serde_json::json!({
+                "harnessId": wide, "model": wide, "tool": wide, "subagentType": wide,
+                "agentType": wide, "program": wide,
+                "path": format!("src/{}", "p".repeat(super::activity::MAX_PATH - 4)),
+            }),
+        );
+    }
+    let facade = f.facade(None);
+    let grant = everything();
+    let list = |cursor| {
+        activity(
+            &facade,
+            &grant,
+            activity_params(&ws, None, cursor, Some(remote_proto::MAX_PAGE)),
+        )
+    };
+
+    // Back from the newest: each page oldest first, each one before the last.
+    let mut back = Vec::new();
+    let mut page = list(None);
+    let mut pages = vec![page.clone()];
+    loop {
+        assert!(!page.events.is_empty());
+        let mut ids: Vec<String> = ids(&page).iter().map(|&id| id.to_owned()).collect();
+        ids.append(&mut back);
+        back = ids;
+        let Some(older) = page.older.clone() else {
+            break;
+        };
+        page = list(Some(older));
+        pages.push(page.clone());
+    }
+    assert!(pages.len() > 1, "two hundred of these are over a frame");
+    assert_eq!(back, all);
+
+    // Forward again from the oldest page, as a client catching up does.
+    let mut forward: Vec<String> = ids(pages.last().unwrap())
+        .iter()
+        .map(|&id| id.to_owned())
+        .collect();
+    let mut newer = pages.last().unwrap().newer.clone();
+    loop {
+        let page = list(newer.clone());
+        if page.events.is_empty() {
+            break;
+        }
+        forward.extend(ids(&page).iter().map(|&id| id.to_owned()));
+        newer = page.newer;
+    }
+    assert_eq!(forward, all);
+}
+
+/// Every field of every item has a limit, and together they keep one item, at its largest, within
+/// a page's budget: so `fitting` always finds room for one, and a list can always go on. Text
+/// at its largest is control characters, which JSON writes as six bytes each.
+#[test]
+fn the_largest_item_of_every_list_fits_in_a_frame() {
+    use super::activity::{MAX_CODE, MAX_NAME, MAX_PATH};
+    use remote_proto::{
+        ActivityDetail, ActivityEvent, EventId, MemoryNote, Provenance, RunId, TaskLink, TermSize,
+        TerminalPurpose, WorkspaceTerminal, MAX_CURSOR_LEN, MAX_LABEL, MAX_LINK, MAX_NOTE,
+        MAX_TASKS, MAX_TERMINALS, MAX_TEXT,
+    };
+
+    let id = "i".repeat(remote_proto::ids::MAX_ID_LEN);
+    let text = |chars: usize| "\u{1}".repeat(chars);
+    let code = || Some("c".repeat(MAX_CODE));
+    // Activity names exclude control characters; a four-byte character is their largest.
+    let name = || Some("\u{1f600}".repeat(MAX_NAME));
+    let cursor = || Some(Cursor::new("c".repeat(MAX_CURSOR_LEN)).unwrap());
+    let terminal = || TerminalSummary {
+        id: TerminalId::new(&id).unwrap(),
+        activity: TerminalActivity::Exited,
+        idle_ms: u32::MAX,
+        size: TermSize {
+            cols: u16::MAX,
+            rows: u16::MAX,
+        },
+        exit_code: Some(u32::MAX),
+    };
+    let project = ProjectSummary {
+        id: ProjectId::new(&id).unwrap(),
+        name: text(MAX_TEXT),
+        missing: true,
+    };
+    let workspace = WorkspaceSummary {
+        id: WorkspaceId::new(&id).unwrap(),
+        project: ProjectId::new(&id).unwrap(),
+        name: text(MAX_TEXT),
+        kind: WorkspaceKind::Worktree,
+        branch: Some(BranchRef {
+            label: text(MAX_TEXT),
+            detached: true,
+            unborn: true,
+        }),
+        archived: true,
+        missing: true,
+        tasks: vec![
+            TaskLink {
+                source: text(MAX_LABEL),
+                key: text(MAX_TEXT),
+                title: text(MAX_TEXT),
+                // Links hold no control characters; a quote is their largest.
+                url: "\"".repeat(MAX_LINK),
+            };
+            MAX_TASKS
+        ],
+        running_sessions: u32::MAX,
+    };
+    let session = SessionSummary {
+        id: SessionRecordId::new(&id).unwrap(),
+        workspace: WorkspaceId::new(&id).unwrap(),
+        harness: text(MAX_LABEL),
+        model: Some(text(MAX_LABEL)),
+        effort: Some(text(MAX_LABEL)),
+        title: text(MAX_TEXT),
+        forked_from: Some(SessionRecordId::new(&id).unwrap()),
+        started_at: i64::MIN,
+        ended_at: Some(i64::MIN),
+        exit_code: Some(i64::MIN),
+        process: ProcessState::Unknown,
+        terminal: Some(terminal()),
+    };
+    let other = WorkspaceTerminal {
+        purpose: TerminalPurpose::RunCommand,
+        program: text(MAX_LABEL),
+        harness: Some(text(MAX_LABEL)),
+        terminal: terminal(),
+    };
+    let note = MemoryNote {
+        id: MemoryId::new(&id).unwrap(),
+        project: ProjectId::new(&id).unwrap(),
+        text: text(MAX_NOTE),
+        author: text(MAX_LABEL),
+        harness: Some(text(MAX_LABEL)),
+        created_at: i64::MIN,
+        updated_at: i64::MIN,
+    };
+    let event = ActivityEvent {
+        id: EventId::new(&id).unwrap(),
+        workspace: WorkspaceId::new(&id).unwrap(),
+        session: Some(SessionRecordId::new(&id).unwrap()),
+        run: Some(RunId::new(&id).unwrap()),
+        occurred_at: i64::MIN,
+        kind: "c".repeat(MAX_CODE),
+        source: Provenance {
+            producer: "c".repeat(MAX_CODE),
+            method: "c".repeat(MAX_CODE),
+            fidelity: "c".repeat(MAX_CODE),
+        },
+        detail: ActivityDetail {
+            harness: name(),
+            run_kind: code(),
+            program: name(),
+            model: name(),
+            continuation: code(),
+            launched_by: code(),
+            capture: code(),
+            forked_from: Some(SessionRecordId::new(&id).unwrap()),
+            exit_code: Some(i64::MIN),
+            success: Some(false),
+            signal: code(),
+            via: code(),
+            reason: code(),
+            tool: name(),
+            subagent_type: name(),
+            // Paths hold no control characters; a quote is their largest.
+            path: Some("\"".repeat(MAX_PATH)),
+            path_outside_workspace: Some(false),
+            change: code(),
+            status: code(),
+            duration_ms: Some(u64::MAX),
+            chars: Some(u64::MAX),
+            decision: code(),
+            wait_ms: Some(u64::MAX),
+            notification: code(),
+            error_type: code(),
+            agent_type: name(),
+            trigger: code(),
+            outcome: code(),
+            turn_number: Some(u64::MAX),
+            context_tokens: Some(u64::MAX),
+            context_window: Some(u64::MAX),
+            total_tokens: Some(u64::MAX),
+            output_tokens: Some(u64::MAX),
+            note: code(),
+        },
+    };
+
+    let pages = [
+        Reply::Workspaces(WorkspacePage {
+            projects: vec![project.clone()],
+            workspaces: vec![workspace.clone()],
+            next: cursor(),
+        }),
+        Reply::Workspace(WorkspaceDetail { workspace, project }),
+        Reply::Sessions(SessionPage {
+            sessions: vec![session],
+            terminals: vec![other; MAX_TERMINALS],
+            next: cursor(),
+        }),
+        Reply::Memory(MemoryPage {
+            notes: vec![note],
+            next: cursor(),
+        }),
+        Reply::Activity(ActivityPage {
+            events: vec![event],
+            older: cursor(),
+            newer: cursor(),
+        }),
+        Reply::Host(HostDescription {
+            host: HostId::new(&id).unwrap(),
+            name: text(MAX_TEXT),
+            platform: Platform::current(),
+            app_version: env!("CARGO_PKG_VERSION").to_owned(),
+            protocol: ProtocolVersion::CURRENT,
+            capabilities: ANSWERED.iter().map(|&op| op.to_owned()).collect(),
+        }),
+    ];
+    for reply in pages {
+        // What `fitting` measures: the page alone.
+        let page = match &reply {
+            Reply::Workspaces(page) => encoded_len(page),
+            Reply::Sessions(page) => encoded_len(page),
+            Reply::Memory(page) => encoded_len(page),
+            Reply::Activity(page) => encoded_len(page),
+            other => encoded_len(other),
+        };
+        assert!(page <= PAGE_BUDGET, "{page} bytes: {reply:?}");
+        // And what goes on the wire, with the longest request id.
+        let wire = remote_proto::encode_response(&Response {
+            request_id: Some(RequestId::new(&id).unwrap()),
+            outcome: Outcome::Result(reply),
+        });
+        assert!(wire.len() <= remote_proto::MAX_CONTROL_FRAME);
+    }
+}
+
+#[test]
+fn text_longer_than_the_protocol_allows_is_clipped_on_the_way_out() {
+    let f = Fixture::new();
+    let long = "a long title ".repeat(1_000);
+    f.store
+        .add_session(&NewSession {
+            id: "rec-long",
+            workspace_id: &f.alpha.worktree,
+            harness_id: "claude",
+            model: Some(&long),
+            title: &long,
+            pty_session_id: "pty-long",
+            ..Default::default()
+        })
+        .unwrap();
+    let page = sessions(&f.facade(None), &everything(), &f.alpha.worktree, true);
+    let session = &page.sessions[0];
+    assert_eq!(session.title.chars().count(), remote_proto::MAX_TEXT);
+    assert!(session.title.ends_with('…'));
+    assert!(long.starts_with(session.title.trim_end_matches('…')));
+    assert_eq!(
+        session.model.as_deref().map(|m| m.chars().count()),
+        Some(remote_proto::MAX_LABEL)
+    );
 }

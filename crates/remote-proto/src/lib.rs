@@ -9,7 +9,7 @@
 //!
 //! ```text
 //! client → host   Request  { requestId, protocol, op, params }     JSON, ≤ MAX_CONTROL_FRAME
-//! host → client   Response { requestId, result | error }           JSON
+//! host → client   Response { requestId, result | error }           JSON, ≤ MAX_CONTROL_FRAME
 //! host → client   terminal output                                  binary, see OutputFrame
 //! ```
 //!
@@ -41,7 +41,10 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// The minor this build speaks. Raised for each additive change; never required of a peer.
 pub const PROTOCOL_MINOR: u16 = 0;
 
-/// The largest JSON message either side reads. Checked before parsing.
+/// The largest JSON message either side reads, requests and responses alike. Checked before
+/// parsing. A host keeps its responses within it: a page holds fewer items than asked when they
+/// are large, and each item's fields have limits ([`MAX_TEXT`] and the rest) so that one always
+/// fits.
 pub const MAX_CONTROL_FRAME: usize = 64 * 1024;
 /// The largest chunk of terminal output in one frame.
 pub const MAX_OUTPUT_CHUNK: usize = 64 * 1024;

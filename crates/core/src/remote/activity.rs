@@ -21,11 +21,11 @@ use crate::store::EventRow;
 pub const SHOWN_CLASS: &str = PRIVACY_METADATA;
 
 /// Longest code, such as a reason or a decision.
-const MAX_CODE: usize = 64;
+pub(super) const MAX_CODE: usize = 64;
 /// Longest name, such as a tool's or a model's.
-const MAX_NAME: usize = 128;
+pub(super) const MAX_NAME: usize = 128;
 /// Longest path inside a workspace.
-const MAX_PATH: usize = 1024;
+pub(super) const MAX_PATH: usize = 1024;
 
 /// The event as a client sees it, or `None` when its own ids cannot be expressed in the
 /// protocol, which only a damaged database does.

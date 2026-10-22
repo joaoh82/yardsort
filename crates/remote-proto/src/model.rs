@@ -14,6 +14,40 @@ use crate::ids::{
 };
 use crate::ProtocolVersion;
 
+/// Longest name or title in a reply, in characters: a host's, a project's, a workspace's, a
+/// branch, a conversation's title, a task's key and title. A longer one is [`clip`]ped.
+pub const MAX_TEXT: usize = 256;
+/// Longest label in a reply, in characters: a harness, a model, an effort, a program, an
+/// author, a task's source. A longer one is [`clip`]ped.
+pub const MAX_LABEL: usize = 64;
+/// Longest memory note in a reply, in characters. Hosts accept far shorter notes; this bounds one
+/// they kept from before they did.
+pub const MAX_NOTE: usize = 1000;
+/// The most tasks one workspace lists.
+pub const MAX_TASKS: usize = 8;
+/// Longest task link, in bytes. A task whose link is longer, or holds a control character, is
+/// left out: a shortened link would lead somewhere else.
+pub const MAX_LINK: usize = 512;
+/// The most other terminals one [`SessionPage`] lists.
+pub const MAX_TERMINALS: usize = 32;
+
+/// `text`, cut to `max` characters when it is longer, the last of them `…`.
+///
+/// These limits are what keep one item of any list within [`crate::MAX_CONTROL_FRAME`], so a
+/// page can always hold at least one.
+pub fn clip(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        None => text.to_owned(),
+        Some(_) => {
+            let keep = text
+                .char_indices()
+                .nth(max.saturating_sub(1))
+                .map_or(0, |(at, _)| at);
+            format!("{}…", &text[..keep])
+        }
+    }
+}
+
 /// The operating system a host runs. Clients use it to label a host, nothing more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +144,7 @@ pub struct WorkspaceSummary {
     pub archived: bool,
     /// The folder should be there and is not.
     pub missing: bool,
+    /// At most [`MAX_TASKS`].
     pub tasks: Vec<TaskLink>,
     /// Conversations whose record says they are running. Whether a process is really there is
     /// on each [`SessionSummary`]; this count is for a list, and only as fresh as the list.
@@ -296,6 +331,10 @@ impl From<Cursor> for String {
 }
 
 /// `workspace.list`.
+///
+/// Every page, of this and the other lists, fits in [`crate::MAX_CONTROL_FRAME`]. A page of
+/// large items holds fewer than the request's `limit`, and its cursor goes on from the last of
+/// them: a short page is not the last one, a page without a cursor is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePage {
@@ -315,6 +354,7 @@ pub struct SessionPage {
     /// The workspace's other terminals: shells, the run command, and agents whose record is
     /// gone. On the first page only (a request without a cursor), since there are few and they
     /// have no order worth paging by; empty on later pages, and when there is no daemon to ask.
+    /// At most [`MAX_TERMINALS`].
     #[serde(default)]
     pub terminals: Vec<WorkspaceTerminal>,
     pub next: Option<Cursor>,
@@ -484,6 +524,17 @@ pub struct ActivityPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clipped_text_keeps_its_limit_in_characters_and_says_it_was_cut() {
+        assert_eq!(clip("short", 5), "short");
+        assert_eq!(clip("longer", 5), "long…");
+        assert_eq!(clip("\u{1f600}\u{1f600}\u{1f600}", 2), "\u{1f600}…");
+        assert_eq!(
+            clip(&"\u{e9}".repeat(300), MAX_TEXT).chars().count(),
+            MAX_TEXT
+        );
+    }
 
     #[test]
     fn a_platform_from_the_future_is_other() {
