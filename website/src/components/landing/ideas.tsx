@@ -43,8 +43,8 @@ export function Ideas() {
       </h2>
       <p className="mt-4 max-w-[640px] text-[17px] text-muted">
         Like a sorting yard: fan tasks onto parallel tracks, or keep several agents on one. Hand
-        work from Claude to Codex without re-briefing the branch. Review each result before
-        bringing the changes together.
+        work from Claude to Codex without re-briefing the branch. Review each result before bringing
+        the changes together.
       </p>
 
       <div className="mt-[72px] space-y-[88px]">
