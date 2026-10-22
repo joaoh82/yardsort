@@ -125,9 +125,23 @@ of history) and can emit a **snapshot** — a byte sequence that repaints the
 current screen — followed by the live stream. This pays off immediately in v1 (clean switching
 between workspaces without keeping every xterm instance mounted) and is mandatory for the daemon.
 
+A snapshot can be cut between any two bytes, even inside an escape sequence or a character,
+because batches end wherever a read ended. `snapshot::Headless` makes that safe: it follows the
+parser's state machine (`unfinished.rs`) and ends every snapshot with the open sequence's raw
+bytes, so the next batch completes it in the viewer. It also gives the parser a split character
+whole, with the next batch, because `vt100` 0.16 drops the byte after a character split across
+two `process` calls. Viewers' own streams are never held back.
+
+`PtyHost::attach_numbered` is the same attach with positions: the snapshot says which item of
+the session's output it holds, and each later batch, and each resize, carries the next number.
+It is what a remote viewer will need to prove it lost and doubled nothing. It is in-process only
+for now: the daemon's protocol does not carry numbers until R2 of
+[remote access](26-remote-r0-r1.md).
+
 **The host is the terminal when nobody is watching.** Programs can query the terminal and wait for
 an answer — above all "where is the cursor?" (`ESC [ 6 n`). With a viewer attached, xterm.js
-replies. With none, the host replies from its headless terminal; the decision is made under the
+replies. With none, the host replies from its headless terminal (a numbered viewer does not
+count: it watches, and never answers); the decision is made under the
 same lock that delivers output, so exactly one reply is ever sent. This is load-bearing on Windows:
 `portable-pty` creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY
 ask that question at startup and run nothing until it is answered.

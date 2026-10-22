@@ -12,11 +12,12 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
+use crate::snapshot::Headless;
 use crate::types::{
-    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Result, SessionId, SessionInfo,
-    SessionState, TermSize,
+    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, Result,
+    SessionId, SessionInfo, SessionState, TermSize,
 };
-use crate::{snapshot, EventSink, OutputSink};
+use crate::{EventSink, NumberedSink, OutputSink};
 
 /// Lines of history kept per session for snapshots.
 const SCROLLBACK_LINES: usize = 10_000;
@@ -56,14 +57,31 @@ struct Io {
 
 /// What viewers see: the headless terminal plus whoever is currently watching.
 struct View {
-    parser: vt100::Parser,
+    terminal: Headless,
     size: TermSize,
-    sinks: Vec<(AttachmentId, OutputSink)>,
+    sinks: Vec<(AttachmentId, Viewer)>,
     next_attachment: AttachmentId,
+    /// The last item of output (or resize) handed out. See [`OutputSeq`].
+    seq: OutputSeq,
     state: SessionState,
     last_output: Instant,
     has_output: bool,
     busy: bool,
+}
+
+enum Viewer {
+    /// A terminal emulator, which answers the program's queries itself.
+    Terminal(OutputSink),
+    /// A numbered watcher, which never answers.
+    Numbered(NumberedSink),
+}
+
+impl View {
+    fn next_attachment(&mut self) -> AttachmentId {
+        let id = self.next_attachment;
+        self.next_attachment += 1;
+        id
+    }
 }
 
 impl Session {
@@ -111,10 +129,11 @@ impl Session {
                 writer: Some(writer),
             }),
             view: Mutex::new(View {
-                parser: vt100::Parser::new(size.rows, size.cols, SCROLLBACK_LINES),
+                terminal: Headless::new(size.rows, size.cols, SCROLLBACK_LINES),
                 size,
                 sinks: Vec::new(),
                 next_attachment: 1,
+                seq: 0,
                 state: SessionState::Running,
                 last_output: Instant::now(),
                 has_output: false,
@@ -180,11 +199,27 @@ impl Session {
         // Snapshot and registration happen under the lock the pump takes to deliver output, so
         // the viewer sees every byte exactly once: in the snapshot or in the stream, never both.
         let mut view = self.view();
-        let id = view.next_attachment;
-        view.next_attachment += 1;
-        let snapshot = snapshot::render(&mut view.parser);
+        let id = view.next_attachment();
+        let snapshot = view.terminal.snapshot();
         if sink(&snapshot) {
-            view.sinks.push((id, sink));
+            view.sinks.push((id, Viewer::Terminal(sink)));
+        }
+        id
+    }
+
+    /// As [`Session::attach`], with every item numbered: the snapshot is the terminal after item
+    /// `seq`, and the first item after it is `seq + 1`.
+    pub(crate) fn attach_numbered(&self, mut sink: NumberedSink) -> AttachmentId {
+        let mut view = self.view();
+        let id = view.next_attachment();
+        let snapshot = view.terminal.snapshot();
+        let (seq, size) = (view.seq, view.size);
+        if sink(Numbered::Snapshot {
+            seq,
+            size,
+            bytes: &snapshot,
+        }) {
+            view.sinks.push((id, Viewer::Numbered(sink)));
         }
         id
     }
@@ -208,7 +243,7 @@ impl Session {
     /// the program asked for them (so newlines stay part of the text instead of submitting it),
     /// otherwise as typed input with carriage returns for line breaks.
     pub(crate) fn paste(&self, text: &str) -> Result<()> {
-        let bracketed = self.view().parser.screen().bracketed_paste();
+        let bracketed = self.view().terminal.screen().bracketed_paste();
         let normalized = text.replace("\r\n", "\n");
         let payload = if bracketed {
             // The end marker inside the text would end the paste early; no program needs it.
@@ -221,6 +256,9 @@ impl Session {
 
     pub(crate) fn resize(&self, size: TermSize) -> Result<()> {
         let size = size.sanitized();
+        // Held across the PTY's own resize, so no output the program draws at the new size can
+        // reach a numbered viewer before the item that says the size changed.
+        let mut view = self.view();
         if let Some(master) = self.io().master.as_ref() {
             master
                 .resize(PtySize {
@@ -232,9 +270,16 @@ impl Session {
                 .map_err(|e| HostError::Io(std::io::Error::other(e.to_string())))?;
         }
         // Exited sessions still resize their headless terminal so late snapshots fit the viewer.
-        let mut view = self.view();
-        view.size = size;
-        view.parser.screen_mut().set_size(size.rows, size.cols);
+        if view.size != size {
+            view.size = size;
+            view.terminal.set_size(size.rows, size.cols);
+            view.seq += 1;
+            let seq = view.seq;
+            view.sinks.retain_mut(|(_, viewer)| match viewer {
+                Viewer::Terminal(_) => true,
+                Viewer::Numbered(sink) => sink(Numbered::Resized { seq, size }),
+            });
+        }
         Ok(())
     }
 
@@ -376,15 +421,24 @@ impl Session {
     /// reply, so the host answers from its headless one. This is not an edge case: ConPTY asks
     /// exactly this at startup and runs nothing until it hears back, so without an answer a
     /// Windows session started before its view attaches would hang forever. Deciding under the
-    /// view lock guarantees exactly one reply: ours, or the viewer's.
+    /// view lock means ours is never sent alongside a terminal's. Numbered viewers do not count:
+    /// they watch, and never answer.
     fn deliver(&self, batch: &[u8]) -> Vec<u8> {
         let mut view = self.view();
-        let unattended = view.sinks.is_empty();
+        let unattended = !view
+            .sinks
+            .iter()
+            .any(|(_, viewer)| matches!(viewer, Viewer::Terminal(_)));
+        view.seq += 1;
+        let seq = view.seq;
         // Hand the bytes to the viewers before parsing them into the headless terminal. The
         // parse is only there for snapshots, and nothing below needs it except the cursor
-        // reply, which is only reached when there is no viewer to have waited for it.
-        view.sinks.retain_mut(|(_, sink)| sink(batch));
-        view.parser.process(batch);
+        // reply, which is only reached when there is no terminal to have waited for it.
+        view.sinks.retain_mut(|(_, viewer)| match viewer {
+            Viewer::Terminal(sink) => sink(batch),
+            Viewer::Numbered(sink) => sink(Numbered::Output { seq, bytes: batch }),
+        });
+        view.terminal.feed(batch);
         view.last_output = Instant::now();
         view.has_output = true;
 
@@ -395,7 +449,7 @@ impl Session {
                 .filter(|w| *w == CURSOR_POSITION_QUERY)
                 .count();
             if queries > 0 {
-                let (row, col) = view.parser.screen().cursor_position();
+                let (row, col) = view.terminal.screen().cursor_position();
                 let report = format!("\x1b[{};{}R", row + 1, col + 1);
                 for _ in 0..queries {
                     replies.extend_from_slice(report.as_bytes());

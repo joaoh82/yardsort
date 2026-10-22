@@ -1,6 +1,6 @@
 # 26 — Remote access: fit report and the first contract slice
 
-Status: **R0 done; R1 two slices built, not wired to anything** · 21–22 October 2026 · Companion to
+Status: **R0 and R1 done, not wired to anything** · 21–22 October 2026 · Companion to
 [25, the remote, mobile and sync proposal](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md). It
 records the repository as found when the work started, where the proposal's premises needed
 adjusting, the decisions taken, what this slice built, and the ledger later phases update.
@@ -49,7 +49,8 @@ snapshot, hands it to the sink and registers the sink under the same `view` lock
 `deliver` (`:380`) holds while fanning a batch out. **The boundary is atomic** for every viewer.
 Over the socket, the client picks the stream id and registers its sink before asking, and one
 FIFO writer per connection keeps the order. **There are no sequence numbers, offsets or epochs
-anywhere.** A reattach is always a full snapshot.
+anywhere.** A reattach is always a full snapshot. (R1's third slice added numbering inside
+`pty-host`; see §6. The daemon's protocol still carries none.)
 
 **Terminal queries.** The host answers the cursor-position query (`ESC [ 6 n`) itself **only while
 no viewer is attached**. It decides this under the view lock (`deliver`), so a session with zero
@@ -127,15 +128,15 @@ The proposal's corrections in its own §2 all held when checked:
 
 ## 4 · Ownership
 
-| Owner                       | Owns                                                                    | Notes                                                                         |
-| --------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `crates/pty-host`           | Processes, PTY I/O, headless VT, snapshots, the attach boundary         | Gains chunk sequence and lease arbitration in R2. Still no Tauri, no network. |
-| `crates/pty-ipc`            | The local wire, one daemon per profile                                  | Stays local-only, behind file permissions. **Never exposed to a network.**    |
-| `crates/remote-proto` (new) | The remote protocol's types, limits, versioning, framing                | No transport, no store, no I/O.                                               |
-| `crates/core::remote` (new) | Answering remote reads for one host, authorizing each against a `Grant` | Read-only. Never writes, attaches, resizes or spawns.                         |
-| Host runtime (R2)           | Holding `app.lock`; enrollment and grants; the outbound connector       | Desktop app first, a headless entry point in R5.                              |
-| Server (R2+)                | Accounts, devices, relay, tickets; later sync                           | Separate crate. Depends on `remote-proto`, not on the core.                   |
-| Desktop app, `ys`           | Local UI and CLI, unchanged                                             | The only routes that approve memory, launch, delete.                          |
+| Owner                       | Owns                                                                    | Notes                                                                                                   |
+| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `crates/pty-host`           | Processes, PTY I/O, headless VT, snapshots, the attach boundary         | Numbers output and resizes per session (R1). Gains lease arbitration in R2. Still no Tauri, no network. |
+| `crates/pty-ipc`            | The local wire, one daemon per profile                                  | Stays local-only, behind file permissions. **Never exposed to a network.**                              |
+| `crates/remote-proto` (new) | The remote protocol's types, limits, versioning, framing                | No transport, no store, no I/O.                                                                         |
+| `crates/core::remote` (new) | Answering remote reads for one host, authorizing each against a `Grant` | Read-only. Never writes, attaches, resizes or spawns.                                                   |
+| Host runtime (R2)           | Holding `app.lock`; enrollment and grants; the outbound connector       | Desktop app first, a headless entry point in R5.                                                        |
+| Server (R2+)                | Accounts, devices, relay, tickets; later sync                           | Separate crate. Depends on `remote-proto`, not on the core.                                             |
+| Desktop app, `ys`           | Local UI and CLI, unchanged                                             | The only routes that approve memory, launch, delete.                                                    |
 
 ## 5 · Decisions
 
@@ -182,6 +183,31 @@ Second slice, 22 October 2026:
   `response-sessions.json`. A sessions page without `terminals`, as a host from the first slice
   sends, still reads (tested). Both additions are additive within 1.0. Nothing had shipped, so
   the minor stays 0.
+
+Third slice, 22 October 2026, in `crates/pty-host`:
+
+- **Numbered output.** Each session counts the items of its output stream: every batch, and
+  every resize that changes the size. `PtyHost::attach_numbered` hands a viewer a snapshot
+  tagged with the item it holds (`Numbered::Snapshot { seq, size, bytes }`), then
+  `Numbered::Output` and `Numbered::Resized` items numbered from `seq + 1`. A resize is an item
+  because output drawn at the new size must not reach a viewer before it hears of the size; the
+  view lock is now held across the PTY's own resize to guarantee that order. The epoch is the
+  session's life in one daemon, as §3 planned. The plain `attach`, the `TerminalHost` trait and
+  `pty_ipc` are unchanged, so the daemon's protocol does not carry numbers yet (R2).
+- **A numbered viewer watches; it never answers.** The host still answers cursor queries when
+  only numbered viewers are attached, which is what a remote viewer needs (the protocol forbids
+  viewers to answer) and what keeps ConPTY from stalling at startup.
+- **Found and fixed: a snapshot cut inside a sequence.** Batches end wherever a read ended. A
+  viewer that attached between the two halves of an escape sequence got the second half as text
+  (`1mred` for a red `red`). One that attached inside a character lost it. Worse, `vt100` 0.16
+  drops the byte after a character split across two `process` calls when more multibyte text
+  follows, so the host's own headless terminal could lose a space for good. This affected the
+  desktop's re-attach and `ys attach` today, rarely. `snapshot::Headless` now wraps the parser.
+  `unfinished.rs` follows the DEC parser's state machine and ends each snapshot with the open
+  sequence's raw bytes (a string over 4 KiB keeps only its introducer, so the viewer still
+  swallows the rest). A split character is held back from the parser, at most three bytes, and
+  handed to it with the next batch. Viewers' streams are never held back or delayed. A
+  CHANGELOG line covers the user-visible part.
 
 ## 7 · Verification
 
@@ -242,6 +268,30 @@ Second slice, 22 October 2026:
   - `just check` passed (`yardsort-core` 541 tests, the app crate 150, frontend 642), with the
     `YARDSORT_*` variables unset. So did `just bindings-check` (bindings unchanged),
     `just lint-windows` and the Windows clippy of `remote-proto`.
+- Third slice, on Linux, 2026-10-22:
+  - `pty-host` unit tests: 12. Eight sample outputs (colours, true colour, multibyte text and
+    emoji, an OSC title, OSC 8 links, a DCS string, the alternate screen, line-drawing charsets,
+    `CAN` and abandoned sequences, editing and mode sequences) are each cut at every byte. Both a
+    host fed the two halves as separate batches, and a viewer sent the snapshot then the second
+    half, must end with the same screen, cursor and modes as a terminal fed the whole. Taking
+    the open sequence out of the snapshot fails it at the first mid-sequence cut; not holding
+    back a split character fails it on the host side at `caf` + half of `é`.
+  - `pty-host` integration tests: 19, three new, against real processes in real PTYs. On all
+    platforms, a numbered viewer of a short program gets an unbroken run of numbers after its
+    snapshot, and one that attaches after the exit gets a snapshot at the last number. On Unix:
+    - A program prints 150 coloured, multibyte lines, waits for input, then prints 150 more. One
+      viewer attaches at the start and another at the pause. The terminal is resized, the
+      program continues, and a third viewer attaches after the exit.
+    - All three have unbroken numbers. The two live ones were sent identical items after the
+      second's snapshot, including the resize. The first viewer's stream up to the second's
+      snapshot number draws exactly that snapshot's screen. All three draw the same final screen
+      and cursor.
+    - With only a numbered viewer attached, a program asking for the cursor position gets the
+      host's reply. Counting numbered viewers as terminals makes it hang, and the test fails.
+  - `just check` passed with the `YARDSORT_*` variables unset: `pty-host` 12 + 19,
+    `yardsort-core` 541, `remote-proto` 25, the app crate 150, frontend 642. So did
+    `just bindings-check` (bindings unchanged) and `just lint-windows`. The latter caught a
+    Unix-only test helpers left unused on Windows, now gated.
 - **Not run here:** tests on Windows and macOS. CI covers them; the core cannot be compiled for
   MSVC from Linux, since it bundles SQLite. No mobile device, emulator or simulator was involved,
   because nothing mobile exists yet.
@@ -250,16 +300,16 @@ Second slice, 22 October 2026:
 
 Each later session picks one gate, updates this table, and records what it found.
 
-| Phase                          | State                                                                                         | Gate                                                                                                                                                                                                                                                                                                         |
-| ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| R0 Fit                         | **Done** (this document)                                                                      | HEAD and paths recorded; no overlapping work found                                                                                                                                                                                                                                                           |
-| R1 Contract and host facade    | **Two slices done**: read contracts, facade, terminal schema, activity reads, other terminals | Remaining: daemon-side output sequence numbers; `activity.subscribe` (needs a transport, R2); a TS conformance run over `fixtures/v1/` (R3)                                                                                                                                                                  |
-| R2 Identity and relay          | Not started                                                                                   | Persisted host identity at enrollment; credential store in the core (or a documented secret mount); grants from enrollment; lease and single query responder in the daemon (`PROTOCOL` 2); outbound connector; relay; two-account isolation; revocation kills a live stream; relay failure leaves PTYs alive |
-| R3 Mobile vertical slice       | Not started                                                                                   | Physical iPhone and Android, real sessions                                                                                                                                                                                                                                                                   |
-| R4 Mobile hardening            | Not started                                                                                   |                                                                                                                                                                                                                                                                                                              |
-| R5 Headless and desktop remote | Not started                                                                                   | Needs resume/fork moved from `src-tauri/src/sessions.rs` into the core first                                                                                                                                                                                                                                 |
-| R6 Durable sync                | Not started                                                                                   | Logical-id mapping table; outbox written in the same transaction as each opted-in mutation                                                                                                                                                                                                                   |
-| R7 Managed launch              | Not started                                                                                   | Owner-authorized only                                                                                                                                                                                                                                                                                        |
+| Phase                          | State                                                                                                               | Gate                                                                                                                                                                                                                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R0 Fit                         | **Done** (this document)                                                                                            | HEAD and paths recorded; no overlapping work found                                                                                                                                                                                                                                                           |
+| R1 Contract and host facade    | **Done** in three slices: read contracts, facade, terminal schema, activity reads, other terminals, numbered output | Met: local behaviour preserved, incompatible clients refused, auth boundary documented. Moved on: numbers over the daemon protocol and `activity.subscribe` (R2, with a transport); a TS conformance run over `fixtures/v1/` (R3)                                                                            |
+| R2 Identity and relay          | Not started                                                                                                         | Persisted host identity at enrollment; credential store in the core (or a documented secret mount); grants from enrollment; lease and single query responder in the daemon (`PROTOCOL` 2); outbound connector; relay; two-account isolation; revocation kills a live stream; relay failure leaves PTYs alive |
+| R3 Mobile vertical slice       | Not started                                                                                                         | Physical iPhone and Android, real sessions                                                                                                                                                                                                                                                                   |
+| R4 Mobile hardening            | Not started                                                                                                         |                                                                                                                                                                                                                                                                                                              |
+| R5 Headless and desktop remote | Not started                                                                                                         | Needs resume/fork moved from `src-tauri/src/sessions.rs` into the core first                                                                                                                                                                                                                                 |
+| R6 Durable sync                | Not started                                                                                                         | Logical-id mapping table; outbox written in the same transaction as each opted-in mutation                                                                                                                                                                                                                   |
+| R7 Managed launch              | Not started                                                                                                         | Owner-authorized only                                                                                                                                                                                                                                                                                        |
 
 ## 9 · Remaining risks and the next slice
 
@@ -281,7 +331,19 @@ Each later session picks one gate, updates this table, and records what it found
   checked not to be paths, but otherwise shown as given, as the desktop timeline shows them.
 - **A shell started while activity recording was off** lists as `other`: the host keeps no other
   record of what it is.
+- **Snapshots do not carry a scroll region or a saved cursor.** `vt100`'s `state_formatted`
+  emits neither. A viewer that attaches while a program has a scroll region set scrolls the whole
+  screen until the program sets one again. This predates remote access and affects local
+  re-attach too; fixing it means rendering those two states ourselves.
+- **No replay window.** A reconnecting viewer always gets a fresh snapshot. Resuming from a
+  number without one (`AttachStart::Resumed`) needs a bounded buffer of recent items per session,
+  sized against memory, in R2.
+- **The tracker follows `vte`'s state machine as written for 0.15.** A `vt100` upgrade that
+  changes how sequences end could put the two out of step. The every-byte test is what would
+  notice, so it runs on every build.
 
-**Next:** finish R1 with sequence numbers in `pty-host`'s `deliver`, with a real-PTY test that a
-snapshot at `seq` plus frames `seq+1…` reproduce the screen. Then R2 can begin: the gate is the owner's choice of identity provider for
-the self-host recipe (proposal §16), which this slice does not need.
+**Next: R2, identity and relay.** Its gate is the owner's choice of identity provider for the
+self-host recipe (proposal §16). It also needs a lease and a single query responder enforced in
+the daemon (`pty_ipc::PROTOCOL` 2, which can carry the numbering added here), a host identity
+persisted at enrollment, and a credential store usable without the desktop app (open question
+35).

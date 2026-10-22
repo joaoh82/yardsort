@@ -5,7 +5,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pty_host::{HostError, HostEvent, LaunchPlan, PtyHost, SessionId, SessionState, TermSize};
+use pty_host::{
+    HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, PtyHost, SessionId, SessionState,
+    TermSize,
+};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -522,4 +525,239 @@ fn a_plans_prompt_is_typed_in_once_the_program_is_ready() {
     let capture = Capture::default();
     attach_terminal(&host, &session.id, &capture);
     capture.wait_for("got:[fix the bug]");
+}
+
+/// One item a numbered viewer was sent, owned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Item {
+    Snapshot(OutputSeq, TermSize, Vec<u8>),
+    Output(OutputSeq, Vec<u8>),
+    Resized(OutputSeq, TermSize),
+}
+
+impl Item {
+    fn seq(&self) -> OutputSeq {
+        match self {
+            Self::Snapshot(seq, ..) | Self::Output(seq, _) | Self::Resized(seq, _) => *seq,
+        }
+    }
+}
+
+/// Everything one numbered viewer was sent, in order.
+#[derive(Clone, Default)]
+struct Numbering(Arc<Mutex<Vec<Item>>>);
+
+impl Numbering {
+    fn attach(&self, host: &PtyHost, id: &SessionId) {
+        let items = Arc::clone(&self.0);
+        host.attach_numbered(
+            id,
+            Box::new(move |item| {
+                items.lock().unwrap().push(match item {
+                    Numbered::Snapshot { seq, size, bytes } => {
+                        Item::Snapshot(seq, size, bytes.to_vec())
+                    }
+                    Numbered::Output { seq, bytes } => Item::Output(seq, bytes.to_vec()),
+                    Numbered::Resized { seq, size } => Item::Resized(seq, size),
+                });
+                true
+            }),
+        )
+        .unwrap();
+    }
+
+    fn items(&self) -> Vec<Item> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn snapshot_seq(&self) -> OutputSeq {
+        self.items()[0].seq()
+    }
+
+    /// The snapshot comes first, and every item after it carries the next number.
+    fn assert_unbroken(&self) {
+        let items = self.items();
+        assert!(matches!(items[0], Item::Snapshot(..)), "{items:?}");
+        for (n, pair) in items.windows(2).enumerate() {
+            assert_eq!(pair[1].seq(), pair[0].seq() + 1, "a gap after item {n}");
+            assert!(!matches!(pair[1], Item::Snapshot(..)));
+        }
+    }
+
+    #[cfg(unix)]
+    /// The screen a viewer draws from the items up to and including `until`.
+    ///
+    /// Bytes between resizes go to the emulator in one call, as one stream: `vt100` mishandles
+    /// a character split across calls, and a real viewer is a stream parser.
+    fn replay(&self, until: OutputSeq) -> vt100::Parser {
+        let mut viewer: Option<vt100::Parser> = None;
+        let mut pending = Vec::new();
+        for item in self.items().into_iter().take_while(|i| i.seq() <= until) {
+            match item {
+                Item::Snapshot(_, size, bytes) => {
+                    viewer = Some(vt100::Parser::new(size.rows, size.cols, 10_000));
+                    pending = bytes;
+                }
+                Item::Output(_, bytes) => pending.extend_from_slice(&bytes),
+                Item::Resized(_, size) => {
+                    let viewer = viewer.as_mut().unwrap();
+                    viewer.process(&std::mem::take(&mut pending));
+                    viewer.screen_mut().set_size(size.rows, size.cols);
+                }
+            }
+        }
+        let mut viewer = viewer.unwrap();
+        viewer.process(&pending);
+        viewer
+    }
+
+    #[cfg(unix)]
+    /// The screen drawn from every item.
+    fn text(&self) -> String {
+        let screen = self.replay(OutputSeq::MAX);
+        screen.screen().contents()
+    }
+
+    /// Every byte sent, as text. ConPTY repaints in its own way, so on Windows the bytes are
+    /// the safer thing to look in.
+    fn bytes(&self) -> String {
+        let mut all = Vec::new();
+        for item in self.items() {
+            if let Item::Snapshot(_, _, bytes) | Item::Output(_, bytes) = item {
+                all.extend_from_slice(&bytes);
+            }
+        }
+        String::from_utf8_lossy(&all).into_owned()
+    }
+}
+
+#[cfg(unix)]
+fn screen_of(viewer: &vt100::Parser) -> (Vec<u8>, (u16, u16)) {
+    (
+        viewer.screen().contents_formatted(),
+        viewer.screen().cursor_position(),
+    )
+}
+
+#[test]
+fn numbered_viewers_get_every_item_once_and_in_order() {
+    let (host, events) = host();
+    let session = host
+        .spawn(shell("echo numbered-first&& echo numbered-second"))
+        .unwrap();
+    // Only a numbered viewer is watching. On Windows that is also the proof that it does not
+    // stand in for a terminal: ConPTY runs nothing until its cursor query is answered, and here
+    // only the host can answer it.
+    let early = Numbering::default();
+    early.attach(&host, &session.id);
+    wait_for_exit(&host, &events, &session.id);
+
+    early.assert_unbroken();
+    let text = early.bytes();
+    assert!(text.contains("numbered-second"), "{text:?}");
+
+    // After the exit, a snapshot of where it all ended, and nothing more.
+    let late = Numbering::default();
+    late.attach(&host, &session.id);
+    assert_eq!(late.items().len(), 1);
+    assert_eq!(late.snapshot_seq(), early.items().last().unwrap().seq());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_numbered_snapshot_and_the_items_after_it_rebuild_the_screen_exactly() {
+    // Colours, multibyte characters and a cursor move, in two halves with a pause for input
+    // between them, so a second viewer can attach in the middle.
+    let lines = |from: u32, to: u32| {
+        format!(
+            "i={from}; while [ $i -lt {to} ]; do \
+             printf '\\033[3%dmline %d caf\\303\\251 \\342\\230\\203\\033[m\\r\\n' $((i % 7 + 1)) $i; \
+             i=$((i + 1)); done"
+        )
+    };
+    let script = format!(
+        "{}; read go; {}; printf '\\033[2;5Hend'",
+        lines(0, 150),
+        lines(150, 300)
+    );
+    let (host, events) = host();
+    let session = host.spawn(shell(&script)).unwrap();
+
+    let first = Numbering::default();
+    first.attach(&host, &session.id);
+    let start = std::time::Instant::now();
+    while !first.text().contains("line 149") {
+        assert!(start.elapsed() < TIMEOUT, "the first half never arrived");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let second = Numbering::default();
+    second.attach(&host, &session.id);
+    host.resize(
+        &session.id,
+        TermSize {
+            cols: 100,
+            rows: 30,
+        },
+    )
+    .unwrap();
+    host.write(&session.id, b"go\r").unwrap();
+    wait_for_exit(&host, &events, &session.id);
+    let third = Numbering::default();
+    third.attach(&host, &session.id);
+
+    for viewer in [&first, &second, &third] {
+        viewer.assert_unbroken();
+    }
+    let middle = second.snapshot_seq();
+    let end = first.items().last().unwrap().seq();
+    assert!(first.snapshot_seq() < middle && middle < end);
+    assert_eq!(third.snapshot_seq(), end);
+
+    // Where they overlap, the two live viewers were sent the same items.
+    let after = |viewer: &Numbering| -> Vec<Item> {
+        viewer
+            .items()
+            .into_iter()
+            .filter(|i| i.seq() > middle)
+            .collect()
+    };
+    assert_eq!(after(&first), after(&second));
+    assert!(after(&first).iter().any(|i| matches!(
+        i,
+        Item::Resized(
+            _,
+            TermSize {
+                cols: 100,
+                rows: 30
+            }
+        )
+    )));
+
+    // The second viewer's snapshot is exactly what the first had drawn by the same number:
+    // the number on a snapshot says precisely which output it holds.
+    assert_eq!(
+        screen_of(&first.replay(middle)),
+        screen_of(&second.replay(middle))
+    );
+    // And from three different starts, one screen at the end.
+    let ending = screen_of(&first.replay(end));
+    assert_eq!(screen_of(&second.replay(end)), ending);
+    assert_eq!(screen_of(&third.replay(end)), ending);
+    let text = third.text();
+    assert!(text.contains("line 299 café ☃"), "{text:?}");
+    assert!(text.contains("end"), "{text:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_host_still_answers_queries_when_only_numbered_viewers_watch() {
+    let (host, events) = host();
+    let session = host
+        .spawn(shell(&format!("sleep 1; {ASK_CURSOR_POSITION}")))
+        .unwrap();
+    let watching = Numbering::default();
+    watching.attach(&host, &session.id);
+    wait_for_exit(&host, &events, &session.id);
+    let text = watching.text();
+    assert!(text.contains("host-replied"), "{text:?}");
 }
