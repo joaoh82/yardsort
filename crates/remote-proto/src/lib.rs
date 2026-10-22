@@ -13,8 +13,8 @@
 //! host → client   terminal output                                  binary, see OutputFrame
 //! ```
 //!
-//! What this slice answers is the read side: `host.describe`, `workspace.list`,
-//! `workspace.describe`, `session.list` and `memory.list`. The `terminal.*` operations are
+//! What hosts answer so far is the read side: `host.describe`, `workspace.list`,
+//! `workspace.describe`, `session.list`, `activity.list` and `memory.list`. The `terminal.*` operations are
 //! defined (see [`terminal`]) but no host answers them yet: they need authenticated devices and
 //! enforced control leases first.
 
@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 pub use grant::{Grant, ProjectGrant, Scope};
 pub use ids::{
-    AccountRef, DeviceId, HostId, IdError, LeaseId, MemoryId, ProjectId, RequestId, RunId,
+    AccountRef, DeviceId, EventId, HostId, IdError, LeaseId, MemoryId, ProjectId, RequestId, RunId,
     ServerId, SessionRecordId, TerminalId, WorkspaceId,
 };
 pub use model::*;
@@ -245,6 +245,20 @@ pub struct SessionListParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ActivityListParams {
+    pub workspace: WorkspaceId,
+    /// Only this conversation's events.
+    #[serde(default)]
+    pub session: Option<SessionRecordId>,
+    /// A previous page's `older` or `newer`. Without one, the newest events.
+    #[serde(default)]
+    pub cursor: Option<Cursor>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MemoryListParams {
     pub project: ProjectId,
     #[serde(default)]
@@ -270,6 +284,8 @@ pub enum Operation {
     WorkspaceDescribe(WorkspaceRef),
     #[serde(rename = "session.list")]
     SessionList(SessionListParams),
+    #[serde(rename = "activity.list")]
+    ActivityList(ActivityListParams),
     #[serde(rename = "memory.list")]
     MemoryList(MemoryListParams),
     #[serde(rename = "terminal.attach")]
@@ -294,6 +310,7 @@ pub const OPERATIONS: &[&str] = &[
     "workspace.list",
     "workspace.describe",
     "session.list",
+    "activity.list",
     "memory.list",
     "terminal.attach",
     "terminal.detach",
@@ -311,14 +328,15 @@ impl Operation {
             Self::WorkspaceList(_) => 1,
             Self::WorkspaceDescribe(_) => 2,
             Self::SessionList(_) => 3,
-            Self::MemoryList(_) => 4,
-            Self::TerminalAttach(_) => 5,
-            Self::TerminalDetach(_) => 6,
-            Self::TerminalAcquire(_) => 7,
-            Self::TerminalRenew(_) => 8,
-            Self::TerminalRelease(_) => 9,
-            Self::TerminalInput(_) => 10,
-            Self::TerminalResize(_) => 11,
+            Self::ActivityList(_) => 4,
+            Self::MemoryList(_) => 5,
+            Self::TerminalAttach(_) => 6,
+            Self::TerminalDetach(_) => 7,
+            Self::TerminalAcquire(_) => 8,
+            Self::TerminalRenew(_) => 9,
+            Self::TerminalRelease(_) => 10,
+            Self::TerminalInput(_) => 11,
+            Self::TerminalResize(_) => 12,
         };
         OPERATIONS[index]
     }
@@ -331,6 +349,7 @@ impl Operation {
             Self::WorkspaceList(_) | Self::WorkspaceDescribe(_) | Self::SessionList(_) => {
                 Scope::WorkspaceRead
             }
+            Self::ActivityList(_) => Scope::ActivityRead,
             Self::MemoryList(_) => Scope::MemoryRead,
             Self::TerminalAttach(_) | Self::TerminalDetach(_) => Scope::TerminalRead,
             Self::TerminalAcquire(_)
@@ -347,6 +366,7 @@ impl Operation {
         match self {
             Self::WorkspaceList(WorkspaceListParams { limit, .. })
             | Self::SessionList(SessionListParams { limit, .. })
+            | Self::ActivityList(ActivityListParams { limit, .. })
             | Self::MemoryList(MemoryListParams { limit, .. })
                 if *limit == Some(0) =>
             {
@@ -386,6 +406,7 @@ pub enum Reply {
     Workspaces(WorkspacePage),
     Workspace(WorkspaceDetail),
     Sessions(SessionPage),
+    Activity(ActivityPage),
     Memory(MemoryPage),
     Attached(Attached),
     Lease(Lease),

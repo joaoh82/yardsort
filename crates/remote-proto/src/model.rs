@@ -9,7 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{HostId, MemoryId, ProjectId, SessionRecordId, TerminalId, WorkspaceId};
+use crate::ids::{
+    EventId, HostId, MemoryId, ProjectId, RunId, SessionRecordId, TerminalId, WorkspaceId,
+};
 use crate::ProtocolVersion;
 
 /// The operating system a host runs. Clients use it to label a host, nothing more.
@@ -200,6 +202,40 @@ pub struct SessionSummary {
     pub terminal: Option<TerminalSummary>,
 }
 
+/// What a terminal outside any recorded conversation runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalPurpose {
+    /// The user's shell.
+    Shell,
+    /// The project's run command.
+    RunCommand,
+    /// Some other program started in the workspace.
+    Program,
+    /// An agent whose conversation record is gone: forgotten, while its process ran on.
+    Agent,
+    /// The host cannot tell: it was started while activity recording was off. Also what a
+    /// purpose from a newer host reads as.
+    #[serde(other)]
+    Other,
+}
+
+/// A terminal in a workspace that is not an agent conversation, or whose conversation the host
+/// no longer has a record of.
+///
+/// Only while the host's daemon has it, running or exited: nothing is recorded about a shell
+/// after it is closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceTerminal {
+    pub purpose: TerminalPurpose,
+    /// The program's name, without its folder, extension or arguments: `zsh`, `npm`.
+    pub program: String,
+    /// Which harness, for an [`TerminalPurpose::Agent`].
+    pub harness: Option<String>,
+    pub terminal: TerminalSummary,
+}
+
 /// An approved memory entry. The only state a remote client is ever shown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -276,6 +312,11 @@ pub struct WorkspacePage {
 #[serde(rename_all = "camelCase")]
 pub struct SessionPage {
     pub sessions: Vec<SessionSummary>,
+    /// The workspace's other terminals: shells, the run command, and agents whose record is
+    /// gone. On the first page only (a request without a cursor), since there are few and they
+    /// have no order worth paging by; empty on later pages, and when there is no daemon to ask.
+    #[serde(default)]
+    pub terminals: Vec<WorkspaceTerminal>,
     pub next: Option<Cursor>,
 }
 
@@ -285,6 +326,159 @@ pub struct SessionPage {
 pub struct MemoryPage {
     pub notes: Vec<MemoryNote>,
     pub next: Option<Cursor>,
+}
+
+/// Who recorded an event, how, and how far to trust it: `yardsort`/`lifecycle`/`observed` for
+/// what Yardsort saw from outside a process, `claude`/`hook`/`reported` for what an agent said
+/// about itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Provenance {
+    pub producer: String,
+    pub method: String,
+    pub fidelity: String,
+}
+
+/// One recorded fact about a workspace's processes and agents: what Yardsort saw (a process
+/// started, exited, could not start) or what an agent reported through an adapter the user
+/// switched on (a tool ran, a turn ended). Never anything read from a terminal.
+///
+/// A client shows a kind it does not know by its name, with whatever details it does know.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityEvent {
+    pub id: EventId,
+    pub workspace: WorkspaceId,
+    /// The conversation it belongs to, when it belongs to one the host still has a record of.
+    pub session: Option<SessionRecordId>,
+    /// The process it belongs to.
+    pub run: Option<RunId>,
+    /// The producer's clock, in milliseconds since the Unix epoch. Order by the page, not this:
+    /// clocks disagree.
+    pub occurred_at: i64,
+    /// `process.started`, `tool.completed`, `turn.completed`, …
+    pub kind: String,
+    pub source: Provenance,
+    pub detail: ActivityDetail,
+}
+
+/// What an event says, field by field. Every field is optional, and which ones an event has
+/// depends on its kind and on who recorded it.
+///
+/// This is a list of allowed fields, not a copy of what the host stores. A host fills only
+/// these, and only with values that pass its checks: names and short codes, counts, durations,
+/// and paths relative to the workspace. Never a prompt, a command, a tool's input or output,
+/// an error's text, an agent's own session id, or a path outside the workspace.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityDetail {
+    /// Which harness: `claude`, `codex`, or a custom definition's id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// For `process.*`: `harness`, `shell` or `program`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_kind: Option<String>,
+    /// The program's name, without its folder or arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// `fresh`, `resumed` or `forked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<String>,
+    /// `app` or `cli`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launched_by: Option<String>,
+    /// How the run was given to report about itself (`hook`, `notify`, …), when it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<String>,
+    /// For `session.forked`: the conversation it was copied from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<SessionRecordId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub success: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
+    /// How an exit came to be known: `live`, `spool`, `settle` or `reconcile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+    /// A short code saying why, where the producer gives one: `exited`, `interrupted`,
+    /// `prompt_input_exit`. Never free text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// A tool's name, as the agent gave it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_type: Option<String>,
+    /// A file, relative to the workspace's folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The file was outside the workspace; which one is not said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_outside_workspace: Option<bool>,
+    /// For `file.reported_write`: `add`, `update` or `delete`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// For `prompt.submitted`: how long the message was. Its text is never recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chars: Option<u64>,
+    /// For `approval.resolved`: `allow`, `deny`, …
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<String>,
+    /// How long the agent waited for that decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u64>,
+    /// For `agent.notified`: what the agent says it wants, as its own code
+    /// (`permission_prompt`, `idle_prompt`). Reported by the agent, never inferred.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_number: Option<u64>,
+    /// How much context the turn's last request carried, and of how large a window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    /// A short code qualifying the event, such as `notify` for a Codex turn known only from
+    /// its notification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// `activity.list`: events oldest first, whichever way the request walked.
+///
+/// The first request (no cursor) gets the newest events. `older` walks back from there, a page
+/// at a time; `newer` returns only what was recorded after a page, which is how a client that
+/// was away catches up without fetching everything again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityPage {
+    pub events: Vec<ActivityEvent>,
+    /// The page before this one. `None` when nothing older is kept.
+    pub older: Option<Cursor>,
+    /// What was recorded after this page. A client catching up keeps the one from the newest
+    /// page it holds; asking with it returns an empty page and the same cursor when nothing is
+    /// new. `None` only when there was nothing at all.
+    pub newer: Option<Cursor>,
 }
 
 #[cfg(test)]

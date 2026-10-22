@@ -67,6 +67,8 @@ pub const HARNESS_SESSION_LABEL: &str = "harnessSession";
 pub const RECORD_LABEL: &str = "record";
 /// Label carrying the id of the activity run (see [`crate::activity`]) a PTY session is.
 pub const RUN_LABEL: &str = "run";
+/// Label carrying the id of the workspace whose run command a PTY session is.
+pub const PROJECT_RUN_LABEL: &str = "projectRun";
 
 /// What launching something needs: where sessions are recorded, what runs them, the user's
 /// environment, and the harness definitions in force.
@@ -101,7 +103,7 @@ impl Launcher<'_> {
             ));
         }
         if let Some(session) = self.host.list().into_iter().find(|session| {
-            session.labels.get("projectRun").map(String::as_str) == Some(workspace_id)
+            session.labels.get(PROJECT_RUN_LABEL).map(String::as_str) == Some(workspace_id)
                 && matches!(session.state, pty_host::SessionState::Running)
         }) {
             return Ok(session);
@@ -124,7 +126,7 @@ impl Launcher<'_> {
         )?;
         resolved
             .labels
-            .insert("projectRun".into(), workspace_id.to_owned());
+            .insert(PROJECT_RUN_LABEL.into(), workspace_id.to_owned());
         resolved
             .labels
             .insert(WORKSPACE_LABEL.into(), workspace_id.to_owned());

@@ -124,6 +124,11 @@ id!(
     MemoryId
 );
 id!(
+    /// One recorded activity event. Stable: the same fact keeps its id across pages and
+    /// reconnects, so a client can drop one it already has.
+    EventId
+);
+id!(
     /// A control lease on one terminal.
     LeaseId
 );

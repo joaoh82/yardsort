@@ -19,7 +19,7 @@ use remote_proto::{
 use super::*;
 use crate::git::{normalize, testing::git};
 use crate::launch::{HARNESS_SESSION_LABEL, RECORD_LABEL};
-use crate::store::NewSession;
+use crate::store::{NewEvent, NewRun, NewSession};
 
 /// A host's records: two projects, each with its own checkout and one worktree.
 struct Fixture {
@@ -536,6 +536,19 @@ impl TerminalHost for ListOnly {
 
 /// A process that stays alive until killed, labelled as Yardsort labels a harness.
 fn agent(host: &PtyHost, workspace: &str, record: &str, dir: &Path) -> SessionInfo {
+    labelled(
+        host,
+        &[
+            (WORKSPACE_LABEL, workspace),
+            (RECORD_LABEL, record),
+            (HARNESS_SESSION_LABEL, "native-conversation-id"),
+        ],
+        dir,
+    )
+}
+
+/// A process that stays alive until killed, with these labels.
+fn labelled(host: &PtyHost, labels: &[(&str, &str)], dir: &Path) -> SessionInfo {
     let (program, args): (&str, Vec<String>) = if cfg!(windows) {
         ("cmd.exe", vec!["/C".into(), "ping -n 60 127.0.0.1".into()])
     } else {
@@ -544,13 +557,10 @@ fn agent(host: &PtyHost, workspace: &str, record: &str, dir: &Path) -> SessionIn
             vec!["-c".into(), "echo started; sleep 60".into()],
         )
     };
-    let mut labels = BTreeMap::new();
-    labels.insert(WORKSPACE_LABEL.to_owned(), workspace.to_owned());
-    labels.insert(RECORD_LABEL.to_owned(), record.to_owned());
-    labels.insert(
-        HARNESS_SESSION_LABEL.to_owned(),
-        "native-conversation-id".to_owned(),
-    );
+    let labels: BTreeMap<String, String> = labels
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
     host.spawn(LaunchPlan {
         program: program.into(),
         args,
@@ -742,4 +752,509 @@ fn terminal_operations_are_refused_and_touch_no_terminal() {
         ErrorCode::Unsupported
     );
     host.kill(&live.id).unwrap();
+}
+
+#[test]
+fn other_terminals_are_listed_once_with_their_purpose_and_without_their_command_line() {
+    let f = Fixture::new();
+    let host = Arc::new(PtyHost::new(Arc::new(|_| {})));
+    let list_only = ListOnly(Arc::clone(&host));
+    let ws = f.alpha.worktree.clone();
+    let dir = f.dir.path();
+
+    // A conversation, and an earlier process of it that is still on show: both are its, so
+    // neither is an "other" terminal.
+    let conversation = agent(&host, &ws, "rec-a", dir);
+    record(&f.store, "rec-a", &ws, &conversation.id.0);
+    let earlier = agent(&host, &ws, "rec-a", dir);
+    record(&f.store, "rec-ended", &ws, "pty-long-gone");
+    f.store
+        .end_session_by_pty("pty-long-gone", Some(0))
+        .unwrap();
+
+    let run_command = labelled(
+        &host,
+        &[(WORKSPACE_LABEL, &ws), (PROJECT_RUN_LABEL, &ws)],
+        dir,
+    );
+    f.store
+        .add_run(&NewRun {
+            id: "run-shell",
+            workspace_id: &ws,
+            kind: "shell",
+            launched_by: "app",
+            ..Default::default()
+        })
+        .unwrap();
+    let shell = labelled(
+        &host,
+        &[(WORKSPACE_LABEL, &ws), (RUN_LABEL, "run-shell")],
+        dir,
+    );
+    let unrecorded = labelled(&host, &[(WORKSPACE_LABEL, &ws)], dir);
+    let orphan = labelled(
+        &host,
+        &[
+            (WORKSPACE_LABEL, &ws),
+            (HARNESS_LABEL, "claude"),
+            (RECORD_LABEL, "rec-forgotten"),
+        ],
+        dir,
+    );
+    // Another workspace's shell is not this one's.
+    let theirs = labelled(&host, &[(WORKSPACE_LABEL, &f.beta.worktree)], dir);
+
+    let facade = f.facade(Some(&list_only));
+    let page = sessions(&facade, &everything(), &ws, true);
+    let purpose = |id: &SessionId| {
+        page.terminals
+            .iter()
+            .find(|t| t.terminal.id.as_str() == id.0)
+            .map(|t| (t.purpose, t.harness.clone()))
+    };
+    assert_eq!(page.terminals.len(), 4, "{:?}", page.terminals);
+    assert_eq!(purpose(&conversation.id), None);
+    assert_eq!(purpose(&earlier.id), None);
+    assert_eq!(purpose(&theirs.id), None);
+    assert_eq!(
+        purpose(&run_command.id),
+        Some((TerminalPurpose::RunCommand, None))
+    );
+    assert_eq!(purpose(&shell.id), Some((TerminalPurpose::Shell, None)));
+    assert_eq!(
+        purpose(&unrecorded.id),
+        Some((TerminalPurpose::Other, None))
+    );
+    assert_eq!(
+        purpose(&orphan.id),
+        Some((TerminalPurpose::Agent, Some("claude".into())))
+    );
+    let program = if cfg!(windows) { "cmd" } else { "sh" };
+    assert!(page.terminals.iter().all(|t| t.program == program));
+
+    let params = |cursor, limit| remote_proto::SessionListParams {
+        workspace: WorkspaceId::new(&ws).unwrap(),
+        include_ended: true,
+        cursor,
+        limit,
+    };
+    let wire = String::from_utf8(facade.handle_bytes(
+        &everything(),
+        &serde_json::to_vec(&request(Operation::SessionList(params(None, None)))).unwrap(),
+    ))
+    .unwrap();
+    for secret in ["sleep 60", "ping -n", "/bin/", "run-shell", &f.private()] {
+        assert!(!wire.contains(secret), "{secret} leaked: {wire}");
+    }
+
+    // They come with the first page only, and only when there is a daemon to ask.
+    let Reply::Sessions(first) = reply(ask(
+        &facade,
+        &everything(),
+        Operation::SessionList(params(None, Some(1))),
+    )) else {
+        panic!()
+    };
+    assert_eq!(first.terminals.len(), 4);
+    let Reply::Sessions(second) = reply(ask(
+        &facade,
+        &everything(),
+        Operation::SessionList(params(first.next, Some(1))),
+    )) else {
+        panic!()
+    };
+    assert_eq!(second.sessions.len(), 1);
+    assert!(second.terminals.is_empty());
+    assert!(sessions(&f.facade(None), &everything(), &ws, true)
+        .terminals
+        .is_empty());
+
+    for info in host.list() {
+        host.kill(&info.id).unwrap();
+    }
+}
+
+/// Record an event as a producer would.
+fn event(
+    store: &Store,
+    id: &str,
+    workspace: &str,
+    session: Option<&str>,
+    kind: &str,
+    payload: serde_json::Value,
+) {
+    add_event(store, id, workspace, session, kind, "metadata", payload);
+}
+
+fn add_event(
+    store: &Store,
+    id: &str,
+    workspace: &str,
+    session: Option<&str>,
+    kind: &str,
+    privacy_class: &str,
+    payload: serde_json::Value,
+) {
+    assert!(store
+        .add_event(&NewEvent {
+            id,
+            schema_version: 1,
+            workspace_id: workspace,
+            session_id: session,
+            occurred_at: 1_000,
+            kind,
+            producer: "yardsort",
+            method: "lifecycle",
+            fidelity: "observed",
+            privacy_class,
+            payload: &payload.to_string(),
+            ..Default::default()
+        })
+        .unwrap());
+}
+
+fn activity_params(
+    workspace: &str,
+    session: Option<&str>,
+    cursor: Option<remote_proto::Cursor>,
+    limit: Option<u32>,
+) -> Operation {
+    Operation::ActivityList(remote_proto::ActivityListParams {
+        workspace: WorkspaceId::new(workspace).unwrap(),
+        session: session.map(|s| SessionRecordId::new(s).unwrap()),
+        cursor,
+        limit,
+    })
+}
+
+fn activity(facade: &HostFacade<'_>, grant: &Grant, operation: Operation) -> ActivityPage {
+    match reply(ask(facade, grant, operation)) {
+        Reply::Activity(page) => page,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn ids(page: &ActivityPage) -> Vec<&str> {
+    page.events.iter().map(|e| e.id.as_str()).collect()
+}
+
+#[test]
+fn activity_pages_back_and_catches_up_with_only_what_is_new() {
+    let f = Fixture::new();
+    let ws = f.alpha.worktree.clone();
+    record(&f.store, "rec-a", &ws, "pty-a");
+    for n in 1..=5 {
+        let session = (n % 2 == 1).then_some("rec-a");
+        event(
+            &f.store,
+            &format!("ev-{n}"),
+            &ws,
+            session,
+            "turn.completed",
+            serde_json::json!({}),
+        );
+        // Interleaved: another workspace's, and a class remote readers are not shown.
+        event(
+            &f.store,
+            &format!("beta-{n}"),
+            &f.beta.worktree,
+            None,
+            "turn.completed",
+            serde_json::json!({}),
+        );
+        add_event(
+            &f.store,
+            &format!("content-{n}"),
+            &ws,
+            None,
+            "prompt.submitted",
+            "content",
+            serde_json::json!({ "text": "hunter2" }),
+        );
+    }
+    let facade = f.facade(None);
+    let all = everything();
+    let list = |session, cursor, limit| {
+        activity(&facade, &all, activity_params(&ws, session, cursor, limit))
+    };
+
+    // The newest first page, oldest first within it; then back, a page at a time, to the start.
+    let newest = list(None, None, Some(2));
+    assert_eq!(ids(&newest), ["ev-4", "ev-5"]);
+    let middle = list(None, newest.older.clone(), Some(2));
+    assert_eq!(ids(&middle), ["ev-2", "ev-3"]);
+    let oldest = list(None, middle.older.clone(), Some(2));
+    assert_eq!(ids(&oldest), ["ev-1"]);
+    assert_eq!(oldest.older, None, "nothing older is kept");
+
+    // Back from a reconnect with nothing new: an empty page, and the same place to ask from.
+    let caught_up = list(None, newest.newer.clone(), Some(2));
+    assert!(caught_up.events.is_empty());
+    assert_eq!(caught_up.newer, newest.newer);
+
+    // Three more while away: only those come back, in order, a page at a time.
+    for n in 6..=8 {
+        event(
+            &f.store,
+            &format!("ev-{n}"),
+            &ws,
+            None,
+            "turn.completed",
+            serde_json::json!({}),
+        );
+    }
+    let first = list(None, newest.newer.clone(), Some(2));
+    assert_eq!(ids(&first), ["ev-6", "ev-7"]);
+    assert!(first.older.is_some());
+    let second = list(None, first.newer.clone(), Some(2));
+    assert_eq!(ids(&second), ["ev-8"]);
+    let third = list(None, second.newer.clone(), Some(2));
+    assert!(third.events.is_empty());
+
+    // One conversation's only.
+    let theirs = list(Some("rec-a"), None, None);
+    assert_eq!(ids(&theirs), ["ev-1", "ev-3", "ev-5"]);
+    assert!(theirs
+        .events
+        .iter()
+        .all(|e| e.session.as_ref().map(SessionRecordId::as_str) == Some("rec-a")));
+
+    // An empty workspace has no cursors at all.
+    let empty = activity(
+        &facade,
+        &all,
+        activity_params(&f.alpha.local, None, None, None),
+    );
+    assert!(empty.events.is_empty());
+    assert_eq!((empty.older, empty.newer), (None, None));
+}
+
+#[test]
+fn activity_is_scoped_and_a_cursor_outlives_nothing_it_named() {
+    let f = Fixture::new();
+    let ws = f.alpha.worktree.clone();
+    record(&f.store, "rec-a", &ws, "pty-a");
+    record(&f.store, "rec-b", &ws, "pty-b");
+    record(&f.store, "rec-beta", &f.beta.worktree, "pty-beta");
+    event(
+        &f.store,
+        "ev-1",
+        &ws,
+        Some("rec-a"),
+        "turn.completed",
+        serde_json::json!({}),
+    );
+    event(
+        &f.store,
+        "ev-2",
+        &ws,
+        Some("rec-b"),
+        "turn.completed",
+        serde_json::json!({}),
+    );
+    let facade = f.facade(None);
+    let all = everything();
+
+    // The scope is asked for first.
+    let error = refusal(ask(
+        &facade,
+        &grant(&[Scope::WorkspaceRead], ProjectGrant::All),
+        activity_params(&ws, None, None, None),
+    ));
+    assert_eq!(error.code, ErrorCode::Forbidden);
+    assert!(error.message.contains("activity:read"), "{}", error.message);
+
+    // Another project's workspace, and a conversation from another workspace, look like nothing.
+    let alpha_only = only(&f.alpha.id, &[Scope::ActivityRead]);
+    let nowhere = "00000000-0000-4000-8000-000000000000";
+    for (theirs, absent) in [
+        (
+            activity_params(&f.beta.worktree, None, None, None),
+            activity_params(nowhere, None, None, None),
+        ),
+        (
+            activity_params(&ws, Some("rec-beta"), None, None),
+            activity_params(&ws, Some(nowhere), None, None),
+        ),
+    ] {
+        let theirs = refusal(ask(&facade, &alpha_only, theirs));
+        assert_eq!(theirs.code, ErrorCode::NotFound);
+        assert_eq!(theirs, refusal(ask(&facade, &alpha_only, absent)));
+    }
+
+    // A cursor that is not one of these, or names an event another filter would not show.
+    let page = activity(
+        &facade,
+        &all,
+        activity_params(&ws, Some("rec-b"), None, None),
+    );
+    let cursor = |text: &str| Some(remote_proto::Cursor::new(text).unwrap());
+    for (session, bad) in [
+        (None, cursor("k1.ev-1")),
+        (None, cursor("a1.x2")),
+        (None, cursor("a1.o-2")),
+        (None, cursor("a1.n")),
+        (Some("rec-a"), page.newer.clone()),
+    ] {
+        let error = refusal(ask(&facade, &all, activity_params(&ws, session, bad, None)));
+        assert_eq!(error.code, ErrorCode::CursorExpired);
+    }
+    // The workspace-wide list does include rec-b's event, so its cursor is good there.
+    assert!(activity(
+        &facade,
+        &all,
+        activity_params(&ws, None, page.newer.clone(), None)
+    )
+    .events
+    .is_empty());
+
+    // Clearing the workspace's activity takes the cursor's event with it.
+    f.store.clear_activity(Some(&ws)).unwrap();
+    let error = refusal(ask(
+        &facade,
+        &all,
+        activity_params(&ws, None, page.newer, None),
+    ));
+    assert_eq!(error.code, ErrorCode::CursorExpired);
+}
+
+#[test]
+fn activity_shows_its_listed_fields_and_nothing_a_producer_kept_for_this_host() {
+    let f = Fixture::new();
+    let ws = f.alpha.worktree.clone();
+    record(&f.store, "rec-a", &ws, "pty-a");
+    let rows = [
+        (
+            "process.started",
+            serde_json::json!({
+                "kind": "harness", "harnessId": "claude", "model": "opus", "effort": "high",
+                "program": "claude", "continuation": "fresh", "launchedBy": "app",
+                "ptySessionId": "pty-secret-id", "capture": "hook",
+            }),
+        ),
+        (
+            "process.spawn_failed",
+            serde_json::json!({
+                "kind": "program", "program": "/home/someone/bin/tool",
+                "reason": "`/home/someone/bin/tool` was not found on PATH",
+            }),
+        ),
+        (
+            "turn.completed",
+            serde_json::json!({
+                "codexHome": "/home/someone/.codex-private", "threadId": "native-thread",
+                "detail": "notify", "contextTokens": 1000, "contextWindow": 2000,
+            }),
+        ),
+        (
+            "tool.completed",
+            serde_json::json!({
+                "tool": "Edit", "path": "src/app.rs", "durationMs": 12,
+                "toolUseId": "toolu_secret", "command": "rm -rf secret-cmd",
+            }),
+        ),
+        (
+            "tool.failed",
+            serde_json::json!({ "tool": "Read", "path": "/etc/passwd", "exitCode": -1 }),
+        ),
+        (
+            "prompt.submitted",
+            serde_json::json!({ "chars": 147, "prompt": "the text of hunter2" }),
+        ),
+        (
+            "agent.notified",
+            serde_json::json!({ "type": "permission_prompt", "message": "Allow hunter2?" }),
+        ),
+        (
+            "session.forked",
+            serde_json::json!({ "sessionId": "rec-a", "fromSessionId": "rec-a" }),
+        ),
+        ("process.exited", serde_json::json!("not an object")),
+    ];
+    for (n, (kind, payload)) in rows.iter().enumerate() {
+        event(
+            &f.store,
+            &format!("ev-{n}"),
+            &ws,
+            Some("rec-a"),
+            kind,
+            payload.clone(),
+        );
+    }
+    let facade = f.facade(None);
+    let page = activity(
+        &facade,
+        &everything(),
+        activity_params(&ws, None, None, None),
+    );
+    assert_eq!(page.events.len(), rows.len());
+    let detail = |kind: &str| {
+        page.events
+            .iter()
+            .find(|e| e.kind == kind)
+            .map(|e| e.detail.clone())
+            .unwrap()
+    };
+
+    let started = detail("process.started");
+    assert_eq!(started.harness.as_deref(), Some("claude"));
+    assert_eq!(started.run_kind.as_deref(), Some("harness"));
+    assert_eq!(started.program.as_deref(), Some("claude"));
+    assert_eq!(started.model.as_deref(), Some("opus"));
+    assert_eq!(started.capture.as_deref(), Some("hook"));
+    let failed = detail("process.spawn_failed");
+    assert_eq!((failed.program, failed.reason), (None, None));
+    let turn = detail("turn.completed");
+    assert_eq!(turn.note.as_deref(), Some("notify"));
+    assert_eq!(
+        (turn.context_tokens, turn.context_window),
+        (Some(1000), Some(2000))
+    );
+    let edit = detail("tool.completed");
+    assert_eq!(edit.path.as_deref(), Some("src/app.rs"));
+    assert_eq!(edit.duration_ms, Some(12));
+    let read = detail("tool.failed");
+    assert_eq!(
+        read.path, None,
+        "a path outside the workspace is not one to send"
+    );
+    assert_eq!(read.exit_code, Some(-1));
+    assert_eq!(detail("prompt.submitted").chars, Some(147));
+    assert_eq!(
+        detail("agent.notified").notification.as_deref(),
+        Some("permission_prompt")
+    );
+    assert_eq!(
+        detail("session.forked")
+            .forked_from
+            .map(|id| id.as_str().to_owned()),
+        Some("rec-a".to_owned())
+    );
+    assert_eq!(
+        detail("process.exited"),
+        remote_proto::ActivityDetail::default()
+    );
+    let first = &page.events[0];
+    assert_eq!(first.source.producer, "yardsort");
+    assert_eq!(first.session.as_ref().unwrap().as_str(), "rec-a");
+
+    let wire = String::from_utf8(facade.handle_bytes(
+        &everything(),
+        &serde_json::to_vec(&request(activity_params(&ws, None, None, None))).unwrap(),
+    ))
+    .unwrap();
+    for secret in [
+        "pty-secret-id",
+        "/home/someone",
+        "codex-private",
+        "native-thread",
+        "/etc/passwd",
+        "secret-cmd",
+        "toolu_secret",
+        "hunter2",
+        "not found",
+        "effort",
+    ] {
+        assert!(!wire.contains(secret), "{secret} leaked: {wire}");
+    }
 }

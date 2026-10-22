@@ -19,6 +19,9 @@
 //! 4. The project the request reaches, against the grant's projects. Outside it is `not_found`,
 //!    exactly like an id that does not exist, so ids cannot be probed.
 //!
+//! Activity is read only from the `metadata` privacy class, and only through an allowlist of
+//! fields, each checked again on the way out: see [`activity`].
+//!
 //! The terminal operations stop after step 3 with `unsupported`, and the host does not advertise
 //! them: viewing and typing need control leases enforced across the desktop and every device,
 //! which do not exist yet. This facade never writes to a terminal, never resizes one and never
@@ -30,18 +33,19 @@
 
 use pty_host::{SessionInfo, SessionState, TerminalHost};
 use remote_proto::{
-    page_size, BranchRef, Cursor, ErrorCode, Grant, Hello, HostDescription, HostId, MemoryId,
-    MemoryListParams, MemoryNote, MemoryPage, Operation, Outcome, Platform, ProcessState,
-    ProjectId, ProjectSummary, ProtocolVersion, RemoteError, Reply, Request, Response,
-    SessionListParams, SessionPage, SessionRecordId, SessionSummary, TaskLink, TermSize,
-    TerminalActivity, TerminalId, TerminalSummary, Welcome, WorkspaceDetail, WorkspaceId,
-    WorkspaceKind, WorkspaceListParams, WorkspacePage, WorkspaceSummary, PROTOCOL_MAJOR,
+    page_size, ActivityListParams, ActivityPage, BranchRef, Cursor, ErrorCode, Grant, Hello,
+    HostDescription, HostId, MemoryId, MemoryListParams, MemoryNote, MemoryPage, Operation,
+    Outcome, Platform, ProcessState, ProjectId, ProjectSummary, ProtocolVersion, RemoteError,
+    Reply, Request, Response, SessionListParams, SessionPage, SessionRecordId, SessionSummary,
+    TaskLink, TermSize, TerminalActivity, TerminalId, TerminalPurpose, TerminalSummary, Welcome,
+    WorkspaceDetail, WorkspaceId, WorkspaceKind, WorkspaceListParams, WorkspacePage,
+    WorkspaceSummary, WorkspaceTerminal, PROTOCOL_MAJOR,
 };
 
 use crate::git::Git;
-use crate::launch::WORKSPACE_LABEL;
+use crate::launch::{HARNESS_LABEL, PROJECT_RUN_LABEL, RECORD_LABEL, RUN_LABEL, WORKSPACE_LABEL};
 use crate::projects::{self, Projects};
-use crate::store::{ProjectRow, SessionRow, Store, WorkspaceRow};
+use crate::store::{EventBound, EventFilter, ProjectRow, SessionRow, Store, WorkspaceRow};
 use crate::tasks::delegate::TaskRef;
 
 /// The operations this host answers. Advertised in [`HostDescription::capabilities`]; anything
@@ -51,6 +55,7 @@ pub const ANSWERED: &[&str] = &[
     "workspace.list",
     "workspace.describe",
     "session.list",
+    "activity.list",
     "memory.list",
 ];
 
@@ -121,6 +126,7 @@ impl HostFacade<'_> {
                 .workspace(grant, &params.workspace)
                 .map(Reply::Workspace),
             Operation::SessionList(params) => self.sessions(grant, params).map(Reply::Sessions),
+            Operation::ActivityList(params) => self.activity(grant, params).map(Reply::Activity),
             Operation::MemoryList(params) => self.memory(grant, params).map(Reply::Memory),
             Operation::TerminalAttach(_)
             | Operation::TerminalDetach(_)
@@ -234,10 +240,15 @@ impl HostFacade<'_> {
         let (workspace, _) = self.reachable_workspace(grant, &params.workspace)?;
         // Asked once for the whole list, so every session is judged against the same moment.
         let live: Option<Vec<SessionInfo>> = self.terminals.map(|host| host.list());
-        let sessions = self
+        let records = self
             .store
             .sessions(&workspace.id)
-            .map_err(|_| unreadable())?
+            .map_err(|_| unreadable())?;
+        let terminals = match (&live, &params.cursor) {
+            (Some(live), None) => self.other_terminals(&workspace.id, &records, live)?,
+            _ => Vec::new(),
+        };
+        let sessions = records
             .into_iter()
             .filter(|row| params.include_ended || row.running)
             .map(|row| session(row, &workspace.id, live.as_deref()))
@@ -248,7 +259,135 @@ impl HostFacade<'_> {
             params.cursor.as_ref(),
             params.limit,
         )?;
-        Ok(SessionPage { sessions, next })
+        Ok(SessionPage {
+            sessions,
+            terminals,
+            next,
+        })
+    }
+
+    /// The daemon's terminals in this workspace that belong to none of its conversations.
+    ///
+    /// A terminal belongs to a conversation when a record of this workspace names it as its
+    /// process, or when its own label names a record of this workspace (an earlier process of a
+    /// resumed conversation). Its purpose comes from its labels and its activity run, never from
+    /// its command line, which stays on the host with its arguments.
+    fn other_terminals(
+        &self,
+        workspace_id: &str,
+        records: &[SessionRow],
+        live: &[SessionInfo],
+    ) -> Answer<Vec<WorkspaceTerminal>> {
+        let belongs = |info: &SessionInfo| {
+            records.iter().any(|row| {
+                row.pty_session_id.as_deref() == Some(info.id.0.as_str())
+                    || info.labels.get(RECORD_LABEL) == Some(&row.id)
+            })
+        };
+        live.iter()
+            .filter(|info| {
+                info.labels.get(WORKSPACE_LABEL).map(String::as_str) == Some(workspace_id)
+            })
+            .filter(|info| !belongs(info))
+            .map(|info| {
+                let harness = info.labels.get(HARNESS_LABEL).cloned();
+                let purpose = if harness.is_some() {
+                    TerminalPurpose::Agent
+                } else if info.labels.get(PROJECT_RUN_LABEL).map(String::as_str)
+                    == Some(workspace_id)
+                {
+                    TerminalPurpose::RunCommand
+                } else {
+                    self.run_purpose(info.labels.get(RUN_LABEL))?
+                };
+                Ok(WorkspaceTerminal {
+                    purpose,
+                    program: crate::activity::program_name(Some(&info.program)),
+                    harness,
+                    terminal: terminal_summary(info)?,
+                })
+            })
+            .collect()
+    }
+
+    /// What the activity run a terminal was started as says it is, when it was recorded.
+    fn run_purpose(&self, run: Option<&String>) -> Answer<TerminalPurpose> {
+        let Some(run) = run else {
+            return Ok(TerminalPurpose::Other);
+        };
+        Ok(match self.store.run(run).map_err(|_| unreadable())? {
+            Some(row) if row.kind == "shell" => TerminalPurpose::Shell,
+            Some(row) if row.kind == "program" => TerminalPurpose::Program,
+            _ => TerminalPurpose::Other,
+        })
+    }
+
+    /// A page of a workspace's activity, oldest first. See [`ActivityPage`] for how the cursors
+    /// walk, and [`activity`] for what of each event is shown.
+    fn activity(&self, grant: &Grant, params: &ActivityListParams) -> Answer<ActivityPage> {
+        let (workspace, _) = self.reachable_workspace(grant, &params.workspace)?;
+        if let Some(session) = &params.session {
+            let theirs = self
+                .store
+                .session(session.as_str())
+                .map_err(|_| unreadable())?
+                .is_some_and(|row| row.workspace_id == workspace.id);
+            if !theirs {
+                return Err(RemoteError::not_found());
+            }
+        }
+        let filter = EventFilter {
+            workspace_id: &workspace.id,
+            privacy_class: activity::SHOWN_CLASS,
+            session_id: params.session.as_ref().map(SessionRecordId::as_str),
+        };
+        let bound = match &params.cursor {
+            None => EventBound::Newest,
+            Some(cursor) => {
+                let (bound, seq) = activity_bound(cursor)?;
+                // The event a cursor names must still be kept, with the same filter: otherwise
+                // events may have gone from beside it, and the next page could skip some.
+                if !self
+                    .store
+                    .event_matches(&filter, seq)
+                    .map_err(|_| unreadable())?
+                {
+                    return Err(cursor_expired());
+                }
+                bound
+            }
+        };
+        let size = page_size(params.limit);
+        // One more than a page says whether there is another, without a count query.
+        let mut rows = self
+            .store
+            .events_window(&filter, bound, size + 1)
+            .map_err(|_| unreadable())?;
+        let more = rows.len() > size;
+        if more {
+            match bound {
+                // Oldest first: the extra one is the oldest, before the page.
+                EventBound::Newest | EventBound::Before(_) => drop(rows.remove(0)),
+                EventBound::After(_) => drop(rows.pop()),
+            }
+        }
+        let older = match (rows.first(), bound) {
+            // Walking forward from a cursor, the cursor's own event is older than this page.
+            (Some(first), EventBound::After(_)) => Some(activity_cursor('o', first.seq)?),
+            (Some(first), _) if more => Some(activity_cursor('o', first.seq)?),
+            _ => None,
+        };
+        let newer = match (rows.last(), bound) {
+            (Some(last), _) => Some(activity_cursor('n', last.seq)?),
+            // Nothing new since the cursor: the same position, to ask from again.
+            (None, EventBound::After(seq)) => Some(activity_cursor('n', seq)?),
+            (None, _) => None,
+        };
+        Ok(ActivityPage {
+            events: rows.iter().filter_map(activity::event).collect(),
+            older,
+            newer,
+        })
     }
 
     /// Approved entries only, newest first.
@@ -419,6 +558,41 @@ fn terminal_summary(info: &SessionInfo) -> Answer<TerminalSummary> {
     })
 }
 
+/// Activity cursors name an event by its sequence number, and which way to walk from it: `o`
+/// for older, `n` for newer. Versioned like [`CURSOR_PREFIX`].
+const ACTIVITY_CURSOR_PREFIX: &str = "a1.";
+
+fn activity_cursor(direction: char, seq: i64) -> Answer<Cursor> {
+    Cursor::new(format!("{ACTIVITY_CURSOR_PREFIX}{direction}{seq}")).map_err(|_| unreadable())
+}
+
+/// Where a cursor starts, and the event it names.
+fn activity_bound(cursor: &Cursor) -> Answer<(EventBound, i64)> {
+    let rest = cursor
+        .as_str()
+        .strip_prefix(ACTIVITY_CURSOR_PREFIX)
+        .ok_or_else(cursor_expired)?;
+    let seq = |digits: &str| {
+        digits
+            .parse::<i64>()
+            .ok()
+            .filter(|seq| *seq > 0)
+            .ok_or_else(cursor_expired)
+    };
+    match rest.split_at_checked(1) {
+        Some(("o", digits)) => seq(digits).map(|seq| (EventBound::Before(seq), seq)),
+        Some(("n", digits)) => seq(digits).map(|seq| (EventBound::After(seq), seq)),
+        _ => Err(cursor_expired()),
+    }
+}
+
+fn cursor_expired() -> RemoteError {
+    RemoteError::new(
+        ErrorCode::CursorExpired,
+        "The list changed since that page. Start again from the top.",
+    )
+}
+
 /// Cursors name the last item a page held. Versioned, so a later change of scheme turns old
 /// cursors into `cursor_expired` rather than into the wrong page.
 const CURSOR_PREFIX: &str = "k1.";
@@ -437,20 +611,14 @@ fn page<T>(
     let start = match cursor {
         None => 0,
         Some(cursor) => {
-            let expired = || {
-                RemoteError::new(
-                    ErrorCode::CursorExpired,
-                    "The list changed since that page. Start again from the top.",
-                )
-            };
             let after = cursor
                 .as_str()
                 .strip_prefix(CURSOR_PREFIX)
-                .ok_or_else(expired)?;
+                .ok_or_else(cursor_expired)?;
             items
                 .iter()
                 .position(|item| key(item) == after)
-                .ok_or_else(expired)?
+                .ok_or_else(cursor_expired)?
                 + 1
         }
     };
@@ -466,5 +634,6 @@ fn page<T>(
     Ok((items, next))
 }
 
+mod activity;
 #[cfg(test)]
 mod tests;

@@ -1,6 +1,6 @@
 # 26 — Remote access: fit report and the first contract slice
 
-Status: **R0 done; R1 first slice built, not wired to anything** · 21 October 2026 · Companion to
+Status: **R0 done; R1 two slices built, not wired to anything** · 21–22 October 2026 · Companion to
 [25, the remote, mobile and sync proposal](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md). It
 records the repository as found when the work started, where the proposal's premises needed
 adjusting, the decisions taken, what this slice built, and the ledger later phases update.
@@ -139,20 +139,23 @@ The proposal's corrections in its own §2 all held when checked:
 
 ## 5 · Decisions
 
-| Question                 | Decision                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Where the contract lives | `crates/remote-proto`: `serde`, `serde_json` and `thiserror` only, so a server and a mobile conformance test can depend on it without SQLite, git or a PTY.                                                                                                                                                                                 |
-| Versioning               | `PROTOCOL_MAJOR` 1 / `PROTOCOL_MINOR` 0, independent of the app, of `pty_ipc::PROTOCOL` and of any sync schema. `Hello` offers majors; another major gets `protocol_incompatible` with `supportedProtocols`. Unknown fields are ignored. An unknown `op` is `unsupported`, not malformed.                                                   |
-| Envelope                 | `{requestId, protocol, op, params}` in; `{requestId, result: {kind, …}}` or `{requestId, error: {code, message, retryable}}` out.                                                                                                                                                                                                           |
-| Errors                   | Stable snake_case codes, one per row of the proposal's list, plus `not_found`, `lease_lost`, `resnapshot_required`, `unsupported`, `internal`, and `unknown` for a newer peer's code. Only `host_offline`, `rate_limited` and `internal` are retryable. Messages never echo the request and never carry store errors, which can name files. |
-| Untrusted input          | Size is checked before parsing (64 KiB). Every id is ≤ 128 bytes of `[A-Za-z0-9-_.:]`, so no path or control character gets through. A cursor is ≤ 256 printable bytes. Page sizes are clamped to 200. Input is ≤ 32 KiB. Nesting is bounded by serde_json's recursion limit (tested).                                                      |
-| Authorization shape      | `Grant { device, scopes, projects: All \| Only(set) }`, using the proposal's six scopes. Checked in order: protocol, bounds, scope (`forbidden`), project reach (`not_found`, identical to a missing id). Nothing in this slice mints a grant.                                                                                              |
-| What may cross           | No paths, argv, environment, labels, harness-native session ids, first messages or terminal output. The session `title` crosses: the desktop shows it, and it may quote the first message, so clients must treat it as user content and never log it.                                                                                       |
-| Session state            | `process`: `running`, `ended`, `gone` or `unknown` (no daemon). `terminal.activity`: `starting`, `busy`, `quiet` or `exited`, from timing only. `quiet` is never presented as "needs your input". A daemon session is matched to a record only when its `workspace` label agrees.                                                           |
-| Pagination               | Order is the app's own. The cursor is `k1.<last id>`. If that item has gone, the answer is `cursor_expired` rather than a silently skipped or repeated item.                                                                                                                                                                                |
-| Terminal output frames   | Binary: kind, version, stream `u32`, epoch `u32`, seq `u64`, then ≤ 64 KiB of raw bytes. Never JSON.                                                                                                                                                                                                                                        |
-| Terminal control         | Specified (`attach`, `detach`, `acquire`, `renew`, `release`, `input`, `resize`; lease id + generation + input seq; 30 s lease, 10 s renewal) and **refused by every host** (`unsupported`, not advertised) until R2 enforces it in the daemon.                                                                                             |
-| Memory                   | Read-only, approved only. There is no remote route to propose, approve, edit or revoke, so the facade adds no way for an agent to approve its own proposal.                                                                                                                                                                                 |
+| Question                 | Decision                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Where the contract lives | `crates/remote-proto`: `serde`, `serde_json` and `thiserror` only, so a server and a mobile conformance test can depend on it without SQLite, git or a PTY.                                                                                                                                                                                                                      |
+| Versioning               | `PROTOCOL_MAJOR` 1 / `PROTOCOL_MINOR` 0, independent of the app, of `pty_ipc::PROTOCOL` and of any sync schema. `Hello` offers majors; another major gets `protocol_incompatible` with `supportedProtocols`. Unknown fields are ignored. An unknown `op` is `unsupported`, not malformed.                                                                                        |
+| Envelope                 | `{requestId, protocol, op, params}` in; `{requestId, result: {kind, …}}` or `{requestId, error: {code, message, retryable}}` out.                                                                                                                                                                                                                                                |
+| Errors                   | Stable snake_case codes, one per row of the proposal's list, plus `not_found`, `lease_lost`, `resnapshot_required`, `unsupported`, `internal`, and `unknown` for a newer peer's code. Only `host_offline`, `rate_limited` and `internal` are retryable. Messages never echo the request and never carry store errors, which can name files.                                      |
+| Untrusted input          | Size is checked before parsing (64 KiB). Every id is ≤ 128 bytes of `[A-Za-z0-9-_.:]`, so no path or control character gets through. A cursor is ≤ 256 printable bytes. Page sizes are clamped to 200. Input is ≤ 32 KiB. Nesting is bounded by serde_json's recursion limit (tested).                                                                                           |
+| Authorization shape      | `Grant { device, scopes, projects: All \| Only(set) }`, using the proposal's six scopes. Checked in order: protocol, bounds, scope (`forbidden`), project reach (`not_found`, identical to a missing id). Nothing in this slice mints a grant.                                                                                                                                   |
+| What may cross           | No paths, argv, environment, labels, harness-native session ids, first messages or terminal output. The session `title` crosses: the desktop shows it, and it may quote the first message, so clients must treat it as user content and never log it.                                                                                                                            |
+| Session state            | `process`: `running`, `ended`, `gone` or `unknown` (no daemon). `terminal.activity`: `starting`, `busy`, `quiet` or `exited`, from timing only. `quiet` is never presented as "needs your input". A daemon session is matched to a record only when its `workspace` label agrees.                                                                                                |
+| Pagination               | Order is the app's own. The cursor is `k1.<last id>`. If that item has gone, the answer is `cursor_expired` rather than a silently skipped or repeated item. Activity has its own cursors (below).                                                                                                                                                                               |
+| Activity                 | `activity.list` under `activity:read`, per workspace, optionally per conversation. Pages are oldest first. `older` walks back; `newer` returns only what came after, which is how a reconnecting client catches up. Cursors are `a1.o<seq>` / `a1.n<seq>` on `agent_events.seq`, and expire when the event they name is gone (cleared, pruned) or the filter no longer shows it. |
+| What an event shows      | Only the `metadata` privacy class. Each payload goes through an allowlist of fields (`ActivityDetail`), each checked by class: short codes, names that are not paths, counts, and paths inside the workspace (no absolute path, drive or `..`). Left behind: Codex's home folder, native session ids, the PTY id, tool-use ids, launch-error text, anything not listed.          |
+| Other terminals          | `session.list` adds `terminals` on its first page: the daemon's sessions in the workspace that belong to no record of it, with a purpose (`shell`, `runCommand`, `program`, `agent` for a forgotten record, `other` when recording was off) from labels and the activity run, and the program's base name. Never argv or path.                                                   |
+| Terminal output frames   | Binary: kind, version, stream `u32`, epoch `u32`, seq `u64`, then ≤ 64 KiB of raw bytes. Never JSON.                                                                                                                                                                                                                                                                             |
+| Terminal control         | Specified (`attach`, `detach`, `acquire`, `renew`, `release`, `input`, `resize`; lease id + generation + input seq; 30 s lease, 10 s renewal) and **refused by every host** (`unsupported`, not advertised) until R2 enforces it in the daemon.                                                                                                                                  |
+| Memory                   | Read-only, approved only. There is no remote route to propose, approve, edit or revoke, so the facade adds no way for an agent to approve its own proposal.                                                                                                                                                                                                                      |
 
 ## 6 · What shipped in this slice
 
@@ -165,6 +168,20 @@ The proposal's corrections in its own §2 all held when checked:
   `Projects::list`, `Store` and `TerminalHost::list`. It refuses everything else.
 - No migration, no setting, no Tauri command, no CLI command, no listener. `src/lib/bindings.ts`
   is unchanged.
+
+Second slice, 22 October 2026:
+
+- **`activity.list`** in the protocol (`ActivityListParams`, `ActivityPage`, `ActivityEvent`,
+  `ActivityDetail`, `Provenance`, `EventId`) and in the facade. The projection lives in
+  `crates/core/src/remote/activity.rs`. The store gained `events_window` (either side of a
+  sequence number, oldest first) and `event_matches` (whether a cursor's event is still there).
+  It reads the existing `agent_events_timeline` index. No migration.
+- **Other terminals** on `session.list` (`WorkspaceTerminal`, `TerminalPurpose`). The run
+  command's label is now the named constant `launch::PROJECT_RUN_LABEL`.
+- Two new fixtures (`request-activity-list.json`, `response-activity.json`), and a terminal in
+  `response-sessions.json`. A sessions page without `terminals`, as a host from the first slice
+  sends, still reads (tested). Both additions are additive within 1.0. Nothing had shipped, so
+  the minor stays 0.
 
 ## 7 · Verification
 
@@ -201,6 +218,30 @@ The proposal's corrections in its own §2 all held when checked:
 - The proposal file failed `prettier --check` at HEAD (its tables were not aligned), which made
   `just check` fail on `main`. It was reformatted here. The change is whitespace only, apart from
   its new status line.
+- Second slice, on Linux, 2026-10-22:
+  - `remote-proto`: 25 tests. The activity fixtures round-trip, and a sessions page without
+    `terminals` reads as having none.
+  - `remote::`: 17 tests. Three are unit tests of the field checks: codes, names, and paths
+    inside the workspace.
+  - Activity pages walk back to the oldest event and stop. A catch-up with nothing new returns
+    the same cursor, and three new events come back alone and in order. Events from another
+    workspace or of the `content` class never appear between them.
+  - Activity is `forbidden` without `activity:read`. Another project's workspace, and a
+    conversation from another workspace, get the same `not_found` as ids that exist nowhere.
+  - A cursor that is foreign, malformed or negative expires, and so does one whose event the
+    session filter would not show, or that was cleared.
+  - Hostile payloads keep their listed fields. On the wire there is no PTY id, home folder, Codex
+    home, native thread id, absolute or escaping path, command, tool-use id, launch-error text,
+    prompt text or `effort`. Making the path or reason checks pass everything through fails the
+    test.
+  - Seven real PTYs: a conversation, an earlier process of it, the run command, a recorded shell,
+    an unrecorded process, an agent whose record is gone, and another workspace's shell. The four
+    that belong to no conversation are listed once, each with its purpose and the base name `sh`
+    (`cmd` on Windows). No argv, `/bin/` or run id is on the wire. Terminals come only on the
+    first page, and not without a daemon.
+  - `just check` passed (`yardsort-core` 541 tests, the app crate 150, frontend 642), with the
+    `YARDSORT_*` variables unset. So did `just bindings-check` (bindings unchanged),
+    `just lint-windows` and the Windows clippy of `remote-proto`.
 - **Not run here:** tests on Windows and macOS. CI covers them; the core cannot be compiled for
   MSVC from Linux, since it bundles SQLite. No mobile device, emulator or simulator was involved,
   because nothing mobile exists yet.
@@ -209,16 +250,16 @@ The proposal's corrections in its own §2 all held when checked:
 
 Each later session picks one gate, updates this table, and records what it found.
 
-| Phase                          | State                                                         | Gate                                                                                                                                                                                                                                                                                                         |
-| ------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| R0 Fit                         | **Done** (this document)                                      | HEAD and paths recorded; no overlapping work found                                                                                                                                                                                                                                                           |
-| R1 Contract and host facade    | **First slice done**: read contracts, facade, terminal schema | Remaining: `activity.list`/`subscribe` on `agent_events.seq`; shell and program terminals beside harness sessions; a TS conformance run over `fixtures/v1/`; daemon-side sequence numbers                                                                                                                    |
-| R2 Identity and relay          | Not started                                                   | Persisted host identity at enrollment; credential store in the core (or a documented secret mount); grants from enrollment; lease and single query responder in the daemon (`PROTOCOL` 2); outbound connector; relay; two-account isolation; revocation kills a live stream; relay failure leaves PTYs alive |
-| R3 Mobile vertical slice       | Not started                                                   | Physical iPhone and Android, real sessions                                                                                                                                                                                                                                                                   |
-| R4 Mobile hardening            | Not started                                                   |                                                                                                                                                                                                                                                                                                              |
-| R5 Headless and desktop remote | Not started                                                   | Needs resume/fork moved from `src-tauri/src/sessions.rs` into the core first                                                                                                                                                                                                                                 |
-| R6 Durable sync                | Not started                                                   | Logical-id mapping table; outbox written in the same transaction as each opted-in mutation                                                                                                                                                                                                                   |
-| R7 Managed launch              | Not started                                                   | Owner-authorized only                                                                                                                                                                                                                                                                                        |
+| Phase                          | State                                                                                         | Gate                                                                                                                                                                                                                                                                                                         |
+| ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R0 Fit                         | **Done** (this document)                                                                      | HEAD and paths recorded; no overlapping work found                                                                                                                                                                                                                                                           |
+| R1 Contract and host facade    | **Two slices done**: read contracts, facade, terminal schema, activity reads, other terminals | Remaining: daemon-side output sequence numbers; `activity.subscribe` (needs a transport, R2); a TS conformance run over `fixtures/v1/` (R3)                                                                                                                                                                  |
+| R2 Identity and relay          | Not started                                                                                   | Persisted host identity at enrollment; credential store in the core (or a documented secret mount); grants from enrollment; lease and single query responder in the daemon (`PROTOCOL` 2); outbound connector; relay; two-account isolation; revocation kills a live stream; relay failure leaves PTYs alive |
+| R3 Mobile vertical slice       | Not started                                                                                   | Physical iPhone and Android, real sessions                                                                                                                                                                                                                                                                   |
+| R4 Mobile hardening            | Not started                                                                                   |                                                                                                                                                                                                                                                                                                              |
+| R5 Headless and desktop remote | Not started                                                                                   | Needs resume/fork moved from `src-tauri/src/sessions.rs` into the core first                                                                                                                                                                                                                                 |
+| R6 Durable sync                | Not started                                                                                   | Logical-id mapping table; outbox written in the same transaction as each opted-in mutation                                                                                                                                                                                                                   |
+| R7 Managed launch              | Not started                                                                                   | Owner-authorized only                                                                                                                                                                                                                                                                                        |
 
 ## 9 · Remaining risks and the next slice
 
@@ -234,8 +275,13 @@ Each later session picks one gate, updates this table, and records what it found
 - **Workspace listing asks git for each workspace's head**, as the sidebar does. That is fine at
   tens of workspaces; the proposal's 100-workspace p95 budget is unmeasured.
 
-**Next:** finish R1 in two small slices. First, `activity.list` with an `agent_events.seq`
-cursor, plus shell and program terminals in `session.list`. Second, sequence numbers in
-`pty-host`'s `deliver`, with a real-PTY test that a snapshot at `seq` plus frames `seq+1…`
-reproduce the screen. Then R2 can begin: the gate is the owner's choice of identity provider for
+- **Activity details are only as private as their producers' normalizers plus the allowlist.**
+  A new adapter field is invisible remotely until it is added to `ActivityDetail` on purpose, which
+  is the intended default. Tool names and model names are free text from the agent, bounded and
+  checked not to be paths, but otherwise shown as given, as the desktop timeline shows them.
+- **A shell started while activity recording was off** lists as `other`: the host keeps no other
+  record of what it is.
+
+**Next:** finish R1 with sequence numbers in `pty-host`'s `deliver`, with a real-PTY test that a
+snapshot at `seq` plus frames `seq+1…` reproduce the screen. Then R2 can begin: the gate is the owner's choice of identity provider for
 the self-host recipe (proposal §16), which this slice does not need.

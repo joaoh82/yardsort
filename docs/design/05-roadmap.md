@@ -853,11 +853,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
 - [x] R0: the fit report against the live tree. Two things the proposal assumed are not there
       yet. Terminal queries have one responder only while at most one viewer is attached. Input
       and resize have no controller at all. Both belong in the daemon.
-- [ ] R1: contracts and a host facade. **First slice built:** `crates/remote-proto` (versioned
+- [ ] R1: contracts and a host facade. **Two slices built:** `crates/remote-proto` (versioned
       envelope, errors, limits, read model, terminal attach/control schema, output frames) and a
-      read-only `HostFacade` in the core, tested against real stores, worktrees and PTYs. Not
-      wired to anything; no user-visible change. Left: activity reads, shell terminals, output
-      sequence numbers in `pty-host`.
+      read-only `HostFacade` in the core, tested against real stores, worktrees and PTYs. It
+      answers activity reads (paged both ways on `agent_events.seq`, metadata only, through a
+      field allowlist) and lists shells and the run command beside conversations. Not wired to
+      anything; no user-visible change. Left: output sequence numbers in `pty-host`.
 - [ ] R2–R7: identity and relay, the mobile app, hardening, headless hosts, sync, managed launch.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant

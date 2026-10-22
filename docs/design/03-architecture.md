@@ -561,8 +561,9 @@ remote ever talks to it directly. Instead:
 - `yardsort_core::remote::HostFacade` answers that protocol for one host, read-only, checking
   each request against a device's `Grant` (scopes plus projects). It is built field by field
   from what the app already shows, so paths, argv, environment, labels and terminal output have
-  nowhere to go. It answers host, workspace, session and approved-memory reads, and refuses
-  every terminal operation.
+  nowhere to go. It answers host, workspace, session, activity and approved-memory reads, and
+  refuses every terminal operation. Activity is read only from the `metadata` class, through an
+  allowlist of fields each checked again on the way out (`remote/activity.rs`).
 
 Nothing calls the facade yet. It gets a caller only once devices are enrolled and authenticated
 (R2). Terminal control waits for a lease and a single query responder enforced **in the daemon**,

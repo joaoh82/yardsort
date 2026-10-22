@@ -24,6 +24,20 @@
         }
       }
     ],
+    "terminals": [
+      {
+        "purpose": "runCommand",
+        "program": "npm",
+        "harness": null,
+        "terminal": {
+          "id": "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918",
+          "activity": "busy",
+          "idleMs": 120,
+          "size": { "cols": 120, "rows": 30 },
+          "exitCode": null
+        }
+      }
+    ],
     "next": null
   }
 }

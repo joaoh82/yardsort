@@ -28,6 +28,8 @@ fn requests_match_their_fixtures() {
     assert_eq!(request.operation.name(), "workspace.list");
     let request: Request = pinned("request-host-describe.json");
     assert_eq!(request.operation, Operation::HostDescribe);
+    let request: Request = pinned("request-activity-list.json");
+    assert_eq!(request.operation.scope(), Some(Scope::ActivityRead));
     let request: Request = pinned("request-terminal-input.json");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
     let hello: Hello = pinned("hello.json");
@@ -40,6 +42,7 @@ fn responses_match_their_fixtures() {
         "response-host.json",
         "response-workspaces.json",
         "response-sessions.json",
+        "response-activity.json",
         "response-error-incompatible.json",
         "response-attached.json",
     ] {
@@ -70,6 +73,12 @@ fn every_operation_has_the_name_it_is_sent_under() {
         Operation::SessionList(SessionListParams {
             workspace,
             include_ended: false,
+            cursor: None,
+            limit: None,
+        }),
+        Operation::ActivityList(ActivityListParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            session: None,
             cursor: None,
             limit: None,
         }),
@@ -108,6 +117,19 @@ fn every_operation_has_the_name_it_is_sent_under() {
         let json = serde_json::to_value(&operation).unwrap();
         assert_eq!(json["op"], operation.name());
     }
+}
+
+#[test]
+fn a_sessions_page_without_terminals_reads_as_having_none() {
+    // What a host from before terminals were listed sends: still 1.x, and still understood.
+    let mut json = fixture("response-sessions.json");
+    json["result"].as_object_mut().unwrap().remove("terminals");
+    let response: Response = serde_json::from_value(json).unwrap();
+    let Outcome::Result(Reply::Sessions(page)) = response.outcome else {
+        panic!("{response:?}")
+    };
+    assert_eq!(page.sessions.len(), 1);
+    assert!(page.terminals.is_empty());
 }
 
 fn error_of(bytes: &[u8]) -> (Option<RequestId>, RemoteError) {
