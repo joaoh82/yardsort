@@ -39,11 +39,12 @@ export function Ideas() {
         id="h-how"
         className="max-w-[720px] text-[26px] leading-[1.15] font-medium tracking-[-0.02em] md:text-[32px]"
       >
-        Run parallel tasks, review changes and merge the work.
+        Orchestrate agents, share a worktree, hand the story on.
       </h2>
       <p className="mt-4 max-w-[640px] text-[17px] text-muted">
-        Like a sorting yard bringing rail cars onto separate tracks, Yardsort gives each task a
-        branch and a worktree. Review each result before bringing the changes together.
+        Like a sorting yard: fan tasks onto parallel tracks, or keep several agents on one. Hand
+        work from Claude to Codex without re-briefing the branch. Review each result before bringing
+        the changes together.
       </p>
 
       <div className="mt-[72px] space-y-[88px]">
@@ -59,8 +60,9 @@ export function Ideas() {
         >
           <p>
             You describe a task, pick an agent, and press Enter. Yardsort creates a branch and a git
-            worktree for it — a separate folder — and starts the agent there. Start another, and
-            another. They cannot disturb each other, or your own checkout.
+            worktree for it — a separate folder — and starts the agent there. Fan another task onto
+            its own track, or start a second agent in the same worktree as a tab. Isolated when you
+            need isolation; shared when you want Claude and Codex on the same files.
           </p>
           <p>
             Workspaces are ordinary worktrees and branches. Inspect or undo anything with{" "}
@@ -150,7 +152,8 @@ export function Ideas() {
           <p>
             One agent has worked in a workspace and you want another there — Codex after Claude, or
             the same agent from a clean start. The files and the diff carry over by themselves. What
-            was asked, tried and found does not.
+            was asked, tried and found does not — unless you hand it on. That is the usual pain of
+            switching agents; Yardsort is built to close it.
           </p>
           <p>
             <strong className={strong}>Hand off…</strong> writes the next agent&apos;s first message

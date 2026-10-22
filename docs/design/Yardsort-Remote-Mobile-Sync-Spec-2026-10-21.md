@@ -29,16 +29,16 @@ The inspected local `origin/main` snapshot is `74df92c54a1a5561f1b7fcd71e90f027f
 
 Observed foundations:
 
-| Area | Existing foundation to preserve |
-| --- | --- |
-| Desktop | Rust core and SQLite own state; React/TS renders it through the existing IPC boundary |
-| Terminal | Tauri frontend uses xterm.js; `crates/pty-host` owns PTYs and headless terminal state |
-| Daemon | Same executable in daemon mode, local socket/named-pipe IPC; window-independent PTY lifetime |
-| Attachment | Snapshot followed by live output; existing handling of terminal queries and Windows ConPTY |
-| Events | Structured metadata beside opaque terminal bytes; canonical SQLite storage and bounded recovery mechanisms |
-| Memory | Reviewed project notes; agents can propose, humans approve; `ys memory` and launch-context delivery |
-| Jev | Optional downstream judgments, including duplicate/contradiction checks; not storage, authorization, or a text generator |
-| Tasks | Existing forge-backed tasks and workspace references; do not invent a conflicting local task model |
+| Area       | Existing foundation to preserve                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Desktop    | Rust core and SQLite own state; React/TS renders it through the existing IPC boundary                                    |
+| Terminal   | Tauri frontend uses xterm.js; `crates/pty-host` owns PTYs and headless terminal state                                    |
+| Daemon     | Same executable in daemon mode, local socket/named-pipe IPC; window-independent PTY lifetime                             |
+| Attachment | Snapshot followed by live output; existing handling of terminal queries and Windows ConPTY                               |
+| Events     | Structured metadata beside opaque terminal bytes; canonical SQLite storage and bounded recovery mechanisms               |
+| Memory     | Reviewed project notes; agents can propose, humans approve; `ys memory` and launch-context delivery                      |
+| Jev        | Optional downstream judgments, including duplicate/contradiction checks; not storage, authorization, or a text generator |
+| Tasks      | Existing forge-backed tasks and workspace references; do not invent a conflicting local task model                       |
 
 Important corrections to older planning assumptions:
 
@@ -91,14 +91,14 @@ flowchart TD
 
 Arrows represent logical connectivity, not exclusive data direction. The relay carries bidirectional traffic over outbound host and client connections. Identity, relay, sync, and notification workers may initially be modules of one deployable service; no microservice fleet is required.
 
-| Component | Owns | Must not own |
-| --- | --- | --- |
-| Host runtime | Workspace APIs, authorization enforcement, event subscriptions, local DB integration, connection lifecycle | A duplicate PTY implementation |
-| PTY daemon | Child lifetime, I/O, screen snapshot, attach state, terminal-response coordination | Accounts, billing, synchronized memory conflict resolution |
-| Relay | Connection routing, bounded buffers, connection limits | Persistent terminal transcripts or process truth |
-| Control service | Accounts, device grants, host directory, short-lived connection tickets | Unrestricted commands executed on hosts |
-| Sync service | Opted-in durable records, revisions, tombstones, cursors | Filesystem worktrees or running process state |
-| Mobile | Views, ephemeral terminal buffer, explicit user intents, credential storage | Authoritative workspace or execution state |
+| Component       | Owns                                                                                                       | Must not own                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Host runtime    | Workspace APIs, authorization enforcement, event subscriptions, local DB integration, connection lifecycle | A duplicate PTY implementation                             |
+| PTY daemon      | Child lifetime, I/O, screen snapshot, attach state, terminal-response coordination                         | Accounts, billing, synchronized memory conflict resolution |
+| Relay           | Connection routing, bounded buffers, connection limits                                                     | Persistent terminal transcripts or process truth           |
+| Control service | Accounts, device grants, host directory, short-lived connection tickets                                    | Unrestricted commands executed on hosts                    |
+| Sync service    | Opted-in durable records, revisions, tombstones, cursors                                                   | Filesystem worktrees or running process state              |
+| Mobile          | Views, ephemeral terminal buffer, explicit user intents, credential storage                                | Authoritative workspace or execution state                 |
 
 Extract only the services necessary to run the host without the desktop window. Do not move all Tauri commands into a new network endpoint. Add an allowlisted remote facade over core services. The facade translates explicit requests and sanitizes responses; it does not expose environment variables, complete launch arguments, native harness logs, or arbitrary file reads.
 
@@ -139,17 +139,17 @@ Version the remote protocol independently of desktop releases, local daemon IPC,
 
 Logical API surface (names illustrative; finalize schemas in phase 1):
 
-| Operation | Result / guard |
-| --- | --- |
-| `server.describe` | Server identity, protocol range, authentication issuer, feature availability |
-| `host.list`, `host.describe` | Authorized hosts, connection status and last-seen time |
-| `workspace.list`, `workspace.describe` | Safe metadata scoped to host/project; cursor pagination |
-| `session.list`, `activity.list/subscribe` | Session/run identifiers and observed activity with provenance |
-| `terminal.attach/detach` | Snapshot boundary and live stream; requires read scope |
-| `terminal.acquire/release` | Control lease and generation; requires control scope |
-| `terminal.input/resize` | Requires current lease and matching stream/session generation |
-| `device.revoke` | Invalidates grants and live connections |
-| `memory.list/search` | Approved notes only; respects existing project access policy |
+| Operation                                 | Result / guard                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `server.describe`                         | Server identity, protocol range, authentication issuer, feature availability |
+| `host.list`, `host.describe`              | Authorized hosts, connection status and last-seen time                       |
+| `workspace.list`, `workspace.describe`    | Safe metadata scoped to host/project; cursor pagination                      |
+| `session.list`, `activity.list/subscribe` | Session/run identifiers and observed activity with provenance                |
+| `terminal.attach/detach`                  | Snapshot boundary and live stream; requires read scope                       |
+| `terminal.acquire/release`                | Control lease and generation; requires control scope                         |
+| `terminal.input/resize`                   | Requires current lease and matching stream/session generation                |
+| `device.revoke`                           | Invalidates grants and live connections                                      |
+| `memory.list/search`                      | Approved notes only; respects existing project access policy                 |
 
 Each control request carries request ID, operation, protocol version, scoped resource ID, and typed payload. Responses carry either a typed result or a stable error code, safe human message, and retryability flag. Define at least unauthenticated, forbidden, host-offline, session-ended, control-conflict, cursor-expired, rate-limited, protocol-incompatible, and invalid-request errors.
 
@@ -237,17 +237,17 @@ Sync follows the usable remote feature. A server's durable data and a host's liv
 
 ### 10.1 Data boundary
 
-| Record | v1 sync behavior |
-| --- | --- |
-| Project identity and display metadata | Explicitly linked across installations; never merge solely by repository URL |
-| Workspace logical metadata | Sync name, branch/reference, task links, ownership, archive state; show host/checkout mapping |
-| Approved memory | Sync text, approval provenance, revisions, source references, and revocations |
-| Candidate/rejected memory | Local in initial sync; do not accidentally promote or upload |
-| Device paths and checkout mapping | Local binding; exclude private absolute paths from synced records |
-| Running sessions | Host-owned live state; optional last-observed summaries are labeled historical |
-| Raw telemetry, transcripts, native harness history | Excluded by default |
-| Git objects/uncommitted changes, credentials, environment | Excluded |
-| Memory-sharing preferences | Keep local unless an explicit future policy says otherwise |
+| Record                                                    | v1 sync behavior                                                                              |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Project identity and display metadata                     | Explicitly linked across installations; never merge solely by repository URL                  |
+| Workspace logical metadata                                | Sync name, branch/reference, task links, ownership, archive state; show host/checkout mapping |
+| Approved memory                                           | Sync text, approval provenance, revisions, source references, and revocations                 |
+| Candidate/rejected memory                                 | Local in initial sync; do not accidentally promote or upload                                  |
+| Device paths and checkout mapping                         | Local binding; exclude private absolute paths from synced records                             |
+| Running sessions                                          | Host-owned live state; optional last-observed summaries are labeled historical                |
+| Raw telemetry, transcripts, native harness history        | Excluded by default                                                                           |
+| Git objects/uncommitted changes, credentials, environment | Excluded                                                                                      |
+| Memory-sharing preferences                                | Keep local unless an explicit future policy says otherwise                                    |
 
 Use stable globally unique logical IDs alongside existing local IDs if necessary. Each checkout maps a logical project/workspace ID to a host-local path. An existing clone can be explicitly linked; the user must resolve ambiguous forks/remotes. A synced workspace does not automatically create a worktree. An explicit materialization action uses Git, validates branch state, and refuses to overwrite conflicting local work.
 
@@ -297,16 +297,16 @@ Preserve the repository's current open-source license and notices. Public docs m
 
 Each phase should be split into small reviewable changes with implementation, meaningful tests, user docs, and an accurate status record. Phase names are separate from the existing agent-events stages 0–7.
 
-| Phase | Deliverable | Exit gate |
-| --- | --- | --- |
-| R0: Fit | Current-state report, ownership map, decision adjustments, dependency/license audit plan | Actual HEAD and code paths recorded; overlap resolved without overwriting user work |
-| R1: Contract and host facade | Versioned DTOs, safe workspace/session reads, terminal attach/control contracts, local adapter tests | Existing local app/CLI behavior preserved; incompatible clients rejected; auth boundary documented |
-| R2: Identity and relay | Server-scoped accounts, enrollment/revocation, outbound host connector, bounded relay | Two-account isolation tests pass; revoked device loses an active stream; relay failure leaves PTYs alive |
-| R3: Mobile vertical slice | Expo app, pairing, host/workspace list, terminal view/control, reconnect | Physical iPhone and Android interact with real agent sessions on existing hosts; keyboard and control handoff pass |
-| R4: Mobile beta hardening | Notifications, lifecycle behavior, privacy defaults, diagnostics, self-host setup | Lock/resume and network changes pass; generic push works; offline host state is honest; no payload leakage |
-| R5: Headless and desktop remote | Supported Linux host package/container and desktop remote adapter | Same session usable from both clients; host works without GUI; persistent data survives service restart |
-| R6: Durable sync | Explicit linking, outbox/inbox, approved-memory and metadata sync, conflict UI | Offline edits converge or surface conflicts; revocations do not resurrect; no files/processes silently migrate |
-| R7: Managed launch | Signup operations, quotas, billing integration, recovery/export, support runbooks | Backup restore drill, load and isolation tests, deployment rollback, and store distribution gates complete |
+| Phase                           | Deliverable                                                                                          | Exit gate                                                                                                          |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| R0: Fit                         | Current-state report, ownership map, decision adjustments, dependency/license audit plan             | Actual HEAD and code paths recorded; overlap resolved without overwriting user work                                |
+| R1: Contract and host facade    | Versioned DTOs, safe workspace/session reads, terminal attach/control contracts, local adapter tests | Existing local app/CLI behavior preserved; incompatible clients rejected; auth boundary documented                 |
+| R2: Identity and relay          | Server-scoped accounts, enrollment/revocation, outbound host connector, bounded relay                | Two-account isolation tests pass; revoked device loses an active stream; relay failure leaves PTYs alive           |
+| R3: Mobile vertical slice       | Expo app, pairing, host/workspace list, terminal view/control, reconnect                             | Physical iPhone and Android interact with real agent sessions on existing hosts; keyboard and control handoff pass |
+| R4: Mobile beta hardening       | Notifications, lifecycle behavior, privacy defaults, diagnostics, self-host setup                    | Lock/resume and network changes pass; generic push works; offline host state is honest; no payload leakage         |
+| R5: Headless and desktop remote | Supported Linux host package/container and desktop remote adapter                                    | Same session usable from both clients; host works without GUI; persistent data survives service restart            |
+| R6: Durable sync                | Explicit linking, outbox/inbox, approved-memory and metadata sync, conflict UI                       | Offline edits converge or surface conflicts; revocations do not resurrect; no files/processes silently migrate     |
+| R7: Managed launch              | Signup operations, quotas, billing integration, recovery/export, support runbooks                    | Backup restore drill, load and isolation tests, deployment rollback, and store distribution gates complete         |
 
 R3 depends on R1/R2 for a real end-to-end path. UI mockups can precede that, but do not call mocked connectivity done. R4 may be tested privately while R5 develops. R6 requires stable identity and resource mapping but is not a prerequisite for mobile remote access. Managed beta can operate R2–R4 before commercial launch R7.
 
@@ -352,16 +352,16 @@ Public launch requires tested installation/signing/update paths, store assets, a
 
 The coding agent may select ordinary libraries and module locations after checking compatibility. Record significant changes as short ADRs. These are not reasons to reopen React Native versus Tauri mobile.
 
-| Decision | Default / boundary | Resolve by |
-| --- | --- | --- |
-| Identity provider | Standards-based OIDC; supported self-host recipe; no bespoke password database | R2 |
-| Server runtime packaging | Rust modules/services and PostgreSQL; reuse compatible project conventions | R1–R2 |
-| Terminal bridge implementation | Bundled xterm.js in isolated WebView with native transport | R3 device gate |
-| Relay confidentiality | Trusted TLS relay, clearly disclosed; no E2EE claim | Before public beta |
-| Official-app self-host push | Optional publisher gateway; independent app build alternative | R4 |
-| Headless daemon packaging | Reuse existing PTY ownership, extract only necessary host runtime | R5 |
-| Sync record mapping/migrations | Preserve current domain IDs; explicit logical mappings if needed | R1 identifiers, R6 migrations |
-| Billing, quota amounts, domains, app identifiers | Owner-supplied production choices; no invented credentials or paid provisioning | R7 |
+| Decision                                         | Default / boundary                                                              | Resolve by                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------- | ----------------------------- |
+| Identity provider                                | Standards-based OIDC; supported self-host recipe; no bespoke password database  | R2                            |
+| Server runtime packaging                         | Rust modules/services and PostgreSQL; reuse compatible project conventions      | R1–R2                         |
+| Terminal bridge implementation                   | Bundled xterm.js in isolated WebView with native transport                      | R3 device gate                |
+| Relay confidentiality                            | Trusted TLS relay, clearly disclosed; no E2EE claim                             | Before public beta            |
+| Official-app self-host push                      | Optional publisher gateway; independent app build alternative                   | R4                            |
+| Headless daemon packaging                        | Reuse existing PTY ownership, extract only necessary host runtime               | R5                            |
+| Sync record mapping/migrations                   | Preserve current domain IDs; explicit logical mappings if needed                | R1 identifiers, R6 migrations |
+| Billing, quota amounts, domains, app identifiers | Owner-supplied production choices; no invented credentials or paid provisioning | R7                            |
 
 If implementation evidence reveals a conflict with a settled product requirement, document it and ask a focused question. Missing production credentials should not prevent local development and tests with clearly identified fixtures.
 

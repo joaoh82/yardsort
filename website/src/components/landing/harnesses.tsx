@@ -93,9 +93,11 @@ export function Harnesses() {
           </h3>
           <div className="mt-3.5 space-y-3 text-muted">
             <p>
-              Claude Code, Codex, Grok, OpenCode, OMP, Cursor and Pi work out of the box. Pick a
-              different one for each task — the worktree, the branch, the review of its changes and
-              the pull request stay the same whichever you choose.
+              Claude Code, Codex, Grok, OpenCode, OMP, Cursor and Pi work out of the box.
+              Orchestrate them on one task or across many — the worktree, the branch, the review of
+              its changes and the pull request stay the same whichever you choose. Started in
+              Claude, finish in Codex: hand off carries what happened so far, plus any project
+              memory you approved.
             </p>
             <p>
               Add any other terminal agent with a few lines of configuration — no plugin, no release

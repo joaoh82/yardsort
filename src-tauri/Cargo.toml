@@ -1,6 +1,6 @@
 [package]
 name = "yardsort"
-description = "Run AI coding agents in parallel, each on its own track"
+description = "Orchestrate coding agents on Linux, macOS and Windows — shared worktrees, handoff with context"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
