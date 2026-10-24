@@ -1,6 +1,6 @@
 [package]
 name = "yardsort-server"
-description = "The Yardsort server's control service: signing in through an OIDC identity provider, accounts, and the credentials the server issues to devices. A library; nothing listens yet."
+description = "The Yardsort server: signing in through an OIDC identity provider, accounts, and the credentials it issues to devices, kept in PostgreSQL and served over HTTP."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,8 +10,13 @@ publish = false
 [lints]
 workspace = true
 
+[[bin]]
+name = "yardsort-server"
+path = "src/main.rs"
+
 [dependencies]
 remote-proto = { path = "../remote-proto" }
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "query", "tokio"] }
 base64 = "0.22"
 getrandom = "0.3"
 # Checks the identity provider's ID tokens. The algorithm is pinned to each key's own type, so a
@@ -20,11 +25,21 @@ jsonwebtoken = { version = "11.1", default-features = false, features = ["rust_c
 # To the identity provider only: discovery, its keys, and the code exchange.
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# The records, in PostgreSQL. Queries are checked by the tests against a real server, not at
+# compile time, so building needs no database. (sqlx would check them at compile time, but its
+# SQLite driver's native library collides with the app's, even unused.)
+deadpool-postgres = "0.14"
+tokio-postgres = "0.7"
+tokio-postgres-rustls = "0.14"
+webpki-roots = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 subtle = "2"
 thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
@@ -32,4 +47,3 @@ uuid = { version = "1", features = ["v4"] }
 # A stand-in identity provider, served over real HTTP, for the tests.
 axum = "0.8"
 jsonwebtoken = { version = "11.1", default-features = false, features = ["rust_crypto"] }
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }

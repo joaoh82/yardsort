@@ -65,6 +65,19 @@ jobs:
       - name: Rust — clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # The server's PostgreSQL store is tested against a real one. Linux only: the macOS and
+      # Windows runners have no containers, and its tests skip the PostgreSQL half there.
+      - name: PostgreSQL for the server's tests
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:55432:5432 \
+            postgres:17.10-alpine
+          until docker exec postgres pg_isready -U postgres; do sleep 1; done
+          docker exec postgres psql -U postgres -c 'CREATE DATABASE yardsort_test'
+          echo "YARDSORT_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/yardsort_test?sslmode=disable" >> "$GITHUB_ENV"
+          echo "YARDSORT_REQUIRE_TEST_DATABASE=1" >> "$GITHUB_ENV"
+
       - name: Rust — test
         run: cargo test --workspace
 

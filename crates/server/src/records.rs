@@ -4,8 +4,9 @@
 //! [`Records`] is what the service asks of a store. Each method is one step that must happen
 //! whole: taking a one-time value removes it in the same step that reads it, and rotating a
 //! refresh credential checks and replaces it in one step, so two requests racing with the same
-//! value cannot both succeed. [`MemoryRecords`] keeps everything in one process; the PostgreSQL
-//! store comes next and passes the same tests.
+//! value cannot both succeed. [`MemoryRecords`] keeps everything in one process, for tests;
+//! [`crate::postgres::PgRecords`] is the store a server runs on. Both pass the same tests
+//! (`tests/records.rs`).
 //!
 //! Nothing here is a secret: credentials and one-time values are kept as [`TokenHash`]es. The one
 //! exception is the identity provider's PKCE verifier for a sign-in in progress, which has to be
@@ -106,6 +107,10 @@ pub struct RecordsError(pub String);
 
 pub type Result<T> = std::result::Result<T, RecordsError>;
 
+/// How stale a device's `last_seen_at` may be: a use within this long of the last one noted is
+/// not written again, so a busy device does not write on every request.
+pub const SEEN_RESOLUTION_MS: i64 = 60_000;
+
 /// What the control service needs of a store. See the module documentation for what "one step"
 /// means for each method.
 pub trait Records: Send + Sync {
@@ -156,7 +161,8 @@ pub trait Records: Send + Sync {
         now: i64,
     ) -> impl Future<Output = Result<Rotation>> + Send;
 
-    /// Note that a device used its access.
+    /// Note that a device used its access, unless one was noted less than
+    /// [`SEEN_RESOLUTION_MS`] ago.
     fn seen(&self, device: &DeviceId, now: i64) -> impl Future<Output = Result<()>> + Send;
 
     /// The account's devices, revoked ones included.
@@ -324,7 +330,12 @@ impl Records for MemoryRecords {
     async fn seen(&self, device: &DeviceId, now: i64) -> Result<()> {
         self.with(|s| {
             if let Some(device) = s.device_mut(device) {
-                device.last_seen_at = Some(now);
+                if device
+                    .last_seen_at
+                    .is_none_or(|at| at <= now - SEEN_RESOLUTION_MS)
+                {
+                    device.last_seen_at = Some(now);
+                }
             }
         })
     }

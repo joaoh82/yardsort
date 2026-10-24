@@ -52,8 +52,10 @@ crates/pty-ipc/      The wire between the app and the daemon that runs that host
                      the server loop, and a client that is itself a TerminalHost.
 crates/remote-proto/ The remote protocol: versioned request, reply and terminal-frame types,
                      their limits and validation. Data only — no transport, no listener.
-crates/server/       The remote server's control service: signing in through an OIDC provider,
-                     accounts, devices and their credentials. A library; nothing listens yet.
+crates/server/       The remote server: signing in through an OIDC provider, accounts, devices
+  migrations/        and their credentials, kept in PostgreSQL and served over HTTP. Its own
+  dev/               numbered SQL files, append-only like the core's; dev/ is the local
+                     environment (see "Working on the server").
 crates/core/         Everything both clients share and no UI belongs in: the SQLite store,
   src/               git, projects, workspaces, settings, harnesses, workflow files, the launch
                      environment, and finding or starting the daemon. No Tauri — linking the
@@ -81,6 +83,26 @@ Two principles explain most design decisions — more in [architecture](docs/des
    Status, readiness and notifications all derive from _activity_, not content.
 3. **The app is a client.** The terminals belong to the daemon, not the window, so closing the
    window is a disconnect — never a kill.
+
+## Working on the server
+
+The remote server (`crates/server`, the `yardsort-server` binary) needs PostgreSQL and an
+identity provider to sign in with. Locally both run in Docker, so install Docker with Compose and
+make sure your user can reach it; nothing is installed on the machine itself. The server runs on
+the host, so a change rebuilds in seconds.
+
+| Command                       | What it does                                                                                                                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `just server-up`              | Starts PostgreSQL and a throwaway ZITADEL (`crates/server/dev/compose.yaml`), creates the server's app in ZITADEL, and writes the server's settings to `crates/server/dev/server.env.local`. |
+| `just server-run`             | Runs the server against them at `http://127.0.0.1:8787`.                                                                                                                                     |
+| `just server-sign-in`         | Signs a pretend device in through your browser, as the app will, then lists devices, refreshes and revokes itself. Sign in as `developer@yardsort.test`, password `Yardsort-dev-1`.          |
+| `just server-test`            | The server's tests, with their PostgreSQL half against the local database. Plain `cargo test` skips that half when the containers are not up.                                                |
+| `just server-down` / `-reset` | Stops the containers; `reset` also forgets everything in them.                                                                                                                               |
+
+ZITADEL's admin console is at `http://127.0.0.1:8080/ui/console`, with the same sign-in. Every
+password and key in the development environment is a well-known value, and everything listens
+on `127.0.0.1` only: never reuse any of it anywhere reachable. Where the real server will run, and
+the accounts behind it, is [28](docs/design/28-remote-infrastructure.md).
 
 ## Making a change
 

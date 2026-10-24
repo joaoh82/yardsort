@@ -11,7 +11,7 @@ use crate::records::{
     AccountId, Device, Handoff, Issued, PendingLogin, Records, RevokeReason, Revoked, Rotation,
 };
 use crate::tokens::{self, Kind};
-use crate::{ACCESS_TTL_MS, HANDOFF_TTL_MS, LOGIN_TTL_MS, REFRESH_TTL_MS};
+use crate::{ACCESS_TTL_MS, HANDOFF_TTL_MS, LOGIN_TTL_MS, MAX_DEVICES_PER_ACCOUNT, REFRESH_TTL_MS};
 
 /// What a server's operator decides.
 #[derive(Debug, Clone)]
@@ -143,7 +143,7 @@ impl<R: Records> ControlService<R> {
                 now,
             )
             .await
-            .map_err(|_| unreadable())?;
+            .map_err(unreadable)?;
         Ok(url)
     }
 
@@ -168,10 +168,11 @@ impl<R: Records> ControlService<R> {
         let login = match self.records.take_login(&tokens::hash(state)).await {
             Ok(Some(login)) => login,
             Ok(None) => return unknown(),
-            Err(_) => return LoginFinish::Unknown(unreadable()),
+            Err(error) => return LoginFinish::Unknown(unreadable(error)),
         };
-        let Ok(back) = Url::parse(&login.device_redirect) else {
-            return LoginFinish::Unknown(unreadable());
+        let back = match Url::parse(&login.device_redirect) {
+            Ok(back) => back,
+            Err(error) => return LoginFinish::Unknown(unreadable(error)),
         };
         let refuse = |code: ErrorCode, why: String| LoginFinish::Refused {
             to: with_query(&back, "error", error_code(code)),
@@ -260,15 +261,37 @@ impl<R: Records> ControlService<R> {
                     .records
                     .take_handoff(&hash)
                     .await
-                    .map_err(|_| unreadable())?
+                    .map_err(unreadable)?
                     .ok_or_else(refused)?;
                 if handoff.expires_at <= now
                     || !tokens::verifies(&handoff.device_challenge, verifier.expose())
                 {
                     return Err(refused());
                 }
-                let id =
-                    DeviceId::new(uuid::Uuid::new_v4().to_string()).map_err(|_| unreadable())?;
+                // Counted before adding, so two sign-ins at once may both get in: a bound on
+                // what one account can make the records hold, not an exact quota.
+                let signed_in = self
+                    .records
+                    .devices(&handoff.account)
+                    .await
+                    .map_err(unreadable)?
+                    .iter()
+                    .filter(|d| d.revoked.is_none())
+                    .filter(|d| {
+                        d.last_seen_at.unwrap_or(d.created_at).max(d.created_at) + REFRESH_TTL_MS
+                            > now
+                    })
+                    .count();
+                if signed_in >= MAX_DEVICES_PER_ACCOUNT {
+                    return Err(RemoteError::new(
+                        ErrorCode::Forbidden,
+                        format!(
+                            "This account already has {MAX_DEVICES_PER_ACCOUNT} devices signed in. \
+                             Sign one out from another device, then sign in again."
+                        ),
+                    ));
+                }
+                let id = DeviceId::new(uuid::Uuid::new_v4().to_string()).map_err(unreadable)?;
                 let (issued, pair) = issue(now);
                 let credentials = pair.for_device(id.clone());
                 self.records
@@ -286,7 +309,7 @@ impl<R: Records> ControlService<R> {
                         issued,
                     )
                     .await
-                    .map_err(|_| unreadable())?;
+                    .map_err(unreadable)?;
                 Ok(credentials)
             }
             TokenRequest::Refresh { refresh } => {
@@ -300,7 +323,7 @@ impl<R: Records> ControlService<R> {
                     .records
                     .rotate(&hash, issued, now)
                     .await
-                    .map_err(|_| unreadable())?
+                    .map_err(unreadable)?
                 {
                     Rotation::Rotated(device) => Ok(pair.for_device(device.id)),
                     Rotation::Reused => Err(unauthenticated(
@@ -321,7 +344,7 @@ impl<R: Records> ControlService<R> {
             .records
             .access(&hash)
             .await
-            .map_err(|_| unreadable())?
+            .map_err(unreadable)?
             .ok_or_else(signed_out)?;
         if expires_at <= now || device.revoked.is_some() {
             return Err(signed_out());
@@ -329,7 +352,7 @@ impl<R: Records> ControlService<R> {
         self.records
             .seen(&device.id, now)
             .await
-            .map_err(|_| unreadable())?;
+            .map_err(unreadable)?;
         Ok(Caller {
             account: device.account,
             device: device.id,
@@ -342,7 +365,7 @@ impl<R: Records> ControlService<R> {
             .records
             .devices(&caller.account)
             .await
-            .map_err(|_| unreadable())?;
+            .map_err(unreadable)?;
         devices.sort_by_key(|d| std::cmp::Reverse(d.created_at));
         Ok(DevicePage {
             devices: devices
@@ -380,7 +403,7 @@ impl<R: Records> ControlService<R> {
                 },
             )
             .await
-            .map_err(|_| unreadable())?;
+            .map_err(unreadable)?;
         if revoked {
             Ok(())
         } else {
@@ -477,8 +500,9 @@ fn provider_unavailable() -> RemoteError {
     )
 }
 
-/// The records would not answer. Their error stays on the server.
-fn unreadable() -> RemoteError {
+/// The records would not answer. Their error is logged here and stays on the server.
+fn unreadable(error: impl std::fmt::Display) -> RemoteError {
+    tracing::error!("records: {error}");
     RemoteError::new(
         ErrorCode::Internal,
         "The server could not read its own records. Try again in a moment.",

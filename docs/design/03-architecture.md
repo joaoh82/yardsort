@@ -565,7 +565,7 @@ and wakes when the host reports a session quiet or exited. The app holds `app.lo
 directory for as long as it runs (`presence`), which is how `ys` knows it is there and why only
 one app drives a profile's runs.
 
-## Remote access (proposed; first slice built, not wired)
+## Remote access (proposed; sign-in server built, not wired)
 
 Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the records are
 [26](26-remote-r0-r1.md) and [27](27-remote-r2.md). The daemon's socket stays local and file-permission protected. Nothing
@@ -574,12 +574,13 @@ remote ever talks to it directly. Instead:
 - `crates/remote-proto` defines the remote protocol. It is versioned on its own (major 1), with
   JSON requests and replies, binary terminal-output frames, size limits checked before parsing,
   and one id type per kind of thing. It does no I/O.
-- `crates/server` is the server's control service, a library so far
+- `crates/server` is the server: the `yardsort-server` binary, on PostgreSQL, over HTTP
   ([27](27-remote-r2.md)). A person signs in at the server's OIDC provider once per device; the
   server checks the ID token, keeps the account as issuer and subject, and from then on issues
   its own credentials (a 15-minute access, a single-use refresh), kept only as hashes. The
   provider is never asked again for that device, and revoking it takes effect on its next
-  request.
+  request. It serves sign-in and the device routes so far; nothing in the app or `ys` calls it
+  yet, and it is not deployed anywhere ([28](28-remote-infrastructure.md)).
 - `yardsort_core::remote::HostFacade` answers that protocol for one host, read-only, checking
   each request against a device's `Grant` (scopes plus projects). It is built field by field
   from what the app already shows, so paths, argv, environment, labels and terminal output have

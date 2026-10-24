@@ -10,10 +10,15 @@
 //! therefore the server's alone, and immediate, and a provider that bills by active user counts
 //! sign-ins, not every phone's every refresh.
 //!
-//! This crate is a library. Nothing listens yet: the HTTP endpoints, the PostgreSQL store and
-//! host enrollment come in later slices of R2.
+//! [`http::router`] serves the service over HTTP, [`postgres::PgRecords`] keeps its records, and
+//! the `yardsort-server` binary (`src/main.rs`) puts the two together from its environment. Host
+//! enrollment and the relay come in later slices of R2.
 
+pub mod config;
+pub mod http;
+pub mod limit;
 pub mod oidc;
+pub mod postgres;
 pub mod records;
 mod service;
 pub mod tokens;
@@ -30,3 +35,6 @@ pub const ACCESS_TTL_MS: i64 = 15 * 60_000;
 /// How long a refresh credential works unused. Each refresh starts this again, so a device in
 /// use stays signed in, and one left unused for this long must sign in again.
 pub const REFRESH_TTL_MS: i64 = 90 * 24 * 60 * 60_000;
+/// How many devices one account may have signed in. A device counts until it is revoked or has
+/// gone unused for [`REFRESH_TTL_MS`].
+pub const MAX_DEVICES_PER_ACCOUNT: usize = 50;

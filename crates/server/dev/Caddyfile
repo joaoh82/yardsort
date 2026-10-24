@@ -1,0 +1,19 @@
+# ZITADEL behind one address, as it requires: the login pages to the login container, everything
+# else to the API over HTTP/2 without TLS (h2c), which its gRPC needs. Local development only.
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	@root path /
+	rewrite @root /ui/v2/login/
+
+	handle /ui/v2/login* {
+		reverse_proxy zitadel-login:3000
+	}
+
+	handle {
+		reverse_proxy h2c://zitadel-api:8080
+	}
+}
