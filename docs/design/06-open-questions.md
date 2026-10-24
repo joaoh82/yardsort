@@ -277,3 +277,13 @@ still stands; these are what the code added to it.
     see?** Lean: the terminal listed as viewable later, with the reason ("this computer's
     terminals predate remote control; they will be available once these agents finish"), never
     a forced daemon restart.
+38. **Should a spent refresh credential be accepted again for a few seconds?** Today presenting
+    one revokes the device ([27](27-remote-r2.md#3--credentials)), which also signs out an honest
+    device whose answer was lost in transit. Lean: no grace window until reports show it
+    happening; a sign-in fixes it.
+39. **Should a device have to sign in again after some time however often it is used?** Each
+    refresh starts its 90 days again, and the provider is asked only at sign-in, so a person
+    disabled at the provider keeps their devices until the operator revokes them
+    ([27 §7](27-remote-r2.md#7--risks)). A maximum session (30 to 90 days) bounds that, at the cost
+    of a sign-in every so often, which a provider billing by daily active user counts. Lean: no
+    maximum yet; an operator command revokes an account's devices (R2 slice 3).

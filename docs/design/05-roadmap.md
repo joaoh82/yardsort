@@ -862,7 +862,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       Found on the way and fixed: a snapshot taken between two halves of an escape sequence or
       a character showed the rest as text, or lost a byte (`vt100` 0.16 drops one after a split
       character).
-- [ ] R2–R7: identity and relay, the mobile app, hardening, headless hosts, sync, managed launch.
+- [ ] R2: identity and relay, in progress ([27](27-remote-r2.md)). The self-host recipe's
+      identity provider is ZITADEL; the server takes any OIDC issuer. First slice built, as a
+      library: a person signs in at the provider once per device, and the device then holds the
+      server's own credentials (15-minute access, single-use refresh), so the provider is never
+      asked again and revocation is immediate.
+- [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

@@ -48,13 +48,16 @@ pub fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// The operating system a host runs. Clients use it to label a host, nothing more.
+/// The operating system a host or a device runs. Used to label one, nothing more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Platform {
     Linux,
     Macos,
     Windows,
+    /// A phone's, for a device that signed in from one.
+    Ios,
+    Android,
     #[serde(other)]
     Other,
 }
@@ -67,6 +70,10 @@ impl Platform {
             Self::Macos
         } else if cfg!(windows) {
             Self::Windows
+        } else if cfg!(target_os = "ios") {
+            Self::Ios
+        } else if cfg!(target_os = "android") {
+            Self::Android
         } else {
             Self::Other
         }

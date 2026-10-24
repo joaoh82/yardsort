@@ -52,6 +52,8 @@ crates/pty-ipc/      The wire between the app and the daemon that runs that host
                      the server loop, and a client that is itself a TerminalHost.
 crates/remote-proto/ The remote protocol: versioned request, reply and terminal-frame types,
                      their limits and validation. Data only — no transport, no listener.
+crates/server/       The remote server's control service: signing in through an OIDC provider,
+                     accounts, devices and their credentials. A library; nothing listens yet.
 crates/core/         Everything both clients share and no UI belongs in: the SQLite store,
   src/               git, projects, workspaces, settings, harnesses, workflow files, the launch
                      environment, and finding or starting the daemon. No Tauri — linking the
