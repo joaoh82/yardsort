@@ -168,6 +168,14 @@ pub trait Records: Send + Sync {
     /// The account's devices, revoked ones included.
     fn devices(&self, account: &AccountId) -> impl Future<Output = Result<Vec<Device>>> + Send;
 
+    /// How many of the account's devices are signed in at `now`: not revoked, and holding a
+    /// refresh credential that is neither spent nor lapsed.
+    fn signed_in_devices(
+        &self,
+        account: &AccountId,
+        now: i64,
+    ) -> impl Future<Output = Result<usize>> + Send;
+
     /// Revoke one of the account's devices. `false` when the account has no such device, which
     /// includes another account's: the two are not told apart.
     fn revoke(
@@ -347,6 +355,20 @@ impl Records for MemoryRecords {
                 .filter(|d| d.account == *account)
                 .cloned()
                 .collect()
+        })
+    }
+
+    async fn signed_in_devices(&self, account: &AccountId, now: i64) -> Result<usize> {
+        self.with(|s| {
+            s.devices
+                .iter()
+                .filter(|d| d.account == *account && d.revoked.is_none())
+                .filter(|d| {
+                    s.refresh
+                        .values()
+                        .any(|r| r.device == d.id && !r.spent && r.expires_at > now)
+                })
+                .count()
         })
     }
 

@@ -52,6 +52,7 @@ for_each_store!(
     racing_rotations_of_one_credential_let_exactly_one_through,
     seen_is_written_at_most_once_a_minute,
     an_account_lists_and_revokes_only_its_own_devices,
+    signed_in_devices_hold_a_live_refresh_credential,
     devices_keep_every_wire_name,
 );
 
@@ -379,6 +380,44 @@ async fn an_account_lists_and_revokes_only_its_own_devices(records: Arc<impl Rec
         .find(|d| d.id == phone.id)
         .unwrap();
     assert_eq!(phone_now.revoked, Some(by_owner(T + 5)));
+}
+
+async fn signed_in_devices_hold_a_live_refresh_credential(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    enroll(&*records, &alice, "phone", T).await;
+    // Rotated: one spent credential and one live one, still one device.
+    enroll(&*records, &alice, "laptop", T).await;
+    records
+        .rotate(
+            &h("laptop-refresh"),
+            issued("laptop-2", T + 9_000),
+            T + 9_000,
+        )
+        .await
+        .unwrap();
+    let tablet = enroll(&*records, &alice, "tablet", T).await;
+    let revoked = Revoked {
+        at: T + 100,
+        reason: RevokeReason::ByOwner,
+    };
+    assert!(records.revoke(&alice, &tablet.id, revoked).await.unwrap());
+    enroll(&*records, &bob, "bob-phone", T).await;
+
+    assert_eq!(
+        records.signed_in_devices(&alice, T + 9_500).await.unwrap(),
+        2
+    );
+    assert_eq!(records.signed_in_devices(&bob, T + 9_500).await.unwrap(), 1);
+    // The phone's only credential lapses at T + 10 000; the laptop's renewed one later.
+    assert_eq!(
+        records.signed_in_devices(&alice, T + 10_000).await.unwrap(),
+        1
+    );
+    assert_eq!(
+        records.signed_in_devices(&alice, T + 19_000).await.unwrap(),
+        0
+    );
 }
 
 async fn devices_keep_every_wire_name(records: Arc<impl Records>) {

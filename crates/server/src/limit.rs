@@ -4,19 +4,36 @@
 //!
 //! Each instance counts on its own, so two instances allow twice the rate. An IPv6 address counts
 //! with the rest of its /64, which one subscriber usually holds whole.
+//!
+//! At most [`MAX_TRACKED`] addresses are counted one by one. When that many are, full buckets
+//! (which say nothing) are swept out at most once every [`SWEEP_EVERY`], and an address that
+//! still finds no room shares one overflow bucket with every other such address. So a burst from
+//! many addresses costs bounded memory and no more than one sweep a second, and the addresses
+//! already counted keep their own allowance; only newcomers during the burst share.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Buckets kept before full ones, which say nothing, are dropped.
+/// Addresses counted one by one.
 const MAX_TRACKED: usize = 10_000;
+/// The least time between two sweeps of a full map.
+const SWEEP_EVERY: Duration = Duration::from_secs(1);
 
 pub struct Limiter {
     /// The burst allowed, and the refill over a minute.
     per_minute: f64,
-    buckets: Mutex<HashMap<IpAddr, Bucket>>,
+    state: Mutex<State>,
+}
+
+#[derive(Default)]
+struct State {
+    buckets: HashMap<IpAddr, Bucket>,
+    /// Shared by the addresses that found no room in `buckets`.
+    overflow: Option<Bucket>,
+    swept_at: Option<Instant>,
+    sweeps: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -29,24 +46,39 @@ impl Limiter {
     pub fn per_minute(count: u32) -> Self {
         Self {
             per_minute: f64::from(count.max(1)),
-            buckets: Mutex::new(HashMap::new()),
+            state: Mutex::new(State::default()),
         }
     }
 
     /// Take one for `address`, or say how long until one is free.
     pub fn check(&self, address: IpAddr, now: Instant) -> Result<(), Duration> {
         let key = grouped(address);
-        let Ok(mut buckets) = self.buckets.lock() else {
+        let Ok(mut state) = self.state.lock() else {
             // A panic elsewhere while holding it: let requests through rather than refuse all.
             return Ok(());
         };
-        if buckets.len() >= MAX_TRACKED {
-            buckets.retain(|_, b| self.refilled(*b, now) < self.per_minute);
+        let state = &mut *state;
+        if !state.buckets.contains_key(&key) && state.buckets.len() >= MAX_TRACKED {
+            let due = state
+                .swept_at
+                .is_none_or(|at| now.saturating_duration_since(at) >= SWEEP_EVERY);
+            if due {
+                state
+                    .buckets
+                    .retain(|_, b| self.refilled(*b, now) < self.per_minute);
+                state.swept_at = Some(now);
+                state.sweeps += 1;
+            }
         }
-        let bucket = buckets.entry(key).or_insert(Bucket {
+        let full = Bucket {
             tokens: self.per_minute,
             at: now,
-        });
+        };
+        let bucket = if state.buckets.len() < MAX_TRACKED || state.buckets.contains_key(&key) {
+            state.buckets.entry(key).or_insert(full)
+        } else {
+            state.overflow.get_or_insert(full)
+        };
         let tokens = self.refilled(*bucket, now);
         if tokens >= 1.0 {
             *bucket = Bucket {
@@ -126,14 +158,30 @@ mod tests {
     }
 
     #[test]
-    fn many_addresses_do_not_grow_it_without_bound() {
+    fn a_burst_from_many_addresses_is_bounded_and_sweeps_at_most_once_a_second() {
         let limiter = Limiter::per_minute(10);
         let t = Instant::now();
-        for i in 0..(MAX_TRACKED as u32 + 10) {
-            let _ = limiter.check(IpAddr::V4(i.into()), t);
+        let known = ip("203.0.113.1");
+        assert!(limiter.check(known, t).is_ok());
+        let mut refused = 0;
+        for i in 0..(2 * MAX_TRACKED as u32) {
+            if limiter.check(IpAddr::V4(i.into()), t).is_err() {
+                refused += 1;
+            }
         }
+        let tracked = |l: &Limiter| l.state.lock().unwrap().buckets.len();
+        let sweeps = |l: &Limiter| l.state.lock().unwrap().sweeps;
+        assert_eq!(tracked(&limiter), MAX_TRACKED);
+        assert_eq!(sweeps(&limiter), 1, "one sweep for the whole burst");
+        // The newcomers that found no room shared one allowance of ten.
+        assert_eq!(refused, MAX_TRACKED + 1 - 10);
+        // An address counted before the burst keeps its own.
+        assert!(limiter.check(known, t).is_ok());
+
+        // Once the burst has refilled, a sweep a second later makes room again.
         let later = t + Duration::from_secs(60);
-        let _ = limiter.check(ip("203.0.113.1"), later);
-        assert!(limiter.buckets.lock().unwrap().len() < 100);
+        assert!(limiter.check(ip("198.51.100.9"), later).is_ok());
+        assert_eq!(sweeps(&limiter), 2);
+        assert!(tracked(&limiter) < 100);
     }
 }

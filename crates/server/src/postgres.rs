@@ -387,6 +387,24 @@ impl Records for PgRecords {
             .collect()
     }
 
+    async fn signed_in_devices(&self, account: &AccountId, now: i64) -> Result<usize> {
+        let row = self
+            .client()
+            .await?
+            .query_one(
+                "SELECT count(*) FROM devices d
+                 WHERE d.account = $1 AND d.revoked_at IS NULL AND EXISTS (
+                     SELECT 1 FROM refresh_credentials r
+                     WHERE r.device = d.id AND r.spent_at IS NULL AND r.expires_at > $2
+                 )",
+                &[&account.0, &now],
+            )
+            .await
+            .map_err(failed)?;
+        let count: i64 = row.get(0);
+        Ok(usize::try_from(count).unwrap_or(usize::MAX))
+    }
+
     async fn revoke(
         &self,
         account: &AccountId,

@@ -12,6 +12,7 @@ use remote_proto::{DeviceId, ErrorCode, Platform, RemoteError, ServerId};
 use url::Url;
 use yardsort_server::oidc::{self, ProviderConfig, KEYS_REFETCH_MS, PROVIDER_MAX_AGE_MS};
 use yardsort_server::records::{Device, Issued, MemoryRecords, Records};
+use yardsort_server::tokens::Kind;
 use yardsort_server::{
     tokens, Caller, ControlService, LoginFinish, ServerConfig, ACCESS_TTL_MS, HANDOFF_TTL_MS,
     LOGIN_TTL_MS, MAX_DEVICES_PER_ACCOUNT, REFRESH_TTL_MS,
@@ -553,35 +554,45 @@ async fn a_provider_that_names_another_issuer_is_not_used() {
     .is_ok());
 }
 
+/// Enroll a device for `subject` directly in the records, as if it signed in at `at`, and return
+/// its refresh credential.
+async fn enrolled_at(s: &Setup, subject: &str, name: &str, at: i64) -> Secret {
+    let records = s.service.records();
+    let account = records.account(&s.idp.issuer(), subject, at).await.unwrap();
+    let refresh = tokens::mint(Kind::Refresh);
+    let device = Device {
+        id: DeviceId::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+        account,
+        name: name.into(),
+        kind: DeviceKind::Phone,
+        platform: Platform::Ios,
+        created_at: at,
+        last_seen_at: None,
+        revoked: None,
+    };
+    let issued = Issued {
+        access: tokens::mint(Kind::Access).hash,
+        access_expires_at: at + ACCESS_TTL_MS,
+        refresh: refresh.hash,
+        refresh_expires_at: at + REFRESH_TTL_MS,
+    };
+    records.add_device(device, issued).await.unwrap();
+    refresh.secret
+}
+
 #[tokio::test]
 async fn an_account_may_have_only_so_many_devices_signed_in() {
     let s = setup(None).await;
     let now = now_ms();
-    // Devices unused for as long as a refresh lasts no longer count.
-    let records = s.service.records();
-    let account = records
-        .account(&s.idp.issuer(), "subject-1", now)
-        .await
-        .unwrap();
+    // Devices whose refresh credential has lapsed no longer count.
     for n in 0..MAX_DEVICES_PER_ACCOUNT {
-        let long_ago = now - REFRESH_TTL_MS;
-        let device = Device {
-            id: DeviceId::new(format!("unused-{n}")).unwrap(),
-            account: account.clone(),
-            name: format!("Unused {n}"),
-            kind: DeviceKind::Phone,
-            platform: Platform::Ios,
-            created_at: long_ago,
-            last_seen_at: None,
-            revoked: None,
-        };
-        let issued = Issued {
-            access: tokens::hash(&tokens::random()),
-            access_expires_at: long_ago + ACCESS_TTL_MS,
-            refresh: tokens::hash(&tokens::random()),
-            refresh_expires_at: long_ago + REFRESH_TTL_MS,
-        };
-        records.add_device(device, issued).await.unwrap();
+        enrolled_at(
+            &s,
+            "subject-1",
+            &format!("Unused {n}"),
+            now - REFRESH_TTL_MS,
+        )
+        .await;
     }
 
     let mut first = None;
@@ -600,6 +611,21 @@ async fn an_account_may_have_only_so_many_devices_signed_in() {
     let me = caller(&s, &first, now).await.unwrap();
     s.service.revoke(&me, &first.device, now).await.unwrap();
     sign_in(&s, "subject-1", "Replacement", now).await;
+}
+
+#[tokio::test]
+async fn a_device_that_only_refreshes_still_counts_after_ninety_days() {
+    let s = setup(None).await;
+    let now = now_ms();
+    let long_ago = now - REFRESH_TTL_MS - 1;
+    for n in 0..MAX_DEVICES_PER_ACCOUNT {
+        let first = enrolled_at(&s, "subject-1", &format!("Device {n}"), long_ago).await;
+        // Refreshed just before it lapsed, and never used for anything else.
+        refresh(&s, &first, now - 2).await.unwrap();
+    }
+    let (verifier, code) = browse(&s, "subject-1", now).await;
+    let refused = redeem(&s, &code, &verifier, "One too many", now).await;
+    assert_eq!(code_of(refused), ErrorCode::Forbidden);
 }
 
 #[tokio::test]

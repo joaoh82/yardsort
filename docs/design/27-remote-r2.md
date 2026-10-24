@@ -146,8 +146,13 @@ is sent anywhere, so the server is not an open redirector.
   with a burst of as many, answered with `429` and `Retry-After`. An IPv6 address counts with the
   rest of its /64. Behind a proxy, the address is taken from the header it names
   (`YARDSORT_CLIENT_IP_HEADER`, `Fly-Client-IP` on Fly.io) and otherwise from the connection.
-- **At most 50 devices per account** (`MAX_DEVICES_PER_ACCOUNT`). A device counts until it is
-  revoked or has gone unused for as long as a refresh lasts. The 51st sign-in is refused with
+  At most 10 000 addresses are counted one by one. Once that many are, full buckets are swept
+  out at most once a second, and a newcomer that still finds no room shares one overflow bucket
+  with every other, so a burst from many addresses costs bounded memory and time, and addresses
+  already counted keep their own allowance.
+- **At most 50 devices per account** (`MAX_DEVICES_PER_ACCOUNT`). A device counts while it is not
+  revoked and holds a refresh credential that is neither spent nor lapsed, however it last used
+  it (`Records::signed_in_devices`). The 51st sign-in is refused with
   `403` and a message saying to sign one out; the code it used is spent. Two sign-ins at the
   same moment can both get in, so this bounds what one account can make the records hold
   rather than being an exact quota.
@@ -186,11 +191,12 @@ is sent anywhere, so the server is not an open redirector.
 
 On Linux, 2026-10-23, the second slice, with the review's additions of 2026-10-24:
 
-- `just server-test`: 54 tests, all passing.
-  - `tests/records.rs`: the same twelve checks of what a store must do, run on `MemoryRecords`
+- `just server-test`: 57 tests, all passing.
+  - `tests/records.rs`: the same thirteen checks of what a store must do, run on `MemoryRecords`
     and on `PgRecords` against PostgreSQL 17, each test in a fresh schema. They include eight
     rotations of one refresh credential racing (exactly one gets through), a copy of the first
-    refresh credential still revoking the device three rotations later, names with non-ASCII
+    refresh credential still revoking the device three rotations later, which devices count as
+    signed in (revoked, rotated, lapsed and another account's), names with non-ASCII
     text, and every device kind and platform. Two more are PostgreSQL's alone: the server's id
     and schema survive a restart, and four instances starting together on an empty schema
     migrate once and agree on one id.
@@ -198,14 +204,18 @@ On Linux, 2026-10-23, the second slice, with the review's additions of 2026-10-2
     the provider's answer, redemption, the device list, refresh, an unknown device's `404`,
     revocation and the `401` after. Also the status, body and headers of each kind of wrong
     request, and the rate limits.
-  - The first slice's tests, one more for the device limit (50 long-unused devices, then 50 in
-    use, then a refused 51st, another account unaffected, room again after a revocation), and
-    unit tests for the settings and the limiter.
+  - The first slice's tests, and two more for the device limit: 50 lapsed devices, then 50 in
+    use, then a refused 51st, another account unaffected, room again after a revocation; and 50
+    devices that only ever refreshed, across the 90 days, still counting.
+  - Unit tests for the settings and the limiter, including a burst from 20 000 addresses at one
+    instant: 10 000 tracked, one sweep, the rest sharing one allowance.
 - Seven changes to `PgRecords` were made on purpose, one at a time: no row locks in a rotation,
   revocation not scoped to the account, a sign-in not removed when taken, a second revocation
   overwriting the first, reuse not revoking the device, lapsed handoffs kept, and spent refresh
-  credentials deleted at the next rotation. A test failed each time, as it did with the device
-  limit taken out and with long-unused devices counted.
+  credentials deleted at the next rotation. A test failed each time. So did one with the device
+  limit taken out, with lapsed credentials counted, with devices counted by when they were last
+  seen (which missed the ones that only refresh: found in review), with the limiter sweeping on
+  every request (the burst took 2.1 s instead of 0.02 s), and with it tracking every address.
 - **Against a real ZITADEL** (v4.19.5, in the local environment): `just server-sign-in` signed in
   through ZITADEL's login pages, which headless Chromium filled in. The device was listed,
   refreshed, revoked, and then refused. This also settled two things:
@@ -276,7 +286,9 @@ losing a live stream, and relay failure leaving PTYs alive.
 ## 8 · Risks
 
 - **Rate limits are per instance and per address.** Two instances allow twice the rate, and many
-  addresses together are not limited. The callback is not limited: it only takes a sign-in that
+  addresses together are not limited as a whole. Once more than 10 000 are in play, newcomers
+  share one allowance, so during such a burst a person signing in from a new address may be
+  told to wait a minute. The callback is not limited: it only takes a sign-in that
   was started, which is.
 - **Refresh reuse signs a device out even when the device is honest**, when the answer carrying
   its new credentials was lost in transit after the server rotated them. That is the standard

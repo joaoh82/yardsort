@@ -272,16 +272,9 @@ impl<R: Records> ControlService<R> {
                 // what one account can make the records hold, not an exact quota.
                 let signed_in = self
                     .records
-                    .devices(&handoff.account)
+                    .signed_in_devices(&handoff.account, now)
                     .await
-                    .map_err(unreadable)?
-                    .iter()
-                    .filter(|d| d.revoked.is_none())
-                    .filter(|d| {
-                        d.last_seen_at.unwrap_or(d.created_at).max(d.created_at) + REFRESH_TTL_MS
-                            > now
-                    })
-                    .count();
+                    .map_err(unreadable)?;
                 if signed_in >= MAX_DEVICES_PER_ACCOUNT {
                     return Err(RemoteError::new(
                         ErrorCode::Forbidden,
