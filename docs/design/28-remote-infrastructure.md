@@ -1,0 +1,234 @@
+# Remote: where it runs, and how to set it up
+
+**Status:** a plan. Nothing is provisioned, bought or deployed. Prices were checked on
+2026-10-22 and change often; check them again before relying on them. The design this hosts is
+[27](27-remote-r2.md). Setting the accounts up is the owner's to do (proposal §16: production
+choices, credentials and paid provisioning are owner-supplied). Section 5 is the checklist for it.
+
+## 1 · Environments
+
+| Environment    | Runs on                                 | Identity provider                                     | Database                  | Who uses it                     |
+| -------------- | --------------------------------------- | ----------------------------------------------------- | ------------------------- | ------------------------------- |
+| **Local**      | Docker Compose on a developer's machine | ZITADEL in a container, throwaway                     | PostgreSQL in a container | Development and tests           |
+| **Staging**    | Fly.io `fra`, one small Machine         | ZITADEL Cloud, the free instance                      | PostgreSQL (see §2)       | The team, and beta testers      |
+| **Production** | Fly.io `fra`, two Machines              | ZITADEL Cloud Pro, its own instance and custom domain | Fly Managed Postgres      | Everyone on the managed service |
+
+Self-hosters run the same server image with the self-host recipe (R2's third slice): their own
+ZITADEL, their own PostgreSQL, behind their own reverse proxy. Nothing in it calls our
+infrastructure.
+
+Each environment has its own identity provider instance or application, its own database and
+its own secrets. Staging never reads production data, and a staging credential opens nothing in
+production.
+
+## 2 · Where each part runs
+
+**The Yardsort server on Fly.io.** One binary serves sign-in, the device routes and, from slice
+6, the relay. The relay holds WebSocket connections for as long as hosts and phones stay
+connected, which rules out request-scoped serverless platforms such as Cloud Run or Lambda. Fly
+runs a container as a long-lived Machine and proxies WebSockets, terminates TLS and issues
+certificates. It bills by the second, and its private network reaches its managed PostgreSQL.
+`flyctl` is already installed here. A deploy restarts Machines and so drops live connections:
+hosts and devices reconnect, which the protocol is built for (a fresh snapshot, never a replay).
+
+**PostgreSQL.** Two choices:
+
+- **Fly Managed Postgres**: high availability, backups and connection pooling on every plan, and
+  reachable over Fly's private network. Basic, with shared CPUs and 1 GB, is US$38 a month plus
+  US$0.28 per GB of storage. This is the choice for production.
+- **Neon**: usage-based, with a free plan, and US$0.106 per compute-hour on Launch. It is cheaper
+  for a staging database that is mostly idle, but outside Fly's network, so it is reached over
+  the internet with TLS.
+
+The lean is Neon's free plan for staging and Fly Managed Postgres for production.
+
+**Identity on ZITADEL Cloud.** Staging uses the free plan: one instance, 100 daily active users,
+and a `*.zitadel.cloud` domain. Production needs Pro (US$100 a month): a second instance needs
+it, and so do a custom domain and the uptime guarantee. With sign-in only (27 §2), each device
+counts on the days its person signs in, not every day it is used. Data locations are the United
+States, the European Union, Switzerland and Australia, all on Google Cloud. ZITADEL's own pages
+disagree on whether the free plan may choose one. Put the instance in the same part of the world
+as the server.
+
+**Everything else:**
+
+- **DNS:** `yardsort.sh` is on Cloudflare, already the owner's.
+- **The website:** stays on Vercel.
+- **Email:** for now, ZITADEL sends its own verification and invitation emails. Our own sender
+  comes later, for branding.
+- **Push:** Apple's and Google's push services, in R4.
+- **Monitoring:** Fly's built-in metrics and logs to begin with. Error tracking and a status page
+  come before the public beta.
+
+**Considered and not chosen:**
+
+- **A plain VPS** (Hetzner and similar) is cheapest per CPU. But we would run PostgreSQL, its
+  backups and failover, TLS and deploys ourselves. Hetzner's prices also rose sharply in 2026: a
+  CPX22 was about €19.50 a month in August, and the cheapest CX line was not orderable.
+- **Render** (the owner chose Fly.io over it on 2026-10-23) would also work, and is simpler to
+  operate: deploys from a Git push, a clear
+  dashboard, preview environments. It loses on three things this server needs (checked
+  2026-10-23):
+  - **Relay traffic costs more.** Render's Pro workspace includes 25 GB of outbound traffic,
+    then US$0.15 per GB. Fly charges US$0.02 per GB in Europe and North America. Relay traffic
+    is the cost that grows with use.
+  - **No routing to a chosen instance.** Render's load balancer gives each new connection to a
+    random instance. Once the relay runs on more than one instance, a host and the phone
+    reaching it may land on different ones, and the instances would need a message bus between
+    them. On Fly, the server can answer `fly-replay` to send a connection to the Machine that
+    holds the host's.
+  - **One region per service, and one in Europe.** Render has Frankfurt alone in Europe, and
+    each region is its own private network. Fly offers Managed Postgres in Frankfurt,
+    Amsterdam and London, and one app can run Machines in several regions.
+
+  With high availability, Render's PostgreSQL needs a Pro plan (US$55 a month for 1 CPU and
+  4 GB) and bills the standby at the same price again. That makes production on Render about
+  US$150 a month before ZITADEL, against about US$50 on Fly. Both status pages, and outside
+  trackers, show regional incidents on both platforms through 2026: neither record is clean.
+  Either way, local processes survive the server going away (proposal §18, "Important invariants").
+
+- **Railway** was ruled out by the owner after its instability in October 2026.
+- **AWS or Google Cloud directly** give the most control and need the most operations, which a
+  team this size should not spend yet.
+
+## 3 · What it costs to start
+
+| Item                                               | Staging          | Production at launch                          |
+| -------------------------------------------------- | ---------------- | --------------------------------------------- |
+| Fly Machines (shared-cpu-1x, 512 MB, US$3.69 each) | 1 → ~US$4        | 2 → ~US$7.50                                  |
+| Fly outbound traffic (US$0.02/GB in NA and EU)     | ~US$0            | Relay traffic: measure in beta (proposal §12) |
+| Dedicated IPv4                                     | US$0 (shared)    | US$2                                          |
+| PostgreSQL                                         | Neon free: US$0  | Fly Managed Postgres Basic: US$38 + storage   |
+| ZITADEL Cloud                                      | Free: US$0       | Pro: US$100                                   |
+| Domain and DNS                                     | the owner's      | the owner's                                   |
+| **About**                                          | **US$5 a month** | **US$150 a month**, before relay traffic      |
+
+## 4 · Names
+
+The domain is `yardsort.sh`. The website keeps `www.yardsort.sh` on Vercel.
+
+| Name                         | What                                                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `remote.yardsort.sh`         | The production server, which the app and the phone connect to: sign-in, devices, and later the relay                |
+| `remote-staging.yardsort.sh` | Staging                                                                                                             |
+| `auth.yardsort.sh`           | Production's ZITADEL custom domain (Pro): the sign-in pages people see. Staging keeps its `*.zitadel.cloud` address |
+| `<server>/v1/login/callback` | The one redirect URI registered at ZITADEL for each environment (27 §2)                                             |
+| `yardsort://signed-in`       | The app's redirect, allowed by the server, never registered at ZITADEL                                              |
+| `http://127.0.0.1/signed-in` | A computer's redirect, on any port                                                                                  |
+
+Fly app names are global, so the ones below may need a suffix.
+
+## 5 · Setting it up: the owner's checklist
+
+Do these in order. Nothing secret goes into git, an issue or a chat. Each secret goes straight
+from the provider's screen into Fly's secrets or a GitHub environment secret.
+
+**A. Decide**
+
+Settled on 2026-10-23:
+
+- **Region: Europe.** Fly `fra` (Frankfurt), where Managed Postgres is offered
+  (`fly platform regions`), and ZITADEL's European Union location.
+- **Hosting: Fly.io**, over Render (§2).
+- **Domain:** `yardsort.sh`, with the names in §4. Its DNS is on Cloudflare.
+- **ZITADEL:** the Cloud free plan to begin with, and Pro once there is something to launch.
+
+**B. ZITADEL Cloud, for staging first**
+
+1. Sign up at zitadel.com. That creates a Customer Portal account and a team. Turn on MFA or a
+   passkey for it.
+2. **Create Instance**: name it `yardsort-staging`, in the chosen region if offered. Create its
+   first administrator, with a passkey.
+3. In the instance console, create a **project**, `Yardsort server`.
+4. In the project, create an **application**:
+   - **Type:** **Web**.
+   - **Authentication method:** **Code**, so the server authenticates with a client secret.
+     The server sends PKCE as well, which ZITADEL accepts alongside the secret: confirmed against
+     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §6).
+   - **Redirect URI:** `https://remote-staging.yardsort.sh/v1/login/callback`.
+   - **Development mode:** off.
+   - **Refresh tokens:** leave them off. The server never asks ZITADEL for one.
+5. Copy the **issuer**, exactly as the instance shows it (`https://yardsort-staging-xxxx.zitadel.cloud`),
+   and the **client ID**. These two are not secret. Put the **client secret** straight into Fly
+   (step C3).
+6. **Login settings:** turn off self-registration for the beta, and invite testers from the
+   console. Allow passkeys.
+
+**C. Fly.io**
+
+1. Create or choose the organization for Yardsort, with a payment card. Every member uses
+   two-factor authentication.
+2. Create the apps without deploying them: `fly apps create yardsort-remote-staging`, and
+   `yardsort-remote` for later.
+3. Set staging's secrets. `fly secrets import` reads them from stdin, ending with Ctrl-D, so
+   they stay out of shell history:
+
+   ```sh
+   fly secrets import -a yardsort-remote-staging   # then paste, one per line:
+   # YARDSORT_OIDC_CLIENT_SECRET=…
+   # DATABASE_URL=…
+   ```
+
+4. Create a deploy token for CI that can deploy that app and nothing else:
+   `fly tokens create deploy -a yardsort-remote-staging`.
+
+**D. Database**
+
+- **Staging:** create a Neon project in Frankfurt (AWS `eu-central-1`), with one database
+  `yardsort`. Use its direct connection string, not the pooled one, as `DATABASE_URL`, keeping
+  `sslmode=require`: the server keeps its own pool of eight connections per instance, and makes
+  its tables itself when it first starts.
+- **Production, later:** `fly mpg create`, on the Basic plan, in the primary region.
+
+**E. DNS**
+
+`fly certs add remote-staging.yardsort.sh -a yardsort-remote-staging`, then add the records it
+prints in Cloudflare, set to **DNS only** (the grey cloud), not proxied:
+
+- Fly issues and renews the certificate itself, and its check has to reach Fly.
+- Proxied, every connection would come from Cloudflare's addresses. The server's per-address
+  rate limits would then count Cloudflare, not the client.
+
+`fly certs show remote-staging.yardsort.sh -a yardsort-remote-staging` says when the certificate
+is issued.
+
+**F. GitHub**
+
+Create a `staging` environment on the repository, with the deploy token as `FLY_API_TOKEN`.
+Later, create a `production` environment that requires a reviewer.
+
+**G. Hand back**
+
+Pass these back to whoever builds the deploy (slice 3):
+
+- the Fly app names, if a suffix was needed;
+- the ZITADEL issuer and client ID.
+
+None of them is a secret.
+
+**Production, at launch:**
+
+- Do B again on Pro: a `yardsort-production` instance with `auth.yardsort.sh` as its custom domain.
+- Do C, D and E again for `yardsort-remote`.
+
+## 6 · What gets built, and when
+
+Section 5 is the owner's. The rest is code, in R2's next slices, and nothing is deployed without
+the owner's go-ahead:
+
+- **Slice 2, done on 2026-10-23** ([27](27-remote-r2.md) §5): the `yardsort-server` binary,
+  its PostgreSQL store, configuration from the environment and secret files, and the local
+  Docker environment with `just` recipes (CONTRIBUTING, "Working on the server").
+- **Slice 3:**
+  - the container image and `fly.toml`, with the settings that are not secret (the public URL,
+    the issuer, the client id, `YARDSORT_CLIENT_IP_HEADER=Fly-Client-IP`) and a health check on
+    `/health`;
+  - a GitHub Actions workflow that deploys to staging on request, and to production only
+    through the protected environment;
+  - the self-host recipe.
+
+## 7 · Open decisions
+
+- Neon or Fly Managed Postgres for staging.
+- When "something to launch" is, for ZITADEL Pro: the public beta, or launch (R7).
+- Whether beta testers sign up for themselves or are invited.

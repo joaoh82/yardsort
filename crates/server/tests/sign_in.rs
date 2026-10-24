@@ -1,334 +1,22 @@
-//! Signing in against a stand-in identity provider served over real HTTP. Discovery, the key set
-//! and the code exchange go from reqwest to an axum server, and its ID tokens are signed with real
-//! keys: `tests/fixtures/`, generated for these tests and used nowhere else.
-//!
-//! The provider checks what a real one does: the client's credentials, the code, the redirect URI
-//! and the PKCE verifier. Each test that makes it misbehave checks that nobody was signed in.
+//! Signing in, through the control service, against the stand-in identity provider in
+//! `common/idp.rs`. Each test that makes the provider misbehave checks that nobody was signed in.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+mod common;
 
-use axum::extract::{Form, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use base64::Engine;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use common::idp::*;
+use jsonwebtoken::{Algorithm, EncodingKey};
 use remote_proto::account::{
     Credentials, DeviceKind, LoginParams, NewDevice, Secret, TokenRequest,
 };
 use remote_proto::{DeviceId, ErrorCode, Platform, RemoteError, ServerId};
-use serde_json::{json, Value};
 use url::Url;
 use yardsort_server::oidc::{self, ProviderConfig, KEYS_REFETCH_MS, PROVIDER_MAX_AGE_MS};
-use yardsort_server::records::MemoryRecords;
+use yardsort_server::records::{Device, Issued, MemoryRecords, Records};
+use yardsort_server::tokens::Kind;
 use yardsort_server::{
     tokens, Caller, ControlService, LoginFinish, ServerConfig, ACCESS_TTL_MS, HANDOFF_TTL_MS,
-    LOGIN_TTL_MS, REFRESH_TTL_MS,
+    LOGIN_TTL_MS, MAX_DEVICES_PER_ACCOUNT, REFRESH_TTL_MS,
 };
-
-const CLIENT_ID: &str = "yardsort-server";
-/// A provider such as ZITADEL puts its project in `aud` beside the client, and the client in `azp`.
-const PROJECT: &str = "project-at-the-provider";
-const APP: &str = "yardsort://signed-in";
-
-const RSA_A: &[u8] = include_bytes!("fixtures/rsa-a.der");
-const RSA_B: &[u8] = include_bytes!("fixtures/rsa-b.der");
-const EC: &[u8] = include_bytes!("fixtures/ec-p256.der");
-
-fn jwk(name: &str) -> Value {
-    let path = format!(
-        "{}/tests/fixtures/{name}.jwk.json",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
-}
-
-/// How the provider gets its ID token wrong, if it does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tamper {
-    Nothing,
-    Issuer,
-    Audience,
-    OtherAzp,
-    SeveralAudiencesNoAzp,
-    Nonce,
-    NoNonce,
-    Expired,
-    FromTheFuture,
-    /// Signed with another key, under the id of the provider's own.
-    UnpublishedKey,
-    /// Signed under a key id the provider never published.
-    UnknownKeyId,
-    AlgNone,
-    HmacWithThePublicKey,
-    RsaSignatureUnderAnEcKeyId,
-}
-
-#[derive(Clone)]
-struct Signer {
-    kid: &'static str,
-    alg: Algorithm,
-    key: EncodingKey,
-}
-
-struct Grant {
-    challenge: String,
-    redirect_uri: String,
-    nonce: String,
-    subject: String,
-}
-
-struct IdpState {
-    base: String,
-    secret: Option<String>,
-    signer: Signer,
-    published: Vec<Value>,
-    discovery_issuer: Option<String>,
-    tamper: Tamper,
-    grants: HashMap<String, Grant>,
-    token_calls: usize,
-    jwks_calls: usize,
-}
-
-type Shared = Arc<Mutex<IdpState>>;
-
-struct Idp {
-    state: Shared,
-}
-
-impl Idp {
-    async fn start(secret: Option<&str>) -> Self {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let state = Arc::new(Mutex::new(IdpState {
-            base,
-            secret: secret.map(str::to_owned),
-            signer: Signer {
-                kid: "rsa-a",
-                alg: Algorithm::RS256,
-                key: EncodingKey::from_rsa_der(RSA_A),
-            },
-            published: vec![jwk("rsa-a"), jwk("ec-p256")],
-            discovery_issuer: None,
-            tamper: Tamper::Nothing,
-            grants: HashMap::new(),
-            token_calls: 0,
-            jwks_calls: 0,
-        }));
-        let app = Router::new()
-            .route("/.well-known/openid-configuration", get(discovery))
-            .route("/jwks", get(jwks))
-            .route("/token", post(token))
-            .with_state(state.clone());
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        Self { state }
-    }
-
-    fn issuer(&self) -> String {
-        self.state.lock().unwrap().base.clone()
-    }
-
-    fn with<T>(&self, f: impl FnOnce(&mut IdpState) -> T) -> T {
-        f(&mut self.state.lock().unwrap())
-    }
-
-    /// What happens in the browser at the provider: the person signs in as `subject`, and the
-    /// provider sends the browser back to the server with a code and the server's `state`.
-    fn approve(&self, authorize: &Url, subject: &str) -> (String, String) {
-        let q: HashMap<String, String> = authorize.query_pairs().into_owned().collect();
-        assert_eq!(q["response_type"], "code");
-        assert_eq!(q["client_id"], CLIENT_ID);
-        assert_eq!(
-            q["scope"], "openid",
-            "nothing beyond who signed in is asked for"
-        );
-        assert_eq!(q["code_challenge_method"], "S256");
-        let code = tokens::random();
-        self.with(|s| {
-            assert!(authorize
-                .as_str()
-                .starts_with(&format!("{}/authorize?", s.base)));
-            s.grants.insert(
-                code.clone(),
-                Grant {
-                    challenge: q["code_challenge"].clone(),
-                    redirect_uri: q["redirect_uri"].clone(),
-                    nonce: q["nonce"].clone(),
-                    subject: subject.to_owned(),
-                },
-            )
-        });
-        (code, q["state"].clone())
-    }
-
-    fn calls(&self) -> (usize, usize) {
-        self.with(|s| (s.token_calls, s.jwks_calls))
-    }
-}
-
-async fn discovery(State(state): State<Shared>) -> Json<Value> {
-    let s = state.lock().unwrap();
-    let base = &s.base;
-    Json(json!({
-        "issuer": s.discovery_issuer.clone().unwrap_or_else(|| base.clone()),
-        "authorization_endpoint": format!("{base}/authorize"),
-        "token_endpoint": format!("{base}/token"),
-        "jwks_uri": format!("{base}/jwks"),
-        "code_challenge_methods_supported": ["S256"],
-    }))
-}
-
-async fn jwks(State(state): State<Shared>) -> Json<Value> {
-    let mut s = state.lock().unwrap();
-    s.jwks_calls += 1;
-    Json(json!({ "keys": s.published }))
-}
-
-async fn token(
-    State(state): State<Shared>,
-    headers: HeaderMap,
-    Form(form): Form<HashMap<String, String>>,
-) -> Response {
-    let mut s = state.lock().unwrap();
-    s.token_calls += 1;
-    let refuse =
-        |status: StatusCode, error: &str| (status, Json(json!({ "error": error }))).into_response();
-    let client = match &s.secret {
-        Some(secret) => basic(&headers) == Some((encoded(CLIENT_ID), encoded(secret))),
-        None => {
-            form.get("client_id").map(String::as_str) == Some(CLIENT_ID)
-                && !headers.contains_key("authorization")
-        }
-    };
-    if !client {
-        return refuse(StatusCode::UNAUTHORIZED, "invalid_client");
-    }
-    if form.get("grant_type").map(String::as_str) != Some("authorization_code") {
-        return refuse(StatusCode::BAD_REQUEST, "unsupported_grant_type");
-    }
-    let Some(grant) = form.get("code").and_then(|code| s.grants.remove(code)) else {
-        return refuse(StatusCode::BAD_REQUEST, "invalid_grant");
-    };
-    let verifier = form.get("code_verifier").cloned().unwrap_or_default();
-    if form.get("redirect_uri") != Some(&grant.redirect_uri)
-        || tokens::s256(&verifier) != grant.challenge
-    {
-        return refuse(StatusCode::BAD_REQUEST, "invalid_grant");
-    }
-    let id_token = id_token(&s, &grant);
-    Json(json!({
-        "access_token": "the-providers-own-access-token",
-        "token_type": "Bearer",
-        "expires_in": 3600,
-        "id_token": id_token,
-    }))
-    .into_response()
-}
-
-fn basic(headers: &HeaderMap) -> Option<(String, String)> {
-    let value = headers.get("authorization")?.to_str().ok()?;
-    let decoded = STANDARD.decode(value.strip_prefix("Basic ")?).ok()?;
-    let (id, secret) = std::str::from_utf8(&decoded).ok()?.split_once(':')?;
-    Some((id.to_owned(), secret.to_owned()))
-}
-
-fn encoded(text: &str) -> String {
-    url::form_urlencoded::byte_serialize(text.as_bytes()).collect()
-}
-
-fn id_token(s: &IdpState, grant: &Grant) -> String {
-    let now = now_ms() / 1000;
-    let mut claims = json!({
-        "iss": s.base,
-        "sub": grant.subject,
-        "aud": [CLIENT_ID, PROJECT],
-        "azp": CLIENT_ID,
-        "exp": now + 3600,
-        "iat": now,
-        "auth_time": now,
-        "nonce": grant.nonce,
-        "email": "someone@example.invalid",
-    });
-    let c = claims.as_object_mut().unwrap();
-    match s.tamper {
-        Tamper::Issuer => {
-            c.insert("iss".into(), json!(format!("{}/elsewhere", s.base)));
-        }
-        Tamper::Audience => {
-            c.insert("aud".into(), json!(["another-client"]));
-            c.insert("azp".into(), json!("another-client"));
-        }
-        Tamper::OtherAzp => {
-            c.insert("azp".into(), json!("another-client"));
-        }
-        Tamper::SeveralAudiencesNoAzp => {
-            c.remove("azp");
-        }
-        Tamper::Nonce => {
-            c.insert("nonce".into(), json!("a-nonce-from-another-sign-in"));
-        }
-        Tamper::NoNonce => {
-            c.remove("nonce");
-        }
-        Tamper::Expired => {
-            c.insert("iat".into(), json!(now - 7200));
-            c.insert("exp".into(), json!(now - 3600));
-        }
-        Tamper::FromTheFuture => {
-            c.insert("iat".into(), json!(now + 3600));
-            c.insert("exp".into(), json!(now + 7200));
-        }
-        _ => {}
-    }
-    let sign = |kid: &str, alg: Algorithm, key: &EncodingKey| {
-        let mut header = Header::new(alg);
-        header.kid = Some(kid.to_owned());
-        jsonwebtoken::encode(&header, &claims, key).unwrap()
-    };
-    match s.tamper {
-        Tamper::UnpublishedKey => {
-            sign("rsa-a", Algorithm::RS256, &EncodingKey::from_rsa_der(RSA_B))
-        }
-        Tamper::UnknownKeyId => sign(
-            "nobody-publishes-this",
-            Algorithm::RS256,
-            &EncodingKey::from_rsa_der(RSA_B),
-        ),
-        Tamper::AlgNone => {
-            let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none","kid":"rsa-a"}"#);
-            let payload = URL_SAFE_NO_PAD.encode(claims.to_string());
-            format!("{header}.{payload}.")
-        }
-        // The classic confusion: the published RSA key's bytes used as an HMAC secret.
-        Tamper::HmacWithThePublicKey => {
-            let modulus = URL_SAFE_NO_PAD
-                .decode(jwk("rsa-a")["n"].as_str().unwrap())
-                .unwrap();
-            sign(
-                "rsa-a",
-                Algorithm::HS256,
-                &EncodingKey::from_secret(&modulus),
-            )
-        }
-        Tamper::RsaSignatureUnderAnEcKeyId => sign(
-            "ec-p256",
-            Algorithm::RS256,
-            &EncodingKey::from_rsa_der(RSA_A),
-        ),
-        _ => sign(s.signer.kid, s.signer.alg, &s.signer.key),
-    }
-}
 
 struct Setup {
     idp: Idp,
@@ -864,6 +552,80 @@ async fn a_provider_that_names_another_issuer_is_not_used() {
         http
     )
     .is_ok());
+}
+
+/// Enroll a device for `subject` directly in the records, as if it signed in at `at`, and return
+/// its refresh credential.
+async fn enrolled_at(s: &Setup, subject: &str, name: &str, at: i64) -> Secret {
+    let records = s.service.records();
+    let account = records.account(&s.idp.issuer(), subject, at).await.unwrap();
+    let refresh = tokens::mint(Kind::Refresh);
+    let device = Device {
+        id: DeviceId::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+        account,
+        name: name.into(),
+        kind: DeviceKind::Phone,
+        platform: Platform::Ios,
+        created_at: at,
+        last_seen_at: None,
+        revoked: None,
+    };
+    let issued = Issued {
+        access: tokens::mint(Kind::Access).hash,
+        access_expires_at: at + ACCESS_TTL_MS,
+        refresh: refresh.hash,
+        refresh_expires_at: at + REFRESH_TTL_MS,
+    };
+    records.add_device(device, issued).await.unwrap();
+    refresh.secret
+}
+
+#[tokio::test]
+async fn an_account_may_have_only_so_many_devices_signed_in() {
+    let s = setup(None).await;
+    let now = now_ms();
+    // Devices whose refresh credential has lapsed no longer count.
+    for n in 0..MAX_DEVICES_PER_ACCOUNT {
+        enrolled_at(
+            &s,
+            "subject-1",
+            &format!("Unused {n}"),
+            now - REFRESH_TTL_MS,
+        )
+        .await;
+    }
+
+    let mut first = None;
+    for n in 0..MAX_DEVICES_PER_ACCOUNT {
+        let credentials = sign_in(&s, "subject-1", &format!("Device {n}"), now).await;
+        first.get_or_insert(credentials);
+    }
+    let (verifier, code) = browse(&s, "subject-1", now).await;
+    let refused = redeem(&s, &code, &verifier, "One too many", now).await;
+    assert_eq!(code_of(refused), ErrorCode::Forbidden);
+    // Someone else is counted on their own.
+    sign_in(&s, "subject-2", "Phone", now).await;
+
+    // Signing one out makes room.
+    let first = first.unwrap();
+    let me = caller(&s, &first, now).await.unwrap();
+    s.service.revoke(&me, &first.device, now).await.unwrap();
+    sign_in(&s, "subject-1", "Replacement", now).await;
+}
+
+#[tokio::test]
+async fn a_device_that_only_refreshes_still_counts_after_ninety_days() {
+    let s = setup(None).await;
+    let now = now_ms();
+    let long_ago = now - REFRESH_TTL_MS - 1;
+    for n in 0..MAX_DEVICES_PER_ACCOUNT {
+        let first = enrolled_at(&s, "subject-1", &format!("Device {n}"), long_ago).await;
+        // Refreshed just before it lapsed, and never used for anything else.
+        refresh(&s, &first, now - 2).await.unwrap();
+    }
+    let (verifier, code) = browse(&s, "subject-1", now).await;
+    let refused = redeem(&s, &code, &verifier, "One too many", now).await;
+    assert_eq!(code_of(refused), ErrorCode::Forbidden);
 }
 
 #[tokio::test]

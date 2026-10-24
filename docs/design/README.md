@@ -32,6 +32,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 25  | [Remote, mobile & sync](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md) | Proposal: reach your agents from a phone or another computer; self-hostable; durable sync after that    |
 | 26  | [Remote, R0–R1](26-remote-r0-r1.md)                                     | The fit report, the versioned protocol and a read-only host facade. Not wired; no terminals yet         |
 | 27  | [Remote, R2](27-remote-r2.md)                                           | Identity and relay. Started: sign in once through the provider, then the server's own credentials       |
+| 28  | [Remote infrastructure](28-remote-infrastructure.md)                    | Plan: local, staging and production; Fly.io, ZITADEL Cloud, PostgreSQL; the owner's setup checklist     |
 
 ## Vocabulary
 

@@ -1,8 +1,10 @@
 # Remote, R2: identity and relay
 
-**Status:** R2 started on 2026-10-22. The first slice is built: signing in through the server's
-identity provider, and the server's own credentials for each device after that. It is a library
-(`crates/server`): nothing listens, and nothing in the app or `ys` uses it yet. The proposal is
+**Status:** R2 started on 2026-10-22. Two slices are built. The first (2026-10-22): signing in
+through the server's identity provider, and the server's own credentials for each device after
+that. The second (2026-10-23): the `yardsort-server` binary, which serves them over HTTP from
+PostgreSQL, and a local environment with a real ZITADEL in Docker. Nothing in the app or `ys` uses
+the server yet, and it is not deployed anywhere ([28](28-remote-infrastructure.md)). The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -88,7 +90,9 @@ An ID token is accepted only if all of these hold (`oidc.rs`):
   publishes a single key. ZITADEL always sends it.
 
 The provider's endpoints must be HTTPS. Plain HTTP is accepted only on a loopback address, for a
-provider running beside the server in development. There is no switch to skip certificate checks.
+provider running beside the server in development, and only one written as an address
+(`127.0.0.1`), since a name such as `localhost` can resolve anywhere. That is why the local
+ZITADEL is served at `http://127.0.0.1:8080`. There is no switch to skip certificate checks.
 
 A key id the server has not seen fetches the key set again, at most once a minute, so a stream of
 tokens naming unknown keys cannot make it hammer the provider. The key set and the discovery
@@ -119,9 +123,109 @@ is sent anywhere, so the server is not an open redirector.
   crypto, so no C toolchain on any platform), `reqwest` with rustls and `ring` as the app already
   has, `sha2`, `subtle`, `getrandom`, `url`. For tests only: `axum` 0.8 and `tokio`.
 
-## 5 · Verification
+## 5 · What the second slice adds
 
-On Linux, 2026-10-22:
+- **`yardsort-server`, the binary** (`src/main.rs`), configured from its environment
+  (`config.rs`): the public URL, the provider's issuer, client id and secret, `DATABASE_URL`, the
+  listen address and the allowed device redirects. The client secret and the database URL can
+  come from files instead (`…_FILE`), as container platforms mount them, and never from the
+  command line. On `SIGTERM` it stops accepting and finishes what is in flight.
+- **The HTTP routes** (`http.rs`): `GET /v1/server`, `GET /v1/login`, `GET /v1/login/callback`,
+  `POST /v1/token`, `GET /v1/devices`, `POST /v1/devices/{id}/revoke`, and `GET /health` for a
+  platform's checks.
+  - The two browser routes answer with `303` redirects, or a short plain-text page when there is
+    nowhere to send the browser. The rest answer JSON, and a failure is a `RemoteError` with the
+    status its code implies (`401` with `WWW-Authenticate: Bearer`, `404`, `429`, …).
+  - Every response is `Cache-Control: no-store` and `Referrer-Policy: no-referrer`, since codes
+    and credentials pass through.
+  - Bodies over 16 KB are refused with `413`.
+  - A request is logged by method, path, status and time, never its query (where codes travel)
+    or headers (where credentials do). A records failure is logged on the server and reaches the
+    device only as "could not read its own records".
+- **Rate limits** (`limit.rs`): 20 sign-ins started and 60 token requests a minute per address,
+  with a burst of as many, answered with `429` and `Retry-After`. An IPv6 address counts with the
+  rest of its /64. Behind a proxy, the address is taken from the header it names
+  (`YARDSORT_CLIENT_IP_HEADER`, `Fly-Client-IP` on Fly.io) and otherwise from the connection.
+  At most 10 000 addresses are counted one by one. Once that many are, full buckets are swept
+  out at most once a second, and a newcomer that still finds no room shares one overflow bucket
+  with every other, so a burst from many addresses costs bounded memory and time, and addresses
+  already counted keep their own allowance.
+- **At most 50 devices per account** (`MAX_DEVICES_PER_ACCOUNT`). A device counts while it is not
+  revoked and holds a refresh credential that is neither spent nor lapsed, however it last used
+  it (`Records::signed_in_devices`). The 51st sign-in is refused with
+  `403` and a message saying to sign one out; the code it used is spent. Two sign-ins at the
+  same moment can both get in, so this bounds what one account can make the records hold
+  rather than being an exact quota.
+- **`PgRecords`** (`postgres.rs`), the store a running server uses:
+  - Each `Records` step is one statement or one transaction. One-time values are taken with
+    `DELETE … RETURNING`. A rotation locks the refresh credential's row and its device's, so of
+    two racing rotations exactly one gets through and the other is reuse.
+  - Rotations also delete the device's lapsed access credentials, and its spent refresh
+    credentials once they would have lapsed anyway, never sooner: a spent one must still revoke
+    the device when a copy is presented (§8).
+  - `last_seen_at` is written at most once a minute (`SEEN_RESOLUTION_MS`); `MemoryRecords`
+    follows the same rule.
+  - The server's id is made the first time any instance starts, and kept.
+  - `tokio-postgres` with a pool, and TLS through rustls against the public web roots, as the
+    connection string's `sslmode` says. Not `sqlx`: its SQLite driver's native library collides
+    with the app's, even with that driver turned off.
+- **Migrations** in `crates/server/migrations/`, applied in order when the server connects,
+  under an advisory lock so that instances starting together take turns. Append-only, like the
+  core's: a shipped file is never edited.
+- **The local environment**, all on `127.0.0.1` with well-known throwaway secrets:
+  - `crates/server/dev/compose.yaml` runs PostgreSQL 17 and ZITADEL v4.19.5 (API and login,
+    behind Caddy), following ZITADEL's own Compose example (Apache-2.0).
+  - `scripts/server-dev.mjs`, behind `just server-up`, creates the server's project and app in
+    that ZITADEL through its API, with the settings 28's checklist gives a real instance, and
+    writes the server's settings to a git-ignored file. Running it again changes nothing.
+  - `just server-run` runs the server on the host, so a change rebuilds in seconds.
+  - `just server-sign-in` (`examples/sign-in.rs`) is a pretend device: it signs in through the
+    browser to a loopback listener, lists devices, refreshes, and revokes itself.
+- **New dependencies**, all under permissive licences: `tokio-postgres`, `deadpool-postgres`,
+  `tokio-postgres-rustls` and `webpki-roots` for PostgreSQL; `axum` (until now for tests only),
+  `tokio`, `tracing` and `tracing-subscriber`.
+- **CI** starts a PostgreSQL container on its Linux runner and requires the PostgreSQL tests to
+  run there. The macOS and Windows runners have no containers, so those tests skip there.
+
+## 6 · Verification
+
+On Linux, 2026-10-23, the second slice, with the review's additions of 2026-10-24:
+
+- `just server-test`: 57 tests, all passing.
+  - `tests/records.rs`: the same thirteen checks of what a store must do, run on `MemoryRecords`
+    and on `PgRecords` against PostgreSQL 17, each test in a fresh schema. They include eight
+    rotations of one refresh credential racing (exactly one gets through), a copy of the first
+    refresh credential still revoking the device three rotations later, which devices count as
+    signed in (revoked, rotated, lapsed and another account's), names with non-ASCII
+    text, and every device kind and platform. Two more are PostgreSQL's alone: the server's id
+    and schema survive a restart, and four instances starting together on an empty schema
+    migrate once and agree on one id.
+  - `tests/http.rs`: a whole sign-in through the router on a real port, on both stores: start,
+    the provider's answer, redemption, the device list, refresh, an unknown device's `404`,
+    revocation and the `401` after. Also the status, body and headers of each kind of wrong
+    request, and the rate limits.
+  - The first slice's tests, and two more for the device limit: 50 lapsed devices, then 50 in
+    use, then a refused 51st, another account unaffected, room again after a revocation; and 50
+    devices that only ever refreshed, across the 90 days, still counting.
+  - Unit tests for the settings and the limiter, including a burst from 20 000 addresses at one
+    instant: 10 000 tracked, one sweep, the rest sharing one allowance.
+- Seven changes to `PgRecords` were made on purpose, one at a time: no row locks in a rotation,
+  revocation not scoped to the account, a sign-in not removed when taken, a second revocation
+  overwriting the first, reuse not revoking the device, lapsed handoffs kept, and spent refresh
+  credentials deleted at the next rotation. A test failed each time. So did one with the device
+  limit taken out, with lapsed credentials counted, with devices counted by when they were last
+  seen (which missed the ones that only refresh: found in review), with the limiter sweeping on
+  every request (the burst took 2.1 s instead of 0.02 s), and with it tracking every address.
+- **Against a real ZITADEL** (v4.19.5, in the local environment): `just server-sign-in` signed in
+  through ZITADEL's login pages, which headless Chromium filled in. The device was listed,
+  refreshed, revoked, and then refused. This also settled two things:
+  - ZITADEL accepts the server's PKCE together with its client secret. The **Code**
+    authentication method in 28's checklist works as written.
+  - ZITADEL accepts `127.0.0.1` as its domain, so its issuer is a loopback address.
+- The server's log from that run holds no code, credential, `state`, client secret or database
+  password.
+
+On Linux, 2026-10-22, the first slice:
 
 - `cargo test -p yardsort-server`: 5 unit tests and 11 integration tests (12 after review). The
   integration tests run against a stand-in provider served over real HTTP by `axum`, which
@@ -151,22 +255,25 @@ On Linux, 2026-10-22:
 - `cargo test -p remote-proto`: the account fixtures round-trip, a `Secret` never prints, and the
   challenge, verifier and device-name bounds hold.
 
-**Not run here:** PostgreSQL, since this machine has no server and no access to Docker; a real
-ZITADEL; macOS and Windows, which CI covers; anything on a phone.
+**Not run here:** macOS and Windows, which CI covers, without the PostgreSQL half (above); ZITADEL
+Cloud, as opposed to ZITADEL in a container; anything on a phone; any deployment.
 
-## 6 · The rest of R2
+## 7 · The rest of R2
 
-Each item is a later slice. The gate (proposal §13): two-account isolation, a revoked device
+Each item is a later slice. Where each runs, and the accounts to set up, are in
+[28](28-remote-infrastructure.md). The gate (proposal §13): two-account isolation, a revoked device
 losing a live stream, and relay failure leaving PTYs alive.
 
-1. ~~Sign-in and device credentials, as a library.~~ This slice.
-2. **PostgreSQL records and the HTTP listener**: `/v1/server`, `/v1/login`, the callback,
-   `/v1/token` and the device routes, with rate limits on starting sign-ins and on the token
-   endpoint. The same tests are run against PostgreSQL. Needs a PostgreSQL to test against, here
-   and in CI.
-3. **The self-host recipe**: Compose with ZITADEL (pinned), the server, PostgreSQL and a reverse
-   proxy, with TLS, backup and upgrade notes, and one end-to-end sign-in against a real ZITADEL
-   in CI. A `yardsort-server` command revokes every device of an account (§7).
+1. ~~Sign-in and device credentials, as a library.~~ Done (§4).
+2. ~~PostgreSQL records, the HTTP listener, rate limits, and the local environment.~~ Done (§5).
+3. **Deploying it, and the self-host recipe**:
+   - the container image and `fly.toml`, and a workflow that deploys to staging on request and to
+     production only through a protected environment (28);
+   - Compose with ZITADEL (pinned), the server, PostgreSQL and a reverse proxy, with TLS, backup
+     and upgrade notes;
+   - a `yardsort-server` command that revokes every device of an account, by issuer and subject
+     (§8);
+   - one end-to-end sign-in against a real ZITADEL in CI.
 4. **Host enrollment and grants**: a host identity persisted when Remote is enabled, enrollment
    by QR secret or human code (hashed, five minutes, rate-limited), approval at the host, grants
    from that approval, and where a headless host keeps its credential
@@ -176,32 +283,34 @@ losing a live stream, and relay failure leaving PTYs alive.
 6. **The relay and the host's outbound connector**: WSS, single-use 60-second connection tickets,
    bounded queues, revocation closing live streams, and relay failure leaving every PTY running.
 
-## 7 · Risks
+## 8 · Risks
 
-- **Nothing limits how fast sign-ins are started or codes redeemed.** Pending sign-ins lapse
-  after ten minutes, and `MemoryRecords` drops lapsed ones as it adds new ones, but a flood is
-  unbounded until the listener (slice 2) limits by source.
+- **Rate limits are per instance and per address.** Two instances allow twice the rate, and many
+  addresses together are not limited as a whole. Once more than 10 000 are in play, newcomers
+  share one allowance, so during such a burst a person signing in from a new address may be
+  told to wait a minute. The callback is not limited: it only takes a sign-in that
+  was started, which is.
 - **Refresh reuse signs a device out even when the device is honest**, when the answer carrying
   its new credentials was lost in transit after the server rotated them. That is the standard
   trade, and a sign-in fixes it. A short grace window would trade some of the protection away;
   [open question 38](06-open-questions.md#remote).
 - **An access credential is a bearer credential.** A copy works until its quarter hour is up,
   or until the device is revoked, which takes effect on the next request.
-- **`last_seen_at` is written on every authenticated request.** The PostgreSQL store should
-  write it at most once a minute.
 - **Disabling a person at the provider does not sign their devices out.** The provider is asked
   once per device, at sign-in, and each refresh starts the 90 days again, so a device in use
   keeps working for as long as it stays in use. That follows from asking the provider only at
   sign-in (§2), which is what keeps a provider that bills by daily active user cheap. Until it
   is answered, the operator's path is revoking that account's devices; slice 3 adds a
-  `yardsort-server` command for it, by issuer and subject, beside the self-host recipe. A
-  maximum session length, after which a device has to sign in again however often it is used, is
-  the other answer; it costs a sign-in every so often and is not chosen yet
-  ([open question 39](06-open-questions.md#remote)).
+  `yardsort-server` command for it, by issuer and subject. A maximum session length, after which
+  a device has to sign in again however often it is used, is the other answer; it costs a sign-in
+  every so often and is not chosen yet ([open question 39](06-open-questions.md#remote)).
 - **Spent refresh credentials must outlive their rotation.** A store that dropped a spent one at
   once would answer a stolen copy with "unknown" and leave its holder signed in, instead of
-  revoking the device. The `Records` contract says so; `MemoryRecords` keeps everything, and the
-  PostgreSQL store (slice 2) may drop one only after its own expiry.
+  revoking the device. The `Records` contract says so; `MemoryRecords` keeps everything, and
+  `PgRecords` drops one only after its own expiry, which a record test checks.
+- **A device that never comes back leaves its rows**: its last access and refresh credentials'
+  hashes stay until it is revoked or its account is deleted. They open nothing, but nothing
+  sweeps them either.
 - **Account deletion and export** (§9) are not built.
 - **`jsonwebtoken`'s pure-Rust backend brings the `rsa` crate**, which has an open timing
   advisory (RUSTSEC-2023-0071) on operations with a private key. The server only verifies, with
