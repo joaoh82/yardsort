@@ -145,6 +145,10 @@ pub trait Records: Send + Sync {
     ) -> impl Future<Output = Result<Option<(Device, i64)>>> + Send;
 
     /// Trade `refresh` for `issued`, if it is current. See [`Rotation`].
+    ///
+    /// A spent refresh credential must be kept until its own expiry: one presented again has to
+    /// come back [`Rotation::Reused`], which revokes the device, and not [`Rotation::Unknown`],
+    /// which leaves the copy's holder signed in. A store may drop it once it has lapsed.
     fn rotate(
         &self,
         refresh: &TokenHash,

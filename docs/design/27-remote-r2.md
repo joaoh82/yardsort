@@ -84,12 +84,16 @@ An ID token is accepted only if all of these hold (`oidc.rs`):
   there are several audiences (ZITADEL lists its project beside the client).
 - `exp` has not passed, and `iat` and `nbf` are not in the future, each within 60 seconds.
 - `nonce` is the one this sign-in sent.
+- It names its key with `kid`. A token without one is refused, even from a provider that
+  publishes a single key. ZITADEL always sends it.
 
 The provider's endpoints must be HTTPS. Plain HTTP is accepted only on a loopback address, for a
 provider running beside the server in development. There is no switch to skip certificate checks.
 
 A key id the server has not seen fetches the key set again, at most once a minute, so a stream of
-tokens naming unknown keys cannot make it hammer the provider.
+tokens naming unknown keys cannot make it hammer the provider. The key set and the discovery
+document are also fetched again once they are an hour old, even when the key is known, so a key
+the provider withdraws stops signing anyone in within the hour.
 
 A sign-in goes back only to a redirect the operator allows, compared exactly. A loopback rule
 (`http://127.0.0.1/signed-in`) matches any port, since a computer's client listens on whichever
@@ -119,11 +123,11 @@ is sent anywhere, so the server is not an open redirector.
 
 On Linux, 2026-10-22:
 
-- `cargo test -p yardsort-server`: 5 unit tests and 11 integration tests. The integration tests
-  run against a stand-in provider served over real HTTP by `axum`, which checks what a real one
-  does: client authentication (Basic, with a secret containing `%` and `+`, and a public client),
-  the code, the redirect URI and the PKCE verifier. It signs real RS256 and ES256 tokens with
-  keys generated for the tests (`tests/fixtures/`). They cover:
+- `cargo test -p yardsort-server`: 5 unit tests and 11 integration tests (12 after review). The
+  integration tests run against a stand-in provider served over real HTTP by `axum`, which
+  checks what a real one does: client authentication (Basic, with a secret containing `%` and
+  `+`, and a public client), the code, the redirect URI and the PKCE verifier. It signs real
+  RS256 and ES256 tokens with keys generated for the tests (`tests/fixtures/`). They cover:
   - signing in once and using the device for thirty days, with one code exchange and one key
     fetch at the provider;
   - two subjects are two accounts: each lists and revokes only its own devices, and a revoked
@@ -137,6 +141,8 @@ On Linux, 2026-10-22:
     a published id, an unpublished key id, `alg: none`, HMAC keyed with the public key, an RSA
     signature under an EC key's id), none of which creates an account;
   - a rotated provider key is fetched, and unknown ones are fetched at most once a minute;
+  - a key the provider withdraws is refused once the key set is an hour old (added after review,
+    2026-10-24; it fails with the maximum age taken out);
   - a provider whose discovery names another issuer is not used, nor one on plain HTTP;
   - a refresh credential works once, and presenting a spent one signs that device out.
 - Ten checks were broken on purpose, one at a time: nonce, `azp`, several audiences, `iat`, the
@@ -160,7 +166,7 @@ losing a live stream, and relay failure leaving PTYs alive.
    and in CI.
 3. **The self-host recipe**: Compose with ZITADEL (pinned), the server, PostgreSQL and a reverse
    proxy, with TLS, backup and upgrade notes, and one end-to-end sign-in against a real ZITADEL
-   in CI.
+   in CI. A `yardsort-server` command revokes every device of an account (§7).
 4. **Host enrollment and grants**: a host identity persisted when Remote is enabled, enrollment
    by QR secret or human code (hashed, five minutes, rate-limited), approval at the host, grants
    from that approval, and where a headless host keeps its credential
@@ -183,6 +189,19 @@ losing a live stream, and relay failure leaving PTYs alive.
   or until the device is revoked, which takes effect on the next request.
 - **`last_seen_at` is written on every authenticated request.** The PostgreSQL store should
   write it at most once a minute.
+- **Disabling a person at the provider does not sign their devices out.** The provider is asked
+  once per device, at sign-in, and each refresh starts the 90 days again, so a device in use
+  keeps working for as long as it stays in use. That follows from asking the provider only at
+  sign-in (§2), which is what keeps a provider that bills by daily active user cheap. Until it
+  is answered, the operator's path is revoking that account's devices; slice 3 adds a
+  `yardsort-server` command for it, by issuer and subject, beside the self-host recipe. A
+  maximum session length, after which a device has to sign in again however often it is used, is
+  the other answer; it costs a sign-in every so often and is not chosen yet
+  ([open question 39](06-open-questions.md#remote)).
+- **Spent refresh credentials must outlive their rotation.** A store that dropped a spent one at
+  once would answer a stolen copy with "unknown" and leave its holder signed in, instead of
+  revoking the device. The `Records` contract says so; `MemoryRecords` keeps everything, and the
+  PostgreSQL store (slice 2) may drop one only after its own expiry.
 - **Account deletion and export** (§9) are not built.
 - **`jsonwebtoken`'s pure-Rust backend brings the `rsa` crate**, which has an open timing
   advisory (RUSTSEC-2023-0071) on operations with a private key. The server only verifies, with

@@ -23,7 +23,7 @@ use remote_proto::account::{
 use remote_proto::{DeviceId, ErrorCode, Platform, RemoteError, ServerId};
 use serde_json::{json, Value};
 use url::Url;
-use yardsort_server::oidc::{self, ProviderConfig, KEYS_REFETCH_MS};
+use yardsort_server::oidc::{self, ProviderConfig, KEYS_REFETCH_MS, PROVIDER_MAX_AGE_MS};
 use yardsort_server::records::MemoryRecords;
 use yardsort_server::{
     tokens, Caller, ControlService, LoginFinish, ServerConfig, ACCESS_TTL_MS, HANDOFF_TTL_MS,
@@ -799,6 +799,34 @@ async fn new_provider_keys_are_fetched_but_unknown_ones_cannot_make_the_server_h
         assert!(matches!(finish, LoginFinish::Refused { .. }));
     }
     assert_eq!(s.idp.calls().1, 3);
+}
+
+#[tokio::test]
+async fn a_key_the_provider_withdraws_stops_signing_anyone_in_within_the_hour() {
+    let s = setup(None).await;
+    let now = now_ms();
+    sign_in(&s, "subject-1", "Phone", now).await;
+    assert_eq!(s.idp.calls().1, 1);
+
+    // The provider withdraws its key, but a copy of it still signs tokens.
+    s.idp.with(|i| i.published = vec![jwk("rsa-b")]);
+    let soon = now + PROVIDER_MAX_AGE_MS - 1;
+    sign_in(&s, "subject-1", "Phone", soon).await;
+    assert_eq!(s.idp.calls().1, 1, "the key set is still fresh");
+
+    let later = now + PROVIDER_MAX_AGE_MS;
+    let authorize = s
+        .service
+        .begin_login(&params(&tokens::random(), APP), later)
+        .await
+        .unwrap();
+    let (code, state) = s.idp.approve(&authorize, "subject-1");
+    let finish = s
+        .service
+        .finish_login(Some(&code), Some(&state), None, later)
+        .await;
+    assert!(matches!(finish, LoginFinish::Refused { .. }));
+    assert_eq!(s.idp.calls().1, 2, "fetched again once an hour old");
 }
 
 #[tokio::test]

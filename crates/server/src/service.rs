@@ -126,6 +126,7 @@ impl<R: Records> ControlService<R> {
                 &state,
                 &nonce,
                 &tokens::s256(verifier.expose()),
+                now,
             )
             .await
             .map_err(|_| provider_unavailable())?;

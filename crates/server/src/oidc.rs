@@ -10,11 +10,16 @@
 //! - It is signed with `RS256` or `ES256` by a key in the provider's published key set, and the
 //!   algorithm is the one that key's own type allows. A token cannot pick a weaker check: `none`,
 //!   an HMAC with the public key, or another family is refused before its signature is looked at.
+//! - It names that key with `kid`. A token without one is refused, even from a provider that
+//!   publishes a single key; ZITADEL always sends it.
 //! - `iss` is exactly the configured issuer, which discovery also had to state exactly.
 //! - `aud` includes this server's client id, and `azp`, when present, is that client id. With
 //!   more than one audience, `azp` must be present.
 //! - `exp` has not passed and `iat` is not in the future, each within [`CLOCK_LEEWAY_MS`].
 //! - `nonce` is the one this sign-in sent.
+//!
+//! The discovery document and the key set are fetched again once they are [`PROVIDER_MAX_AGE_MS`]
+//! old, so a key the provider withdraws stops being accepted within that time.
 //!
 //! The provider's endpoints must use HTTPS. Plain HTTP is accepted only on a loopback address,
 //! for a provider running beside the server in development; there is no switch to skip
@@ -42,6 +47,9 @@ pub const CLOCK_LEEWAY_MS: i64 = 60_000;
 /// The least time between two fetches of the provider's keys, so a stream of tokens naming an
 /// unknown key cannot make the server hammer the provider.
 pub const KEYS_REFETCH_MS: i64 = 60_000;
+/// How long the discovery document and the key set are used before they are fetched again, even
+/// when the key a token names is among them.
+pub const PROVIDER_MAX_AGE_MS: i64 = 3_600_000;
 /// For every request to the provider.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -98,7 +106,8 @@ pub fn http_client_builder() -> reqwest::ClientBuilder {
 pub struct Provider {
     config: ProviderConfig,
     http: reqwest::Client,
-    discovery: Mutex<Option<Arc<Discovery>>>,
+    /// With when it was fetched.
+    discovery: Mutex<Option<(Arc<Discovery>, i64)>>,
     keys: Mutex<Keys>,
 }
 
@@ -187,8 +196,9 @@ impl Provider {
         state: &str,
         nonce: &str,
         challenge: &str,
+        now: i64,
     ) -> Result<Url, OidcError> {
-        let discovery = self.discovery().await?;
+        let discovery = self.discovery(now).await?;
         let mut url = discovery.authorization_endpoint.clone();
         url.query_pairs_mut()
             .append_pair("response_type", "code")
@@ -212,7 +222,7 @@ impl Provider {
         nonce: &TokenHash,
         now: i64,
     ) -> Result<Identity, OidcError> {
-        let discovery = self.discovery().await?;
+        let discovery = self.discovery(now).await?;
         let mut form = vec![
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -291,15 +301,16 @@ impl Provider {
         if claims.iss != self.config.issuer {
             return Err(OidcError::Rejected("issuer"));
         }
-        if claims.exp.saturating_mul(1000) + CLOCK_LEEWAY_MS <= now {
+        let ms = |seconds: i64| seconds.saturating_mul(1000);
+        if ms(claims.exp).saturating_add(CLOCK_LEEWAY_MS) <= now {
             return Err(OidcError::Rejected("expired"));
         }
-        if claims.iat.saturating_mul(1000) - CLOCK_LEEWAY_MS > now {
+        if ms(claims.iat).saturating_sub(CLOCK_LEEWAY_MS) > now {
             return Err(OidcError::Rejected("issued in the future"));
         }
         if claims
             .nbf
-            .is_some_and(|nbf| nbf.saturating_mul(1000) - CLOCK_LEEWAY_MS > now)
+            .is_some_and(|nbf| ms(nbf).saturating_sub(CLOCK_LEEWAY_MS) > now)
         {
             return Err(OidcError::Rejected("not valid yet"));
         }
@@ -328,18 +339,20 @@ impl Provider {
         })
     }
 
-    /// The provider's key `kid`. With `refetch`, the key set is fetched again first, unless it
-    /// was fetched less than [`KEYS_REFETCH_MS`] ago.
+    /// The provider's key `kid`. The key set is fetched again first when it is
+    /// [`PROVIDER_MAX_AGE_MS`] old, or with `refetch` unless it was fetched less than
+    /// [`KEYS_REFETCH_MS`] ago.
     async fn key(&self, kid: &str, now: i64, refetch: bool) -> Result<Option<Jwk>, OidcError> {
         let (cached, fetched_at) = {
             let keys = self.keys.lock().expect("keys lock");
             (keys.set.clone(), keys.fetched_at)
         };
-        let recent = fetched_at.is_some_and(|at| now - at < KEYS_REFETCH_MS);
+        let younger = |age: i64| fetched_at.is_some_and(|at| now.saturating_sub(at) < age);
+        let usable = younger(PROVIDER_MAX_AGE_MS) && (!refetch || younger(KEYS_REFETCH_MS));
         let set = match cached {
-            Some(set) if !refetch || recent => set,
+            Some(set) if usable => set,
             _ => {
-                let discovery = self.discovery().await?;
+                let discovery = self.discovery(now).await?;
                 let set: JwkSet = self.get_json(&discovery.jwks_uri).await?;
                 let set = Arc::new(set);
                 let mut keys = self.keys.lock().expect("keys lock");
@@ -351,9 +364,11 @@ impl Provider {
         Ok(set.find(kid).cloned())
     }
 
-    async fn discovery(&self) -> Result<Arc<Discovery>, OidcError> {
-        if let Some(found) = self.discovery.lock().expect("discovery lock").clone() {
-            return Ok(found);
+    async fn discovery(&self, now: i64) -> Result<Arc<Discovery>, OidcError> {
+        if let Some((found, at)) = self.discovery.lock().expect("discovery lock").clone() {
+            if now.saturating_sub(at) < PROVIDER_MAX_AGE_MS {
+                return Ok(found);
+            }
         }
         let issuer = &self.config.issuer;
         let url = Url::parse(&format!(
@@ -390,7 +405,7 @@ impl Provider {
             token_endpoint: endpoint("token_endpoint", &document.token_endpoint)?,
             jwks_uri: endpoint("jwks_uri", &document.jwks_uri)?,
         });
-        *self.discovery.lock().expect("discovery lock") = Some(found.clone());
+        *self.discovery.lock().expect("discovery lock") = Some((found.clone(), now));
         Ok(found)
     }
 
