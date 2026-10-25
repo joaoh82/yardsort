@@ -351,10 +351,19 @@ Built on 2026-10-25, after the default was settled: **off** until the user turns
 - **What the recordings showed.** A Claude Code fork repeats the conversation before it with the
   original times, so a fork's turns before its record began are dropped and the digest says whose
   they are. Codex appends a resumed thread to the same session file.
+- **When a conversation began.** A session record's `started_at` moves to the latest start on
+  every resume, which the sessions list wants. The digest needs the first — a fork's own turns are
+  those after it, and a Codex file keeps the time it began — so migration 0017 adds `began_at`,
+  which a resume leaves alone. Older records get their first capture run's start if it was
+  earlier; a record resumed before this, without capture, has lost its first start.
 - **Finding a Codex conversation.** By the `threadId` its run reported, when Codex capture was
-  on; otherwise the earliest session file whose `session_meta` names the workspace's folder and
-  began between a minute before the record and the record's end. The day folders are Codex's local
-  dates, so the days either side are looked in too, and only each file's first line is read.
+  on; otherwise by a session file whose `session_meta` names the workspace's folder and began
+  between a minute before the conversation began and its end. Each file goes to one conversation,
+  never one whose thread another reported, and the closest in time is matched first: a
+  conversation whose file is gone is listed as not found rather than given a newer one's — the
+  asking agent's own takes part for that, though it is not shown. The day folders are Codex's
+  local dates, so the days either side are looked in too, and only each file's first line is
+  read.
 - **The digest**, `crates/core/src/activity/digest.rs`, as proposed, with these differences:
   each message is quoted (`> `) under `User:` and `Agent:`, so a heading in a message cannot pass
   for one of the digest's; there is no _Asked:_ line — the first message is kept as the task,

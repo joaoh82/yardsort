@@ -164,7 +164,7 @@ Some things to know:
 - **Claude Code and Codex** are read today. Another agent's conversation is listed with why it is
   not there. A Codex conversation is found by the thread it reported when
   [Codex reports what it does](activity.md#what-codex-reports), and otherwise by the folder and
-  the time it began.
+  the time it first began; a resume does not change which file that is.
 - **The asking agent's own conversation is left out**, and so is what Yardsort added to a first
   message — the project's memory, a handoff packet — which the agent has anyway.
 - **A fork** shows only its own turns: the ones before the fork belong to the conversation it

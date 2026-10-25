@@ -11,7 +11,8 @@
 //! harness injected, and what Yardsort itself added to a first message — the project's memory, a
 //! handoff packet — which the reader is given anyway, and which would otherwise quote itself.
 
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -69,12 +70,17 @@ pub fn gather(
     sources: &Sources,
     now: i64,
 ) -> StoreResult<Vec<Conversation>> {
+    let sessions = store.sessions(&workspace.id)?;
+    let codex = match sources.codex.as_deref() {
+        Some(home) => codex_files(store, workspace, &sessions, home, now)?,
+        None => HashMap::new(),
+    };
     let mut out = Vec::new();
-    for session in store.sessions(&workspace.id)? {
+    for session in sessions {
         if Some(session.id.as_str()) == except {
             continue;
         }
-        let read = read_session(store, workspace, &session, sources, now)?;
+        let read = read_session(&session, sources, &codex);
         let (mut turns, unreadable) = match read {
             Ok(turns) => (turns, None),
             Err(why) => (Vec::new(), Some(why)),
@@ -82,8 +88,9 @@ pub fn gather(
         if let Some(first) = turns.first_mut() {
             first.user = own_words(&first.user);
         }
+        // When it first began, not when it was last resumed: the fork's own turns are all after.
         if session.forked_from.is_some() {
-            turns.retain(|turn| turn.at >= session.started_at);
+            turns.retain(|turn| turn.at >= session.began_at);
         }
         // A conversation that has not said anything yet has nothing to tell.
         if turns.is_empty() && unreadable.is_none() {
@@ -93,7 +100,7 @@ pub fn gather(
             id: session.id,
             harness: session.harness_id,
             model: session.model,
-            started_at: session.started_at,
+            started_at: session.began_at,
             running: session.running,
             forked_from: session.forked_from,
             turns,
@@ -122,25 +129,78 @@ fn own_words(text: &str) -> String {
     }
 }
 
-fn read_session(
+/// The session files of each Codex conversation in the workspace, by record id. A thread the
+/// conversation reported is its own. The others are matched by where and when they began: each
+/// file to one conversation, the closest in time first, so a conversation whose file is gone
+/// does not take a newer one's. The asking agent's own conversation takes part, so its words are
+/// never given as another's.
+fn codex_files(
     store: &Store,
     workspace: &WorkspaceRow,
+    sessions: &[SessionRow],
+    home: &Path,
+    now: i64,
+) -> StoreResult<HashMap<String, Vec<PathBuf>>> {
+    let mut files = HashMap::new();
+    let mut claimed = HashSet::new();
+    let mut unreported = Vec::new();
+    for session in sessions.iter().filter(|s| s.harness_id == "codex") {
+        let threads = store.reported_threads(&session.id)?;
+        let found: Vec<_> = threads
+            .iter()
+            .filter_map(|thread| super::codex::find_rollout(home, thread))
+            .collect();
+        claimed.extend(threads);
+        if found.is_empty() {
+            unreported.push(session);
+        } else {
+            files.insert(session.id.clone(), found);
+        }
+    }
+    let mut pairs = Vec::new();
+    for session in unreported {
+        // From when it first began: a resume appends to the same file, which keeps that time.
+        let candidates = transcript::codex_files_in(
+            home,
+            Path::new(&workspace.path),
+            session.began_at - CODEX_SLACK_MS,
+            session.ended_at.unwrap_or(now),
+        );
+        for file in candidates {
+            if !claimed.contains(&file.thread) {
+                let apart = (file.started_at - session.began_at).abs();
+                pairs.push((apart, session.id.as_str(), file));
+            }
+        }
+    }
+    pairs.sort_by(|a, b| (a.0, a.1, &a.2.path).cmp(&(b.0, b.1, &b.2.path)));
+    for (_, id, file) in pairs {
+        if files.contains_key(id) || claimed.contains(&file.thread) {
+            continue;
+        }
+        claimed.insert(file.thread);
+        files.insert(id.to_owned(), vec![file.path]);
+    }
+    Ok(files)
+}
+
+fn read_session(
     session: &SessionRow,
     sources: &Sources,
-    now: i64,
-) -> StoreResult<Result<Vec<Turn>, String>> {
+    codex: &HashMap<String, Vec<PathBuf>>,
+) -> Result<Vec<Turn>, String> {
     let read = |path: &Path, reader: fn(std::io::BufReader<std::fs::File>) -> _| {
         std::fs::File::open(path)
             .map(std::io::BufReader::new)
             .and_then(reader)
             .map_err(|e| format!("its transcript could not be read: {e}"))
     };
-    Ok(match session.harness_id.as_str() {
+    match session.harness_id.as_str() {
         "claude" => {
             let Some(id) = session.harness_session_id.as_deref() else {
-                return Ok(Err(
+                return Err(
                     "Yardsort did not choose its id, so its transcript cannot be found".to_owned(),
-                ));
+                );
             };
             match transcript::claude_file(&sources.claude, id) {
                 Some(path) => read(&path, transcript::read_claude),
@@ -148,39 +208,22 @@ fn read_session(
             }
         }
         "codex" => {
-            let Some(home) = sources.codex.as_deref() else {
-                return Ok(Err("Codex's home folder is not known".to_owned()));
+            if sources.codex.is_none() {
+                return Err("Codex's home folder is not known".to_owned());
+            }
+            let Some(files) = codex.get(&session.id) else {
+                return Err("its session file was not found".to_owned());
             };
-            let mut files: Vec<_> = store
-                .reported_threads(&session.id)?
-                .iter()
-                .filter_map(|thread| super::codex::find_rollout(home, thread))
-                .collect();
-            if files.is_empty() {
-                let to = session.ended_at.unwrap_or(now);
-                files.extend(transcript::codex_file_in(
-                    home,
-                    Path::new(&workspace.path),
-                    session.started_at - CODEX_SLACK_MS,
-                    to,
-                ));
-            }
-            if files.is_empty() {
-                return Ok(Err("its session file was not found".to_owned()));
-            }
             let mut turns = Vec::new();
             for file in files {
-                match read(&file, transcript::read_codex) {
-                    Ok(more) => turns.extend(more),
-                    Err(why) => return Ok(Err(why)),
-                }
+                turns.extend(read(file, transcript::read_codex)?);
             }
             turns.sort_by_key(|t| t.at);
             turns.dedup();
             Ok(turns)
         }
         other => Err(format!("Yardsort cannot read {other}'s conversations yet")),
-    })
+    }
 }
 
 /// What to show.
@@ -752,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fork_shows_only_its_own_turns() {
+    fn a_fork_shows_only_its_own_turns_however_often_it_is_resumed() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::in_memory();
         let ws = workspace(&store, Path::new("/wt/fix"));
@@ -777,6 +820,8 @@ mod tests {
             .at
             - 1_000;
         store.set_session_started("rec-b", fork_at);
+        // Closed and opened again since: its own turns still begin where it was forked.
+        store.mark_session_running("rec-b", "pty-again").unwrap();
         let found = gather(&store, &ws, Some("rec-a"), &sources, T0).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].turns.len(), 1);
@@ -786,6 +831,88 @@ mod tests {
         );
         let text = render(&select(&found, &Options::default()));
         assert!(text.contains("Forked from conversation rec-a: "), "{text}");
+    }
+
+    /// Epoch milliseconds as Codex writes them.
+    fn iso(ms: i64) -> String {
+        let (y, m, d) = super::super::handoff::civil_date(ms);
+        let t = ms.rem_euclid(86_400_000);
+        format!(
+            "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z",
+            t / 3_600_000,
+            t / 60_000 % 60,
+            t / 1_000 % 60,
+            t % 1_000
+        )
+    }
+
+    #[test]
+    fn a_resumed_codex_conversation_keeps_its_own_session_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo"));
+        let sources = sources(dir.path());
+        let recorded = fixtures().join("codex/0.163.0/conversation.jsonl");
+        let began = transcript::codex_meta(&recorded)
+            .unwrap()
+            .started_at
+            .unwrap();
+        session(&store, &ws.id, "rec-codex", "codex", None);
+        store.set_session_started("rec-codex", began);
+        // Opened again, as `codex resume --last` does, which writes on in the file it began.
+        store
+            .mark_session_running("rec-codex", "pty-again")
+            .unwrap();
+        // The asking agent is another Codex conversation in the same folder, begun since.
+        session(&store, &ws.id, "rec-asking", "codex", None);
+        let asking = store.session("rec-asking").unwrap().unwrap().began_at + 1_000;
+        let text = std::fs::read_to_string(&recorded)
+            .unwrap()
+            .replace(
+                "01a0d83f-0000-7000-8000-000000000001",
+                "01a0d83f-0000-7000-8000-000000000002",
+            )
+            .replace(
+                "Create a file named notes.txt",
+                "The asking agent's own words",
+            );
+        let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+        let mut meta: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        meta["timestamp"] = iso(asking).into();
+        meta["payload"]["timestamp"] = iso(asking).into();
+        lines[0] = meta.to_string();
+        let (y, m, d) = super::super::handoff::civil_date(asking);
+        let day = dir
+            .path()
+            .join(format!("codex/sessions/{y:04}/{m:02}/{d:02}"));
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(
+            day.join("rollout-asking-01a0d83f-0000-7000-8000-000000000002.jsonl"),
+            lines.join("\n") + "\n",
+        )
+        .unwrap();
+
+        let later = asking + 3_600_000;
+        let found = gather(&store, &ws, Some("rec-asking"), &sources, later).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "rec-codex");
+        assert_eq!(found[0].started_at, began, "when it first began");
+        assert_eq!(found[0].turns.len(), 2, "{:?}", found[0].unreadable);
+        assert!(found[0].turns[0]
+            .user
+            .starts_with("Create a file named notes.txt"));
+
+        // With its own file gone, it is not given the asking agent's instead.
+        std::fs::remove_file(dir.path().join(
+            "codex/sessions/2026/10/25/rollout-2026-10-25T13-35-00-01a0d83f-0000-7000-8000-000000000001.jsonl",
+        ))
+        .unwrap();
+        let found = gather(&store, &ws, Some("rec-asking"), &sources, later).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].unreadable.as_deref(),
+            Some("its session file was not found")
+        );
     }
 
     #[test]

@@ -225,14 +225,23 @@ pub fn codex_meta(path: &Path) -> Option<CodexMeta> {
     })
 }
 
-/// The Codex session file that began in `cwd` between `from` and `to` (epoch milliseconds),
+/// A Codex session file, by its first line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexFile {
+    pub thread: String,
+    /// Epoch milliseconds.
+    pub started_at: i64,
+    pub path: PathBuf,
+}
+
+/// The Codex session files that began in `cwd` between `from` and `to` (epoch milliseconds),
 /// earliest first: for a conversation whose thread id was never reported. The day folders are
 /// Codex's local dates, so the day either side is looked in too.
-pub fn codex_file_in(codex_home: &Path, cwd: &Path, from: i64, to: i64) -> Option<PathBuf> {
+pub fn codex_files_in(codex_home: &Path, cwd: &Path, from: i64, to: i64) -> Vec<CodexFile> {
     let cwd = dunce::simplified(cwd);
     let sessions = codex_home.join("sessions");
     let day = 86_400_000;
-    let mut found: Vec<(i64, PathBuf)> = Vec::new();
+    let mut found: Vec<CodexFile> = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     let mut at = from - day;
     while at <= to + day {
@@ -262,14 +271,18 @@ pub fn codex_file_in(codex_home: &Path, cwd: &Path, from: i64, to: i64) -> Optio
                 .is_some_and(|c| dunce::simplified(Path::new(c)) == cwd);
             match meta.started_at {
                 Some(started) if here && (from..=to).contains(&started) => {
-                    found.push((started, path));
+                    found.push(CodexFile {
+                        thread: meta.thread,
+                        started_at: started,
+                        path,
+                    });
                 }
                 _ => {}
             }
         }
     }
-    found.sort();
-    found.into_iter().next().map(|(_, path)| path)
+    found.sort_by(|a, b| (a.started_at, &a.path).cmp(&(b.started_at, &b.path)));
+    found
 }
 
 /// The turns of a Codex session file. Only the thread the file is about: a subagent's
@@ -544,9 +557,10 @@ mod tests {
         .unwrap();
         let at = |s: &str| iso_to_ms(s).unwrap();
         let found = |cwd: &str, from: &str, to: &str| {
-            codex_file_in(dir.path(), Path::new(cwd), at(from), at(to))
-                .and_then(|p| codex_meta(&p))
-                .map(|m| m.thread)
+            codex_files_in(dir.path(), Path::new(cwd), at(from), at(to))
+                .into_iter()
+                .next()
+                .map(|file| file.thread)
         };
         assert_eq!(
             found(
