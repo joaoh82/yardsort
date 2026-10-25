@@ -287,3 +287,21 @@ still stands; these are what the code added to it.
     ([27 §8](27-remote-r2.md#8--risks)). A maximum session (30 to 90 days) bounds that, at the cost
     of a sign-in every so often, which a provider billing by daily active user counts. Lean: no
     maximum yet; an operator command revokes an account's devices (R2 slice 3).
+
+## Conversation context
+
+From the design pass in [29-conversation-context](29-conversation-context.md).
+
+40. **Should an agent's own handoff note come back as a fallback?** Asking each agent to keep a
+    note through `ys` was set aside as the source because it is not deterministic. For a harness
+    with no readable transcript — Cursor today, any custom harness — a note is better than
+    nothing. Lean: only if a harness with no reader turns out to be used beside others often.
+41. **How does a resumed Claude conversation see a new note?** Claude Code 2.1.302 records its
+    system prompt on the first request and resends it on every resume until a compaction, so a
+    conversation that began alone keeps having no note. `--system-prompt-snapshot off` on that
+    resume would work, at the cost of the cached system prompt. Lean: pass it only on a resume
+    whose conversation began without the note and now has company; measure the cost first.
+42. **What is the switch's default?** The digest takes what the user typed to one agent's
+    provider to another's. Memory is on by default because it is the user's own notes; this is
+    the user's own words too, but not ones they chose to share. Lean: off, and asked once per
+    project the first time a second agent starts beside a conversation.
