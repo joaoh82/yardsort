@@ -1,0 +1,41 @@
+# Staging on Fly.io: https://remote-staging.yardsort.sh (docs/design/28-remote-infrastructure.md).
+# Deployed by .github/workflows/server-deploy.yml, from the repository root:
+#
+#   fly deploy . --config crates/server/fly/staging.toml --dockerfile crates/server/Dockerfile
+#
+# Only settings that are not secret live here. The client secret and DATABASE_URL are Fly secrets
+# (`fly secrets list -a yardsort-remote-staging` shows their names, never their values).
+
+app = "yardsort-remote-staging"
+primary_region = "fra"
+# SIGTERM is what the server waits for to finish its requests and stop.
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[env]
+  YARDSORT_PUBLIC_URL = "https://remote-staging.yardsort.sh"
+  YARDSORT_SERVER_NAME = "Yardsort staging"
+  YARDSORT_OIDC_ISSUER = "https://yardsort-staging-pegnzh.eu1.zitadel.cloud"
+  YARDSORT_OIDC_CLIENT_ID = "396580739791025500"
+  # Fly's proxy names the client's address here; the rate limits count by it.
+  YARDSORT_CLIENT_IP_HEADER = "Fly-Client-IP"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Staging sleeps when nobody uses it, and Fly's proxy wakes it on the next request. That stops
+  # suiting once the relay holds long connections (R2's sixth slice).
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

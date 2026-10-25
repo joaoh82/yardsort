@@ -1,7 +1,8 @@
 # Remote: where it runs, and how to set it up
 
-**Status:** a plan. Nothing is provisioned, bought or deployed. Prices were checked on
-2026-10-22 and change often; check them again before relying on them. The design this hosts is
+**Status:** staging was set up and deployed on 2026-10-24, and has answered at its own name since
+2026-10-25 (§5); production is not set up. Prices were checked on 2026-10-22 and change often; check them again
+before relying on them. The design this hosts is
 [27](27-remote-r2.md). Setting the accounts up is the owner's to do (proposal §16: production
 choices, credentials and paid provisioning are owner-supplied). Section 5 is the checklist for it.
 
@@ -40,7 +41,7 @@ hosts and devices reconnect, which the protocol is built for (a fresh snapshot, 
   for a staging database that is mostly idle, but outside Fly's network, so it is reached over
   the internet with TLS.
 
-The lean is Neon's free plan for staging and Fly Managed Postgres for production.
+Staging uses Neon's free plan (settled 2026-10-24), and production will use Fly Managed Postgres.
 
 **Identity on ZITADEL Cloud.** Staging uses the free plan: one instance, 100 daily active users,
 and a `*.zitadel.cloud` domain. Production needs Pro (US$100 a month): a second instance needs
@@ -120,6 +121,23 @@ Fly app names are global, so the ones below may need a suffix.
 
 ## 5 · Setting it up: the owner's checklist
 
+**Staging, done on 2026-10-24.** Each service has its own Yardsort organization, apart from
+anything else its owner runs there, and Yardsort's own project or app inside it:
+
+| Service       | What exists                                                                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ZITADEL Cloud | Instance `yardsort-staging` in the EU (`https://yardsort-staging-pegnzh.eu1.zitadel.cloud`), organization Yardsort, project `Yardsort server`, Web application `Yardsort` |
+| Neon          | Organization Yardsort, project `yardsort` in `aws-eu-central-1` on PostgreSQL 17, database and role `yardsort`                                                            |
+| Fly.io        | Organization `yardsort`, with its own card; apps `yardsort-remote-staging` (one Machine in `fra`, since 2026-10-24) and `yardsort-remote` (empty)                         |
+| Fly secrets   | On staging: `YARDSORT_OIDC_CLIENT_SECRET` and `DATABASE_URL` (Neon's direct connection, `sslmode=require`)                                                                |
+| GitHub        | Environment `staging`, holding `FLY_API_TOKEN`: deploy token `github-staging`, for the staging app alone                                                                  |
+| Cloudflare    | In `yardsort.sh`, DNS only: `A remote-staging` to `66.241.124.66` (Fly's shared address) and `AAAA remote-staging` to `2a09:8280:1::1cb:3339:0` (staging's own)           |
+
+The issuer and the client id are in `crates/server/fly/staging.toml`. No secret passed through a
+file, an issue or a chat: each went from its provider straight into Fly or GitHub. The two DNS
+records were added by hand in Cloudflare's dashboard on 2026-10-25, and Fly's certificate was
+issued a minute later.
+
 Do these in order. Nothing secret goes into git, an issue or a chat. Each secret goes straight
 from the provider's screen into Fly's secrets or a GitHub environment secret.
 
@@ -144,7 +162,7 @@ Settled on 2026-10-23:
    - **Type:** **Web**.
    - **Authentication method:** **Code**, so the server authenticates with a client secret.
      The server sends PKCE as well, which ZITADEL accepts alongside the secret: confirmed against
-     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §6).
+     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §7).
    - **Redirect URI:** `https://remote-staging.yardsort.sh/v1/login/callback`.
    - **Development mode:** off.
    - **Refresh tokens:** leave them off. The server never asks ZITADEL for one.
@@ -219,16 +237,18 @@ the owner's go-ahead:
 - **Slice 2, done on 2026-10-23** ([27](27-remote-r2.md) §5): the `yardsort-server` binary,
   its PostgreSQL store, configuration from the environment and secret files, and the local
   Docker environment with `just` recipes (CONTRIBUTING, "Working on the server").
-- **Slice 3:**
-  - the container image and `fly.toml`, with the settings that are not secret (the public URL,
-    the issuer, the client id, `YARDSORT_CLIENT_IP_HEADER=Fly-Client-IP`) and a health check on
-    `/health`;
-  - a GitHub Actions workflow that deploys to staging on request, and to production only
-    through the protected environment;
-  - the self-host recipe.
+- **Slice 3, built on 2026-10-24** ([27](27-remote-r2.md) §6): the container image, staging's Fly
+  config (`crates/server/fly/staging.toml`), a workflow that deploys it on request
+  (`.github/workflows/server-deploy.yml`), and the self-host recipe (`crates/server/self-host/`).
+  Staging was first deployed from a workstation, with the workflow's arguments, before the
+  workflow reached `main`. Step E and staging's smoke test followed on 2026-10-25, and the test
+  passed ([27](27-remote-r2.md) §7). Production's Fly config and its protected environment come
+  with its ZITADEL instance.
 
 ## 7 · Open decisions
 
-- Neon or Fly Managed Postgres for staging.
 - When "something to launch" is, for ZITADEL Pro: the public beta, or launch (R7).
 - Whether beta testers sign up for themselves or are invited.
+- Whether DNS records stay a hand step in Cloudflare's dashboard or a script does them, with an
+  API token limited to editing `yardsort.sh`'s DNS. By hand for staging; production adds
+  `remote` and `auth`.

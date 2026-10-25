@@ -1,0 +1,26 @@
+# TLS for both names, from Let's Encrypt, renewed by Caddy. Ports 80 and 443 must reach this
+# machine for that.
+{
+	email {$ACME_EMAIL}
+	# compose.localhost.yaml sets this to `local_certs`: Caddy's own CA instead of Let's Encrypt.
+	{$CADDY_CERTIFICATES}
+}
+
+# ZITADEL wants one address: its login pages from the login container, everything else from the
+# API over HTTP/2 without TLS (h2c), which its gRPC needs.
+{$AUTH_DOMAIN} {
+	handle /ui/v2/login* {
+		reverse_proxy zitadel-login:3000
+	}
+	handle {
+		reverse_proxy h2c://zitadel-api:8080
+	}
+}
+
+# The server. It counts its rate limits by the address Caddy names here, which Caddy sets itself,
+# so a client cannot choose it.
+{$REMOTE_DOMAIN} {
+	reverse_proxy server:8080 {
+		header_up X-Real-IP {remote_host}
+	}
+}

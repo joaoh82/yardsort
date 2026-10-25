@@ -1,23 +1,43 @@
 //! `yardsort-server`: the control service on PostgreSQL, over HTTP. Configured by its environment;
 //! see [`yardsort_server::config`].
+//!
+//! `yardsort-server revoke-account --subject SUBJECT [--issuer ISSUER]` signs every device of one
+//! account out instead, for an operator: the provider's subject, at the provider the server is
+//! configured with unless `--issuer` names another. It needs only `DATABASE_URL`.
 
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 
 use tracing_subscriber::EnvFilter;
-use yardsort_server::config::Settings;
+use yardsort_server::config::{AdminSettings, Settings};
 use yardsort_server::http::{self, now_ms};
 use yardsort_server::postgres::PgRecords;
+use yardsort_server::records::{Records, RevokeReason, Revoked};
 use yardsort_server::{oidc, ControlService, ServerConfig};
+
+const USAGE: &str = "usage: yardsort-server [revoke-account --subject SUBJECT [--issuer ISSUER]]";
 
 #[tokio::main]
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
+        // Colours for a person at a terminal; plain text for a platform's log collector.
+        .with_ansi(std::io::stdout().is_terminal())
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
-    match run().await {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let result = match args.first().map(String::as_str) {
+        None => serve().await,
+        Some("revoke-account") => revoke_account(&args[1..]).await,
+        Some("help" | "-h" | "--help") => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        Some(other) => Err(format!("unknown command {other:?}\n{USAGE}")),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("{error}");
@@ -26,7 +46,7 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> Result<(), String> {
+async fn serve() -> Result<(), String> {
     let settings = Settings::from_env().map_err(|e| e.to_string())?;
     let records = PgRecords::connect(settings.database_url.expose())
         .await
@@ -73,6 +93,52 @@ async fn run() -> Result<(), String> {
     .with_graceful_shutdown(stopped())
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Revoke every device of one account, as its owner could one at a time. The devices stop on their
+/// next request. Signing in again is still possible, if the provider lets the person in.
+async fn revoke_account(args: &[String]) -> Result<(), String> {
+    let mut subject = None;
+    let mut issuer = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let slot = match arg.as_str() {
+            "--subject" => &mut subject,
+            "--issuer" => &mut issuer,
+            other => return Err(format!("unexpected {other:?}\n{USAGE}")),
+        };
+        *slot = Some(
+            args.next()
+                .ok_or_else(|| format!("{arg} needs a value\n{USAGE}"))?
+                .clone(),
+        );
+    }
+    let subject = subject.ok_or_else(|| format!("--subject is required\n{USAGE}"))?;
+    let settings = AdminSettings::from_env().map_err(|e| e.to_string())?;
+    let issuer = issuer
+        .or(settings.issuer)
+        .ok_or("give --issuer, or set YARDSORT_OIDC_ISSUER")?;
+    let records = PgRecords::connect(settings.database_url.expose())
+        .await
+        .map_err(|e| e.to_string())?;
+    let revoked = Revoked {
+        at: now_ms(),
+        reason: RevokeReason::ByOperator,
+    };
+    match records
+        .revoke_account(&issuer, &subject, revoked)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        Some(count) => {
+            let devices = if count == 1 { "device" } else { "devices" };
+            println!("Revoked {count} {devices} of the account for {subject} at {issuer}.");
+            Ok(())
+        }
+        None => Err(format!(
+            "no account for {subject} at {issuer}: that subject has never signed in here"
+        )),
+    }
 }
 
 /// Ctrl-C, or the `SIGTERM` a platform sends before it replaces an instance.

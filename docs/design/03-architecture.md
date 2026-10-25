@@ -580,7 +580,9 @@ remote ever talks to it directly. Instead:
   its own credentials (a 15-minute access, a single-use refresh), kept only as hashes. The
   provider is never asked again for that device, and revoking it takes effect on its next
   request. It serves sign-in and the device routes so far; nothing in the app or `ys` calls it
-  yet, and it is not deployed anywhere ([28](28-remote-infrastructure.md)).
+  yet. It ships as a container image, which staging on Fly.io and the self-host recipe
+  (`crates/server/self-host/`) both run; staging has run on Fly.io since 2026-10-24
+  ([28](28-remote-infrastructure.md)).
 - `yardsort_core::remote::HostFacade` answers that protocol for one host, read-only, checking
   each request against a device's `Grant` (scopes plus projects). It is built field by field
   from what the app already shows, so paths, argv, environment, labels and terminal output have

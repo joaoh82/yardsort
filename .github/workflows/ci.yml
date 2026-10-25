@@ -85,6 +85,34 @@ jobs:
         shell: bash
         run: git diff --exit-code -- src/lib/bindings.ts
 
+  # One whole sign-in against a real ZITADEL, through the server's container image, ending with the
+  # image's own `revoke-account` signing the account out (`just server-e2e`). ZITADEL's login pages
+  # are not rendered: the tool makes the two API calls they make. Linux: it needs containers.
+  server-e2e:
+    name: Server end to end
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-e2e
+
+      - name: PostgreSQL and ZITADEL, with the server's app
+        timeout-minutes: 10
+        run: bun scripts/server-dev.mjs up
+
+      - name: Build the image, run it, sign in, revoke
+        timeout-minutes: 15
+        run: bun scripts/server-dev.mjs e2e
+
   # Installers for all three platforms. Only on main (and on demand): these are the slow,
   # expensive jobs — macOS minutes are billed at 10x on private repos.
   website:

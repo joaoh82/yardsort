@@ -103,6 +103,14 @@ server-sign-in *args:
 server-test *args:
     bun scripts/server-dev.mjs test {{ args }}
 
+# Build the server's container image, yardsort-server:dev (crates/server/Dockerfile)
+server-image:
+    bun scripts/server-dev.mjs image
+
+# Run that image against the containers and sign in through ZITADEL with no browser, then revoke the account from inside the image (Linux)
+server-e2e:
+    bun scripts/server-dev.mjs e2e
+
 # Stop the containers, keeping what is in them
 server-down:
     bun scripts/server-dev.mjs down

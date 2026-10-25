@@ -4,6 +4,8 @@
 //   bun scripts/server-dev.mjs up      start the containers, and give ZITADEL the server's app
 //   bun scripts/server-dev.mjs run     run the server against them (cargo run)
 //   bun scripts/server-dev.mjs test    the server's tests, the PostgreSQL ones included
+//   bun scripts/server-dev.mjs image   build the server's container image (crates/server/Dockerfile)
+//   bun scripts/server-dev.mjs e2e     build the image, run it, and sign in through ZITADEL (Linux)
 //   bun scripts/server-dev.mjs down    stop the containers, keeping what is in them
 //   bun scripts/server-dev.mjs reset   stop them and forget everything: accounts, ZITADEL, the lot
 //
@@ -13,7 +15,7 @@
 //
 // Plain JavaScript on Node's APIs, so it runs the same under bun on all three systems.
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -34,6 +36,10 @@ const TEST_DATABASE_URL =
 
 const docker = (args, options = {}) =>
   execFileSync("docker", [...compose, ...args], { cwd: root, encoding: "utf8", ...options });
+
+const IMAGE = "yardsort-server:dev";
+const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+const E2E_CONTAINER = "yardsort-server-e2e";
 
 async function zitadel(token, method, path, body) {
   const response = await fetch(`${ISSUER}${path}`, {
@@ -157,15 +163,145 @@ function test(args) {
   process.exit(result.status ?? 1);
 }
 
+function image() {
+  execFileSync(
+    "docker",
+    ["build", "-f", join("crates", "server", "Dockerfile"), "-t", IMAGE, "."],
+    {
+      cwd: root,
+      stdio: "inherit",
+    },
+  );
+}
+
+async function healthy(url) {
+  try {
+    return (await fetch(`${url}/health`)).ok;
+  } catch {
+    return false;
+  }
+}
+
+/** The image, run as the server against the containers, and signed in to through ZITADEL with no
+ * browser: what CI runs, and slice 3's local smoke test. The container shares the host's network,
+ * which Docker offers on Linux. */
+async function e2e() {
+  const settings = readSettings();
+  if (!settings) {
+    console.error("No settings yet: run `just server-up` first.");
+    process.exit(1);
+  }
+  if (await healthy(PUBLIC_URL)) {
+    console.error(`Something already answers at ${PUBLIC_URL}: stop \`just server-run\` first.`);
+    process.exit(1);
+  }
+  image();
+  execFileSync("docker", ["rm", "-f", E2E_CONTAINER], { stdio: "ignore" });
+  execFileSync("docker", [
+    ...["run", "-d", "--name", E2E_CONTAINER, "--network", "host"],
+    ...["--env-file", settingsFile, "-e", `YARDSORT_LISTEN=127.0.0.1:${new URL(PUBLIC_URL).port}`],
+    IMAGE,
+  ]);
+  const logs = () =>
+    spawnSync("docker", ["logs", E2E_CONTAINER], { encoding: "utf8" }).output.join("");
+  let passed = false;
+  try {
+    for (let i = 0; i < 60 && !(await healthy(PUBLIC_URL)); i++) await sleep(500);
+    if (!(await healthy(PUBLIC_URL))) throw new Error("the server did not come up");
+
+    const token = docker([
+      "exec",
+      "-T",
+      "zitadel-login",
+      "cat",
+      "/zitadel/bootstrap/login-client.pat",
+    ]).trim();
+    passed = await signInAndRevoke(token);
+  } catch (error) {
+    console.error(error.message);
+  } finally {
+    const text = logs();
+    // The server's log must hold neither its client secret nor anyone's credentials.
+    for (const [what, secret] of [
+      ["the client secret", settings.YARDSORT_OIDC_CLIENT_SECRET],
+      ["a bearer credential", "Bearer "],
+    ]) {
+      if (secret && text.includes(secret)) {
+        console.error(`The server's log holds ${what}.`);
+        passed = false;
+      }
+    }
+    if (!passed) console.error(`\nThe server's log:\n${text}`);
+    execFileSync("docker", ["rm", "-f", E2E_CONTAINER], { stdio: "ignore" });
+  }
+  console.log(passed ? "\nEnd to end: passed." : "\nEnd to end: FAILED.");
+  process.exit(passed ? 0 : 1);
+}
+
+/** The sign-in tool (`crates/server/examples/sign-in.rs`) signs in through ZITADEL's API and
+ * waits; once it does, the image's own `revoke-account` signs the account out, and the tool checks
+ * that its credentials stopped working. */
+function signInAndRevoke(token) {
+  return new Promise((resolvePassed) => {
+    // Built first and run directly, so that stopping it stops the tool and not only cargo.
+    execFileSync("cargo", ["build", "-q", "-p", "yardsort-server", "--example", "sign-in"], {
+      cwd: root,
+      stdio: "inherit",
+    });
+    const target = process.env.CARGO_TARGET_DIR ?? join(root, "target");
+    const binary = join(target, "debug", "examples", "sign-in");
+    const tool = spawn(
+      process.platform === "win32" ? `${binary}.exe` : binary,
+      [PUBLIC_URL, "--zitadel-api", "--wait-for-revoke"],
+      {
+        cwd: root,
+        stdio: ["ignore", "pipe", "inherit"],
+        env: {
+          ...process.env,
+          ZITADEL_LOGIN_CLIENT_TOKEN: token,
+          YARDSORT_SIGN_IN_AS: "developer@yardsort.test",
+          YARDSORT_SIGN_IN_PASSWORD: "Yardsort-dev-1",
+        },
+      },
+    );
+    let output = "";
+    let revoked = false;
+    tool.stdout.setEncoding("utf8");
+    tool.stdout.on("data", (chunk) => {
+      process.stdout.write(chunk);
+      output += chunk;
+      const subject = /as user (\S+)\./.exec(output)?.[1];
+      if (!revoked && subject && output.includes("Waiting for this device")) {
+        revoked = true;
+        const result = spawnSync(
+          "docker",
+          [
+            ...["exec", E2E_CONTAINER, "/usr/local/bin/yardsort-server"],
+            ...["revoke-account", "--subject", subject],
+          ],
+          { encoding: "utf8" },
+        );
+        process.stdout.write(`\n$ yardsort-server revoke-account --subject ${subject}\n`);
+        process.stdout.write(result.output.join(""));
+        // A revocation takes effect on the device's next request, which it makes every half second.
+        setTimeout(() => tool.kill(), 30_000).unref();
+      }
+    });
+    tool.on("exit", (code) => resolvePassed(code === 0 && revoked));
+  });
+}
+
 const command = process.argv[2];
 if (command === "up") await up();
 else if (command === "run") run();
 else if (command === "test") test(process.argv.slice(3));
+else if (command === "image") image();
+else if (command === "e2e") await e2e();
 else if (command === "down") docker(["down"], { stdio: "inherit" });
 else if (command === "reset") {
   docker(["down", "--volumes"], { stdio: "inherit" });
   rmSync(settingsFile, { force: true });
 } else {
-  console.error("usage: bun scripts/server-dev.mjs up | run | test | down | reset");
+  console.error("usage: bun scripts/server-dev.mjs up | run | test | image | e2e | down | reset");
   process.exit(2);
 }
