@@ -1,0 +1,20 @@
+# For a machine that already runs its own reverse proxy (README.md, "Using your own proxy"): no
+# Caddy, and the three services the proxy needs published on this machine's loopback address.
+#
+#   docker compose -f compose.yaml -f compose.own-proxy.yaml up -d zitadel-login server
+#
+# Never start `proxy` with this file: it would want ports 80 and 443 too.
+
+services:
+  zitadel-api:
+    ports:
+      - "127.0.0.1:8081:8080"
+  zitadel-login:
+    ports:
+      - "127.0.0.1:3000:3000"
+  server:
+    ports:
+      - "127.0.0.1:8787:8080"
+    # The server reaches ZITADEL by its public name, through your proxy on this machine.
+    extra_hosts:
+      - "${AUTH_DOMAIN}:host-gateway"

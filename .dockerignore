@@ -1,0 +1,17 @@
+# What `docker build` sends: only what Cargo needs to build the server (crates/server/Dockerfile).
+# Everything else, the frontend, target/ and any local secrets among it, stays behind.
+*
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!crates/
+!src-tauri/Cargo.toml
+!src-tauri/build.rs
+!src-tauri/src/
+
+# Never, even inside what is let through above.
+**/target/
+**/node_modules/
+**/*.local
+**/.env
+**/.env.*

@@ -3,12 +3,21 @@
 //! and the one-time code it brings is redeemed with this run's PKCE verifier.
 //!
 //! ```text
-//! cargo run -p yardsort-server --example sign-in -- [SERVER] [--keep] [--no-browser]
+//! cargo run -p yardsort-server --example sign-in -- [SERVER] [--keep | --wait-for-revoke]
+//!     [--no-browser | --zitadel-api]
 //! ```
 //!
 //! `SERVER` is `http://127.0.0.1:8787` unless given (`just server-run`). After signing in it lists
-//! the account's devices, refreshes once, and revokes itself unless `--keep` is given. Credentials
-//! are never printed; nothing is saved.
+//! the account's devices, refreshes once, and revokes itself unless `--keep` is given. With
+//! `--wait-for-revoke` it stays signed in until something else revokes it (`yardsort-server
+//! revoke-account`), then checks that its access and refresh credentials are both refused.
+//!
+//! `--zitadel-api` signs in without a browser, for automated runs against a ZITADEL: it does what
+//! ZITADEL's own login pages do, through its session API, as `YARDSORT_SIGN_IN_AS` with
+//! `YARDSORT_SIGN_IN_PASSWORD`, using the login client's token in `ZITADEL_LOGIN_CLIENT_TOKEN`. It
+//! prints the ZITADEL user id, which is the subject `revoke-account` takes.
+//!
+//! Credentials are never printed; nothing is saved.
 
 use std::time::Duration;
 
@@ -24,8 +33,11 @@ use yardsort_server::{oidc, tokens};
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let keep = args.iter().any(|a| a == "--keep");
-    let browser = !args.iter().any(|a| a == "--no-browser");
+    let flag = |name: &str| args.iter().any(|a| a == name);
+    let keep = flag("--keep");
+    let wait_for_revoke = flag("--wait-for-revoke");
+    let zitadel_api = flag("--zitadel-api");
+    let browser = !flag("--no-browser") && !zitadel_api;
     let server = args
         .iter()
         .find(|a| !a.starts_with("--"))
@@ -51,13 +63,23 @@ async fn main() -> Result<(), String> {
         .append_pair("challengeMethod", CHALLENGE_METHOD)
         .append_pair("redirect", &redirect);
 
-    println!("Sign in, in a browser:\n\n  {login}\n");
-    if browser {
-        open(login.as_str());
-    }
-    let code = tokio::time::timeout(Duration::from_secs(600), returned(&listener))
-        .await
-        .map_err(|_| "no sign-in came back within ten minutes".to_owned())??;
+    let code = if zitadel_api {
+        // Both at once: the last step of the API's sign-in is the redirect to the listener.
+        let (code, signed_in) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(60), returned(&listener)),
+            through_zitadel_api(&http, login),
+        );
+        signed_in?;
+        code.map_err(|_| "no sign-in came back within a minute".to_owned())??
+    } else {
+        println!("Sign in, in a browser:\n\n  {login}\n");
+        if browser {
+            open(login.as_str());
+        }
+        tokio::time::timeout(Duration::from_secs(600), returned(&listener))
+            .await
+            .map_err(|_| "no sign-in came back within ten minutes".to_owned())??
+    };
 
     let credentials: Credentials = call(
         http.post(server.join("v1/token").map_err(|e| e.to_string())?)
@@ -108,6 +130,39 @@ async fn main() -> Result<(), String> {
         println!("Kept signed in (--keep). Nothing was saved, so this device is now unreachable.");
         return Ok(());
     }
+    if wait_for_revoke {
+        println!("Waiting for this device to be revoked elsewhere, for up to ten minutes.");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
+        loop {
+            let response = devices(&renewed.access)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                break;
+            }
+            if tokio::time::Instant::now() > deadline {
+                return Err("not revoked within ten minutes".into());
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let refreshed = http
+            .post(server.join("v1/token").unwrap())
+            .json(&TokenRequest::Refresh {
+                refresh: renewed.refresh.clone(),
+            })
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if refreshed.status() != reqwest::StatusCode::UNAUTHORIZED {
+            return Err(format!(
+                "revoked, but refreshing got {} rather than 401",
+                refreshed.status()
+            ));
+        }
+        println!("Revoked elsewhere: its access and refresh credentials now both get 401.");
+        return Ok(());
+    }
     let revoke = server
         .join(&format!("v1/devices/{}/revoke", renewed.device))
         .unwrap();
@@ -129,6 +184,112 @@ async fn main() -> Result<(), String> {
         after.status()
     );
     Ok(())
+}
+
+/// The provider's half of a sign-in, without a browser: what ZITADEL's login pages do, through
+/// its session API. Ends by following the server's redirect to the loopback listener, as a
+/// browser would.
+async fn through_zitadel_api(http: &reqwest::Client, login: Url) -> Result<(), String> {
+    let env = |name: &str| std::env::var(name).map_err(|_| format!("{name} is not set"));
+    let token = env("ZITADEL_LOGIN_CLIENT_TOKEN")?;
+    let login_name = env("YARDSORT_SIGN_IN_AS")?;
+    let password = env("YARDSORT_SIGN_IN_PASSWORD")?;
+
+    // The server sends the browser to the provider, which sends it to its login pages with the
+    // id of this sign-in request.
+    let authorize = redirected(http, login).await?;
+    let login_page = redirected(http, authorize.clone()).await?;
+    let request = login_page
+        .query_pairs()
+        .find(|(k, _)| k == "authRequest")
+        .map(|(_, v)| v.into_owned())
+        .ok_or_else(|| format!("ZITADEL sent the browser to {login_page}, with no authRequest"))?;
+    let zitadel = |path: &str| authorize.join(path).map_err(|e| e.to_string());
+    let api = |url: Url, body: serde_json::Value| {
+        let http = http.clone();
+        let token = token.clone();
+        async move {
+            let response = http
+                .post(url.clone())
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            let status = response.status();
+            let body: serde_json::Value = response.json().await.unwrap_or_default();
+            if !status.is_success() {
+                return Err(format!("ZITADEL {}: {status} {body}", url.path()));
+            }
+            Ok(body)
+        }
+    };
+
+    let session = api(
+        zitadel("/v2/sessions")?,
+        serde_json::json!({ "checks": {
+            "user": { "loginName": login_name },
+            "password": { "password": password },
+        }}),
+    )
+    .await?;
+    let field = |value: &serde_json::Value, name: &str| {
+        value[name]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("ZITADEL's answer has no {name}"))
+    };
+    let (session_id, session_token) = (
+        field(&session, "sessionId")?,
+        field(&session, "sessionToken")?,
+    );
+    let user = http
+        .get(zitadel(&format!("/v2/sessions/{session_id}"))?)
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(id) = user["session"]["factors"]["user"]["id"].as_str() {
+        println!("Signed in at ZITADEL as user {id}.");
+    }
+    let finished = api(
+        zitadel(&format!("/v2/oidc/auth_requests/{request}"))?,
+        serde_json::json!({ "session": {
+            "sessionId": session_id,
+            "sessionToken": session_token,
+        }}),
+    )
+    .await?;
+    let callback = Url::parse(&field(&finished, "callbackUrl")?).map_err(|e| e.to_string())?;
+
+    // The server's callback, then its redirect to this tool's listener.
+    let device = redirected(http, callback).await?;
+    http.get(device).send().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Where a response sends the browser next.
+async fn redirected(http: &reqwest::Client, url: Url) -> Result<Url, String> {
+    let response = http
+        .get(url.clone())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            format!(
+                "{} answered {}, not a redirect",
+                url.path(),
+                response.status()
+            )
+        })?;
+    url.join(location).map_err(|e| e.to_string())
 }
 
 /// The one-time code the browser brings back to the loopback listener.

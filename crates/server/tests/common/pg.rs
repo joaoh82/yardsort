@@ -62,6 +62,15 @@ pub struct EmptySchema {
 }
 
 impl TestDatabase {
+    /// A URL for this test's schema, as a process outside the test would be given it.
+    pub fn url(&self) -> String {
+        let separator = if self.url.contains('?') { '&' } else { '?' };
+        format!(
+            "{}{separator}options=-c%20search_path%3D{}",
+            self.url, self.schema
+        )
+    }
+
     pub async fn drop(self) {
         admin(&self.url, &format!("DROP SCHEMA {} CASCADE", self.schema)).await;
     }

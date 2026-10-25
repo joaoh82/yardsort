@@ -75,6 +75,9 @@ pub enum RevokeReason {
     ByOwner,
     /// A refresh credential it had already traded in was presented again: a copy of it exists.
     RefreshReused,
+    /// The server's operator revoked every device of its account (`yardsort-server
+    /// revoke-account`).
+    ByOperator,
 }
 
 /// A device's credentials as kept: hashes and when they lapse.
@@ -184,6 +187,15 @@ pub trait Records: Send + Sync {
         device: &DeviceId,
         revoked: Revoked,
     ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Revoke every device of the account for this provider subject that is not revoked yet, in
+    /// one step, and say how many that was. `None` when there is no such account; none is made.
+    fn revoke_account(
+        &self,
+        issuer: &str,
+        subject: &str,
+        revoked: Revoked,
+    ) -> impl Future<Output = Result<Option<usize>>> + Send;
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
@@ -384,6 +396,27 @@ impl Records for MemoryRecords {
                 true
             }
             _ => false,
+        })
+    }
+    async fn revoke_account(
+        &self,
+        issuer: &str,
+        subject: &str,
+        revoked: Revoked,
+    ) -> Result<Option<usize>> {
+        self.with(|s| {
+            let account = s
+                .accounts
+                .get(&(issuer.to_owned(), subject.to_owned()))?
+                .clone();
+            let mut count = 0;
+            for device in &mut s.devices {
+                if device.account == account && device.revoked.is_none() {
+                    device.revoked = Some(revoked);
+                    count += 1;
+                }
+            }
+            Some(count)
         })
     }
 }

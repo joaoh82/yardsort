@@ -53,6 +53,7 @@ for_each_store!(
     seen_is_written_at_most_once_a_minute,
     an_account_lists_and_revokes_only_its_own_devices,
     signed_in_devices_hold_a_live_refresh_credential,
+    the_operator_revokes_every_device_of_one_account,
     devices_keep_every_wire_name,
 );
 
@@ -417,6 +418,79 @@ async fn signed_in_devices_hold_a_live_refresh_credential(records: Arc<impl Reco
     assert_eq!(
         records.signed_in_devices(&alice, T + 19_000).await.unwrap(),
         0
+    );
+}
+
+async fn the_operator_revokes_every_device_of_one_account(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    // The same subject at another provider is another person.
+    let elsewhere = records.account("https://id.two", "alice", T).await.unwrap();
+    let phone = enroll(&*records, &alice, "phone", T).await;
+    let laptop = enroll(&*records, &alice, "laptop", T).await;
+    let earlier = enroll(&*records, &alice, "earlier", T).await;
+    let by_owner = Revoked {
+        at: T + 1,
+        reason: RevokeReason::ByOwner,
+    };
+    assert!(records.revoke(&alice, &earlier.id, by_owner).await.unwrap());
+    let theirs = enroll(&*records, &elsewhere, "theirs", T).await;
+
+    let by_operator = |at| Revoked {
+        at,
+        reason: RevokeReason::ByOperator,
+    };
+    assert_eq!(
+        records
+            .revoke_account("https://id.one", "alice", by_operator(T + 5))
+            .await
+            .unwrap(),
+        Some(2)
+    );
+    let revoked = |devices: Vec<Device>, id: &DeviceId| {
+        devices.into_iter().find(|d| d.id == *id).unwrap().revoked
+    };
+    let now = records.devices(&alice).await.unwrap();
+    assert_eq!(revoked(now.clone(), &phone.id), Some(by_operator(T + 5)));
+    assert_eq!(revoked(now.clone(), &laptop.id), Some(by_operator(T + 5)));
+    // An earlier revocation, and its reason, stand.
+    assert_eq!(revoked(now, &earlier.id), Some(by_owner));
+    assert_eq!(
+        revoked(records.devices(&elsewhere).await.unwrap(), &theirs.id),
+        None
+    );
+    assert_eq!(records.signed_in_devices(&alice, T + 6).await.unwrap(), 0);
+    assert_eq!(
+        records.signed_in_devices(&elsewhere, T + 6).await.unwrap(),
+        1
+    );
+
+    // Again: nothing left to revoke, and the first time stands.
+    assert_eq!(
+        records
+            .revoke_account("https://id.one", "alice", by_operator(T + 9))
+            .await
+            .unwrap(),
+        Some(0)
+    );
+    assert_eq!(
+        revoked(records.devices(&alice).await.unwrap(), &phone.id),
+        Some(by_operator(T + 5))
+    );
+
+    // A subject that never signed in is not an account, and asking does not make one.
+    assert_eq!(
+        records
+            .revoke_account("https://id.one", "nobody", by_operator(T + 9))
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        records
+            .revoke_account("https://id.one", "nobody", by_operator(T + 9))
+            .await
+            .unwrap(),
+        None
     );
 }
 

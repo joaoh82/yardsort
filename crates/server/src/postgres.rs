@@ -430,6 +430,37 @@ impl Records for PgRecords {
             .map_err(failed)?;
         Ok(changed > 0)
     }
+
+    async fn revoke_account(
+        &self,
+        issuer: &str,
+        subject: &str,
+        revoked: Revoked,
+    ) -> Result<Option<usize>> {
+        let row = self
+            .client()
+            .await?
+            .query_one(
+                "WITH account AS (
+                     SELECT id FROM accounts WHERE issuer = $1 AND subject = $2
+                 ), revoked AS (
+                     UPDATE devices SET revoked_at = $3, revoked_reason = $4
+                     WHERE account IN (SELECT id FROM account) AND revoked_at IS NULL
+                     RETURNING 1
+                 )
+                 SELECT (SELECT count(*) FROM account), (SELECT count(*) FROM revoked)",
+                &[
+                    &issuer,
+                    &subject,
+                    &revoked.at,
+                    &reason_spelled(revoked.reason),
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        let (accounts, devices): (i64, i64) = (row.get(0), row.get(1));
+        Ok((accounts > 0).then(|| usize::try_from(devices).unwrap_or(usize::MAX)))
+    }
 }
 
 async fn issue(tx: &Transaction<'_>, device: &DeviceId, issued: &Issued) -> Result<()> {
@@ -471,6 +502,7 @@ fn device(row: &Row) -> Result<Device> {
             at,
             reason: match reason.as_deref() {
                 Some("refreshReused") => RevokeReason::RefreshReused,
+                Some("byOperator") => RevokeReason::ByOperator,
                 _ => RevokeReason::ByOwner,
             },
         }),
@@ -481,6 +513,7 @@ fn reason_spelled(reason: RevokeReason) -> &'static str {
     match reason {
         RevokeReason::ByOwner => "byOwner",
         RevokeReason::RefreshReused => "refreshReused",
+        RevokeReason::ByOperator => "byOperator",
     }
 }
 

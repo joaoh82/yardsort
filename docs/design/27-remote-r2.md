@@ -1,10 +1,14 @@
 # Remote, R2: identity and relay
 
-**Status:** R2 started on 2026-10-22. Two slices are built. The first (2026-10-22): signing in
+**Status:** R2 started on 2026-10-22. Three slices are built. The first (2026-10-22): signing in
 through the server's identity provider, and the server's own credentials for each device after
 that. The second (2026-10-23): the `yardsort-server` binary, which serves them over HTTP from
-PostgreSQL, and a local environment with a real ZITADEL in Docker. Nothing in the app or `ys` uses
-the server yet, and it is not deployed anywhere ([28](28-remote-infrastructure.md)). The proposal is
+PostgreSQL, and a local environment with a real ZITADEL in Docker. The third (2026-10-24): the
+server's container image, its Fly.io configuration and deploy workflow, the self-host recipe, an
+operator's command to sign an account out everywhere, and a sign-in against a real ZITADEL in CI.
+Staging was deployed on 2026-10-24 ([28](28-remote-infrastructure.md) §5), and passed the third
+slice's smoke test (§10) on 2026-10-25 at `https://remote-staging.yardsort.sh`. Nothing in the app or
+`ys` uses the server. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -162,7 +166,7 @@ is sent anywhere, so the server is not an open redirector.
     two racing rotations exactly one gets through and the other is reuse.
   - Rotations also delete the device's lapsed access credentials, and its spent refresh
     credentials once they would have lapsed anyway, never sooner: a spent one must still revoke
-    the device when a copy is presented (§8).
+    the device when a copy is presented (§9).
   - `last_seen_at` is written at most once a minute (`SEEN_RESOLUTION_MS`); `MemoryRecords`
     follows the same rule.
   - The server's id is made the first time any instance starts, and kept.
@@ -187,7 +191,117 @@ is sent anywhere, so the server is not an open redirector.
 - **CI** starts a PostgreSQL container on its Linux runner and requires the PostgreSQL tests to
   run there. The macOS and Windows runners have no containers, so those tests skip there.
 
-## 6 · Verification
+## 6 · What the third slice adds
+
+- **The image** (`crates/server/Dockerfile`), built from the repository root: `yardsort-server`
+  alone on a distroless Debian 13 base, as a user with no shell, listening on 8080. Both bases
+  are pinned by digest. The build context is an allowlist (`.dockerignore`): the Cargo workspace
+  and nothing else, so no `node_modules`, `target/` or local `.env` file goes to a builder. It is
+  52 MB, 14 MB compressed. The server only colours its log at a terminal, so a platform's log
+  collector gets plain text.
+- **Staging on Fly.io** (`crates/server/fly/staging.toml`): the settings that are not secret (the
+  public URL, the issuer, the client id, `YARDSORT_CLIENT_IP_HEADER=Fly-Client-IP`), a health
+  check on `/health`, one `shared-cpu-1x` Machine with 512 MB in `fra`. It stops when idle and
+  Fly's proxy starts it on the next request; that changes once the relay holds long connections.
+  The client secret and `DATABASE_URL` are Fly secrets, set from the providers' screens and never
+  through a file or this repository.
+- **The deploy workflow** (`.github/workflows/server-deploy.yml`), run by hand. It builds on Fly's
+  builder, deploys one Machine (`--ha=false`), then checks the app's `fly.dev` address answers
+  `/health` and names the configured issuer. It runs in the `staging` GitHub environment, whose
+  `FLY_API_TOKEN` is a deploy token for that one app. Fly's setup action is pinned by commit, since
+  it runs with the token in reach. Production is not offered: it arrives with its own ZITADEL
+  instance, a Fly config and a `production` environment that requires a reviewer.
+- **`yardsort-server revoke-account --subject SUBJECT [--issuer ISSUER]`**: revokes every device
+  of one account that is not revoked yet, in one statement (`Records::revoke_account`), with a
+  new reason, `byOperator`. The issuer defaults to the server's own. It needs only
+  `DATABASE_URL`, and says how many devices it revoked; a subject that never signed in is an
+  error rather than a quiet zero, and does not create an account. It does not stop the person
+  signing in again: that is the provider's to refuse (§9).
+- **The self-host recipe** (`crates/server/self-host/`): Compose with PostgreSQL 17, ZITADEL
+  v4.19.5 (API and login), the server built from source, and Caddy, which gets certificates from
+  Let's Encrypt. Secrets come from a `.env` the repository ignores. The server has its own
+  database role. Caddy names the client's address in `X-Real-IP`, which it sets itself. Caddy
+  answers for ZITADEL's public name inside the Compose network too, so the server reaches ZITADEL
+  without leaving the machine, where many hosts cannot reach their own public address. Its README
+  covers setting up, signing someone out everywhere, backups, restores and upgrades.
+  `compose.localhost.yaml` runs the same recipe under `*.localhost` with Caddy's own certificate
+  authority, to try it on one machine. `compose.own-proxy.yaml` leaves Caddy out for a machine that already runs a
+  proxy, and the README lists what that proxy must do.
+- **End to end against a real ZITADEL** (`just server-e2e`, and a CI job, "Server end to end"):
+  the image runs against the local environment's ZITADEL and PostgreSQL. The sign-in tool signs
+  in without a browser: it makes the two calls ZITADEL's own login pages make (a session from the
+  username and password, then that session for the sign-in request) and follows the redirects as
+  a browser would. It then lists devices and refreshes, and waits while the image's own
+  `revoke-account` signs the account out, until its access and refresh credentials are both
+  refused. The run fails if the server's log holds the client secret or a bearer credential.
+- **The sign-in tool** (`examples/sign-in.rs`) gains `--zitadel-api` for that, and
+  `--wait-for-revoke`, which a person can use too, against staging.
+- An HTTP client the server cannot build now says why, instead of reqwest's "builder error". The
+  self-host trial found it: an `SSL_CERT_FILE` the server could not read.
+
+## 7 · Verification
+
+On Linux, 2026-10-24, the third slice:
+
+- `just server-test`: 61 tests, all passing. New: the contract test for `revoke_account` on both
+  stores (two of three devices revoked, an earlier revocation and its reason kept, the same
+  subject at another provider untouched, asking again changes nothing, an unknown subject is
+  `None` twice so none was created); the built binary revoking an account in PostgreSQL, refusing
+  another provider's subject and a misspelt one; and its errors for a missing subject, value,
+  database and issuer.
+- Two changes to the new query were made on purpose: without "not revoked yet" an earlier
+  revocation was overwritten, and without the issuer another provider's account was revoked. A
+  test failed each time.
+- `just server-e2e`, the CI job's steps, passed: the image served the local ZITADEL, signed in,
+  refreshed, and was revoked from inside its container. With the revoke pointed at a subject that
+  does not exist, it failed in 32 seconds and left no process behind.
+- **The self-host recipe**, under `compose.localhost.yaml`, with a throwaway `.env`: ZITADEL and
+  Caddy came up healthy, ZITADEL's discovery answered over HTTPS, the server was built by
+  Compose, reached ZITADEL by its public name, and answered `/health` and `/v1/server` through
+  Caddy. The sign-in tool signed in through ZITADEL's API, from this machine, through Caddy;
+  `docker compose exec server yardsort-server revoke-account` revoked it, and both its
+  credentials were refused. Both databases were dumped as the README says; the server's was
+  restored over itself with the server stopped, kept its tables' owner and its server id, and
+  served again. The server's log held neither the client secret, the database password nor a
+  bearer credential. With `compose.own-proxy.yaml`, ZITADEL's API and login answered on their
+  published ports; the API answered only with its public `Host` (`404` otherwise), and over h2c.
+  No other proxy was tried. Two fixes came out of it: ZITADEL's health check ignores `--tlsMode`, so
+  the recipe sets TLS by its settings, and the error above.
+- **The image with a browser**, the second local smoke test (§10): the sign-in tool started a
+  sign-in at the image, headless Chromium went through ZITADEL's own login pages (name, then
+  password) and back to the tool, which listed, refreshed and waited; `revoke-account` run in the
+  container signed it out, and both its credentials were refused.
+- `fly config validate` accepts `staging.toml`, and `fly deploy --build-only --local-only` with
+  the workflow's arguments built the image from the repository root without pushing it.
+  `actionlint` passes on both workflows.
+- Staging's accounts were checked from here, by name only: the Fly app and its two staged
+  secrets, the GitHub environment and its secret, the Neon project, and the ZITADEL Cloud
+  instance's discovery document and key set. ZITADEL accepts the staging callback as a redirect
+  for the client id, and refuses another.
+
+**Staging**, deployed from this machine on 2026-10-24 with the workflow's own arguments (the
+workflow can only be run from Actions once it is on `main`): Fly's builder built the image, 12 MB,
+and one Machine started in `fra`. The server connected to Neon over TLS, made its tables and its
+id, and listened 2.5 seconds after the Machine started; Fly's first health check came a second
+before that and failed, and every one since has passed. `https://yardsort-remote-staging.fly.dev`
+answers `/health`, and `/v1/server` names the staging ZITADEL as its issuer. `fly ssh console -C`
+runs `revoke-account` in the image, which has no shell, with the Machine's secrets: for a subject
+that never signed in it answered "no account" and changed nothing.
+
+**Staging's smoke test** (§10), on 2026-10-25, once its DNS records were in: Fly's certificate
+from Let's Encrypt was issued within a minute, and `https://remote-staging.yardsort.sh` answered
+`/health`, with `/v1/server` naming the staging ZITADEL. The sign-in tool, run from this machine,
+sent the browser to ZITADEL Cloud and back; it listed its device, refreshed, and waited. The
+account's subject was read from the staging database (the one account, with one live device),
+and `revoke-account` over `fly ssh console` revoked that one device. Within a second the tool
+reported both its credentials refused. Fly's log of the run has every request by method, path
+and status, none with a query string, and no secret, database URL, code or credential.
+Scanners found the name within minutes of its certificate (certificate transparency) and got
+`404` for everything they tried.
+
+**Not run here:** ZITADEL's login pages in the self-host recipe or
+in CI, which both use the API the pages call; the recipe on a machine reachable from the
+internet; macOS and Windows for any of it.
 
 On Linux, 2026-10-23, the second slice, with the review's additions of 2026-10-24:
 
@@ -258,7 +372,7 @@ On Linux, 2026-10-22, the first slice:
 **Not run here:** macOS and Windows, which CI covers, without the PostgreSQL half (above); ZITADEL
 Cloud, as opposed to ZITADEL in a container; anything on a phone; any deployment.
 
-## 7 · The rest of R2
+## 8 · The rest of R2
 
 Each item is a later slice. Where each runs, and the accounts to set up, are in
 [28](28-remote-infrastructure.md). The gate (proposal §13): two-account isolation, a revoked device
@@ -266,14 +380,8 @@ losing a live stream, and relay failure leaving PTYs alive.
 
 1. ~~Sign-in and device credentials, as a library.~~ Done (§4).
 2. ~~PostgreSQL records, the HTTP listener, rate limits, and the local environment.~~ Done (§5).
-3. **Deploying it, and the self-host recipe**:
-   - the container image and `fly.toml`, and a workflow that deploys to staging on request and to
-     production only through a protected environment (28);
-   - Compose with ZITADEL (pinned), the server, PostgreSQL and a reverse proxy, with TLS, backup
-     and upgrade notes;
-   - a `yardsort-server` command that revokes every device of an account, by issuer and subject
-     (§8);
-   - one end-to-end sign-in against a real ZITADEL in CI.
+3. ~~Deploying it, and the self-host recipe.~~ Done (§6): staging deployed and its smoke test
+   passed (§7). Production's deploy comes with its ZITADEL instance.
 4. **Host enrollment and grants**: a host identity persisted when Remote is enabled, enrollment
    by QR secret or human code (hashed, five minutes, rate-limited), approval at the host, grants
    from that approval, and where a headless host keeps its credential
@@ -283,7 +391,7 @@ losing a live stream, and relay failure leaving PTYs alive.
 6. **The relay and the host's outbound connector**: WSS, single-use 60-second connection tickets,
    bounded queues, revocation closing live streams, and relay failure leaving every PTY running.
 
-## 8 · Risks
+## 9 · Risks
 
 - **Rate limits are per instance and per address.** Two instances allow twice the rate, and many
   addresses together are not limited as a whole. Once more than 10 000 are in play, newcomers
@@ -300,8 +408,8 @@ losing a live stream, and relay failure leaving PTYs alive.
   once per device, at sign-in, and each refresh starts the 90 days again, so a device in use
   keeps working for as long as it stays in use. That follows from asking the provider only at
   sign-in (§2), which is what keeps a provider that bills by daily active user cheap. Until it
-  is answered, the operator's path is revoking that account's devices; slice 3 adds a
-  `yardsort-server` command for it, by issuer and subject. A maximum session length, after which
+  is answered, the operator's path is to disable the person at the provider and then run
+  `yardsort-server revoke-account` (§6). A maximum session length, after which
   a device has to sign in again however often it is used, is the other answer; it costs a sign-in
   every so often and is not chosen yet ([open question 39](06-open-questions.md#remote)).
 - **Spent refresh credentials must outlive their rotation.** A store that dropped a spent one at
@@ -311,9 +419,54 @@ losing a live stream, and relay failure leaving PTYs alive.
 - **A device that never comes back leaves its rows**: its last access and refresh credentials'
   hashes stay until it is revoked or its account is deleted. They open nothing, but nothing
   sweeps them either.
-- **Account deletion and export** (§9) are not built.
+- **Account deletion and export** (proposal §9) are not built.
 - **`jsonwebtoken`'s pure-Rust backend brings the `rsa` crate**, which has an open timing
   advisory (RUSTSEC-2023-0071) on operations with a private key. The server only verifies, with
   the provider's public keys; only the tests sign. Nothing in CI audits dependencies yet.
 - **The provider's own `error` text** comes through the browser. It is bounded to 64 characters
   and only reaches the server's log, never the device.
+- **The image's bases do not update themselves.** They are pinned by digest, so a fix in Debian's
+  glibc or in Rust reaches the server only when someone moves the pins (the Dockerfile says how).
+  Nothing watches for that yet.
+- **CI's end-to-end run does not render ZITADEL's login pages.** It makes the calls they make, so
+  a change in the pages themselves would get past it. A person signing in on staging is the check
+  for them (§10).
+- **Staging sleeps.** The first request after it stopped waits for a Machine to start, and Neon's
+  free compute to wake: a few seconds, not more, but enough to look like a failure.
+- **The deploy token lasts until 2046,** Fly's default. It deploys one app and nothing else, and
+  lives only in the GitHub environment; replacing it is `fly tokens create deploy` again.
+- **The self-host recipe runs ZITADEL's containers as root**, as ZITADEL's own Compose example does,
+  so that the API can write the login client's token where the login container reads it.
+
+## 10 · Smoke tests
+
+From the third slice on, each slice ends with a smoke test a person runs: on their own machine,
+and on staging once the slice is deployed there. They are short on purpose. The tests above check
+the details; these check that the whole thing works where it will run.
+
+**Slice 2: the server, on this machine.** `just server-up`, `just server-run`, and in another
+terminal `just server-sign-in`. Sign in as `developer@yardsort.test` with `Yardsort-dev-1`. It
+lists the device, refreshes, revokes itself, and shows the `401` after.
+
+**Slice 3, on this machine** (Linux, with Docker):
+
+1. `just server-up`, then `just server-e2e`. It ends with "End to end: passed".
+2. The image with a browser: `just server-image`, then
+   `docker run --rm --name yardsort-smoke --network host --env-file crates/server/dev/server.env.local -e YARDSORT_LISTEN=127.0.0.1:8787 yardsort-server:dev`,
+   and `just server-sign-in --wait-for-revoke` in another terminal. Sign in in the browser. While
+   it waits, revoke the account from the container:
+   `docker exec yardsort-smoke /usr/local/bin/yardsort-server revoke-account --subject <id>`, with
+   the id of `developer@yardsort.test` from ZITADEL's console at `http://127.0.0.1:8080/ui/console`.
+   The sign-in tool reports both its credentials refused.
+3. Optionally, the self-host recipe under `compose.localhost.yaml`, as its README describes.
+
+**Slice 3, on staging**, once it is deployed:
+
+1. `https://remote-staging.yardsort.sh/health` answers `ok`, and `/v1/server` names
+   `https://yardsort-staging-pegnzh.eu1.zitadel.cloud` as its issuer.
+2. `just server-sign-in https://remote-staging.yardsort.sh --wait-for-revoke`, and sign in on
+   ZITADEL Cloud's pages in the browser with a staging account.
+3. While it waits, revoke that account. Take the user's id from the staging ZITADEL console, then
+   `fly ssh console -a yardsort-remote-staging -C "/usr/local/bin/yardsort-server revoke-account --subject <id>"`.
+   The sign-in tool reports both its credentials refused.
+4. `fly logs -a yardsort-remote-staging` holds no client secret, database URL, code or credential.

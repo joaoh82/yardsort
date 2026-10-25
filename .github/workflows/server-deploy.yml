@@ -1,0 +1,65 @@
+name: Deploy the server
+
+# Deploys `yardsort-server` to Fly.io, on request only (Actions → Deploy the server → Run
+# workflow). Each environment has its own Fly config (crates/server/fly/<environment>.toml), its
+# own app and its own GitHub environment holding FLY_API_TOKEN: a deploy token for that one app.
+#
+# Staging deploys whichever branch it is run from. Production is not offered yet: it arrives with
+# its ZITADEL instance, as a `production` environment that requires a reviewer and deploys from
+# main only (docs/design/28-remote-infrastructure.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Where to deploy
+        type: choice
+        options: [staging]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    # One deploy per environment at a time; a second waits rather than cancelling the first.
+    concurrency:
+      group: server-deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    timeout-minutes: 30
+    env:
+      CONFIG: crates/server/fly/${{ inputs.environment }}.toml
+    steps:
+      - uses: actions/checkout@v5
+
+      # Pinned by commit: this step runs with the deploy token in reach.
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.122
+
+      # Built on Fly's builder from crates/server/Dockerfile. One Machine, not Fly's default of two
+      # on a first deploy: staging is one small Machine (28 §1).
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: >-
+          flyctl deploy . --config "$CONFIG" --dockerfile crates/server/Dockerfile
+          --remote-only --ha=false --wait-timeout 5m
+
+      # The app answers, and names the provider this environment was configured with. Through its
+      # own fly.dev address, which works before the public name's DNS and certificate do.
+      - name: Check it answers
+        run: |
+          url="https://$(sed -n 's/^app = "\(.*\)"/\1/p' "$CONFIG").fly.dev"
+          issuer=$(sed -n 's/^ *YARDSORT_OIDC_ISSUER = "\(.*\)"/\1/p' "$CONFIG")
+          for _ in $(seq 1 30); do
+            if curl -fsS "$url/health"; then break; fi
+            sleep 10
+          done
+          echo
+          curl -fsS "$url/v1/server" | tee server.json
+          echo
+          grep -qF "\"issuer\":\"$issuer\"" server.json

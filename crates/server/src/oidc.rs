@@ -87,9 +87,17 @@ pub struct Identity {
 /// An HTTP client for talking to providers: no redirects followed, a timeout on everything, and
 /// rustls with the `ring` provider (the one the app installs too).
 pub fn http_client() -> Result<reqwest::Client, OidcError> {
-    http_client_builder()
-        .build()
-        .map_err(|e| OidcError::Unreachable(e.to_string()))
+    http_client_builder().build().map_err(|e| {
+        // reqwest's own text is only "builder error"; the cause is what an operator can act on,
+        // such as an `SSL_CERT_FILE` the server cannot read.
+        let mut text = e.to_string();
+        let mut cause = std::error::Error::source(&e);
+        while let Some(next) = cause {
+            text.push_str(&format!(": {next}"));
+            cause = next.source();
+        }
+        OidcError::Unreachable(text)
+    })
 }
 
 /// [`http_client`], before it is built, for a caller that needs to add to it.

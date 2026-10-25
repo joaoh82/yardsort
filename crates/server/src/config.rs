@@ -69,17 +69,7 @@ impl Settings {
         let get = |name: &str| get(name).filter(|value| !value.trim().is_empty());
         let required =
             |name: &str| get(name).ok_or_else(|| ConfigError(format!("{name} is not set")));
-        let secret = |name: &str| -> Result<Option<Secret>, ConfigError> {
-            let file = format!("{name}_FILE");
-            match (get(name), get(&file)) {
-                (Some(_), Some(_)) => Err(ConfigError(format!("set {name} or {file}, not both"))),
-                (Some(value), None) => Ok(Some(Secret::new(value))),
-                (None, Some(path)) => std::fs::read_to_string(path.trim())
-                    .map(|text| Some(Secret::new(text.trim_end())))
-                    .map_err(|e| ConfigError(format!("{file}: {e}"))),
-                (None, None) => Ok(None),
-            }
-        };
+        let secret = |name: &str| secret(&get, name);
 
         let listen = get("YARDSORT_LISTEN").unwrap_or_else(|| DEFAULT_LISTEN.into());
         let listen = listen
@@ -117,10 +107,50 @@ impl Settings {
                 client_secret: secret("YARDSORT_OIDC_CLIENT_SECRET")?,
             },
             device_redirects,
-            database_url: secret("DATABASE_URL")?
-                .ok_or_else(|| ConfigError("DATABASE_URL is not set".into()))?,
+            database_url: database_url(&get)?,
         })
     }
+}
+
+/// What `yardsort-server revoke-account` needs: the database, and the provider the server signs
+/// in with, if it is set.
+pub struct AdminSettings {
+    pub database_url: Secret,
+    pub issuer: Option<String>,
+}
+
+impl AdminSettings {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let get = |name: &str| get(name).filter(|value| !value.trim().is_empty());
+        Ok(Self {
+            database_url: database_url(&get)?,
+            issuer: get("YARDSORT_OIDC_ISSUER"),
+        })
+    }
+}
+
+/// `name`, or the contents of the file `{name}_FILE` names.
+fn secret(
+    get: &impl Fn(&str) -> Option<String>,
+    name: &str,
+) -> Result<Option<Secret>, ConfigError> {
+    let file = format!("{name}_FILE");
+    match (get(name), get(&file)) {
+        (Some(_), Some(_)) => Err(ConfigError(format!("set {name} or {file}, not both"))),
+        (Some(value), None) => Ok(Some(Secret::new(value))),
+        (None, Some(path)) => std::fs::read_to_string(path.trim())
+            .map(|text| Some(Secret::new(text.trim_end())))
+            .map_err(|e| ConfigError(format!("{file}: {e}"))),
+        (None, None) => Ok(None),
+    }
+}
+
+fn database_url(get: &impl Fn(&str) -> Option<String>) -> Result<Secret, ConfigError> {
+    secret(get, "DATABASE_URL")?.ok_or_else(|| ConfigError("DATABASE_URL is not set".into()))
 }
 
 #[cfg(test)]
