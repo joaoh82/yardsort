@@ -873,6 +873,27 @@ _Exit (R1):_ an incompatible client is refused with the majors this host speaks;
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
 unchanged.
 
+## M27 — Conversation context
+
+Proposed in [29-conversation-context](29-conversation-context.md) on 2026-10-25. A second agent in
+a workspace sees the same files as the first and nothing of its conversation; the handoff packet
+says so, because the record is metadata. Nothing here is built.
+
+- A **conversation digest** — every message the user typed and the agent's final reply per turn,
+  from the harness's own transcript, within a budget, with no model — read live by
+  `ys workspace context` and never stored, so it ends with the workspace.
+- Every launch is told it is there: a short note as background context through a new
+  `context_args` harness template (no first message, so no turn) from the tab bar; a section after
+  the memory from the composer; the digest itself in **Hand off…**'s packet.
+- A per-project switch, since the digest goes to another agent's provider.
+- [ ] Slice 1: the digest and `ys workspace context`, for Claude Code and Codex.
+- [ ] Slice 2: `context_args`, the note, the tab bar and composer.
+- [ ] Slice 3: _What was said_ in the packet; Grok, Cursor, OpenCode, OMP and Pi.
+
+_Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
+beside it, and before its first answer Codex reads Claude's conversation and uses it; with the
+switch off, or Alt-clicked, it gets nothing.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
