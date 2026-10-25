@@ -31,6 +31,7 @@ pub mod claude;
 pub mod codex;
 pub mod context;
 pub mod cursor;
+pub mod digest;
 pub mod grok;
 pub mod handoff;
 pub mod hook;
@@ -38,6 +39,7 @@ pub mod inbox;
 pub mod opencode;
 pub mod pi;
 pub mod provenance;
+pub mod transcript;
 
 use inbox::{Inbox, InboxEntry};
 

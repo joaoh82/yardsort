@@ -339,6 +339,7 @@ mod tests {
             exit_code: (!running).then_some(0),
             pty_session_id: running.then(|| "pty".to_owned()),
             started_at: 1_790_000_000_000,
+            began_at: 1_790_000_000_000,
             ended_at: None,
         }
     }

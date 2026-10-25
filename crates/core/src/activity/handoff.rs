@@ -615,7 +615,7 @@ fn truncate(text: &str, max: usize) -> String {
 
 /// An instant, as a UTC date and time: the packet may be read on another machine, and a
 /// date without a zone is a guess.
-fn when(ms: i64) -> String {
+pub(crate) fn when(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     let (hh, mm) = (rem / 3600, (rem % 3600) / 60);
@@ -632,6 +632,11 @@ fn lasted(from: i64, to: i64) -> String {
     } else {
         format!("{} h {} min", secs / 3600, (secs % 3600) / 60)
     }
+}
+
+/// The UTC date of an instant in epoch milliseconds: year, month, day.
+pub(crate) fn civil_date(ms: i64) -> (i64, i64, i64) {
+    civil_from_days(ms.div_euclid(86_400_000))
 }
 
 /// Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).

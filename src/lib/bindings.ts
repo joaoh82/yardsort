@@ -291,6 +291,8 @@ export const commands = {
 	memoryDecide: (id: string, decision: MemoryDecision) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_decide", { id, decision })),
 	/**  Turn sharing a project's approved entries with its agents on or off. */
 	memoryShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_share", { projectId, shared })),
+	/**  Turn letting a project's agents read each other's conversations on or off. */
+	conversationsShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("conversations_share", { projectId, shared })),
 	/**
 	 *  How many proposals wait, per project that has any. Agents propose through `ys`, which writes
 	 *  the database directly, so the window asks again when it regains focus and when activity lands.
@@ -1453,6 +1455,11 @@ export type ProjectMemory = {
 	projectId: string,
 	/**  Whether approved entries go into this project's agents' first messages. */
 	shared: boolean,
+	/**
+	 *  Whether this project's agents may read each other's conversations in a workspace, with
+	 *  `ys workspace context`. Off until the user turns it on.
+	 */
+	conversationsShared: boolean,
 	/**  Oldest first. */
 	entries: MemoryEntry[],
 	/**  The section a first message would get now, or `None` when nothing would be added. */

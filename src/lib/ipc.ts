@@ -641,6 +641,9 @@ export const ipc = {
   /** Whether a project's approved entries go into its agents' first messages. */
   memoryShare: (projectId: string, shared: boolean) =>
     unwrap(commands.memoryShare(projectId, shared)),
+  /** Let a project's agents read each other's conversations with `ys workspace context`, or not. */
+  conversationsShare: (projectId: string, shared: boolean) =>
+    unwrap(commands.conversationsShare(projectId, shared)),
   /** How many proposals wait, per project that has any. */
   memoryWaiting: () => unwrap(commands.memoryWaiting()),
   /** Jev's word on each waiting proposal: repeats or contradicts an approved entry. */

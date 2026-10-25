@@ -25,6 +25,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0013_workflow_run_context.sql"),
     include_str!("../migrations/0014_workspace_tasks.sql"),
     include_str!("../migrations/0015_outcome_began.sql"),
+    include_str!("../migrations/0016_project_conversations.sql"),
+    include_str!("../migrations/0017_session_began.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -93,8 +95,10 @@ pub struct SessionRow {
     pub running: bool,
     pub exit_code: Option<i64>,
     pub pty_session_id: Option<String>,
-    /// Milliseconds since the Unix epoch.
+    /// Milliseconds since the Unix epoch. The latest start: a resume moves it.
     pub started_at: i64,
+    /// When the conversation first began, which a resume leaves alone.
+    pub began_at: i64,
     pub ended_at: Option<i64>,
 }
 
@@ -856,10 +860,12 @@ impl Store {
     // --- sessions -----------------------------------------------------------------------------
 
     pub fn add_session(&self, new: &NewSession<'_>) -> StoreResult<()> {
+        let now = now_ms();
         self.conn().execute(
             "INSERT INTO sessions (id, workspace_id, harness_id, model, effort, harness_session_id,
-                                   title, forked_from, state, pty_session_id, started_at, prompt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)",
+                                   title, forked_from, state, pty_session_id, started_at, began_at,
+                                   prompt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)",
             params![
                 new.id,
                 new.workspace_id,
@@ -870,7 +876,8 @@ impl Store {
                 new.title,
                 new.forked_from,
                 new.pty_session_id,
-                now_ms(),
+                now,
+                now,
                 new.prompt
             ],
         )?;
@@ -1376,6 +1383,29 @@ impl Store {
         Ok(())
     }
 
+    /// Whether a project's agents may read each other's conversations. Not until the user says
+    /// so: a project with no row here has never been asked, and does not share.
+    pub fn conversations_shared(&self, project_id: &str) -> StoreResult<bool> {
+        let conn = self.conn();
+        Ok(conn
+            .query_row(
+                "SELECT share FROM project_conversations WHERE project_id = ?",
+                [project_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_some_and(|share| share != 0))
+    }
+
+    pub fn set_conversations_shared(&self, project_id: &str, share: bool) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO project_conversations (project_id, share) VALUES (?, ?)
+             ON CONFLICT(project_id) DO UPDATE SET share = excluded.share",
+            params![project_id, i64::from(share)],
+        )?;
+        Ok(())
+    }
+
     /// How many candidates wait in each project, for the counts on the project rows.
     pub fn memory_waiting(&self) -> StoreResult<BTreeMap<String, u32>> {
         let conn = self.conn();
@@ -1469,6 +1499,21 @@ impl Store {
              ORDER BY started_at DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map([workspace_id], run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The thread ids Codex reported for a conversation, first reported first: what names its
+    /// session files. Only a conversation that was reporting has any.
+    pub fn reported_threads(&self, session_id: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT json_extract(payload, '$.threadId') AS thread FROM agent_events
+             WHERE (session_id = ?1
+                    OR run_id IN (SELECT id FROM agent_runs WHERE session_id = ?1))
+               AND thread IS NOT NULL
+             GROUP BY thread ORDER BY MIN(seq)",
+        )?;
+        let rows = stmt.query_map([session_id], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -1834,6 +1879,17 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Move a session's start, first and latest, for tests of what is read by time.
+    #[cfg(test)]
+    pub fn set_session_started(&self, id: &str, at: i64) {
+        self.conn()
+            .execute(
+                "UPDATE sessions SET started_at = ?1, began_at = ?1 WHERE id = ?2",
+                params![at, id],
+            )
+            .unwrap();
     }
 
     /// Make every activity write fail from here on, for tests of what happens then. The
@@ -2214,7 +2270,8 @@ fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRow>
 }
 
 const SESSION_COLUMNS: &str = "id, workspace_id, harness_id, model, effort, harness_session_id, \
-     title, forked_from, state, exit_code, pty_session_id, started_at, ended_at";
+     title, forked_from, state, exit_code, pty_session_id, started_at, ended_at, \
+     COALESCE(began_at, started_at)";
 
 fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
@@ -2231,6 +2288,7 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         pty_session_id: row.get(10)?,
         started_at: row.get(11)?,
         ended_at: row.get(12)?,
+        began_at: row.get(13)?,
     })
 }
 

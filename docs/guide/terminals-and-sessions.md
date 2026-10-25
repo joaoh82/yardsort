@@ -135,6 +135,41 @@ too, under _Project memory_, where you can edit it with the rest.
 `ys workspace handoff <workspace>` prints the same message from the command line, without
 Assist's ordering — see the [CLI guide](cli.md#ys-workspace-handoff-workspace).
 
+## What agents can read of each other
+
+The handoff message says what the agents did. It does not say what they were told or what they
+concluded — what you would otherwise type again for the next agent. With **Share conversations
+between this project's agents** ticked in the project's [Memory view](memory.md#the-memory-view),
+any agent in a workspace can read that too:
+
+```sh
+ys workspace context
+```
+
+prints the workspace's other conversations: every message you typed, and each agent's reply at
+the end of each turn, newest first, with the time of each turn in UTC. Yardsort reads them from the
+agents' own transcripts — the files Claude Code and Codex keep of every conversation — when the
+command is run, and keeps no copy: nothing of it is stored, and when the workspace goes, Yardsort
+has no way back to them. Tool calls, their output and the agents' reasoning are left out, so a
+conversation of hundreds of megabytes reads as a few pages; what still does not fit is named by
+turn, and `--turn` shows any one whole. See the [CLI guide](cli.md#ys-workspace-context-workspace).
+
+Some things to know:
+
+- **It is off until you turn it on**, per project. What an agent reads goes to that agent's
+  provider: Claude's conversation, read by Codex, is sent to OpenAI as part of Codex's work. Turn
+  it on in projects where that is fine.
+- **An agent is not told about it yet.** Ask it to run `ys workspace context`, or put that in the
+  first message. Telling every agent started beside a conversation is the next step.
+- **Claude Code and Codex** are read today. Another agent's conversation is listed with why it is
+  not there. A Codex conversation is found by the thread it reported when
+  [Codex reports what it does](activity.md#what-codex-reports), and otherwise by the folder and
+  the time it first began; a resume does not change which file that is.
+- **The asking agent's own conversation is left out**, and so is what Yardsort added to a first
+  message — the project's memory, a handoff packet — which the agent has anyway.
+- **A fork** shows only its own turns: the ones before the fork belong to the conversation it
+  came from, which is listed beside it.
+
 ## Agents keep working when you close the window
 
 Terminals do not belong to the window. They belong to a small background process — the
