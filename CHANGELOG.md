@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **An agent can read what was said in the workspace's other conversations.** Tick **Share
+  conversations between this project's agents** in a project's Memory view, and
+  `ys workspace context` prints every message you typed and each turn's reply from the Claude Code
+  and Codex conversations beside it, read from their own transcripts, without tool output, within
+  about 8,000 tokens. Nothing is stored. Off unless you turn it on, because what an agent reads
+  goes to its provider.
+
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
   a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or

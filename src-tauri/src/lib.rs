@@ -145,6 +145,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             memory::memory_edit,
             memory::memory_decide,
             memory::memory_share,
+            memory::conversations_share,
             memory::memory_waiting,
             memory::memory_check,
             outcomes::outcomes_get,

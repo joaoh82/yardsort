@@ -886,7 +886,11 @@ says so, because the record is metadata. Nothing here is built.
   `context_args` harness template (no first message, so no turn) from the tab bar; a section after
   the memory from the composer; the digest itself in **Hand off…**'s packet.
 - A per-project switch, since the digest goes to another agent's provider.
-- [ ] Slice 1: the digest and `ys workspace context`, for Claude Code and Codex.
+- [x] Slice 1: the digest and `ys workspace context`, for Claude Code and Codex, and the switch,
+      off by default. Found: a Claude Code fork repeats its parent's turns with their times; a
+      Codex session file can be 2.4 GB, so transcripts stream; recorded transcripts carry the
+      account's own setup and the fixtures keep only the conversation. Recorded in
+      [29 § slice 1](29-conversation-context.md#slice-1-what-shipped).
 - [ ] Slice 2: `context_args`, the note, the tab bar and composer.
 - [ ] Slice 3: _What was said_ in the packet; Grok, Cursor, OpenCode, OMP and Pi.
 

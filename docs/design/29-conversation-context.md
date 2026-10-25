@@ -1,7 +1,8 @@
 # 29 — Conversation context between a workspace's agents
 
-_Proposal, 2026-10-25. Decisions from the design pass on 2026-10-24 and 2026-10-25 are recorded;
-nothing here is built yet._
+_Proposal, 2026-10-25. Decisions from the design pass on 2026-10-24 and 2026-10-25 are recorded.
+Slice 1 is built — the digest for Claude Code and Codex, `ys workspace context` and the switch —
+and [§ slice 1](#slice-1-what-shipped) says where it differs from the proposal below._
 
 A workspace can hold several conversations: Claude in one tab, Codex or Cursor in the next. They
 share the worktree, so the second agent sees the same files and the same diff — and nothing of
@@ -91,8 +92,8 @@ What it says:
   because of pasted text in the user's messages — review comments, logs, documents. So the digest
   has a budget, and long messages are cut before recent replies are.
 
-Not measured yet: the same for Codex, Grok, Cursor, OpenCode and Pi. Slice 1 repeats it for
-Codex before the budget is fixed.
+Codex was measured in slice 1, with the readers themselves:
+[§ slice 1](#slice-1-what-shipped). Grok, Cursor, OpenCode and Pi are not measured yet.
 
 ## The digest
 
@@ -277,9 +278,9 @@ reason this is a switch at all, and the setting says it in those words.
   so a Windows profile and a relocated home both work.
 - **Files being written:** the transcript of a running agent is read while it grows. A last line
   without its newline is a line not yet written, as `activity::grok` treats it, and is skipped.
-- **Size:** a transcript is read whole and refused above 256 MiB; the largest here is 155 MB.
-  Reading from the end until the budget is full is the follow-up if that is slow — not before a
-  measurement says so.
+- **Size:** ~~a transcript is read whole and refused above 256 MiB~~ — a Codex session file
+  here is 2.4 GB, so transcripts are read line by line with no limit, and a line that cannot hold
+  a message is skipped before it is parsed. Measured in [§ slice 1](#slice-1-what-shipped).
 - **The command line:** the note is the only new argument, and it is short; see above.
 
 ## Slices
@@ -323,3 +324,67 @@ Each its own pull request, with its guides in the same one.
 - **Nothing across workspaces.** A workspace's conversations are for its own agents. What should
   outlive it is memory, proposed and approved as it is now.
 - **No transcript content in the timeline, the inbox or Assist.** Those stay as they are.
+
+## Slice 1: what shipped
+
+Built on 2026-10-25, after the default was settled: **off** until the user turns it on
+([open question 42](06-open-questions.md#conversation-context)).
+
+- **The readers**, `crates/core/src/activity/transcript.rs`. Claude Code: a `user` line is the
+  user's when its content is text, it is not `isMeta`, a compact summary or a sidechain, its
+  `origin.kind` — where the version writes one — is `human`, and it does not start with a tag
+  Claude Code puts there itself (a slash command and its output, a background task's report,
+  `[Request interrupted`). Assistant text is gathered per `message.id`, since a message is written
+  once per content block; `<synthetic>` messages are not the model's. Codex: `UserMessage` and
+  `AgentMessage` items of the file's own thread; the reply is the last agent text of the turn,
+  and `task_complete`'s `last_agent_message` when no `final_answer` came. Both stream: a line
+  that cannot hold anything wanted is skipped unparsed, and a last line without its newline is
+  left for the next read.
+- **Fixtures recorded for this**, by `scripts/record-conversations.sh`: a two-turn Claude Code
+  2.1.302 conversation and its fork, and a two-turn Codex 0.163.0 thread across `exec resume`.
+  The raw files carried the recording account's own setup — Claude Code's attachment and request
+  lines hold the system prompt, the user's memory, skills and connectors; Codex's `world_state`
+  lists skills and the time zone — so the script keeps only the conversation's lines whole and
+  leaves the rest as their type alone. Claude Code's print mode marks the user's message
+  `promptSource: "sdk"` with no `origin`, an interactive one `origin.kind: "human"`; the reader
+  takes both, and a hand-written test covers the lines only an interactive session writes.
+- **What the recordings showed.** A Claude Code fork repeats the conversation before it with the
+  original times, so a fork's turns before its record began are dropped and the digest says whose
+  they are. Codex appends a resumed thread to the same session file.
+- **Finding a Codex conversation.** By the `threadId` its run reported, when Codex capture was
+  on; otherwise the earliest session file whose `session_meta` names the workspace's folder and
+  began between a minute before the record and the record's end. The day folders are Codex's local
+  dates, so the days either side are looked in too, and only each file's first line is read.
+- **The digest**, `crates/core/src/activity/digest.rs`, as proposed, with these differences:
+  each message is quoted (`> `) under `User:` and `Agent:`, so a heading in a message cannot pass
+  for one of the digest's; there is no _Asked:_ line — the first message is kept as the task,
+  cut to 2,000 characters, and keeps that cut if it later gains its reply; a conversation with no
+  turn yet is left out, and one that cannot be read is listed last with why.
+- **`ys workspace context`**: as proposed, plus `--turn` with no `--conversation` when there is
+  only one. It drains the inbox first, as every `ys` read does, so a Codex thread reported a
+  moment ago is found by id.
+- **The switch** lives in the Memory view, under memory's own: migration 0016
+  (`project_conversations`, no row is off), `conversations_share`, and `conversationsShared` on
+  `ProjectMemory`.
+
+Measured with the readers on this machine's largest transcripts, release build: the user's
+typed messages and each turn's reply.
+
+| Agent  | Transcript | Turns |  Typed | Replies | Share of the file | Read in |
+| ------ | ---------- | ----: | -----: | ------: | ----------------: | ------: |
+| Claude | 155.5 MB   |    31 |  7,881 |  57,801 |            0.042% |   57 ms |
+| Claude | 91.2 MB    |    41 |  5,785 |  74,703 |            0.088% |   39 ms |
+| Claude | 49.4 MB    |    32 |  9,931 |  73,162 |            0.168% |   27 ms |
+| Claude | 13.0 MB    |    14 |  2,070 |  16,887 |            0.145% |    7 ms |
+| Codex  | 2,423.2 MB |   208 | 97,765 | 115,184 |            0.009% | 2132 ms |
+| Codex  | 381.1 MB   |   240 | 90,379 | 128,200 |            0.057% |  162 ms |
+| Codex  | 69.8 MB    |    50 | 21,994 | 107,363 |            0.185% |   25 ms |
+| Codex  | 5.0 MB     |     9 | 37,552 |   3,647 |            0.827% |    2 ms |
+
+Characters, not bytes. The Claude rows are smaller than the first measurement's because that one
+counted every text `user` line — compact summaries and background-task reports among them —
+where the reader keeps only what was typed. The 2.4 GB Codex file is the desktop app's, not one
+Yardsort started; it is read in about two seconds, and nothing smaller comes near.
+
+Not done in this slice, as planned: telling the agent (slice 2), and the packet and the other
+harnesses (slice 3). Owed: the hands-on pass in [08](08-manual-checklist.md) on macOS and Windows.

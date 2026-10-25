@@ -301,7 +301,5 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     conversation that began alone keeps having no note. `--system-prompt-snapshot off` on that
     resume would work, at the cost of the cached system prompt. Lean: pass it only on a resume
     whose conversation began without the note and now has company; measure the cost first.
-42. **What is the switch's default?** The digest takes what the user typed to one agent's
-    provider to another's. Memory is on by default because it is the user's own notes; this is
-    the user's own words too, but not ones they chose to share. Lean: off, and asked once per
-    project the first time a second agent starts beside a conversation.
+42. ~~**What is the switch's default?**~~ **Settled 2026-10-25: off.** Asking once per project
+    the first time a second agent starts beside a conversation comes with slice 2.
