@@ -87,7 +87,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
 
     out.emit(&sessions, || {
         if sessions.is_empty() {
-            println!("No {}sessions.", if all { "" } else { "running " });
+            sayln!("No {}sessions.", if all { "" } else { "running " });
             return;
         }
         let mut rows = vec![vec![

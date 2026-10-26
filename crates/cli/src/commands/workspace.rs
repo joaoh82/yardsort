@@ -254,7 +254,7 @@ fn context(
             user: whole.user.clone(),
             said: whole.said.clone(),
         };
-        return out.emit(&json, || print!("{text}"));
+        return out.emit(&json, || say!("{text}"));
     }
     let shown = digest::select(
         &conversations,
@@ -264,7 +264,7 @@ fn context(
             since,
         },
     );
-    out.emit(&shown, || print!("{}", digest::render(&shown)))
+    out.emit(&shown, || say!("{}", digest::render(&shown)))
 }
 
 /// A UTC time as people write it: `2026-10-25T13:00Z`, with seconds or without.
@@ -325,7 +325,7 @@ fn handoff(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         events: facts.events,
         text: yardsort_core::activity::handoff::render(&facts),
     };
-    out.emit(&packet, || print!("{}", packet.text))
+    out.emit(&packet, || say!("{}", packet.text))
 }
 
 fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Result<(), Failure> {
@@ -364,7 +364,7 @@ fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Resu
 
     out.emit(&workspaces, || {
         if workspaces.is_empty() {
-            println!("No workspaces.");
+            sayln!("No workspaces.");
             return;
         }
         let mut rows = vec![vec![
@@ -488,20 +488,20 @@ pub(super) fn new(
     }
 
     out.emit(&created, || {
-        println!("created  {}", created.name);
+        sayln!("created  {}", created.name);
         if let Some(task) = &created.task {
-            println!("  task   {task}");
+            sayln!("  task   {task}");
         }
         if let Some(branch) = &created.branch {
-            println!("  branch {branch}");
+            sayln!("  branch {branch}");
         }
-        println!("  path   {}", created.path);
+        sayln!("  path   {}", created.path);
         match (&created.harness, &created.session) {
             (Some(harness), Some(session)) => {
-                println!("  agent  {harness} ({})", short(session));
-                println!("\nIt keeps working after this command returns. Open Yardsort to watch.");
+                sayln!("  agent  {harness} ({})", short(session));
+                sayln!("\nIt keeps working after this command returns. Open Yardsort to watch.");
             }
-            _ => println!("\nNothing started. Open it in Yardsort to start an agent."),
+            _ => sayln!("\nNothing started. Open it in Yardsort to start an agent."),
         }
     })
 }
@@ -572,11 +572,11 @@ fn delete(ys: &Yardsort, wanted: &str, force: bool, out: &Output) -> Result<(), 
         path: workspace.path,
     };
     out.emit(&deleted, || {
-        println!("deleted  {}", deleted.name);
+        sayln!("deleted  {}", deleted.name);
         if let Some(branch) = &deleted.branch {
-            println!("  branch {branch} (kept)");
+            sayln!("  branch {branch} (kept)");
         }
-        println!("  path   {}", deleted.path);
+        sayln!("  path   {}", deleted.path);
     })
 }
 

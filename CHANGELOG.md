@@ -31,6 +31,16 @@ has the downloads and the full commit lists.
   name or a terminal's own id, so two agents in one workspace could not be told apart. When a name
   matches several, each choice is listed with an id to name it by.
 
+- **A conversation nothing has been said in yet is described as one.** Agents write no transcript
+  until they are asked something, so `ys workspace context` listed a conversation started
+  without a message as one whose transcript was not found, and the agent reading it could only
+  guess. It now says that one was started without a message, so most likely nothing has been
+  said in it yet.
+
+- **`ys` stops quietly when what it is printing to stops reading.** `ys session list | head`
+  panicked with _failed printing to stdout: Broken pipe_ once `head` had its lines; it now exits
+  without a word.
+
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
   a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or

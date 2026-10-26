@@ -91,9 +91,9 @@ pub fn run(
         },
         || {
             if text.is_empty() {
-                println!("{} has printed nothing.", target.label);
+                sayln!("{} has printed nothing.", target.label);
             } else {
-                println!("{text}");
+                sayln!("{text}");
             }
         },
     )

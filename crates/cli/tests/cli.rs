@@ -135,6 +135,28 @@ fn projects_are_listed_as_a_table_and_as_json() {
 }
 
 #[test]
+fn a_reader_that_stops_reading_ends_it_quietly() {
+    let fx = Fixture::new();
+    // As `ys project list | head -1` leaves it once `head` has its line: nobody at the other end.
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "project",
+            "list",
+        ])
+        .env("YARDSORT_NO_DAEMON", "1")
+        .stdout(writer)
+        .output()
+        .expect("ys should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(stderr, "");
+}
+
+#[test]
 fn a_new_workspace_is_a_real_branch_and_a_real_worktree() {
     let fx = Fixture::new();
 

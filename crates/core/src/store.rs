@@ -1,6 +1,6 @@
 //! Persistent app state in SQLite. Pure storage: no git, no filesystem, no policy.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -927,6 +927,15 @@ impl Store {
             "SELECT prompt FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL
              ORDER BY rowid",
         )?;
+        let rows = stmt.query_map([workspace_id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The conversations in a workspace that were started with a first message, by record id.
+    pub fn prompted_sessions(&self, workspace_id: &str) -> StoreResult<HashSet<String>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT id FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL")?;
         let rows = stmt.query_map([workspace_id], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }

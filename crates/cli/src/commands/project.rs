@@ -38,7 +38,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
 
     out.emit(&projects, || {
         if projects.is_empty() {
-            println!("No projects yet. Add one in the app.");
+            sayln!("No projects yet. Add one in the app.");
             return;
         }
         let mut rows = vec![vec![
