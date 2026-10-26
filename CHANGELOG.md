@@ -38,8 +38,8 @@ has the downloads and the full commit lists.
   said in it yet.
 
 - **`ys` stops quietly when what it is printing to stops reading.** `ys session list | head`
-  panicked with _failed printing to stdout: Broken pipe_ once `head` had its lines; it now exits
-  without a word.
+  panicked with _failed printing to stdout: Broken pipe_ once `head` had its lines, and
+  `ys logs --raw` failed with _cannot write the screen_; both now exit without a word.
 
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of

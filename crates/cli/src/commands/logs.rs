@@ -65,12 +65,7 @@ pub fn run(
             ));
         }
         // Escape sequences and all: repaints a terminal exactly as attaching would.
-        let mut stdout = std::io::stdout().lock();
-        stdout
-            .write_all(&snapshot)
-            .and_then(|()| stdout.flush())
-            .map_err(|e| Failure::new(format!("cannot write the screen: {e}")))?;
-        return Ok(());
+        return write_raw(&mut std::io::stdout().lock(), &snapshot);
     }
 
     let text = pty_host::snapshot::to_text(&snapshot, target.size.rows, target.size.cols);
@@ -108,6 +103,16 @@ struct Screen {
     text: String,
 }
 
+/// A reader that stops reading, as `| head` does, has seen enough: that is not a failure.
+fn write_raw(to: &mut impl Write, screen: &[u8]) -> Result<(), Failure> {
+    match to.write_all(screen).and_then(|()| to.flush()) {
+        Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => {
+            Err(Failure::new(format!("cannot write the screen: {e}")))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn describe(no_match: NoMatch) -> Failure {
     Failure::new(match no_match {
         NoMatch::Nothing => "The daemon is holding no sessions at all.".to_owned(),
@@ -120,4 +125,37 @@ fn describe(no_match: NoMatch) -> Failure {
             choices.join(", ")
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pipe whose reader has gone, or a disk that is full.
+    struct Refusing(std::io::ErrorKind);
+
+    impl Write for Refusing {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(self.0.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_raw_screen_nobody_reads_to_the_end_is_not_an_error() {
+        let mut written = Vec::new();
+        assert!(write_raw(&mut written, b"\x1b[1mhi").is_ok());
+        assert_eq!(written, b"\x1b[1mhi");
+
+        let gone = write_raw(&mut Refusing(std::io::ErrorKind::BrokenPipe), b"hi");
+        assert!(gone.is_ok());
+
+        let Err(Failure(full)) = write_raw(&mut Refusing(std::io::ErrorKind::StorageFull), b"hi")
+        else {
+            panic!("a write that fails for another reason is still an error");
+        };
+        assert!(full.starts_with("cannot write the screen"), "{full}");
+    }
 }
