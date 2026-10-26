@@ -909,6 +909,11 @@ says so, because the record is metadata. Slices 1–3 are built.
       [open question 41](06-open-questions.md#conversation-context)). Grok keeps its rules across
       a resume, so it is not given one. Recorded in
       [29 § after slice 3](29-conversation-context.md#after-slice-3-grok-and-resume).
+- [x] The note on resume for Claude Code: `--system-prompt-snapshot off` on a told resume, in a
+      `resume_context_args` template that replaced the switch, settling
+      [open question 41](06-open-questions.md#conversation-context). Found: the snapshot-off build
+      is stable, so it costs one cache write per told resume, not one per request. Recorded in
+      [29 § Claude Code on resume](29-conversation-context.md#claude-code-on-resume).
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
 beside it, and before its first answer Codex reads Claude's conversation and uses it; with the
