@@ -31,6 +31,11 @@ const ARG_FIELDS = [
   ["resumeArgs", "Resume", "Replace the session and prompt args when resuming. {session_id}"],
   ["forkArgs", "Fork", "Replace them when forking a session. {session_id}"],
   [
+    "resumeContextArgs",
+    "Resume context",
+    "The context args for a resumed or forked conversation, after the resume or fork args. {context}. Empty for an agent that keeps the system prompt a conversation began with, where a new note would never be seen.",
+  ],
+  [
     "writeArgs",
     "Write",
     "This agent's non-interactive mode, for having it write a commit message or a pull request. Its whole command line, with {prompt} for the question. Empty means it cannot.",
@@ -280,23 +285,6 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
             />
           </Field>
         ))}
-        <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={draft.resumeContext ?? false}
-            disabled={!draft.resumeContext && !draft.args.contextArgs.trim()}
-            onChange={(e) => set({ resumeContext: e.target.checked })}
-          />
-          <span className="grid gap-0.5">
-            Give the context args on resume and fork too
-            <span className="text-[12px] text-ink-faint">
-              For an agent that builds its system prompt at each launch, as OMP and pi do: a resumed
-              conversation is told about the others as a new one is. Claude Code, Codex and Grok
-              keep the prompt a conversation began with, so it would be passed and never seen.
-            </span>
-          </span>
-        </label>
       </fieldset>
 
       <div className="grid grid-cols-2 gap-3">

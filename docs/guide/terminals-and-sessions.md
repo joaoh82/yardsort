@@ -183,11 +183,13 @@ Some things to know:
   words; the composer says so beside its pickers, with **Show** and a box to leave it out of that
   start. Workflow steps are told the same way.
 - **Alt-click** an agent button to start it without the note.
-- **Resuming tells OMP and pi again.** They build their system prompt at each launch, so a
-  resumed or forked OMP or pi conversation is given the note as a new one is, about every other
-  conversation here, and its tab says so. Claude Code, Codex and Grok keep the system prompt a
-  conversation began with and ignore a new one on resume, so they are not given it: a resumed one
-  knows what it was told when it began, and one that began alone is not told about conversations
+- **Resuming tells Claude Code, OMP and pi again.** A resumed or forked conversation of theirs is
+  given the note as a new one is, about every other conversation here, and its tab says so. OMP
+  and pi build their system prompt at each launch. Claude Code keeps the one a conversation began
+  with, so a resume that is told passes `--system-prompt-snapshot off` to have it built afresh;
+  a resume with nothing to tell is left as it was. Codex and Grok keep the system prompt a
+  conversation began with whatever they are passed, so they are not given it: a resumed one knows
+  what it was told when it began, and one that began alone is not told about conversations
   started since. Ask it to run `ys workspace context`.
 - **Claude Code, Codex, Grok, Cursor, OpenCode, OMP and pi** — every built-in agent — are read
   today. A custom agent's conversations are listed with why they are not there. Claude Code's,

@@ -211,8 +211,8 @@ pub fn note_for(
 }
 
 /// [`note_for`] an agent resuming or forking the conversation `resuming`, when its harness reads
-/// background context then ([`HarnessDef::resume_context`]): every other conversation here, as a
-/// new agent is told. `None` for one that keeps what it was told when it began.
+/// background context then ([`HarnessDef::resume_context_args`]): every other conversation here,
+/// as a new agent is told. `None` for one that keeps what it was told when it began.
 pub fn note_on_resume(
     store: &Store,
     workspace: &WorkspaceRow,
@@ -221,7 +221,7 @@ pub fn note_on_resume(
     sources: &Sources,
     now: i64,
 ) -> StoreResult<Option<Note>> {
-    if !def.resume_context || def.context_args.is_empty() {
+    if def.resume_context_args.is_empty() {
         return Ok(None);
     }
     note_for(store, workspace, Some(resuming), sources, now)
@@ -1325,9 +1325,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(note.about, "pi's conversation");
-        // Claude Code keeps the system prompt it began with, so it is given nothing.
+        // So is Claude Code, which reads it with its snapshot off; Codex keeps the instructions
+        // it began with, so it is given nothing.
+        assert!(
+            note_on_resume(&store, &ws, &def("claude"), "rec-omp", &sources, now)
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(
-            note_on_resume(&store, &ws, &def("claude"), "rec-omp", &sources, now).unwrap(),
+            note_on_resume(&store, &ws, &def("codex"), "rec-omp", &sources, now).unwrap(),
             None
         );
         // Nor is anyone, once the project stops sharing.

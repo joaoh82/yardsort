@@ -5,7 +5,8 @@ Slices 1–3 are built — the digest for every built-in agent,
 `ys workspace context`, the switch, telling every new agent, and *What was said* in the handoff
 packet — and [§ slice 1](#slice-1-what-shipped), [§ slice 2](#slice-2-what-shipped) and
 [§ slice 3](#slice-3-what-shipped) say where they differ from the proposal below, with
-[§ after slice 3](#after-slice-3-grok-and-resume) for Grok and the note on resume._
+[§ after slice 3](#after-slice-3-grok-and-resume) for Grok and the note on resume, and
+[§ Claude Code on resume](#claude-code-on-resume) for the last of it._
 
 A workspace can hold several conversations: Claude in one tab, Codex or Cursor in the next. They
 share the worktree, so the second agent sees the same files and the same diff — and nothing of
@@ -244,7 +245,9 @@ conversation is compacted. So:
 - A Claude conversation that began **alone**, and is resumed after another agent has worked
   beside it, does not see a new note. Passing `--system-prompt-snapshot off` on such a resume
   would fix it at the cost of the cached system prompt on every request. See
-  [open question 41](06-open-questions.md#conversation-context).
+  [open question 41](06-open-questions.md#conversation-context), and
+  [§ Claude Code on resume](#claude-code-on-resume) for what was built: the cost turned out to
+  be one cache write per told resume, not one per request.
 
 Other harnesses are checked for the same behaviour when their template is verified.
 
@@ -533,8 +536,9 @@ Built on 2026-10-26, once Grok was signed in.
   `resume_context`, puts `context_args` after the resume or fork args. It is on for OMP and pi,
   which build their system prompt at each launch, and editable in Settings → Harnesses. The app's
   resume and fork compute the note as a new start does, about every conversation but the one
-  continued (`digest::note_on_resume`), and label the tab, so its line and mark show. A resume
-  asks nothing: in a project never asked, nothing is shared, so nothing is told.
+  continued (`digest::note_on_resume`), and label the tab, so its line and mark show. (The
+  field was then a switch, `resume_context`; it became a template of its own the same day, for
+  Claude Code — [§ Claude Code on resume](#claude-code-on-resume).)
 
 Owed: the rows for Grok and an OMP resume in
 [08 § 26](08-manual-checklist.md#26--conversation-context), and macOS and Windows.
@@ -548,3 +552,44 @@ on; migration 0016, already merged, still says off and is left as it was. The on
 question is removed (`digest::unasked`, `conversations_unasked`, the dialog), since it asked to
 turn on what is already on. A project whose user answered _Not in this project_ keeps its row,
 and stays off.
+
+## Claude Code on resume
+
+Built on 2026-10-26, the last of
+[open question 41](06-open-questions.md#conversation-context). Checked live with Claude Code
+2.1.302 in print mode, on a throwaway repository, with a note asking every reply to end in one
+word:
+
+| Launch on a conversation that began with no note   | Note followed | Cache written | Cache read |
+| -------------------------------------------------- | ------------- | ------------- | ---------- |
+| `--resume` with `--append-system-prompt`           | no            | 26,943        | 14,430     |
+| the same with `--system-prompt-snapshot off`       | yes           | 32,033        | 11,236     |
+| the same again                                     | yes           | 1,901         | 41,421     |
+| `--resume` with neither                            | no            | 3,081         | 40,265     |
+| a fork (`--fork-session`) with both                | yes           | 1,205         | 43,297     |
+| snapshot off, three requests in one launch (tools) | yes           | 148–242 each  | ~43,000    |
+
+So snapshot off builds the system prompt afresh for that launch, and the build is stable: the
+next request, and the next launch with the same note, read it from the cache. The cost the
+question feared, a cached system prompt lost on every request, is not there. What remains is one
+write of the conversation's cache on a told resume whose prompt differs from the last one sent,
+which a resume after the cache has expired pays anyway. The snapshot itself is untouched: a later
+launch without the option sends what the conversation recorded first.
+
+- **`resume_context` became `resume_context_args`**, a template like `context_args`, placed after
+  the resume or fork args. OMP and pi have their context args there; Claude Code has
+  `--system-prompt-snapshot off --append-system-prompt {context}`; Codex and Grok have nothing.
+  As with every group, it is dropped whole when there is no note, so a resume with nothing to
+  tell is the plain `--resume` it was. Settings → Harnesses has it as **Resume context args** in
+  place of the box. The field was not released, so nothing reads the old one.
+- **Every told resume, not only one that began alone.** The lean was to turn the snapshot off only
+  for a conversation that began without the note. Yardsort does not record what a conversation
+  began with, and a conversation that began with it gains a note naming the conversations as they
+  are now, for the same one write.
+- **An older Claude Code refuses the option** (`error: unknown option`), and the resume fails to
+  start. Built-in flags follow the version verified, as elsewhere in
+  [04](04-harnesses.md); the settings guide says to clear the field or update Claude Code. When
+  the option arrived is not known.
+
+Owed: a told Claude Code resume in a running window
+([08 § 26](08-manual-checklist.md#26--conversation-context)), and macOS and Windows.

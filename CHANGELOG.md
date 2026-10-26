@@ -22,8 +22,10 @@ has the downloads and the full commit lists.
   your messages and each turn's final reply, read from the agents' own transcripts when you press
   it, within about 4,000 tokens. `ys workspace context` and that part now read Grok, Cursor,
   OpenCode, OMP and pi conversations too, beside Claude Code's and Codex's, and Grok, OMP and pi
-  are told about them as background context, as Claude Code and Codex are. A resumed OMP or pi
-  conversation is told again; Settings → Harnesses has a box for which agents get that.
+  are told about them as background context, as Claude Code and Codex are. A resumed or forked Claude
+  Code, OMP or pi conversation is told again, about the conversations there are then — Claude
+  Code with `--system-prompt-snapshot off` on that resume, so it reads the new note. Settings →
+  Harnesses has a **Resume context args** template for it.
 
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of

@@ -1054,12 +1054,13 @@ export type HarnessDef = {
 	 */
 	contextArgs?: string[],
 	/**
-	 *  Whether [`Self::context_args`] go on a resume or fork too: true for a harness that builds
-	 *  its system prompt at each launch (OMP, pi), so a resumed conversation reads a new note;
-	 *  false for one that keeps the prompt a conversation began with (Claude Code, Codex, Grok),
-	 *  where a new note would be passed and never seen.
+	 *  The same for a resume or fork, after its args: what makes a continued conversation read a
+	 *  new note. [`Self::context_args`] for a harness that builds its system prompt at each
+	 *  launch (OMP, pi); for Claude Code, which keeps the prompt a conversation began with, those
+	 *  plus `--system-prompt-snapshot off`. Empty for one that keeps it whatever it is passed
+	 *  (Codex, Grok), where a note would be passed and never seen.
 	 */
-	resumeContext?: boolean,
+	resumeContextArgs?: string[],
 	resumeArgs: string[],
 	forkArgs: string[],
 	/**  Effort levels to offer. Empty hides the picker. */
