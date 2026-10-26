@@ -49,6 +49,8 @@ const tab = (id: string, extra: Partial<TerminalTab> = {}): TerminalTab => ({
   recordId: null,
   busy: false,
   attention: false,
+  toldAbout: null,
+  toldAt: null,
   ...extra,
 });
 

@@ -1,8 +1,9 @@
 # 29 — Conversation context between a workspace's agents
 
 _Proposal, 2026-10-25. Decisions from the design pass on 2026-10-24 and 2026-10-25 are recorded.
-Slice 1 is built — the digest for Claude Code and Codex, `ys workspace context` and the switch —
-and [§ slice 1](#slice-1-what-shipped) says where it differs from the proposal below._
+Slices 1 and 2 are built — the digest for Claude Code and Codex, `ys workspace context`, the
+switch, and telling every new agent — and [§ slice 1](#slice-1-what-shipped) and
+[§ slice 2](#slice-2-what-shipped) say where they differ from the proposal below._
 
 A workspace can hold several conversations: Claude in one tab, Codex or Cursor in the next. They
 share the worktree, so the second agent sees the same files and the same diff — and nothing of
@@ -397,3 +398,49 @@ Yardsort started; it is read in about two seconds, and nothing smaller comes nea
 
 Not done in this slice, as planned: telling the agent (slice 2), and the packet and the other
 harnesses (slice 3). Owed: the hands-on pass in [08](08-manual-checklist.md) on macOS and Windows.
+
+## Slice 2: what shipped
+
+Built on 2026-10-25.
+
+- **`context_args`** on the harness definition, with `{context}`, between the session and prompt
+  args; editable in Settings → Harnesses as **Context args**, and **What will run** shows it with
+  a sample. Shipped for the two checked live, by giving a codeword through the option and asking
+  for it: Claude Code 2.1.302, `--append-system-prompt {context}`, and Codex 0.163.0,
+  `-c developer_instructions={context}` — accepted though not in `--help`, a value that is not
+  TOML taken as the string itself, quotes and newlines included. **Not shipped** for Grok, OMP
+  and Pi: their options are in `--help`, but no account was signed in on this machine to check
+  them, so they are told after the first message; a user can set them. OpenCode's would be code
+  in its adapter, and Cursor has none.
+- **The note**, `digest::note`: as proposed, naming up to four conversations by agent, turn count
+  and last turn, the rest counted. It is built from the same reading as the digest, at launch, so
+  starting an agent beside other conversations reads their transcripts — milliseconds for
+  ordinary ones, measured in [§ slice 1](#slice-1-what-shipped). Given only with a turn said; the tab gets
+  a `toldAbout` label with what it was about.
+- **Where it goes** is decided in `launch::resolve_launch_with`, so every way of starting a new
+  agent — tab bar, the empty workspace's buttons, composer, workflow steps, the conflict helper's
+  new conversation, `ys workspace new` — gets the same rule: background context when the harness
+  has `context_args`, the message left as typed; otherwise a _This workspace's other
+  conversations_ section after the message (after _Project memory_); otherwise nothing. The
+  digest strips that section from first messages as it does memory's. A handoff gets it too: its
+  packet still says the conversation is not in it, until slice 3.
+- **Resume does not give the note** — a finding, checked live on both: Claude Code keeps the
+  system prompt a conversation began with (its `--system-prompt-snapshot`, on by default), and
+  Codex keeps its developer instructions the same way; a new one on resume is ignored, with
+  `-c` before or after `resume --last`. A note there would be a line in **What will run** the
+  agent never sees, so `continue_args` leaves `context_args` out.
+  [Open question 41](06-open-questions.md#conversation-context) stays open for the
+  snapshot-off option.
+- **In the window:** a line under the tabs for a new told agent's first minute, a **⇄** mark on
+  its tab after, and **Show** on both, opening the note and the digest as they read now; the
+  composer's line with **Show** and a box (`skipContext`); **Alt-click** on any agent button;
+  for a harness without `context_args`, the button asks — **Start with the handoff…** or
+  **Start fresh** — and asks only when there is something to be told.
+- **Asked once per project**, as [open question 42](06-open-questions.md#conversation-context)
+  planned: before an agent starts beside a conversation that has said something, in a project
+  that has never answered, a dialog asks whether to share, in the privacy section's words.
+  Either answer writes the project's row in `project_conversations` — so "asked" needs nothing
+  new: no row is the question not yet asked — and the launch goes on; closing it starts nothing.
+
+Owed: the live check in [08 § 26](08-manual-checklist.md#26--conversation-context) — Codex started
+from the tab bar beside Claude reads the digest before its first answer — on each platform.

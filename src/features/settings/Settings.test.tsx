@@ -55,6 +55,7 @@ const claude: HarnessInfo = {
   resumeArgs: ["--resume", "{session_id}"],
   forkArgs: ["--resume", "{session_id}", "--fork-session"],
   writeArgs: ["--print", "{prompt}"],
+  contextArgs: ["--append-system-prompt", "{context}"],
   efforts: ["low", "high"],
   models: ["opus"],
   promptTransport: "argv",

@@ -37,6 +37,8 @@ const tab = (id: string, exited = false): TerminalTab => ({
   recordId: null,
   busy: false,
   attention: false,
+  toldAbout: null,
+  toldAt: null,
 });
 
 beforeEach(() => {

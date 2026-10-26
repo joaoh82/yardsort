@@ -301,5 +301,9 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     conversation that began alone keeps having no note. `--system-prompt-snapshot off` on that
     resume would work, at the cost of the cached system prompt. Lean: pass it only on a resume
     whose conversation began without the note and now has company; measure the cost first.
-42. ~~**What is the switch's default?**~~ **Settled 2026-10-25: off.** Asking once per project
-    the first time a second agent starts beside a conversation comes with slice 2.
+    _Slice 2, checked live:_ snapshot off does let a resumed Claude conversation see a new note;
+    Codex 0.163.0 keeps its developer instructions across a resume too, with no such option
+    found. For now a resume gets no note.
+42. ~~**What is the switch's default?**~~ **Settled 2026-10-25: off**, and asked once per project
+    the first time an agent starts beside a conversation that has said something — built in
+    slice 2.

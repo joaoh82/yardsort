@@ -18,6 +18,10 @@ const core = vi.hoisted(() => ({
   uiStateSave: vi.fn(),
   workspaceHandoff: vi.fn(),
   memoryGet: vi.fn(async () => ({ projectId: "p", shared: false, preview: null, entries: [] })),
+  conversationContext: vi.fn(),
+  conversationsUnasked: vi.fn(),
+  conversationsShare: vi.fn(),
+  sessionContext: vi.fn(async () => null),
   outcomesAgents: vi.fn(async () => []),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -48,6 +52,9 @@ beforeEach(() => {
   core.onHostEvent.mockResolvedValue(() => {});
   core.onSessionStarted.mockResolvedValue(() => {});
   core.uiStateSave.mockResolvedValue(undefined);
+  core.conversationContext.mockResolvedValue(null);
+  core.conversationsUnasked.mockResolvedValue(null);
+  core.conversationsShare.mockResolvedValue({});
   core.ptySpawn.mockImplementation(async ({ workspaceId }: { workspaceId: string }) => ({
     id: `s-${workspaceId}`,
     program: "/bin/bash",
@@ -185,4 +192,164 @@ it("Run opens project settings when no command is configured", async () => {
   await userEvent.click(screen.getByRole("button", { name: "▶ Run" }));
   expect(await screen.findByRole("dialog")).toHaveAccessibleName("Project settings — alpha");
   expect(core.workspaceRun).not.toHaveBeenCalled();
+});
+
+describe("starting an agent beside other conversations", () => {
+  const told = {
+    about: "codex's conversation",
+    note: "Other agents have worked in this workspace: codex (2 turns, last …).",
+    digest: "## codex · conversation 3f2a · 2 turns",
+  };
+  const agentButton = () => screen.getAllByTitle(/^Start CLAUDE here/)[0]!;
+
+  it("leaves telling it to the core when the harness takes background context", async () => {
+    useHarnessStore.setState({
+      harnesses: [harness("claude", { contextArgs: ["--append-system-prompt", "{context}"] })],
+      loaded: true,
+    });
+    core.conversationContext.mockResolvedValue(told);
+    show(feature.id);
+
+    await userEvent.click(agentButton());
+    expect(core.ptySpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: feature.id,
+        harness: { id: "claude", model: null, effort: null, prompt: null },
+      }),
+    );
+    expect(core.conversationContext).not.toHaveBeenCalled();
+  });
+
+  it("starts it bare on Alt-click", async () => {
+    core.conversationContext.mockResolvedValue(told);
+    const user = userEvent.setup();
+    show(feature.id);
+
+    await user.keyboard("{Alt>}");
+    await user.click(agentButton());
+    await user.keyboard("{/Alt}");
+    expect(core.ptySpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ harness: expect.objectContaining({ skipContext: true }) }),
+    );
+  });
+
+  it("asks first when the harness takes none, and starts nothing until answered", async () => {
+    const user = userEvent.setup();
+    core.conversationContext.mockResolvedValue(told);
+    core.workspaceHandoff.mockResolvedValue({
+      text: "# Handoff from Yardsort\n",
+      runs: 1,
+      events: 2,
+    });
+    show(feature.id);
+
+    await user.click(agentButton());
+    expect(await screen.findByRole("menuitem", { name: "Start fresh" })).toBeInTheDocument();
+    expect(core.conversationContext).toHaveBeenCalledWith(feature.id, null);
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("menuitem", { name: "Start with the handoff…" }));
+    await waitFor(() => expect(useProjectsStore.getState().composingWorkspaceId).toBe(feature.id));
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+  });
+
+  it("Start fresh sends nothing", async () => {
+    const user = userEvent.setup();
+    core.conversationContext.mockResolvedValue(told);
+    show(feature.id);
+
+    await user.click(agentButton());
+    await user.click(await screen.findByRole("menuitem", { name: "Start fresh" }));
+    expect(core.ptySpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness: { id: "claude", model: null, effort: null, prompt: null, skipContext: true },
+      }),
+    );
+  });
+
+  it("does not ask when there is nothing to be told", async () => {
+    show(feature.id);
+
+    await userEvent.click(agentButton());
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(screen.queryByRole("menuitem")).toBeNull();
+  });
+
+  it("asks once whether the project shares conversations, before anything starts", async () => {
+    const user = userEvent.setup();
+    core.conversationsUnasked.mockResolvedValue("codex's conversation");
+    show(feature.id);
+
+    await user.click(agentButton());
+    const question = await screen.findByRole("dialog", {
+      name: "Let alpha’s agents read each other’s conversations?",
+    });
+    expect(question).toHaveTextContent("There is codex's conversation in this workspace.");
+    expect(question).toHaveTextContent("sent to OpenAI");
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+
+    await user.click(within(question).getByRole("button", { name: "Share conversations" }));
+    expect(core.conversationsShare).toHaveBeenCalledWith(alpha.id, true);
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+  });
+
+  it("a no is an answer too, and closing the question starts nothing", async () => {
+    const user = userEvent.setup();
+    core.conversationsUnasked.mockResolvedValue("codex's conversation");
+    show(feature.id);
+
+    await user.click(agentButton());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(core.conversationsShare).not.toHaveBeenCalled();
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+
+    await user.click(agentButton());
+    await user.click(await screen.findByRole("button", { name: "Not in this project" }));
+    expect(core.conversationsShare).toHaveBeenCalledWith(alpha.id, false);
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+  });
+
+  it("says a new agent was told, and shows what it reads", async () => {
+    const user = userEvent.setup();
+    core.conversationContext.mockResolvedValue(told);
+    core.ptySpawn.mockImplementation(async ({ workspaceId }: { workspaceId: string }) => ({
+      id: "s-told",
+      program: "claude",
+      args: [],
+      cwd: null,
+      pid: 1,
+      size: { cols: 80, rows: 24 },
+      labels: {
+        workspace: workspaceId,
+        harness: "claude",
+        record: "rec-new",
+        toldAbout: told.about,
+      },
+      state: { status: "running" as const },
+      hasOutput: false,
+      busy: false,
+      idleMs: 0,
+    }));
+    useHarnessStore.setState({
+      harnesses: [harness("claude", { contextArgs: ["--append-system-prompt", "{context}"] })],
+      loaded: true,
+    });
+    show(feature.id);
+
+    await user.click(agentButton());
+    const bar = await screen.findByRole("status");
+    expect(bar).toHaveTextContent("Told about codex's conversation");
+    expect(
+      screen.getByRole("button", { name: "Told about codex's conversation: show" }),
+    ).toBeVisible();
+
+    await user.click(within(bar).getByRole("button", { name: "Show" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "This workspace’s other conversations",
+    });
+    expect(core.conversationContext).toHaveBeenCalledWith(feature.id, "rec-new");
+    expect(await within(dialog).findByText(told.note)).toBeInTheDocument();
+    expect(within(dialog).getByText(told.digest)).toBeInTheDocument();
+  });
 });

@@ -12,6 +12,13 @@ has the downloads and the full commit lists.
   about 8,000 tokens. Nothing is stored. Off unless you turn it on, because what an agent reads
   goes to its provider.
 
+- **A new agent is told when other conversations in its workspace can be read.** Claude Code and
+  Codex get a short note as background context, so one started from the tab bar knows without a
+  first message; other agents get it after the first message, and their buttons ask whether to
+  start with the handoff. The tab says so, with **Show**; **Alt-click** starts an agent without
+  it. The first time an agent starts beside another conversation, Yardsort asks once whether the
+  project should share them. Settings → Harnesses has a new **Context args** template.
+
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
   a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or

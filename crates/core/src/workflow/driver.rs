@@ -429,6 +429,7 @@ fn carry_out(
                 skip_memory,
                 // Started by a workflow, not by hand: the notes, without asking for proposals.
                 quiet_memory: true,
+                skip_context: false,
             };
             done(hands.start(&place.workspace.id, request).map(|session| {
                 let mut outputs = Outputs::new();

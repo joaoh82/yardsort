@@ -14,6 +14,7 @@ import {
   type ActivityPage,
   type ActivitySettingsDto,
   type ContextUsage,
+  type ConversationContext,
   type AgentOutcomes,
   type Attempt,
   type FileReports,
@@ -150,6 +151,7 @@ export type {
   ActivityPage,
   ActivitySettingsDto,
   ContextUsage,
+  ConversationContext,
   AgentOutcomes,
   Attempt,
   FileReports,
@@ -250,6 +252,8 @@ export const WORKSPACE_LABEL = "workspace";
 export const HARNESS_LABEL = "harness";
 /** The label naming the session record (conversation) a terminal belongs to, if any. */
 export const RECORD_LABEL = "record";
+/** On an agent told about the workspace's other conversations: which, e.g. "claude's conversation". */
+export const TOLD_ABOUT_LABEL = "toldAbout";
 
 /** False in a plain browser tab and in unit tests, where there is no core to call. */
 export const hasCore = isTauri;
@@ -644,6 +648,19 @@ export const ipc = {
   /** Let a project's agents read each other's conversations with `ys workspace context`, or not. */
   conversationsShare: (projectId: string, shared: boolean) =>
     unwrap(commands.conversationsShare(projectId, shared)),
+  /**
+   * The note an agent started in this workspace now would be given about its other
+   * conversations, and the digest it would read — `except` the conversation it is, for one
+   * already running. `null` when the project does not share them or none has said anything.
+   */
+  conversationContext: (workspaceId: string, except: string | null) =>
+    unwrap(commands.conversationContext(workspaceId, except)),
+  /**
+   * What the note would be about, when an agent starting in this workspace should first ask
+   * whether the project shares conversations — once per project. `null` when there is no
+   * question: answered already, or nothing said here yet.
+   */
+  conversationsUnasked: (workspaceId: string) => unwrap(commands.conversationsUnasked(workspaceId)),
   /** How many proposals wait, per project that has any. */
   memoryWaiting: () => unwrap(commands.memoryWaiting()),
   /** Jev's word on each waiting proposal: repeats or contradicts an approved entry. */

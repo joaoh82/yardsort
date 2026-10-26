@@ -2,12 +2,12 @@ import { useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ContextMenu, type MenuItem } from "@/features/sidebar/ContextMenu";
 import { useShortcutLabel } from "@/stores/preferences";
-import { errorMessage, ipc } from "@/lib/ipc";
-import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
-import { bareHarness } from "./quickLaunch";
+import { AgentButton } from "./AgentButton";
+import { handOff } from "./handOff";
+import { ConversationsDialog } from "./ConversationsDialog";
 import { StatusDot } from "./StatusDot";
 
 export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
@@ -37,16 +37,13 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
       <div className="ml-auto flex items-center gap-1 pr-2">
         <HandOff workspaceId={workspaceId} />
         {harnesses.map((harness) => (
-          <button
+          <AgentButton
             key={harness.id}
-            type="button"
-            title={`Start ${harness.label} here`}
-            onClick={() => void open(workspaceId, bareHarness(harness.id))}
+            workspaceId={workspaceId}
+            harness={harness}
+            iconSize={12}
             className="flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] text-ink-faint hover:bg-raised hover:text-ink"
-          >
-            <HarnessIcon id={harness.id} label={harness.label} size={12} />
-            {harness.id}
-          </button>
+          />
         ))}
       </div>
     </div>
@@ -61,6 +58,7 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
     s.byWorkspace[tab.workspaceId]?.find((candidate) => candidate.id === tab.recordId),
   );
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [showing, setShowing] = useState(false);
   const status = tab.exit ? (tab.exit.success ? "ended" : `exited ${tab.exit.code}`) : null;
   const activity = tab.exit
     ? tab.exit.success
@@ -113,6 +111,17 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
         <span className="max-w-40 truncate">{tab.title}</span>
         {status && <span className="text-[11px] text-ink-faint">{status}</span>}
       </button>
+      {tab.toldAbout && (
+        <button
+          type="button"
+          aria-label={`Told about ${tab.toldAbout}: show`}
+          title={`Told it can read ${tab.toldAbout}. Show what it reads.`}
+          onClick={() => setShowing(true)}
+          className="rounded px-1 text-[11px] text-ink-faint hover:bg-line hover:text-ink"
+        >
+          ⇄
+        </button>
+      )}
       <button
         type="button"
         aria-label={`Close ${tab.title}`}
@@ -122,6 +131,13 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
         ×
       </button>
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
+      {showing && (
+        <ConversationsDialog
+          workspaceId={tab.workspaceId}
+          except={tab.recordId}
+          onClose={() => setShowing(false)}
+        />
+      )}
     </div>
   );
 }
@@ -133,28 +149,17 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
  */
 function HandOff({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState(false);
-  const handOff = async () => {
-    const projects = useProjectsStore.getState();
-    const workspace = projects.projects
-      .flatMap((project) => project.workspaces)
-      .find((candidate) => candidate.id === workspaceId);
-    if (!workspace) return;
+  const start = async () => {
     setBusy(true);
-    try {
-      const packet = await ipc.workspaceHandoff(workspaceId);
-      useProjectsStore.getState().composeIn(workspace, packet.text);
-    } catch (error) {
-      useProjectsStore.setState({ error: errorMessage(error) });
-    } finally {
-      setBusy(false);
-    }
+    await handOff(workspaceId);
+    setBusy(false);
   };
   return (
     <button
       type="button"
       disabled={busy}
       title="Start another agent here, with what Yardsort recorded about this workspace as its first message — to read and edit before it is sent"
-      onClick={() => void handOff()}
+      onClick={() => void start()}
       className="mr-1 shrink-0 rounded border border-line px-2 py-0.5 text-[11px] whitespace-nowrap text-ink-faint hover:border-accent hover:text-ink disabled:opacity-40"
     >
       Hand off…

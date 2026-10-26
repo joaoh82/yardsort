@@ -238,6 +238,7 @@ pub(super) fn deliver(
                     handoff: true,
                     skip_memory: false,
                     quiet_memory: false,
+                    skip_context: false,
                 }),
                 size,
             )?;

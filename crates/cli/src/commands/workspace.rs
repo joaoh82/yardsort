@@ -478,6 +478,7 @@ pub(super) fn new(
                 handoff: false,
                 skip_memory: false,
                 quiet_memory: false,
+                skip_context: false,
             }),
             DETACHED_SIZE,
         )?;

@@ -7,6 +7,7 @@ mod activity;
 mod assist;
 mod changes;
 mod commands;
+mod conversations;
 #[cfg(target_os = "linux")]
 mod display;
 mod draft;
@@ -146,6 +147,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             memory::memory_decide,
             memory::memory_share,
             memory::conversations_share,
+            conversations::conversation_context,
+            conversations::conversations_unasked,
             memory::memory_waiting,
             memory::memory_check,
             outcomes::outcomes_get,

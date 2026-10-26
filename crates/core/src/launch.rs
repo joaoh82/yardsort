@@ -44,6 +44,11 @@ pub struct HarnessRequest {
     /// starts five reviewers must not leave five proposals about that one review.
     #[serde(default)]
     pub quiet_memory: bool,
+    /// Do not tell this agent about the workspace's other conversations, though the project
+    /// shares them: Alt-click on an agent button, or the composer's box. See
+    /// `docs/design/29-conversation-context.md`.
+    #[serde(default)]
+    pub skip_context: bool,
 }
 
 /// What to run in a workspace.
@@ -69,6 +74,9 @@ pub const RECORD_LABEL: &str = "record";
 pub const RUN_LABEL: &str = "run";
 /// Label carrying the id of the workspace whose run command a PTY session is.
 pub const PROJECT_RUN_LABEL: &str = "projectRun";
+/// Label on an agent that was told about the workspace's other conversations, saying which:
+/// "claude's conversation". Its tab says so.
+pub const CONTEXT_LABEL: &str = "toldAbout";
 
 /// What launching something needs: where sessions are recorded, what runs them, the user's
 /// environment, and the harness definitions in force.
@@ -182,7 +190,24 @@ impl Launcher<'_> {
             }
             _ => None,
         };
-        let mut resolved = resolve_launch_with(launch, self.harnesses, memory.as_deref())?;
+        // An agent started beside other conversations is told it can read them, when the project
+        // shares them. Read now, so the note names them as they stand.
+        let note = match &launch {
+            Launch::Harness(request) if !request.skip_context => {
+                let sources =
+                    crate::usage::logs::Sources::from_env(&|name| self.env.vars.get(name).cloned());
+                activity::digest::note_for(
+                    self.store,
+                    &workspace,
+                    None,
+                    &sources,
+                    crate::store::now_ms(),
+                )?
+            }
+            _ => None,
+        };
+        let mut resolved =
+            resolve_launch_with(launch, self.harnesses, memory.as_deref(), note.as_ref())?;
         resolved
             .labels
             .insert(WORKSPACE_LABEL.to_owned(), workspace_id.to_owned());
@@ -443,15 +468,19 @@ const MAX_ARGV_PROMPT: usize = if cfg!(windows) { 24_000 } else { 100_000 };
 
 /// Turn a [`Launch`] into a program, its argv and the labels describing it.
 pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResult<ResolvedLaunch> {
-    resolve_launch_with(launch, overrides, None)
+    resolve_launch_with(launch, overrides, None, None)
 }
 
-/// As [`resolve_launch`], with `context` added after a harness's first message — the project's
-/// memory. The agent receives both; the record keeps only the first message, as the task.
+/// As [`resolve_launch`], with `memory` added after a harness's first message, and the `note`
+/// about the workspace's other conversations given as background context where the harness
+/// takes it, or after the first message where it does not. The agent receives all of it; the
+/// record keeps only the first message, as the task. A launch with neither background context
+/// nor a first message has nowhere to put the note, and goes without.
 pub fn resolve_launch_with(
     launch: Launch,
     overrides: &[HarnessOverride],
-    context: Option<&str>,
+    memory: Option<&str>,
+    note: Option<&activity::digest::Note>,
 ) -> IpcResult<ResolvedLaunch> {
     let mut labels = Labels::new();
     Ok(match launch {
@@ -476,11 +505,21 @@ pub fn resolve_launch_with(
                 IpcError::new("unknown_harness", "That harness is not configured.")
             })?;
             let prompt = request.prompt.filter(|p| !p.trim().is_empty());
-            // What the agent is given: the first message, then the context after it.
-            let sent = match (&prompt, context) {
-                (Some(prompt), Some(context)) => Some(format!("{prompt}\n\n{context}")),
-                (prompt, _) => prompt.clone(),
-            };
+            let background = note.filter(|_| !def.context_args.is_empty());
+            let after = note
+                .filter(|_| background.is_none() && prompt.is_some())
+                .map(activity::digest::note_section);
+            // What the agent is given: the first message, then the memory and the note after it.
+            let sent = prompt.as_ref().map(|prompt| {
+                [Some(prompt.as_str()), memory, after.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            });
+            if let Some(told) = background.or(note.filter(|_| after.is_some())) {
+                labels.insert(CONTEXT_LABEL.to_owned(), told.about.clone());
+            }
             if sent.as_ref().is_some_and(|p| p.len() > MAX_ARGV_PROMPT) {
                 def.prompt_transport = PromptTransport::Stdin;
             }
@@ -494,6 +533,7 @@ pub fn resolve_launch_with(
                 effort: effort.clone(),
                 session_id: session_id.clone(),
                 new_session_id: None,
+                context: background.map(|note| note.text.clone()),
             });
             labels.insert(HARNESS_LABEL.to_owned(), def.id.clone());
             if let Some(session_id) = &session_id {
@@ -654,6 +694,7 @@ mod tests {
             handoff: false,
             skip_memory: false,
             quiet_memory: false,
+            skip_context: false,
         };
         let claude = resolve_launch(Launch::Harness(request("claude")), &[]).unwrap();
         assert_eq!(claude.program.as_deref(), Some("claude"));
@@ -691,6 +732,7 @@ mod tests {
             handoff: false,
             skip_memory: false,
             quiet_memory: false,
+            skip_context: false,
         };
         let stdin = [HarnessOverride {
             id: "claude".into(),
@@ -893,6 +935,7 @@ mod tests {
                         handoff,
                         skip_memory,
                         quiet_memory: quiet.get(),
+                        skip_context: false,
                     }),
                     SIZE,
                 )
@@ -947,6 +990,129 @@ mod tests {
         assert!(!start(Some("exit 0"), false, false).contains("Project memory"));
     }
 
+    /// Beside another conversation, in a project that shares them, a new agent is told it can
+    /// read them: as background context where its harness takes some, leaving the message as
+    /// typed; after the message where it does not; not at all with neither, when opted out, or
+    /// when the project does not share them. The record keeps the user's words alone.
+    #[test]
+    fn a_new_agent_is_told_about_the_other_conversations_where_its_harness_takes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let project = store.workspace(&ws).unwrap().unwrap().project_id;
+        // Claude has had a two-turn conversation here.
+        let claude = dir.path().join("claude");
+        let folder = claude.join("projects").join("-here");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("fixtures/claude-transcript/2.1.302/conversation.jsonl"),
+            folder.join("claude-a.jsonl"),
+        )
+        .unwrap();
+        store
+            .add_session(&crate::store::NewSession {
+                id: "rec-claude",
+                workspace_id: &ws,
+                harness_id: "claude",
+                harness_session_id: Some("claude-a"),
+                title: "notes",
+                pty_session_id: "pty-claude",
+                ..Default::default()
+            })
+            .unwrap();
+        store.end_session_by_pty("pty-claude", Some(0)).unwrap();
+        let mut vars = process_env().vars.clone();
+        vars.insert("CLAUDE_CONFIG_DIR".into(), claude.to_string_lossy().into());
+        let env = Arc::new(ShellEnv {
+            vars,
+            source: EnvSource::Process,
+            warning: None,
+        });
+        let host = PlanCatcher::default();
+        let mut with_context = shell_harness();
+        with_context.id = "sh-context".into();
+        with_context.context_args = Some(vec!["--context".into(), "{context}".into()]);
+        let harnesses = [shell_harness(), with_context];
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &harnesses, &activity, dir.path());
+        let start = |id: &str, prompt: Option<&str>, skip_context: bool| {
+            launcher
+                .in_workspace(
+                    &ws,
+                    Launch::Harness(HarnessRequest {
+                        id: id.into(),
+                        model: None,
+                        effort: None,
+                        prompt: prompt.map(str::to_owned),
+                        handoff: false,
+                        skip_memory: false,
+                        quiet_memory: false,
+                        skip_context,
+                    }),
+                    SIZE,
+                )
+                .unwrap();
+            host.plans.lock().unwrap().pop().unwrap()
+        };
+        let told = |plan: &LaunchPlan| plan.labels.get(CONTEXT_LABEL).cloned();
+        store.set_conversations_shared(&project, true).unwrap();
+        // Memory is its own section, tested above; out of the way here.
+        store.set_memory_shared(&project, false).unwrap();
+
+        // From the tab bar: no first message, so no turn; the note as background context.
+        let plan = start("sh-context", None, false);
+        let at = plan.args.iter().position(|a| a == "--context").unwrap();
+        let note = &plan.args[at + 1];
+        assert!(
+            note.starts_with("Other agents have worked in this workspace: claude (2 turns, last "),
+            "{note}"
+        );
+        assert!(note.contains("run `ys workspace context`"), "{note}");
+        assert!(plan.prompt.is_none(), "nothing is typed in");
+        assert_eq!(told(&plan).as_deref(), Some("claude's conversation"));
+
+        // With a message, it is left as typed.
+        let plan = start("sh-context", Some("exit 0"), false);
+        assert_eq!(plan.args.last().map(String::as_str), Some("exit 0"));
+        assert!(plan.args.iter().any(|a| a == "--context"));
+
+        // A harness that takes no background context gets it after the message …
+        let plan = start("sh-agent", Some("exit 0"), false);
+        let sent = plan.args.last().unwrap();
+        assert!(
+            sent.starts_with("exit 0\n\n## This workspace's other conversations\n\nOther agents"),
+            "{sent}"
+        );
+        assert_eq!(told(&plan).as_deref(), Some("claude's conversation"));
+        assert_eq!(
+            store
+                .session_prompts(&ws)
+                .unwrap()
+                .last()
+                .map(String::as_str),
+            Some("exit 0"),
+            "the task on record is the user's words alone"
+        );
+        // … and, with no message, nowhere to put it.
+        let plan = start("sh-agent", None, false);
+        assert!(!plan.args.join(" ").contains("Other agents"));
+        assert_eq!(told(&plan), None);
+
+        // Alt-click, or the composer's box.
+        let plan = start("sh-context", Some("exit 0"), true);
+        assert!(!plan.args.iter().any(|a| a == "--context"));
+        assert_eq!(told(&plan), None);
+        let plan = start("sh-agent", Some("exit 0"), true);
+        assert!(!plan.args.join(" ").contains("Other agents"));
+
+        // The project's switch.
+        store.set_conversations_shared(&project, false).unwrap();
+        let plan = start("sh-context", None, false);
+        assert!(!plan.args.iter().any(|a| a == "--context"));
+        assert_eq!(told(&plan), None);
+    }
+
     #[test]
     fn a_workspace_launch_is_a_recorded_run_and_tells_the_program_which_one() {
         let dir = tempfile::tempdir().unwrap();
@@ -969,6 +1135,7 @@ mod tests {
                     handoff: false,
                     skip_memory: false,
                     quiet_memory: false,
+                    skip_context: false,
                 }),
                 SIZE,
             )
@@ -1215,6 +1382,7 @@ mod tests {
                     handoff: false,
                     skip_memory: false,
                     quiet_memory: false,
+                    skip_context: false,
                 }),
                 SIZE,
             )
@@ -1320,6 +1488,7 @@ mod tests {
                     handoff: false,
                     skip_memory: false,
                     quiet_memory: false,
+                    skip_context: false,
                 }),
                 SIZE,
             )
@@ -1383,6 +1552,7 @@ mod tests {
                 handoff: false,
                 skip_memory: false,
                 quiet_memory: false,
+                skip_context: false,
             })
         };
         let on = ActivitySettings {
@@ -1448,6 +1618,7 @@ mod tests {
                     handoff: false,
                     skip_memory: false,
                     quiet_memory: false,
+                    skip_context: false,
                 }),
                 SIZE,
             )
@@ -1498,6 +1669,7 @@ mod tests {
                 handoff: false,
                 skip_memory: false,
                 quiet_memory: false,
+                skip_context: false,
             })
         };
         let on = ActivitySettings {
@@ -1579,6 +1751,7 @@ mod tests {
                 handoff: false,
                 skip_memory: false,
                 quiet_memory: false,
+                skip_context: false,
             })
         };
         let on = ActivitySettings {
@@ -1670,6 +1843,7 @@ mod tests {
                 // The command line is what is looked at here, not what goes after the message.
                 skip_memory: true,
                 quiet_memory: false,
+                skip_context: false,
             })
         };
         let on = ActivitySettings {
@@ -1748,6 +1922,7 @@ mod tests {
                 handoff: false,
                 skip_memory: false,
                 quiet_memory: false,
+                skip_context: false,
             })
         };
         let omp_only = ActivitySettings {
@@ -1814,6 +1989,7 @@ mod tests {
                 handoff: false,
                 skip_memory: false,
                 quiet_memory: false,
+                skip_context: false,
             })
         };
         let off = ActivitySettings::default();

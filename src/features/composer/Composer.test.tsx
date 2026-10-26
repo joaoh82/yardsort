@@ -28,6 +28,9 @@ const core = vi.hoisted(() => ({
   workspacesImport: vi.fn(),
   ptySpawn: vi.fn(),
   memoryGet: vi.fn(),
+  conversationContext: vi.fn(),
+  conversationsUnasked: vi.fn(),
+  conversationsShare: vi.fn(),
   outcomesAgents: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -87,6 +90,8 @@ describe("Composer", () => {
     vi.clearAllMocks();
     drag.handler = null;
     core.uiStateSave.mockResolvedValue(undefined);
+    core.conversationContext.mockResolvedValue(null);
+    core.conversationsUnasked.mockResolvedValue(null);
     core.projectBranches.mockResolvedValue({
       branches: ["develop", "main", "ys/kept-earlier", "ys/in-use"],
       default: "main",
@@ -453,6 +458,8 @@ describe("Composer with Assist", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     core.uiStateSave.mockResolvedValue(undefined);
+    core.conversationContext.mockResolvedValue(null);
+    core.conversationsUnasked.mockResolvedValue(null);
     core.projectBranches.mockResolvedValue({ branches: ["main"], default: "main", checkedOut: [] });
     core.harnessesList.mockResolvedValue([
       harness("claude", { efforts: ["low", "medium", "high"] }),
@@ -629,6 +636,54 @@ describe("Composer with Assist", () => {
       prompt: "Fix it",
       skipMemory: true,
     });
+  });
+
+  it("tells the agent about the workspace's other conversations unless told not to", async () => {
+    core.conversationContext.mockResolvedValue({
+      about: "codex's conversation",
+      note: "Other agents have worked in this workspace: codex (2 turns, last …).",
+      digest: "## codex · conversation 3f2a · 2 turns",
+    });
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    const tell = await screen.findByRole("checkbox", {
+      name: /Tell the agent it can read codex.s conversation here/,
+    });
+    expect(tell).toBeChecked();
+    expect(core.conversationContext).toHaveBeenCalledWith("w-app", null);
+    expect(screen.getByText(/with none it is not told/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show the other conversations" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/codex \(2 turns/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix it");
+    expect(tell.closest("label")).toHaveTextContent(/here, after the message\. Your message stays/);
+    await user.click(tell);
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "{Enter}");
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(core.ptySpawn.mock.calls[0]![0].harness).toMatchObject({
+      prompt: "Fix it",
+      skipContext: true,
+    });
+  });
+
+  it("asks once whether the project shares conversations before starting in a workspace", async () => {
+    core.conversationsUnasked.mockResolvedValue("codex's conversation");
+    core.conversationsShare.mockResolvedValue({});
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    await user.type(await screen.findByRole("textbox", { name: /work on/ }), "Fix it{Enter}");
+    const question = await screen.findByRole("dialog", { name: /read each other.s conversations/ });
+    expect(core.ptySpawn).not.toHaveBeenCalled();
+    await user.click(within(question).getByRole("button", { name: "Share conversations" }));
+    expect(core.conversationsShare).toHaveBeenCalledWith("p-app", true);
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
   });
 
   it("says an empty shared memory only asks the agent to propose", async () => {

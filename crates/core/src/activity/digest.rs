@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use specta::Type;
 
 use super::handoff::when;
 use super::transcript::{self, Turn};
@@ -33,6 +34,8 @@ const OLDER_USER_CHARS: usize = 1_000;
 const OLDER_REPLY_CHARS: usize = 600;
 /// Where a first message's own words end and Yardsort's additions begin.
 const MEMORY_MARKER: &str = "\n\n## Project memory\n";
+/// The heading of the note when it goes after a first message: see [`note`].
+pub const NOTE_HEADING: &str = "## This workspace's other conversations";
 const HANDOFF_MARKER: &str = "# Handoff from Yardsort";
 /// How long before its record Codex may have started a session file: the file is the agent's,
 /// the record Yardsort's, and they are not written at the same instant.
@@ -123,10 +126,105 @@ fn own_words(text: &str) -> String {
     if text.starts_with(HANDOFF_MARKER) {
         return "[a handoff packet from Yardsort]".to_owned();
     }
-    match text.find(MEMORY_MARKER) {
+    let note = format!("\n\n{NOTE_HEADING}\n");
+    let end = [text.find(MEMORY_MARKER), text.find(&note)]
+        .into_iter()
+        .flatten()
+        .min();
+    match end {
         Some(at) => text[..at].trim_end().to_owned(),
         None => text.to_owned(),
     }
+}
+
+/// How many conversations the note names before it counts the rest.
+const NOTE_NAMES: usize = 4;
+
+/// What a new agent in a workspace is told: that other conversations here can be read, and how.
+/// A pointer, not the digest — short enough for any command line, and read when it is wanted, so
+/// it is current then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    /// What the agent was told about, for its tab: "claude's conversation".
+    pub about: String,
+    /// The note, as the agent reads it.
+    pub text: String,
+}
+
+/// The note for these conversations, or `None` when none of them has said anything.
+pub fn note(conversations: &[Conversation]) -> Option<Note> {
+    let spoken: Vec<&Conversation> = conversations
+        .iter()
+        .filter(|c| !c.turns.is_empty())
+        .collect();
+    let first = spoken.first()?;
+    let mut names: Vec<String> = spoken
+        .iter()
+        .take(NOTE_NAMES)
+        .map(|c| {
+            let turns = match c.turns.len() {
+                1 => "1 turn".to_owned(),
+                n => format!("{n} turns"),
+            };
+            let running = if c.running { ", still running" } else { "" };
+            format!(
+                "{} ({turns}, last {}{running})",
+                c.harness,
+                when(c.last_at())
+            )
+        })
+        .collect();
+    if spoken.len() > NOTE_NAMES {
+        names.push(format!("{} more", spoken.len() - NOTE_NAMES));
+    }
+    let about = match spoken.len() {
+        1 => format!("{}'s conversation", first.harness),
+        n => format!("{n} other conversations"),
+    };
+    let text = format!(
+        "Other agents have worked in this workspace: {}. Before you answer the user's first \
+         message, run `ys workspace context` to read what they were asked, what they decided and \
+         what they left to do. It changes as they work; run it again when the user refers to \
+         their work.",
+        names.join("; ")
+    );
+    Some(Note { about, text })
+}
+
+/// [`note`] for a new agent in `workspace` — `except` its own conversation, when it has one —
+/// or `None` when the project does not share its agents' conversations.
+pub fn note_for(
+    store: &Store,
+    workspace: &WorkspaceRow,
+    except: Option<&str>,
+    sources: &Sources,
+    now: i64,
+) -> StoreResult<Option<Note>> {
+    if !store.conversations_shared(&workspace.project_id)? {
+        return Ok(None);
+    }
+    Ok(note(&gather(store, workspace, except, sources, now)?))
+}
+
+/// Whether to ask the user, before an agent starts in `workspace`, if the project should share
+/// its agents' conversations: when it has never been asked, and another conversation here has
+/// said something. Gives what the note would be about, for the question.
+pub fn unasked(
+    store: &Store,
+    workspace: &WorkspaceRow,
+    sources: &Sources,
+    now: i64,
+) -> StoreResult<Option<String>> {
+    if store.conversations_decided(&workspace.project_id)? {
+        return Ok(None);
+    }
+    Ok(note(&gather(store, workspace, None, sources, now)?).map(|note| note.about))
+}
+
+/// The note as a section after a first message, for an agent that takes no background context.
+pub fn note_section(note: &Note) -> String {
+    format!("{NOTE_HEADING}\n\n{}\n", note.text)
 }
 
 /// The session files of each Codex conversation in the workspace, by record id. A thread the
@@ -916,7 +1014,87 @@ mod tests {
     }
 
     #[test]
+    fn the_question_is_asked_once_and_only_beside_a_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/wt/fix"));
+        let sources = sources(dir.path());
+        assert_eq!(
+            unasked(&store, &ws, &sources, T0).unwrap(),
+            None,
+            "nothing said yet"
+        );
+        session(&store, &ws.id, "rec-claude", "claude", Some("claude-a"));
+        assert_eq!(
+            unasked(&store, &ws, &sources, T0).unwrap().as_deref(),
+            Some("claude's conversation")
+        );
+        assert_eq!(
+            note_for(&store, &ws, None, &sources, T0).unwrap(),
+            None,
+            "still off"
+        );
+        store
+            .set_conversations_shared(&ws.project_id, false)
+            .unwrap();
+        assert_eq!(
+            unasked(&store, &ws, &sources, T0).unwrap(),
+            None,
+            "answered no"
+        );
+        store
+            .set_conversations_shared(&ws.project_id, true)
+            .unwrap();
+        assert_eq!(
+            unasked(&store, &ws, &sources, T0).unwrap(),
+            None,
+            "answered yes"
+        );
+        assert!(note_for(&store, &ws, None, &sources, T0).unwrap().is_some());
+    }
+
+    #[test]
+    fn the_note_names_the_conversations_that_have_said_something() {
+        assert_eq!(note(&[]), None);
+        let silent = conversation("rec-a", vec![]);
+        assert_eq!(note(std::slice::from_ref(&silent)), None);
+        let mut claude = conversation("rec-b", vec![turn(T0, "fix it", "Fixed.")]);
+        claude.running = true;
+        let one = note(&[claude.clone(), silent]).unwrap();
+        assert_eq!(one.about, "claude's conversation");
+        assert!(
+            one.text.starts_with(&format!(
+                "Other agents have worked in this workspace: claude (1 turn, last {}, still running). \
+                 Before you answer the user's first message, run `ys workspace context`",
+                when(T0)
+            )),
+            "{}",
+            one.text
+        );
+        let mut codex = conversation(
+            "rec-c",
+            vec![turn(T0, "a", "b"), turn(T0 + 60_000, "c", "d")],
+        );
+        codex.harness = "codex".to_owned();
+        let many: Vec<Conversation> = std::iter::repeat_n(claude, 4).chain([codex]).collect();
+        let several = note(&many).unwrap();
+        assert_eq!(several.about, "5 other conversations");
+        assert!(
+            several.text.contains("; 1 more. Before"),
+            "{}",
+            several.text
+        );
+        assert!(note_section(&several).starts_with("## This workspace's other conversations\n\n"));
+    }
+
+    #[test]
     fn what_yardsort_added_to_a_first_message_is_not_the_users() {
+        assert_eq!(
+            own_words(
+                "fix the login\n\n## This workspace's other conversations\n\nOther agents have worked"
+            ),
+            "fix the login"
+        );
         assert_eq!(
             own_words("fix the login\n\n## Project memory\n\n- (memory ab12) the tests need TZ"),
             "fix the login"

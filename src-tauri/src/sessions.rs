@@ -174,6 +174,7 @@ pub(crate) fn continue_session(
             effort: row.effort.clone(),
             session_id: row.harness_session_id.clone(),
             new_session_id: new_session_id.clone(),
+            context: None,
         },
         fork,
     );

@@ -12,6 +12,8 @@ import {
 import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
+import { ConversationsDialog } from "@/features/terminal/ConversationsDialog";
+import { useShareQuestion } from "@/features/terminal/shareQuestion";
 import { useFileDrop } from "@/lib/useFileDrop";
 import { useShortcutLabel } from "@/stores/preferences";
 import { insertDroppedPaths } from "./drop";
@@ -180,6 +182,25 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     };
   }, [project.id, handoff]);
 
+  // In a workspace with other conversations, in a project that shares them: what the agent is
+  // told about them, and a way to leave that out of this one launch.
+  const [conversations, setConversations] = useState<{ about: string } | null>(null);
+  const [skipContext, setSkipContext] = useState(false);
+  const [showConversations, setShowConversations] = useState(false);
+  const share = useShareQuestion();
+  const runInId = runIn?.id;
+  useEffect(() => {
+    if (!runInId || !hasCore()) return;
+    let stale = false;
+    ipc.conversationContext(runInId, null).then(
+      (read) => !stale && setConversations(read && { about: read.about }),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [runInId]);
+
   // Your history with each agent, across projects: shown beside the picker, never used to pick.
   const [histories, setHistories] = useState<AgentOutcomes[]>([]);
   useEffect(() => {
@@ -231,6 +252,8 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
 
   const start = async () => {
     if (!ready || !harness) return;
+    // Beside another conversation, in a project never asked: whether to share them, first.
+    if (runIn && !(await share.ask(runIn.id))) return;
     setBusy(true);
     setError(null);
     const projects = useProjectsStore.getState();
@@ -240,6 +263,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       effort: effortChoice || null,
       prompt: message.trim() || null,
       ...(memory && skipMemory ? { skipMemory: true } : {}),
+      ...(conversations && skipContext ? { skipContext: true } : {}),
     };
     const remember = () =>
       projects.remember(picksKey(project.id), {
@@ -519,6 +543,43 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           </div>
         )}
 
+        {conversations && harness && (
+          <div className="mt-2 text-[12px] text-ink-faint">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!skipContext}
+                disabled={busy}
+                onChange={(event) => setSkipContext(!event.target.checked)}
+                className="accent-(--color-accent)"
+              />
+              <span>
+                Tell the agent it can read {conversations.about} here
+                {(harness.contextArgs ?? []).length > 0
+                  ? ", as background context."
+                  : message.trim()
+                    ? ", after the message. Your message stays the task on record."
+                    : " — after a message, so write one; with none it is not told."}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowConversations(true)}
+                aria-label="Show the other conversations"
+                className="ml-auto text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+              >
+                Show
+              </button>
+            </label>
+          </div>
+        )}
+        {showConversations && runIn && (
+          <ConversationsDialog
+            workspaceId={runIn.id}
+            except={null}
+            onClose={() => setShowConversations(false)}
+          />
+        )}
+
         {!runIn && (
           <p className="mt-2 text-right text-[11px] text-ink-faint">
             Have worktrees already?{" "}
@@ -568,6 +629,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         </div>
       </form>
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
+      {share.question}
     </div>
   );
 }

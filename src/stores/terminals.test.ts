@@ -41,6 +41,8 @@ const tab = (id: string, workspaceId = "ws", extra: Partial<TerminalTab> = {}): 
   recordId: null,
   busy: false,
   attention: false,
+  toldAbout: null,
+  toldAt: null,
   ...extra,
 });
 
