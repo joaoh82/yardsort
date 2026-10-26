@@ -27,6 +27,10 @@ has the downloads and the full commit lists.
   Code with `--system-prompt-snapshot off` on that resume, so it reads the new note. Settings →
   Harnesses has a **Resume context args** template for it.
 
+- **`ys attach` and `ys logs` take the id `ys session list` prints.** They took only a workspace
+  name or a terminal's own id, so two agents in one workspace could not be told apart. When a name
+  matches several, each choice is listed with an id to name it by.
+
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
   a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or

@@ -6,7 +6,8 @@ Slices 1–3 are built — the digest for every built-in agent,
 packet — and [§ slice 1](#slice-1-what-shipped), [§ slice 2](#slice-2-what-shipped) and
 [§ slice 3](#slice-3-what-shipped) say where they differ from the proposal below, with
 [§ after slice 3](#after-slice-3-grok-and-resume) for Grok and the note on resume, and
-[§ Claude Code on resume](#claude-code-on-resume) for the last of it._
+[§ Claude Code on resume](#claude-code-on-resume) for the last of it;
+[§ checked in the app](#checked-in-the-app) records the pass on Linux._
 
 A workspace can hold several conversations: Claude in one tab, Codex or Cursor in the next. They
 share the worktree, so the second agent sees the same files and the same diff — and nothing of
@@ -591,5 +592,23 @@ launch without the option sends what the conversation recorded first.
   [04](04-harnesses.md); the settings guide says to clear the field or update Claude Code. When
   the option arrived is not known.
 
-Owed: a told Claude Code resume in a running window
-([08 § 26](08-manual-checklist.md#26--conversation-context)), and macOS and Windows.
+Owed: macOS and Windows.
+
+## Checked in the app
+
+On 2026-10-26 every row of [08 § 26](08-manual-checklist.md#26--conversation-context) passed on
+Linux, in a development build on a throwaway profile with all seven agents signed in: Codex beside
+Claude told without a question and reading the digest first; the composer's line and its box;
+Alt-click; Grok without context args offering the handoff; a resumed Claude that began alone run
+with `--system-prompt-snapshot off` and naming Codex's conversation, and run plainly once sharing
+was off; the packet's _What was said_ with sharing on and off; Grok, OMP and pi told from the tab
+bar, a resumed OMP told again and a resumed Grok not; every conversation in the digest, without
+tool output. Found on the way:
+
+- The handoff row and the row for the other five agents had been filed under § 21; they are in
+  § 26 now.
+- `ys attach` and `ys logs` took a workspace name or a terminal's own id, not the record id
+  `ys session list` prints, so two agents in one workspace could not be told apart. They take the
+  record's id too now, and a refusal lists each choice with an id to name it by.
+- pi, on Kimi K2.6, was given the note and answered a question about the folder without running
+  the command; the others ran it first. The note asks; it cannot make a model do it.
