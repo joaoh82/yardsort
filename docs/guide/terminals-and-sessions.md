@@ -171,8 +171,8 @@ Some things to know:
   context — their system-prompt option, the **Context** args in
   [Settings → Harnesses](settings.md#harnesses) — so an agent started from an agent button gets
   it without a first message and starts no turn. An agent without that option can only be told in
-  a first message: its button asks first, **Start with the handoff…** (the composer, with the
-  handoff message) or **Start fresh** (not told). From the composer the note goes after your
+  a first message: its button asks first, **Start with the handoff…** (the composer, with that
+  agent picked and the handoff message) or **Start fresh** (not told). From the composer the note goes after your
   message, under _This workspace's other conversations_, and the task on record stays your
   words; the composer says so beside its pickers, with **Show** and a box to leave it out of that
   start. Workflow steps are told the same way.

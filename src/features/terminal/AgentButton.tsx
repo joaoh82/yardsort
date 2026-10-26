@@ -59,7 +59,10 @@ export function AgentButton({
         <ContextMenu
           at={askAt}
           items={[
-            { label: "Start with the handoff…", onSelect: () => void handOff(workspaceId) },
+            {
+              label: "Start with the handoff…",
+              onSelect: () => void handOff(workspaceId, harness.id),
+            },
             { label: "Start fresh", onSelect: () => start(true) },
           ]}
           onClose={() => setAskAt(null)}

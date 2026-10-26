@@ -65,9 +65,12 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const [note] = useState(() => (runIn ? null : useProjectsStore.getState().composingPrompt));
   const [task] = useState(() => (runIn ? null : useProjectsStore.getState().composingTask));
   const [message, setMessage] = useState(handoff ?? note ?? "");
-  const [harnessId, setHarnessId] = useState<string | null>(null);
-  const [model, setModel] = useState(last.model ?? "");
-  const [effort, setEffort] = useState(last.effort ?? "");
+  // Asked for by one agent's button: that agent, and the last picks only if they were for it.
+  const [handed] = useState(() => (runIn ? useProjectsStore.getState().composingHarness : null));
+  const lastFits = !handed || handed === last.harness;
+  const [harnessId, setHarnessId] = useState<string | null>(handed);
+  const [model, setModel] = useState((lastFits && last.model) || "");
+  const [effort, setEffort] = useState((lastFits && last.effort) || "");
   const [branches, setBranches] = useState<BranchList | null>(null);
   // "new:<branch>" starts a new branch from <branch>; "open:<branch>" opens <branch> itself.
   const [base, setBase] = useState("");
@@ -250,12 +253,24 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // A branch lives in one worktree at a time, so only branches nobody has checked out can open.
   const openable = branches?.branches.filter((name) => !branches.checkedOut.includes(name)) ?? [];
 
+  // Taken before anything is awaited: a second Start while the first is still asking or
+  // spawning would start a second agent on the same task.
+  const starting = useRef(false);
   const start = async () => {
-    if (!ready || !harness) return;
-    // Beside another conversation, in a project never asked: whether to share them, first.
-    if (runIn && !(await share.ask(runIn.id))) return;
+    if (!ready || !harness || starting.current) return;
+    starting.current = true;
+    try {
+      await launch(harness);
+    } finally {
+      starting.current = false;
+    }
+  };
+
+  const launch = async (harness: HarnessInfo) => {
     setBusy(true);
     setError(null);
+    // Beside another conversation, in a project never asked: whether to share them, first.
+    if (runIn && !(await share.ask(runIn.id))) return setBusy(false);
     const projects = useProjectsStore.getState();
     const request = {
       id: harness.id,

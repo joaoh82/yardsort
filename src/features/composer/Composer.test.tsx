@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistStatus } from "@/lib/ipc";
@@ -118,6 +118,7 @@ describe("Composer", () => {
       composingBranch: null,
       composingPrompt: null,
       composingTask: null,
+      composingHarness: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
@@ -684,6 +685,45 @@ describe("Composer with Assist", () => {
     await user.click(within(question).getByRole("button", { name: "Share conversations" }));
     expect(core.conversationsShare).toHaveBeenCalledWith("p-app", true);
     await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+  });
+
+  it("starts once however often Start is pressed while it is still asking", async () => {
+    let answer: (about: string | null) => void = () => {};
+    core.conversationsUnasked.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    await user.type(await screen.findByRole("textbox", { name: /work on/ }), "Fix it{Enter}");
+    await user.keyboard("{Enter}");
+    fireEvent.submit(screen.getByRole("form", { name: "Run in local" }));
+    answer(null);
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(core.ptySpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens on the agent whose button asked for it, without the last picks for another", async () => {
+    useProjectsStore.setState({
+      composingProjectId: null,
+      composingWorkspaceId: "w-app",
+      composingPrompt: "# Handoff from Yardsort\n",
+      composingHarness: "codex",
+      ui: {
+        "composer.last.p-app": JSON.stringify({ harness: "claude", model: "opus", effort: "low" }),
+      },
+    });
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    const picker = await screen.findByRole("combobox", { name: "Harness" });
+    await waitFor(() => expect(picker).toHaveValue("codex"));
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Go{Enter}");
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(core.ptySpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness: expect.objectContaining({ id: "codex", model: null, effort: null }),
+      }),
+    );
   });
 
   it("says an empty shared memory only asks the agent to propose", async () => {

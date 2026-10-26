@@ -250,6 +250,8 @@ describe("starting an agent beside other conversations", () => {
 
     await user.click(screen.getByRole("menuitem", { name: "Start with the handoff…" }));
     await waitFor(() => expect(useProjectsStore.getState().composingWorkspaceId).toBe(feature.id));
+    // The composer opens on the agent whose button was pressed, not the last one used.
+    expect(useProjectsStore.getState().composingHarness).toBe("claude");
     expect(core.ptySpawn).not.toHaveBeenCalled();
   });
 

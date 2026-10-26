@@ -73,6 +73,9 @@ interface ProjectsState {
   /** The task the composer's workspace is being started from: it is recorded against the
    *  workspace, and names it. Cleared with the composer. */
   composingTask: TaskRef | null;
+  /** The agent the composer should have picked, when composing inside a workspace was asked for
+   *  by one agent's button. Cleared with the composer. */
+  composingHarness: string | null;
   /** Raw persisted UI state, for features that remember small things (see `remember`). */
   ui: Record<string, string>;
   /** Projects are expanded unless listed here, so new ones start open. */
@@ -134,7 +137,7 @@ interface ProjectsState {
   /** Show the Tasks view in the center panel, or close it. */
   openTasks: (open: boolean) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
-  composeIn: (workspace: Workspace, prompt?: string) => void;
+  composeIn: (workspace: Workspace, prompt?: string, harness?: string) => void;
   /**
    * Create a worktree workspace and start its harness. Resolves to the new session, or to an
    * error message — returned rather than stored, because the composer shows it inline.
@@ -215,6 +218,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     composingPrompt: null,
     composingBranch: null,
     composingTask: null,
+    composingHarness: null,
     workflowId: null,
     usageOpen: false,
     pullRequestsOpen: false,
@@ -395,6 +399,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           composingPrompt: null,
           composingBranch: null,
           composingTask: null,
+          composingHarness: null,
           workflowId: null,
           usageOpen: false,
           pullRequestsOpen: false,
@@ -408,6 +413,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
@@ -423,6 +429,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: (projectId && prompt) || null,
         composingBranch: (projectId && branch) || null,
         composingTask: (projectId && task) || null,
+        composingHarness: null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
@@ -443,6 +450,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
       });
     },
 
@@ -457,6 +465,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
       });
     },
 
@@ -471,6 +480,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
       });
     },
 
@@ -485,10 +495,11 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
       });
     },
 
-    composeIn(workspace, prompt) {
+    composeIn(workspace, prompt, harness) {
       set({
         selectedWorkspaceId: workspace.id,
         composingProjectId: null,
@@ -496,6 +507,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: prompt ?? null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: harness ?? null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
