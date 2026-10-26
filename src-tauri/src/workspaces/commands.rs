@@ -201,6 +201,8 @@ pub async fn harness_preview(app: AppHandle, def: HarnessDef) -> IpcResult<Harne
             effort: def.efforts.first().cloned(),
             session_id: Some("0f8fad5b-d9cb-469f-a165-70867728950e".into()),
             new_session_id: Some("7c9e6679-7425-40de-944b-e07fc1f90ae7".into()),
+            // A new conversation beside others is given the note this way.
+            context: Some("Other agents have worked in this workspace: …".into()),
         };
         let with_command = |args: Vec<String>| {
             std::iter::once(def.command.clone())

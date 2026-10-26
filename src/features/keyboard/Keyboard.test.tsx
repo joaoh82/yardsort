@@ -233,6 +233,8 @@ describe("keyboard navigation", () => {
         recordId: null,
         busy: false,
         attention: false,
+        toldAbout: null,
+        toldAt: null,
       })),
       active: { "w-demo": "one" },
     });

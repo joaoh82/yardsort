@@ -879,7 +879,7 @@ unchanged.
 
 Proposed in [29-conversation-context](29-conversation-context.md) on 2026-10-25. A second agent in
 a workspace sees the same files as the first and nothing of its conversation; the handoff packet
-says so, because the record is metadata. Nothing here is built.
+says so, because the record is metadata. Slices 1 and 2 are built.
 
 - A **conversation digest** — every message the user typed and the agent's final reply per turn,
   from the harness's own transcript, within a budget, with no model — read live by
@@ -893,7 +893,11 @@ says so, because the record is metadata. Nothing here is built.
       Codex session file can be 2.4 GB, so transcripts stream; recorded transcripts carry the
       account's own setup and the fixtures keep only the conversation. Recorded in
       [29 § slice 1](29-conversation-context.md#slice-1-what-shipped).
-- [ ] Slice 2: `context_args`, the note, the tab bar and composer.
+- [x] Slice 2: `context_args`, the note, the tab bar and composer, and asking once per project.
+      Found: Claude Code and Codex both keep the system prompt a conversation began with, so a
+      note on resume is ignored and none is given; Grok, OMP and Pi could not be checked live and
+      ship without `context_args`. Recorded in
+      [29 § slice 2](29-conversation-context.md#slice-2-what-shipped).
 - [ ] Slice 3: _What was said_ in the packet; Grok, Cursor, OpenCode, OMP and Pi.
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar

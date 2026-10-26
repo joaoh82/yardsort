@@ -22,6 +22,11 @@ const ARG_FIELDS = [
   ["modelArgs", "Model", "Used when a model is chosen. {model}"],
   ["effortArgs", "Effort", "Used when an effort level is chosen. {effort}"],
   ["sessionArgs", "Session id", "Used when Yardsort assigns the session id. {session_id}"],
+  [
+    "contextArgs",
+    "Context",
+    "Background context for a new conversation — the agent's system-prompt option — used to tell it about the workspace's other conversations. {context}. Empty: told after the first message instead.",
+  ],
   ["promptArgs", "Prompt", "Used when there is an opening message (argv transport). {prompt}"],
   ["resumeArgs", "Resume", "Replace the session and prompt args when resuming. {session_id}"],
   ["forkArgs", "Fork", "Replace them when forking a session. {session_id}"],

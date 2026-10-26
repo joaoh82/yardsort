@@ -735,6 +735,8 @@ describe("Sidebar", () => {
             exit: null,
             busy: true,
             attention: false,
+            toldAbout: null,
+            toldAt: null,
           },
           {
             id: "t2",
@@ -744,6 +746,8 @@ describe("Sidebar", () => {
             exit: null,
             busy: false,
             attention: true,
+            toldAbout: null,
+            toldAt: null,
           },
           {
             id: "t3",
@@ -753,6 +757,8 @@ describe("Sidebar", () => {
             exit: null,
             busy: false,
             attention: false,
+            toldAbout: null,
+            toldAt: null,
           },
         ],
       });
@@ -826,6 +832,8 @@ describe("Sidebar", () => {
       recordId: "r1",
       busy: false,
       attention: false,
+      toldAbout: null,
+      toldAt: null,
     };
     const row = () => within(screen.getByRole("treeitem", { name: "feature" }));
     const badge = (name: string) => row().queryByRole("img", { name });
@@ -1439,6 +1447,8 @@ describe("Sidebar", () => {
           recordId: null,
           busy: false,
           attention: false,
+          toldAbout: null,
+          toldAt: null,
         },
       ],
       active: { "w-alpha": "s-w-alpha" },

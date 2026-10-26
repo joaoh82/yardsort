@@ -1397,6 +1397,20 @@ impl Store {
             .is_some_and(|share| share != 0))
     }
 
+    /// Whether the user has said, either way, whether a project shares conversations: the
+    /// question is asked once, and a project with a row has its answer.
+    pub fn conversations_decided(&self, project_id: &str) -> StoreResult<bool> {
+        let conn = self.conn();
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM project_conversations WHERE project_id = ?",
+                [project_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
     pub fn set_conversations_shared(&self, project_id: &str, share: bool) -> StoreResult<()> {
         self.conn().execute(
             "INSERT INTO project_conversations (project_id, share) VALUES (?, ?)

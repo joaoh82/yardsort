@@ -5,6 +5,7 @@ import {
   HARNESS_LABEL,
   ipc,
   RECORD_LABEL,
+  TOLD_ABOUT_LABEL,
   WORKSPACE_LABEL,
   type ExitInfo,
   type HarnessRequest,
@@ -26,6 +27,10 @@ export interface TerminalTab {
   busy: boolean;
   /** Finished a long stretch of work while nobody was watching; cleared by looking at it. */
   attention: boolean;
+  /** What the agent was told it can read of the workspace's other conversations, if anything. */
+  toldAbout: string | null;
+  /** When this window started it so told, for saying so while it is new; `null` if adopted. */
+  toldAt: number | null;
 }
 
 /** A burst of output shorter than this is somebody typing, not an agent finishing work. */
@@ -87,6 +92,8 @@ function tabFor(session: SessionInfo, adopting = false): TerminalTab | null {
     // reload, or since the last time the app was open. If it is an agent that has printed
     // something and is now quiet, that is work waiting to be looked at.
     attention: adopting && isWaitingAgent(session),
+    toldAbout: session.labels[TOLD_ABOUT_LABEL] ?? null,
+    toldAt: !adopting && session.labels[TOLD_ABOUT_LABEL] ? Date.now() : null,
   };
 }
 

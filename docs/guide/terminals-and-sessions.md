@@ -158,9 +158,29 @@ Some things to know:
 
 - **It is off until you turn it on**, per project. What an agent reads goes to that agent's
   provider: Claude's conversation, read by Codex, is sent to OpenAI as part of Codex's work. Turn
-  it on in projects where that is fine.
-- **An agent is not told about it yet.** Ask it to run `ys workspace context`, or put that in the
-  first message. Telling every agent started beside a conversation is the next step.
+  it on in projects where that is fine. The first time you start an agent beside a conversation
+  in a project you have not decided for, Yardsort asks; either answer is kept, and closing the
+  question starts nothing.
+- **A new agent is told.** An agent started in a workspace where another conversation has said
+  something gets a short note: which conversations there are, and that `ys workspace context`
+  reads them. It says nothing of what was said — the agent reads that when it needs it, so it is
+  current then. Its tab says so: a line under the tabs for its first minute, _Told about claude's
+  conversation_, and a **⇄** mark on the tab after; **Show** opens the note and what the command
+  gives now.
+- **How the note travels** depends on the agent. Claude Code and Codex take it as background
+  context — their system-prompt option, the **Context** args in
+  [Settings → Harnesses](settings.md#harnesses) — so an agent started from an agent button gets
+  it without a first message and starts no turn. An agent without that option can only be told in
+  a first message: its button asks first, **Start with the handoff…** (the composer, with that
+  agent picked and the handoff message) or **Start fresh** (not told). From the composer the note goes after your
+  message, under _This workspace's other conversations_, and the task on record stays your
+  words; the composer says so beside its pickers, with **Show** and a box to leave it out of that
+  start. Workflow steps are told the same way.
+- **Alt-click** an agent button to start it without the note.
+- **Resuming does not tell it again.** Claude Code and Codex keep the system prompt a
+  conversation began with and ignore a new one on resume, so a resumed agent knows what it was
+  told when it began — and one that began alone is not told about conversations started since.
+  Ask it to run `ys workspace context`.
 - **Claude Code and Codex** are read today. Another agent's conversation is listed with why it is
   not there. A Codex conversation is found by the thread it reported when
   [Codex reports what it does](activity.md#what-codex-reports), and otherwise by the folder and
