@@ -19,6 +19,7 @@ use specta::Type;
 
 use super::handoff::when;
 use super::transcript::{self, Turn};
+use crate::harness::HarnessDef;
 use crate::memory::short_id;
 use crate::store::{SessionRow, Store, StoreResult, WorkspaceRow};
 use crate::usage::logs::Sources;
@@ -207,6 +208,23 @@ pub fn note_for(
         return Ok(None);
     }
     Ok(note(&gather(store, workspace, except, sources, now)?))
+}
+
+/// [`note_for`] an agent resuming or forking the conversation `resuming`, when its harness reads
+/// background context then ([`HarnessDef::resume_context`]): every other conversation here, as a
+/// new agent is told. `None` for one that keeps what it was told when it began.
+pub fn note_on_resume(
+    store: &Store,
+    workspace: &WorkspaceRow,
+    def: &HarnessDef,
+    resuming: &str,
+    sources: &Sources,
+    now: i64,
+) -> StoreResult<Option<Note>> {
+    if !def.resume_context || def.context_args.is_empty() {
+        return Ok(None);
+    }
+    note_for(store, workspace, Some(resuming), sources, now)
 }
 
 /// Whether to ask the user, before an agent starts in `workspace`, if the project should share
@@ -427,6 +445,31 @@ fn read_session(
             let mut turns = Vec::new();
             for id in ids {
                 turns.extend(transcript::read_opencode(db, id)?);
+            }
+            turns
+        }
+        "grok" => {
+            let Some(home) = sources.grok.as_deref() else {
+                return Err("Grok's home folder is not known".to_owned());
+            };
+            let Some(id) = session.harness_session_id.as_deref() else {
+                return Err(
+                    "Yardsort did not choose its id, so its transcript cannot be found".to_owned(),
+                );
+            };
+            let Some(dir) = super::grok::find_session_dir(home, id) else {
+                return Err("its session folder was not found".to_owned());
+            };
+            let mut turns = transcript::read_grok(&dir)
+                .map_err(|e| format!("its transcript could not be read: {e}"))?;
+            // A turn its own events do not time was copied by a fork, and is left to the fork rule;
+            // in a conversation of its own it is one Grok did not date.
+            if session.forked_from.is_none() {
+                for turn in &mut turns {
+                    if turn.at == 0 {
+                        turn.at = session.began_at;
+                    }
+                }
             }
             turns
         }
@@ -1006,9 +1049,27 @@ mod tests {
             "2026-10-26T09-22-00-000Z_44444444-4444-4444-8444-444444444444.jsonl",
             "omp/18.11.3/conversation.jsonl",
         );
+        // Grok's conversation and its fork, each a session folder of its own.
+        for (name, id) in [
+            ("conversation", "77777777-7777-4777-8777-777777777777"),
+            ("fork", "88888888-8888-4888-8888-888888888888"),
+        ] {
+            let folder = dir
+                .join("grok/sessions/%2Ftmp%2Fyardsort-fixture%2Frepo-grok")
+                .join(id);
+            std::fs::create_dir_all(&folder).unwrap();
+            for file in ["chat_history.jsonl", "events.jsonl"] {
+                std::fs::copy(
+                    fixtures().join("grok/1.0.70").join(name).join(file),
+                    folder.join(file),
+                )
+                .unwrap();
+            }
+        }
         Sources {
             cursor: Some(cursor),
             opencode: Some(opencode),
+            grok: Some(dir.join("grok")),
             pi: Some(dir.join("pi")),
             omp: Some(dir.join("omp")),
             ..Default::default()
@@ -1038,7 +1099,7 @@ mod tests {
         session(&store, &ws.id, "rec-claude", "claude", Some("claude-a"));
         session(&store, &ws.id, "rec-codex", "codex", None);
         session(&store, &ws.id, "rec-asking", "claude", Some("claude-b"));
-        session(&store, &ws.id, "rec-grok", "grok", None);
+        session(&store, &ws.id, "rec-mine", "my-agent", None);
         // The Codex record starts as the recorded session file did.
         let codex_start =
             transcript::codex_meta(&fixtures().join("codex/0.163.0/conversation.jsonl"))
@@ -1063,8 +1124,8 @@ mod tests {
             "found by where and when it began"
         );
         assert_eq!(
-            by("rec-grok").unreadable.as_deref(),
-            Some("Yardsort cannot read grok's conversations yet")
+            by("rec-mine").unreadable.as_deref(),
+            Some("Yardsort cannot read my-agent's conversations yet")
         );
         // Newest activity first: Codex was recorded after Claude.
         assert_eq!(ids[0], "rec-codex");
@@ -1075,9 +1136,9 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("> Nothing is left"), "{text}");
-        assert!(text.contains("Its conversation is not here: Yardsort cannot read grok's"));
+        assert!(text.contains("Its conversation is not here: Yardsort cannot read my-agent's"));
         assert!(
-            text.contains("## grok · conversation rec-grok · started"),
+            text.contains("## my-agent · conversation rec-mine · started"),
             "{text}"
         );
         assert!(!text.contains("\n\n\n"), "{text}");
@@ -1198,6 +1259,103 @@ mod tests {
     }
 
     #[test]
+    fn grok_is_read_by_the_id_yardsort_gave_it_and_its_fork_by_its_own_turns() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo-grok"));
+        let sources = more_sources(dir.path());
+        session(
+            &store,
+            &ws.id,
+            "rec-grok",
+            "grok",
+            Some("77777777-7777-4777-8777-777777777777"),
+        );
+        store
+            .add_session(&NewSession {
+                id: "rec-grok-fork",
+                workspace_id: &ws.id,
+                harness_id: "grok",
+                harness_session_id: Some("88888888-8888-4888-8888-888888888888"),
+                title: "fork",
+                forked_from: Some("rec-grok"),
+                pty_session_id: "pty-rec-grok-fork",
+                ..Default::default()
+            })
+            .unwrap();
+        let forked = crate::activity::iso_to_ms("2026-10-26T09:51:55.000Z").unwrap();
+        store.set_session_started("rec-grok-fork", forked);
+        session(
+            &store,
+            &ws.id,
+            "rec-gone",
+            "grok",
+            Some("99999999-0000-4000-8000-000000000000"),
+        );
+
+        let found = gather(&store, &ws, None, &sources, forked + 3_600_000).unwrap();
+        let by = |id: &str| found.iter().find(|c| c.id == id).unwrap();
+        assert_eq!(
+            by("rec-grok").turns.len(),
+            2,
+            "{:?}",
+            by("rec-grok").unreadable
+        );
+        let fork = by("rec-grok-fork");
+        assert_eq!(fork.turns.len(), 1, "{:?}", fork.unreadable);
+        assert_eq!(
+            fork.turns[0].user,
+            "In one sentence, say which file you created."
+        );
+        assert_eq!(
+            by("rec-gone").unreadable.as_deref(),
+            Some("its session folder was not found")
+        );
+    }
+
+    #[test]
+    fn a_resumed_agent_is_told_only_where_it_reads_background_context_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo-omp"));
+        store
+            .set_conversations_shared(&ws.project_id, true)
+            .unwrap();
+        let sources = more_sources(dir.path());
+        session(
+            &store,
+            &ws.id,
+            "rec-pi",
+            "pi",
+            Some("55555555-5555-4555-8555-555555555555"),
+        );
+        session(&store, &ws.id, "rec-omp", "omp", None);
+        let began = crate::activity::iso_to_ms("2026-10-26T09:21:59.500Z").unwrap();
+        store.set_session_started("rec-omp", began);
+        let now = began + 3_600_000;
+        let def = |id: &str| crate::harness::find(id, &[]).unwrap();
+
+        // Resuming OMP: told about pi's conversation, not its own.
+        let note = note_on_resume(&store, &ws, &def("omp"), "rec-omp", &sources, now)
+            .unwrap()
+            .unwrap();
+        assert_eq!(note.about, "pi's conversation");
+        // Claude Code keeps the system prompt it began with, so it is given nothing.
+        assert_eq!(
+            note_on_resume(&store, &ws, &def("claude"), "rec-omp", &sources, now).unwrap(),
+            None
+        );
+        // Nor is anyone, once the project stops sharing.
+        store
+            .set_conversations_shared(&ws.project_id, false)
+            .unwrap();
+        assert_eq!(
+            note_on_resume(&store, &ws, &def("omp"), "rec-omp", &sources, now).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn a_packet_says_what_was_said_only_where_the_project_shares_it() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::in_memory();
@@ -1226,7 +1384,7 @@ mod tests {
         store
             .set_conversations_shared(&ws.project_id, true)
             .unwrap();
-        session(&store, &ws.id, "rec-grok", "grok", None);
+        session(&store, &ws.id, "rec-mine", "my-agent", None);
         assert_eq!(packet_section(&store, &ws, &sources, T0).unwrap(), None);
     }
 

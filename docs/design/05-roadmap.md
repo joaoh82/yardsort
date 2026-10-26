@@ -904,7 +904,11 @@ says so, because the record is metadata. Slices 1–3 are built.
       [29 § slice 3](29-conversation-context.md#slice-3-what-shipped).
       OMP and pi followed once they were signed in: readers for both (one format, a tree of
       entries) and their `context_args`, checked live; both take a new note on resume.
-- [ ] A reader for Grok, once an account here can record a fixture.
+- [x] A reader for Grok, once an account here could record a fixture (1.0.70, 2026-10-26), and its
+      `--rules` template; and the note on resume for OMP and pi (`resume_context`, from
+      [open question 41](06-open-questions.md#conversation-context)). Grok keeps its rules across
+      a resume, so it is not given one. Recorded in
+      [29 § after slice 3](29-conversation-context.md#after-slice-3-grok-and-resume).
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
 beside it, and before its first answer Codex reads Claude's conversation and uses it; with the

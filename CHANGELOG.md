@@ -22,9 +22,10 @@ has the downloads and the full commit lists.
 - **Hand off… says what was said, and Cursor and OpenCode conversations can be read.** In a
   project that shares its agents' conversations, the handoff message has a _What was said_ part:
   your messages and each turn's final reply, read from the agents' own transcripts when you press
-  it, within about 4,000 tokens. `ys workspace context` and that part now read Cursor, OpenCode,
-  OMP and pi conversations too, beside Claude Code's and Codex's, and OMP and pi are told about
-  them as background context, as Claude Code and Codex are.
+  it, within about 4,000 tokens. `ys workspace context` and that part now read Grok, Cursor,
+  OpenCode, OMP and pi conversations too, beside Claude Code's and Codex's, and Grok, OMP and pi
+  are told about them as background context, as Claude Code and Codex are. A resumed OMP or pi
+  conversation is told again; Settings → Harnesses has a box for which agents get that.
 
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of

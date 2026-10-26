@@ -175,8 +175,8 @@ Some things to know:
   current then. Its tab says so: a line under the tabs for its first minute, _Told about claude's
   conversation_, and a **⇄** mark on the tab after; **Show** opens the note and what the command
   gives now.
-- **How the note travels** depends on the agent. Claude Code, Codex, OMP and pi take it as
-  background context — their system-prompt option, the **Context** args in
+- **How the note travels** depends on the agent. Claude Code, Codex, Grok, OMP and pi take it
+  as background context — their system-prompt option, the **Context** args in
   [Settings → Harnesses](settings.md#harnesses) — so an agent started from an agent button gets
   it without a first message and starts no turn. An agent without that option can only be told in
   a first message: its button asks first, **Start with the handoff…** (the composer, with that
@@ -185,14 +185,16 @@ Some things to know:
   words; the composer says so beside its pickers, with **Show** and a box to leave it out of that
   start. Workflow steps are told the same way.
 - **Alt-click** an agent button to start it without the note.
-- **Resuming does not tell it again.** Claude Code and Codex keep the system prompt a
-  conversation began with and ignore a new one on resume, so a resumed agent knows what it was
-  told when it began — and one that began alone is not told about conversations started since.
-  OMP and pi would take a new one, but are not given it either, for now. Ask it to run
-  `ys workspace context`.
-- **Claude Code, Codex, Cursor, OpenCode, OMP and pi** are read today. Grok's and a custom
-  agent's conversations are listed with why they are not there. Claude Code's and pi's are found
-  by the session id Yardsort gave them. The others are found by the id the agent reported when it
+- **Resuming tells OMP and pi again.** They build their system prompt at each launch, so a
+  resumed or forked OMP or pi conversation is given the note as a new one is, about every other
+  conversation here, and its tab says so. Claude Code, Codex and Grok keep the system prompt a
+  conversation began with and ignore a new one on resume, so they are not given it: a resumed one
+  knows what it was told when it began, and one that began alone is not told about conversations
+  started since. Ask it to run `ys workspace context`.
+- **Claude Code, Codex, Grok, Cursor, OpenCode, OMP and pi** — every built-in agent — are read
+  today. A custom agent's conversations are listed with why they are not there. Claude Code's,
+  Grok's and pi's are found by the session id Yardsort gave them; Grok's under `~/.grok/sessions`
+  (or `GROK_HOME`), timed by the turns in its own event log. The others are found by the id the agent reported when it
   [reports what it does](activity.md), and otherwise by the folder and the time the
   conversation first began; a resume does not change which one that is:
   - **Codex** — its session file under `~/.codex/sessions` (or `CODEX_HOME`).

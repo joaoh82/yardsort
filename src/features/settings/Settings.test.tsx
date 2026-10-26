@@ -56,6 +56,7 @@ const claude: HarnessInfo = {
   forkArgs: ["--resume", "{session_id}", "--fork-session"],
   writeArgs: ["--print", "{prompt}"],
   contextArgs: ["--append-system-prompt", "{context}"],
+  resumeContext: false,
   efforts: ["low", "high"],
   models: ["opus"],
   promptTransport: "argv",
@@ -229,6 +230,23 @@ describe("Settings", () => {
       expect(none).toBeDisabled();
       await user.type(screen.getByLabelText("Auto args"), "--approve-for-me");
       expect(none).toBeEnabled();
+    });
+
+    it("gives the context on resume only when asked, and only with context args", async () => {
+      core.harnessSave.mockResolvedValue([{ ...claude, modified: true }, codex]);
+      const { user } = await openSettings();
+      const resumed = screen.getByRole("checkbox", { name: /context args on resume and fork too/ });
+      expect(resumed).not.toBeChecked();
+      await user.click(resumed);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect(core.harnessSave.mock.calls[0]![0]).toMatchObject({ resumeContext: true });
+
+      // Without context args there is nothing to give.
+      await user.click(screen.getByRole("button", { name: /Codex/ }));
+      await user.clear(screen.getByLabelText("Context args"));
+      expect(
+        screen.getByRole("checkbox", { name: /context args on resume and fork too/ }),
+      ).toBeDisabled();
     });
 
     it("warns on the switch when an agent's auto mode approves everything not denied", async () => {

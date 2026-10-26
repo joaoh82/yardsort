@@ -296,7 +296,9 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     note through `ys` was set aside as the source because it is not deterministic. For a harness
     with no readable transcript — Cursor today, any custom harness — a note is better than
     nothing. Lean: only if a harness with no reader turns out to be used beside others often.
-41. **How does a resumed Claude conversation see a new note?** Claude Code 2.1.302 records its
+41. **How does a resumed Claude conversation see a new note?** _OMP and pi: built 2026-10-26_ —
+    they read a new note on resume, and `resume_context` gives it to them. Still open for Claude
+    Code. Claude Code 2.1.302 records its
     system prompt on the first request and resends it on every resume until a compaction, so a
     conversation that began alone keeps having no note. `--system-prompt-snapshot off` on that
     resume would work, at the cost of the cached system prompt. Lean: pass it only on a resume
@@ -305,8 +307,8 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     Codex 0.163.0 keeps its developer instructions across a resume too, with no such option
     found. For now a resume gets no note. _Slice 3, checked live:_ OMP 18.11.3 and pi 1.4.0 build
     their system prompt at each launch, so a resumed conversation does follow a new
-    `--append-system-prompt`; giving the note on resume for them alone would need a per-harness
-    switch, not added yet.
+    `--append-system-prompt`; the per-harness switch is `resume_context`, on for those two. Grok
+    1.0.70 keeps its `--rules` across a resume, as Claude Code and Codex do.
 42. ~~**What is the switch's default?**~~ **Settled 2026-10-25: off**, and asked once per project
     the first time an agent starts beside a conversation that has said something — built in
     slice 2.
