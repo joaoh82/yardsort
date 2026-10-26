@@ -81,6 +81,7 @@ pub fn gather(
 ) -> StoreResult<Vec<Conversation>> {
     let sessions = store.sessions(&workspace.id)?;
     let located = Located::find(store, workspace, &sessions, sources, now)?;
+    let prompted = store.prompted_sessions(&workspace.id)?;
     let mut out = Vec::new();
     for session in sessions {
         if Some(session.id.as_str()) == except {
@@ -89,7 +90,16 @@ pub fn gather(
         let read = read_session(&session, sources, &located);
         let (mut turns, unreadable) = match read {
             Ok(turns) => (turns, None),
-            Err(why) => (Vec::new(), Some(why)),
+            // An agent writes nothing down until it is asked something.
+            Err(Unread::Missing(why)) if !prompted.contains(&session.id) => (
+                Vec::new(),
+                Some(format!(
+                    "{why}, and it was started without a message, so most likely nothing has \
+                     been said in it yet"
+                )),
+            ),
+            Err(Unread::Missing(why)) => (Vec::new(), Some(why.to_owned())),
+            Err(Unread::Failed(why)) => (Vec::new(), Some(why)),
         };
         if let Some(first) = turns.first_mut() {
             first.user = own_words(&first.user);
@@ -364,11 +374,23 @@ fn locate<T>(
     Ok(found)
 }
 
+/// Why a conversation could not be read: nothing of it was found, or something went wrong.
+enum Unread {
+    Missing(&'static str),
+    Failed(String),
+}
+
+impl From<String> for Unread {
+    fn from(why: String) -> Self {
+        Self::Failed(why)
+    }
+}
+
 fn read_session(
     session: &SessionRow,
     sources: &Sources,
     located: &Located,
-) -> Result<Vec<Turn>, String> {
+) -> Result<Vec<Turn>, Unread> {
     let read = |path: &Path, reader: fn(std::io::BufReader<std::fs::File>) -> _| {
         std::fs::File::open(path)
             .map(std::io::BufReader::new)
@@ -387,29 +409,31 @@ fn read_session(
         "claude" => {
             let Some(id) = session.harness_session_id.as_deref() else {
                 return Err(
-                    "Yardsort did not choose its id, so its transcript cannot be found".to_owned(),
+                    "Yardsort did not choose its id, so its transcript cannot be found"
+                        .to_owned()
+                        .into(),
                 );
             };
             return match transcript::claude_file(&sources.claude, id) {
-                Some(path) => read(&path, transcript::read_claude),
-                None => Err("its transcript was not found".to_owned()),
+                Some(path) => Ok(read(&path, transcript::read_claude)?),
+                None => Err(Unread::Missing("its transcript was not found")),
             };
         }
         "codex" => {
             if sources.codex.is_none() {
-                return Err("Codex's home folder is not known".to_owned());
+                return Err("Codex's home folder is not known".to_owned().into());
             }
             let Some(files) = located.codex.get(&session.id) else {
-                return Err("its session file was not found".to_owned());
+                return Err(Unread::Missing("its session file was not found"));
             };
             read_all(files, transcript::read_codex)?
         }
         "cursor" => {
             if sources.cursor.is_none() {
-                return Err("the home folder is not known".to_owned());
+                return Err("the home folder is not known".to_owned().into());
             }
             let Some(files) = located.cursor.get(&session.id) else {
-                return Err("its transcript was not found".to_owned());
+                return Err(Unread::Missing("its transcript was not found"));
             };
             let mut turns = read_all(files, transcript::read_cursor)?;
             // Cursor's times are to the minute, and a message may have none.
@@ -422,10 +446,12 @@ fn read_session(
         }
         "opencode" => {
             let Some(db) = sources.opencode.as_deref() else {
-                return Err("OpenCode's data folder is not known".to_owned());
+                return Err("OpenCode's data folder is not known".to_owned().into());
             };
             let Some(ids) = located.opencode.get(&session.id) else {
-                return Err("its session was not found in OpenCode's database".to_owned());
+                return Err(Unread::Missing(
+                    "its session was not found in OpenCode's database",
+                ));
             };
             let mut turns = Vec::new();
             for id in ids {
@@ -435,15 +461,17 @@ fn read_session(
         }
         "grok" => {
             let Some(home) = sources.grok.as_deref() else {
-                return Err("Grok's home folder is not known".to_owned());
+                return Err("Grok's home folder is not known".to_owned().into());
             };
             let Some(id) = session.harness_session_id.as_deref() else {
                 return Err(
-                    "Yardsort did not choose its id, so its transcript cannot be found".to_owned(),
+                    "Yardsort did not choose its id, so its transcript cannot be found"
+                        .to_owned()
+                        .into(),
                 );
             };
             let Some(dir) = super::grok::find_session_dir(home, id) else {
-                return Err("its session folder was not found".to_owned());
+                return Err(Unread::Missing("its session folder was not found"));
             };
             let mut turns = transcript::read_grok(&dir)
                 .map_err(|e| format!("its transcript could not be read: {e}"))?;
@@ -460,28 +488,32 @@ fn read_session(
         }
         "pi" => {
             let Some(dir) = sources.pi.as_deref() else {
-                return Err("pi's agent folder is not known".to_owned());
+                return Err("pi's agent folder is not known".to_owned().into());
             };
             let Some(id) = session.harness_session_id.as_deref() else {
                 return Err(
-                    "Yardsort did not choose its id, so its transcript cannot be found".to_owned(),
+                    "Yardsort did not choose its id, so its transcript cannot be found"
+                        .to_owned()
+                        .into(),
                 );
             };
             match transcript::pi_file(dir, id) {
                 Some(path) => read(&path, transcript::read_pi)?,
-                None => return Err("its transcript was not found".to_owned()),
+                None => return Err(Unread::Missing("its transcript was not found")),
             }
         }
         "omp" => {
             if sources.omp.is_none() {
-                return Err("OMP's agent folder is not known".to_owned());
+                return Err("OMP's agent folder is not known".to_owned().into());
             }
             let Some(files) = located.omp.get(&session.id) else {
-                return Err("its session file was not found".to_owned());
+                return Err(Unread::Missing("its session file was not found"));
             };
             read_all(files, transcript::read_pi)?
         }
-        other => return Err(format!("Yardsort cannot read {other}'s conversations yet")),
+        other => {
+            return Err(format!("Yardsort cannot read {other}'s conversations yet").into());
+        }
     };
     turns.sort_by_key(|t| t.at);
     turns.dedup();
@@ -1180,7 +1212,10 @@ mod tests {
         );
         assert_eq!(
             by("rec-silent").unreadable.as_deref(),
-            Some("its session was not found in OpenCode's database")
+            Some(
+                "its session was not found in OpenCode's database, and it was started without a message, so most likely \
+                 nothing has been said in it yet"
+            )
         );
 
         // Another workspace has neither: Cursor's folder is this one's, and OpenCode's session
@@ -1192,7 +1227,10 @@ mod tests {
         let found = gather(&store, &elsewhere, None, &sources, began + 3_600_000).unwrap();
         assert_eq!(
             found[0].unreadable.as_deref(),
-            Some("its transcript was not found")
+            Some(
+                "its transcript was not found, and it was started without a message, so most \
+                 likely nothing has been said in it yet"
+            )
         );
     }
 
@@ -1294,7 +1332,10 @@ mod tests {
         );
         assert_eq!(
             by("rec-gone").unreadable.as_deref(),
-            Some("its session folder was not found")
+            Some(
+                "its session folder was not found, and it was started without a message, so most likely \
+                 nothing has been said in it yet"
+            )
         );
     }
 
@@ -1487,7 +1528,18 @@ mod tests {
             .unwrap()
             .started_at
             .unwrap();
-        session(&store, &ws.id, "rec-codex", "codex", None);
+        // Started with its task, so a file that is gone is only gone.
+        store
+            .add_session(&NewSession {
+                id: "rec-codex",
+                workspace_id: &ws.id,
+                harness_id: "codex",
+                title: "rec-codex",
+                pty_session_id: "pty-rec-codex",
+                prompt: Some("Create a file named notes.txt"),
+                ..Default::default()
+            })
+            .unwrap();
         store.set_session_started("rec-codex", began);
         // Opened again, as `codex resume --last` does, which writes on in the file it began.
         store

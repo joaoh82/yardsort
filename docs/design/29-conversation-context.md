@@ -612,3 +612,9 @@ tool output. Found on the way:
   record's id too now, and a refusal lists each choice with an id to name it by.
 - pi, on Kimi K2.6, was given the note and answered a question about the folder without running
   the command; the others ran it first. The note asks; it cannot make a model do it.
+- A Claude Code and a Grok conversation opened and closed without a message were listed as ones
+  whose transcript or session folder was not found, and Claude, reading that, wondered aloud
+  whether one of them was its own. Neither writes anything until it is asked something, so a
+  conversation started without a first message and not found now says that most likely nothing
+  has been said in it yet. One that began with a message and is not found keeps the plain reason:
+  that one has been lost.

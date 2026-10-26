@@ -192,7 +192,10 @@ Some things to know:
   what it was told when it began, and one that began alone is not told about conversations
   started since. Ask it to run `ys workspace context`.
 - **Claude Code, Codex, Grok, Cursor, OpenCode, OMP and pi** — every built-in agent — are read
-  today. A custom agent's conversations are listed with why they are not there. Claude Code's,
+  today. A custom agent's conversations are listed with why they are not there, and so is one
+  whose transcript is not found. Agents write nothing down until they are asked something, so
+  one started without a message and not found is said to be one that most likely has nothing
+  said in it yet. Claude Code's,
   Grok's and pi's are found by the session id Yardsort gave them; Grok's under `~/.grok/sessions`
   (or `GROK_HOME`), timed by the turns in its own event log. The others are found by the id the agent reported when it
   [reports what it does](activity.md), and otherwise by the folder and the time the

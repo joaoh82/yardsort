@@ -5,6 +5,24 @@
 //! app and does not need it running — an agent started here belongs to the daemon, so it keeps
 //! working after `ys` exits and appears in the app the next time it looks.
 
+/// `print!` for an answer: a reader that stops reading, as `| head` does, ends `ys` quietly
+/// where `print!` would panic.
+macro_rules! say {
+    ($($arg:tt)*) => {
+        $crate::say(format_args!($($arg)*))
+    };
+}
+
+/// `println!` for an answer, the same way.
+macro_rules! sayln {
+    () => {
+        $crate::say(format_args!("\n"))
+    };
+    ($($arg:tt)*) => {
+        $crate::say(format_args!("{}\n", format_args!($($arg)*)))
+    };
+}
+
 mod commands;
 mod target;
 mod yardsort;
@@ -149,6 +167,19 @@ fn main() {
     }
 }
 
+/// Write to standard output. A closed pipe is the reader having seen enough, not a failure.
+pub fn say(text: std::fmt::Arguments) {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    if let Err(e) = stdout.write_fmt(text) {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("cannot write the answer: {e}");
+        std::process::exit(1);
+    }
+}
+
 /// How to print. Every command supports both shapes: a table for a person, JSON for a script.
 pub struct Output {
     pub json: bool,
@@ -164,7 +195,7 @@ impl Output {
         if self.json {
             let text = serde_json::to_string_pretty(value)
                 .map_err(|e| Failure::new(format!("cannot render JSON: {e}")))?;
-            println!("{text}");
+            sayln!("{text}");
         } else {
             plain();
         }
@@ -174,7 +205,7 @@ impl Output {
     /// A message for a person, skipped entirely when the output is JSON.
     pub fn note(&self, message: impl std::fmt::Display) {
         if !self.json {
-            println!("{message}");
+            sayln!("{message}");
         }
     }
 }
@@ -201,6 +232,6 @@ pub fn table(rows: &[Vec<String>]) {
                 line.extend(std::iter::repeat_n(' ', pad));
             }
         }
-        println!("{}", line.trim_end());
+        sayln!("{}", line.trim_end());
     }
 }

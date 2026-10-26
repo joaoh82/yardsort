@@ -163,7 +163,7 @@ pub fn run(data_dir: Option<PathBuf>, out: &Output) -> Result<(), Failure> {
         let _ = yes_no;
         table(&rows);
         if !report.database_found {
-            println!("\nNo database there. Open Yardsort once to create one, or pass --data-dir.");
+            sayln!("\nNo database there. Open Yardsort once to create one, or pass --data-dir.");
         }
     })
 }

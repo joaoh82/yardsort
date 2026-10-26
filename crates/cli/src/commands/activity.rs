@@ -117,7 +117,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 .collect();
             out.emit(&events, || {
                 if events.is_empty() {
-                    println!("No activity recorded.");
+                    sayln!("No activity recorded.");
                     return;
                 }
                 let mut lines = vec![vec![
@@ -145,7 +145,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 let workspace = name_of(&row.workspace_id);
                 let line = serde_json::to_string(&Event::from_row(row, &workspace))
                     .map_err(|e| Failure::new(format!("cannot render JSON: {e}")))?;
-                println!("{line}");
+                sayln!("{line}");
             }
             Ok(())
         }

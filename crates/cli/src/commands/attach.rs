@@ -82,7 +82,7 @@ pub fn run(
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(target.pty.clone());
     let session = SessionId(target.pty.clone());
 
-    println!(
+    sayln!(
         "Attaching to {} — Ctrl-] detaches, and leaves it running.",
         target.label
     );
@@ -120,14 +120,14 @@ pub fn run(
     let _ = client.detach(&session, attachment);
 
     match reason {
-        Ended::Detached => println!("\nDetached. {} is still running.", target.label),
+        Ended::Detached => sayln!("\nDetached. {} is still running.", target.label),
         Ended::Exited => {
             // Somebody heard it end, so the record and the run can say so now rather than wait
             // for the app, or for the next drain of the daemon's spool.
             if let Ok(info) = client.info(&session) {
                 yardsort_core::launch::settle_record(&ys.store, &*client, &info);
             }
-            println!("\n{} exited.", target.label);
+            sayln!("\n{} exited.", target.label);
         }
         Ended::Input(error) => return Err(Failure::new(format!("stopped reading input: {error}"))),
     }
