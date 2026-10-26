@@ -421,8 +421,8 @@ Needs a project with a few worktree workspaces; the GitHub CLI for the pull-requ
 |     | The composer, with Claude picked: _too few to say yet_ until Claude has five attempts with an outcome, then _kept N of M_. Pick an agent with no attempts: no line.                                                                                                                                                                                  |
 |     | In a project on GitHub, start a workspace, open a pull request from it, merge it (squash) and delete the workspace an hour or more later, without opening Outcomes in between. Dismiss _How did it go?_. Refocus the window, then open **Outcomes…**: the attempt is _kept_, _merged, not labelled_, with its pull request beside it.                |
 |     | With the switch on, **Hand off…** in that workspace: the composer's message has a _What was said_ part between _What the agents did here_ and _Project memory_, with Claude's turns, and _What is not here_ no longer says the conversations are missing. Turn the switch off: the part is gone. `ys workspace handoff <workspace>` prints the same. |
-|     | Start Cursor and OpenCode in the workspace and give each a message. **Show** on a new agent's line, or `ys workspace context`: both conversations are there with their messages, and none of the tools they ran.                                                                                                                                     |
-|     | **macOS / Windows:** the first two rows, and the Cursor and OpenCode row.                                                                                                                                                                                                                                                                            |
+|     | Start Cursor, OpenCode, OMP and pi in the workspace and give each a message; OMP and pi start from the tab bar without the question, told as background context. **Show** on a new agent's line, or `ys workspace context`: every conversation is there with its messages, and none of the tools they ran.                                           |
+|     | **macOS / Windows:** the first two rows, and the row with the other four agents.                                                                                                                                                                                                                                                                     |
 
 ## 22 · Workflow runs
 
@@ -567,7 +567,7 @@ already added as a project, and a location used by an earlier clone or new proje
 
 ## 26 · Conversation context
 
-Needs Claude Code and Codex signed in (Cursor and OpenCode for one row), a project with **Share conversations between this
+Needs Claude Code and Codex signed in (Cursor, OpenCode, OMP and pi for one row), a project with **Share conversations between this
 project's agents** never answered, and a worktree workspace in it.
 
 | ✓   | Check                                                                                                                                                                                                                                                                                                                                                                                                                         |

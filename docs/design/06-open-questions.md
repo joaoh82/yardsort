@@ -303,7 +303,10 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     whose conversation began without the note and now has company; measure the cost first.
     _Slice 2, checked live:_ snapshot off does let a resumed Claude conversation see a new note;
     Codex 0.163.0 keeps its developer instructions across a resume too, with no such option
-    found. For now a resume gets no note.
+    found. For now a resume gets no note. _Slice 3, checked live:_ OMP 18.11.3 and pi 1.4.0 build
+    their system prompt at each launch, so a resumed conversation does follow a new
+    `--append-system-prompt`; giving the note on resume for them alone would need a per-harness
+    switch, not added yet.
 42. ~~**What is the switch's default?**~~ **Settled 2026-10-25: off**, and asked once per project
     the first time an agent starts beside a conversation that has said something — built in
     slice 2.

@@ -1,11 +1,11 @@
 # 29 — Conversation context between a workspace's agents
 
 _Proposal, 2026-10-25. Decisions from the design pass on 2026-10-24 and 2026-10-25 are recorded.
-Slices 1–3 are built — the digest for Claude Code, Codex, Cursor and OpenCode,
+Slices 1–3 are built — the digest for Claude Code, Codex, Cursor, OpenCode, OMP and pi,
 `ys workspace context`, the switch, telling every new agent, and *What was said* in the handoff
 packet — and [§ slice 1](#slice-1-what-shipped), [§ slice 2](#slice-2-what-shipped) and
-[§ slice 3](#slice-3-what-shipped) say where they differ from the proposal below. Readers for
-Grok, OMP and Pi wait for a fixture._
+[§ slice 3](#slice-3-what-shipped) say where they differ from the proposal below. Grok's reader
+waits for a fixture._
 
 A workspace can hold several conversations: Claude in one tab, Codex or Cursor in the next. They
 share the worktree, so the second agent sees the same files and the same diff — and nothing of
@@ -164,15 +164,15 @@ omitted, unreadable }] }` for scripts and for the composer.
 Each needs a small reader in the core, beside its adapter. Versions are the ones installed here
 on 2026-10-25.
 
-| Harness               | Where                                                                        | How Yardsort finds it                                                                                                                                                               | State                                                                                        |
-| --------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Claude Code 2.1.302   | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session id>.jsonl` | The session id is assigned by Yardsort; find the file by id under any `projects/` dir.                                                                                              | Format known: `activity::context` reads it for usage today. First reader.                    |
-| Codex 0.163.0         | `<CODEX_HOME>/sessions/<y>/<m>/<d>/rollout-*-<thread>[_<fork>].jsonl`        | `activity::codex::find_rollout` by the `threadId` on the run's events — present only with Codex capture on; otherwise the newest rollout whose `session_meta.cwd` is the workspace. | `UserMessage` and `AgentMessage` items already parsed for metadata. First reader.            |
-| Grok 1.0.50           | `$GROK_HOME/sessions/<encoded cwd>/<id>/chat_history.jsonl`                  | `activity::grok::find_session_dir` by session id.                                                                                                                                   | The file is listed in [14](14-agent-events-stage-2-grok.md) but never read; needs a fixture. |
-| Cursor 2026.10.16     | `~/.cursor/projects/<cwd as dashes>/agent-transcripts/<chat>/<chat>.jsonl`   | The chat id its hooks report as `sessionId`, with capture on; otherwise by folder and first message's time.                                                                         | Read in slice 3, with a fixture.                                                             |
-| OpenCode 2.0.32       | Its SQLite database, `opencode/opencode.db` under the XDG data folder        | The session id the plugin reports, with capture on; otherwise by `session_v2.directory` and start.                                                                                  | Read in slice 3, with a fixture: the database, not the plugin.                               |
-| OMP 18.11.3, Pi 1.4.0 | Their session files                                                          | Pi's id is assigned; OMP's is latest-in-cwd.                                                                                                                                        | Needs fixtures.                                                                              |
-| A custom harness      | —                                                                            | —                                                                                                                                                                                   | No reader. Listed as unreadable, with its turn count when it reports events.                 |
+| Harness               | Where                                                                                    | How Yardsort finds it                                                                                                                                                               | State                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Claude Code 2.1.302   | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session id>.jsonl`             | The session id is assigned by Yardsort; find the file by id under any `projects/` dir.                                                                                              | Format known: `activity::context` reads it for usage today. First reader.                    |
+| Codex 0.163.0         | `<CODEX_HOME>/sessions/<y>/<m>/<d>/rollout-*-<thread>[_<fork>].jsonl`                    | `activity::codex::find_rollout` by the `threadId` on the run's events — present only with Codex capture on; otherwise the newest rollout whose `session_meta.cwd` is the workspace. | `UserMessage` and `AgentMessage` items already parsed for metadata. First reader.            |
+| Grok 1.0.50           | `$GROK_HOME/sessions/<encoded cwd>/<id>/chat_history.jsonl`                              | `activity::grok::find_session_dir` by session id.                                                                                                                                   | The file is listed in [14](14-agent-events-stage-2-grok.md) but never read; needs a fixture. |
+| Cursor 2026.10.16     | `~/.cursor/projects/<cwd as dashes>/agent-transcripts/<chat>/<chat>.jsonl`               | The chat id its hooks report as `sessionId`, with capture on; otherwise by folder and first message's time.                                                                         | Read in slice 3, with a fixture.                                                             |
+| OpenCode 2.0.32       | Its SQLite database, `opencode/opencode.db` under the XDG data folder                    | The session id the plugin reports, with capture on; otherwise by `session_v2.directory` and start.                                                                                  | Read in slice 3, with a fixture: the database, not the plugin.                               |
+| OMP 18.11.3, Pi 1.4.0 | `<PI_CODING_AGENT_DIR or ~/.omp/agent, ~/.pi/agent>/sessions/<folder>/<time>_<id>.jsonl` | Pi's id is assigned; OMP's is the `sessionId` its extension reports, otherwise by the name's time and the `session` line's folder.                                                  | Read in slice 3, with fixtures: one format, a tree.                                          |
+| A custom harness      | —                                                                                        | —                                                                                                                                                                                   | No reader. Listed as unreadable, with its turn count when it reports events.                 |
 
 Transcript formats change between versions, as hook payloads do. Each reader is tested against
 a recorded fixture under `crates/core/fixtures/<harness>/<version>/`, and a format it does not
@@ -486,13 +486,28 @@ Built on 2026-10-26.
   recorded; an interactive session goes through the same server.
 - **Finding a conversation** is now one function for the three agents whose ids Yardsort does not
   choose: an id the conversation reported names its own — Codex's `threadId`, the `sessionId`
-  Cursor's hooks and OpenCode's plugin give (`Store::reported_ids`) — and the others are matched
+  Cursor's hooks and OpenCode's and OMP's extensions give (`Store::reported_ids`) — and the others are matched
   by folder and time, each transcript to one conversation, closest first. Cursor's slack is two
   minutes, for its minute-long times.
-- **Grok, OMP and Pi** still read as _Yardsort cannot read …'s conversations yet_: none of the
-  three could be signed in on this machine to record a fixture (the one Grok session here is a
-  month old, from 1.0.41, and five lines long), and a reader without one is a guess.
+- **OMP 18.11.3 and pi 1.4.0**, recorded once the user signed both in, the same afternoon: one
+  format, `sessions/<folder>/<time>_<session id>.jsonl` under the agent folder, read by one reader.
+  The file is a **tree** — every entry has an `id` and `parentId`, and going back to an earlier
+  point leaves the old branch in the file — so the conversation read is the branch ending at the
+  last entry. pi records the **whole system prompt** as a `system` message, the user's own skills
+  and their paths among it, and both keep the provider's own payload and the reasoning: the
+  script strips all three from the fixtures. A pi fork is a new file with a copy of the branch at
+  the original times, which the fork rule already handles. pi is found by the id Yardsort gives
+  it; OMP by the `sessionId` its extension reports, or by the time in the file's name and the
+  folder its `session` line names. `PI_CODING_AGENT_DIR`, which both read, is honoured.
+- **Their `context_args`, checked live** with the note's own wording, a quote and a newline: OMP
+  `--append-system-prompt={context}`, pi `--append-system-prompt {context}`. Unlike Claude Code
+  and Codex, **both take a new system prompt on resume** — each launch builds it afresh — so a
+  resume could tell them; that needs a per-harness switch and is left with
+  [open question 41](06-open-questions.md#conversation-context).
+- **Grok** still reads as _Yardsort cannot read grok's conversations yet_: it could not be signed
+  in on this machine to record a fixture (the one Grok session here is a month old, from 1.0.41,
+  and five lines long), and a reader without one is a guess.
 
 Owed: the live check in [08 § 26](08-manual-checklist.md#26--conversation-context) for the packet
-and for Cursor and OpenCode beside Claude, and both readers on macOS and Windows — OpenCode's data
+and for Cursor, OpenCode, OMP and pi beside Claude, and the readers on macOS and Windows — OpenCode's data
 folder there is assumed, from its use of XDG folders everywhere, not checked.

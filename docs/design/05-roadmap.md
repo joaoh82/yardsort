@@ -898,11 +898,13 @@ says so, because the record is metadata. Slices 1–3 are built.
       note on resume is ignored and none is given; Grok, OMP and Pi could not be checked live and
       ship without `context_args`. Recorded in
       [29 § slice 2](29-conversation-context.md#slice-2-what-shipped).
-- [x] Slice 3: _What was said_ in the packet, and readers for Cursor and OpenCode. Found:
+- [x] Slice 3: _What was said_ in the packet, and readers for Cursor, OpenCode, OMP and pi. Found:
       Cursor writes no tool output to its transcript and only minute-long times; OpenCode 2 keeps
       conversations in a SQLite database, and a subagent's session reports its own id. Recorded in
       [29 § slice 3](29-conversation-context.md#slice-3-what-shipped).
-- [ ] Readers for Grok, OMP and Pi, once an account here can record a fixture.
+      OMP and pi followed once they were signed in: readers for both (one format, a tree of
+      entries) and their `context_args`, checked live; both take a new note on resume.
+- [ ] A reader for Grok, once an account here can record a fixture.
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
 beside it, and before its first answer Codex reads Claude's conversation and uses it; with the

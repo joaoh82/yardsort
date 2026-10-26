@@ -10,8 +10,10 @@
 #   under a throwaway `CODEX_HOME` with the real one's `auth.json` symlinked in, as
 #   scripts/record-codex.sh does; Claude Code writes under your own config directory, as
 #   scripts/record-claude-hooks.sh does.
-# - Cursor and OpenCode: the file is there already and the first turn only reads it, so neither
-#   is given leave to change anything. Cursor runs with `--trust` for the throwaway repository
+# - Cursor, OpenCode, OMP and pi: the file is there already and the first turn only reads it, so
+#   none is given leave to change anything. OMP and pi write under your own `~/.omp/agent` and
+#   `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) with your default model; pi, whose session ids
+#   Yardsort chooses, gets a fork as well. Cursor runs with `--trust` for the throwaway repository
 #   and writes under your own `~/.cursor`, in TZ=UTC so the time it puts in each message is UTC.
 #   OpenCode runs a free model (`OPENCODE_MODEL`, default opencode/glm-5.3-flash-free) under a
 #   throwaway `XDG_DATA_HOME`, so its database holds this conversation alone; the fixture is that
@@ -24,16 +26,18 @@
 #   crates/core/fixtures/codex/<version>/conversation.jsonl
 #   crates/core/fixtures/cursor/<version>/conversation.jsonl
 #   crates/core/fixtures/opencode/<version>/conversation.sql
+#   crates/core/fixtures/omp/<version>/conversation.jsonl
+#   crates/core/fixtures/pi/<version>/conversation.jsonl  (and fork.jsonl)
 #
 # Spends a few hundred tokens on each account (OpenCode's free model, none). Re-run it when a new
 # version changes a shape; the readers' tests read these files.
 #
-# Usage: scripts/record-conversations.sh [claude|codex|cursor|opencode]...   (default: all four)
+# Usage: scripts/record-conversations.sh [claude|codex|cursor|opencode|omp|pi]...   (default: all)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 which=("$@")
-[ ${#which[@]} -eq 0 ] && which=(claude codex cursor opencode)
+[ ${#which[@]} -eq 0 ] && which=(claude codex cursor opencode omp pi)
 work="$(mktemp -d -t yardsort-conversation.XXXXXX)"
 mkdir -p "$work/repo"
 git -C "$work/repo" init -q
@@ -216,6 +220,91 @@ record_opencode() {
     echo "($model). opencode run reads notes.txt, then -s adds a second turn to the same session,"
     echo "ses_fixture0000000000000001. The session_v2 and session_message tables only; paths and ids redacted."
     echo "opencode run keeps the message it was given in quotes, which the fixture keeps."
+  } >"$out/README-conversation.txt"
+}
+
+# A pi-family session file without what is the model's rather than the conversation's: what the
+# provider sent back besides the text, the reasoning, and the system prompt pi records — which
+# names your own skills and where they are.
+strip_provider() { # <file>
+  python3 -I -c '
+import json, sys
+for line in open(sys.argv[1]):
+    entry = json.loads(line)
+    message = entry.get("message")
+    if isinstance(message, dict):
+        for key in ("providerPayload", "responseId"):
+            if key in message:
+                message[key] = "<stripped>"
+        if message.get("role") == "system" and "sections" in message:
+            message["sections"] = "<stripped>"
+        for block in message.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "thinking":
+                for key in ("thinking", "thinkingSignature"):
+                    if key in block:
+                        block[key] = "<stripped>"
+    print(json.dumps(entry, ensure_ascii=False, separators=(",", ":")))
+' "$1"
+}
+
+record_omp() {
+  local version out repo session file
+  version="$(omp --version </dev/null | sed 's#^omp/##')"
+  out="$root/crates/core/fixtures/omp/$version"
+  repo="$work/repo-omp"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  echo "$note" >"$repo/notes.txt"
+  echo "recording OMP $version into $out"
+  (cd "$repo" && omp --print "$read_first" </dev/null) >>"$work/omp.out" 2>>"$work/omp.err" ||
+    echo "omp exited $? (see $work/omp.err)"
+  (cd "$repo" && omp --print --continue "$second" </dev/null) >>"$work/omp.out" 2>>"$work/omp.err" ||
+    echo "omp exited $? (see $work/omp.err)"
+  file="$(grep -l "\"cwd\":\"$repo\"" "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"/sessions/*/*.jsonl | head -1)"
+  session="$(basename "$file" .jsonl | sed 's/^[^_]*_//')"
+  mkdir -p "$out"
+  strip_provider "$file" >"$work/omp.jsonl"
+  redact "$work/omp.jsonl" "$out/conversation.jsonl" "$session" 44444444-4444-4444-8444-444444444444
+  {
+    echo "conversation.jsonl: OMP $version, recorded $(date -u +%Y-%m-%d) with scripts/record-conversations.sh"
+    echo "(your default model). omp --print reads notes.txt, then --continue adds a second turn to the same"
+    echo "session, 4444…. The provider's payloads are stripped; paths and ids are redacted."
+  } >"$out/README-conversation.txt"
+}
+
+record_pi() {
+  local version out repo session fork file name id
+  version="$(pi --version </dev/null)"
+  out="$root/crates/core/fixtures/pi/$version"
+  repo="$work/repo-pi"
+  session="$(uuidgen | tr 'A-Z' 'a-z')"
+  fork="$(uuidgen | tr 'A-Z' 'a-z')"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  echo "$note" >"$repo/notes.txt"
+  echo "recording pi $version into $out (session $session)"
+  run() {
+    (cd "$repo" && pi --print "$@" </dev/null) >>"$work/pi.out" 2>>"$work/pi.err" ||
+      echo "pi exited $? (see $work/pi.err)"
+  }
+  run --session-id "$session" "$read_first"
+  run --session "$session" "$second"
+  run --fork "$session" --session-id "$fork" "$forked"
+  mkdir -p "$out"
+  for name in conversation fork; do
+    id="$session"
+    [ "$name" = fork ] && id="$fork"
+    file="$(find "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions" -name "*_$id.jsonl" | head -1)"
+    strip_provider "$file" >"$work/pi-$name.jsonl"
+    # The fork names the file it came from, in pi's folder for the repository.
+    redact "$work/pi-$name.jsonl" "$out/$name.jsonl" \
+      "$(basename "$(dirname "$file")")" --tmp-yardsort-fixture-repo-pi-- \
+      "$session" 55555555-5555-4555-8555-555555555555 "$fork" 66666666-6666-4666-8666-666666666666
+  done
+  {
+    echo "conversation.jsonl, fork.jsonl: pi $version, recorded $(date -u +%Y-%m-%d) with scripts/record-conversations.sh"
+    echo "(your default model). Session 5555…: pi --print reads notes.txt, then --session adds a second turn;"
+    echo "6666… is --fork of it, one more turn. The provider's payloads are stripped; paths and ids redacted."
   } >"$out/README-conversation.txt"
 }
 

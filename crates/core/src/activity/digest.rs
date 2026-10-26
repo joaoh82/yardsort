@@ -238,6 +238,8 @@ struct Located {
     cursor: HashMap<String, Vec<PathBuf>>,
     /// OpenCode session ids, by record id.
     opencode: HashMap<String, Vec<String>>,
+    /// OMP session files, by record id.
+    omp: HashMap<String, Vec<PathBuf>>,
 }
 
 impl Located {
@@ -288,6 +290,20 @@ impl Located {
                     transcript::opencode_sessions_in(db, cwd, from, to)
                         .into_iter()
                         .map(|session| (session.id.clone(), session.started_at, session.id))
+                        .collect()
+                },
+            )?;
+        }
+        if let Some(dir) = sources.omp.as_deref() {
+            located.omp = locate(
+                store,
+                sessions,
+                ("omp", "sessionId", SLACK_MS, now),
+                |session| transcript::pi_file(dir, session),
+                |from, to| {
+                    transcript::pi_files_in(dir, cwd, from, to)
+                        .into_iter()
+                        .map(|file| (file.session, file.started_at, file.path))
                         .collect()
                 },
             )?;
@@ -413,6 +429,29 @@ fn read_session(
                 turns.extend(transcript::read_opencode(db, id)?);
             }
             turns
+        }
+        "pi" => {
+            let Some(dir) = sources.pi.as_deref() else {
+                return Err("pi's agent folder is not known".to_owned());
+            };
+            let Some(id) = session.harness_session_id.as_deref() else {
+                return Err(
+                    "Yardsort did not choose its id, so its transcript cannot be found".to_owned(),
+                );
+            };
+            match transcript::pi_file(dir, id) {
+                Some(path) => read(&path, transcript::read_pi)?,
+                None => return Err("its transcript was not found".to_owned()),
+            }
+        }
+        "omp" => {
+            if sources.omp.is_none() {
+                return Err("OMP's agent folder is not known".to_owned());
+            }
+            let Some(files) = located.omp.get(&session.id) else {
+                return Err("its session file was not found".to_owned());
+            };
+            read_all(files, transcript::read_pi)?
         }
         other => return Err(format!("Yardsort cannot read {other}'s conversations yet")),
     };
@@ -943,9 +982,35 @@ mod tests {
             &std::fs::read_to_string(fixtures().join("opencode/2.0.32/conversation.sql")).unwrap(),
         )
         .unwrap();
+        // pi's conversation and its fork, OMP's conversation, each in the folder it was in.
+        let copy = |agent: &str, folder: &str, name: &str, from: &str| {
+            let folder = dir.join(agent).join("sessions").join(folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::copy(fixtures().join(from), folder.join(name)).unwrap();
+        };
+        copy(
+            "pi",
+            "--tmp-yardsort-fixture-repo-pi--",
+            "2026-10-26T09-24-09-360Z_55555555-5555-4555-8555-555555555555.jsonl",
+            "pi/1.4.0/conversation.jsonl",
+        );
+        copy(
+            "pi",
+            "--tmp-yardsort-fixture-repo-pi--",
+            "2026-10-26T09-24-14-000Z_66666666-6666-4666-8666-666666666666.jsonl",
+            "pi/1.4.0/fork.jsonl",
+        );
+        copy(
+            "omp",
+            "-tmp-yardsort-fixture-repo-omp",
+            "2026-10-26T09-22-00-000Z_44444444-4444-4444-8444-444444444444.jsonl",
+            "omp/18.11.3/conversation.jsonl",
+        );
         Sources {
             cursor: Some(cursor),
             opencode: Some(opencode),
+            pi: Some(dir.join("pi")),
+            omp: Some(dir.join("omp")),
             ..Default::default()
         }
     }
@@ -1083,6 +1148,53 @@ mod tests {
             found[0].unreadable.as_deref(),
             Some("its transcript was not found")
         );
+    }
+
+    #[test]
+    fn pi_is_read_by_the_id_yardsort_gave_it_and_omp_by_folder_and_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo-omp"));
+        let sources = more_sources(dir.path());
+        session(
+            &store,
+            &ws.id,
+            "rec-pi",
+            "pi",
+            Some("55555555-5555-4555-8555-555555555555"),
+        );
+        store
+            .add_session(&NewSession {
+                id: "rec-pi-fork",
+                workspace_id: &ws.id,
+                harness_id: "pi",
+                harness_session_id: Some("66666666-6666-4666-8666-666666666666"),
+                title: "fork",
+                forked_from: Some("rec-pi"),
+                pty_session_id: "pty-rec-pi-fork",
+                ..Default::default()
+            })
+            .unwrap();
+        // The fork began after its parent's turns, whose copies keep their own times.
+        let forked = crate::activity::iso_to_ms("2026-10-26T09:24:14.000Z").unwrap();
+        store.set_session_started("rec-pi-fork", forked);
+        // OMP's session file began in this folder at 09:22 UTC: the name says when.
+        session(&store, &ws.id, "rec-omp", "omp", None);
+        let began = crate::activity::iso_to_ms("2026-10-26T09:21:59.500Z").unwrap();
+        store.set_session_started("rec-omp", began);
+
+        let found = gather(&store, &ws, None, &sources, began + 3_600_000).unwrap();
+        let by = |id: &str| found.iter().find(|c| c.id == id).unwrap();
+        assert_eq!(by("rec-pi").turns.len(), 2, "{:?}", by("rec-pi").unreadable);
+        let fork = by("rec-pi-fork");
+        assert_eq!(fork.turns.len(), 1, "{:?}", fork.unreadable);
+        assert_eq!(
+            fork.turns[0].user,
+            "In one sentence, say which file you created."
+        );
+        let omp = by("rec-omp");
+        assert_eq!(omp.turns.len(), 2, "{:?}", omp.unreadable);
+        assert!(omp.turns[1].reply().unwrap().contains("TZ=UTC"));
     }
 
     #[test]

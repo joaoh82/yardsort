@@ -24,6 +24,13 @@
 //!   conversation is a `session_v2` row, its messages `session_message` rows in `seq` order: a
 //!   `user` one's `data` has the `text`, an `assistant` one's has `content` parts — `text`,
 //!   `reasoning`, `tool`. A subagent's conversation is a session with a parent.
+//! - **pi and OMP**, one format: `sessions/<folder>/<time>_<session id>.jsonl` under the agent
+//!   folder (`~/.pi/agent`, `~/.omp/agent`, or `PI_CODING_AGENT_DIR`), the folder named after the
+//!   working directory, which the `session` line holds too. The file is a tree: every entry has
+//!   an `id` and a `parentId`, and the conversation is the branch that ends at the last entry; a
+//!   branch left behind stays in the file. A `message` entry's `role` is `user`, `assistant`
+//!   (`text`, `thinking` and `toolCall` blocks), `toolResult` or — pi — `system`. A fork is a new
+//!   file holding a copy of the branch it came from, with the original times.
 //!
 //! The files can be large — a long conversation is hundreds of megabytes, nearly all of it tool
 //! output — so they are read line by line, and a line that cannot hold anything wanted is skipped
@@ -737,9 +744,205 @@ pub fn read_opencode(db: &Path, session: &str) -> Result<Vec<Turn>, String> {
     Ok(turns)
 }
 
+/// A pi-family session file's name: `2026-10-26T09-24-09-360Z_<session id>.jsonl`, giving when it
+/// began and its id.
+fn pi_name(name: &str) -> Option<(i64, &str)> {
+    let (time, id) = name.strip_suffix(".jsonl")?.split_once('_')?;
+    let (date, clock) = time.split_once('T')?;
+    let clock = clock.strip_suffix('Z')?;
+    let mut parts = clock.splitn(4, '-');
+    let (h, m, sec, ms) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    let at = iso_to_ms(&format!("{date}T{h}:{m}:{sec}.{ms}Z"))?;
+    Some((at, id))
+}
+
+/// The session files in every folder under a pi-family `sessions` folder.
+fn pi_session_files(sessions: &Path) -> Vec<PathBuf> {
+    let Ok(folders) = std::fs::read_dir(sessions) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = folders
+        .flatten()
+        .filter_map(|folder| std::fs::read_dir(folder.path()).ok())
+        .flat_map(|entries| entries.flatten().map(|entry| entry.path()))
+        .collect();
+    files.sort();
+    files
+}
+
+/// A pi or OMP conversation by its session id, in whichever folder: one Yardsort chose (pi) or
+/// one the agent reported (OMP).
+pub fn pi_file(agent_dir: &Path, session: &str) -> Option<PathBuf> {
+    if !plain_id(session) {
+        return None;
+    }
+    pi_session_files(&agent_dir.join("sessions"))
+        .into_iter()
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(pi_name)
+                .is_some_and(|(_, id)| id == session)
+        })
+}
+
+/// A pi-family session file, by its name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiFile {
+    pub session: String,
+    /// Epoch milliseconds.
+    pub started_at: i64,
+    pub path: PathBuf,
+}
+
+/// The pi or OMP conversations begun in `cwd` between `from` and `to` (epoch milliseconds),
+/// earliest first: for a conversation whose session id was never reported. The name gives the
+/// time, so only the files begun in the window are opened, for the folder their `session` line
+/// names.
+pub fn pi_files_in(agent_dir: &Path, cwd: &Path, from: i64, to: i64) -> Vec<PiFile> {
+    let cwd = dunce::simplified(cwd);
+    let mut found: Vec<PiFile> = pi_session_files(&agent_dir.join("sessions"))
+        .into_iter()
+        .filter_map(|path| {
+            let (started_at, session) = pi_name(path.file_name()?.to_str()?)?;
+            let session = session.to_owned();
+            if !(from..=to).contains(&started_at) {
+                return None;
+            }
+            let here = pi_cwd(&path)?;
+            (dunce::simplified(Path::new(&here)) == cwd).then_some(PiFile {
+                session,
+                started_at,
+                path,
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| (a.started_at, &a.path).cmp(&(b.started_at, &b.path)));
+    found
+}
+
+/// The working directory a pi-family session file's `session` line names, from its first lines.
+fn pi_cwd(path: &Path) -> Option<String> {
+    let reader = io::BufReader::new(std::fs::File::open(path).ok()?);
+    reader
+        .lines()
+        .take(4)
+        .map_while(Result::ok)
+        .find_map(|line| {
+            let entry: Value = serde_json::from_str(&line).ok()?;
+            (entry["type"].as_str() == Some("session"))
+                .then(|| entry["cwd"].as_str().map(str::to_owned))
+                .flatten()
+        })
+}
+
+/// What every pi-family entry is read for: where it hangs in the tree. The rest of a tool's
+/// result, most of the file, is skipped over rather than kept.
+#[derive(serde::Deserialize)]
+struct PiEntry {
+    #[serde(rename = "type")]
+    kind: String,
+    id: Option<String>,
+    #[serde(rename = "parentId")]
+    parent: Option<String>,
+}
+
+/// The turns of a pi or OMP session file: the branch that ends at its last entry. A file with no
+/// `session` line is in a form this does not know.
+pub fn read_pi(reader: impl BufRead) -> io::Result<Vec<Turn>> {
+    let mut parents: std::collections::HashMap<String, Option<String>> =
+        std::collections::HashMap::new();
+    let mut last: Option<String> = None;
+    let mut session = false;
+    // Messages in file order: their entry id, whether the user's, when, and the text.
+    let mut messages: Vec<(String, bool, i64, Vec<String>)> = Vec::new();
+    each_line(reader, |line| {
+        let Ok(entry) = serde_json::from_str::<PiEntry>(line) else {
+            return;
+        };
+        session |= entry.kind == "session";
+        let Some(id) = entry.id else {
+            return;
+        };
+        parents.insert(id.clone(), entry.parent);
+        last = Some(id.clone());
+        let said = line.contains("\"role\":\"user\"") || line.contains("\"role\":\"assistant\"");
+        if entry.kind != "message" || !said {
+            return;
+        }
+        let Ok(full) = serde_json::from_str::<Value>(line) else {
+            return;
+        };
+        let message = &full["message"];
+        let user = match message["role"].as_str() {
+            Some("user") => true,
+            Some("assistant") => false,
+            _ => return,
+        };
+        let at = message["timestamp"]
+            .as_i64()
+            .or_else(|| full["timestamp"].as_str().and_then(iso_to_ms))
+            .unwrap_or(0);
+        messages.push((id, user, at, pi_texts(&message["content"], user)));
+    })?;
+    if !session {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "it is in a form Yardsort does not know",
+        ));
+    }
+    let mut branch = std::collections::HashSet::new();
+    let mut at = last;
+    while let Some(id) = at {
+        if !branch.insert(id.clone()) {
+            break;
+        }
+        at = parents.get(&id).cloned().flatten();
+    }
+    let mut turns: Vec<Turn> = Vec::new();
+    for (id, user, at, texts) in messages {
+        if !branch.contains(&id) {
+            continue;
+        }
+        if user {
+            let text = texts.join("\n").trim().to_owned();
+            if !text.is_empty() {
+                turns.push(Turn {
+                    at,
+                    user: text,
+                    said: Vec::new(),
+                });
+            }
+        } else if let Some(turn) = turns.last_mut() {
+            turn.said.extend(texts);
+        }
+    }
+    Ok(turns)
+}
+
+/// The text of a pi-family message: its `text` blocks — a user's may be one string — and, for the
+/// user, an image as `[image]`. Thinking and tool calls are not text.
+fn pi_texts(content: &Value, user: bool) -> Vec<String> {
+    if let Some(text) = content.as_str() {
+        return vec![text.trim().to_owned()];
+    }
+    content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|block| match block["type"].as_str() {
+            Some("text") => block["text"].as_str().map(|t| t.trim().to_owned()),
+            Some("image") if user => Some("[image]".to_owned()),
+            _ => None,
+        })
+        .filter(|text| !text.is_empty())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn fixture(path: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1114,5 +1317,101 @@ mod tests {
         assert!(opencode_session(&db, "ses_fixture0000000000000001").is_some());
         assert!(opencode_session(&db, "ses_child").is_none());
         assert!(opencode_sessions_in(&dir.path().join("none.db"), cwd, 0, i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn an_omp_and_a_pi_session_read_as_the_users_words_and_what_the_agent_said() {
+        for recorded in [
+            "omp/18.11.3/conversation.jsonl",
+            "pi/1.4.0/conversation.jsonl",
+        ] {
+            let turns = read_pi(open(recorded)).unwrap();
+            assert_eq!(turns.len(), 2, "{recorded}: {turns:#?}");
+            assert_eq!(
+                turns[0].user,
+                "Read notes.txt, then reply with one short sentence saying what it says."
+            );
+            assert_eq!(
+                turns[1].user,
+                "Thanks. In one sentence, what is left to do?"
+            );
+            assert!(turns[0].reply().unwrap().contains("TZ=UTC"), "{recorded}");
+            // The file's content as the tool returned it, and the reasoning, are not in it.
+            let all: String = turns.iter().flat_map(|t| t.said.clone()).collect();
+            assert!(
+                !all.contains("1:the tests need") && !all.contains("<stripped>"),
+                "{all}"
+            );
+            assert!(turns[0].at > 1_790_000_000_000 && turns[1].at > turns[0].at);
+        }
+        // A fork is a copy of the branch it came from, with the original times, and its own turn.
+        let fork = read_pi(open("pi/1.4.0/fork.jsonl")).unwrap();
+        let parent = read_pi(open("pi/1.4.0/conversation.jsonl")).unwrap();
+        assert_eq!(fork.len(), 3);
+        assert_eq!(fork[..2], parent[..]);
+        assert_eq!(fork[2].user, "In one sentence, say which file you created.");
+    }
+
+    #[test]
+    fn a_pi_session_is_the_branch_that_ends_at_its_last_entry() {
+        let recorded = std::fs::read_to_string(fixture("pi/1.4.0/conversation.jsonl")).unwrap();
+        let first_reply = recorded
+            .lines()
+            .find(|line| line.contains("It says the tests need"))
+            .unwrap();
+        let reply_id = serde_json::from_str::<Value>(first_reply).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        // The user went back to after the first reply and asked something else: the second turn
+        // is a branch left behind.
+        let branched = format!(
+            "{recorded}{}\n",
+            json!({"type": "message", "id": "b1", "parentId": reply_id,
+                   "timestamp": "2026-10-26T09:30:00.000Z",
+                   "message": {"role": "user", "content": "Instead, list the files.", "timestamp": 1_793_007_000_000_i64}})
+        );
+        let turns = read_pi(io::Cursor::new(branched)).unwrap();
+        let asked: Vec<&str> = turns.iter().map(|t| t.user.as_str()).collect();
+        assert_eq!(
+            asked,
+            [
+                "Read notes.txt, then reply with one short sentence saying what it says.",
+                "Instead, list the files."
+            ]
+        );
+        // No `session` line: not a form this knows.
+        let unknown = "{\"type\":\"message\",\"id\":\"a\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n";
+        assert!(read_pi(io::Cursor::new(unknown)).is_err());
+    }
+
+    #[test]
+    fn pi_family_sessions_are_found_by_id_and_by_folder_and_time() {
+        assert_eq!(
+            pi_name("2026-10-26T09-24-09-360Z_55555555-5555-4555-8555-555555555555.jsonl"),
+            Some((
+                iso_to_ms("2026-10-26T09:24:09.360Z").unwrap(),
+                "55555555-5555-4555-8555-555555555555"
+            ))
+        );
+        assert_eq!(pi_name("notes.jsonl"), None);
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("sessions/--tmp-yardsort-fixture-repo-pi--");
+        std::fs::create_dir_all(&folder).unwrap();
+        let name = "2026-10-26T09-24-09-360Z_55555555-5555-4555-8555-555555555555.jsonl";
+        std::fs::copy(fixture("pi/1.4.0/conversation.jsonl"), folder.join(name)).unwrap();
+        let path = folder.join(name);
+        assert_eq!(
+            pi_file(dir.path(), "55555555-5555-4555-8555-555555555555"),
+            Some(path.clone())
+        );
+        assert_eq!(pi_file(dir.path(), "../55555555"), None);
+        let at = iso_to_ms("2026-10-26T09:24:09.360Z").unwrap();
+        let cwd = Path::new("/tmp/yardsort-fixture/repo-pi");
+        let found = pi_files_in(dir.path(), cwd, at - 1, at + 1);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].path, path);
+        assert!(pi_files_in(dir.path(), cwd, at + 1, i64::MAX).is_empty());
+        assert!(pi_files_in(dir.path(), Path::new("/elsewhere"), 0, i64::MAX).is_empty());
     }
 }

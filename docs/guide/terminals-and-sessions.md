@@ -175,8 +175,8 @@ Some things to know:
   current then. Its tab says so: a line under the tabs for its first minute, _Told about claude's
   conversation_, and a **⇄** mark on the tab after; **Show** opens the note and what the command
   gives now.
-- **How the note travels** depends on the agent. Claude Code and Codex take it as background
-  context — their system-prompt option, the **Context** args in
+- **How the note travels** depends on the agent. Claude Code, Codex, OMP and pi take it as
+  background context — their system-prompt option, the **Context** args in
   [Settings → Harnesses](settings.md#harnesses) — so an agent started from an agent button gets
   it without a first message and starts no turn. An agent without that option can only be told in
   a first message: its button asks first, **Start with the handoff…** (the composer, with that
@@ -188,10 +188,11 @@ Some things to know:
 - **Resuming does not tell it again.** Claude Code and Codex keep the system prompt a
   conversation began with and ignore a new one on resume, so a resumed agent knows what it was
   told when it began — and one that began alone is not told about conversations started since.
-  Ask it to run `ys workspace context`.
-- **Claude Code, Codex, Cursor and OpenCode** are read today. Grok's, OMP's, pi's and a custom
-  agent's conversations are listed with why they are not there. Claude Code's is found by the
-  session id Yardsort gave it. The others are found by the id the agent reported when it
+  OMP and pi would take a new one, but are not given it either, for now. Ask it to run
+  `ys workspace context`.
+- **Claude Code, Codex, Cursor, OpenCode, OMP and pi** are read today. Grok's and a custom
+  agent's conversations are listed with why they are not there. Claude Code's and pi's are found
+  by the session id Yardsort gave them. The others are found by the id the agent reported when it
   [reports what it does](activity.md), and otherwise by the folder and the time the
   conversation first began; a resume does not change which one that is:
   - **Codex** — its session file under `~/.codex/sessions` (or `CODEX_HOME`).
@@ -200,6 +201,9 @@ Some things to know:
   - **OpenCode** — its session in OpenCode's database, `~/.local/share/opencode/opencode.db` (or
     under `XDG_DATA_HOME`). A subagent's session is part of the conversation that started it,
     and is not read as one of its own.
+  - **OMP** — its session file under `~/.omp/agent/sessions` (pi's under `~/.pi/agent/sessions`;
+    both under `PI_CODING_AGENT_DIR` when it is set). These files are trees: when you go back and
+    take the conversation another way, what is read is the way it went last.
 - **The asking agent's own conversation is left out**, and so is what Yardsort added to a first
   message — the project's memory, a handoff packet — which the agent has anyway.
 - **A fork** shows only its own turns: the ones before the fork belong to the conversation it

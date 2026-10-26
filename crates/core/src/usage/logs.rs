@@ -436,6 +436,10 @@ pub struct Sources {
     pub cursor: Option<PathBuf>,
     /// OpenCode's database: `opencode/opencode.db` under the XDG data folder, on every system.
     pub opencode: Option<PathBuf>,
+    /// The agent folders of pi and OMP: `PI_CODING_AGENT_DIR`, which both read, or their own
+    /// under the home folder.
+    pub pi: Option<PathBuf>,
+    pub omp: Option<PathBuf>,
 }
 
 impl Sources {
@@ -452,6 +456,12 @@ impl Sources {
                 .flat_map(|home| [home.join(".claude"), home.join(".config").join("claude")])
                 .collect(),
         };
+        let agent_dir = |folder: &str| {
+            var("PI_CODING_AGENT_DIR")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| home.as_ref().map(|home| home.join(folder).join("agent")))
+        };
         Self {
             claude,
             codex: crate::activity::codex::codex_home(var),
@@ -462,6 +472,8 @@ impl Sources {
                 .map(PathBuf::from)
                 .or_else(|| home.as_ref().map(|home| home.join(".local").join("share")))
                 .map(|data| crate::activity::transcript::opencode_db(&data)),
+            pi: agent_dir(".pi"),
+            omp: agent_dir(".omp"),
         }
     }
 
