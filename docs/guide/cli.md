@@ -161,7 +161,8 @@ that launched the command — cannot be removed, and nothing is deleted.
 
 Prints the handoff packet for a workspace: what Yardsort recorded there — the task, where the
 branch stands and who wrote each changed file, what each agent run did, and what is not known —
-written as the next agent's first message. The same text the app's **Hand off…** button starts
+written as the next agent's first message. In a project that shares its agents' conversations it
+also says what was said in them, as `ys workspace context` would, within 16,000 characters. The same text the app's **Hand off…** button starts
 from (see [handing work to another agent](terminals-and-sessions.md#handing-work-to-another-agent)),
 without Assist's ordering of the files, which the command line has no key for.
 

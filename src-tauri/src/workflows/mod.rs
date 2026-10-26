@@ -177,7 +177,7 @@ impl Hands for AppHands<'_> {
         let state = self.state;
         let (row, root) = crate::changes::commands::workspace(state, workspace_id).ok()?;
         let git = crate::git::Git::new(&state.env()).ok()?;
-        let facts = handoff::facts(
+        let mut facts = handoff::facts(
             &state.store,
             &git,
             &root,
@@ -185,6 +185,13 @@ impl Hands for AppHands<'_> {
             row.base_branch.as_deref(),
         )
         .ok()?;
+        facts.said = yardsort_core::activity::digest::packet_section(
+            &state.store,
+            &row,
+            &crate::conversations::sources(state),
+            crate::conversations::now(),
+        )
+        .unwrap_or(None);
         Some(handoff::render(&facts))
     }
 

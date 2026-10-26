@@ -565,7 +565,7 @@ describe("Composer with Assist", () => {
     render(<Composer project={app} runIn={app.workspaces[0]} />);
     await screen.findByRole("form", { name: "Run in local" });
     expect(screen.getByRole("heading")).toHaveTextContent("Hand off in app");
-    expect(screen.getByText(/never the last agent.s words/)).toBeInTheDocument();
+    expect(screen.getByText(/what was said in them/)).toBeInTheDocument();
     const box = screen.getByRole("textbox", { name: /work on/ });
     expect(box).toHaveValue(packet);
 

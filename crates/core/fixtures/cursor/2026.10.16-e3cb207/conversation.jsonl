@@ -1,0 +1,6 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Monday, Oct 26, 2026, 8:59 AM (UTC)</timestamp>\n<user_query>\nRead notes.txt, then reply with one short sentence saying what it says.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"path":"/tmp/yardsort-fixture/repo-cursor/notes.txt"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The notes say the tests need `TZ=UTC`."}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Monday, Oct 26, 2026, 8:59 AM (UTC)</timestamp>\n<user_query>\nThanks. In one sentence, what is left to do?\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The tests still need to be run with `TZ=UTC`."}]}}
+{"type":"turn_ended","status":"success"}

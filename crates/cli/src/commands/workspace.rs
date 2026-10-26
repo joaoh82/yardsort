@@ -222,15 +222,8 @@ fn context(
     ys.drain_spool();
     let sources = Sources::from_env(&|name| env(name).or_else(|| ys.env().vars.get(name).cloned()));
     let asking = env(yardsort_core::activity::RECORD_ENV);
-    let conversations = digest::gather(
-        &ys.store,
-        &workspace,
-        asking.as_deref(),
-        &sources,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as i64),
-    )?;
+    let conversations =
+        digest::gather(&ys.store, &workspace, asking.as_deref(), &sources, now_ms())?;
     if let Some(n) = turn {
         let matching: Vec<_> = conversations
             .iter()
@@ -291,6 +284,12 @@ fn parse_since(text: &str) -> Result<i64, Failure> {
     yardsort_core::activity::iso_to_ms(&full).ok_or_else(refused)
 }
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
+}
+
 /// The packet, as text or, with `--json`, as `{ text, runs, events }`.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -311,13 +310,16 @@ fn handoff(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         )));
     }
     let git = ys.git()?;
-    let facts = yardsort_core::activity::handoff::facts(
+    let mut facts = yardsort_core::activity::handoff::facts(
         &ys.store,
         &git,
         &root,
         &workspace.id,
         workspace.base_branch.as_deref(),
     )?;
+    let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let sources = Sources::from_env(&|name| env(name).or_else(|| ys.env().vars.get(name).cloned()));
+    facts.said = digest::packet_section(&ys.store, &workspace, &sources, now_ms())?;
     let packet = Packet {
         runs: facts.runs.len(),
         events: facts.events,

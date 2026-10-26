@@ -375,7 +375,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: vec![],
             prompt_args: strings(&["--", " {prompt}"]),
             write_args: strings(&["--print", "--no-session", "--", " {prompt}"]),
-            context_args: vec![],
+            context_args: strings(&["--append-system-prompt={context}"]),
             resume_args: strings(&["--continue"]),
             fork_args: vec![],
             efforts: strings(&[
@@ -427,7 +427,7 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: strings(&["--session-id", "{session_id}"]),
             prompt_args: strings(&["--", " {prompt}"]),
             write_args: strings(&["--print", "--no-session", "--", " {prompt}"]),
-            context_args: vec![],
+            context_args: strings(&["--append-system-prompt", "{context}"]),
             resume_args: strings(&["--session", "{session_id}"]),
             fork_args: strings(&["--fork", "{session_id}", "--session-id", "{new_session_id}"]),
             efforts: strings(&["off", "minimal", "low", "medium", "high", "xhigh", "max"]),
@@ -712,8 +712,21 @@ mod tests {
                 "fix it"
             ]
         );
+        // OMP takes it as one argument, pi as two; checked live like the others.
+        let omp = find("omp", &[]).unwrap();
+        let mut told = values("fix it", "", "");
+        told.context = Some(note.into());
+        assert!(omp
+            .start_args(&told)
+            .contains(&format!("--append-system-prompt={note}")));
+        let pi = find("pi", &[]).unwrap().start_args(&told);
+        let at = pi
+            .iter()
+            .position(|a| a == "--append-system-prompt")
+            .unwrap();
+        assert_eq!(pi[at + 1], note);
         // Not verified live yet, so not given that way: they are told after the first message.
-        for id in ["grok", "opencode", "omp", "cursor", "pi"] {
+        for id in ["grok", "opencode", "cursor"] {
             assert!(find(id, &[]).unwrap().context_args.is_empty(), "{id}");
         }
         // Without a note the group is dropped whole.

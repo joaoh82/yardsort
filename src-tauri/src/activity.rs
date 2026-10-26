@@ -382,12 +382,18 @@ pub async fn workspace_handoff(app: AppHandle, workspace_id: String) -> IpcResul
         move |state| {
             let (row, root) = crate::changes::commands::workspace(state, &workspace_id)?;
             let git = crate::git::Git::new(&state.env())?;
-            let facts = handoff::facts(
+            let mut facts = handoff::facts(
                 &state.store,
                 &git,
                 &root,
                 &workspace_id,
                 row.base_branch.as_deref(),
+            )?;
+            facts.said = yardsort_core::activity::digest::packet_section(
+                &state.store,
+                &row,
+                &crate::conversations::sources(state),
+                crate::conversations::now(),
             )?;
             // A review that cannot run is no ranking, not a failed packet.
             let prepared = crate::assist::commands::prepare_review(state, &workspace_id).ok();

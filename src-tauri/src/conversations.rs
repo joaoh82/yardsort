@@ -26,12 +26,13 @@ pub struct ConversationContext {
 /// The note and the digest for an agent in `workspace_id` — `except` the conversation it is, for
 /// one already running — or `None` when the project does not share its agents' conversations or
 /// none of the others has said anything yet.
-fn sources(state: &AppState) -> Sources {
+/// Where the agents keep their conversations, in the environment they are launched in.
+pub(crate) fn sources(state: &AppState) -> Sources {
     let env = state.env();
     Sources::from_env(&|name| env.vars.get(name).cloned())
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
