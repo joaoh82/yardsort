@@ -914,6 +914,9 @@ says so, because the record is metadata. Slices 1–3 are built.
       [open question 41](06-open-questions.md#conversation-context). Found: the snapshot-off build
       is stable, so it costs one cache write per told resume, not one per request. Recorded in
       [29 § Claude Code on resume](29-conversation-context.md#claude-code-on-resume).
+- [x] Checklist § 26 in the app on Linux, 2026-10-26: every row passes. Found: two of its rows had
+      been filed under § 21, and `ys attach` / `ys logs` did not take the id `ys session list`
+      prints. Recorded in [29 § checked in the app](29-conversation-context.md#checked-in-the-app).
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
 beside it, and before its first answer Codex reads Claude's conversation and uses it; with the

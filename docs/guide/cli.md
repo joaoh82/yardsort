@@ -239,7 +239,9 @@ ys attach 6051993d             # the start of an id from `ys session list`
 ```
 
 With nothing named it attaches to the only running session, and asks which one you meant if there
-is more than one. A shell has no workspace name, so reach it by id.
+is more than one, listing each with an id to name it by. A workspace's name picks its agent when it
+has one; when two agents share a workspace, name one by the id `ys session list` prints. A shell
+has no workspace name or record, so reach it by the id that list of choices gives.
 
 Attaching matches the session to your terminal's size, and follows it if you resize the window.
 If the app has the same session open in a tab, that tab's size and yours are the same setting —
@@ -257,6 +259,7 @@ that have **finished**, which is the one thing `attach` will not do.
 ```sh
 ys logs                        # the only session, if there is one
 ys logs fix-the-flaky-login-test
+ys logs 6051993d               # the start of an id from `ys session list`, as for attach
 ys logs --lines 20             # just the end of it
 ys logs --json                 # the text as a JSON field, for scripts
 ys logs --raw                  # escape sequences and colours, exactly as the app would repaint
