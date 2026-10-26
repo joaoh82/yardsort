@@ -280,6 +280,23 @@ export function HarnessForm({ harness, isNew, onSaved, onRemoved }: Props) {
             />
           </Field>
         ))}
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={draft.resumeContext ?? false}
+            disabled={!draft.resumeContext && !draft.args.contextArgs.trim()}
+            onChange={(e) => set({ resumeContext: e.target.checked })}
+          />
+          <span className="grid gap-0.5">
+            Give the context args on resume and fork too
+            <span className="text-[12px] text-ink-faint">
+              For an agent that builds its system prompt at each launch, as OMP and pi do: a resumed
+              conversation is told about the others as a new one is. Claude Code, Codex and Grok
+              keep the prompt a conversation began with, so it would be passed and never seen.
+            </span>
+          </span>
+        </label>
       </fieldset>
 
       <div className="grid grid-cols-2 gap-3">

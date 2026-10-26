@@ -190,7 +190,7 @@ ys workspace context --since 2026-10-25T13:00Z        # only turns from then on,
 ys workspace context --budget 64000 --json
 ```
 
-It answers only in a project that shares its conversations — off until you tick **Share
+It answers only in a project that shares its conversations — on unless you untick **Share
 conversations between this project's agents** in the Memory view — and otherwise says so. Run by
 an agent Yardsort started, it leaves out that agent's own conversation.
 

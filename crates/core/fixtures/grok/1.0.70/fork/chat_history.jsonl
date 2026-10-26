@@ -1,0 +1,23 @@
+{"type":"system","content":"<stripped>"}
+{"type":"user","content":[{"type":"text","text":"<stripped>"}]}
+{"type":"user","content":[{"type":"text","text":"<stripped>"}],"synthetic_reason":"system_reminder"}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nRead notes.txt, then reply with one short sentence saying what it says.\n</user_query>"}],"prompt_index":0}
+{"type":"user","content":[{"type":"text","text":"<stripped>"}],"synthetic_reason":"system_reminder"}
+{"type":"reasoning","id":"rs_efa3c2fd-379d-9247-aa74-95b17074f2b2","summary":[],"encrypted_content":"<stripped>","status":"completed"}
+{"type":"assistant","content":"","tool_calls":[{"id":"call-e0185ac8-d391-4c76-9214-966589cf45ff-0","name":"read_file","arguments":"{\"target_file\":\"/tmp/yardsort-fixture/repo-grok/notes.txt\"}"}],"model_id":"grok-4.7-build","model_fingerprint":"fp_5719f1aec35dd73c","reasoning_effort":"high"}
+{"type":"tool_result","tool_call_id":"call-e0185ac8-d391-4c76-9214-966589cf45ff-0","content":"1→the tests need TZ=UTC\n"}
+{"type":"reasoning","id":"rs_abba1f23-9b76-9bea-a8a5-5968b9992f0f","summary":[],"encrypted_content":"<stripped>","status":"completed"}
+{"type":"assistant","content":"The note says the tests need TZ=UTC.","model_id":"grok-4.7-build","model_fingerprint":"fp_5719f1aec35dd73c","reasoning_effort":"high"}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nThanks. In one sentence, what is left to do?\n</user_query>"}],"prompt_index":1}
+{"type":"reasoning","id":"rs_90134210-4c05-99c9-a957-34ce370b1043","summary":[],"encrypted_content":"<stripped>","status":"completed"}
+{"type":"assistant","content":"I'll check the repo for anything still open beyond that note.","tool_calls":[{"id":"call-91fd2289-3d1c-4369-8a3f-15036e93e3ae-1","name":"list_dir","arguments":"{\"target_directory\":\"/tmp/yardsort-fixture/repo-grok\"}"}],"model_id":"grok-4.7-build","model_fingerprint":"fp_5719f1aec35dd73c","reasoning_effort":"high"}
+{"type":"tool_result","tool_call_id":"call-91fd2289-3d1c-4369-8a3f-15036e93e3ae-1","content":"- /tmp/yardsort-fixture/repo-grok/\n  - notes.txt"}
+{"type":"reasoning","id":"rs_4e2d177a-2774-9342-ade4-1c9975822513","summary":[],"encrypted_content":"<stripped>","status":"completed"}
+{"type":"assistant","content":"Set `TZ=UTC` for the tests.","model_id":"grok-4.7-build","model_fingerprint":"fp_5719f1aec35dd73c","reasoning_effort":"high"}
+{"type":"user","content":[{"type":"text","text":"<stripped>"}],"synthetic_reason":"system_reminder"}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nIn one sentence, say which file you created.\n</user_query>"}],"prompt_index":2}
+{"type":"reasoning","id":"rs_3e8523fb-3a72-9939-8971-0caca466f588","summary":[],"encrypted_content":"<stripped>","status":"completed"}
+{"type":"assistant","content":"I'll check the workspace for a file that was added.","tool_calls":[{"id":"call-69e98113-4aab-42a7-ae7f-587d4df0d308-2","name":"list_dir","arguments":"{\"target_directory\":\"/tmp/yardsort-fixture/repo-grok\"}"}],"model_id":"grok-4.7-build","model_fingerprint":"fp_5719f1aec35dd73c","reasoning_effort":"high"}
+{"type":"tool_result","tool_call_id":"call-69e98113-4aab-42a7-ae7f-587d4df0d308-2","content":"- /tmp/yardsort-fixture/repo-grok/\n  - notes.txt"}
+{"type":"reasoning","id":"rs_6ae53494-56c2-9c80-a91b-eb058ecbf77c","summary":[],"encrypted_content":"<stripped>","status":"completed"}
+{"type":"assistant","content":"I did not create a file.","model_id":"grok-4.7-build","model_fingerprint":"fp_5719f1aec35dd73c","reasoning_effort":"high"}

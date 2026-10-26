@@ -302,12 +302,6 @@ export const commands = {
 	digest: string,
 } | null, IpcError>(__TAURI_INVOKE("conversation_context", { workspaceId, except })),
 	/**
-	 *  Whether to ask, before an agent starts in `workspace_id`, if its project should share its
-	 *  agents' conversations — asked once per project, beside a conversation that has said
-	 *  something — and what the note would be about. The answer is `conversations_share`.
-	 */
-	conversationsUnasked: (workspaceId: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("conversations_unasked", { workspaceId })),
-	/**
 	 *  How many proposals wait, per project that has any. Agents propose through `ys`, which writes
 	 *  the database directly, so the window asks again when it regains focus and when activity lands.
 	 */
@@ -1059,6 +1053,13 @@ export type HarnessDef = {
 	 *  Empty means the harness has no such option, or it is not known to work.
 	 */
 	contextArgs?: string[],
+	/**
+	 *  Whether [`Self::context_args`] go on a resume or fork too: true for a harness that builds
+	 *  its system prompt at each launch (OMP, pi), so a resumed conversation reads a new note;
+	 *  false for one that keeps the prompt a conversation began with (Claude Code, Codex, Grok),
+	 *  where a new note would be passed and never seen.
+	 */
+	resumeContext?: boolean,
 	resumeArgs: string[],
 	forkArgs: string[],
 	/**  Effort levels to offer. Empty hides the picker. */

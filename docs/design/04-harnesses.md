@@ -34,6 +34,7 @@ models      = ["fable", "opus", "sonnet"]          # suggestions only; free text
 
 session_args = ["--session-id", "{session_id}"]    # omitted unless session_id_mode = "assigned"
 context_args = ["--append-system-prompt", "{context}"]  # background context; see doc 29
+resume_context = false                             # true: context_args on resume and fork too
 prompt_args = ["{prompt}"]                         # omitted when there is no opening message
 resume_args = ["--resume", "{session_id}"]
 fork_args   = ["--resume", "{session_id}", "--fork-session", "--session-id", "{new_session_id}"]
@@ -65,10 +66,11 @@ every harness needing hand-written templates.
   resuming or forking, because Codex resumes with a subcommand that reads its own options.
   `write_args` one-shots (drafting a commit message) never get them: they run no tools.
   The session id has a group of its own so that an empty prompt drops only the prompt.
-  `context_args` sit between `session_args` and `prompt_args` when starting, and only then: they
-  carry the note about the workspace's other conversations
-  ([29](29-conversation-context.md#slice-2-what-shipped)), which the agents checked ignore on
-  resume.
+  `context_args` sit between `session_args` and `prompt_args` when starting. They carry the note
+  about the workspace's other conversations ([29](29-conversation-context.md#slice-2-what-shipped)).
+  On a resume or fork they come after the resume or fork args only with `resume_context`, for an
+  agent that builds its system prompt at each launch (OMP, pi); Claude Code, Codex and Grok keep
+  the one a conversation began with and would never see it.
 - Braces that are not one of our placeholders are literal, so JSON can be passed in an argument.
 - Built-in definitions are compiled in. User edits are stored as overrides, so **Restore defaults**
   is just "delete the override", and new app versions can ship corrected defaults.

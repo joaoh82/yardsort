@@ -62,8 +62,9 @@ they were given.
 
 ## Sharing conversations
 
-The Memory view has a second switch, **Share conversations between this project's agents**, off
-until you tick it. It is not memory: nothing is written and nothing outlives the workspace. While
+The Memory view has a second switch, **Share conversations between this project's agents**, on
+until you untick it. What an agent reads goes to that agent's provider, so untick it in a project
+whose conversations should stay with the agent they were said to. It is not memory: nothing is written and nothing outlives the workspace. While
 it is on, an agent in one of the project's workspaces can run `ys workspace context` to read what
 was said in the workspace's other conversations, and a new agent started beside one is told so.
 See [what agents can read of each other](terminals-and-sessions.md#what-agents-can-read-of-each-other).

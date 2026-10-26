@@ -10,10 +10,11 @@
 #   under a throwaway `CODEX_HOME` with the real one's `auth.json` symlinked in, as
 #   scripts/record-codex.sh does; Claude Code writes under your own config directory, as
 #   scripts/record-claude-hooks.sh does.
-# - Cursor, OpenCode, OMP and pi: the file is there already and the first turn only reads it, so
-#   none is given leave to change anything. OMP and pi write under your own `~/.omp/agent` and
+# - Cursor, OpenCode, OMP, pi and Grok: the file is there already and the first turn only reads
+#   it, so none is given leave to change anything. OMP and pi write under your own `~/.omp/agent` and
 #   `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) with your default model; pi, whose session ids
-#   Yardsort chooses, gets a fork as well. Cursor runs with `--trust` for the throwaway repository
+#   Yardsort chooses, gets a fork as well; so does Grok, which writes under your own `~/.grok` (or
+#   `GROK_HOME`). Cursor runs with `--trust` for the throwaway repository
 #   and writes under your own `~/.cursor`, in TZ=UTC so the time it puts in each message is UTC.
 #   OpenCode runs a free model (`OPENCODE_MODEL`, default opencode/glm-5.3-flash-free) under a
 #   throwaway `XDG_DATA_HOME`, so its database holds this conversation alone; the fixture is that
@@ -28,16 +29,17 @@
 #   crates/core/fixtures/opencode/<version>/conversation.sql
 #   crates/core/fixtures/omp/<version>/conversation.jsonl
 #   crates/core/fixtures/pi/<version>/conversation.jsonl  (and fork.jsonl)
+#   crates/core/fixtures/grok/<version>/conversation/, fork/  (chat_history.jsonl, events.jsonl)
 #
 # Spends a few hundred tokens on each account (OpenCode's free model, none). Re-run it when a new
 # version changes a shape; the readers' tests read these files.
 #
-# Usage: scripts/record-conversations.sh [claude|codex|cursor|opencode|omp|pi]...   (default: all)
+# Usage: scripts/record-conversations.sh [claude|codex|cursor|opencode|omp|pi|grok]...   (default: all)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 which=("$@")
-[ ${#which[@]} -eq 0 ] && which=(claude codex cursor opencode omp pi)
+[ ${#which[@]} -eq 0 ] && which=(claude codex cursor opencode omp pi grok)
 work="$(mktemp -d -t yardsort-conversation.XXXXXX)"
 mkdir -p "$work/repo"
 git -C "$work/repo" init -q
@@ -305,6 +307,60 @@ record_pi() {
     echo "conversation.jsonl, fork.jsonl: pi $version, recorded $(date -u +%Y-%m-%d) with scripts/record-conversations.sh"
     echo "(your default model). Session 5555…: pi --print reads notes.txt, then --session adds a second turn;"
     echo "6666… is --fork of it, one more turn. The provider's payloads are stripped; paths and ids redacted."
+  } >"$out/README-conversation.txt"
+}
+
+record_grok() {
+  local version out repo session fork name id dir
+  version="$(grok --version </dev/null | awk '{print $2}')"
+  out="$root/crates/core/fixtures/grok/$version"
+  repo="$work/repo-grok"
+  session="$(uuidgen | tr 'A-Z' 'a-z')"
+  fork="$(uuidgen | tr 'A-Z' 'a-z')"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  echo "$note" >"$repo/notes.txt"
+  echo "recording Grok $version into $out (session $session)"
+  run() {
+    (cd "$repo" && grok "$@" </dev/null) >>"$work/grok.out" 2>>"$work/grok.err" ||
+      echo "grok exited $? (see $work/grok.err)"
+  }
+  run --session-id "$session" --single "$read_first"
+  run --resume "$session" --single "$second"
+  run --resume "$session" --fork-session --session-id "$fork" --single "$forked"
+  for name in conversation fork; do
+    id="$session"
+    [ "$name" = fork ] && id="$fork"
+    dir="$(find "${GROK_HOME:-$HOME/.grok}/sessions" -mindepth 2 -maxdepth 2 -type d -name "$id" | head -1)"
+    mkdir -p "$out/$name" "$work/grok-$name"
+    # The system prompt, what Grok tells the model about your machine, skills and MCP servers, and
+    # the reasoning are not the conversation; of the events, only when each turn began is wanted.
+    python3 -I -c '
+import json, sys
+for line in open(sys.argv[1]):
+    entry = json.loads(line)
+    kind = entry.get("type")
+    if kind == "system":
+        entry["content"] = "<stripped>"
+    elif kind == "user" and "prompt_index" not in entry:
+        entry["content"] = [{"type": "text", "text": "<stripped>"}]
+    elif kind == "reasoning":
+        entry["encrypted_content"] = "<stripped>"
+        entry["summary"] = []
+    print(json.dumps(entry, ensure_ascii=False, separators=(",", ":")))
+' "$dir/chat_history.jsonl" >"$work/grok-$name/chat_history.jsonl"
+    grep '"type":"turn_started"' "$dir/events.jsonl" >"$work/grok-$name/events.jsonl" || true
+    for file in chat_history.jsonl events.jsonl; do
+      redact "$work/grok-$name/$file" "$out/$name/$file" \
+        "$session" 77777777-7777-4777-8777-777777777777 "$fork" 88888888-8888-4888-8888-888888888888
+    done
+  done
+  {
+    echo "conversation/, fork/: Grok $version, recorded $(date -u +%Y-%m-%d) with scripts/record-conversations.sh."
+    echo "Session 7777…: grok --single reads notes.txt, then --resume adds a second turn; 8888… is"
+    echo "--resume --fork-session of it, one more turn. chat_history.jsonl without the system prompt, what"
+    echo "Grok adds about the machine and its setup, and the reasoning; events.jsonl only its turn_started"
+    echo "lines. Paths and ids redacted."
   } >"$out/README-conversation.txt"
 }
 

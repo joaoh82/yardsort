@@ -23,9 +23,6 @@ pub struct ConversationContext {
     pub digest: String,
 }
 
-/// The note and the digest for an agent in `workspace_id` — `except` the conversation it is, for
-/// one already running — or `None` when the project does not share its agents' conversations or
-/// none of the others has said anything yet.
 /// Where the agents keep their conversations, in the environment they are launched in.
 pub(crate) fn sources(state: &AppState) -> Sources {
     let env = state.env();
@@ -38,6 +35,9 @@ pub(crate) fn now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
+/// The note and the digest for an agent in `workspace_id` — `except` the conversation it is, for
+/// one already running — or `None` when the project does not share its agents' conversations or
+/// none of the others has said anything yet.
 pub(crate) fn context(
     state: &AppState,
     workspace_id: &str,
@@ -58,29 +58,6 @@ pub(crate) fn context(
         note: note.text,
         digest: digest::render(&digest::select(&found, &digest::Options::default())),
     }))
-}
-
-/// Whether to ask, before an agent starts in `workspace_id`, if its project should share its
-/// agents' conversations — asked once per project, beside a conversation that has said
-/// something — and what the note would be about. The answer is `conversations_share`.
-#[tauri::command]
-#[specta::specta]
-pub async fn conversations_unasked(
-    app: AppHandle,
-    workspace_id: String,
-) -> IpcResult<Option<String>> {
-    blocking(app, move |state| {
-        let Some(workspace) = state.store.workspace(&workspace_id)? else {
-            return Ok(None);
-        };
-        Ok(digest::unasked(
-            &state.store,
-            &workspace,
-            &sources(state),
-            now(),
-        )?)
-    })
-    .await
 }
 
 #[tauri::command]

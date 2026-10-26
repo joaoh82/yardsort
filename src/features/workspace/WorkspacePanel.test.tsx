@@ -19,8 +19,6 @@ const core = vi.hoisted(() => ({
   workspaceHandoff: vi.fn(),
   memoryGet: vi.fn(async () => ({ projectId: "p", shared: false, preview: null, entries: [] })),
   conversationContext: vi.fn(),
-  conversationsUnasked: vi.fn(),
-  conversationsShare: vi.fn(),
   sessionContext: vi.fn(async () => null),
   outcomesAgents: vi.fn(async () => []),
 }));
@@ -53,8 +51,6 @@ beforeEach(() => {
   core.onSessionStarted.mockResolvedValue(() => {});
   core.uiStateSave.mockResolvedValue(undefined);
   core.conversationContext.mockResolvedValue(null);
-  core.conversationsUnasked.mockResolvedValue(null);
-  core.conversationsShare.mockResolvedValue({});
   core.ptySpawn.mockImplementation(async ({ workspaceId }: { workspaceId: string }) => ({
     id: `s-${workspaceId}`,
     program: "/bin/bash",
@@ -275,41 +271,6 @@ describe("starting an agent beside other conversations", () => {
     await userEvent.click(agentButton());
     await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
     expect(screen.queryByRole("menuitem")).toBeNull();
-  });
-
-  it("asks once whether the project shares conversations, before anything starts", async () => {
-    const user = userEvent.setup();
-    core.conversationsUnasked.mockResolvedValue("codex's conversation");
-    show(feature.id);
-
-    await user.click(agentButton());
-    const question = await screen.findByRole("dialog", {
-      name: "Let alpha’s agents read each other’s conversations?",
-    });
-    expect(question).toHaveTextContent("There is codex's conversation in this workspace.");
-    expect(question).toHaveTextContent("sent to OpenAI");
-    expect(core.ptySpawn).not.toHaveBeenCalled();
-
-    await user.click(within(question).getByRole("button", { name: "Share conversations" }));
-    expect(core.conversationsShare).toHaveBeenCalledWith(alpha.id, true);
-    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
-  });
-
-  it("a no is an answer too, and closing the question starts nothing", async () => {
-    const user = userEvent.setup();
-    core.conversationsUnasked.mockResolvedValue("codex's conversation");
-    show(feature.id);
-
-    await user.click(agentButton());
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(core.conversationsShare).not.toHaveBeenCalled();
-    expect(core.ptySpawn).not.toHaveBeenCalled();
-
-    await user.click(agentButton());
-    await user.click(await screen.findByRole("button", { name: "Not in this project" }));
-    expect(core.conversationsShare).toHaveBeenCalledWith(alpha.id, false);
-    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
   });
 
   it("says a new agent was told, and shows what it reads", async () => {

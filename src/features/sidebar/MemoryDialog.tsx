@@ -158,7 +158,7 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
                 other conversations there: every message you typed and each turn&rsquo;s reply, from
                 the agents&rsquo; own transcripts, without tool output. What it reads goes to that
                 agent&rsquo;s provider, which may not be the one you said it to. Nothing is stored.
-                Off unless you turn it on.
+                On unless you turn it off.
               </span>
             </span>
           </label>

@@ -31,6 +31,11 @@
 //!   branch left behind stays in the file. A `message` entry's `role` is `user`, `assistant`
 //!   (`text`, `thinking` and `toolCall` blocks), `toolResult` or — pi — `system`. A fork is a new
 //!   file holding a copy of the branch it came from, with the original times.
+//! - **Grok**: `sessions/<encoded cwd>/<session id>/` under `GROK_HOME`. `chat_history.jsonl` has
+//!   no times: a typed message is a `user` line with a `prompt_index`, wrapped in `<user_query>`;
+//!   the other `user` lines are Grok's own — the machine, skills, reminders. An `assistant` line's
+//!   `content` is its text. When each prompt's turn began is in `events.jsonl`, a `turn_started`
+//!   whose `turn_number` is the prompt's index. A fork copies the history, not those events.
 //!
 //! The files can be large — a long conversation is hundreds of megabytes, nearly all of it tool
 //! output — so they are read line by line, and a line that cannot hold anything wanted is skipped
@@ -939,6 +944,74 @@ fn pi_texts(content: &Value, user: bool) -> Vec<String> {
         .collect()
 }
 
+/// The turns of a Grok session folder: the messages from `chat_history.jsonl`, each timed by its
+/// turn's start in `events.jsonl`. A turn this session's events do not start — one a fork copied
+/// — has 0 for its time, for the caller to keep or leave out. A history with user lines but no
+/// typed message is in a form this does not know.
+pub fn read_grok(dir: &Path) -> io::Result<Vec<Turn>> {
+    let mut started = std::collections::HashMap::new();
+    if let Ok(file) = std::fs::File::open(dir.join("events.jsonl")) {
+        each_line(io::BufReader::new(file), |line| {
+            if !line.contains("\"turn_started\"") {
+                return;
+            }
+            let Ok(event) = serde_json::from_str::<Value>(line) else {
+                return;
+            };
+            let primary = event["session_relationship"]
+                .as_str()
+                .is_none_or(|r| r == "primary");
+            if let (true, Some(n), Some(at)) = (
+                primary,
+                event["turn_number"].as_u64(),
+                event["ts"].as_str().and_then(iso_to_ms),
+            ) {
+                started.entry(n).or_insert(at);
+            }
+        })?;
+    }
+    let history = std::fs::File::open(dir.join("chat_history.jsonl"))?;
+    let mut turns: Vec<Turn> = Vec::new();
+    let mut unknown = false;
+    each_line(io::BufReader::new(history), |line| {
+        if !(line.contains("\"type\":\"user\"") || line.contains("\"type\":\"assistant\"")) {
+            return;
+        }
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            return;
+        };
+        match entry["type"].as_str() {
+            Some("user") => {
+                let Some(n) = entry["prompt_index"].as_u64() else {
+                    unknown |= entry["synthetic_reason"].is_null();
+                    return;
+                };
+                let text = codex_text(&entry["content"]).unwrap_or_default();
+                let typed = between(&text, "<user_query>", "</user_query>").unwrap_or(&text);
+                turns.push(Turn {
+                    at: started.get(&n).copied().unwrap_or(0),
+                    user: typed.trim().to_owned(),
+                    said: Vec::new(),
+                });
+            }
+            Some("assistant") => {
+                let text = entry["content"].as_str().map(str::trim).unwrap_or("");
+                if let (Some(turn), false) = (turns.last_mut(), text.is_empty()) {
+                    turn.said.push(text.to_owned());
+                }
+            }
+            _ => {}
+        }
+    })?;
+    if turns.is_empty() && unknown {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "it is in a form Yardsort does not know",
+        ));
+    }
+    Ok(turns)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1413,5 +1486,45 @@ mod tests {
         assert_eq!(found[0].path, path);
         assert!(pi_files_in(dir.path(), cwd, at + 1, i64::MAX).is_empty());
         assert!(pi_files_in(dir.path(), Path::new("/elsewhere"), 0, i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn a_grok_session_reads_as_the_users_words_timed_by_its_events() {
+        let turns = read_grok(&fixture("grok/1.0.70/conversation")).unwrap();
+        assert_eq!(turns.len(), 2, "{turns:#?}");
+        // What Grok adds about the machine and its setup is not the user; the wrapper neither.
+        assert_eq!(
+            turns[0].user,
+            "Read notes.txt, then reply with one short sentence saying what it says."
+        );
+        assert_eq!(
+            turns[1].user,
+            "Thanks. In one sentence, what is left to do?"
+        );
+        assert_eq!(turns[0].said, ["The note says the tests need TZ=UTC."]);
+        assert_eq!(turns[1].reply(), Some("Set `TZ=UTC` for the tests."));
+        assert_eq!(turns[0].at, iso_to_ms("2026-10-26T09:51:43.214Z").unwrap());
+        assert_eq!(turns[1].at, iso_to_ms("2026-10-26T09:51:48.186Z").unwrap());
+        // A fork copies the history but not the events: the copied turns have no time of their own.
+        let fork = read_grok(&fixture("grok/1.0.70/fork")).unwrap();
+        assert_eq!(fork.len(), 3);
+        assert_eq!((fork[0].at, fork[1].at), (0, 0));
+        assert_eq!(fork[2].user, "In one sentence, say which file you created.");
+        assert!(fork[2].at > 0);
+        // Without its events every turn is untimed, and still read.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            fixture("grok/1.0.70/conversation/chat_history.jsonl"),
+            dir.path().join("chat_history.jsonl"),
+        )
+        .unwrap();
+        assert_eq!(read_grok(dir.path()).unwrap().len(), 2);
+        // A typed message with no prompt index is a form this does not know.
+        std::fs::write(
+            dir.path().join("chat_history.jsonl"),
+            "{\"type\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}\n",
+        )
+        .unwrap();
+        assert!(read_grok(dir.path()).is_err());
     }
 }
