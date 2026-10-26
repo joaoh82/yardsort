@@ -797,11 +797,29 @@ fn an_agent_reads_the_other_conversations_only_once_the_project_shares_them() {
         refused.contains("does not share its agents' conversations"),
         "{refused}"
     );
+    // The handoff packet keeps to the same switch.
+    let (code, packet, err) = as_agent(&["workspace", "handoff", &workspace_id]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!packet.contains("## What was said"), "{packet}");
     let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
     store
         .set_conversations_shared(&workspace.project_id, true)
         .unwrap();
     drop(store);
+
+    // Now it carries every conversation here, under its own part.
+    let (code, packet, err) = as_agent(&["workspace", "handoff", &workspace_id]);
+    assert_eq!(code, Some(0), "{err}");
+    let said = &packet[packet.find("## What was said").expect(&packet)..];
+    assert!(
+        said.contains("### claude · conversation rec-othe"),
+        "{packet}"
+    );
+    assert!(
+        said.contains("> Thanks. In one sentence, what is left to do?"),
+        "{packet}"
+    );
+    assert!(said.find("## What is not here").is_some(), "{packet}");
 
     let (code, text, err) = as_agent(&["workspace", "context"]);
     assert_eq!(code, Some(0), "{err}");

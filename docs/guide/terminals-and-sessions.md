@@ -101,7 +101,7 @@ nothing of what was asked, tried or found. **Hand off…** in the tab bar writes
 from what Yardsort recorded and opens the [composer](workspaces.md#starting-one-the-composer)
 with it, to run in this workspace. Read it, change it, pick the agent, press Enter.
 
-The message has four parts:
+The message has these parts:
 
 - **What this workspace was asked** — the first message of each conversation here, whole.
 - **Where the work stands** — the branch and what it started from, the commits on it, and each
@@ -111,13 +111,21 @@ The message has four parts:
   then, for a run that was reporting, its turns, tools by count, what failed and on which file,
   what it reported writing, permissions asked, notifications raised. A run that was not
   reporting says only that it ran.
-- **What is not here** — the conversations themselves, the commands, the contents of files as
-  they were, and how many events the summary rests on, with the `ys activity list` line that
-  shows them.
+- **What was said** — only in a project that
+  [shares its agents' conversations](#what-agents-can-read-of-each-other): every message you
+  typed in this workspace's conversations and each turn's final reply, newest first, read from
+  the agents' own transcripts as the message is made. About 16,000 characters of it: the newest
+  turns whole, older ones shortened, and the rest counted, with the `ys workspace context` line
+  that shows one.
+- **What is not here** — what the message could not say: the conversations themselves, or with
+  _What was said_, the agents' reasoning, their tool calls and what those returned; the
+  commands; the contents of files as they were; and how many events the summary rests on, with
+  the `ys activity list` line that shows them.
 
-Two things to know. Nothing in it comes from the last agent's words: Yardsort keeps metadata,
-never a conversation, so the message says where it is blind and tells the agent to ask you. And
-a handoff is not the task: the new conversation's record keeps no first message, so what the
+Two things to know. Without _What was said_, nothing in it comes from the last agent's words:
+Yardsort keeps metadata, never a conversation, so the message says where it is blind and tells
+the agent to ask you. With it, the words are read from the agents' files when you press
+**Hand off…**, and Yardsort keeps no copy. And a handoff is not the task: the new conversation's record keeps no first message, so what the
 workspace was asked stays what you first typed — for Assist, and for the next handoff. Times in
 the message are UTC, in case it travels.
 
@@ -181,10 +189,17 @@ Some things to know:
   conversation began with and ignore a new one on resume, so a resumed agent knows what it was
   told when it began — and one that began alone is not told about conversations started since.
   Ask it to run `ys workspace context`.
-- **Claude Code and Codex** are read today. Another agent's conversation is listed with why it is
-  not there. A Codex conversation is found by the thread it reported when
-  [Codex reports what it does](activity.md#what-codex-reports), and otherwise by the folder and
-  the time it first began; a resume does not change which file that is.
+- **Claude Code, Codex, Cursor and OpenCode** are read today. Grok's, OMP's, pi's and a custom
+  agent's conversations are listed with why they are not there. Claude Code's is found by the
+  session id Yardsort gave it. The others are found by the id the agent reported when it
+  [reports what it does](activity.md), and otherwise by the folder and the time the
+  conversation first began; a resume does not change which one that is:
+  - **Codex** — its session file under `~/.codex/sessions` (or `CODEX_HOME`).
+  - **Cursor** — its chat under `~/.cursor/projects/<the workspace's path>/agent-transcripts`.
+    Cursor writes the time of each message only to the minute.
+  - **OpenCode** — its session in OpenCode's database, `~/.local/share/opencode/opencode.db` (or
+    under `XDG_DATA_HOME`). A subagent's session is part of the conversation that started it,
+    and is not read as one of its own.
 - **The asking agent's own conversation is left out**, and so is what Yardsort added to a first
   message — the project's memory, a handoff packet — which the agent has anyway.
 - **A fork** shows only its own turns: the ones before the fork belong to the conversation it

@@ -431,6 +431,11 @@ pub struct Sources {
     pub claude: Vec<PathBuf>,
     pub codex: Option<PathBuf>,
     pub grok: Option<PathBuf>,
+    /// Cursor's `.cursor` under the home folder, where its conversations are: Cursor 2026.10.16
+    /// puts them there whatever `CURSOR_CONFIG_DIR` says.
+    pub cursor: Option<PathBuf>,
+    /// OpenCode's database: `opencode/opencode.db` under the XDG data folder, on every system.
+    pub opencode: Option<PathBuf>,
 }
 
 impl Sources {
@@ -451,6 +456,12 @@ impl Sources {
             claude,
             codex: crate::activity::codex::codex_home(var),
             grok: crate::activity::grok::grok_home(var),
+            cursor: home.as_ref().map(|home| home.join(".cursor")),
+            opencode: var("XDG_DATA_HOME")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| home.as_ref().map(|home| home.join(".local").join("share")))
+                .map(|data| crate::activity::transcript::opencode_db(&data)),
         }
     }
 

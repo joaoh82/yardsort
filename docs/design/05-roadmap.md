@@ -879,7 +879,7 @@ unchanged.
 
 Proposed in [29-conversation-context](29-conversation-context.md) on 2026-10-25. A second agent in
 a workspace sees the same files as the first and nothing of its conversation; the handoff packet
-says so, because the record is metadata. Slices 1 and 2 are built.
+says so, because the record is metadata. Slices 1–3 are built.
 
 - A **conversation digest** — every message the user typed and the agent's final reply per turn,
   from the harness's own transcript, within a budget, with no model — read live by
@@ -898,7 +898,11 @@ says so, because the record is metadata. Slices 1 and 2 are built.
       note on resume is ignored and none is given; Grok, OMP and Pi could not be checked live and
       ship without `context_args`. Recorded in
       [29 § slice 2](29-conversation-context.md#slice-2-what-shipped).
-- [ ] Slice 3: _What was said_ in the packet; Grok, Cursor, OpenCode, OMP and Pi.
+- [x] Slice 3: _What was said_ in the packet, and readers for Cursor and OpenCode. Found:
+      Cursor writes no tool output to its transcript and only minute-long times; OpenCode 2 keeps
+      conversations in a SQLite database, and a subagent's session reports its own id. Recorded in
+      [29 § slice 3](29-conversation-context.md#slice-3-what-shipped).
+- [ ] Readers for Grok, OMP and Pi, once an account here can record a fixture.
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
 beside it, and before its first answer Codex reads Claude's conversation and uses it; with the

@@ -357,9 +357,10 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         </h1>
         {handoff !== null && (
           <p className="mb-2 text-[12px] text-ink-faint">
-            This is what Yardsort recorded about the workspace, written as the next agent&rsquo;s
-            first message — never the last agent&rsquo;s words, which it does not keep. Read it,
-            change it, then start. The task on record stays what you first asked.
+            This is what Yardsort recorded about the workspace — and, where the project shares its
+            agents&rsquo; conversations, what was said in them — written as the next agent&rsquo;s
+            first message. Read it, change it, then start. The task on record stays what you first
+            asked.
           </p>
         )}
         {task && (

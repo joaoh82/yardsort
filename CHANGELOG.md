@@ -19,6 +19,12 @@ has the downloads and the full commit lists.
   it. The first time an agent starts beside another conversation, Yardsort asks once whether the
   project should share them. Settings → Harnesses has a new **Context args** template.
 
+- **Hand off… says what was said, and Cursor and OpenCode conversations can be read.** In a
+  project that shares its agents' conversations, the handoff message has a _What was said_ part:
+  your messages and each turn's final reply, read from the agents' own transcripts when you press
+  it, within about 4,000 tokens. `ys workspace context` and that part now read Cursor and OpenCode
+  conversations too, beside Claude Code's and Codex's.
+
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
   a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or

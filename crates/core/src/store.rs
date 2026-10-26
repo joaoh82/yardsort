@@ -1516,18 +1516,21 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// The thread ids Codex reported for a conversation, first reported first: what names its
-    /// session files. Only a conversation that was reporting has any.
-    pub fn reported_threads(&self, session_id: &str) -> StoreResult<Vec<String>> {
+    /// The ids an agent reported for a conversation in its events' `field` — Codex's
+    /// `threadId`, the `sessionId` of Cursor and OpenCode — first reported first: what names its
+    /// transcript. Only a conversation that was reporting has any.
+    pub fn reported_ids(&self, session_id: &str, field: &str) -> StoreResult<Vec<String>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT json_extract(payload, '$.threadId') AS thread FROM agent_events
+            "SELECT json_extract(payload, ?2) AS reported FROM agent_events
              WHERE (session_id = ?1
                     OR run_id IN (SELECT id FROM agent_runs WHERE session_id = ?1))
-               AND thread IS NOT NULL
-             GROUP BY thread ORDER BY MIN(seq)",
+               AND reported IS NOT NULL
+             GROUP BY reported ORDER BY MIN(seq)",
         )?;
-        let rows = stmt.query_map([session_id], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![session_id, format!("$.{field}")], |r| {
+            r.get::<_, String>(0)
+        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

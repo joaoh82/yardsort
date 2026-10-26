@@ -25,6 +25,8 @@ use crate::usage::logs::Sources;
 
 /// How much text a digest may hold, in characters: about 8k tokens.
 pub const DEFAULT_BUDGET: usize = 32_000;
+/// The same in a handoff packet, which the user reads and edits before it is sent: about 4k.
+pub const PACKET_BUDGET: usize = 16_000;
 /// The newest turns of each conversation, which are given whole while they fit.
 const RECENT_TURNS: usize = 5;
 /// A conversation's first message is its task: kept, shortened to this, whatever its age.
@@ -37,9 +39,12 @@ const MEMORY_MARKER: &str = "\n\n## Project memory\n";
 /// The heading of the note when it goes after a first message: see [`note`].
 pub const NOTE_HEADING: &str = "## This workspace's other conversations";
 const HANDOFF_MARKER: &str = "# Handoff from Yardsort";
-/// How long before its record Codex may have started a session file: the file is the agent's,
-/// the record Yardsort's, and they are not written at the same instant.
-const CODEX_SLACK_MS: i64 = 60_000;
+/// How long before its record an agent may have begun its transcript — a Codex session file, an
+/// OpenCode session: the transcript is the agent's, the record Yardsort's, and they are not
+/// written at the same instant.
+const SLACK_MS: i64 = 60_000;
+/// The same for Cursor, whose only times are its messages', to the minute.
+const CURSOR_SLACK_MS: i64 = 120_000;
 
 /// One conversation in the workspace, as read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,16 +79,13 @@ pub fn gather(
     now: i64,
 ) -> StoreResult<Vec<Conversation>> {
     let sessions = store.sessions(&workspace.id)?;
-    let codex = match sources.codex.as_deref() {
-        Some(home) => codex_files(store, workspace, &sessions, home, now)?,
-        None => HashMap::new(),
-    };
+    let located = Located::find(store, workspace, &sessions, sources, now)?;
     let mut out = Vec::new();
     for session in sessions {
         if Some(session.id.as_str()) == except {
             continue;
         }
-        let read = read_session(&session, sources, &codex);
+        let read = read_session(&session, sources, &located);
         let (mut turns, unreadable) = match read {
             Ok(turns) => (turns, None),
             Err(why) => (Vec::new(), Some(why)),
@@ -227,65 +229,126 @@ pub fn note_section(note: &Note) -> String {
     format!("{NOTE_HEADING}\n\n{}\n", note.text)
 }
 
-/// The session files of each Codex conversation in the workspace, by record id. A thread the
-/// conversation reported is its own. The others are matched by where and when they began: each
-/// file to one conversation, the closest in time first, so a conversation whose file is gone
-/// does not take a newer one's. The asking agent's own conversation takes part, so its words are
-/// never given as another's.
-fn codex_files(
+/// Where a conversation's words are, for each harness whose transcript has to be matched to it.
+#[derive(Default)]
+struct Located {
+    /// Codex session files, by record id.
+    codex: HashMap<String, Vec<PathBuf>>,
+    /// Cursor conversation files, by record id.
+    cursor: HashMap<String, Vec<PathBuf>>,
+    /// OpenCode session ids, by record id.
+    opencode: HashMap<String, Vec<String>>,
+}
+
+impl Located {
+    fn find(
+        store: &Store,
+        workspace: &WorkspaceRow,
+        sessions: &[SessionRow],
+        sources: &Sources,
+        now: i64,
+    ) -> StoreResult<Self> {
+        let cwd = Path::new(&workspace.path);
+        let mut located = Self::default();
+        if let Some(home) = sources.codex.as_deref() {
+            located.codex = locate(
+                store,
+                sessions,
+                ("codex", "threadId", SLACK_MS, now),
+                |thread| super::codex::find_rollout(home, thread),
+                |from, to| {
+                    transcript::codex_files_in(home, cwd, from, to)
+                        .into_iter()
+                        .map(|file| (file.thread, file.started_at, file.path))
+                        .collect()
+                },
+            )?;
+        }
+        if let Some(home) = sources.cursor.as_deref() {
+            located.cursor = locate(
+                store,
+                sessions,
+                ("cursor", "sessionId", CURSOR_SLACK_MS, now),
+                |chat| transcript::cursor_file(home, chat),
+                |from, to| {
+                    transcript::cursor_files_in(home, cwd, from, to)
+                        .into_iter()
+                        .map(|file| (file.chat, file.started_at, file.path))
+                        .collect()
+                },
+            )?;
+        }
+        if let Some(db) = sources.opencode.as_deref() {
+            located.opencode = locate(
+                store,
+                sessions,
+                ("opencode", "sessionId", SLACK_MS, now),
+                |id| transcript::opencode_session(db, id).map(|session| session.id),
+                |from, to| {
+                    transcript::opencode_sessions_in(db, cwd, from, to)
+                        .into_iter()
+                        .map(|session| (session.id.clone(), session.started_at, session.id))
+                        .collect()
+                },
+            )?;
+        }
+        Ok(located)
+    }
+}
+
+/// Where each of the workspace's conversations with one harness is, by record id: `(harness,
+/// the event field its id is reported in, how long before a conversation began its transcript may
+/// start, now)`. An id the conversation reported names its own. The others are matched by where
+/// and when they began — `begun` gives each transcript there in a window as `(id, start, where)`
+/// — each to one conversation, the closest in time first, so a conversation whose transcript is
+/// gone does not take a newer one's. The asking agent's own conversation takes part, so its words
+/// are never given as another's.
+fn locate<T>(
     store: &Store,
-    workspace: &WorkspaceRow,
     sessions: &[SessionRow],
-    home: &Path,
-    now: i64,
-) -> StoreResult<HashMap<String, Vec<PathBuf>>> {
-    let mut files = HashMap::new();
+    (harness, field, slack, now): (&str, &str, i64, i64),
+    by_id: impl Fn(&str) -> Option<T>,
+    begun: impl Fn(i64, i64) -> Vec<(String, i64, T)>,
+) -> StoreResult<HashMap<String, Vec<T>>> {
+    let mut found = HashMap::new();
     let mut claimed = HashSet::new();
     let mut unreported = Vec::new();
-    for session in sessions.iter().filter(|s| s.harness_id == "codex") {
-        let threads = store.reported_threads(&session.id)?;
-        let found: Vec<_> = threads
-            .iter()
-            .filter_map(|thread| super::codex::find_rollout(home, thread))
-            .collect();
-        claimed.extend(threads);
-        if found.is_empty() {
+    for session in sessions.iter().filter(|s| s.harness_id == harness) {
+        let ids = store.reported_ids(&session.id, field)?;
+        let own: Vec<T> = ids.iter().filter_map(|id| by_id(id)).collect();
+        claimed.extend(ids);
+        if own.is_empty() {
             unreported.push(session);
         } else {
-            files.insert(session.id.clone(), found);
+            found.insert(session.id.clone(), own);
         }
     }
     let mut pairs = Vec::new();
     for session in unreported {
-        // From when it first began: a resume appends to the same file, which keeps that time.
-        let candidates = transcript::codex_files_in(
-            home,
-            Path::new(&workspace.path),
-            session.began_at - CODEX_SLACK_MS,
-            session.ended_at.unwrap_or(now),
-        );
-        for file in candidates {
-            if !claimed.contains(&file.thread) {
-                let apart = (file.started_at - session.began_at).abs();
-                pairs.push((apart, session.id.as_str(), file));
+        // From when it first began: a resume appends to the same transcript, which keeps that time.
+        for (id, started_at, at) in begun(session.began_at - slack, session.ended_at.unwrap_or(now))
+        {
+            if !claimed.contains(&id) {
+                let apart = (started_at - session.began_at).abs();
+                pairs.push((apart, session.id.as_str(), id, at));
             }
         }
     }
-    pairs.sort_by(|a, b| (a.0, a.1, &a.2.path).cmp(&(b.0, b.1, &b.2.path)));
-    for (_, id, file) in pairs {
-        if files.contains_key(id) || claimed.contains(&file.thread) {
+    pairs.sort_by(|a, b| (a.0, a.1, &a.2).cmp(&(b.0, b.1, &b.2)));
+    for (_, session, id, at) in pairs {
+        if found.contains_key(session) || claimed.contains(&id) {
             continue;
         }
-        claimed.insert(file.thread);
-        files.insert(id.to_owned(), vec![file.path]);
+        claimed.insert(id);
+        found.insert(session.to_owned(), vec![at]);
     }
-    Ok(files)
+    Ok(found)
 }
 
 fn read_session(
     session: &SessionRow,
     sources: &Sources,
-    codex: &HashMap<String, Vec<PathBuf>>,
+    located: &Located,
 ) -> Result<Vec<Turn>, String> {
     let read = |path: &Path, reader: fn(std::io::BufReader<std::fs::File>) -> _| {
         std::fs::File::open(path)
@@ -293,35 +356,69 @@ fn read_session(
             .and_then(reader)
             .map_err(|e| format!("its transcript could not be read: {e}"))
     };
-    match session.harness_id.as_str() {
+    // Every file a conversation is in, read in turn: a resume may have started another.
+    let read_all = |files: &[PathBuf], reader: fn(std::io::BufReader<std::fs::File>) -> _| {
+        let mut turns = Vec::new();
+        for file in files {
+            turns.extend(read(file, reader)?);
+        }
+        Ok::<_, String>(turns)
+    };
+    let mut turns = match session.harness_id.as_str() {
         "claude" => {
             let Some(id) = session.harness_session_id.as_deref() else {
                 return Err(
                     "Yardsort did not choose its id, so its transcript cannot be found".to_owned(),
                 );
             };
-            match transcript::claude_file(&sources.claude, id) {
+            return match transcript::claude_file(&sources.claude, id) {
                 Some(path) => read(&path, transcript::read_claude),
                 None => Err("its transcript was not found".to_owned()),
-            }
+            };
         }
         "codex" => {
             if sources.codex.is_none() {
                 return Err("Codex's home folder is not known".to_owned());
             }
-            let Some(files) = codex.get(&session.id) else {
+            let Some(files) = located.codex.get(&session.id) else {
                 return Err("its session file was not found".to_owned());
             };
-            let mut turns = Vec::new();
-            for file in files {
-                turns.extend(read(file, transcript::read_codex)?);
-            }
-            turns.sort_by_key(|t| t.at);
-            turns.dedup();
-            Ok(turns)
+            read_all(files, transcript::read_codex)?
         }
-        other => Err(format!("Yardsort cannot read {other}'s conversations yet")),
-    }
+        "cursor" => {
+            if sources.cursor.is_none() {
+                return Err("the home folder is not known".to_owned());
+            }
+            let Some(files) = located.cursor.get(&session.id) else {
+                return Err("its transcript was not found".to_owned());
+            };
+            let mut turns = read_all(files, transcript::read_cursor)?;
+            // Cursor's times are to the minute, and a message may have none.
+            for turn in &mut turns {
+                if turn.at == 0 {
+                    turn.at = session.began_at;
+                }
+            }
+            turns
+        }
+        "opencode" => {
+            let Some(db) = sources.opencode.as_deref() else {
+                return Err("OpenCode's data folder is not known".to_owned());
+            };
+            let Some(ids) = located.opencode.get(&session.id) else {
+                return Err("its session was not found in OpenCode's database".to_owned());
+            };
+            let mut turns = Vec::new();
+            for id in ids {
+                turns.extend(transcript::read_opencode(db, id)?);
+            }
+            turns
+        }
+        other => return Err(format!("Yardsort cannot read {other}'s conversations yet")),
+    };
+    turns.sort_by_key(|t| t.at);
+    turns.dedup();
+    Ok(turns)
 }
 
 /// What to show.
@@ -432,10 +529,10 @@ pub fn select(conversations: &[Conversation], options: &Options) -> Digest {
         wanted.iter().map(|c| vec![None; c.turns.len()]).collect();
     let mut used: usize = wanted
         .iter()
-        .map(|c| render_header(&header(c, &[])).chars().count())
+        .map(|c| render_header(&header(c, &[]), 2).chars().count())
         .sum();
     let cost = |c: &Conversation, i: usize, form: Form| {
-        render_turn(&shown_turn(i + 1, &c.turns[i], form))
+        render_turn(&shown_turn(i + 1, &c.turns[i], form), 2)
             .chars()
             .count()
     };
@@ -559,13 +656,19 @@ pub fn render(digest: &Digest) -> String {
         out.push_str("\nNo other conversation in this workspace has said anything yet.\n");
         return out;
     }
+    render_conversations(digest, 2, &mut out);
+    out
+}
+
+/// The conversations, each under a heading of `level`, its turns one below.
+fn render_conversations(digest: &Digest, level: usize, out: &mut String) {
     for shown in &digest.conversations {
         if !out.ends_with("\n\n") {
             out.push('\n');
         }
-        out.push_str(&render_header(shown));
+        out.push_str(&render_header(shown, level));
         for turn in &shown.turns {
-            out.push_str(&render_turn(turn));
+            out.push_str(&render_turn(turn, level + 1));
         }
         if !shown.omitted.is_empty() {
             out.push_str(&format!(
@@ -581,7 +684,38 @@ pub fn render(digest: &Digest) -> String {
             ));
         }
     }
-    out
+}
+
+/// What was said in `workspace`, as a handoff packet's part of that name: every conversation in
+/// it, within [`PACKET_BUDGET`], with headings under the packet's. `None` when the project does
+/// not share its agents' conversations, or none of them has said anything yet.
+pub fn packet_section(
+    store: &Store,
+    workspace: &WorkspaceRow,
+    sources: &Sources,
+    now: i64,
+) -> StoreResult<Option<String>> {
+    if !store.conversations_shared(&workspace.project_id)? {
+        return Ok(None);
+    }
+    let conversations = gather(store, workspace, None, sources, now)?;
+    if conversations.iter().all(|c| c.turns.is_empty()) {
+        return Ok(None);
+    }
+    let digest = select(
+        &conversations,
+        &Options {
+            budget: PACKET_BUDGET,
+            ..Options::default()
+        },
+    );
+    let mut out = String::from(
+        "Read from each agent's own transcript as this packet was made: every message the user \
+         typed, and the agent's reply at the end of each turn, newest turn first. Times are UTC. \
+         `ys workspace context` reads it again as it is then.\n",
+    );
+    render_conversations(&digest, 3, &mut out);
+    Ok(Some(out))
 }
 
 fn agent(harness: &str, model: Option<&str>) -> String {
@@ -591,9 +725,10 @@ fn agent(harness: &str, model: Option<&str>) -> String {
     }
 }
 
-fn render_header(shown: &Shown) -> String {
+fn render_header(shown: &Shown, level: usize) -> String {
     let mut line = format!(
-        "## {} · conversation {}",
+        "{} {} · conversation {}",
+        "#".repeat(level),
         agent(&shown.harness, shown.model.as_deref()),
         shown.id
     );
@@ -624,8 +759,13 @@ fn render_header(shown: &Shown) -> String {
     line
 }
 
-fn render_turn(turn: &ShownTurn) -> String {
-    let mut out = format!("### Turn {} · {}\n\nUser:\n", turn.n, when(turn.at));
+fn render_turn(turn: &ShownTurn, level: usize) -> String {
+    let mut out = format!(
+        "{} Turn {} · {}\n\nUser:\n",
+        "#".repeat(level),
+        turn.n,
+        when(turn.at)
+    );
     out.push_str(&quote(&turn.user));
     match &turn.reply {
         Some(reply) => {
@@ -777,7 +917,36 @@ mod tests {
         Sources {
             claude: vec![claude],
             codex: Some(codex),
-            grok: None,
+            ..Default::default()
+        }
+    }
+
+    /// A home folder holding the recorded Cursor chat, and an OpenCode database holding the
+    /// recorded session, each where it was recorded.
+    fn more_sources(dir: &Path) -> Sources {
+        let cursor = dir.join(".cursor");
+        let chat = "33333333-3333-4333-8333-333333333333";
+        let folder =
+            transcript::cursor_folder(&cursor, Path::new("/tmp/yardsort-fixture/repo-cursor"))
+                .join(chat);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::copy(
+            fixtures().join("cursor/2026.10.16-e3cb207/conversation.jsonl"),
+            folder.join(format!("{chat}.jsonl")),
+        )
+        .unwrap();
+        let opencode = transcript::opencode_db(dir);
+        std::fs::create_dir_all(opencode.parent().unwrap()).unwrap();
+        let conn = rusqlite::Connection::open(&opencode).unwrap();
+        conn.pragma_update(None, "foreign_keys", false).unwrap();
+        conn.execute_batch(
+            &std::fs::read_to_string(fixtures().join("opencode/2.0.32/conversation.sql")).unwrap(),
+        )
+        .unwrap();
+        Sources {
+            cursor: Some(cursor),
+            opencode: Some(opencode),
+            ..Default::default()
         }
     }
 
@@ -849,6 +1018,104 @@ mod tests {
         assert!(!text.contains("\n\n\n"), "{text}");
         assert!(!text.contains("File created successfully"), "{text}");
         assert!(!text.contains("tool_use"), "{text}");
+    }
+
+    #[test]
+    fn cursor_and_opencode_conversations_are_read_from_their_own_stores() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo-cursor"));
+        let sources = more_sources(dir.path());
+        // Cursor's chat is found by the folder it names after the workspace, and when it began:
+        // its first message, Monday, Oct 26, 2026, 8:59 AM (UTC).
+        let began = crate::activity::iso_to_ms("2026-10-26T08:58:40Z").unwrap();
+        session(&store, &ws.id, "rec-cursor", "cursor", None);
+        store.set_session_started("rec-cursor", began);
+        // OpenCode's session began in another folder; the id it reported is what names it.
+        session(&store, &ws.id, "rec-opencode", "opencode", None);
+        store
+            .add_event(&NewEvent {
+                id: "e1",
+                schema_version: 1,
+                workspace_id: &ws.id,
+                session_id: Some("rec-opencode"),
+                run_id: None,
+                occurred_at: T0,
+                kind: "session.started",
+                producer: "opencode",
+                method: "plugin",
+                fidelity: "reported",
+                source_key: None,
+                privacy_class: "metadata",
+                payload: r#"{"sessionId":"ses_fixture0000000000000001"}"#,
+            })
+            .unwrap();
+        // One that reported nothing, and began where nothing is.
+        session(&store, &ws.id, "rec-silent", "opencode", None);
+
+        let found = gather(&store, &ws, None, &sources, began + 3_600_000).unwrap();
+        let by = |id: &str| found.iter().find(|c| c.id == id).unwrap();
+        let cursor = by("rec-cursor");
+        assert_eq!(cursor.turns.len(), 2, "{:?}", cursor.unreadable);
+        assert_eq!(
+            cursor.turns[0].user,
+            "Read notes.txt, then reply with one short sentence saying what it says."
+        );
+        assert_eq!(
+            by("rec-opencode").turns.len(),
+            2,
+            "{:?}",
+            by("rec-opencode").unreadable
+        );
+        assert_eq!(
+            by("rec-silent").unreadable.as_deref(),
+            Some("its session was not found in OpenCode's database")
+        );
+
+        // Another workspace has neither: Cursor's folder is this one's, and OpenCode's session
+        // here was never reported.
+        let store = Store::in_memory();
+        let elsewhere = workspace(&store, Path::new("/tmp/yardsort-fixture/elsewhere"));
+        session(&store, &elsewhere.id, "rec-cursor-2", "cursor", None);
+        store.set_session_started("rec-cursor-2", began);
+        let found = gather(&store, &elsewhere, None, &sources, began + 3_600_000).unwrap();
+        assert_eq!(
+            found[0].unreadable.as_deref(),
+            Some("its transcript was not found")
+        );
+    }
+
+    #[test]
+    fn a_packet_says_what_was_said_only_where_the_project_shares_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo"));
+        let sources = sources(dir.path());
+        session(&store, &ws.id, "rec-claude", "claude", Some("claude-a"));
+        assert_eq!(packet_section(&store, &ws, &sources, T0).unwrap(), None);
+
+        store
+            .set_conversations_shared(&ws.project_id, true)
+            .unwrap();
+        let said = packet_section(&store, &ws, &sources, T0).unwrap().unwrap();
+        // Under the packet's own headings: a conversation is a level below its part.
+        assert!(
+            said.contains("\n### claude · conversation rec-clau"),
+            "{said}"
+        );
+        assert!(said.contains("\n#### Turn 2 · "), "{said}");
+        assert!(!said.contains("\n## "), "{said}");
+        assert!(said.contains("> Thanks. In one sentence, what is left to do?"));
+        assert!(said.starts_with("Read from each agent's own transcript as this packet was made"));
+
+        // A conversation that has said nothing gives no part at all.
+        let store = Store::in_memory();
+        let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo"));
+        store
+            .set_conversations_shared(&ws.project_id, true)
+            .unwrap();
+        session(&store, &ws.id, "rec-grok", "grok", None);
+        assert_eq!(packet_section(&store, &ws, &sources, T0).unwrap(), None);
     }
 
     #[test]
