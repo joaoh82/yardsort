@@ -655,12 +655,6 @@ export const ipc = {
    */
   conversationContext: (workspaceId: string, except: string | null) =>
     unwrap(commands.conversationContext(workspaceId, except)),
-  /**
-   * What the note would be about, when an agent starting in this workspace should first ask
-   * whether the project shares conversations — once per project. `null` when there is no
-   * question: answered already, or nothing said here yet.
-   */
-  conversationsUnasked: (workspaceId: string) => unwrap(commands.conversationsUnasked(workspaceId)),
   /** How many proposals wait, per project that has any. */
   memoryWaiting: () => unwrap(commands.memoryWaiting()),
   /** Jev's word on each waiting proposal: repeats or contradicts an approved entry. */

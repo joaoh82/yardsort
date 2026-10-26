@@ -309,6 +309,8 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     their system prompt at each launch, so a resumed conversation does follow a new
     `--append-system-prompt`; the per-harness switch is `resume_context`, on for those two. Grok
     1.0.70 keeps its `--rules` across a resume, as Claude Code and Codex do.
-42. ~~**What is the switch's default?**~~ **Settled 2026-10-25: off**, and asked once per project
-    the first time an agent starts beside a conversation that has said something — built in
-    slice 2.
+42. ~~**What is the switch's default?**~~ **Settled 2026-10-26: on**, by the user's decision; a
+    project shares until it is turned off in its Memory view. It was first settled off on
+    2026-10-25, with a question asked once per project the first time an agent started beside a
+    conversation (built in slice 2); with the default on there is nothing to ask, and the
+    question is gone.

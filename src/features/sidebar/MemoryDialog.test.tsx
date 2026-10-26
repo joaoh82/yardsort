@@ -39,7 +39,7 @@ const entry = (id: string, text: string, extra: Partial<MemoryEntry> = {}): Memo
 const memory = (
   entries: MemoryEntry[],
   shared = false,
-  conversationsShared = false,
+  conversationsShared = true,
 ): ProjectMemory => ({
   projectId: "p-app",
   shared,
@@ -148,15 +148,15 @@ describe("MemoryDialog", () => {
       ).toBeChecked(),
     );
 
-    // Sharing conversations is its own switch, off until it is turned on.
+    // Sharing conversations is its own switch, on until it is turned off.
     const conversations = screen.getByRole("checkbox", {
       name: /Share conversations between this project.s agents/,
     });
-    expect(conversations).not.toBeChecked();
-    core.conversationsShare.mockResolvedValue(memory([kept], true, true));
+    expect(conversations).toBeChecked();
+    core.conversationsShare.mockResolvedValue(memory([kept], true, false));
     await user.click(conversations);
-    expect(core.conversationsShare).toHaveBeenCalledWith("p-app", true);
-    await waitFor(() => expect(conversations).toBeChecked());
+    expect(core.conversationsShare).toHaveBeenCalledWith("p-app", false);
+    await waitFor(() => expect(conversations).not.toBeChecked());
     expect(
       screen.getByRole("checkbox", { name: /Give this project.s agents its memory/ }),
     ).toBeChecked();

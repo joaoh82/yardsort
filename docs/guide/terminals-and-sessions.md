@@ -164,11 +164,9 @@ turn, and `--turn` shows any one whole. See the [CLI guide](cli.md#ys-workspace-
 
 Some things to know:
 
-- **It is off until you turn it on**, per project. What an agent reads goes to that agent's
-  provider: Claude's conversation, read by Codex, is sent to OpenAI as part of Codex's work. Turn
-  it on in projects where that is fine. The first time you start an agent beside a conversation
-  in a project you have not decided for, Yardsort asks; either answer is kept, and closing the
-  question starts nothing.
+- **It is on unless you turn it off**, per project, in the project's Memory view. What an agent
+  reads goes to that agent's provider: Claude's conversation, read by Codex, is sent to OpenAI as
+  part of Codex's work. Turn it off in projects where that is not fine.
 - **A new agent is told.** An agent started in a workspace where another conversation has said
   something gets a short note: which conversations there are, and that `ys workspace context`
   reads them. It says nothing of what was said — the agent reads that when it needs it, so it is

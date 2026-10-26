@@ -269,9 +269,9 @@ reason this is a switch at all, and the setting says it in those words.
 
 - The digest never leaves the machine by Yardsort's hand: it goes to an agent the user started,
   through that agent's own connection.
-- The default is undecided — [open question 42](06-open-questions.md#conversation-context). The
-  lean: off until asked, and asked once per project, the first time a second agent starts in a
-  workspace that has a conversation, with the sentence above.
+- ~~The default is undecided~~ — [open question 42](06-open-questions.md#conversation-context):
+  first off with a question asked once per project (slice 2), then **on** from 2026-10-26, the
+  user's call, with no question; the Memory view's switch turns it off, with the sentence above.
 - Clearing activity does not touch this, because there is nothing of it to clear. Deleting the
   workspace ends it.
 
@@ -538,3 +538,13 @@ Built on 2026-10-26, once Grok was signed in.
 
 Owed: the rows for Grok and an OMP resume in
 [08 § 26](08-manual-checklist.md#26--conversation-context), and macOS and Windows.
+
+## The default: on
+
+Changed on 2026-10-26, the user's decision: a project shares its agents' conversations unless it
+is turned off ([open question 42](06-open-questions.md#conversation-context)). A project with no
+row in `project_conversations` now shares — `Store::conversations_shared` reads a missing row as
+on; migration 0016, already merged, still says off and is left as it was. The once-per-project
+question is removed (`digest::unasked`, `conversations_unasked`, the dialog), since it asked to
+turn on what is already on. A project whose user answered _Not in this project_ keeps its row,
+and stays off.

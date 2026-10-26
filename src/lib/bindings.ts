@@ -302,12 +302,6 @@ export const commands = {
 	digest: string,
 } | null, IpcError>(__TAURI_INVOKE("conversation_context", { workspaceId, except })),
 	/**
-	 *  Whether to ask, before an agent starts in `workspace_id`, if its project should share its
-	 *  agents' conversations — asked once per project, beside a conversation that has said
-	 *  something — and what the note would be about. The answer is `conversations_share`.
-	 */
-	conversationsUnasked: (workspaceId: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("conversations_unasked", { workspaceId })),
-	/**
 	 *  How many proposals wait, per project that has any. Agents propose through `ys`, which writes
 	 *  the database directly, so the window asks again when it regains focus and when activity lands.
 	 */

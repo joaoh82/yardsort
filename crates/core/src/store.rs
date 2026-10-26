@@ -1383,8 +1383,9 @@ impl Store {
         Ok(())
     }
 
-    /// Whether a project's agents may read each other's conversations. Not until the user says
-    /// so: a project with no row here has never been asked, and does not share.
+    /// Whether a project's agents may read each other's conversations: yes unless the user has
+    /// turned it off. A project with no row here shares — the default since 2026-10-26; migration
+    /// 0016 describes the first one, off.
     pub fn conversations_shared(&self, project_id: &str) -> StoreResult<bool> {
         let conn = self.conn();
         Ok(conn
@@ -1394,21 +1395,7 @@ impl Store {
                 |r| r.get::<_, i64>(0),
             )
             .optional()?
-            .is_some_and(|share| share != 0))
-    }
-
-    /// Whether the user has said, either way, whether a project shares conversations: the
-    /// question is asked once, and a project with a row has its answer.
-    pub fn conversations_decided(&self, project_id: &str) -> StoreResult<bool> {
-        let conn = self.conn();
-        Ok(conn
-            .query_row(
-                "SELECT 1 FROM project_conversations WHERE project_id = ?",
-                [project_id],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some())
+            .is_none_or(|share| share != 0))
     }
 
     pub fn set_conversations_shared(&self, project_id: &str, share: bool) -> StoreResult<()> {
@@ -2998,5 +2985,19 @@ mod tests {
         });
 
         assert_eq!(app.projects().unwrap().len(), EACH * 2);
+    }
+
+    #[test]
+    fn a_project_shares_its_agents_conversations_until_turned_off() {
+        let store = Store::in_memory();
+        let project = store.add_project("app", "/code/app").unwrap();
+        assert!(
+            store.conversations_shared(&project.id).unwrap(),
+            "on by default"
+        );
+        store.set_conversations_shared(&project.id, false).unwrap();
+        assert!(!store.conversations_shared(&project.id).unwrap());
+        store.set_conversations_shared(&project.id, true).unwrap();
+        assert!(store.conversations_shared(&project.id).unwrap());
     }
 }

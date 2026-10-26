@@ -5,19 +5,17 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
-- **An agent can read what was said in the workspace's other conversations.** Tick **Share
-  conversations between this project's agents** in a project's Memory view, and
+- **An agent can read what was said in the workspace's other conversations.**
   `ys workspace context` prints every message you typed and each turn's reply from the Claude Code
   and Codex conversations beside it, read from their own transcripts, without tool output, within
-  about 8,000 tokens. Nothing is stored. Off unless you turn it on, because what an agent reads
-  goes to its provider.
+  about 8,000 tokens. Nothing is stored. On unless you untick **Share conversations between this
+  project's agents** in a project's Memory view — what an agent reads goes to its provider.
 
 - **A new agent is told when other conversations in its workspace can be read.** Claude Code and
   Codex get a short note as background context, so one started from the tab bar knows without a
   first message; other agents get it after the first message, and their buttons ask whether to
   start with the handoff. The tab says so, with **Show**; **Alt-click** starts an agent without
-  it. The first time an agent starts beside another conversation, Yardsort asks once whether the
-  project should share them. Settings → Harnesses has a new **Context args** template.
+  it. Settings → Harnesses has a new **Context args** template.
 
 - **Hand off… says what was said, and Cursor and OpenCode conversations can be read.** In a
   project that shares its agents' conversations, the handoff message has a _What was said_ part:

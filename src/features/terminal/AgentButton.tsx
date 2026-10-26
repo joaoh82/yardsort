@@ -5,7 +5,6 @@ import { ipc, type HarnessInfo } from "@/lib/ipc";
 import { useTerminalStore } from "@/stores/terminals";
 import { handOff } from "./handOff";
 import { bareHarness } from "./quickLaunch";
-import { useShareQuestion } from "./shareQuestion";
 
 /**
  * Start an agent here with no first message. Beside other conversations, in a project that
@@ -27,7 +26,6 @@ export function AgentButton({
 }) {
   const open = useTerminalStore((s) => s.open);
   const [askAt, setAskAt] = useState<{ x: number; y: number } | null>(null);
-  const share = useShareQuestion();
   const start = (skipContext = false) =>
     void open(
       workspaceId,
@@ -37,7 +35,6 @@ export function AgentButton({
   const click = async (event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.altKey) return start(true);
     const box = event.currentTarget.getBoundingClientRect();
-    if (!(await share.ask(workspaceId))) return;
     if ((harness.contextArgs ?? []).length > 0) return start();
     const context = await ipc.conversationContext(workspaceId, null).catch(() => null);
     if (!context) return start();
@@ -68,7 +65,6 @@ export function AgentButton({
           onClose={() => setAskAt(null)}
         />
       )}
-      {share.question}
     </>
   );
 }

@@ -227,21 +227,6 @@ pub fn note_on_resume(
     note_for(store, workspace, Some(resuming), sources, now)
 }
 
-/// Whether to ask the user, before an agent starts in `workspace`, if the project should share
-/// its agents' conversations: when it has never been asked, and another conversation here has
-/// said something. Gives what the note would be about, for the question.
-pub fn unasked(
-    store: &Store,
-    workspace: &WorkspaceRow,
-    sources: &Sources,
-    now: i64,
-) -> StoreResult<Option<String>> {
-    if store.conversations_decided(&workspace.project_id)? {
-        return Ok(None);
-    }
-    Ok(note(&gather(store, workspace, None, sources, now)?).map(|note| note.about))
-}
-
 /// The note as a section after a first message, for an agent that takes no background context.
 pub fn note_section(note: &Note) -> String {
     format!("{NOTE_HEADING}\n\n{}\n", note.text)
@@ -1362,6 +1347,10 @@ mod tests {
         let ws = workspace(&store, Path::new("/tmp/yardsort-fixture/repo"));
         let sources = sources(dir.path());
         session(&store, &ws.id, "rec-claude", "claude", Some("claude-a"));
+        // A project shares until the user turns it off.
+        store
+            .set_conversations_shared(&ws.project_id, false)
+            .unwrap();
         assert_eq!(packet_section(&store, &ws, &sources, T0).unwrap(), None);
 
         store
@@ -1548,46 +1537,6 @@ mod tests {
             found[0].unreadable.as_deref(),
             Some("its session file was not found")
         );
-    }
-
-    #[test]
-    fn the_question_is_asked_once_and_only_beside_a_conversation() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::in_memory();
-        let ws = workspace(&store, Path::new("/wt/fix"));
-        let sources = sources(dir.path());
-        assert_eq!(
-            unasked(&store, &ws, &sources, T0).unwrap(),
-            None,
-            "nothing said yet"
-        );
-        session(&store, &ws.id, "rec-claude", "claude", Some("claude-a"));
-        assert_eq!(
-            unasked(&store, &ws, &sources, T0).unwrap().as_deref(),
-            Some("claude's conversation")
-        );
-        assert_eq!(
-            note_for(&store, &ws, None, &sources, T0).unwrap(),
-            None,
-            "still off"
-        );
-        store
-            .set_conversations_shared(&ws.project_id, false)
-            .unwrap();
-        assert_eq!(
-            unasked(&store, &ws, &sources, T0).unwrap(),
-            None,
-            "answered no"
-        );
-        store
-            .set_conversations_shared(&ws.project_id, true)
-            .unwrap();
-        assert_eq!(
-            unasked(&store, &ws, &sources, T0).unwrap(),
-            None,
-            "answered yes"
-        );
-        assert!(note_for(&store, &ws, None, &sources, T0).unwrap().is_some());
     }
 
     #[test]

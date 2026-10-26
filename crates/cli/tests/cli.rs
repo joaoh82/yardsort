@@ -728,11 +728,11 @@ fn the_handoff_packet_is_printed_from_the_record_and_git_together() {
     );
 }
 
-/// An agent asks what the workspace's other conversation said: nothing until the project shares
-/// conversations; then the user's messages and the replies, from the recorded transcript, without
-/// the tool output and without the asking agent's own conversation.
+/// An agent asks what the workspace's other conversation said: nothing while the project has
+/// turned sharing off; otherwise the user's messages and the replies, from the recorded
+/// transcript, without the tool output and without the asking agent's own conversation.
 #[test]
-fn an_agent_reads_the_other_conversations_only_once_the_project_shares_them() {
+fn an_agent_reads_the_other_conversations_only_while_the_project_shares_them() {
     let fx = Fixture::new();
     let made = make_workspace(&fx, "Fix the login redirect");
     let workspace_id = made["id"].as_str().unwrap().to_owned();
@@ -790,7 +790,12 @@ fn an_agent_reads_the_other_conversations_only_once_the_project_shares_them() {
         )
     };
 
-    // Off until the user turns it on.
+    // On by default; turned off, nothing is read.
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .set_conversations_shared(&workspace.project_id, false)
+        .unwrap();
+    drop(store);
     let (code, _, refused) = as_agent(&["workspace", "context"]);
     assert_eq!(code, Some(1));
     assert!(

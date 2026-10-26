@@ -13,7 +13,6 @@ import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
 import { ConversationsDialog } from "@/features/terminal/ConversationsDialog";
-import { useShareQuestion } from "@/features/terminal/shareQuestion";
 import { useFileDrop } from "@/lib/useFileDrop";
 import { useShortcutLabel } from "@/stores/preferences";
 import { insertDroppedPaths } from "./drop";
@@ -190,7 +189,6 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const [conversations, setConversations] = useState<{ about: string } | null>(null);
   const [skipContext, setSkipContext] = useState(false);
   const [showConversations, setShowConversations] = useState(false);
-  const share = useShareQuestion();
   const runInId = runIn?.id;
   useEffect(() => {
     if (!runInId || !hasCore()) return;
@@ -253,8 +251,8 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // A branch lives in one worktree at a time, so only branches nobody has checked out can open.
   const openable = branches?.branches.filter((name) => !branches.checkedOut.includes(name)) ?? [];
 
-  // Taken before anything is awaited: a second Start while the first is still asking or
-  // spawning would start a second agent on the same task.
+  // Taken before anything is awaited: a second Start while the first is still spawning would
+  // start a second agent on the same task.
   const starting = useRef(false);
   const start = async () => {
     if (!ready || !harness || starting.current) return;
@@ -269,8 +267,6 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const launch = async (harness: HarnessInfo) => {
     setBusy(true);
     setError(null);
-    // Beside another conversation, in a project never asked: whether to share them, first.
-    if (runIn && !(await share.ask(runIn.id))) return setBusy(false);
     const projects = useProjectsStore.getState();
     const request = {
       id: harness.id,
@@ -645,7 +641,6 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         </div>
       </form>
       {importing && <ImportWorktreesDialog project={project} onClose={() => setImporting(false)} />}
-      {share.question}
     </div>
   );
 }

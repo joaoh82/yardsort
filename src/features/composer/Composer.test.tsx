@@ -29,8 +29,6 @@ const core = vi.hoisted(() => ({
   ptySpawn: vi.fn(),
   memoryGet: vi.fn(),
   conversationContext: vi.fn(),
-  conversationsUnasked: vi.fn(),
-  conversationsShare: vi.fn(),
   outcomesAgents: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -91,7 +89,6 @@ describe("Composer", () => {
     drag.handler = null;
     core.uiStateSave.mockResolvedValue(undefined);
     core.conversationContext.mockResolvedValue(null);
-    core.conversationsUnasked.mockResolvedValue(null);
     core.projectBranches.mockResolvedValue({
       branches: ["develop", "main", "ys/kept-earlier", "ys/in-use"],
       default: "main",
@@ -460,7 +457,6 @@ describe("Composer with Assist", () => {
     vi.clearAllMocks();
     core.uiStateSave.mockResolvedValue(undefined);
     core.conversationContext.mockResolvedValue(null);
-    core.conversationsUnasked.mockResolvedValue(null);
     core.projectBranches.mockResolvedValue({ branches: ["main"], default: "main", checkedOut: [] });
     core.harnessesList.mockResolvedValue([
       harness("claude", { efforts: ["low", "medium", "high"] }),
@@ -672,33 +668,17 @@ describe("Composer with Assist", () => {
     });
   });
 
-  it("asks once whether the project shares conversations before starting in a workspace", async () => {
-    core.conversationsUnasked.mockResolvedValue("codex's conversation");
-    core.conversationsShare.mockResolvedValue({});
-    core.ptySpawn.mockResolvedValue(session("w-app"));
-    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
-    const user = userEvent.setup();
-    render(<Composer project={app} runIn={app.workspaces[0]} />);
-    await user.type(await screen.findByRole("textbox", { name: /work on/ }), "Fix it{Enter}");
-    const question = await screen.findByRole("dialog", { name: /read each other.s conversations/ });
-    expect(core.ptySpawn).not.toHaveBeenCalled();
-    await user.click(within(question).getByRole("button", { name: "Share conversations" }));
-    expect(core.conversationsShare).toHaveBeenCalledWith("p-app", true);
-    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
-  });
-
-  it("starts once however often Start is pressed while it is still asking", async () => {
-    let answer: (about: string | null) => void = () => {};
-    core.conversationsUnasked.mockReturnValue(new Promise((resolve) => (answer = resolve)));
-    core.ptySpawn.mockResolvedValue(session("w-app"));
+  it("starts once however often Start is pressed while it is still starting", async () => {
+    let spawned: (info: ReturnType<typeof session>) => void = () => {};
+    core.ptySpawn.mockReturnValue(new Promise((resolve) => (spawned = resolve)));
     useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
     const user = userEvent.setup();
     render(<Composer project={app} runIn={app.workspaces[0]} />);
     await user.type(await screen.findByRole("textbox", { name: /work on/ }), "Fix it{Enter}");
     await user.keyboard("{Enter}");
     fireEvent.submit(screen.getByRole("form", { name: "Run in local" }));
-    answer(null);
-    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    spawned(session("w-app"));
+    await waitFor(() => expect(useTerminalStore.getState().tabs).toHaveLength(1));
     expect(core.ptySpawn).toHaveBeenCalledTimes(1);
   });
 
