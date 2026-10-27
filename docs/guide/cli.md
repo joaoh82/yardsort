@@ -161,7 +161,8 @@ that launched the command — cannot be removed, and nothing is deleted.
 
 Prints the handoff packet for a workspace: what Yardsort recorded there — the task, where the
 branch stands and who wrote each changed file, what each agent run did, and what is not known —
-written as the next agent's first message. The same text the app's **Hand off…** button starts
+written as the next agent's first message. In a project that shares its agents' conversations it
+also says what was said in them, as `ys workspace context` would, within 16,000 characters. The same text the app's **Hand off…** button starts
 from (see [handing work to another agent](terminals-and-sessions.md#handing-work-to-another-agent)),
 without Assist's ordering of the files, which the command line has no key for.
 
@@ -172,6 +173,39 @@ ys workspace handoff fix-the-flaky-login-test > handoff.md
 
 The workspace can be named or given by id. `--json` gives `{ "text", "runs", "events" }`.
 Nothing is started: pipe the text where you want it, or paste it as an agent's first message.
+
+### `ys workspace context [workspace]`
+
+What was said in a workspace's other conversations, for an agent joining the work: every message
+you typed and the agent's reply at the end of each turn, newest turn first, read from each
+agent's own transcript. Tool calls, their output and the agents' reasoning are left out. See
+[what agents can read of each other](terminals-and-sessions.md#what-agents-can-read-of-each-other).
+
+```sh
+ys workspace context                                  # the workspace this is run in
+ys workspace context fix-the-flaky-login-test         # one by name or id, from anywhere
+ys workspace context --conversation 3f2a1b9c          # one conversation, by the id it shows
+ys workspace context --conversation 3f2a1b9c --turn 12   # one turn whole
+ys workspace context --since 2026-10-25T13:00Z        # only turns from then on, in UTC
+ys workspace context --budget 64000 --json
+```
+
+It answers only in a project that shares its conversations — on unless you untick **Share
+conversations between this project's agents** in the Memory view — and otherwise says so. Run by
+an agent Yardsort started, it leaves out that agent's own conversation.
+
+The digest fits in `--budget` characters (32,000 by default, about 8,000 tokens): each
+conversation's first message, its task; then its newest five turns, whole when they fit; then
+older turns, shortened, newest first. What did not fit is listed by turn number, and `--turn`
+shows any one of them whole — the message and everything the agent wrote in that turn, its
+commentary between tool calls too, still without the tool calls. `--turn` needs `--conversation`
+when there is more than one. `--json` gives `{ "conversations": [{ "id", "harness", "model",
+"startedAt", "lastTurnAt", "running", "forkedFrom", "turnCount", "turns": [{ "n", "at", "user",
+"reply", "shortened" }], "omitted", "unreadable" }] }`, or, with `--turn`, that one turn with
+everything the agent `said`.
+
+Claude Code's and Codex's conversations are read today. Any other agent's is listed with the
+reason it is not there.
 
 ### `ys session list`
 
@@ -205,7 +239,9 @@ ys attach 6051993d             # the start of an id from `ys session list`
 ```
 
 With nothing named it attaches to the only running session, and asks which one you meant if there
-is more than one. A shell has no workspace name, so reach it by id.
+is more than one, listing each with an id to name it by. A workspace's name picks its agent when it
+has one; when two agents share a workspace, name one by the id `ys session list` prints. A shell
+has no workspace name or record, so reach it by the id that list of choices gives.
 
 Attaching matches the session to your terminal's size, and follows it if you resize the window.
 If the app has the same session open in a tab, that tab's size and yours are the same setting —
@@ -223,6 +259,7 @@ that have **finished**, which is the one thing `attach` will not do.
 ```sh
 ys logs                        # the only session, if there is one
 ys logs fix-the-flaky-login-test
+ys logs 6051993d               # the start of an id from `ys session list`, as for attach
 ys logs --lines 20             # just the end of it
 ys logs --json                 # the text as a JSON field, for scripts
 ys logs --raw                  # escape sequences and colours, exactly as the app would repaint

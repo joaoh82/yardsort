@@ -283,7 +283,7 @@ is sent anywhere, so the server is not an open redirector.
   that signs in again keeps its id and its grants, and the device it was before stops acting
   for it.
 
-**The host's own record** (`yardsort-core`, `remote::host`, migration `0016_remote_host.sql`):
+**The host's own record** (`yardsort-core`, `remote::host`, migration `0018_remote_host.sql`):
 
 - `remote_host` is this machine as a host on one server, written when Remote is turned on and
   deleted when it is turned off. A new server's host does not inherit an earlier server's grants.

@@ -880,7 +880,7 @@ unchanged.
 
 Proposed in [29-conversation-context](29-conversation-context.md) on 2026-10-25. A second agent in
 a workspace sees the same files as the first and nothing of its conversation; the handoff packet
-says so, because the record is metadata. Nothing here is built.
+says so, because the record is metadata. Slices 1–3 are built.
 
 - A **conversation digest** — every message the user typed and the agent's final reply per turn,
   from the harness's own transcript, within a budget, with no model — read live by
@@ -889,9 +889,35 @@ says so, because the record is metadata. Nothing here is built.
   `context_args` harness template (no first message, so no turn) from the tab bar; a section after
   the memory from the composer; the digest itself in **Hand off…**'s packet.
 - A per-project switch, since the digest goes to another agent's provider.
-- [ ] Slice 1: the digest and `ys workspace context`, for Claude Code and Codex.
-- [ ] Slice 2: `context_args`, the note, the tab bar and composer.
-- [ ] Slice 3: _What was said_ in the packet; Grok, Cursor, OpenCode, OMP and Pi.
+- [x] Slice 1: the digest and `ys workspace context`, for Claude Code and Codex, and the switch,
+      off by default. Found: a Claude Code fork repeats its parent's turns with their times; a
+      Codex session file can be 2.4 GB, so transcripts stream; recorded transcripts carry the
+      account's own setup and the fixtures keep only the conversation. Recorded in
+      [29 § slice 1](29-conversation-context.md#slice-1-what-shipped).
+- [x] Slice 2: `context_args`, the note, the tab bar and composer, and asking once per project.
+      Found: Claude Code and Codex both keep the system prompt a conversation began with, so a
+      note on resume is ignored and none is given; Grok, OMP and Pi could not be checked live and
+      ship without `context_args`. Recorded in
+      [29 § slice 2](29-conversation-context.md#slice-2-what-shipped).
+- [x] Slice 3: _What was said_ in the packet, and readers for Cursor, OpenCode, OMP and pi. Found:
+      Cursor writes no tool output to its transcript and only minute-long times; OpenCode 2 keeps
+      conversations in a SQLite database, and a subagent's session reports its own id. Recorded in
+      [29 § slice 3](29-conversation-context.md#slice-3-what-shipped).
+      OMP and pi followed once they were signed in: readers for both (one format, a tree of
+      entries) and their `context_args`, checked live; both take a new note on resume.
+- [x] A reader for Grok, once an account here could record a fixture (1.0.70, 2026-10-26), and its
+      `--rules` template; and the note on resume for OMP and pi (`resume_context`, from
+      [open question 41](06-open-questions.md#conversation-context)). Grok keeps its rules across
+      a resume, so it is not given one. Recorded in
+      [29 § after slice 3](29-conversation-context.md#after-slice-3-grok-and-resume).
+- [x] The note on resume for Claude Code: `--system-prompt-snapshot off` on a told resume, in a
+      `resume_context_args` template that replaced the switch, settling
+      [open question 41](06-open-questions.md#conversation-context). Found: the snapshot-off build
+      is stable, so it costs one cache write per told resume, not one per request. Recorded in
+      [29 § Claude Code on resume](29-conversation-context.md#claude-code-on-resume).
+- [x] Checklist § 26 in the app on Linux, 2026-10-26: every row passes. Found: two of its rows had
+      been filed under § 21, and `ys attach` / `ys logs` did not take the id `ys session list`
+      prints. Recorded in [29 § checked in the app](29-conversation-context.md#checked-in-the-app).
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
 beside it, and before its first answer Codex reads Claude's conversation and uses it; with the

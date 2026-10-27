@@ -5,6 +5,42 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **An agent can read what was said in the workspace's other conversations.**
+  `ys workspace context` prints every message you typed and each turn's reply from the Claude Code
+  and Codex conversations beside it, read from their own transcripts, without tool output, within
+  about 8,000 tokens. Nothing is stored. On unless you untick **Share conversations between this
+  project's agents** in a project's Memory view — what an agent reads goes to its provider.
+
+- **A new agent is told when other conversations in its workspace can be read.** Claude Code and
+  Codex get a short note as background context, so one started from the tab bar knows without a
+  first message; other agents get it after the first message, and their buttons ask whether to
+  start with the handoff. The tab says so, with **Show**; **Alt-click** starts an agent without
+  it. Settings → Harnesses has a new **Context args** template.
+
+- **Hand off… says what was said, and Cursor and OpenCode conversations can be read.** In a
+  project that shares its agents' conversations, the handoff message has a _What was said_ part:
+  your messages and each turn's final reply, read from the agents' own transcripts when you press
+  it, within about 4,000 tokens. `ys workspace context` and that part now read Grok, Cursor,
+  OpenCode, OMP and pi conversations too, beside Claude Code's and Codex's, and Grok, OMP and pi
+  are told about them as background context, as Claude Code and Codex are. A resumed or forked Claude
+  Code, OMP or pi conversation is told again, about the conversations there are then — Claude
+  Code with `--system-prompt-snapshot off` on that resume, so it reads the new note. Settings →
+  Harnesses has a **Resume context args** template for it.
+
+- **`ys attach` and `ys logs` take the id `ys session list` prints.** They took only a workspace
+  name or a terminal's own id, so two agents in one workspace could not be told apart. When a name
+  matches several, each choice is listed with an id to name it by.
+
+- **A conversation nothing has been said in yet is described as one.** Agents write no transcript
+  until they are asked something, so `ys workspace context` listed a conversation started
+  without a message as one whose transcript was not found, and the agent reading it could only
+  guess. It now says that one was started without a message, so most likely nothing has been
+  said in it yet.
+
+- **`ys` stops quietly when what it is printing to stops reading.** `ys session list | head`
+  panicked with _failed printing to stdout: Broken pipe_ once `head` had its lines, and
+  `ys logs --raw` failed with _cannot write the screen_; both now exit without a word.
+
 - **A terminal you come back to while it is printing no longer shows a stray fragment.**
   Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
   a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or

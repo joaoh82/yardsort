@@ -27,6 +27,12 @@ that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere)
 
 When the project [shares its memory](memory.md#giving-agents-the-memory), a line under the pickers says its approved entries go after your message — or, while nothing is approved yet, that the agent will be asked to propose some — **Show** reads what is added, and unticking leaves it out of this one launch. Your message stays the task on record.
 
+Started in a workspace that already has another conversation, in a project that
+[shares conversations](memory.md#sharing-conversations), another line says the agent will be told
+it can read them — as background context for Claude Code and Codex, otherwise after your message
+— with **Show** for the note and what it reads, and a box to leave it out of this launch. See
+[what agents can read of each other](terminals-and-sessions.md#what-agents-can-read-of-each-other).
+
 Under the pickers, the composer also shows your history with the agent you picked, across your projects — _kept 3 of 5_, or _too few to say yet_ — from the [outcomes](outcomes.md) you have recorded. It is shown, never used to choose for you.
 
 Your last choices are remembered per project. With [Assist](assist.md) switched on, a line under

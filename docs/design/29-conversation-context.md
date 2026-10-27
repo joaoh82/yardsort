@@ -1,7 +1,13 @@
 # 29 — Conversation context between a workspace's agents
 
-_Proposal, 2026-10-25. Decisions from the design pass on 2026-10-24 and 2026-10-25 are recorded;
-nothing here is built yet._
+_Proposal, 2026-10-25. Decisions from the design pass on 2026-10-24 and 2026-10-25 are recorded.
+Slices 1–3 are built — the digest for every built-in agent,
+`ys workspace context`, the switch, telling every new agent, and *What was said* in the handoff
+packet — and [§ slice 1](#slice-1-what-shipped), [§ slice 2](#slice-2-what-shipped) and
+[§ slice 3](#slice-3-what-shipped) say where they differ from the proposal below, with
+[§ after slice 3](#after-slice-3-grok-and-resume) for Grok and the note on resume, and
+[§ Claude Code on resume](#claude-code-on-resume) for the last of it;
+[§ checked in the app](#checked-in-the-app) records the pass on Linux._
 
 A workspace can hold several conversations: Claude in one tab, Codex or Cursor in the next. They
 share the worktree, so the second agent sees the same files and the same diff — and nothing of
@@ -91,8 +97,9 @@ What it says:
   because of pasted text in the user's messages — review comments, logs, documents. So the digest
   has a budget, and long messages are cut before recent replies are.
 
-Not measured yet: the same for Codex, Grok, Cursor, OpenCode and Pi. Slice 1 repeats it for
-Codex before the budget is fixed.
+Codex was measured in slice 1, with the readers themselves:
+[§ slice 1](#slice-1-what-shipped); Cursor in slice 3 ([§ slice 3](#slice-3-what-shipped)). Grok,
+OpenCode, OMP and Pi are not measured yet.
 
 ## The digest
 
@@ -159,15 +166,15 @@ omitted, unreadable }] }` for scripts and for the composer.
 Each needs a small reader in the core, beside its adapter. Versions are the ones installed here
 on 2026-10-25.
 
-| Harness               | Where                                                                        | How Yardsort finds it                                                                                                                                                               | State                                                                                          |
-| --------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Claude Code 2.1.302   | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session id>.jsonl` | The session id is assigned by Yardsort; find the file by id under any `projects/` dir.                                                                                              | Format known: `activity::context` reads it for usage today. First reader.                      |
-| Codex 0.163.0         | `<CODEX_HOME>/sessions/<y>/<m>/<d>/rollout-*-<thread>[_<fork>].jsonl`        | `activity::codex::find_rollout` by the `threadId` on the run's events — present only with Codex capture on; otherwise the newest rollout whose `session_meta.cwd` is the workspace. | `UserMessage` and `AgentMessage` items already parsed for metadata. First reader.              |
-| Grok 1.0.50           | `$GROK_HOME/sessions/<encoded cwd>/<id>/chat_history.jsonl`                  | `activity::grok::find_session_dir` by session id.                                                                                                                                   | The file is listed in [14](14-agent-events-stage-2-grok.md) but never read; needs a fixture.   |
-| Cursor 2026.10.16     | The hook payload's `transcript_path`                                         | Not kept today: the adapter would record it, so only with Cursor capture on.                                                                                                        | Format unknown; needs a fixture. [16](16-agent-events-stage-2-cursor.md) never reads the path. |
-| OpenCode 2.0.32       | OpenCode's own storage                                                       | By the session id the plugin reports.                                                                                                                                               | Unknown. The plugin could report message text itself instead; decided on a fixture.            |
-| OMP 18.11.3, Pi 1.4.0 | Their session files                                                          | Pi's id is assigned; OMP's is latest-in-cwd.                                                                                                                                        | Needs fixtures.                                                                                |
-| A custom harness      | —                                                                            | —                                                                                                                                                                                   | No reader. Listed as unreadable, with its turn count when it reports events.                   |
+| Harness               | Where                                                                                    | How Yardsort finds it                                                                                                                                                               | State                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Claude Code 2.1.302   | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session id>.jsonl`             | The session id is assigned by Yardsort; find the file by id under any `projects/` dir.                                                                                              | Format known: `activity::context` reads it for usage today. First reader.         |
+| Codex 0.163.0         | `<CODEX_HOME>/sessions/<y>/<m>/<d>/rollout-*-<thread>[_<fork>].jsonl`                    | `activity::codex::find_rollout` by the `threadId` on the run's events — present only with Codex capture on; otherwise the newest rollout whose `session_meta.cwd` is the workspace. | `UserMessage` and `AgentMessage` items already parsed for metadata. First reader. |
+| Grok 1.0.70           | `$GROK_HOME/sessions/<encoded cwd>/<id>/chat_history.jsonl`, timed by `events.jsonl`     | `activity::grok::find_session_dir` by session id.                                                                                                                                   | Read after slice 3, with fixtures.                                                |
+| Cursor 2026.10.16     | `~/.cursor/projects/<cwd as dashes>/agent-transcripts/<chat>/<chat>.jsonl`               | The chat id its hooks report as `sessionId`, with capture on; otherwise by folder and first message's time.                                                                         | Read in slice 3, with a fixture.                                                  |
+| OpenCode 2.0.32       | Its SQLite database, `opencode/opencode.db` under the XDG data folder                    | The session id the plugin reports, with capture on; otherwise by `session_v2.directory` and start.                                                                                  | Read in slice 3, with a fixture: the database, not the plugin.                    |
+| OMP 18.11.3, Pi 1.4.0 | `<PI_CODING_AGENT_DIR or ~/.omp/agent, ~/.pi/agent>/sessions/<folder>/<time>_<id>.jsonl` | Pi's id is assigned; OMP's is the `sessionId` its extension reports, otherwise by the name's time and the `session` line's folder.                                                  | Read in slice 3, with fixtures: one format, a tree.                               |
+| A custom harness      | —                                                                                        | —                                                                                                                                                                                   | No reader. Listed as unreadable, with its turn count when it reports events.      |
 
 Transcript formats change between versions, as hook payloads do. Each reader is tested against
 a recorded fixture under `crates/core/fixtures/<harness>/<version>/`, and a format it does not
@@ -239,7 +246,9 @@ conversation is compacted. So:
 - A Claude conversation that began **alone**, and is resumed after another agent has worked
   beside it, does not see a new note. Passing `--system-prompt-snapshot off` on such a resume
   would fix it at the cost of the cached system prompt on every request. See
-  [open question 41](06-open-questions.md#conversation-context).
+  [open question 41](06-open-questions.md#conversation-context), and
+  [§ Claude Code on resume](#claude-code-on-resume) for what was built: the cost turned out to
+  be one cache write per told resume, not one per request.
 
 Other harnesses are checked for the same behaviour when their template is verified.
 
@@ -264,9 +273,9 @@ reason this is a switch at all, and the setting says it in those words.
 
 - The digest never leaves the machine by Yardsort's hand: it goes to an agent the user started,
   through that agent's own connection.
-- The default is undecided — [open question 42](06-open-questions.md#conversation-context). The
-  lean: off until asked, and asked once per project, the first time a second agent starts in a
-  workspace that has a conversation, with the sentence above.
+- ~~The default is undecided~~ — [open question 42](06-open-questions.md#conversation-context):
+  first off with a question asked once per project (slice 2), then **on** from 2026-10-26, the
+  user's call, with no question; the Memory view's switch turns it off, with the sentence above.
 - Clearing activity does not touch this, because there is nothing of it to clear. Deleting the
   workspace ends it.
 
@@ -277,9 +286,9 @@ reason this is a switch at all, and the setting says it in those words.
   so a Windows profile and a relocated home both work.
 - **Files being written:** the transcript of a running agent is read while it grows. A last line
   without its newline is a line not yet written, as `activity::grok` treats it, and is skipped.
-- **Size:** a transcript is read whole and refused above 256 MiB; the largest here is 155 MB.
-  Reading from the end until the budget is full is the follow-up if that is slow — not before a
-  measurement says so.
+- **Size:** ~~a transcript is read whole and refused above 256 MiB~~ — a Codex session file
+  here is 2.4 GB, so transcripts are read line by line with no limit, and a line that cannot hold
+  a message is skipped before it is parsed. Measured in [§ slice 1](#slice-1-what-shipped).
 - **The command line:** the note is the only new argument, and it is short; see above.
 
 ## Slices
@@ -323,3 +332,289 @@ Each its own pull request, with its guides in the same one.
 - **Nothing across workspaces.** A workspace's conversations are for its own agents. What should
   outlive it is memory, proposed and approved as it is now.
 - **No transcript content in the timeline, the inbox or Assist.** Those stay as they are.
+
+## Slice 1: what shipped
+
+Built on 2026-10-25, after the default was settled: **off** until the user turns it on
+([open question 42](06-open-questions.md#conversation-context)).
+
+- **The readers**, `crates/core/src/activity/transcript.rs`. Claude Code: a `user` line is the
+  user's when its content is text, it is not `isMeta`, a compact summary or a sidechain, its
+  `origin.kind` — where the version writes one — is `human`, and it does not start with a tag
+  Claude Code puts there itself (a slash command and its output, a background task's report,
+  `[Request interrupted`). Assistant text is gathered per `message.id`, since a message is written
+  once per content block; `<synthetic>` messages are not the model's. Codex: `UserMessage` and
+  `AgentMessage` items of the file's own thread; the reply is the last agent text of the turn,
+  and `task_complete`'s `last_agent_message` when no `final_answer` came. Both stream: a line
+  that cannot hold anything wanted is skipped unparsed, and a last line without its newline is
+  left for the next read.
+- **Fixtures recorded for this**, by `scripts/record-conversations.sh`: a two-turn Claude Code
+  2.1.302 conversation and its fork, and a two-turn Codex 0.163.0 thread across `exec resume`.
+  The raw files carried the recording account's own setup — Claude Code's attachment and request
+  lines hold the system prompt, the user's memory, skills and connectors; Codex's `world_state`
+  lists skills and the time zone — so the script keeps only the conversation's lines whole and
+  leaves the rest as their type alone. Claude Code's print mode marks the user's message
+  `promptSource: "sdk"` with no `origin`, an interactive one `origin.kind: "human"`; the reader
+  takes both, and a hand-written test covers the lines only an interactive session writes.
+- **What the recordings showed.** A Claude Code fork repeats the conversation before it with the
+  original times, so a fork's turns before its record began are dropped and the digest says whose
+  they are. Codex appends a resumed thread to the same session file.
+- **When a conversation began.** A session record's `started_at` moves to the latest start on
+  every resume, which the sessions list wants. The digest needs the first — a fork's own turns are
+  those after it, and a Codex file keeps the time it began — so migration 0017 adds `began_at`,
+  which a resume leaves alone. Older records get their first capture run's start if it was
+  earlier; a record resumed before this, without capture, has lost its first start.
+- **Finding a Codex conversation.** By the `threadId` its run reported, when Codex capture was
+  on; otherwise by a session file whose `session_meta` names the workspace's folder and began
+  between a minute before the conversation began and its end. Each file goes to one conversation,
+  never one whose thread another reported, and the closest in time is matched first: a
+  conversation whose file is gone is listed as not found rather than given a newer one's — the
+  asking agent's own takes part for that, though it is not shown. The day folders are Codex's
+  local dates, so the days either side are looked in too, and only each file's first line is
+  read.
+- **The digest**, `crates/core/src/activity/digest.rs`, as proposed, with these differences:
+  each message is quoted (`> `) under `User:` and `Agent:`, so a heading in a message cannot pass
+  for one of the digest's; there is no _Asked:_ line — the first message is kept as the task,
+  cut to 2,000 characters, and keeps that cut if it later gains its reply; a conversation with no
+  turn yet is left out, and one that cannot be read is listed last with why.
+- **`ys workspace context`**: as proposed, plus `--turn` with no `--conversation` when there is
+  only one. It drains the inbox first, as every `ys` read does, so a Codex thread reported a
+  moment ago is found by id.
+- **The switch** lives in the Memory view, under memory's own: migration 0016
+  (`project_conversations`, no row is off), `conversations_share`, and `conversationsShared` on
+  `ProjectMemory`.
+
+Measured with the readers on this machine's largest transcripts, release build: the user's
+typed messages and each turn's reply.
+
+| Agent  | Transcript | Turns |  Typed | Replies | Share of the file | Read in |
+| ------ | ---------- | ----: | -----: | ------: | ----------------: | ------: |
+| Claude | 155.5 MB   |    31 |  7,881 |  57,801 |            0.042% |   57 ms |
+| Claude | 91.2 MB    |    41 |  5,785 |  74,703 |            0.088% |   39 ms |
+| Claude | 49.4 MB    |    32 |  9,931 |  73,162 |            0.168% |   27 ms |
+| Claude | 13.0 MB    |    14 |  2,070 |  16,887 |            0.145% |    7 ms |
+| Codex  | 2,423.2 MB |   208 | 97,765 | 115,184 |            0.009% | 2132 ms |
+| Codex  | 381.1 MB   |   240 | 90,379 | 128,200 |            0.057% |  162 ms |
+| Codex  | 69.8 MB    |    50 | 21,994 | 107,363 |            0.185% |   25 ms |
+| Codex  | 5.0 MB     |     9 | 37,552 |   3,647 |            0.827% |    2 ms |
+
+Characters, not bytes. The Claude rows are smaller than the first measurement's because that one
+counted every text `user` line — compact summaries and background-task reports among them —
+where the reader keeps only what was typed. The 2.4 GB Codex file is the desktop app's, not one
+Yardsort started; it is read in about two seconds, and nothing smaller comes near.
+
+Not done in this slice, as planned: telling the agent (slice 2), and the packet and the other
+harnesses (slice 3). Owed: the hands-on pass in [08](08-manual-checklist.md) on macOS and Windows.
+
+## Slice 2: what shipped
+
+Built on 2026-10-25.
+
+- **`context_args`** on the harness definition, with `{context}`, between the session and prompt
+  args; editable in Settings → Harnesses as **Context args**, and **What will run** shows it with
+  a sample. Shipped for the two checked live, by giving a codeword through the option and asking
+  for it: Claude Code 2.1.302, `--append-system-prompt {context}`, and Codex 0.163.0,
+  `-c developer_instructions={context}` — accepted though not in `--help`, a value that is not
+  TOML taken as the string itself, quotes and newlines included. **Not shipped** for Grok, OMP
+  and Pi: their options are in `--help`, but no account was signed in on this machine to check
+  them, so they are told after the first message; a user can set them. OpenCode's would be code
+  in its adapter, and Cursor has none.
+- **The note**, `digest::note`: as proposed, naming up to four conversations by agent, turn count
+  and last turn, the rest counted. It is built from the same reading as the digest, at launch, so
+  starting an agent beside other conversations reads their transcripts — milliseconds for
+  ordinary ones, measured in [§ slice 1](#slice-1-what-shipped). Given only with a turn said; the tab gets
+  a `toldAbout` label with what it was about.
+- **Where it goes** is decided in `launch::resolve_launch_with`, so every way of starting a new
+  agent — tab bar, the empty workspace's buttons, composer, workflow steps, the conflict helper's
+  new conversation, `ys workspace new` — gets the same rule: background context when the harness
+  has `context_args`, the message left as typed; otherwise a _This workspace's other
+  conversations_ section after the message (after _Project memory_); otherwise nothing. The
+  digest strips that section from first messages as it does memory's. A handoff gets it too: its
+  packet still says the conversation is not in it, until slice 3.
+- **Resume does not give the note** — a finding, checked live on both: Claude Code keeps the
+  system prompt a conversation began with (its `--system-prompt-snapshot`, on by default), and
+  Codex keeps its developer instructions the same way; a new one on resume is ignored, with
+  `-c` before or after `resume --last`. A note there would be a line in **What will run** the
+  agent never sees, so `continue_args` leaves `context_args` out.
+  [Open question 41](06-open-questions.md#conversation-context) stays open for the
+  snapshot-off option.
+- **In the window:** a line under the tabs for a new told agent's first minute, a **⇄** mark on
+  its tab after, and **Show** on both, opening the note and the digest as they read now; the
+  composer's line with **Show** and a box (`skipContext`); **Alt-click** on any agent button;
+  for a harness without `context_args`, the button asks — **Start with the handoff…** or
+  **Start fresh** — and asks only when there is something to be told.
+- **Asked once per project**, as [open question 42](06-open-questions.md#conversation-context)
+  planned: before an agent starts beside a conversation that has said something, in a project
+  that has never answered, a dialog asks whether to share, in the privacy section's words.
+  Either answer writes the project's row in `project_conversations` — so "asked" needs nothing
+  new: no row is the question not yet asked — and the launch goes on; closing it starts nothing.
+
+Owed: the live check in [08 § 26](08-manual-checklist.md#26--conversation-context) — Codex started
+from the tab bar beside Claude reads the digest before its first answer — on each platform.
+
+## Slice 3: what shipped
+
+Built on 2026-10-26.
+
+- **_What was said_ in the packet.** `digest::packet_section` gives every conversation in the
+  workspace — none is the asker's, since the packet is for an agent not started yet — within
+  `PACKET_BUDGET`, 16,000 characters (half `ys workspace context`'s, since the user reads it in the
+  composer), with the digest's headings a level down under the packet's `## What was said`. It goes
+  after _What the agents did here_ and before _Project memory_, and only where the project shares
+  conversations and one of them has said something. With it, the packet's opening says where its
+  words come from, and _What is not here_ names what the part leaves out — reasoning, tool calls
+  and their output, the turns it shortened — with the `--turn` line, instead of "the conversations
+  themselves". `Facts.said` is filled by each caller — **Hand off…**, `ys workspace handoff`, a
+  workflow's handoff — since it needs the launch environment's folders. The composer's line about
+  the packet now says it may hold what was said.
+- **Cursor**, 2026.10.16-e3cb207, recorded by `scripts/record-conversations.sh` (now four agents):
+  `~/.cursor/projects/<folder>/agent-transcripts/<chat>/<chat>.jsonl`. Found in Cursor's own code
+  rather than guessed: the folder is the working directory with every run of non-alphanumerics
+  made one dash and trimmed, always under the home folder, whatever `CURSOR_CONFIG_DIR` says. (The
+  folders with a hash on the end are a worker socket's, which has a path-length limit.) Each line
+  is `{role, message: {content}}` with `text` and `tool_use` blocks; **no tool output is written at
+  all**, so the 13 transcripts here are 1–170 KB and the conversation is 7–50% of each. The user's
+  words are inside `<user_query>`, after a `<timestamp>` in local time to the minute —
+  `Monday, Oct 26, 2026, 9:53 AM (UTC+1)` — the only time in the file; every one of the 13, the
+  interactive ones from Yardsort included, has both. The fixture is recorded with `TZ=UTC`, so its
+  times read as UTC; the offset form is tested on its own. A user line without `<user_query>`
+  reads as a form not known, not as nothing.
+- **OpenCode**, 2.0.32: not files but its SQLite database, `opencode/opencode.db` under
+  `XDG_DATA_HOME` or `~/.local/share`, opened read-only. A conversation is a `session_v2` row
+  with no parent (a subagent's has one, and reports its own session id, so a reported id is
+  checked); its `session_message` rows in `seq` order are `user` — `text` — and `assistant` —
+  `content` of `text`, `reasoning` and `tool` parts — and `idle`. Times are milliseconds. The
+  fixture is the two tables as SQL, from a throwaway data folder and a free model, so no account
+  was needed; `opencode run` keeps its message in quotes, and the fixture keeps them. A database
+  without these tables, OpenCode 1's, is _a form Yardsort does not know_. Only `opencode run` was
+  recorded; an interactive session goes through the same server.
+- **Finding a conversation** is now one function for the three agents whose ids Yardsort does not
+  choose: an id the conversation reported names its own — Codex's `threadId`, the `sessionId`
+  Cursor's hooks and OpenCode's and OMP's extensions give (`Store::reported_ids`) — and the others are matched
+  by folder and time, each transcript to one conversation, closest first. Cursor's slack is two
+  minutes, for its minute-long times.
+- **OMP 18.11.3 and pi 1.4.0**, recorded once the user signed both in, the same afternoon: one
+  format, `sessions/<folder>/<time>_<session id>.jsonl` under the agent folder, read by one reader.
+  The file is a **tree** — every entry has an `id` and `parentId`, and going back to an earlier
+  point leaves the old branch in the file — so the conversation read is the branch ending at the
+  last entry. pi records the **whole system prompt** as a `system` message, the user's own skills
+  and their paths among it, and both keep the provider's own payload and the reasoning: the
+  script strips all three from the fixtures. A pi fork is a new file with a copy of the branch at
+  the original times, which the fork rule already handles. pi is found by the id Yardsort gives
+  it; OMP by the `sessionId` its extension reports, or by the time in the file's name and the
+  folder its `session` line names. `PI_CODING_AGENT_DIR`, which both read, is honoured.
+- **Their `context_args`, checked live** with the note's own wording, a quote and a newline: OMP
+  `--append-system-prompt={context}`, pi `--append-system-prompt {context}`. Unlike Claude Code
+  and Codex, **both take a new system prompt on resume** — each launch builds it afresh — so a
+  resume could tell them; that needs a per-harness switch and is left with
+  [open question 41](06-open-questions.md#conversation-context).
+- **Grok** still reads as _Yardsort cannot read grok's conversations yet_: it could not be signed
+  in on this machine to record a fixture (the one Grok session here is a month old, from 1.0.41,
+  and five lines long), and a reader without one is a guess.
+
+Owed: the live check in [08 § 26](08-manual-checklist.md#26--conversation-context) for the packet
+and for Cursor, OpenCode, OMP and pi beside Claude, and the readers on macOS and Windows — OpenCode's data
+folder there is assumed, from its use of XDG folders everywhere, not checked.
+
+## After slice 3: Grok and resume
+
+Built on 2026-10-26, once Grok was signed in.
+
+- **Grok 1.0.70.** `chat_history.jsonl` in the session folder has **no times**. A typed message is
+  a `user` line with a `prompt_index`, inside `<user_query>`; the other `user` lines are Grok's —
+  `<user_info>` with the OS, shell and path, and `system_reminder`s listing the user's skills and
+  MCP servers — and the first line is the whole system prompt. Times come from `events.jsonl`: a
+  `turn_started` whose `turn_number` is the prompt's index. A **fork** (`--resume
+--fork-session`) copies the history but not the events, so a copied prompt has no start of its
+  own: it reads as untimed and the fork rule leaves it out, while an untimed turn of a
+  conversation that is not a fork takes its start. The fixtures keep only `turn_started` events,
+  and the system prompt, Grok's own lines and the reasoning are stripped.
+- **Grok's `--rules {context}`**, checked live with the note's wording, a quote and a newline. On
+  resume it keeps the rules the conversation began with, as Claude Code and Codex do: asked to end
+  every reply with a word, a resumed conversation did not, and a new one did.
+- **The note on resume, for OMP and pi**
+  ([open question 41](06-open-questions.md#conversation-context)): a new harness field,
+  `resume_context`, puts `context_args` after the resume or fork args. It is on for OMP and pi,
+  which build their system prompt at each launch, and editable in Settings → Harnesses. The app's
+  resume and fork compute the note as a new start does, about every conversation but the one
+  continued (`digest::note_on_resume`), and label the tab, so its line and mark show. (The
+  field was then a switch, `resume_context`; it became a template of its own the same day, for
+  Claude Code — [§ Claude Code on resume](#claude-code-on-resume).)
+
+Owed: the rows for Grok and an OMP resume in
+[08 § 26](08-manual-checklist.md#26--conversation-context), and macOS and Windows.
+
+## The default: on
+
+Changed on 2026-10-26, the user's decision: a project shares its agents' conversations unless it
+is turned off ([open question 42](06-open-questions.md#conversation-context)). A project with no
+row in `project_conversations` now shares — `Store::conversations_shared` reads a missing row as
+on; migration 0016, already merged, still says off and is left as it was. The once-per-project
+question is removed (`digest::unasked`, `conversations_unasked`, the dialog), since it asked to
+turn on what is already on. A project whose user answered _Not in this project_ keeps its row,
+and stays off.
+
+## Claude Code on resume
+
+Built on 2026-10-26, the last of
+[open question 41](06-open-questions.md#conversation-context). Checked live with Claude Code
+2.1.302 in print mode, on a throwaway repository, with a note asking every reply to end in one
+word:
+
+| Launch on a conversation that began with no note   | Note followed | Cache written | Cache read |
+| -------------------------------------------------- | ------------- | ------------- | ---------- |
+| `--resume` with `--append-system-prompt`           | no            | 26,943        | 14,430     |
+| the same with `--system-prompt-snapshot off`       | yes           | 32,033        | 11,236     |
+| the same again                                     | yes           | 1,901         | 41,421     |
+| `--resume` with neither                            | no            | 3,081         | 40,265     |
+| a fork (`--fork-session`) with both                | yes           | 1,205         | 43,297     |
+| snapshot off, three requests in one launch (tools) | yes           | 148–242 each  | ~43,000    |
+
+So snapshot off builds the system prompt afresh for that launch, and the build is stable: the
+next request, and the next launch with the same note, read it from the cache. The cost the
+question feared, a cached system prompt lost on every request, is not there. What remains is one
+write of the conversation's cache on a told resume whose prompt differs from the last one sent,
+which a resume after the cache has expired pays anyway. The snapshot itself is untouched: a later
+launch without the option sends what the conversation recorded first.
+
+- **`resume_context` became `resume_context_args`**, a template like `context_args`, placed after
+  the resume or fork args. OMP and pi have their context args there; Claude Code has
+  `--system-prompt-snapshot off --append-system-prompt {context}`; Codex and Grok have nothing.
+  As with every group, it is dropped whole when there is no note, so a resume with nothing to
+  tell is the plain `--resume` it was. Settings → Harnesses has it as **Resume context args** in
+  place of the box. The field was not released, so nothing reads the old one.
+- **Every told resume, not only one that began alone.** The lean was to turn the snapshot off only
+  for a conversation that began without the note. Yardsort does not record what a conversation
+  began with, and a conversation that began with it gains a note naming the conversations as they
+  are now, for the same one write.
+- **An older Claude Code refuses the option** (`error: unknown option`), and the resume fails to
+  start. Built-in flags follow the version verified, as elsewhere in
+  [04](04-harnesses.md); the settings guide says to clear the field or update Claude Code. When
+  the option arrived is not known.
+
+Owed: macOS and Windows.
+
+## Checked in the app
+
+On 2026-10-26 every row of [08 § 26](08-manual-checklist.md#26--conversation-context) passed on
+Linux, in a development build on a throwaway profile with all seven agents signed in: Codex beside
+Claude told without a question and reading the digest first; the composer's line and its box;
+Alt-click; Grok without context args offering the handoff; a resumed Claude that began alone run
+with `--system-prompt-snapshot off` and naming Codex's conversation, and run plainly once sharing
+was off; the packet's _What was said_ with sharing on and off; Grok, OMP and pi told from the tab
+bar, a resumed OMP told again and a resumed Grok not; every conversation in the digest, without
+tool output. Found on the way:
+
+- The handoff row and the row for the other five agents had been filed under § 21; they are in
+  § 26 now.
+- `ys attach` and `ys logs` took a workspace name or a terminal's own id, not the record id
+  `ys session list` prints, so two agents in one workspace could not be told apart. They take the
+  record's id too now, and a refusal lists each choice with an id to name it by.
+- pi, on Kimi K2.6, was given the note and answered a question about the folder without running
+  the command; the others ran it first. The note asks; it cannot make a model do it.
+- A Claude Code and a Grok conversation opened and closed without a message were listed as ones
+  whose transcript or session folder was not found, and Claude, reading that, wondered aloud
+  whether one of them was its own. Neither writes anything until it is asked something, so a
+  conversation started without a first message and not found now says that most likely nothing
+  has been said in it yet. One that began with a message and is not found keeps the plain reason:
+  that one has been lost.

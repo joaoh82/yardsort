@@ -9,17 +9,17 @@ import { TasksView } from "@/features/tasks/TasksView";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
 import { LatencyRunner } from "@/features/terminal/LatencyRunner";
-import { bareHarness } from "@/features/terminal/quickLaunch";
+import { AgentButton } from "@/features/terminal/AgentButton";
 import { ContextBar } from "@/features/terminal/ContextBar";
+import { ToldBar } from "@/features/terminal/ToldBar";
 import { EndedBar } from "@/features/terminal/EndedBar";
 import { SessionHistory } from "@/features/terminal/SessionHistory";
 import { TerminalTabs } from "@/features/terminal/TerminalTabs";
 import { TerminalView } from "@/features/terminal/TerminalView";
 import { useTerminalSessions } from "@/features/terminal/useTerminalSessions";
-import { ipc, errorMessage, type HarnessRequest, type Project, type Workspace } from "@/lib/ipc";
+import { ipc, errorMessage, type Project, type Workspace } from "@/lib/ipc";
 import { ProjectSettingsDialog } from "@/features/sidebar/ProjectSettingsDialog";
 import { useAppStore } from "@/stores/app";
-import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
 import { useShortcutLabel } from "@/stores/preferences";
 import { useProjectsStore, useSelectedWorkspace } from "@/stores/projects";
@@ -142,6 +142,7 @@ function WorkspaceTerminals(props: {
       )}
       {activeTab && <EndedBar tab={activeTab} />}
       {activeTab && <ContextBar tab={activeTab} />}
+      {activeTab && <ToldBar key={activeTab.id} tab={activeTab} />}
       <div className="min-h-0 flex-1">
         {/* Only the active terminal is mounted; the others keep running in the core and are
             repainted from a snapshot when they come back. `key` forces a fresh view per session. */}
@@ -158,7 +159,7 @@ function WorkspaceTerminals(props: {
             ) : (
               <>
                 <p className="text-ink-muted">Nothing running in this workspace.</p>
-                <LaunchButtons onLaunch={(harness) => void open(workspace.id, harness)} />
+                <LaunchButtons workspaceId={workspace.id} onShell={() => void open(workspace.id)} />
               </>
             )}
             <SessionHistory workspaceId={workspace.id} />
@@ -247,25 +248,22 @@ function LocalActions({ workspace }: { workspace: Workspace }) {
   );
 }
 
-function LaunchButtons({ onLaunch }: { onLaunch: (harness?: HarnessRequest) => void }) {
+function LaunchButtons({ workspaceId, onShell }: { workspaceId: string; onShell: () => void }) {
   const harnesses = launchable(useHarnessStore((s) => s.harnesses));
   const button =
     "rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink";
   return (
     <div className="mt-4 flex flex-wrap justify-center gap-2">
-      <button type="button" onClick={() => onLaunch()} className={button}>
+      <button type="button" onClick={onShell} className={button}>
         shell
       </button>
-      {harnesses.map(({ id, label }) => (
-        <button
-          key={id}
-          type="button"
-          onClick={() => onLaunch(bareHarness(id))}
+      {harnesses.map((harness) => (
+        <AgentButton
+          key={harness.id}
+          workspaceId={workspaceId}
+          harness={harness}
           className={`${button} inline-flex items-center gap-1.5`}
-        >
-          <HarnessIcon id={id} label={label} />
-          {id}
-        </button>
+        />
       ))}
     </div>
   );

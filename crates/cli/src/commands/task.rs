@@ -234,7 +234,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
 
             out.emit(&tasks, || {
                 if tasks.is_empty() {
-                    println!("{}", nothing(state, &filter));
+                    sayln!("{}", nothing(state, &filter));
                     return;
                 }
                 let mut rows = vec![vec![
@@ -268,7 +268,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                     true => Failure::new(LOGGED_OUT),
                     false => Failure::new(error.to_string()),
                 })?;
-            out.emit(&detail, || print!("{}", written(&detail)))
+            out.emit(&detail, || say!("{}", written(&detail)))
         }
         Command::Create {
             title,
@@ -294,7 +294,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 )
                 .map_err(said)?;
             out.emit(&created, || {
-                println!("created  {}\n  url    {}", created.key, created.url)
+                sayln!("created  {}\n  url    {}", created.key, created.url)
             })
         }
         Command::Comment {
@@ -426,7 +426,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             }
             let delegated = delegate::delegated(&detail);
             if print {
-                return out.emit(&delegated, || print!("{}", delegated.prompt));
+                return out.emit(&delegated, || say!("{}", delegated.prompt));
             }
             super::workspace::new(
                 ys,
@@ -483,7 +483,7 @@ fn done(out: &Output, task: &str, did: &str, word: &str) -> Result<(), Failure> 
         None => task.to_owned(),
     };
     let done = Done { task: key, did };
-    out.emit(&done, || println!("{word} {}.", done.task))
+    out.emit(&done, || sayln!("{word} {}.", done.task))
 }
 
 const LOGGED_OUT: &str = "Nobody is logged in to the GitHub CLI. Run `gh auth login`, then try \

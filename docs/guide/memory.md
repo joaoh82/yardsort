@@ -60,6 +60,15 @@ should be told nothing, and it stays off. While it is ticked:
 Revoking an entry takes it out of every launch after that. Launches already running keep what
 they were given.
 
+## Sharing conversations
+
+The Memory view has a second switch, **Share conversations between this project's agents**, on
+until you untick it. What an agent reads goes to that agent's provider, so untick it in a project
+whose conversations should stay with the agent they were said to. It is not memory: nothing is written and nothing outlives the workspace. While
+it is on, an agent in one of the project's workspaces can run `ys workspace context` to read what
+was said in the workspace's other conversations, and a new agent started beside one is told so.
+See [what agents can read of each other](terminals-and-sessions.md#what-agents-can-read-of-each-other).
+
 ## What agents can run
 
 Every agent Yardsort starts can run [`ys`](cli.md#ys-memory), which ships with the app:

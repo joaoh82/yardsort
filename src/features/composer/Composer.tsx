@@ -12,6 +12,7 @@ import {
 import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
+import { ConversationsDialog } from "@/features/terminal/ConversationsDialog";
 import { useFileDrop } from "@/lib/useFileDrop";
 import { useShortcutLabel } from "@/stores/preferences";
 import { insertDroppedPaths } from "./drop";
@@ -63,9 +64,12 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const [note] = useState(() => (runIn ? null : useProjectsStore.getState().composingPrompt));
   const [task] = useState(() => (runIn ? null : useProjectsStore.getState().composingTask));
   const [message, setMessage] = useState(handoff ?? note ?? "");
-  const [harnessId, setHarnessId] = useState<string | null>(null);
-  const [model, setModel] = useState(last.model ?? "");
-  const [effort, setEffort] = useState(last.effort ?? "");
+  // Asked for by one agent's button: that agent, and the last picks only if they were for it.
+  const [handed] = useState(() => (runIn ? useProjectsStore.getState().composingHarness : null));
+  const lastFits = !handed || handed === last.harness;
+  const [harnessId, setHarnessId] = useState<string | null>(handed);
+  const [model, setModel] = useState((lastFits && last.model) || "");
+  const [effort, setEffort] = useState((lastFits && last.effort) || "");
   const [branches, setBranches] = useState<BranchList | null>(null);
   // "new:<branch>" starts a new branch from <branch>; "open:<branch>" opens <branch> itself.
   const [base, setBase] = useState("");
@@ -180,6 +184,24 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     };
   }, [project.id, handoff]);
 
+  // In a workspace with other conversations, in a project that shares them: what the agent is
+  // told about them, and a way to leave that out of this one launch.
+  const [conversations, setConversations] = useState<{ about: string } | null>(null);
+  const [skipContext, setSkipContext] = useState(false);
+  const [showConversations, setShowConversations] = useState(false);
+  const runInId = runIn?.id;
+  useEffect(() => {
+    if (!runInId || !hasCore()) return;
+    let stale = false;
+    ipc.conversationContext(runInId, null).then(
+      (read) => !stale && setConversations(read && { about: read.about }),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [runInId]);
+
   // Your history with each agent, across projects: shown beside the picker, never used to pick.
   const [histories, setHistories] = useState<AgentOutcomes[]>([]);
   useEffect(() => {
@@ -229,8 +251,20 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // A branch lives in one worktree at a time, so only branches nobody has checked out can open.
   const openable = branches?.branches.filter((name) => !branches.checkedOut.includes(name)) ?? [];
 
+  // Taken before anything is awaited: a second Start while the first is still spawning would
+  // start a second agent on the same task.
+  const starting = useRef(false);
   const start = async () => {
-    if (!ready || !harness) return;
+    if (!ready || !harness || starting.current) return;
+    starting.current = true;
+    try {
+      await launch(harness);
+    } finally {
+      starting.current = false;
+    }
+  };
+
+  const launch = async (harness: HarnessInfo) => {
     setBusy(true);
     setError(null);
     const projects = useProjectsStore.getState();
@@ -240,6 +274,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       effort: effortChoice || null,
       prompt: message.trim() || null,
       ...(memory && skipMemory ? { skipMemory: true } : {}),
+      ...(conversations && skipContext ? { skipContext: true } : {}),
     };
     const remember = () =>
       projects.remember(picksKey(project.id), {
@@ -318,9 +353,10 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         </h1>
         {handoff !== null && (
           <p className="mb-2 text-[12px] text-ink-faint">
-            This is what Yardsort recorded about the workspace, written as the next agent&rsquo;s
-            first message — never the last agent&rsquo;s words, which it does not keep. Read it,
-            change it, then start. The task on record stays what you first asked.
+            This is what Yardsort recorded about the workspace — and, where the project shares its
+            agents&rsquo; conversations, what was said in them — written as the next agent&rsquo;s
+            first message. Read it, change it, then start. The task on record stays what you first
+            asked.
           </p>
         )}
         {task && (
@@ -517,6 +553,43 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               </pre>
             )}
           </div>
+        )}
+
+        {conversations && harness && (
+          <div className="mt-2 text-[12px] text-ink-faint">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!skipContext}
+                disabled={busy}
+                onChange={(event) => setSkipContext(!event.target.checked)}
+                className="accent-(--color-accent)"
+              />
+              <span>
+                Tell the agent it can read {conversations.about} here
+                {(harness.contextArgs ?? []).length > 0
+                  ? ", as background context."
+                  : message.trim()
+                    ? ", after the message. Your message stays the task on record."
+                    : " — after a message, so write one; with none it is not told."}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowConversations(true)}
+                aria-label="Show the other conversations"
+                className="ml-auto text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+              >
+                Show
+              </button>
+            </label>
+          </div>
+        )}
+        {showConversations && runIn && (
+          <ConversationsDialog
+            workspaceId={runIn.id}
+            except={null}
+            onClose={() => setShowConversations(false)}
+          />
         )}
 
         {!runIn && (

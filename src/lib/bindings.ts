@@ -319,6 +319,16 @@ export const commands = {
 	memoryDecide: (id: string, decision: MemoryDecision) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_decide", { id, decision })),
 	/**  Turn sharing a project's approved entries with its agents on or off. */
 	memoryShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_share", { projectId, shared })),
+	/**  Turn letting a project's agents read each other's conversations on or off. */
+	conversationsShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("conversations_share", { projectId, shared })),
+	conversationContext: (workspaceId: string, except: string | null) => typedError<{
+	/**  What the note is about, as a tab says it: "claude's conversation". */
+	about: string,
+	/**  The note, as an agent started now would read it. */
+	note: string,
+	/**  What `ys workspace context` gives now. */
+	digest: string,
+} | null, IpcError>(__TAURI_INVOKE("conversation_context", { workspaceId, except })),
 	/**
 	 *  How many proposals wait, per project that has any. Agents propose through `ys`, which writes
 	 *  the database directly, so the window asks again when it regains focus and when activity lands.
@@ -785,6 +795,15 @@ export type ContextUsage = {
 	compactCommand: string | null,
 };
 
+export type ConversationContext = {
+	/**  What the note is about, as a tab says it: "claude's conversation". */
+	about: string,
+	/**  The note, as an agent started now would read it. */
+	note: string,
+	/**  What `ys workspace context` gives now. */
+	digest: string,
+};
+
 /**  A task that was just made: what its source now calls it. */
 export type CreatedTask = {
 	key: string,
@@ -1055,6 +1074,21 @@ export type HarnessDef = {
 	 *  is the honest default for one we know nothing about.
 	 */
 	writeArgs?: string[],
+	/**
+	 *  What gives the agent background context — its system-prompt option — with `{context}`
+	 *  for the text. Yardsort uses it on a new conversation for a short note that the
+	 *  workspace's other conversations can be read (`docs/design/29-conversation-context.md`).
+	 *  Empty means the harness has no such option, or it is not known to work.
+	 */
+	contextArgs?: string[],
+	/**
+	 *  The same for a resume or fork, after its args: what makes a continued conversation read a
+	 *  new note. [`Self::context_args`] for a harness that builds its system prompt at each
+	 *  launch (OMP, pi); for Claude Code, which keeps the prompt a conversation began with, those
+	 *  plus `--system-prompt-snapshot off`. Empty for one that keeps it whatever it is passed
+	 *  (Codex, Grok), where a note would be passed and never seen.
+	 */
+	resumeContextArgs?: string[],
 	resumeArgs: string[],
 	forkArgs: string[],
 	/**  Effort levels to offer. Empty hides the picker. */
@@ -1131,6 +1165,12 @@ export type HarnessRequest = {
 	 *  starts five reviewers must not leave five proposals about that one review.
 	 */
 	quietMemory?: boolean,
+	/**
+	 *  Do not tell this agent about the workspace's other conversations, though the project
+	 *  shares them: Alt-click on an agent button, or the composer's box. See
+	 *  `docs/design/29-conversation-context.md`.
+	 */
+	skipContext?: boolean,
 };
 
 export type HarnessStatus = {
@@ -1481,6 +1521,11 @@ export type ProjectMemory = {
 	projectId: string,
 	/**  Whether approved entries go into this project's agents' first messages. */
 	shared: boolean,
+	/**
+	 *  Whether this project's agents may read each other's conversations in a workspace, with
+	 *  `ys workspace context`. Off until the user turns it on.
+	 */
+	conversationsShared: boolean,
 	/**  Oldest first. */
 	entries: MemoryEntry[],
 	/**  The section a first message would get now, or `None` when nothing would be added. */

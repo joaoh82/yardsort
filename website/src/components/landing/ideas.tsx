@@ -163,9 +163,11 @@ export function Ideas() {
             pick the agent and press Enter.
           </p>
           <p>
-            None of it is the last agent&apos;s words — Yardsort never keeps a conversation — and no
-            model writes it. It says where it is blind, and tells the next agent to ask you. From a
-            terminal, <code className={code}>ys workspace handoff</code> prints the same message.
+            No model writes it, and Yardsort never keeps a conversation. In a project where you let
+            the agents read each other&apos;s, it adds what was said — your messages and each
+            turn&apos;s final reply, read from the agents&apos; own transcripts when you press it.
+            It says where it is blind, and tells the next agent to ask you. From a terminal,{" "}
+            <code className={code}>ys workspace handoff</code> prints the same message.
           </p>
         </Idea>
 

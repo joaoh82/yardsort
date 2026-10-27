@@ -563,6 +563,28 @@ already added as a project, and a location used by an earlier clone or new proje
 |     | Paste an issue's address from a GitHub repository that is not a project: the clone dialog opens on **Clone a repository** with the URL and the name filled in. **Clone project**: when git is done the Tasks view opens on that issue. Again, but **Run in background** before it finishes: the project appears with its notice and the view stays where it was. |
 |     | **macOS / Windows:** the first, third and eighth rows.                                                                                                                                                                                                                                                                                                           |
 
+## 26 · Conversation context
+
+Needs Claude Code and Codex signed in (Cursor, OpenCode, Grok, OMP and pi for one row), a new project — so **Share conversations between this
+project's agents** is on, as by default — and a worktree workspace in it.
+
+`scripts/checklist-26.sh setup` (macOS, Linux) or `pwsh -File scripts\checklist-26.ps1 setup`
+(Windows) makes the throwaway profile, the demo repository and the launch line that puts this
+build's `ys` first for the agents, and prints the steps for the macOS and Windows rows. Its
+`check` then reads what can be seen from outside the window: the digest, whether Codex ran
+`ys workspace context`, and which running agents carry the note, whole.
+
+| ✓   | Check                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | Memory… for the project: **Share conversations between this project's agents** is ticked. Start Claude from the tab bar, ask it something and let it answer. Start Codex from the tab bar: no question; Codex starts with no message and no turn; a line under the tabs says _Told about claude's conversation_ for a minute, and a **⇄** mark stays on the tab.                                                |
+|     | Ask Codex "what was the other agent asked?": it runs `ys workspace context` before answering and answers from it. **Show** on the line or the mark: the note, and the digest without Codex's own conversation.                                                                                                                                                                                                  |
+|     | Open the composer in that workspace: a line says the agent will be told, as background context for Claude or Codex; pick an agent without **Context args**: it says _after the message_. Untick it and start: the agent is not told.                                                                                                                                                                            |
+|     | **Alt-click** an agent button: it starts with no note and no mark. Settings → Harnesses → Grok, clear **Context args** if set: its button now offers **Start with the handoff…** and **Start fresh**; the first opens the composer on Grok (even with another agent used last) with the packet, the second starts it untold.                                                                                    |
+|     | Quit Claude, which began alone, and resume it from the history: its tab says _Told about …_ — the conversations here that have said something, Codex's among them — and asked "which other conversations are here?" it names Codex's. Turn the switch off in Memory… and resume it again: no line, no mark. New agents get no note, and `ys workspace context` refuses.                                         |
+|     | With the switch on, **Hand off…** in that workspace: the composer's message has a _What was said_ part between _What the agents did here_ and _Project memory_, with Claude's turns, and _What is not here_ no longer says the conversations are missing. Turn the switch off: the part is gone. `ys workspace handoff <workspace>` prints the same.                                                            |
+|     | Start Cursor, OpenCode, Grok, OMP and pi in the workspace and give each a message; Grok, OMP and pi start from the tab bar without the question, told as background context. Quit OMP and **Resume** it: its tab says _Told about …_ again; resume Grok: it does not. **Show** on a new agent's line, or `ys workspace context`: every conversation is there with its messages, and none of the tools they ran. |
+|     | **macOS / Windows:** the first two rows, and the row with the other five agents.                                                                                                                                                                                                                                                                                                                                |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:

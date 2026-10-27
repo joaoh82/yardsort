@@ -297,12 +297,20 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     note through `ys` was set aside as the source because it is not deterministic. For a harness
     with no readable transcript — Cursor today, any custom harness — a note is better than
     nothing. Lean: only if a harness with no reader turns out to be used beside others often.
-41. **How does a resumed Claude conversation see a new note?** Claude Code 2.1.302 records its
-    system prompt on the first request and resends it on every resume until a compaction, so a
-    conversation that began alone keeps having no note. `--system-prompt-snapshot off` on that
-    resume would work, at the cost of the cached system prompt. Lean: pass it only on a resume
-    whose conversation began without the note and now has company; measure the cost first.
-42. **What is the switch's default?** The digest takes what the user typed to one agent's
-    provider to another's. Memory is on by default because it is the user's own notes; this is
-    the user's own words too, but not ones they chose to share. Lean: off, and asked once per
-    project the first time a second agent starts beside a conversation.
+41. ~~**How does a resumed Claude conversation see a new note?**~~ **Settled 2026-10-26:**
+    `--system-prompt-snapshot off` on every resume or fork that is told, beside the note, in
+    Claude Code's `resume_context_args` — a template that replaced the `resume_context` switch, so
+    OMP and pi have their context args there and Codex and Grok nothing. Measured live with
+    2.1.302: snapshot off builds the prompt afresh and stably, so later requests and launches read
+    it from the cache; the cost is one cache write on a told resume, not one per request. Not only
+    for a conversation that began alone, as leaned: Yardsort does not record what one began with,
+    and one that began told gains a current note for the same write. A Claude Code without the
+    option refuses it. See [29 § Claude Code on resume](29-conversation-context.md#claude-code-on-resume).
+    _Before:_ Claude Code records its system prompt on the first request and resends it on every
+    resume until a compaction; Codex 0.163.0 and Grok 1.0.70 keep theirs too, with no such option
+    found; OMP 18.11.3 and pi 1.4.0 build theirs at each launch.
+42. ~~**What is the switch's default?**~~ **Settled 2026-10-26: on**, by the user's decision; a
+    project shares until it is turned off in its Memory view. It was first settled off on
+    2026-10-25, with a question asked once per project the first time an agent started beside a
+    conversation (built in slice 2); with the default on there is nothing to ask, and the
+    question is gone.

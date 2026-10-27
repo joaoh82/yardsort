@@ -247,8 +247,10 @@ and press Enter.
 
 ![Hand off: the composer holding the next agent's first message](docs/images/handoff.png)
 
-It is written from the record, not from the last agent's words — Yardsort never keeps a
-conversation — and no model writes it. An excerpt of a real one:
+It is written from the record, and no model writes it. Yardsort never keeps a conversation; in a
+project where you let the agents read each other's, a _What was said_ part adds your messages and
+each turn's final reply, read from the agents' own transcripts when you press **Hand off…**. An
+excerpt of a real one, from a project that does not share them:
 
 ```markdown
 ## What this workspace was asked

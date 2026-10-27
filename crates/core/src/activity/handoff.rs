@@ -7,8 +7,10 @@
 //! the user reads and edits before it is sent through the ordinary prompt transport.
 //!
 //! The packet is deterministic prose from facts. It says what it does not have, in so many
-//! words: Yardsort keeps metadata, never the conversation, so "what the agent reasoned" is not
-//! here and the packet says to ask the user. Nothing in it comes from a model.
+//! words: Yardsort keeps metadata, never the conversation. In a project that shares its agents'
+//! conversations, _What was said_ holds the digest of them, read from the agents' own
+//! transcripts as the packet is made (see `digest`); what the agents reasoned and the tools they
+//! ran are still not here, and the packet says so. Nothing in it comes from a model.
 
 use std::collections::BTreeMap;
 
@@ -99,6 +101,10 @@ pub struct Facts {
     /// The project's memory section, when the project shares it (see `crate::memory`). A
     /// handoff launch gets no memory added at launch, so the packet carries it.
     pub memory: Option<String>,
+    /// What was said in the workspace's conversations, as the packet's part of that name: the
+    /// caller's to add, with `digest::packet_section`, since it is read from the agents' own
+    /// transcripts. `None` when the project does not share them or none has said anything.
+    pub said: Option<String>,
     /// Assist's judgment per changed file, when the caller has one; empty otherwise. Keyed by
     /// scope and path: a file changed both on the branch and since the last commit has two
     /// diffs, and two reviews.
@@ -186,6 +192,7 @@ pub fn from_store(
         runs: summarize(&runs, &sessions, &events, &provenance),
         events: events.len(),
         provenance,
+        said: None,
         rankings: BTreeMap::new(),
     })
 }
@@ -281,11 +288,15 @@ pub fn render(facts: &Facts) -> String {
         "# Handoff from Yardsort: workspace \"{name}\" in {}\n\n",
         facts.project
     ));
-    out.push_str(
+    out.push_str(if facts.said.is_some() {
+        "You are taking over work in this workspace. What follows was assembled by Yardsort \
+         from what it recorded and, under What was said, from the agents' own transcripts, of \
+         which it keeps no copy. Where it says nothing, ask the user or read the files.\n\n"
+    } else {
         "You are taking over work in this workspace. What follows was assembled by Yardsort \
          from what it recorded — never from another agent's conversation, which it does not \
-         keep. Where it says nothing, ask the user or read the files.\n\n",
-    );
+         keep. Where it says nothing, ask the user or read the files.\n\n"
+    });
 
     out.push_str("## What this workspace was asked\n\n");
     if facts.prompts.is_empty() {
@@ -485,16 +496,28 @@ pub fn render(facts: &Facts) -> String {
     }
     out.push('\n');
 
+    if let Some(said) = &facts.said {
+        out.push_str("## What was said\n\n");
+        out.push_str(said);
+        if !out.ends_with("\n\n") {
+            out.push('\n');
+        }
+    }
+
     if let Some(memory) = &facts.memory {
         out.push_str(memory);
         out.push('\n');
     }
 
     out.push_str("## What is not here\n\n");
-    out.push_str(
+    out.push_str(if facts.said.is_some() {
+        "- What the agents reasoned, the tools they called and what those returned, and the \
+         turns What was said shortened or left out: `ys workspace context --conversation <id> \
+         --turn N` gives one turn whole. If more matters, ask the user before assuming.\n"
+    } else {
         "- The conversations themselves: what the agents said, reasoned, tried and rejected. \
-         Yardsort records metadata only. If that matters, ask the user before assuming.\n",
-    );
+         Yardsort records metadata only. If that matters, ask the user before assuming.\n"
+    });
     out.push_str(
         "- The commands the agents ran and the contents of files as they were; read the files \
          as they are now.\n",
@@ -615,7 +638,7 @@ fn truncate(text: &str, max: usize) -> String {
 
 /// An instant, as a UTC date and time: the packet may be read on another machine, and a
 /// date without a zone is a guess.
-fn when(ms: i64) -> String {
+pub(crate) fn when(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     let (hh, mm) = (rem / 3600, (rem % 3600) / 60);
@@ -632,6 +655,11 @@ fn lasted(from: i64, to: i64) -> String {
     } else {
         format!("{} h {} min", secs / 3600, (secs % 3600) / 60)
     }
+}
+
+/// The UTC date of an instant in epoch milliseconds: year, month, day.
+pub(crate) fn civil_date(ms: i64) -> (i64, i64, i64) {
+    civil_from_days(ms.div_euclid(86_400_000))
 }
 
 /// Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
@@ -1203,6 +1231,37 @@ mod tests {
         let memory = with.find("## Project memory").unwrap();
         assert!(memory < with.find("## What is not here").unwrap());
         assert!(with.contains("- The tests need TZ=UTC. (memory "));
+    }
+
+    /// What was said goes after what the agents did, before the memory, and changes what the
+    /// packet says it does not have; without it the packet reads as before.
+    #[test]
+    fn what_was_said_has_its_own_part_and_what_is_not_here_says_what_it_leaves_out() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let project = store.workspace(&ws).unwrap().unwrap().project_id;
+        crate::memory::write(&store, &project, "The tests need TZ=UTC.").unwrap();
+        store.set_memory_shared(&project, true).unwrap();
+        let mut facts = from_store(&store, &ws, &[]).unwrap();
+        let without = render(&facts);
+        assert!(!without.contains("## What was said"));
+        assert!(without.contains("never from another agent's conversation"));
+        assert!(without.contains("- The conversations themselves: what the agents said"));
+
+        facts.said = Some("### claude · conversation 3f2a · 1 turn\n\nUser:\n> Fix it\n".into());
+        let with = render(&facts);
+        let at = |heading: &str| {
+            with.find(heading)
+                .unwrap_or_else(|| panic!("{heading}: {with}"))
+        };
+        assert!(at("## What the agents did here") < at("## What was said"));
+        assert!(at("## What was said") < at("## Project memory"));
+        assert!(at("## Project memory") < at("## What is not here"));
+        assert!(with.contains("> Fix it\n\n## Project memory"), "{with}");
+        assert!(with.contains("under What was said, from the agents' own transcripts"));
+        assert!(!with.contains("never from another agent's conversation"));
+        assert!(!with.contains("- The conversations themselves"));
+        assert!(with.contains("`ys workspace context --conversation <id> --turn N`"));
     }
 
     #[test]

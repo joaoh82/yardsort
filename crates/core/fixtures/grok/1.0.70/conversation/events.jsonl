@@ -1,0 +1,2 @@
+{"ts":"2026-10-26T09:51:43.214Z","type":"turn_started","session_id":"77777777-7777-4777-8777-777777777777","turn_number":0,"model_id":"grok-4.7","yolo_mode":false,"conversation_message_count":3,"session_relationship":"primary","schema_version":"1.0"}
+{"ts":"2026-10-26T09:51:48.186Z","type":"turn_started","session_id":"77777777-7777-4777-8777-777777777777","turn_number":1,"model_id":"grok-4.7","yolo_mode":false,"conversation_message_count":10,"session_relationship":"primary","schema_version":"1.0"}

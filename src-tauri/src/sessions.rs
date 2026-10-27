@@ -167,6 +167,14 @@ pub(crate) fn continue_session(
 
     let fork = matches!(how, Continue::Fork);
     let new_session_id = (fork && def.fork_assigns_id()).then(|| uuid::Uuid::new_v4().to_string());
+    let note = yardsort_core::activity::digest::note_on_resume(
+        &state.store,
+        &workspace,
+        &def,
+        &row.id,
+        &crate::conversations::sources(state),
+        crate::conversations::now(),
+    )?;
     let args = def.continue_args(
         &LaunchValues {
             prompt: None,
@@ -174,6 +182,7 @@ pub(crate) fn continue_session(
             effort: row.effort.clone(),
             session_id: row.harness_session_id.clone(),
             new_session_id: new_session_id.clone(),
+            context: note.as_ref().map(|note| note.text.clone()),
         },
         fork,
     );
@@ -196,6 +205,12 @@ pub(crate) fn continue_session(
     ]);
     if let Some(id) = &harness_session_id {
         labels.insert(HARNESS_SESSION_LABEL.to_owned(), id.clone());
+    }
+    if let Some(note) = &note {
+        labels.insert(
+            yardsort_core::launch::CONTEXT_LABEL.to_owned(),
+            note.about.clone(),
+        );
     }
 
     let run = RunDraft {
@@ -339,6 +354,7 @@ mod tests {
             exit_code: (!running).then_some(0),
             pty_session_id: running.then(|| "pty".to_owned()),
             started_at: 1_790_000_000_000,
+            began_at: 1_790_000_000_000,
             ended_at: None,
         }
     }

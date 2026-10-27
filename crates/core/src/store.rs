@@ -1,6 +1,6 @@
 //! Persistent app state in SQLite. Pure storage: no git, no filesystem, no policy.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,7 +25,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0013_workflow_run_context.sql"),
     include_str!("../migrations/0014_workspace_tasks.sql"),
     include_str!("../migrations/0015_outcome_began.sql"),
-    include_str!("../migrations/0016_remote_host.sql"),
+    include_str!("../migrations/0016_project_conversations.sql"),
+    include_str!("../migrations/0017_session_began.sql"),
+    include_str!("../migrations/0018_remote_host.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -47,7 +49,7 @@ pub struct ProjectRow {
     pub root_path: String,
 }
 
-/// This machine as a host on a Yardsort server. See `migrations/0016_remote_host.sql`.
+/// This machine as a host on a Yardsort server. See `migrations/0018_remote_host.sql`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteHostRow {
     pub server_url: String,
@@ -116,8 +118,10 @@ pub struct SessionRow {
     pub running: bool,
     pub exit_code: Option<i64>,
     pub pty_session_id: Option<String>,
-    /// Milliseconds since the Unix epoch.
+    /// Milliseconds since the Unix epoch. The latest start: a resume moves it.
     pub started_at: i64,
+    /// When the conversation first began, which a resume leaves alone.
+    pub began_at: i64,
     pub ended_at: Option<i64>,
 }
 
@@ -879,10 +883,12 @@ impl Store {
     // --- sessions -----------------------------------------------------------------------------
 
     pub fn add_session(&self, new: &NewSession<'_>) -> StoreResult<()> {
+        let now = now_ms();
         self.conn().execute(
             "INSERT INTO sessions (id, workspace_id, harness_id, model, effort, harness_session_id,
-                                   title, forked_from, state, pty_session_id, started_at, prompt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)",
+                                   title, forked_from, state, pty_session_id, started_at, began_at,
+                                   prompt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)",
             params![
                 new.id,
                 new.workspace_id,
@@ -893,7 +899,8 @@ impl Store {
                 new.title,
                 new.forked_from,
                 new.pty_session_id,
-                now_ms(),
+                now,
+                now,
                 new.prompt
             ],
         )?;
@@ -943,6 +950,15 @@ impl Store {
             "SELECT prompt FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL
              ORDER BY rowid",
         )?;
+        let rows = stmt.query_map([workspace_id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The conversations in a workspace that were started with a first message, by record id.
+    pub fn prompted_sessions(&self, workspace_id: &str) -> StoreResult<HashSet<String>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT id FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL")?;
         let rows = stmt.query_map([workspace_id], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
@@ -1399,6 +1415,30 @@ impl Store {
         Ok(())
     }
 
+    /// Whether a project's agents may read each other's conversations: yes unless the user has
+    /// turned it off. A project with no row here shares — the default since 2026-10-26; migration
+    /// 0016 describes the first one, off.
+    pub fn conversations_shared(&self, project_id: &str) -> StoreResult<bool> {
+        let conn = self.conn();
+        Ok(conn
+            .query_row(
+                "SELECT share FROM project_conversations WHERE project_id = ?",
+                [project_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_none_or(|share| share != 0))
+    }
+
+    pub fn set_conversations_shared(&self, project_id: &str, share: bool) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO project_conversations (project_id, share) VALUES (?, ?)
+             ON CONFLICT(project_id) DO UPDATE SET share = excluded.share",
+            params![project_id, i64::from(share)],
+        )?;
+        Ok(())
+    }
+
     /// How many candidates wait in each project, for the counts on the project rows.
     pub fn memory_waiting(&self) -> StoreResult<BTreeMap<String, u32>> {
         let conn = self.conn();
@@ -1492,6 +1532,24 @@ impl Store {
              ORDER BY started_at DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map([workspace_id], run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The ids an agent reported for a conversation in its events' `field` — Codex's
+    /// `threadId`, the `sessionId` of Cursor and OpenCode — first reported first: what names its
+    /// transcript. Only a conversation that was reporting has any.
+    pub fn reported_ids(&self, session_id: &str, field: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT json_extract(payload, ?2) AS reported FROM agent_events
+             WHERE (session_id = ?1
+                    OR run_id IN (SELECT id FROM agent_runs WHERE session_id = ?1))
+               AND reported IS NOT NULL
+             GROUP BY reported ORDER BY MIN(seq)",
+        )?;
+        let rows = stmt.query_map(params![session_id, format!("$.{field}")], |r| {
+            r.get::<_, String>(0)
+        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -1857,6 +1915,17 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Move a session's start, first and latest, for tests of what is read by time.
+    #[cfg(test)]
+    pub fn set_session_started(&self, id: &str, at: i64) {
+        self.conn()
+            .execute(
+                "UPDATE sessions SET started_at = ?1, began_at = ?1 WHERE id = ?2",
+                params![at, id],
+            )
+            .unwrap();
     }
 
     /// Make every activity write fail from here on, for tests of what happens then. The
@@ -2379,7 +2448,8 @@ fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRow>
 }
 
 const SESSION_COLUMNS: &str = "id, workspace_id, harness_id, model, effort, harness_session_id, \
-     title, forked_from, state, exit_code, pty_session_id, started_at, ended_at";
+     title, forked_from, state, exit_code, pty_session_id, started_at, ended_at, \
+     COALESCE(began_at, started_at)";
 
 fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
@@ -2396,6 +2466,7 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         pty_session_id: row.get(10)?,
         started_at: row.get(11)?,
         ended_at: row.get(12)?,
+        began_at: row.get(13)?,
     })
 }
 
@@ -3088,5 +3159,19 @@ mod tests {
         });
 
         assert_eq!(app.projects().unwrap().len(), EACH * 2);
+    }
+
+    #[test]
+    fn a_project_shares_its_agents_conversations_until_turned_off() {
+        let store = Store::in_memory();
+        let project = store.add_project("app", "/code/app").unwrap();
+        assert!(
+            store.conversations_shared(&project.id).unwrap(),
+            "on by default"
+        );
+        store.set_conversations_shared(&project.id, false).unwrap();
+        assert!(!store.conversations_shared(&project.id).unwrap());
+        store.set_conversations_shared(&project.id, true).unwrap();
+        assert!(store.conversations_shared(&project.id).unwrap());
     }
 }
