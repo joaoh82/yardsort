@@ -1,0 +1,32 @@
+{
+  "grants": [
+    {
+      "id": "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a1b",
+      "host": "7d2e4f60-1a3b-4c5d-8e9f-0a1b2c3d4e5f",
+      "hostName": "Workstation",
+      "device": "4f1c2a3b-5d6e-4f70-8192-a3b4c5d6e7f8",
+      "deviceName": "Example phone",
+      "state": "approved",
+      "requested": ["workspace:read", "activity:read", "terminal:read", "terminal:control"],
+      "scopes": ["workspace:read", "activity:read", "terminal:read"],
+      "projects": { "kind": "only", "projects": ["9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"] },
+      "createdAt": 1792000000000,
+      "decidedAt": 1792000045000,
+      "expiresInMs": null
+    },
+    {
+      "id": "d4e5f607-1829-43a4-b5c6-d7e8f90a1b2c",
+      "host": "7d2e4f60-1a3b-4c5d-8e9f-0a1b2c3d4e5f",
+      "hostName": "Workstation",
+      "device": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      "deviceName": "Laptop",
+      "state": "pending",
+      "requested": ["workspace:read"],
+      "scopes": [],
+      "projects": null,
+      "createdAt": 1792000100000,
+      "decidedAt": null,
+      "expiresInMs": 240000
+    }
+  ]
+}

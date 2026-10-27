@@ -1,5 +1,5 @@
-//! What the control service keeps: accounts, devices, their credentials' hashes, and sign-ins in
-//! progress.
+//! What the control service keeps: accounts, devices, their credentials' hashes, sign-ins in
+//! progress, and the hosts of each account with the grants their people gave other devices.
 //!
 //! [`Records`] is what the service asks of a store. Each method is one step that must happen
 //! whole: taking a one-time value removes it in the same step that reads it, and rotating a
@@ -12,12 +12,13 @@
 //! exception is the identity provider's PKCE verifier for a sign-in in progress, which has to be
 //! sent to the provider as it is; it lives for at most [`crate::LOGIN_TTL_MS`].
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::sync::Mutex;
 
 use remote_proto::account::{DeviceKind, Secret};
-use remote_proto::{DeviceId, Platform};
+use remote_proto::pairing::MAX_OFFER_MISSES;
+use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope};
 
 use crate::tokens::{self, TokenHash};
 
@@ -102,6 +103,98 @@ pub enum Rotation {
     Revoked,
     /// No such credential.
     Unknown,
+}
+
+/// A machine that runs agents, registered on an account by the device it signs in as. Removed
+/// hosts are never returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Host {
+    pub id: HostId,
+    pub account: AccountId,
+    /// The device it is signed in as now. Signing in again moves it to the new one.
+    pub device: DeviceId,
+    pub name: String,
+    pub created_at: i64,
+    /// Its device's.
+    pub last_seen_at: Option<i64>,
+}
+
+/// What a host showed to let one device in, as kept: two hashes, either of which redeems it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostOffer {
+    pub host: HostId,
+    pub account: AccountId,
+    /// Of the QR code's secret.
+    pub secret: TokenHash,
+    /// Of the short code, normalized.
+    pub code: TokenHash,
+    pub expires_at: i64,
+}
+
+/// What became of a presented offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Redemption {
+    /// It was open: it is spent now.
+    Taken(HostOffer),
+    /// No open offer of the account matched. The miss is counted against all of them.
+    Missed,
+}
+
+/// A grant's state as kept. "Expired" is not kept: it is a pending grant whose `expires_at` has
+/// passed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantStatus {
+    Pending,
+    Approved,
+    Denied,
+    Revoked,
+}
+
+/// One device's grant on one host, from when it was asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantRecord {
+    pub id: GrantId,
+    pub account: AccountId,
+    pub host: HostId,
+    /// The device it is for.
+    pub device: DeviceId,
+    pub requested: BTreeSet<Scope>,
+    /// Empty unless approved.
+    pub scopes: BTreeSet<Scope>,
+    /// `None` unless approved.
+    pub projects: Option<ProjectGrant>,
+    pub status: GrantStatus,
+    pub created_at: i64,
+    /// When a pending grant stops waiting for its host's answer.
+    pub expires_at: i64,
+    pub decided_at: Option<i64>,
+}
+
+/// A grant as listed: with its host's and device's names, and whether that device is signed out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantView {
+    pub grant: GrantRecord,
+    pub host_name: String,
+    pub device_name: String,
+    pub device_revoked: bool,
+}
+
+/// Which grants to list. Always within one account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrantFilter {
+    One(GrantId),
+    OfHost(HostId),
+    ForDevice(DeviceId),
+}
+
+/// The host's person's answer to a pending grant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Decision {
+    Approve {
+        scopes: BTreeSet<Scope>,
+        projects: ProjectGrant,
+    },
+    Deny,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -196,6 +289,82 @@ pub trait Records: Send + Sync {
         subject: &str,
         revoked: Revoked,
     ) -> impl Future<Output = Result<Option<usize>>> + Send;
+
+    /// Register a new host.
+    fn add_host(&self, host: Host) -> impl Future<Output = Result<()>> + Send;
+
+    /// The account's host `id`, now signed in as `device` and called `name`. `None` when the
+    /// account has no such host (another account's included), in which case nothing changes.
+    fn rebind_host(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        device: &DeviceId,
+        name: &str,
+    ) -> impl Future<Output = Result<Option<Host>>> + Send;
+
+    /// The account's host `id`, unless it was removed.
+    fn host(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+    ) -> impl Future<Output = Result<Option<Host>>> + Send;
+
+    /// The account's hosts, removed ones left out.
+    fn hosts(&self, account: &AccountId) -> impl Future<Output = Result<Vec<Host>>> + Send;
+
+    /// Keep an offer, in place of any other its host still had open. Lapsed offers may be
+    /// dropped.
+    fn put_offer(&self, offer: HostOffer, now: i64) -> impl Future<Output = Result<()>> + Send;
+
+    /// The account's open offer whose secret or code hashes to `key`, removed in the same step.
+    /// An offer is open until it lapses or the account has missed [`MAX_OFFER_MISSES`] times
+    /// while it was. A miss is counted against every open offer of the account in the same step.
+    fn redeem_offer(
+        &self,
+        account: &AccountId,
+        key: &TokenHash,
+        now: i64,
+    ) -> impl Future<Output = Result<Redemption>> + Send;
+
+    /// Keep a new grant.
+    fn add_grant(&self, grant: GrantRecord) -> impl Future<Output = Result<()>> + Send;
+
+    /// The account's grants that match, newest first, with their names.
+    fn grants(
+        &self,
+        account: &AccountId,
+        filter: GrantFilter,
+    ) -> impl Future<Output = Result<Vec<GrantView>>> + Send;
+
+    /// Answer a grant that is still pending at `now`, in one step. Approving revokes any other
+    /// grant in force for the same device on the same host, so one device holds one grant per
+    /// host. `None` when the account has no such grant or it is not pending any more.
+    fn decide(
+        &self,
+        account: &AccountId,
+        id: &GrantId,
+        decision: Decision,
+        now: i64,
+    ) -> impl Future<Output = Result<Option<GrantRecord>>> + Send;
+
+    /// Revoke a grant that is pending or in force. `false` when the account has no such grant;
+    /// one already decided otherwise is left as it was, and still `true`.
+    fn revoke_grant(
+        &self,
+        account: &AccountId,
+        id: &GrantId,
+        now: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Remove a host in one step: its open offers go, and every grant on it that is pending or
+    /// in force is revoked. `false` when the account has no such host.
+    fn remove_host(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        now: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
@@ -213,6 +382,11 @@ struct State {
     devices: Vec<Device>,
     access: HashMap<TokenHash, (DeviceId, i64)>,
     refresh: HashMap<TokenHash, Refresh>,
+    /// With when each was removed.
+    hosts: Vec<(Host, Option<i64>)>,
+    /// With the misses counted against each.
+    offers: Vec<(HostOffer, i32)>,
+    grants: Vec<GrantRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +428,35 @@ impl State {
 
     fn device_mut(&mut self, id: &DeviceId) -> Option<&mut Device> {
         self.devices.iter_mut().find(|d| d.id == *id)
+    }
+
+    fn host(&self, account: &AccountId, id: &HostId) -> Option<Host> {
+        let (host, _) = self
+            .hosts
+            .iter()
+            .find(|(h, removed)| h.id == *id && h.account == *account && removed.is_none())?;
+        let mut host = host.clone();
+        host.last_seen_at = self
+            .devices
+            .iter()
+            .find(|d| d.id == host.device)
+            .and_then(|d| d.last_seen_at);
+        Some(host)
+    }
+
+    fn view(&self, grant: &GrantRecord) -> GrantView {
+        let device = self.devices.iter().find(|d| d.id == grant.device);
+        GrantView {
+            host_name: self
+                .hosts
+                .iter()
+                .find(|(h, _)| h.id == grant.host)
+                .map(|(h, _)| h.name.clone())
+                .unwrap_or_default(),
+            device_name: device.map(|d| d.name.clone()).unwrap_or_default(),
+            device_revoked: device.is_none_or(|d| d.revoked.is_some()),
+            grant: grant.clone(),
+        }
     }
 }
 
@@ -417,6 +620,176 @@ impl Records for MemoryRecords {
                 }
             }
             Some(count)
+        })
+    }
+
+    async fn add_host(&self, host: Host) -> Result<()> {
+        self.with(|s| s.hosts.push((host, None)))
+    }
+
+    async fn rebind_host(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        device: &DeviceId,
+        name: &str,
+    ) -> Result<Option<Host>> {
+        self.with(|s| {
+            let (host, _) = s
+                .hosts
+                .iter_mut()
+                .find(|(h, removed)| h.id == *id && h.account == *account && removed.is_none())?;
+            host.device = device.clone();
+            host.name = name.to_owned();
+            s.host(account, id)
+        })
+    }
+
+    async fn host(&self, account: &AccountId, id: &HostId) -> Result<Option<Host>> {
+        self.with(|s| s.host(account, id))
+    }
+
+    async fn hosts(&self, account: &AccountId) -> Result<Vec<Host>> {
+        self.with(|s| {
+            let ids: Vec<HostId> = s.hosts.iter().map(|(h, _)| h.id.clone()).collect();
+            ids.iter().filter_map(|id| s.host(account, id)).collect()
+        })
+    }
+
+    async fn put_offer(&self, offer: HostOffer, now: i64) -> Result<()> {
+        self.with(|s| {
+            s.offers
+                .retain(|(o, _)| o.expires_at > now && o.host != offer.host);
+            s.offers.push((offer, 0));
+        })
+    }
+
+    async fn redeem_offer(
+        &self,
+        account: &AccountId,
+        key: &TokenHash,
+        now: i64,
+    ) -> Result<Redemption> {
+        self.with(|s| {
+            let open = |o: &HostOffer, misses: i32| {
+                o.account == *account && o.expires_at > now && misses < MAX_OFFER_MISSES
+            };
+            let found = s.offers.iter().position(|(o, misses)| {
+                open(o, *misses) && (tokens::same(&o.secret, key) || tokens::same(&o.code, key))
+            });
+            match found {
+                Some(at) => Redemption::Taken(s.offers.swap_remove(at).0),
+                None => {
+                    for (o, misses) in &mut s.offers {
+                        if open(o, *misses) {
+                            *misses += 1;
+                        }
+                    }
+                    Redemption::Missed
+                }
+            }
+        })
+    }
+
+    async fn add_grant(&self, grant: GrantRecord) -> Result<()> {
+        self.with(|s| s.grants.push(grant))
+    }
+
+    async fn grants(&self, account: &AccountId, filter: GrantFilter) -> Result<Vec<GrantView>> {
+        self.with(|s| {
+            let mut views: Vec<GrantView> = s
+                .grants
+                .iter()
+                .filter(|g| g.account == *account)
+                .filter(|g| match &filter {
+                    GrantFilter::One(id) => g.id == *id,
+                    GrantFilter::OfHost(host) => g.host == *host,
+                    GrantFilter::ForDevice(device) => g.device == *device,
+                })
+                .map(|g| s.view(g))
+                .collect();
+            views.sort_by_key(|v| std::cmp::Reverse(v.grant.created_at));
+            views
+        })
+    }
+
+    async fn decide(
+        &self,
+        account: &AccountId,
+        id: &GrantId,
+        decision: Decision,
+        now: i64,
+    ) -> Result<Option<GrantRecord>> {
+        self.with(|s| {
+            let at = s.grants.iter().position(|g| {
+                g.id == *id
+                    && g.account == *account
+                    && g.status == GrantStatus::Pending
+                    && g.expires_at > now
+            })?;
+            let (host, device) = (s.grants[at].host.clone(), s.grants[at].device.clone());
+            if let Decision::Approve { .. } = decision {
+                for other in &mut s.grants {
+                    if other.host == host
+                        && other.device == device
+                        && other.status == GrantStatus::Approved
+                    {
+                        other.status = GrantStatus::Revoked;
+                        other.decided_at = Some(now);
+                    }
+                }
+            }
+            let grant = &mut s.grants[at];
+            match decision {
+                Decision::Approve { scopes, projects } => {
+                    grant.status = GrantStatus::Approved;
+                    grant.scopes = scopes;
+                    grant.projects = Some(projects);
+                }
+                Decision::Deny => grant.status = GrantStatus::Denied,
+            }
+            grant.decided_at = Some(now);
+            Some(grant.clone())
+        })
+    }
+
+    async fn revoke_grant(&self, account: &AccountId, id: &GrantId, now: i64) -> Result<bool> {
+        self.with(|s| {
+            let Some(grant) = s
+                .grants
+                .iter_mut()
+                .find(|g| g.id == *id && g.account == *account)
+            else {
+                return false;
+            };
+            if matches!(grant.status, GrantStatus::Pending | GrantStatus::Approved) {
+                grant.status = GrantStatus::Revoked;
+                grant.decided_at = Some(now);
+            }
+            true
+        })
+    }
+
+    async fn remove_host(&self, account: &AccountId, id: &HostId, now: i64) -> Result<bool> {
+        self.with(|s| {
+            let Some((_, removed)) = s
+                .hosts
+                .iter_mut()
+                .find(|(h, removed)| h.id == *id && h.account == *account && removed.is_none())
+            else {
+                return false;
+            };
+            *removed = Some(now);
+            s.offers.retain(|(o, _)| o.host != *id);
+            for grant in &mut s.grants {
+                if grant.host == *id
+                    && matches!(grant.status, GrantStatus::Pending | GrantStatus::Approved)
+                {
+                    grant.status = GrantStatus::Revoked;
+                    grant.decided_at = Some(now);
+                }
+            }
+            true
         })
     }
 }

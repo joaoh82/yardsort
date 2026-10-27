@@ -37,6 +37,8 @@ pub struct AppState {
     pub inbox_watcher: Mutex<Option<crate::activity::InboxWatcher>>,
     /// The Usage view's process sampler and parsed session logs. See `crate::usage`.
     pub usage: crate::usage::Usage,
+    /// Remote: the host's session with its server. See `crate::remote`.
+    pub remote: crate::remote::Remote,
     env: Mutex<Option<Arc<ShellEnv>>>,
 }
 
@@ -61,6 +63,7 @@ impl AppState {
             watcher: Mutex::new(None),
             inbox_watcher: Mutex::new(None),
             usage: crate::usage::Usage::default(),
+            remote: crate::remote::Remote::default(),
             env: Mutex::new(None),
         }
     }

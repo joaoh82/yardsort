@@ -23,6 +23,8 @@ pub enum Kind {
     Refresh,
     /// The one-time code a sign-in sends to the device's redirect.
     Handoff,
+    /// The secret in a host's pairing QR code.
+    Offer,
 }
 
 impl Kind {
@@ -31,6 +33,7 @@ impl Kind {
             Self::Access => "ys1.at.",
             Self::Refresh => "ys1.rt.",
             Self::Handoff => "ys1.hc.",
+            Self::Offer => "ys1.po.",
         }
     }
 }
@@ -76,6 +79,24 @@ pub fn random() -> String {
     let mut bytes = [0u8; ENTROPY];
     getrandom::fill(&mut bytes).expect("the operating system's random source");
     URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// A pairing's short code: five random bytes as eight characters, and the hash of it that is kept.
+/// It is no credential: it finds an offer within one account, a few tries at most.
+pub fn short_code() -> Minted {
+    let mut bytes = [0u8; 5];
+    getrandom::fill(&mut bytes).expect("the operating system's random source");
+    let code = remote_proto::pairing::format_code(bytes);
+    Minted {
+        hash: code_hash(&code),
+        secret: Secret::new(remote_proto::pairing::display_code(&code)),
+    }
+}
+
+/// The hash a short code is kept and looked up by, `code` being normalized already. Its own
+/// prefix keeps it apart from every credential's hash.
+pub fn code_hash(code: &str) -> TokenHash {
+    hash(&format!("ys1.pc.{code}"))
 }
 
 pub fn hash(text: &str) -> TokenHash {

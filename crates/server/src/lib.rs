@@ -11,13 +11,17 @@
 //! sign-ins, not every phone's every refresh.
 //!
 //! [`http::router`] serves the service over HTTP, [`postgres::PgRecords`] keeps its records, and
-//! the `yardsort-server` binary (`src/main.rs`) puts the two together from its environment. Host
-//! enrollment and the relay come in later slices of R2.
+//! the `yardsort-server` binary (`src/main.rs`) puts the two together from its environment.
+//!
+//! **Hosts and grants** (`pairing.rs`, and [`remote_proto::pairing`] for the messages): a host
+//! registers on its account, offers a code, and its person approves the device that redeemed it.
+//! The relay that will carry a device's requests to its hosts comes in a later slice of R2.
 
 pub mod config;
 pub mod http;
 pub mod limit;
 pub mod oidc;
+mod pairing;
 pub mod postgres;
 pub mod records;
 mod service;

@@ -99,6 +99,10 @@ server-run:
 server-sign-in *args:
     cargo run -q -p yardsort-server --example sign-in -- {{ args }}
 
+# Pair a pretend phone with a host (`phone [SERVER] CODE`), or be a pretend host (`host [SERVER]`)
+server-pair *args:
+    cargo run -q -p yardsort-server --example pair -- {{ args }}
+
 # The server's tests, with its PostgreSQL half against the local database
 server-test *args:
     bun scripts/server-dev.mjs test {{ args }}

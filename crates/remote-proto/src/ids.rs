@@ -133,6 +133,10 @@ id!(
     LeaseId
 );
 id!(
+    /// One device's grant on one host, from the moment it is asked for. Issued by the server.
+    GrantId
+);
+id!(
     /// Chosen by the client, echoed in the reply, so replies can be matched to requests.
     RequestId
 );

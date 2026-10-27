@@ -1,0 +1,4 @@
+{
+  "offer": { "kind": "code", "value": "7KQ2-M9XD" },
+  "scopes": ["workspace:read", "activity:read", "terminal:read", "terminal:control"]
+}

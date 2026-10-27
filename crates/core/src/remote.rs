@@ -6,10 +6,11 @@
 //! from what the app already shows, and the types it builds into ([`remote_proto::model`]) have
 //! no room for a path, an argument list, an environment, a label or a byte of terminal output.
 //!
-//! **There is no listener here, and none may be added in front of this until devices are
-//! authenticated.** Every call takes a [`Grant`], and nothing in this module makes one: in this
-//! slice only tests do. Enrollment, approval at the host and revocation come first (phase R2 of
-//! [the remote design](../../../docs/design/26-remote-r0-r1.md)).
+//! **There is no listener here, and none may be added in front of this.** Every call takes a
+//! [`Grant`], and the only one that may be passed is what [`host::grant_for`] returns: a device
+//! this host's person approved here, whose grant the server still has in force. Requests will
+//! reach a host through the relay, which connects out to the server, never through a port of its
+//! own (phase R2 of [the remote design](../../../docs/design/27-remote-r2.md)).
 //!
 //! What is checked, in order, for every request:
 //!
@@ -774,5 +775,6 @@ fn encoded_len(value: &impl Serialize) -> usize {
 }
 
 mod activity;
+pub mod host;
 #[cfg(test)]
 mod tests;

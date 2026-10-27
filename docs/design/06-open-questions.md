@@ -266,10 +266,11 @@ From the fit pass in [26-remote-r0-r1](26-remote-r0-r1.md). The proposal's own t
 ([§16](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md#16-decisions-to-resolve-at-the-appropriate-gate))
 still stands; these are what the code added to it.
 
-35. **Where does a headless host keep its device credential?** The OS credential store is reached
-    only from `src-tauri` today (`keyring`, for Assist's key); the core has no credential layer.
-    Linux servers often have no Secret Service. Lean: a small credential trait in the core, the
-    keyring behind it for desktops, a `0600` file in a documented mount for headless. Decide in R2.
+35. ~~**Where does a headless host keep its device credential?**~~ **Settled 2026-10-25, as the
+    lean said** ([27 §7](27-remote-r2.md#7--what-the-fourth-slice-adds)): a credential trait in
+    the core (`remote::host::CredentialStore`); the app puts the OS credential store behind it,
+    and a directory only its owner can read (`0700`, files `0600`) is the other, chosen with
+    `YARDSORT_CREDENTIALS_DIR`. The headless host (R5) will use the directory, from its own mount.
 36. **Should the session title cross to remote clients?** It may quote the first message. Without
     it a phone cannot tell two conversations apart. Lean: yes, as now, marked user content that
     clients never log; revisit if a title-only privacy mode is asked for.
@@ -284,7 +285,7 @@ still stands; these are what the code added to it.
 39. **Should a device have to sign in again after some time however often it is used?** Each
     refresh starts its 90 days again, and the provider is asked only at sign-in, so a person
     disabled at the provider keeps their devices until the operator revokes them
-    ([27 §9](27-remote-r2.md#9--risks)). A maximum session (30 to 90 days) bounds that, at the cost
+    ([27 §10](27-remote-r2.md#10--risks)). A maximum session (30 to 90 days) bounds that, at the cost
     of a sign-in every so often, which a provider billing by daily active user counts. Lean: no
     maximum yet; an operator command revokes an account's devices (R2 slice 3).
 

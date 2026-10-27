@@ -1,7 +1,8 @@
 //! Signing in, refreshing, and an account's devices, over any [`Records`].
 
 use remote_proto::account::{
-    Credentials, DevicePage, DeviceSummary, LoginParams, Secret, ServerDescription, TokenRequest,
+    Credentials, DeviceKind, DevicePage, DeviceSummary, LoginParams, Secret, ServerDescription,
+    TokenRequest,
 };
 use remote_proto::{DeviceId, ErrorCode, ProtocolVersion, RemoteError, ServerId};
 use url::Url;
@@ -36,6 +37,7 @@ pub struct ServerConfig {
 pub struct Caller {
     pub account: AccountId,
     pub device: DeviceId,
+    pub kind: DeviceKind,
 }
 
 /// Where the provider's answer leads.
@@ -55,7 +57,7 @@ pub struct ControlService<R> {
     callback: Url,
     redirects: Vec<Url>,
     provider: Provider,
-    records: R,
+    pub(crate) records: R,
 }
 
 impl<R: Records> ControlService<R> {
@@ -99,7 +101,12 @@ impl<R: Records> ControlService<R> {
             name: self.config.name.clone(),
             protocol: ProtocolVersion::CURRENT,
             issuer: self.provider.issuer().to_owned(),
-            capabilities: vec!["device.list".into(), "device.revoke".into()],
+            capabilities: vec![
+                "device.list".into(),
+                "device.revoke".into(),
+                "host.list".into(),
+                "host.pair".into(),
+            ],
         }
     }
 
@@ -349,6 +356,7 @@ impl<R: Records> ControlService<R> {
         Ok(Caller {
             account: device.account,
             device: device.id,
+            kind: device.kind,
         })
     }
 
@@ -494,7 +502,7 @@ fn provider_unavailable() -> RemoteError {
 }
 
 /// The records would not answer. Their error is logged here and stays on the server.
-fn unreadable(error: impl std::fmt::Display) -> RemoteError {
+pub(crate) fn unreadable(error: impl std::fmt::Display) -> RemoteError {
     tracing::error!("records: {error}");
     RemoteError::new(
         ErrorCode::Internal,

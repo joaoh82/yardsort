@@ -863,12 +863,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       a character showed the rest as text, or lost a byte (`vt100` 0.16 drops one after a split
       character).
 - [ ] R2: identity and relay, in progress ([27](27-remote-r2.md)). The self-host recipe's
-      identity provider is ZITADEL; the server takes any OIDC issuer. Three slices built: a person
+      identity provider is ZITADEL; the server takes any OIDC issuer. Four slices built: a person
       signs in at the provider once per device, and the device then holds the server's own
       credentials (15-minute access, single-use refresh), so the provider is never asked again
       and revocation is immediate; the `yardsort-server` binary on PostgreSQL; its image, staging
       on Fly.io (live, smoke-tested), the self-host recipe, and a sign-in against a real
-      ZITADEL in CI.
+      ZITADEL in CI; pairing, approved only at the host, with the app's Remote settings behind a
+      preview switch until the relay can connect a paired device.
 - [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch.
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant

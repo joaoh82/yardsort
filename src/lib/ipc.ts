@@ -120,6 +120,12 @@ import {
   type Problem,
   type Source,
   type PrFacts,
+  type RemoteAnswer,
+  type RemoteDevice,
+  type RemotePairing,
+  type RemoteRequest,
+  type RemoteRequests,
+  type RemoteStatus,
   type RemoteRepository,
   type Repositories,
   type ResolvedLink,
@@ -195,6 +201,12 @@ export type {
   Project,
   ProjectPullRequests,
   ProjectTasks,
+  RemoteAnswer,
+  RemoteDevice,
+  RemotePairing,
+  RemoteRequest,
+  RemoteRequests,
+  RemoteStatus,
   Task,
   TaskComment,
   TaskDetail,
@@ -607,6 +619,24 @@ export const ipc = {
   draftForgetKey: () => unwrap(commands.draftForgetKey()),
   draftSaveSettings: (enabled: boolean, model: string) =>
     unwrap(commands.draftSaveSettings(enabled, model)),
+
+  /**
+   * Remote, a preview: this computer as a host on a Yardsort server. The webview never sees a
+   * credential, only whether Remote is on, a pairing code while one is shown, and the devices
+   * let in. See `src-tauri/src/remote.rs`.
+   */
+  remoteStatus: () => unwrap(commands.remoteStatus()),
+  /** Sign in through the browser and register this computer. Waits for the browser. */
+  remoteEnable: (serverUrl: string, name: string) => unwrap(commands.remoteEnable(serverUrl, name)),
+  remoteCancel: () => unwrap(commands.remoteCancel()),
+  remoteDisable: () => unwrap(commands.remoteDisable()),
+  /** A code to type and a QR code, good once for five minutes. */
+  remotePair: () => unwrap(commands.remotePair()),
+  /** Devices waiting for an answer, and the ones let in. */
+  remoteRequests: () => unwrap(commands.remoteRequests()),
+  remoteAnswer: (grantId: string, answer: RemoteAnswer) =>
+    unwrap(commands.remoteAnswer(grantId, answer)),
+  remoteRevoke: (grantId: string) => unwrap(commands.remoteRevoke(grantId)),
 
   /** Assist: whether a TypeSafe key is in force and which features are on. */
   assistStatus: () => unwrap(commands.assistStatus()),

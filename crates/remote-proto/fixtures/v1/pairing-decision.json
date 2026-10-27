@@ -1,0 +1,1 @@
+{ "scopes": ["workspace:read", "terminal:read"], "projects": { "kind": "all" } }

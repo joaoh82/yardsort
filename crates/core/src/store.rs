@@ -25,6 +25,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0013_workflow_run_context.sql"),
     include_str!("../migrations/0014_workspace_tasks.sql"),
     include_str!("../migrations/0015_outcome_began.sql"),
+    include_str!("../migrations/0016_remote_host.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +45,28 @@ pub struct ProjectRow {
     pub id: String,
     pub name: String,
     pub root_path: String,
+}
+
+/// This machine as a host on a Yardsort server. See `migrations/0016_remote_host.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteHostRow {
+    pub server_url: String,
+    pub server_id: String,
+    pub host_id: String,
+    pub device_id: String,
+    pub name: String,
+    pub enabled_at: i64,
+}
+
+/// A device this host's person let in. `scopes` and `projects` are JSON, as on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteGrantRow {
+    pub id: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub scopes: String,
+    pub projects: String,
+    pub approved_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2065,6 +2088,148 @@ impl Store {
         }
         tx.commit()?;
         Ok(changed)
+    }
+
+    /// This machine as a host, when Remote is on.
+    pub fn remote_host(&self) -> StoreResult<Option<RemoteHostRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT server_url, server_id, host_id, device_id, name, enabled_at
+                 FROM remote_host",
+                [],
+                |r| {
+                    Ok(RemoteHostRow {
+                        server_url: r.get(0)?,
+                        server_id: r.get(1)?,
+                        host_id: r.get(2)?,
+                        device_id: r.get(3)?,
+                        name: r.get(4)?,
+                        enabled_at: r.get(5)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Turn Remote on, or move it to another server. Grants from an earlier server are dropped
+    /// in the same step: they were that server's devices.
+    pub fn set_remote_host(&self, host: &RemoteHostRow) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let same_server = tx
+            .query_row(
+                "SELECT server_id = ? AND host_id = ? FROM remote_host",
+                params![host.server_id, host.host_id],
+                |r| r.get::<_, bool>(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !same_server {
+            tx.execute("DELETE FROM remote_grants", [])?;
+        }
+        tx.execute(
+            "INSERT INTO remote_host
+                 (singleton, server_url, server_id, host_id, device_id, name, enabled_at)
+             VALUES (1, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(singleton) DO UPDATE SET
+                 server_url = excluded.server_url, server_id = excluded.server_id,
+                 host_id = excluded.host_id, device_id = excluded.device_id,
+                 name = excluded.name, enabled_at = excluded.enabled_at",
+            params![
+                host.server_url,
+                host.server_id,
+                host.host_id,
+                host.device_id,
+                host.name,
+                host.enabled_at
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Turn Remote off: the host and every grant go, in one step.
+    pub fn forget_remote_host(&self) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM remote_grants", [])?;
+        tx.execute("DELETE FROM remote_host", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The devices this host's person let in, oldest first.
+    pub fn remote_grants(&self) -> StoreResult<Vec<RemoteGrantRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, device_id, device_name, scopes, projects, approved_at
+             FROM remote_grants ORDER BY approved_at, id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(RemoteGrantRow {
+                    id: r.get(0)?,
+                    device_id: r.get(1)?,
+                    device_name: r.get(2)?,
+                    scopes: r.get(3)?,
+                    projects: r.get(4)?,
+                    approved_at: r.get(5)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Keep a grant this host's person just approved, in place of any the device had.
+    pub fn keep_remote_grant(&self, grant: &RemoteGrantRow) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM remote_grants WHERE device_id = ? OR id = ?",
+            params![grant.device_id, grant.id],
+        )?;
+        tx.execute(
+            "INSERT INTO remote_grants
+                 (id, device_id, device_name, scopes, projects, approved_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                grant.id,
+                grant.device_id,
+                grant.device_name,
+                grant.scopes,
+                grant.projects,
+                grant.approved_at
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Drop every grant but these: what the server still has in force. Only ever drops, so the
+    /// server can take a grant away but never add one. Returns how many went.
+    pub fn retain_remote_grants(&self, in_force: &[String]) -> StoreResult<usize> {
+        let kept: std::collections::HashSet<&str> = in_force.iter().map(String::as_str).collect();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let ids: Vec<String> = tx
+            .prepare("SELECT id FROM remote_grants")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let mut dropped = 0;
+        for id in ids.iter().filter(|id| !kept.contains(id.as_str())) {
+            dropped += tx.execute("DELETE FROM remote_grants WHERE id = ?", [id])?;
+        }
+        tx.commit()?;
+        Ok(dropped)
+    }
+
+    /// Drop one grant, revoked here.
+    pub fn drop_remote_grant(&self, id: &str) -> StoreResult<bool> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM remote_grants WHERE id = ?", [id])?
+            > 0)
     }
 
     fn conn(&self) -> MutexGuard<'_, Connection> {

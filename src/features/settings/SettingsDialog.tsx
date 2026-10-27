@@ -1,24 +1,36 @@
 import { useEffect, useRef, useState } from "react";
+import { ipc } from "@/lib/ipc";
 import { useModalFocus } from "@/lib/useModalFocus";
 import { buttonClass } from "./fields";
 import { AssistSettings } from "./AssistSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { HarnessSettings } from "./HarnessSettings";
+import { RemoteSettings } from "./RemoteSettings";
 import { WorkspaceSettings } from "./WorkspaceSettings";
 
 import { useLayoutStore } from "@/stores/layout";
 import { KeyboardSettings } from "./KeyboardSettings";
 
-const SECTIONS = [
+const ALWAYS = [
   ["harnesses", "Harnesses"],
   ["workspaces", "Workspaces"],
   ["assist", "Assist"],
   ["general", "General"],
   ["keyboard", "Keyboard"],
 ] as const;
+/** Only with the preview switch on (`YARDSORT_REMOTE_PREVIEW=1`). */
+const REMOTE = ["remote", "Remote"] as const;
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
-  const [section, setSection] = useState(useLayoutStore.getState().settingsSection);
+  const [section, setSection] = useState<string>(useLayoutStore.getState().settingsSection);
+  const [remote, setRemote] = useState(false);
+  const SECTIONS = remote ? [...ALWAYS, REMOTE] : ALWAYS;
+  useEffect(() => {
+    void ipc
+      .remoteStatus()
+      .then((status) => setRemote(status.available))
+      .catch(() => setRemote(false));
+  }, []);
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef);
 
@@ -83,7 +95,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {section === "keyboard" ? (
+          {section === "remote" && remote ? (
+            <RemoteSettings />
+          ) : section === "keyboard" ? (
             <KeyboardSettings />
           ) : section === "harnesses" ? (
             <HarnessSettings />

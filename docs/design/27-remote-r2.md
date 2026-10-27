@@ -1,14 +1,18 @@
 # Remote, R2: identity and relay
 
-**Status:** R2 started on 2026-10-22. Three slices are built. The first (2026-10-22): signing in
+**Status:** R2 started on 2026-10-22. Four slices are built. The first (2026-10-22): signing in
 through the server's identity provider, and the server's own credentials for each device after
 that. The second (2026-10-23): the `yardsort-server` binary, which serves them over HTTP from
 PostgreSQL, and a local environment with a real ZITADEL in Docker. The third (2026-10-24): the
 server's container image, its Fly.io configuration and deploy workflow, the self-host recipe, an
 operator's command to sign an account out everywhere, and a sign-in against a real ZITADEL in CI.
 Staging was deployed on 2026-10-24 ([28](28-remote-infrastructure.md) §5), and passed the third
-slice's smoke test (§10) on 2026-10-25 at `https://remote-staging.yardsort.sh`. Nothing in the app or
-`ys` uses the server. The proposal is
+slice's smoke test (§11) on 2026-10-25 at `https://remote-staging.yardsort.sh`. The fourth
+(2026-10-25): pairing. A host registers on its account and shows a code; a device of the same
+account redeems it and asks; the host's person approves it at the host, which keeps its own record
+of what it gave. The app does this from Settings → Remote, shown only with
+`YARDSORT_REMOTE_PREVIEW=1`, because nothing can reach a paired host until the relay exists. The
+proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -166,7 +170,7 @@ is sent anywhere, so the server is not an open redirector.
     two racing rotations exactly one gets through and the other is reuse.
   - Rotations also delete the device's lapsed access credentials, and its spent refresh
     credentials once they would have lapsed anyway, never sooner: a spent one must still revoke
-    the device when a copy is presented (§9).
+    the device when a copy is presented (§10).
   - `last_seen_at` is written at most once a minute (`SEEN_RESOLUTION_MS`); `MemoryRecords`
     follows the same rule.
   - The server's id is made the first time any instance starts, and kept.
@@ -216,7 +220,7 @@ is sent anywhere, so the server is not an open redirector.
   new reason, `byOperator`. The issuer defaults to the server's own. It needs only
   `DATABASE_URL`, and says how many devices it revoked; a subject that never signed in is an
   error rather than a quiet zero, and does not create an account. It does not stop the person
-  signing in again: that is the provider's to refuse (§9).
+  signing in again: that is the provider's to refuse (§10).
 - **The self-host recipe** (`crates/server/self-host/`): Compose with PostgreSQL 17, ZITADEL
   v4.19.5 (API and login), the server built from source, and Caddy, which gets certificates from
   Let's Encrypt. Secrets come from a `.env` the repository ignores. The server has its own
@@ -239,7 +243,167 @@ is sent anywhere, so the server is not an open redirector.
 - An HTTP client the server cannot build now says why, instead of reqwest's "builder error". The
   self-host trial found it: an `SSL_CERT_FILE` the server could not read.
 
-## 7 · Verification
+## 7 · What the fourth slice adds
+
+**Pairing on the server** (`remote_proto::pairing` for the messages, `src/pairing.rs`, migration
+`0002_hosts_and_grants.sql`):
+
+| Route                                      | Who                                | What                                                                |
+| ------------------------------------------ | ---------------------------------- | ------------------------------------------------------------------- |
+| `POST /v1/hosts`                           | a device signed in as a host       | Register, or register again under the id the server gave it before  |
+| `GET /v1/hosts`                            | any device of the account          | The account's hosts, as the phone will list them                    |
+| `POST /v1/hosts/{host}/offers`             | the host                           | A pairing offer, in place of any it still had open                  |
+| `POST /v1/pairings`                        | another device of the account      | Redeem an offer and ask for scopes: a pending grant                 |
+| `GET /v1/hosts/{host}/grants`              | the host                           | Grants waiting for its person, and the ones in force                |
+| `POST /v1/grants/{grant}/approve`          | the host                           | Give some or all of what was asked, on all projects or named ones   |
+| `POST /v1/grants/{grant}/deny`             | the host                           | Refuse                                                              |
+| `GET /v1/grants`, `GET /v1/grants/{grant}` | the device it is for, and its host | Where a grant stands: pending, approved, denied, expired or revoked |
+| `POST /v1/grants/{grant}/revoke`           | the device it is for, or its host  | Take it back                                                        |
+| `POST /v1/hosts/{host}/remove`             | the host                           | Stop being one: its offers go and its grants are revoked            |
+
+- **Every check is the account first.** Another account's host, offer or grant is `not_found`,
+  like one that does not exist. Within the account, only the device a host is signed in as now
+  acts for it, and a grant is seen by its host and the device it is for: not by the account's
+  other devices.
+- **An offer** is two things, either of which redeems it, once, within five minutes
+  (`OFFER_TTL_MS`): a secret for a QR code (`ys1.po.…`, 256 bits) and a short code for a person to
+  type (eight characters of Crockford's base32, 40 bits, shown `ABCD-EFGH`; typed in any case,
+  with or without the dash, `O` read as `0` and `I`/`L` as `1`). Both are kept as SHA-256
+  hashes. One host has one offer open at a time.
+- **The short code only finds an offer.** It is looked up within the caller's own account, so a
+  stranger would first have to be signed in to it. Each miss is counted against every open offer
+  of that account, and five misses (`MAX_OFFER_MISSES`) spend them all; the host shows a new
+  one. One address may ask for ten offers and try ten pairings a minute. Then the host's person
+  still has to say yes to a device they can see by name.
+- **Redeeming asks; it gives nothing.** The pending grant waits five minutes for the host's
+  person. An approval gives at most what was asked for. Approving a device on a host revokes any
+  grant it had there before, so a device holds one grant per host; answers on one host take
+  turns, so two approvals at once cannot both stand. A host cannot pair with itself.
+- **Signing a device out ends its grants**, as revoking them or removing the host does. A host
+  that signs in again keeps its id and its grants, and the device it was before stops acting
+  for it.
+
+**The host's own record** (`yardsort-core`, `remote::host`, migration `0016_remote_host.sql`):
+
+- `remote_host` is this machine as a host on one server, written when Remote is turned on and
+  deleted when it is turned off. A new server's host does not inherit an earlier server's grants.
+- `remote_grants` holds the devices this host's person let in, and is written **only when they
+  approve one here**, with what they chose. The server's list can take a grant away, never add
+  one (`Store::retain_remote_grants`). `remote::host::grant_for` lets a device in only when both
+  agree: the grant is in force at the server and this host approved it. A server that lied could
+  not add a device.
+- The host independently checking its grants is proposal §5.3's rule. It matters once the relay
+  carries requests: the facade will be handed only what `grant_for` returns.
+
+**Where a host keeps its credential** ([open question 35](06-open-questions.md#remote), settled):
+`remote::host::CredentialStore`, a small trait in the core. The app puts the OS credential store
+behind it (the same `keyring` entry service Assist uses, as `remote-host-refresh`).
+`FileCredentials` is the other: one file per secret in a directory only its owner can read
+(`0700`, files `0600`, and a directory others could read is made private), for a machine with no
+credential store. The app uses it when `YARDSORT_CREDENTIALS_DIR` names one, and the headless
+host (R5) will by default, from a mount kept apart from its data. Neither the database, a
+settings file nor a terminal's environment ever holds a credential. Each new refresh credential
+is kept before it is used, since the spent one would sign the host out (§3).
+
+**`remote-client`**, a new crate: the device's side of the server's API. It signs in through the
+system browser to a loopback listener, refreshes (`Session`), and makes the calls above. It speaks
+only HTTPS, or HTTP to a loopback address written as one. It is apart from the core because `ys`
+never talks to a server, and the headless host will use it without the app.
+
+**The app** (`src-tauri/src/remote.rs`, Settings → Remote): shown, and its commands answering,
+only when the app starts with `YARDSORT_REMOTE_PREVIEW=1`.
+
+- **Turn on**: the server's address and a name for this computer. It signs in through the
+  browser as a host (Cancel stops waiting), and registers.
+- **Pair a device**: a QR code (the server's address and the offer's secret, drawn by the
+  `qrcode` crate, MIT or Apache-2.0) and the short code, with how long they are good for.
+- **Waiting for you**: each device that redeemed it, by name, with what it asked for. The
+  answers are _Let it watch_ (workspaces, activity, approved memory and terminals, read only),
+  _Let it watch and type_ when it asked to type, which the section says is anything the person
+  could do at this computer, and _Refuse_. Either way on all projects, including ones added
+  later, or on the ones ticked. `device:manage` is never given.
+- **Devices let in**, each with what it may do and a **Revoke**, which is refused here at once
+  and then told to the server.
+- **Turn off** removes the host at the server, signs its device out there, and forgets both here.
+  If the server cannot be reached it is still turned off here, and the error says so. The server's
+  address and the name are kept, in the settings file's `[remote]` section, and offered the next
+  time Remote is turned on.
+
+The section asks the server every three seconds while it is open and Remote is on. The webview
+never sees a credential or the QR code's secret, only its image. Nothing in `ys`, and nothing an
+agent's environment can reach, approves a device: as with memory, only the desktop does.
+
+**The pairing tool** (`examples/pair.rs`, `just server-pair`) stands in for a phone (`phone
+[SERVER] CODE`, asking to watch and type, then waiting for the answer and optionally for a
+revocation), or for a host (`host [SERVER]`, which shows a code and approves the first device
+that redeems it). `just server-e2e`, and with it CI's "Server end to end", now also runs both
+against the image: the host shows a code, the phone redeems it, the host lets it watch and type
+and then takes that back, and the phone sees each step. The run fails if the server's log holds
+anything starting `ys1.`, which every credential, code and pairing secret does.
+
+## 8 · Verification
+
+On Linux, 2026-10-25, the fourth slice:
+
+- `just server-test`: 82 tests, all passing, the record and HTTP tests on both stores. New:
+  - Seven record contract tests: a host registered, moved to a new device, kept from another
+    account and removed for good; an offer redeemed once, only within its account, replaced by
+    the next, lapsing, and gone with its host; misses spending only their own account's offers,
+    one short of the limit and at it; a grant answered once, one per device per host, a denial
+    revoking nothing, too late to answer; revoking and removing; eight approvals racing for one
+    device, of which exactly one stands; and every scope, project and name kept as given.
+  - Pairing over HTTP: the whole of it on both stores, from registering to removing, and what
+    another account cannot do (redeem the code or the secret, take the host's id, make its offers,
+    list, answer or revoke its grants), with the host's own pending request untouched afterwards
+    and a signed-out device's grant gone from the host's list. Also: wrong codes spending the open
+    offer, malformed pairings spending nothing, and the per-address limits.
+- Eight changes were made on purpose, one at a time. Each failed a test: the per-host lock taken
+  out of an approval (six or seven of the eight racing approvals then stood), any device acting
+  as the host, an approval giving more than was asked, offers redeemed across accounts, a host
+  pairing with itself, a phone registering as a host, a signed-out device keeping its grant,
+  and another device of the account seeing a grant. That last one passed at first: no test had a
+  third device on the account. One was added.
+- `just server-e2e` passed with the pairing round: two pretend devices signed in through
+  ZITADEL's API, against the image; the phone saw itself let in to watch and type on every
+  project, then revoked. The server's log held nothing starting `ys1.`, nor the client secret.
+- `yardsort-core`: six tests of the host's record and its credentials. A device is let in only
+  with the grant this host approved and the server names; a grant only the server knows, or
+  another device naming it, lets nobody in; the server's list only takes away; another server's
+  host starts with none; a row this build cannot read gives nothing; credential files are `0600`
+  in a `0700` directory, rewritten whole, and never reached by a name that is a path.
+- `remote-client`: four tests, among them the loopback listener taking the code from the right
+  path only, and a refused sign-in's error text not echoed. `remote-proto`: 35, with the pairing
+  fixtures and code normalising.
+- The frontend: eight tests of Settings → Remote (turning on and its error, the server and
+  name it was last turned on with offered again, the pairing code and QR code, letting a device watch or watch and type on chosen projects, offering no typing to
+  a device that did not ask, refusing, revoking, turning off) and one that the tab appears only
+  with the preview switch.
+- `just check`, `just bindings-check` and `just lint-windows` passed, and so did clippy of
+  `remote-proto` for Windows. `remote-client` could not be checked for Windows from here: `ring`
+  needs Microsoft's C tools to cross-compile. CI's Windows runner builds it.
+
+**The smoke test on this machine** (§11), on 2026-10-27, run by a person: the app with a
+throwaway profile and a credentials directory turned on against the local server, signed in
+through ZITADEL's login pages, showed a code, and let the pairing tool in to watch and type on
+every project; revoking it reached the tool; after a restart Remote was still on and paired
+again; turning off emptied the credentials directory. It found one gap: once turned off, the
+form was empty again, so the server and name had to be typed anew. They are now kept (§7).
+
+**Staging** runs this slice since 2026-10-27: release v3, deployed from this machine with the
+workflow's own arguments, since the branch was not yet pushed. The same Machine and server id;
+the server made the new tables in Neon, `/v1/server` lists `host.list` and `host.pair`, and an
+unauthenticated `POST /v1/hosts` is answered `401`.
+
+**Staging's smoke test** (§11), on 2026-10-27, run by a person: the app turned on against
+staging, signed in on ZITADEL Cloud's pages, and let the pairing tool in to watch and type;
+revoking it reached the tool, and turning off removed the host. The first try looked like a
+fault: the device appeared under **Devices let in** and vanished a poll later. Staging's log
+showed why: the tool had been run without `--wait-for-revoke`, so it signed its own device out
+42 ms after reading its approval, and the host's next poll rightly found the grant revoked. The
+tool now says when it signs out. The log of the run holds every request by method, path and
+status, none with a query string, and no `ys1.`, code, bearer credential or secret.
+
+**Not run here:** the OS credential store on macOS and Windows.
 
 On Linux, 2026-10-24, the third slice:
 
@@ -267,7 +431,7 @@ On Linux, 2026-10-24, the third slice:
   published ports; the API answered only with its public `Host` (`404` otherwise), and over h2c.
   No other proxy was tried. Two fixes came out of it: ZITADEL's health check ignores `--tlsMode`, so
   the recipe sets TLS by its settings, and the error above.
-- **The image with a browser**, the second local smoke test (§10): the sign-in tool started a
+- **The image with a browser**, the second local smoke test (§11): the sign-in tool started a
   sign-in at the image, headless Chromium went through ZITADEL's own login pages (name, then
   password) and back to the tool, which listed, refreshed and waited; `revoke-account` run in the
   container signed it out, and both its credentials were refused.
@@ -286,9 +450,11 @@ id, and listened 2.5 seconds after the Machine started; Fly's first health check
 before that and failed, and every one since has passed. `https://yardsort-remote-staging.fly.dev`
 answers `/health`, and `/v1/server` names the staging ZITADEL as its issuer. `fly ssh console -C`
 runs `revoke-account` in the image, which has no shell, with the Machine's secrets: for a subject
-that never signed in it answered "no account" and changed nothing.
+that never signed in it answered "no account" and changed nothing. Once the workflow was on
+`main`, it deployed staging from Actions on 2026-10-25 (run 40233851558) in 42 seconds: release
+v2 on the same Machine, the same server id, and both of its checks passing.
 
-**Staging's smoke test** (§10), on 2026-10-25, once its DNS records were in: Fly's certificate
+**Staging's smoke test** (§11), on 2026-10-25, once its DNS records were in: Fly's certificate
 from Let's Encrypt was issued within a minute, and `https://remote-staging.yardsort.sh` answered
 `/health`, with `/v1/server` naming the staging ZITADEL. The sign-in tool, run from this machine,
 sent the browser to ZITADEL Cloud and back; it listed its device, refreshed, and waited. The
@@ -372,7 +538,7 @@ On Linux, 2026-10-22, the first slice:
 **Not run here:** macOS and Windows, which CI covers, without the PostgreSQL half (above); ZITADEL
 Cloud, as opposed to ZITADEL in a container; anything on a phone; any deployment.
 
-## 8 · The rest of R2
+## 9 · The rest of R2
 
 Each item is a later slice. Where each runs, and the accounts to set up, are in
 [28](28-remote-infrastructure.md). The gate (proposal §13): two-account isolation, a revoked device
@@ -381,17 +547,16 @@ losing a live stream, and relay failure leaving PTYs alive.
 1. ~~Sign-in and device credentials, as a library.~~ Done (§4).
 2. ~~PostgreSQL records, the HTTP listener, rate limits, and the local environment.~~ Done (§5).
 3. ~~Deploying it, and the self-host recipe.~~ Done (§6): staging deployed and its smoke test
-   passed (§7). Production's deploy comes with its ZITADEL instance.
-4. **Host enrollment and grants**: a host identity persisted when Remote is enabled, enrollment
-   by QR secret or human code (hashed, five minutes, rate-limited), approval at the host, grants
-   from that approval, and where a headless host keeps its credential
-   ([open question 35](06-open-questions.md#remote)).
+   passed (§8). Production's deploy comes with its ZITADEL instance.
+4. ~~Host enrollment and grants.~~ Built (§7), behind the preview switch; done once its smoke
+   test (§11) passes here and on staging. The headless host's own way to approve a device comes
+   with the headless host (R5): today only the desktop approves.
 5. **The daemon, `PROTOCOL` 2**: one controller lease and one query responder enforced in the
    daemon, and numbered output over its IPC.
 6. **The relay and the host's outbound connector**: WSS, single-use 60-second connection tickets,
    bounded queues, revocation closing live streams, and relay failure leaving every PTY running.
 
-## 9 · Risks
+## 10 · Risks
 
 - **Rate limits are per instance and per address.** Two instances allow twice the rate, and many
   addresses together are not limited as a whole. Once more than 10 000 are in play, newcomers
@@ -430,15 +595,32 @@ losing a live stream, and relay failure leaving PTYs alive.
   Nothing watches for that yet.
 - **CI's end-to-end run does not render ZITADEL's login pages.** It makes the calls they make, so
   a change in the pages themselves would get past it. A person signing in on staging is the check
-  for them (§10).
+  for them (§11).
 - **Staging sleeps.** The first request after it stopped waits for a Machine to start, and Neon's
-  free compute to wake: a few seconds, not more, but enough to look like a failure.
+  free compute to wake: a few seconds, not more, but enough to look like a failure. Neon also
+  suspends its compute after a few idle minutes, which closes the connections the server keeps
+  open: the log shows one `deadpool.postgres: Connection error: db error` warning when that
+  happens (seen on 2026-10-25, with no request running), and the pool opens a new connection for
+  the next request.
+- **Pairing's short code is 40 bits.** It is only a way to find an offer, within one account,
+  five tries at most, and an approval at the host still follows. A person reading it aloud near
+  someone signed in to the same account is the case it does not cover; the QR code's secret is
+  the stronger path.
+- **The host learns of a request by asking.** Settings → Remote asks the server every three
+  seconds while it is open; closed, nothing arrives until it is opened again. The relay will tell
+  the host instead.
+- **A host's grant stays in force at the server if the host's last word is lost.** Revoking in
+  the app drops the grant here first, so this host refuses the device at once whatever the
+  server heard. Turning Remote off with the server unreachable leaves the host listed there until
+  the person signs it out from another device; the app says so.
+- **Grants, denials and expired requests are kept.** Nothing sweeps old rows of `grants` yet.
+  They open nothing, and each needed an offer, which is rate-limited.
 - **The deploy token lasts until 2046,** Fly's default. It deploys one app and nothing else, and
   lives only in the GitHub environment; replacing it is `fly tokens create deploy` again.
 - **The self-host recipe runs ZITADEL's containers as root**, as ZITADEL's own Compose example does,
   so that the API can write the login client's token where the login container reads it.
 
-## 10 · Smoke tests
+## 11 · Smoke tests
 
 From the third slice on, each slice ends with a smoke test a person runs: on their own machine,
 and on staging once the slice is deployed there. They are short on purpose. The tests above check
@@ -470,3 +652,27 @@ lists the device, refreshes, revokes itself, and shows the `401` after.
    `fly ssh console -a yardsort-remote-staging -C "/usr/local/bin/yardsort-server revoke-account --subject <id>"`.
    The sign-in tool reports both its credentials refused.
 4. `fly logs -a yardsort-remote-staging` holds no client secret, database URL, code or credential.
+
+**Slice 4, on this machine:**
+
+1. `just server-up`, then `just server-e2e`. It ends with "End to end: passed", after the
+   pairing round.
+2. The app with a browser. `just server-run` in one terminal, and in another a throwaway profile
+   with the preview switch and a credentials directory, so the real credential store is not
+   touched:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys YARDSORT_WORKTREE_ROOT=/tmp/ys-wt just dev`.
+3. Settings → Remote: server `http://127.0.0.1:8787`, a name, **Turn on and sign in**. Sign in as
+   `developer@yardsort.test` with `Yardsort-dev-1`. It shows itself on.
+4. **Pair a device**, then `just server-pair phone <code> --wait-for-revoke` and sign in again in
+   the browser. Within three seconds the app shows the tool waiting. **Let it watch and type**:
+   the tool reports being let in to watch and type on every project.
+5. **Revoke** it: the tool reports the grant taken back.
+6. Quit the app and start it again with the same line. Remote is still on, and **Pair a device**
+   still works, from the kept credential.
+7. **Turn off**. `/tmp/ys-credentials` is empty, and `just server-sign-in` lists the host's
+   device as revoked.
+
+**Slice 4, on staging**, once it is deployed there: steps 3 to 7 with
+`https://remote-staging.yardsort.sh` as the server, a staging account, and
+`just server-pair phone https://remote-staging.yardsort.sh <code> --wait-for-revoke`; then
+`fly logs -a yardsort-remote-staging` holds no `ys1.`, code or credential.

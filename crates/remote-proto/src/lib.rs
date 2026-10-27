@@ -22,14 +22,15 @@ pub mod account;
 pub mod grant;
 pub mod ids;
 pub mod model;
+pub mod pairing;
 pub mod terminal;
 
 use serde::{Deserialize, Serialize};
 
 pub use grant::{Grant, ProjectGrant, Scope};
 pub use ids::{
-    AccountRef, DeviceId, EventId, HostId, IdError, LeaseId, MemoryId, ProjectId, RequestId, RunId,
-    ServerId, SessionRecordId, TerminalId, WorkspaceId,
+    AccountRef, DeviceId, EventId, GrantId, HostId, IdError, LeaseId, MemoryId, ProjectId,
+    RequestId, RunId, ServerId, SessionRecordId, TerminalId, WorkspaceId,
 };
 pub use model::*;
 pub use terminal::{

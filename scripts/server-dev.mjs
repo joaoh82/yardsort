@@ -216,7 +216,7 @@ async function e2e() {
       "cat",
       "/zitadel/bootstrap/login-client.pat",
     ]).trim();
-    passed = await signInAndRevoke(token);
+    passed = (await signInAndRevoke(token)) && (await pairAndRevoke(token));
   } catch (error) {
     console.error(error.message);
   } finally {
@@ -225,6 +225,8 @@ async function e2e() {
     for (const [what, secret] of [
       ["the client secret", settings.YARDSORT_OIDC_CLIENT_SECRET],
       ["a bearer credential", "Bearer "],
+      // Every credential, sign-in code and pairing secret the server issues starts so.
+      ["a credential or pairing secret", "ys1."],
     ]) {
       if (secret && text.includes(secret)) {
         console.error(`The server's log holds ${what}.`);
@@ -289,6 +291,65 @@ function signInAndRevoke(token) {
     });
     tool.on("exit", (code) => resolvePassed(code === 0 && revoked));
   });
+}
+
+/** The pairing tool (`crates/server/examples/pair.rs`) as a host and as a phone, both signed in
+ * through ZITADEL's API: the host shows a code, the phone redeems it and asks, the host lets it
+ * watch and type, then takes that back, and the phone sees each step. */
+async function pairAndRevoke(token) {
+  execFileSync("cargo", ["build", "-q", "-p", "yardsort-server", "--example", "pair"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  const target = process.env.CARGO_TARGET_DIR ?? join(root, "target");
+  const binary = join(target, "debug", "examples", "pair");
+  const env = {
+    ...process.env,
+    ZITADEL_LOGIN_CLIENT_TOKEN: token,
+    YARDSORT_SIGN_IN_AS: "developer@yardsort.test",
+    YARDSORT_SIGN_IN_PASSWORD: "Yardsort-dev-1",
+  };
+  const run = (args, label, onLine) =>
+    new Promise((resolveRun) => {
+      const tool = spawn(process.platform === "win32" ? `${binary}.exe` : binary, args, {
+        cwd: root,
+        stdio: ["ignore", "pipe", "inherit"],
+        env,
+      });
+      let output = "";
+      tool.stdout.setEncoding("utf8");
+      tool.stdout.on("data", (chunk) => {
+        for (const line of chunk.split("\n").filter(Boolean)) {
+          process.stdout.write(`${label} ${line}\n`);
+          onLine?.(line);
+        }
+        output += chunk;
+      });
+      const timer = setTimeout(() => tool.kill(), 120_000);
+      tool.on("exit", (code) => {
+        clearTimeout(timer);
+        resolveRun({ code, output });
+      });
+    });
+  let phone;
+  const host = run(
+    ["host", PUBLIC_URL, "--zitadel-api", "--control", "--revoke-after", "3"],
+    "[host] ",
+    (line) => {
+      const code = /^Code: (\S+)$/.exec(line)?.[1];
+      if (code && !phone) {
+        phone = run(["phone", PUBLIC_URL, code, "--zitadel-api", "--wait-for-revoke"], "[phone]");
+      }
+    },
+  );
+  const hosted = await host;
+  const phoned = phone ? await phone : { code: 1, output: "" };
+  return (
+    hosted.code === 0 &&
+    phoned.code === 0 &&
+    phoned.output.includes("watch and type on every project") &&
+    phoned.output.includes("Revoked:")
+  );
 }
 
 const command = process.argv[2];
