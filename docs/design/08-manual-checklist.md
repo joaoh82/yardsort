@@ -568,6 +568,12 @@ already added as a project, and a location used by an earlier clone or new proje
 Needs Claude Code and Codex signed in (Cursor, OpenCode, Grok, OMP and pi for one row), a new project — so **Share conversations between this
 project's agents** is on, as by default — and a worktree workspace in it.
 
+`scripts/checklist-26.sh setup` (macOS, Linux) or `pwsh -File scripts\checklist-26.ps1 setup`
+(Windows) makes the throwaway profile, the demo repository and the launch line that puts this
+build's `ys` first for the agents, and prints the steps for the macOS and Windows rows. Its
+`check` then reads what can be seen from outside the window: the digest, whether Codex ran
+`ys workspace context`, and which running agents carry the note, whole.
+
 | ✓   | Check                                                                                                                                                                                                                                                                                                                                                                                                           |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 |     | Memory… for the project: **Share conversations between this project's agents** is ticked. Start Claude from the tab bar, ask it something and let it answer. Start Codex from the tab bar: no question; Codex starts with no message and no turn; a line under the tabs says _Told about claude's conversation_ for a minute, and a **⇄** mark stays on the tab.                                                |
