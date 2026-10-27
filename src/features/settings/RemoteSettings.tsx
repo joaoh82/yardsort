@@ -53,6 +53,7 @@ export function RemoteSettings() {
         .remoteRequests()
         .then((answer) => {
           if (!live) return;
+          setError(null);
           setRequests(answer.requests);
           setStatus(answer.status);
         })

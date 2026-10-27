@@ -97,6 +97,22 @@ it("says why turning on failed", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("starts with https://");
 });
 
+it("takes a failed poll's error down once the server answers again", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    core.remoteStatus.mockResolvedValue(on);
+    core.remoteRequests
+      .mockRejectedValueOnce({ code: "remote_unreachable", message: "Could not reach the server" })
+      .mockResolvedValue({ requests: [], status: on });
+    render(<RemoteSettings />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the server");
+    await vi.advanceTimersByTimeAsync(3000);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("shows a code to pair with until it is done", async () => {
   core.remoteStatus.mockResolvedValue(on);
   core.remotePair.mockResolvedValue({

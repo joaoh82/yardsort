@@ -19,8 +19,13 @@ use remote_proto::{DeviceId, Grant, GrantId, ProjectGrant, Scope};
 
 use crate::store::{RemoteGrantRow, Store, StoreResult};
 
-/// The credential-store entry for this host's refresh credential.
-pub const REFRESH_ENTRY: &str = "remote-host-refresh";
+/// The credential-store entry for the refresh credential of `device`, the device this host signed
+/// in as. Per device, because the OS credential store is per user while the host it belongs to is
+/// per profile: a development build or a throwaway profile turning Remote on or off must not
+/// replace or delete the installed app's.
+pub fn refresh_entry(device: &str) -> String {
+    format!("remote-host-refresh-{}", device.to_ascii_lowercase())
+}
 
 /// Somewhere to keep a secret by name.
 pub trait CredentialStore: Send + Sync {
@@ -365,32 +370,49 @@ mod tests {
     }
 
     #[test]
+    fn each_device_has_its_own_entry_and_the_files_take_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileCredentials::new(dir.path().join("credentials")).unwrap();
+        let installed = refresh_entry("4F1C2A3B-5D6E-4F70-8192-A3B4C5D6E7F8");
+        let throwaway = refresh_entry("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d");
+        assert_ne!(installed, throwaway);
+        store
+            .set(&installed, &Secret::new("ys1.rt.installed"))
+            .unwrap();
+        store
+            .set(&throwaway, &Secret::new("ys1.rt.throwaway"))
+            .unwrap();
+        store.delete(&throwaway).unwrap();
+        assert_eq!(
+            store.get(&installed).unwrap(),
+            Some(Secret::new("ys1.rt.installed"))
+        );
+    }
+
+    #[test]
     fn file_credentials_are_private_and_survive_a_rewrite() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("credentials");
         let store = FileCredentials::new(&root).unwrap();
-        assert_eq!(store.get(REFRESH_ENTRY).unwrap(), None);
-        store
-            .set(REFRESH_ENTRY, &Secret::new("ys1.rt.first"))
-            .unwrap();
-        store
-            .set(REFRESH_ENTRY, &Secret::new("ys1.rt.second"))
-            .unwrap();
+        let entry = refresh_entry("4f1c2a3b-5d6e-4f70-8192-a3b4c5d6e7f8");
+        assert_eq!(store.get(&entry).unwrap(), None);
+        store.set(&entry, &Secret::new("ys1.rt.first")).unwrap();
+        store.set(&entry, &Secret::new("ys1.rt.second")).unwrap();
         assert_eq!(
-            store.get(REFRESH_ENTRY).unwrap(),
+            store.get(&entry).unwrap(),
             Some(Secret::new("ys1.rt.second"))
         );
-        assert!(!root.join("remote-host-refresh.partial").exists());
+        assert!(!root.join(format!("{entry}.partial")).exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode(&root), 0o700);
-            assert_eq!(mode(&root.join(REFRESH_ENTRY)), 0o600);
+            assert_eq!(mode(&root.join(&entry)), 0o600);
         }
-        store.delete(REFRESH_ENTRY).unwrap();
-        store.delete(REFRESH_ENTRY).unwrap();
-        assert_eq!(store.get(REFRESH_ENTRY).unwrap(), None);
+        store.delete(&entry).unwrap();
+        store.delete(&entry).unwrap();
+        assert_eq!(store.get(&entry).unwrap(), None);
         // A name is never a path.
         for bad in ["../escape", "a/b", "", "UPPER"] {
             assert!(store.set(bad, &Secret::new("x")).is_err(), "{bad}");

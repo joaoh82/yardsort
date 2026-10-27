@@ -27,7 +27,7 @@ use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 use yardsort_core::remote::host::{
-    self, CredentialStore, FileCredentials, LocalGrant, REFRESH_ENTRY,
+    self, refresh_entry, CredentialStore, FileCredentials, LocalGrant,
 };
 use yardsort_core::store::RemoteHostRow;
 
@@ -154,6 +154,7 @@ fn failed(error: ClientError) -> IpcError {
         None => match error {
             ClientError::Invalid(_) => "remote_address",
             ClientError::TimedOut => "remote_timed_out",
+            ClientError::NotKept(_) => "remote_credentials",
             _ => "remote_unreachable",
         },
     };
@@ -209,10 +210,25 @@ impl CredentialStore for Keyring {
     }
 }
 
-fn keep_refresh(refresh: &Secret) -> Result<(), String> {
+fn keep_refresh(device: &str, refresh: &Secret) -> Result<(), String> {
     credentials()
         .map_err(|e| e.message)?
-        .set(REFRESH_ENTRY, refresh)
+        .set(&refresh_entry(device), refresh)
+}
+
+fn forget_refresh(device: &str) -> Result<(), String> {
+    credentials()
+        .map_err(|e| e.message)?
+        .delete(&refresh_entry(device))
+}
+
+/// An access credential, keeping any new refresh credential under the session's device.
+async fn access(session: &mut Session) -> IpcResult<Secret> {
+    let device = session.device.clone();
+    session
+        .access(|refresh| keep_refresh(device.as_str(), refresh))
+        .await
+        .map_err(failed)
 }
 
 fn status(state: &AppState) -> IpcResult<RemoteStatus> {
@@ -325,9 +341,10 @@ pub async fn remote_enable(
     }
     let signed_in = finished?;
     // Kept before anything else: from here on, it is the only way back in.
-    keep_refresh(&signed_in.refresh).map_err(|e| IpcError::new("remote_credentials", e))?;
+    keep_refresh(signed_in.device.as_str(), &signed_in.refresh)
+        .map_err(|e| IpcError::new("remote_credentials", e))?;
     let mut session = Session::new(client.clone(), signed_in);
-    let access = session.access(keep_refresh).await.map_err(failed)?;
+    let access = access(&mut session).await?;
 
     let state = app.state::<AppState>();
     let earlier = state.store.remote_host().map_err(store_failed)?;
@@ -354,7 +371,7 @@ pub async fn remote_enable(
         Err(error) => {
             // Signed in, but not a host: sign that device out again rather than leave it.
             let _ = client.revoke_device(&access, &session.device).await;
-            let _ = credentials().map(|c| c.delete(REFRESH_ENTRY));
+            let _ = forget_refresh(session.device.as_str());
             return Err(failed(error));
         }
     };
@@ -378,6 +395,9 @@ pub async fn remote_enable(
         enabled_at: now_ms(),
     };
     state.store.set_remote_host(&row).map_err(store_failed)?;
+    if let Some(earlier) = earlier.filter(|h| h.device_id != row.device_id) {
+        let _ = forget_refresh(&earlier.device_id);
+    }
     // Only a convenience for next time: Remote is on whether or not it could be written.
     let _ = state.settings.update(|s| {
         s.remote = crate::settings::RemoteSettings {
@@ -413,7 +433,7 @@ pub async fn remote_disable(app: AppHandle) -> IpcResult<RemoteStatus> {
     let at_server = async {
         let mut session = state.remote.session.lock().await;
         let session = ensure(&mut session, &row).await?;
-        let access = session.access(keep_refresh).await.map_err(failed)?;
+        let access = access(session).await?;
         let host = HostId::new(row.host_id.clone()).map_err(store_failed)?;
         session
             .client
@@ -429,9 +449,7 @@ pub async fn remote_disable(app: AppHandle) -> IpcResult<RemoteStatus> {
     .await;
     *state.remote.session.lock().await = None;
     state.store.forget_remote_host().map_err(store_failed)?;
-    credentials()?
-        .delete(REFRESH_ENTRY)
-        .map_err(|e| IpcError::new("remote_credentials", e))?;
+    forget_refresh(&row.device_id).map_err(|e| IpcError::new("remote_credentials", e))?;
     if let Err(error) = at_server {
         // Signed out at the server already is as good as removed.
         if error.code != "remote_signed_out" {
@@ -456,7 +474,7 @@ pub async fn remote_pair(app: AppHandle) -> IpcResult<RemotePairing> {
     let row = enabled(&state)?;
     let mut session = state.remote.session.lock().await;
     let session = ensure(&mut session, &row).await?;
-    let access = session.access(keep_refresh).await.map_err(failed)?;
+    let access = access(session).await?;
     let host = HostId::new(row.host_id.clone()).map_err(store_failed)?;
     let offer = session.client.offer(&access, &host).await.map_err(failed)?;
     let mut link = url::Url::parse("yardsort://pair").map_err(store_failed)?;
@@ -562,7 +580,7 @@ pub async fn remote_answer(
     let decided = {
         let mut session = state.remote.session.lock().await;
         let session = ensure(&mut session, &row).await?;
-        let access = session.access(keep_refresh).await.map_err(failed)?;
+        let access = access(session).await?;
         session
             .client
             .decide(&access, &id, decision.as_ref())
@@ -601,7 +619,7 @@ pub async fn remote_revoke(app: AppHandle, grant_id: String) -> IpcResult<Remote
     {
         let mut session = state.remote.session.lock().await;
         let session = ensure(&mut session, &row).await?;
-        let access = session.access(keep_refresh).await.map_err(failed)?;
+        let access = access(session).await?;
         session
             .client
             .revoke_grant(&access, &id)
@@ -632,7 +650,7 @@ fn enabled(state: &AppState) -> IpcResult<RemoteHostRow> {
 async fn host_grants(state: &AppState, row: &RemoteHostRow) -> IpcResult<Vec<GrantSummary>> {
     let mut session = state.remote.session.lock().await;
     let session = ensure(&mut session, row).await?;
-    let access = session.access(keep_refresh).await.map_err(failed)?;
+    let access = access(session).await?;
     let host = HostId::new(row.host_id.clone()).map_err(store_failed)?;
     Ok(session
         .client
@@ -649,7 +667,7 @@ async fn ensure<'a>(
 ) -> IpcResult<&'a mut Session> {
     if slot.is_none() {
         let refresh = credentials()?
-            .get(REFRESH_ENTRY)
+            .get(&refresh_entry(&row.device_id))
             .map_err(|e| IpcError::new("remote_credentials", e))?
             .ok_or_else(|| {
                 IpcError::new(
@@ -658,7 +676,7 @@ async fn ensure<'a>(
                 )
             })?;
         let client = Client::new(&row.server_url).map_err(failed)?;
-        let session = Session::resume(client, &refresh, keep_refresh)
+        let session = Session::resume(client, &refresh)
             .await
             .map_err(|e| match e.code() {
                 Some(ErrorCode::Unauthenticated) => IpcError::new(
@@ -667,7 +685,12 @@ async fn ensure<'a>(
                 ),
                 _ => failed(e),
             })?;
-        *slot = Some(session);
+        let session = slot.insert(session);
+        // The kept one is spent now. Should this fail, the session carries on with the new one
+        // until the app quits, and the error says why the next start will be signed out.
+        keep_refresh(&row.device_id, session.refresh_credential())
+            .map_err(|e| IpcError::new("remote_credentials", e))?;
+        return Ok(session);
     }
     Ok(slot.as_mut().expect("just filled"))
 }

@@ -8,7 +8,7 @@
 //!
 //! **Credentials** are handed to the caller and never kept here. The refresh credential is the one
 //! that matters: each works once, and presenting a spent one signs the device out, so a caller
-//! must keep each new one before using it ([`Session::refresh`] says how).
+//! must keep each new one ([`Session::access`] says how).
 //!
 //! Only HTTPS servers are spoken to, apart from a server on a loopback address written as one
 //! (`http://127.0.0.1:8787`), which is how a development server runs. Certificates are checked
@@ -38,6 +38,9 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(600);
 /// An access credential is refreshed this long before it would lapse.
 const REFRESH_MARGIN_MS: u64 = 60_000;
+/// How long a connection to the loopback listener has to send its request. Connections are
+/// served one at a time, so one that sends nothing must not hold up the browser's.
+const RETURN_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -53,6 +56,10 @@ pub enum ClientError {
     Invalid(String),
     #[error("The sign-in did not come back in time. Start again.")]
     TimedOut,
+    /// The server issued a new refresh credential and the caller could not keep it. The session
+    /// still holds it, so it works until this process ends.
+    #[error("The new sign-in could not be kept: {0}")]
+    NotKept(String),
 }
 
 impl ClientError {
@@ -305,7 +312,7 @@ impl SignIn {
         device: NewDevice,
         timeout: Duration,
     ) -> Result<Credentials> {
-        let code = tokio::time::timeout(timeout, returned(&self.listener))
+        let code = tokio::time::timeout(timeout, returned(&self.listener, RETURN_READ_TIMEOUT))
             .await
             .map_err(|_| ClientError::TimedOut)??;
         let request = TokenRequest::SignIn {
@@ -342,30 +349,27 @@ impl Session {
         }
     }
 
-    /// From a refresh credential kept from before: refreshed at once, `keep` given the new one.
-    pub async fn resume(
-        client: Client,
-        refresh: &Secret,
-        keep: impl FnOnce(&Secret) -> std::result::Result<(), String>,
-    ) -> Result<Self> {
+    /// From a refresh credential kept from before, refreshed at once. The one given is spent
+    /// by then: keep [`Session::refresh_credential`] in its place before anything else.
+    pub async fn resume(client: Client, refresh: &Secret) -> Result<Self> {
         let credentials = client.refresh(refresh).await?;
-        keep(&credentials.refresh).map_err(ClientError::Invalid)?;
         Ok(Self::new(client, credentials))
     }
 
     /// An access credential that works for at least another minute, refreshing first when
-    /// needed. `keep` is given the new refresh credential before anything else happens: the old
-    /// one is spent, and presenting it again would sign the device out.
+    /// needed. `keep` is given the new refresh credential: the old one is spent, and presenting
+    /// it again would sign the device out. The session takes the new one first, so when `keep`
+    /// fails ([`ClientError::NotKept`]) this process can carry on with it.
     pub async fn access(
         &mut self,
         keep: impl FnOnce(&Secret) -> std::result::Result<(), String>,
     ) -> Result<Secret> {
         if tokio::time::Instant::now() >= self.refresh_at {
             let credentials = self.client.refresh(&self.refresh).await?;
-            keep(&credentials.refresh).map_err(ClientError::Invalid)?;
             self.refresh_at = refresh_at(credentials.access_expires_in_ms);
             self.access = credentials.access;
             self.refresh = credentials.refresh;
+            keep(&self.refresh).map_err(ClientError::NotKept)?;
         }
         Ok(self.access.clone())
     }
@@ -395,14 +399,15 @@ fn secure_enough(url: &Url) -> bool {
 }
 
 /// The one-time code the browser brings back to the loopback listener.
-async fn returned(listener: &TcpListener) -> Result<String> {
+async fn returned(listener: &TcpListener, read_timeout: Duration) -> Result<String> {
     loop {
         let (mut socket, _) = listener
             .accept()
             .await
             .map_err(|e| ClientError::Invalid(e.to_string()))?;
         let mut buffer = vec![0u8; 8192];
-        let Ok(read) = socket.read(&mut buffer).await else {
+        let Ok(Ok(read)) = tokio::time::timeout(read_timeout, socket.read(&mut buffer)).await
+        else {
             continue;
         };
         let request = String::from_utf8_lossy(&buffer[..read]);
@@ -555,7 +560,9 @@ mod tests {
             assert!(get("/favicon.ico").await.starts_with("HTTP/1.1 404"));
             assert!(get("/signed-in?code=the-code").await.contains("Signed in."));
         });
-        let code = returned(&sign_in.listener).await.unwrap();
+        let code = returned(&sign_in.listener, RETURN_READ_TIMEOUT)
+            .await
+            .unwrap();
         browser.await.unwrap();
         assert_eq!(code, "the-code");
     }
@@ -573,8 +580,125 @@ mod tests {
                 .await
                 .unwrap();
         });
-        let error = returned(&listener).await.unwrap_err();
+        let error = returned(&listener, RETURN_READ_TIMEOUT).await.unwrap_err();
         assert_eq!(error.code(), Some(ErrorCode::Unauthenticated));
         assert!(!error.to_string().contains('<'), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_sends_nothing_does_not_hold_up_the_browser() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            // Opened first and kept open, saying nothing, as a browser's preconnect does.
+            let _quiet = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .unwrap();
+            let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .unwrap();
+            socket
+                .write_all(b"GET /signed-in?code=the-code HTTP/1.1\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        let code = tokio::time::timeout(
+            Duration::from_secs(10),
+            returned(&listener, Duration::from_millis(200)),
+        )
+        .await
+        .expect("the quiet connection held it up")
+        .unwrap();
+        assert_eq!(code, "the-code");
+    }
+
+    /// A stand-in for `POST /v1/token` that answers each refresh with the next credentials,
+    /// lapsing at once, and reports each refresh credential presented to it.
+    async fn token_server() -> (Client, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (seen, presented) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            for issued in 1..=u32::MAX {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0u8; 4096];
+                let body = loop {
+                    let read = socket.read(&mut buffer).await.unwrap();
+                    request.extend_from_slice(&buffer[..read]);
+                    let text = String::from_utf8_lossy(&request).into_owned();
+                    let Some((head, body)) = text.split_once("\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .map(str::to_owned)
+                        })
+                        .and_then(|l| l.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if body.len() >= length {
+                        break body.to_owned();
+                    }
+                };
+                let request: serde_json::Value = serde_json::from_str(&body).unwrap();
+                seen.send(request["refresh"].as_str().unwrap().to_owned())
+                    .unwrap();
+                let answer = serde_json::json!({
+                    "device": "4f1c2a3b-5d6e-4f70-8192-a3b4c5d6e7f8",
+                    "access": format!("ys1.at.{issued}"),
+                    "accessExpiresInMs": 0,
+                    "refresh": format!("ys1.rt.{issued}"),
+                })
+                .to_string();
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
+                            answer.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        (
+            Client::new(&format!("http://127.0.0.1:{port}")).unwrap(),
+            presented,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_refresh_credential_that_could_not_be_kept_is_still_the_one_used_next() {
+        let (client, mut presented) = token_server().await;
+        let mut session = Session::resume(client, &Secret::new("ys1.rt.0"))
+            .await
+            .unwrap();
+        assert_eq!(presented.recv().await.unwrap(), "ys1.rt.0");
+        assert_eq!(session.refresh_credential().expose(), "ys1.rt.1");
+
+        let error = session
+            .access(|_| Err("the credential store is locked".into()))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ClientError::NotKept(_)), "{error}");
+        assert_eq!(presented.recv().await.unwrap(), "ys1.rt.1");
+
+        let mut kept = None;
+        let access = session
+            .access(|refresh| {
+                kept = Some(refresh.expose().to_owned());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        // The one issued with the failed keep, not the spent one before it.
+        assert_eq!(presented.recv().await.unwrap(), "ys1.rt.2");
+        assert_eq!(access.expose(), "ys1.at.3");
+        assert_eq!(kept.as_deref(), Some("ys1.rt.3"));
     }
 }

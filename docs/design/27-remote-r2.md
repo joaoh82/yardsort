@@ -297,13 +297,18 @@ is sent anywhere, so the server is not an open redirector.
 
 **Where a host keeps its credential** ([open question 35](06-open-questions.md#remote), settled):
 `remote::host::CredentialStore`, a small trait in the core. The app puts the OS credential store
-behind it (the same `keyring` entry service Assist uses, as `remote-host-refresh`).
+behind it (the same `keyring` entry service Assist uses, as `remote-host-refresh-<device>`). The
+entry is named for the device the host signed in as because that store is per OS user while the
+host is per profile: a development build or a throwaway profile turning Remote on or off leaves
+the installed app's alone.
 `FileCredentials` is the other: one file per secret in a directory only its owner can read
 (`0700`, files `0600`, and a directory others could read is made private), for a machine with no
 credential store. The app uses it when `YARDSORT_CREDENTIALS_DIR` names one, and the headless
 host (R5) will by default, from a mount kept apart from its data. Neither the database, a
 settings file nor a terminal's environment ever holds a credential. Each new refresh credential
-is kept before it is used, since the spent one would sign the host out (§3).
+replaces the spent one in the session before it is kept, since presenting the spent one would
+sign the host out (§3); if keeping it fails, as with a locked keyring, the session carries on
+with it until the app quits, and the error says so.
 
 **`remote-client`**, a new crate: the device's side of the server's API. It signs in through the
 system browser to a loopback listener, refreshes (`Session`), and makes the calls above. It speaks
@@ -366,18 +371,21 @@ On Linux, 2026-10-25, the fourth slice:
 - `just server-e2e` passed with the pairing round: two pretend devices signed in through
   ZITADEL's API, against the image; the phone saw itself let in to watch and type on every
   project, then revoked. The server's log held nothing starting `ys1.`, nor the client secret.
-- `yardsort-core`: six tests of the host's record and its credentials. A device is let in only
-  with the grant this host approved and the server names; a grant only the server knows, or
-  another device naming it, lets nobody in; the server's list only takes away; another server's
-  host starts with none; a row this build cannot read gives nothing; credential files are `0600`
-  in a `0700` directory, rewritten whole, and never reached by a name that is a path.
-- `remote-client`: four tests, among them the loopback listener taking the code from the right
-  path only, and a refused sign-in's error text not echoed. `remote-proto`: 35, with the pairing
-  fixtures and code normalising.
-- The frontend: eight tests of Settings → Remote (turning on and its error, the server and
-  name it was last turned on with offered again, the pairing code and QR code, letting a device watch or watch and type on chosen projects, offering no typing to
-  a device that did not ask, refusing, revoking, turning off) and one that the tab appears only
-  with the preview switch.
+- `yardsort-core`: seven tests of the host's record and its credentials. A device is let in
+  only with the grant this host approved and the server names; a grant only the server knows,
+  or another device naming it, lets nobody in; the server's list only takes away; another
+  server's host starts with none; a row this build cannot read gives nothing; credential files
+  are `0600` in a `0700` directory, rewritten whole, and never reached by a name that is a path;
+  and each device's credential has its own entry.
+- `remote-client`: six tests, among them the loopback listener taking the code from the right
+  path only, past a connection that sends nothing; a refused sign-in's error text not echoed;
+  and a refresh credential that could not be kept still being the one presented next.
+  `remote-proto`: 35, with the pairing fixtures and code normalising.
+- The frontend: nine tests of Settings → Remote (turning on and its error, the server and name
+  it was last turned on with offered again, a failed poll's error taken down once the server
+  answers, the pairing code and QR code, letting a device watch or watch and type on chosen
+  projects, offering no typing to a device that did not ask, refusing, revoking, turning off)
+  and one that the tab appears only with the preview switch.
 - `just check`, `just bindings-check` and `just lint-windows` passed, and so did clippy of
   `remote-proto` for Windows. `remote-client` could not be checked for Windows from here: `ring`
   needs Microsoft's C tools to cross-compile. CI's Windows runner builds it.
