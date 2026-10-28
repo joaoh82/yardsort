@@ -116,6 +116,7 @@ describe("Composer", () => {
       composingPrompt: null,
       composingTask: null,
       composingHarness: null,
+      composingFork: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
@@ -141,6 +142,112 @@ describe("Composer", () => {
     expect(projects.selectedWorkspaceId).toBe(created.id);
     expect(projects.composingProjectId).toBeNull();
     expect(useTerminalStore.getState().active[created.id]).toBe("s1");
+  });
+
+  it("forks: a new branch from the workspace's, the message as the task, the packet after it", async () => {
+    // Memory is shared, but the packet carries it already: nothing is offered beside it.
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-app",
+      shared: true,
+      preview: "## Project memory",
+      entries: [],
+    });
+    useProjectsStore.setState({
+      composingFork: {
+        workspaceId: "w-app-kept-earlier",
+        name: "kept-earlier",
+        branch: "ys/kept-earlier",
+        packet: '# Forked from Yardsort: workspace "kept-earlier" in app',
+        uncommitted: 2,
+      },
+    });
+    const created = worktree("app", "add-export");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const user = await renderComposer();
+
+    expect(screen.getByRole("heading")).toHaveTextContent(
+      "Fork kept-earlier into a new workspace in app",
+    );
+    expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("new:ys/kept-earlier");
+    expect(screen.getByText(/2 uncommitted files stay behind/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /work on/ })).toHaveValue("");
+    expect(screen.queryByText(/project.s memory/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show what goes with it" }));
+    expect(screen.getByLabelText("Sent after your message")).toHaveTextContent("# Forked from");
+
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Add CSV export{Enter}");
+
+    expect(core.workspaceCreate).toHaveBeenCalledWith({
+      projectId: "p-app",
+      baseBranch: "ys/kept-earlier",
+      existingBranch: null,
+      harness: {
+        id: "claude",
+        model: null,
+        effort: null,
+        prompt: "Add CSV export",
+        forkPacket: '# Forked from Yardsort: workspace "kept-earlier" in app',
+      },
+      size: { cols: 100, rows: 30 },
+      task: null,
+    });
+  });
+
+  it("leaves the fork's packet out when the new branch does not start from the forked one", async () => {
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-app",
+      shared: true,
+      preview: "## Project memory",
+      entries: [],
+    });
+    useProjectsStore.setState({
+      composingFork: {
+        workspaceId: "w-app-kept-earlier",
+        name: "kept-earlier",
+        branch: "ys/kept-earlier",
+        packet: "# Forked from Yardsort",
+        uncommitted: 0,
+      },
+    });
+    const created = worktree("app", "add-export");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const user = await renderComposer();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Branch" }), "new:main");
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "Not starting from ys/kept-earlier, so its commits will not be in the new branch",
+    );
+    expect(screen.queryByRole("button", { name: "Show what goes with it" })).toBeNull();
+    // An ordinary new workspace again: the project's memory is offered as for any other.
+    expect(await screen.findByText(/project.s memory/)).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Add CSV export{Enter}");
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseBranch: "main",
+        harness: { id: "claude", model: null, effort: null, prompt: "Add CSV export" },
+      }),
+    );
+  });
+
+  it("does not fork from a branch the list does not offer", async () => {
+    useProjectsStore.setState({
+      composingFork: {
+        workspaceId: "w-app-gone",
+        name: "gone",
+        branch: "ys/gone",
+        packet: "# Forked from Yardsort",
+        uncommitted: 0,
+      },
+    });
+    const created = worktree("app", "x");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const user = await renderComposer();
+
+    expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("new:main");
+    expect(screen.getByRole("note")).toHaveTextContent("Not starting from ys/gone");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate.mock.calls[0]![0].harness).not.toHaveProperty("forkPacket");
   });
 
   it("passes the chosen harness, model, effort and base branch", async () => {

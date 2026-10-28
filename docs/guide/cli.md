@@ -174,6 +174,45 @@ ys workspace handoff fix-the-flaky-login-test > handoff.md
 The workspace can be named or given by id. `--json` gives `{ "text", "runs", "events" }`.
 Nothing is started: pipe the text where you want it, or paste it as an agent's first message.
 
+### `ys workspace fork <workspace> "<prompt>"`
+
+Forks a workspace: a new workspace on a new branch made from its branch, in its own worktree,
+with an agent started there — what **Fork into new workspace…** in the app's workspace menu does
+(see [Fork into new workspace…](workspaces.md#fork-into-new-workspace)). Your prompt is the new
+workspace's task and names it. After it, the agent gets the workspace's handoff packet worded for
+a fork: that its commits are the new branch's history and its uncommitted files are not, what
+it was asked, what its agents did, and the project's memory when the project shares it.
+
+```sh
+ys workspace fork fix-the-flaky-login-test "add a retry to the login request"
+```
+
+```
+created  add-retry-login-request
+  from   fix-the-flaky-login-test
+  branch ys/add-retry-login-request
+  path   /home/you/yardsort/yardsort/add-retry-login-request
+  agent  claude (5c01e2b7)
+
+It keeps working after this command returns. Open Yardsort to watch.
+
+1 file uncommitted in fix-the-flaky-login-test stayed there: a fork starts from the commits.
+```
+
+| Option             | What it does                                                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| `--harness <id>`   | Which agent to run. Default: the first one found on your `PATH`.                                |
+| `--model <model>`  | Model, for harnesses that take one.                                                             |
+| `--effort <level>` | Effort or thinking level, for harnesses that take one.                                          |
+| `--no-agent`       | Create the branch and worktree and start nothing — nothing of the packet is sent anywhere.      |
+| `--print`          | Write the message the agent would be given — your prompt, then the packet — and create nothing. |
+
+The workspace can be named or given by id. A workspace that is not on a branch (a detached
+checkout) cannot be forked, and the command says so. Files changed and not committed stay where
+they are; commit them there first to bring them along. `--json` gives what `ys workspace new`
+does, plus `forkedFrom` and `leftUncommitted`; with `--print`, `{ "text", "branch",
+"uncommitted" }`.
+
 ### `ys workspace context [workspace]`
 
 What was said in a workspace's other conversations, for an agent joining the work: every message

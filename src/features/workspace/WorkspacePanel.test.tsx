@@ -17,6 +17,8 @@ const core = vi.hoisted(() => ({
   harnessesList: vi.fn(),
   uiStateSave: vi.fn(),
   workspaceHandoff: vi.fn(),
+  workspaceFork: vi.fn(),
+  projectBranches: vi.fn(),
   memoryGet: vi.fn(async () => ({ projectId: "p", shared: false, preview: null, entries: [] })),
   conversationContext: vi.fn(),
   sessionContext: vi.fn(async () => null),
@@ -314,5 +316,36 @@ describe("starting an agent beside other conversations", () => {
     expect(core.conversationContext).toHaveBeenCalledWith(feature.id, "rec-new");
     expect(await within(dialog).findByText(told.note)).toBeInTheDocument();
     expect(within(dialog).getByText(told.digest)).toBeInTheDocument();
+  });
+});
+
+describe("forking", () => {
+  it("opens a fresh composer even when one is already open for the project", async () => {
+    core.projectBranches.mockResolvedValue({
+      branches: ["main", "ys/feature"],
+      default: "main",
+      checkedOut: ["main", "ys/feature"],
+    });
+    core.workspaceFork.mockResolvedValue({
+      text: "# Forked from Yardsort",
+      branch: "ys/feature",
+      uncommitted: 0,
+    });
+    useProjectsStore.setState({
+      projects: [{ ...alpha, workspaces: [local, feature] }],
+      selectedWorkspaceId: feature.id,
+      composingFork: null,
+    });
+    useProjectsStore.getState().compose(alpha.id);
+    render(<WorkspacePanel />);
+    expect(await screen.findByRole("heading")).toHaveTextContent("New workspace in alpha");
+
+    await useProjectsStore.getState().fork(feature);
+    expect(await screen.findByRole("heading")).toHaveTextContent(
+      "Fork feature into a new workspace in alpha",
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("new:ys/feature"),
+    );
   });
 });

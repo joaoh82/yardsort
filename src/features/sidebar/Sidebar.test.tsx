@@ -46,6 +46,7 @@ const core = vi.hoisted(() => ({
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
   harnessesList: vi.fn(),
+  workspaceFork: vi.fn(),
 }));
 const native = vi.hoisted(() => ({
   pickFolder: vi.fn(),
@@ -154,6 +155,7 @@ describe("Sidebar", () => {
       loaded: false,
       selectedWorkspaceId: null,
       composingProjectId: null,
+      composingFork: null,
       pullRequestsOpen: false,
       tasksOpen: false,
       usageOpen: false,
@@ -668,6 +670,39 @@ describe("Sidebar", () => {
     expect(within(dialog).queryByRole("combobox", { name: "Workspace" })).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("forks a workspace into the composer, on a new branch from its branch", async () => {
+    core.workspaceFork.mockResolvedValue({
+      text: "# Forked from Yardsort",
+      branch: "ys/feature",
+      uncommitted: 2,
+    });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork into new workspace…" }));
+
+    await waitFor(() => expect(useProjectsStore.getState().composingProjectId).toBe("p-alpha"));
+    expect(core.workspaceFork).toHaveBeenCalledWith("w-alpha-feature");
+    expect(useProjectsStore.getState().composingFork).toEqual({
+      workspaceId: "w-alpha-feature",
+      name: "feature",
+      branch: "ys/feature",
+      packet: "# Forked from Yardsort",
+      uncommitted: 2,
+    });
+  });
+
+  it("does not fork a workspace that is not on a branch", async () => {
+    core.workspaceFork.mockResolvedValue({ text: "", branch: null, uncommitted: 0 });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork into new workspace…" }));
+
+    await waitFor(() => expect(useProjectsStore.getState().error).toMatch(/not on a branch/));
+    expect(useProjectsStore.getState().composingProjectId).toBeNull();
   });
 
   it("does not reopen the workspace preview over its action menu", async () => {

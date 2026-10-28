@@ -14,13 +14,13 @@ Press **+** on a project row, or `Ctrl+Shift+N` / `⌘N` for the project you are
 
 ![The composer](../images/composer.png)
 
-| Field       | What it does                                                                                                                                                                                                                                                                                                                                  |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Message** | The agent's first prompt. `Enter` starts, `Shift+Enter` makes a new line. Leave it empty to just open the agent. Drop a file here to insert its path — see below. After **Hand off…** it starts as what Yardsort recorded about the workspace — see [handing work to another agent](terminals-and-sessions.md#handing-work-to-another-agent). |
-| **Harness** | Which agent to run. The list comes from [settings](settings.md).                                                                                                                                                                                                                                                                              |
-| **Model**   | Free text with suggestions. Empty means "let the agent use its default" — no flag is passed at all.                                                                                                                                                                                                                                           |
-| **Effort**  | Offered only for agents that have the concept.                                                                                                                                                                                                                                                                                                |
-| **Branch**  | Under _New branch from_, pick the branch to start from. Under _Open existing branch_, pick a branch to check out in a workspace as it is — no new branch is made.                                                                                                                                                                             |
+| Field       | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Message** | The agent's first prompt. `Enter` starts, `Shift+Enter` makes a new line. Leave it empty to just open the agent. Drop a file here to insert its path — see below. After **Hand off…** it starts as what Yardsort recorded about the workspace — see [handing work to another agent](terminals-and-sessions.md#handing-work-to-another-agent). After **Fork into new workspace…** it starts empty, and the record goes after it — see [Fork](#fork-into-new-workspace). |
+| **Harness** | Which agent to run. The list comes from [settings](settings.md).                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Model**   | Free text with suggestions. Empty means "let the agent use its default" — no flag is passed at all.                                                                                                                                                                                                                                                                                                                                                                    |
+| **Effort**  | Offered only for agents that have the concept.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Branch**  | Under _New branch from_, pick the branch to start from. Under _Open existing branch_, pick a branch to check out in a workspace as it is — no new branch is made.                                                                                                                                                                                                                                                                                                      |
 
 Under the pickers, **Import worktrees…** opens the same dialog as the project menu, for worktrees
 that already exist — see [Worktrees made elsewhere](#worktrees-made-elsewhere).
@@ -124,6 +124,39 @@ Start a [workflow](workflows.md) in this workspace: **Run workflow…** asks whi
 review…** goes straight to the built-in review. Both open the same dialog, which asks the
 workflow's inputs and shows the pull request it will use. The `local` workspace has them too,
 from its right-click menu.
+
+### Fork into new workspace…
+
+Start new work from where this workspace stands, without sharing its folder: a new workspace, on
+a new branch made from this one's, in its own worktree. It is for the moment you are partway
+through a feature and want the next one to build on it — where a
+[handoff](terminals-and-sessions.md#handing-work-to-another-agent) would put the next agent in the
+same worktree, on the same branch.
+
+It opens the [composer](#starting-one-the-composer), headed _Fork … into a new workspace_, with
+**Branch** already on this workspace's branch. The message starts empty: say what to do next.
+Your message is the new workspace's task, and names it. After it, the agent gets what Yardsort
+recorded about the workspace you forked — the same record a handoff is written from, worded for
+a new branch: what that workspace was asked, its commits (now in your history), its changed
+files, what its agents did, and the project's memory when the project shares it. **Show what goes
+with it** reads that part; it is not edited there.
+
+A fork starts from the **commits**. Files changed and not committed stay in the workspace you
+forked, and the composer says how many: commit them there first to bring them along. The new
+branch's base is the branch you forked from, so its Changes list and its pull request are
+measured against that branch, not the project's default. The workspace you forked is left as it
+is, and its agents carry on.
+
+The record goes only with a branch started from the one you forked, since only then are its
+commits there. Pick anything else under **Branch** — or fork a workspace whose branch has gone
+since — and the composer says so in amber: it starts an ordinary new workspace, with nothing of
+the forked one's record and the project's memory offered as usual.
+
+From a terminal, `ys workspace fork <workspace> "<prompt>"` does the same, and `--print` shows the
+message without making anything — see the [CLI guide](cli.md#ys-workspace-fork-workspace-prompt).
+
+The item is greyed out for a workspace that is not on a branch (a detached checkout, or a branch
+with no commits yet). The `local` workspace has it too, when its checkout is on a branch.
 
 ### Rename…
 

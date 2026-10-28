@@ -37,6 +37,9 @@ export function WorkspacePanel() {
   // Composing a run inside a workspace that already exists — `local`. Selection is what holds it,
   // so the panel needs both the workspace and the project it belongs to.
   const composingWorkspaceId = useProjectsStore((s) => s.composingWorkspaceId);
+  // A fork reads what it forks once, at mount: forking again, even in the same project, is a new
+  // composer.
+  const forkingFrom = useProjectsStore((s) => s.composingFork?.workspaceId ?? "");
   const workflowId = useProjectsStore((s) => s.workflowId);
   const usageOpen = useProjectsStore((s) => s.usageOpen);
   const pullRequestsOpen = useProjectsStore((s) => s.pullRequestsOpen);
@@ -68,7 +71,7 @@ export function WorkspacePanel() {
       ) : workflowId ? (
         <WorkflowView key={workflowId} workflowId={workflowId} />
       ) : composingFor ? (
-        <Composer key={composingFor.id} project={composingFor} />
+        <Composer key={`${composingFor.id}:${forkingFrom}`} project={composingFor} />
       ) : runIn ? (
         <Composer key={runIn.workspace.id} project={runIn.project} runIn={runIn.workspace} />
       ) : selection ? (

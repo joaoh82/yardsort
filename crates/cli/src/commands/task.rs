@@ -433,6 +433,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
                 project.id,
                 delegated.prompt,
                 Some(delegated.task),
+                None,
                 base,
                 harness,
                 model,

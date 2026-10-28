@@ -47,6 +47,15 @@ has the downloads and the full commit lists.
   leave a character or the space after it missing from the repainted screen. The repaint now
   carries the unfinished half, so the program's next output completes it as it would have.
 
+- **Fork a workspace into a new one.** **Fork into new workspace…** in a workspace's menu starts
+  a new workspace on a new branch made from that workspace's branch, in its own worktree — for
+  building the next feature on the one in progress, where a handoff would share the worktree.
+  Your message is the new workspace's task; what Yardsort recorded about the workspace you forked
+  goes to the agent after it. Uncommitted files stay behind, and the composer says how many. See
+  [Fork into new workspace…](docs/guide/workspaces.md#fork-into-new-workspace).
+  `ys workspace fork <workspace> "<prompt>"` does the same from a terminal; `--print` shows the
+  message the agent would get.
+
 ## 0.20.2
 
 - **Homepage and README lead with what Yardsort is for.** Orchestrate agents on Linux, macOS and

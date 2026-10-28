@@ -25,6 +25,7 @@ import {
   type ProjectMemory,
   type ProjectOutcomes,
   type HandoffPacket,
+  type ForkPacket,
   type ObservedMatch,
   type ObservedWrite,
   type Provenance,
@@ -168,6 +169,7 @@ export type {
   ProjectMemory,
   ProjectOutcomes,
   HandoffPacket,
+  ForkPacket,
   ObservedMatch,
   ObservedWrite,
   Provenance,
@@ -413,6 +415,9 @@ export const ipc = {
   activityClear: (workspaceId: string | null) => done(commands.activityClear(workspaceId)),
   /** The handoff packet for a workspace: what Yardsort recorded, as the next agent's prompt. */
   workspaceHandoff: (workspaceId: string) => unwrap(commands.workspaceHandoff(workspaceId)),
+  /** The fork packet for a workspace: the same record, for an agent in a new workspace on a
+   *  new branch made from its branch. */
+  workspaceFork: (workspaceId: string) => unwrap(commands.workspaceFork(workspaceId)),
   /**
    * Which of a workspace's files its agents reported writing, which runs could have, and for
    * each of `paths` (the change list's files) whether its last write fell inside a tool call.

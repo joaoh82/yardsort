@@ -143,6 +143,11 @@ too, under _Project memory_, where you can edit it with the rest.
 `ys workspace handoff <workspace>` prints the same message from the command line, without
 Assist's ordering — see the [CLI guide](cli.md#ys-workspace-handoff-workspace).
 
+A handoff keeps the next agent in this workspace, on this branch. To start new work that builds
+on this one in a worktree of its own, fork the workspace instead: **Fork into new workspace…** in
+the workspace menu makes a new branch from this one's and sends the same record after your
+message — see [Fork into new workspace…](workspaces.md#fork-into-new-workspace).
+
 ## What agents can read of each other
 
 The handoff message says what the agents did. It does not say what they were told or what they
@@ -210,7 +215,7 @@ Some things to know:
     both under `PI_CODING_AGENT_DIR` when it is set). These files are trees: when you go back and
     take the conversation another way, what is read is the way it went last.
 - **The asking agent's own conversation is left out**, and so is what Yardsort added to a first
-  message — the project's memory, a handoff packet — which the agent has anyway.
+  message — the project's memory, a handoff or fork packet — which the agent has anyway.
 - **A fork** shows only its own turns: the ones before the fork belong to the conversation it
   came from, which is listed beside it.
 

@@ -282,13 +282,58 @@ pub fn summarize(
 
 /// The packet: Markdown a person can read and an agent can act on.
 pub fn render(facts: &Facts) -> String {
+    render_for(facts, Purpose::Handoff)
+}
+
+/// What the packet is for, which decides how it speaks of the workspace it describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    /// The next agent works in the same workspace: "this branch", "here".
+    Handoff,
+    /// The next agent works in a new workspace, on a new branch made from this one's: the
+    /// commits came along, the uncommitted files did not, and the user's own message before
+    /// the packet is the task.
+    Fork,
+}
+
+/// The packet, worded for what it is for.
+pub fn render_for(facts: &Facts, purpose: Purpose) -> String {
+    let fork = purpose == Purpose::Fork;
+    // How the packet points at the workspace it describes: the reader's own, or another.
+    let (this, here) = if fork {
+        ("that", "there")
+    } else {
+        ("this", "here")
+    };
     let mut out = String::new();
     let name = truncate(&facts.workspace, MAX_NAME_CHARS);
-    out.push_str(&format!(
-        "# Handoff from Yardsort: workspace \"{name}\" in {}\n\n",
-        facts.project
-    ));
-    out.push_str(if facts.said.is_some() {
+    if fork {
+        out.push_str(&format!(
+            "# Forked from Yardsort: workspace \"{name}\" in {}\n\n",
+            facts.project
+        ));
+        out.push_str(&format!(
+            "You are in a new workspace, on a new branch made from that workspace's branch: its \
+             commits are your history, its uncommitted files are not here. Your task is the \
+             user's message before this; if there is none, ask the user what to do. What follows \
+             is context, assembled by Yardsort from what it recorded about that workspace{}. \
+             That workspace carries on separately; leave it alone.\n\n",
+            if facts.said.is_some() {
+                " and, under What was said, from its agents' own transcripts, of which it keeps \
+                 no copy"
+            } else {
+                " — never from another agent's conversation, which it does not keep"
+            }
+        ));
+    } else {
+        out.push_str(&format!(
+            "# Handoff from Yardsort: workspace \"{name}\" in {}\n\n",
+            facts.project
+        ));
+    }
+    out.push_str(if fork {
+        ""
+    } else if facts.said.is_some() {
         "You are taking over work in this workspace. What follows was assembled by Yardsort \
          from what it recorded and, under What was said, from the agents' own transcripts, of \
          which it keeps no copy. Where it says nothing, ask the user or read the files.\n\n"
@@ -298,12 +343,12 @@ pub fn render(facts: &Facts) -> String {
          keep. Where it says nothing, ask the user or read the files.\n\n"
     });
 
-    out.push_str("## What this workspace was asked\n\n");
+    out.push_str(&format!("## What {this} workspace was asked\n\n"));
     if facts.prompts.is_empty() {
-        out.push_str(
-            "Not recorded: this workspace was opened without a first message, or its agents \
+        out.push_str(&format!(
+            "Not recorded: {this} workspace was opened without a first message, or its agents \
              were started without one.\n\n",
-        );
+        ));
     } else {
         for (index, prompt) in facts.prompts.iter().enumerate() {
             if facts.prompts.len() > 1 {
@@ -316,8 +361,20 @@ pub fn render(facts: &Facts) -> String {
         }
     }
 
-    out.push_str("## Where the work stands\n\n");
+    out.push_str(if fork {
+        "## Where that work stands\n\n"
+    } else {
+        "## Where the work stands\n\n"
+    });
     match (&facts.branch, &facts.base) {
+        (Some(branch), Some(base)) if fork => out.push_str(&format!(
+            "- Your branch starts from `{branch}`, which started from `{base}`: {} on it, all \
+             in your history.\n",
+            plural(facts.commits.len(), "commit")
+        )),
+        (Some(branch), None) if fork => {
+            out.push_str(&format!("- Your branch starts from `{branch}`.\n"))
+        }
         (Some(branch), Some(base)) => out.push_str(&format!(
             "- Branch `{branch}`, started from `{base}`: {} on it since.\n",
             plural(facts.commits.len(), "commit")
@@ -326,7 +383,7 @@ pub fn render(facts: &Facts) -> String {
         _ => out.push_str("- Not on a branch Yardsort knows.\n"),
     }
     if !facts.commits.is_empty() {
-        out.push_str("- Commits on this branch, newest first:\n");
+        out.push_str(&format!("- Commits on {this} branch, newest first:\n"));
         for subject in facts.commits.iter().take(MAX_COMMITS) {
             out.push_str(&format!("  - {subject}\n"));
         }
@@ -338,13 +395,17 @@ pub fn render(facts: &Facts) -> String {
         }
     }
     let reporting = facts.provenance.reporting_runs() > 0;
-    for (title, scope, files) in [
-        ("Uncommitted", Scope::Uncommitted, &facts.uncommitted),
+    let (uncommitted, committed) = if fork {
         (
-            "Committed on this branch",
-            Scope::Committed,
-            &facts.committed,
-        ),
+            "Uncommitted in that workspace, and so **not** in yours",
+            "Committed on that branch, and so in yours",
+        )
+    } else {
+        ("Uncommitted", "Committed on this branch")
+    };
+    for (title, scope, files) in [
+        (uncommitted, Scope::Uncommitted, &facts.uncommitted),
+        (committed, Scope::Committed, &facts.committed),
     ] {
         if files.is_empty() {
             continue;
@@ -393,9 +454,13 @@ pub fn render(facts: &Facts) -> String {
     }
     out.push('\n');
 
-    out.push_str("## What the agents did here\n\n");
+    out.push_str(&format!("## What the agents did {here}\n\n"));
     if facts.runs.is_empty() {
-        out.push_str("No agent has run in this workspace yet.\n\n");
+        out.push_str(if fork {
+            "No agent had run in that workspace.\n\n"
+        } else {
+            "No agent has run in this workspace yet.\n\n"
+        });
     }
     for run in &facts.runs {
         out.push_str(&format!("- **{}**", run.harness));
@@ -510,23 +575,34 @@ pub fn render(facts: &Facts) -> String {
     }
 
     out.push_str("## What is not here\n\n");
-    out.push_str(if facts.said.is_some() {
-        "- What the agents reasoned, the tools they called and what those returned, and the \
-         turns What was said shortened or left out: `ys workspace context --conversation <id> \
-         --turn N` gives one turn whole. If more matters, ask the user before assuming.\n"
+    // From another workspace, the command has to name the one the conversations are in.
+    let context = if fork {
+        format!("ys workspace context \"{name}\"")
+    } else {
+        "ys workspace context".to_owned()
+    };
+    out.push_str(&if facts.said.is_some() {
+        format!(
+            "- What the agents reasoned, the tools they called and what those returned, and the \
+             turns What was said shortened or left out: `{context} --conversation <id> --turn N` \
+             gives one turn whole. If more matters, ask the user before assuming.\n"
+        )
     } else {
         "- The conversations themselves: what the agents said, reasoned, tried and rejected. \
          Yardsort records metadata only. If that matters, ask the user before assuming.\n"
+            .to_owned()
     });
     out.push_str(
         "- The commands the agents ran and the contents of files as they were; read the files \
          as they are now.\n",
     );
     if !reporting && !facts.runs.is_empty() {
-        out.push_str("- Which files the agents wrote: no run here was reporting what it did.\n");
+        out.push_str(&format!(
+            "- Which files the agents wrote: no run {here} was reporting what it did.\n"
+        ));
     }
     out.push_str(&format!(
-        "- The record behind this: {} in Yardsort's activity timeline for this workspace \
+        "- The record behind this: {} in Yardsort's activity timeline for {this} workspace \
          (`ys activity list --workspace \"{name}\"`).\n",
         plural(facts.events, "event")
     ));
@@ -1262,6 +1338,50 @@ mod tests {
         assert!(!with.contains("never from another agent's conversation"));
         assert!(!with.contains("- The conversations themselves"));
         assert!(with.contains("`ys workspace context --conversation <id> --turn N`"));
+    }
+
+    /// A fork's packet is the same facts, spoken of as another workspace's: the commits are in
+    /// the new branch's history, the uncommitted files are not, and the task is the user's.
+    #[test]
+    fn a_fork_packet_says_the_commits_came_along_and_the_uncommitted_files_did_not() {
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let mut facts = from_store(&store, &ws, &[]).unwrap();
+        facts.commits = vec!["Redirect after sign-in".into()];
+        let changed = |path: &str| ChangedFile {
+            path: path.into(),
+            kind: "modified".into(),
+            additions: Some(1),
+            deletions: Some(0),
+        };
+        facts.uncommitted = vec![changed("src/draft.rs")];
+        facts.committed = vec![changed("src/login.rs")];
+
+        let text = render_for(&facts, Purpose::Fork);
+        assert!(text.starts_with("# Forked from Yardsort: workspace \"fix-login\" in app\n"));
+        assert!(text.contains("Your task is the user's message before this"));
+        assert!(text.contains(
+            "Your branch starts from `ys/fix`, which started from `main`: 1 commit on it"
+        ));
+        assert!(text.contains("- Uncommitted in that workspace, and so **not** in yours: 1 file\n"));
+        assert!(text.contains("- Committed on that branch, and so in yours: 1 file\n"));
+        assert!(text.contains("No agent had run in that workspace."));
+        assert!(!text.contains("this workspace"), "{text}");
+        assert!(!text.contains("taking over"));
+
+        // What was said lives in the other workspace, so the command to read more names it.
+        facts.said = Some("### claude · conversation 3f2a · 1 turn\n".into());
+        let text = render_for(&facts, Purpose::Fork);
+        assert!(text.contains("from its agents' own transcripts"), "{text}");
+        assert!(text.contains("`ys workspace context \"fix-login\" --conversation <id> --turn N`"));
+        facts.said = None;
+
+        // The handoff reads as it always has.
+        let handoff = render(&facts);
+        assert!(handoff.starts_with("# Handoff from Yardsort"));
+        assert!(handoff.contains("You are taking over work in this workspace."));
+        assert!(handoff.contains("- Uncommitted: 1 file\n"));
+        assert_eq!(handoff, render_for(&facts, Purpose::Handoff));
     }
 
     #[test]
