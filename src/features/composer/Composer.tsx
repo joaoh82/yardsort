@@ -176,13 +176,14 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   }, [project.id, runIn, prepared, fork]);
 
   // The project's memory, when it shares it: what goes after the message, and a way to leave it
-  // out of this one launch. A handoff's or a fork's packet carries it already.
+  // out of this one launch. A handoff's packet carries it already, and so does a fork's — but
+  // only while the fork starts from the forked branch, so it is read for a fork too.
   const [memory, setMemory] = useState<{ preview: string; count: number } | null>(null);
   const [skipMemory, setSkipMemory] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showPacket, setShowPacket] = useState(false);
   useEffect(() => {
-    if (handoff !== null || fork || !hasCore()) return;
+    if (handoff !== null || !hasCore()) return;
     let stale = false;
     ipc.memoryGet(project.id).then(
       (loaded) => {
@@ -195,7 +196,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     return () => {
       stale = true;
     };
-  }, [project.id, handoff, fork]);
+  }, [project.id, handoff]);
 
   // In a workspace with other conversations, in a project that shares them: what the agent is
   // told about them, and a way to leave that out of this one launch.
@@ -261,6 +262,11 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
 
   const ready = !busy && !!harness?.resolvedPath && (!!runIn || base !== "");
   const [mode, branch] = [base.slice(0, base.indexOf(":")), base.slice(base.indexOf(":") + 1)];
+  // The packet tells the agent the forked branch's commits are its history, which is true only
+  // when the new branch starts there: picked something else under Branch, or the forked branch
+  // was not offered, and it is an ordinary new workspace, the packet left out.
+  const forking = !!fork && base === `new:${fork.branch}`;
+  const offersMemory = !!memory && !forking;
   // A branch lives in one worktree at a time, so only branches nobody has checked out can open.
   const openable = branches?.branches.filter((name) => !branches.checkedOut.includes(name)) ?? [];
 
@@ -286,9 +292,9 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       model: model.trim() || null,
       effort: effortChoice || null,
       prompt: message.trim() || null,
-      ...(memory && skipMemory ? { skipMemory: true } : {}),
+      ...(offersMemory && skipMemory ? { skipMemory: true } : {}),
       ...(conversations && skipContext ? { skipContext: true } : {}),
-      ...(fork ? { forkPacket: fork.packet } : {}),
+      ...(forking ? { forkPacket: fork.packet } : {}),
     };
     const remember = () =>
       projects.remember(picksKey(project.id), {
@@ -378,7 +384,14 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             asked.
           </p>
         )}
-        {fork && (
+        {fork && base !== "" && !forking && (
+          <p role="note" className="mb-2 text-[12px] text-amber-400">
+            Not starting from <span className="font-mono">{fork.branch}</span>, so its commits will
+            not be in the new branch and nothing of {fork.name}&rsquo;s record goes with your
+            message. Pick <span className="font-mono">{fork.branch}</span> under Branch to fork it.
+          </p>
+        )}
+        {forking && (
           <p className="mb-2 text-[12px] text-ink-faint">
             A new branch and worktree, started from{" "}
             <span className="font-mono text-ink-muted">{fork.branch}</span> with all its commits.
@@ -402,7 +415,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             </button>
           </p>
         )}
-        {fork && showPacket && (
+        {forking && showPacket && (
           <pre
             aria-label="Sent after your message"
             className="mb-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-[11px] whitespace-pre-wrap select-text"
@@ -563,7 +576,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
 
         {harness && <AgentHistoryLine history={histories.find((h) => h.harness === harness.id)} />}
 
-        {memory && (
+        {offersMemory && (
           <div className="mt-2 text-[12px] text-ink-faint">
             <label className="flex items-center gap-2">
               <input

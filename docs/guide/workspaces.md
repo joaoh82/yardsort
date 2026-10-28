@@ -144,8 +144,13 @@ with it** reads that part; it is not edited there.
 A fork starts from the **commits**. Files changed and not committed stay in the workspace you
 forked, and the composer says how many: commit them there first to bring them along. The new
 branch's base is the branch you forked from, so its Changes list and its pull request are
-measured against that branch, not the project's default — pick another under **Branch** if you
-want it otherwise. The workspace you forked is left as it is, and its agents carry on.
+measured against that branch, not the project's default. The workspace you forked is left as it
+is, and its agents carry on.
+
+The record goes only with a branch started from the one you forked, since only then are its
+commits there. Pick anything else under **Branch** — or fork a workspace whose branch has gone
+since — and the composer says so in amber: it starts an ordinary new workspace, with nothing of
+the forked one's record and the project's memory offered as usual.
 
 The item is greyed out for a workspace that is not on a branch (a detached checkout, or a branch
 with no commits yet). The `local` workspace has it too, when its checkout is on a branch.

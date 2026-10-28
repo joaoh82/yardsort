@@ -168,6 +168,10 @@ the first one stopping. **Fork into new workspace…** in the workspace menu is 
   other conversations, which `skip_context` turns off.) A fork with no message still sends the
   packet, and the conversation reader cuts it from a first message as it cuts the memory, so a
   later handoff or `ys workspace context` quotes only the user's words.
+- **Only from the forked branch.** **Branch** stays editable, and a forked branch the list no
+  longer offers falls back to the default. Either way the packet's "its commits are your history"
+  would be false, so the composer sends it only while the base is `new:<forked branch>`; anything
+  else is an ordinary new workspace, said so in amber, with the memory offered again.
 - **The same facts, worded for elsewhere.** `handoff::render_for(facts, Purpose::Fork)` writes
   "that workspace" and "there", says its commits are in the new branch's history and its
   uncommitted files are not, and that the user's message is the task. `render` is the handoff,
