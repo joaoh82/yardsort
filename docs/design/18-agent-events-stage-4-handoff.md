@@ -177,6 +177,10 @@ the first one stopping. **Fork into new workspace…** in the workspace menu is 
   uncommitted files are not, and that the user's message is the task. `render` is the handoff,
   unchanged. `workspace_fork` returns the text, the branch git has out now and how many files
   are uncommitted, which the composer warns about: a fork starts from commits only.
+- **`ys workspace fork <workspace> "<prompt>"`** does it from a terminal: `packet_facts` — the
+  facts `ys workspace handoff` prints from — rendered for a fork, and `ys workspace new` with the
+  workspace's branch as base and the packet as `fork_packet`. `--print` writes the joined message
+  and makes nothing, which is also how its test reads what an agent would get without a daemon.
 - **Not carried: uncommitted work.** Copying it would mean writing into the new worktree on the
   user's behalf, and a stash-and-apply that can conflict. Committing first is one step the user
   already knows; the composer says so with the count.

@@ -53,6 +53,8 @@ has the downloads and the full commit lists.
   Your message is the new workspace's task; what Yardsort recorded about the workspace you forked
   goes to the agent after it. Uncommitted files stay behind, and the composer says how many. See
   [Fork into new workspace…](docs/guide/workspaces.md#fork-into-new-workspace).
+  `ys workspace fork <workspace> "<prompt>"` does the same from a terminal; `--print` shows the
+  message the agent would get.
 
 ## 0.20.2
 

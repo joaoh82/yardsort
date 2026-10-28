@@ -152,6 +152,9 @@ commits there. Pick anything else under **Branch** — or fork a workspace whose
 since — and the composer says so in amber: it starts an ordinary new workspace, with nothing of
 the forked one's record and the project's memory offered as usual.
 
+From a terminal, `ys workspace fork <workspace> "<prompt>"` does the same, and `--print` shows the
+message without making anything — see the [CLI guide](cli.md#ys-workspace-fork-workspace-prompt).
+
 The item is greyed out for a workspace that is not on a branch (a detached checkout, or a branch
 with no commits yet). The `local` workspace has it too, when its checkout is on a branch.
 

@@ -23,6 +23,10 @@ const LINES: { command: string; note: string }[] = [
     note: "the next agent's first message, from what was recorded",
   },
   {
+    command: 'ys workspace fork fix-the-flaky-login-test "add a retry"',
+    note: "the next feature on a new branch from that one, its record going along",
+  },
+  {
     command: "ys workflow run code-review --input reviewer=codex",
     note: "in a workspace's folder: a second agent reviews its pull request",
   },

@@ -68,6 +68,37 @@ pub enum Command {
         /// The workspace, by name or id.
         workspace: String,
     },
+    /// Fork a workspace: a new workspace on a new branch made from its branch, with an agent told
+    /// what was done there.
+    ///
+    /// For building the next thing on work in progress without sharing its folder. The new
+    /// branch starts from the workspace's commits; its uncommitted files stay where they are.
+    /// The message is the new workspace's task and names it; the agent gets the workspace's
+    /// handoff record after it, worded for a fork, as the app's Fork into new workspace… sends.
+    Fork {
+        /// The workspace to fork, by name or id.
+        workspace: String,
+        /// What to do next: the agent's first message, and the new workspace's name.
+        ///
+        /// Free text, so it may start with `-`.
+        #[arg(allow_hyphen_values = true)]
+        prompt: String,
+        /// Which harness to run. Defaults to the first one installed.
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+        /// Model for the harness, if it takes one.
+        #[arg(long, value_name = "MODEL")]
+        model: Option<String>,
+        /// Effort or thinking level, if the harness takes one.
+        #[arg(long, value_name = "LEVEL")]
+        effort: Option<String>,
+        /// Only create the branch and worktree; start nothing, and send nothing.
+        #[arg(long)]
+        no_agent: bool,
+        /// Write the message an agent would be given, and stop: nothing is created or started.
+        #[arg(long, conflicts_with = "no_agent")]
+        print: bool,
+    },
     /// What was said in the workspace's other conversations, for an agent joining the work.
     ///
     /// Every message the user typed and each turn's last reply, newest first, read from the
@@ -134,6 +165,12 @@ struct Created {
     /// The task it was started from, when it was: its key, `#91`.
     #[serde(skip_serializing_if = "Option::is_none")]
     task: Option<String>,
+    /// The workspace it was forked from, when it was, by name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    forked_from: Option<String>,
+    /// Files changed and not committed in the forked workspace, which did not come along.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    left_uncommitted: Option<usize>,
 }
 
 pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure> {
@@ -148,7 +185,18 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             effort,
             no_agent,
         } => new(
-            ys, project, prompt, None, base, harness, model, effort, no_agent, out,
+            ys, project, prompt, None, None, base, harness, model, effort, no_agent, out,
+        ),
+        Command::Fork {
+            workspace,
+            prompt,
+            harness,
+            model,
+            effort,
+            no_agent,
+            print,
+        } => fork(
+            ys, &workspace, prompt, harness, model, effort, no_agent, print, out,
         ),
         Command::Delete { workspace, force } => delete(ys, &workspace, force, out),
         Command::Handoff { workspace } => handoff(ys, &workspace, out),
@@ -300,6 +348,91 @@ struct Packet {
 }
 
 fn handoff(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
+    let (_, facts) = packet_facts(ys, wanted)?;
+    let packet = Packet {
+        runs: facts.runs.len(),
+        events: facts.events,
+        text: yardsort_core::activity::handoff::render(&facts),
+    };
+    out.emit(&packet, || say!("{}", packet.text))
+}
+
+/// What a fork carries from the workspace it was made from.
+pub(super) struct Forked {
+    from: String,
+    packet: String,
+    uncommitted: usize,
+}
+
+/// `--print`: the message the agent would be given, as text or as `{ text, branch, uncommitted }`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkMessage {
+    text: String,
+    branch: String,
+    uncommitted: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fork(
+    ys: &Yardsort,
+    wanted: &str,
+    prompt: String,
+    harness: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+    no_agent: bool,
+    print: bool,
+    out: &Output,
+) -> Result<(), Failure> {
+    let (workspace, facts) = packet_facts(ys, wanted)?;
+    let branch = facts.branch.clone().ok_or_else(|| {
+        Failure::new(format!(
+            "{} is not on a branch, so there is nothing to fork from.",
+            workspace.name
+        ))
+    })?;
+    let packet = yardsort_core::activity::handoff::render_for(
+        &facts,
+        yardsort_core::activity::handoff::Purpose::Fork,
+    );
+    if print {
+        // As the launcher joins them: the message, then the packet in the memory's place.
+        let message = ForkMessage {
+            text: match prompt.trim() {
+                "" => packet,
+                prompt => format!("{prompt}\n\n{packet}"),
+            },
+            branch,
+            uncommitted: facts.uncommitted.len(),
+        };
+        return out.emit(&message, || say!("{}", message.text));
+    }
+    new(
+        ys,
+        workspace.project_id.clone(),
+        prompt,
+        None,
+        Some(Forked {
+            from: workspace.name.clone(),
+            packet,
+            uncommitted: facts.uncommitted.len(),
+        }),
+        Some(branch),
+        harness,
+        model,
+        effort,
+        no_agent,
+        out,
+    )
+}
+
+/// A workspace and everything its handoff packet is written from — the store's half, git's,
+/// and what was said in its conversations when the project shares them.
+fn packet_facts(
+    ys: &Yardsort,
+    wanted: &str,
+) -> Result<(WorkspaceRow, yardsort_core::activity::handoff::Facts), Failure> {
     ys.drain_spool();
     let workspace = find_workspace(ys, wanted)?;
     let root = PathBuf::from(&workspace.path);
@@ -320,12 +453,7 @@ fn handoff(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
     let sources = Sources::from_env(&|name| env(name).or_else(|| ys.env().vars.get(name).cloned()));
     facts.said = digest::packet_section(&ys.store, &workspace, &sources, now_ms())?;
-    let packet = Packet {
-        runs: facts.runs.len(),
-        events: facts.events,
-        text: yardsort_core::activity::handoff::render(&facts),
-    };
-    out.emit(&packet, || say!("{}", packet.text))
+    Ok((workspace, facts))
 }
 
 fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Result<(), Failure> {
@@ -398,6 +526,8 @@ pub(super) fn new(
     prompt: String,
     // The task this is started from: it names the workspace and is recorded against it.
     task: Option<TaskRef>,
+    // The workspace this is forked from: its packet goes to the agent after the message.
+    forked: Option<Forked>,
     base: Option<String>,
     harness: Option<String>,
     model: Option<String>,
@@ -441,6 +571,8 @@ pub(super) fn new(
         session: None,
         harness: harness.clone(),
         task: task.as_ref().map(|task| task.key.clone()),
+        forked_from: forked.as_ref().map(|forked| forked.from.clone()),
+        left_uncommitted: forked.as_ref().map(|forked| forked.uncommitted),
     };
 
     if let Some(harness) = harness {
@@ -481,7 +613,7 @@ pub(super) fn new(
                 skip_memory: false,
                 quiet_memory: false,
                 skip_context: false,
-                fork_packet: None,
+                fork_packet: forked.map(|forked| forked.packet),
             }),
             DETACHED_SIZE,
         )?;
@@ -493,6 +625,9 @@ pub(super) fn new(
         if let Some(task) = &created.task {
             sayln!("  task   {task}");
         }
+        if let Some(from) = &created.forked_from {
+            sayln!("  from   {from}");
+        }
         if let Some(branch) = &created.branch {
             sayln!("  branch {branch}");
         }
@@ -503,6 +638,16 @@ pub(super) fn new(
                 sayln!("\nIt keeps working after this command returns. Open Yardsort to watch.");
             }
             _ => sayln!("\nNothing started. Open it in Yardsort to start an agent."),
+        }
+        if let (Some(from), Some(left @ 1..)) = (&created.forked_from, created.left_uncommitted) {
+            sayln!(
+                "\n{} uncommitted in {from} stayed there: a fork starts from the commits.",
+                if left == 1 {
+                    "1 file".to_owned()
+                } else {
+                    format!("{left} files")
+                }
+            );
         }
     })
 }
