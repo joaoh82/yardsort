@@ -750,6 +750,112 @@ fn the_handoff_packet_is_printed_from_the_record_and_git_together() {
     );
 }
 
+/// Forking makes a new workspace on a new branch from the workspace's branch: its commits come
+/// along, its uncommitted files do not, and the agent's message is the user's, then the packet.
+#[test]
+fn forking_branches_from_the_workspace_and_sends_its_record_after_the_message() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "Fix the login redirect");
+    let name = made["name"].as_str().unwrap().to_owned();
+    let branch = made["branch"].as_str().unwrap().to_owned();
+    let source = PathBuf::from(made["path"].as_str().unwrap());
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&source)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    std::fs::write(source.join("login.rs"), "fn login() {}\n").unwrap();
+    git(&["add", "login.rs"]);
+    git(&["commit", "-q", "-m", "Redirect after sign-in"]);
+    std::fs::write(source.join("draft.md"), "not yet\n").unwrap();
+
+    // --print makes nothing: it is the message, the user's words first.
+    let printed = fx
+        .ys(&["workspace", "fork", &name, "add CSV export", "--print"])
+        .ok();
+    assert!(
+        printed.starts_with(&format!(
+            "add CSV export\n\n# Forked from Yardsort: workspace \"{name}\""
+        )),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("  - Redirect after sign-in\n"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("- Uncommitted in that workspace, and so **not** in yours: 1 file"),
+        "{printed}"
+    );
+    let json: serde_json::Value = serde_json::from_str(
+        &fx.ys(&[
+            "workspace",
+            "fork",
+            &name,
+            "add CSV export",
+            "--print",
+            "--json",
+        ])
+        .ok(),
+    )
+    .unwrap();
+    assert_eq!(json["branch"], branch.as_str());
+    assert_eq!(json["uncommitted"], 1);
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workspace", "list", "--json"]).ok()).unwrap();
+    assert_eq!(worktrees_in(&listed).len(), 1, "--print made nothing");
+
+    let out = fx
+        .ys(&["workspace", "fork", &name, "add CSV export", "--no-agent"])
+        .ok();
+    assert!(out.contains(&format!("  from   {name}")), "{out}");
+    assert!(
+        out.contains(&format!("1 file uncommitted in {name} stayed there")),
+        "{out}"
+    );
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workspace", "list", "--json"]).ok()).unwrap();
+    let forked = worktrees_in(&listed)
+        .into_iter()
+        .find(|w| w["name"] != name.as_str())
+        .expect("the fork")
+        .clone();
+    let path = PathBuf::from(forked["path"].as_str().unwrap());
+    assert_ne!(forked["branch"], branch.as_str(), "a branch of its own");
+    assert!(path.join("login.rs").exists(), "the commit came along");
+    assert!(
+        !path.join("draft.md").exists(),
+        "the uncommitted file did not"
+    );
+    assert!(
+        source.join("draft.md").exists(),
+        "and is still where it was"
+    );
+
+    git(&["checkout", "-q", "--detach"]);
+    let detached = fx
+        .ys(&["workspace", "fork", &name, "add CSV export", "--no-agent"])
+        .failed();
+    assert!(detached.contains("is not on a branch"), "{detached}");
+    let missing = fx.ys(&["workspace", "fork", "nope", "x"]).failed();
+    assert!(
+        missing.contains("No workspace called \"nope\""),
+        "{missing}"
+    );
+}
+
 /// An agent asks what the workspace's other conversation said: nothing while the project has
 /// turned sharing off; otherwise the user's messages and the replies, from the recorded
 /// transcript, without the tool output and without the asking agent's own conversation.

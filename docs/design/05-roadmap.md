@@ -617,6 +617,12 @@ The user story the design opened with, recorded in
   and, from the review Assist already runs, the changed files come in the order Assist would
   look at them with its word on each — a judgment, the packet says, not a fact. Nothing new is
   sent, and no new switch.
+- Forking (2026-10-28): **Fork into new workspace…** in the workspace menu opens the composer
+  on a new branch from the workspace's branch; the user's message is the task and the packet,
+  worded for a fork, goes after it as `HarnessRequest.fork_packet`, in place of the memory it
+  carries. Uncommitted files stay behind, counted in the composer. See
+  [18 §7](18-agent-events-stage-4-handoff.md#7--forking-a-workspace). Not yet run by hand in the
+  window.
 
 _Exit:_ the packet renders every part from a recorded run and leaks nothing; **Hand off…**
 opens the composer here with it; an edited packet spawns with `handoff: true` and creates no

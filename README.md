@@ -144,7 +144,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   starts a workspace and an agent without opening the window: `ys workspace new <project>
 "<prompt>"`. The agent belongs to the background process, so it carries on after the command
   returns — and `ys attach` puts it back on your terminal, `ys logs` prints what a session ended
-  up with, `ys workspace handoff` prints the next agent's first message, `ys workflow run`
+  up with, `ys workspace handoff` prints the next agent's first message, `ys workspace fork`
+  starts the next feature on a new branch from a workspace's, `ys workflow run`
   queues a workflow for the open app to carry out. `ys workspace delete` removes one when the
   work is done, keeping the branch. Every command takes `--json`.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
@@ -283,6 +284,12 @@ would look at them. The handoff is not the task: the new conversation keeps your
 as what the workspace was asked. From a terminal, `ys workspace handoff <workspace>` prints the
 same message. See
 [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent).
+
+A handoff shares the workspace. To build the next feature on this one in a worktree of its own,
+**Fork into new workspace…** in the workspace menu makes a new branch from its branch and sends
+the same record after your message, which is the new workspace's task. Uncommitted files stay
+where they were. From a terminal, `ys workspace fork <workspace> "<prompt>"` does the same. See
+[Fork into new workspace…](docs/guide/workspaces.md#fork-into-new-workspace).
 
 ## Workflows: named agent work, in steps
 

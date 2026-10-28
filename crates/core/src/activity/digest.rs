@@ -9,7 +9,8 @@
 //!
 //! What is left out, on purpose: tool calls and their output, the agents' reasoning, what the
 //! harness injected, and what Yardsort itself added to a first message — the project's memory, a
-//! handoff packet — which the reader is given anyway, and which would otherwise quote itself.
+//! handoff or fork packet — which the reader is given anyway, and which would otherwise quote
+//! itself.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -40,6 +41,8 @@ const MEMORY_MARKER: &str = "\n\n## Project memory\n";
 /// The heading of the note when it goes after a first message: see [`note`].
 pub const NOTE_HEADING: &str = "## This workspace's other conversations";
 const HANDOFF_MARKER: &str = "# Handoff from Yardsort";
+/// A fork's packet, which goes after the user's message, or alone when there was none.
+const FORK_MARKER: &str = "# Forked from Yardsort";
 /// How long before its record an agent may have begun its transcript — a Codex session file, an
 /// OpenCode session: the transcript is the agent's, the record Yardsort's, and they are not
 /// written at the same instant.
@@ -139,8 +142,12 @@ fn own_words(text: &str) -> String {
     if text.starts_with(HANDOFF_MARKER) {
         return "[a handoff packet from Yardsort]".to_owned();
     }
+    if text.starts_with(FORK_MARKER) {
+        return "[a fork packet from Yardsort]".to_owned();
+    }
     let note = format!("\n\n{NOTE_HEADING}\n");
-    let end = [text.find(MEMORY_MARKER), text.find(&note)]
+    let fork = format!("\n\n{FORK_MARKER}");
+    let end = [text.find(MEMORY_MARKER), text.find(&note), text.find(&fork)]
         .into_iter()
         .flatten()
         .min();
@@ -1646,6 +1653,14 @@ mod tests {
         assert_eq!(
             own_words("# Handoff from Yardsort: workspace \"x\" in app\n\nYou are taking over"),
             "[a handoff packet from Yardsort]"
+        );
+        assert_eq!(
+            own_words("add CSV export\n\n# Forked from Yardsort: workspace \"x\" in app\n\nYou"),
+            "add CSV export"
+        );
+        assert_eq!(
+            own_words("# Forked from Yardsort: workspace \"x\" in app\n\nYou are in"),
+            "[a fork packet from Yardsort]"
         );
         assert_eq!(
             own_words("## Project memory is a heading here"),

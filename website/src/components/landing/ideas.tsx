@@ -169,6 +169,11 @@ export function Ideas() {
             It says where it is blind, and tells the next agent to ask you. From a terminal,{" "}
             <code className={code}>ys workspace handoff</code> prints the same message.
           </p>
+          <p>
+            A handoff shares the workspace. To build the next feature on this one in a worktree of
+            its own, <strong className={strong}>Fork into new workspace…</strong> makes a new branch
+            from its branch and sends the same record after your message.
+          </p>
         </Idea>
 
         <Idea
