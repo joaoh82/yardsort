@@ -876,7 +876,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       on Fly.io (live, smoke-tested), the self-host recipe, and a sign-in against a real
       ZITADEL in CI; pairing, approved only at the host, with the app's Remote settings behind a
       preview switch until the relay can connect a paired device.
-- [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch.
+- [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch. The server is
+      AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
+      only it has in a private repository behind a documented interface
+      ([30](30-open-source-and-managed.md)).
 
 _Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
 reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is

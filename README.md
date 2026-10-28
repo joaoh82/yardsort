@@ -506,6 +506,10 @@ with it — write to **[hello@yardsort.sh](mailto:hello@yardsort.sh)**.
 [GPL-3.0](LICENSE). Yardsort is free software: you may use, study, share and change it, and
 versions you distribute must stay free under the same terms.
 
+The remote server, `crates/server`, is [AGPL-3.0](crates/server/LICENSE): the same terms, and
+whoever runs a changed copy for others over a network must offer them its source too. Why, and
+what stays out of this repository: [docs/design/30](docs/design/30-open-source-and-managed.md).
+
 Yardsort was called **Switchyard** until v0.2; if you used that, your projects and settings come
 along automatically the first time you start Yardsort.
 

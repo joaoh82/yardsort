@@ -22,6 +22,10 @@ Each environment has its own identity provider instance or application, its own 
 its own secrets. Staging never reads production data, and a staging credential opens nothing in
 production.
 
+Every environment runs the same server, built from this repository: production runs the public
+`yardsort-server` unmodified, and anything only the managed service has is a separate, private
+program behind a documented interface ([30 §2](30-open-source-and-managed.md#2--the-managed-service-runs-the-public-server-unmodified)).
+
 ## 2 · Where each part runs
 
 **The Yardsort server on Fly.io.** One binary serves sign-in, the device routes and, from slice

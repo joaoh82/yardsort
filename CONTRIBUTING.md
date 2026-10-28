@@ -4,7 +4,9 @@ Thank you for being here. Bug reports, ideas, documentation fixes and code are a
 small contributions are as appreciated as large ones.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Contributions are
-licensed under the project's [GPL-3.0 license](LICENSE).
+licensed under the project's [GPL-3.0 license](LICENSE), apart from those to the remote server,
+`crates/server`, which are under its [AGPL-3.0 license](crates/server/LICENSE)
+([why](docs/design/30-open-source-and-managed.md)).
 
 ## Ways to help
 

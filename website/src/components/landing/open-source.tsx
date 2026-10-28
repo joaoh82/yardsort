@@ -21,7 +21,8 @@ export async function OpenSource() {
           </h2>
           <p className="mt-3 text-[15px] text-muted">
             GPL-3.0. You may use, study, share and change it, and versions you distribute must stay
-            free under the same terms.
+            free under the same terms. The remote server is AGPL-3.0, so a changed copy run for
+            others must offer them its source too.
           </p>
           <p className="mt-3 text-[15px] text-muted">
             Early, and moving fast. The core loop works on all three platforms and is covered by CI
