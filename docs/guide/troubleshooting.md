@@ -144,12 +144,14 @@ hand with `yardsort --yardsort-daemon <socket path>`, which logs to the terminal
 
 ## "Agents are still running under a previous version"
 
-An update replaced Yardsort while agents were working in the daemon the old version started.
+A version of Yardsort started while agents were working in a daemon it cannot talk to: one
+started by a newer version, or by an older one from before a change the new one cannot follow.
 Rather than kill work you did not agree to lose, Yardsort leaves that daemon alone and runs new
 terminals inside itself until you are done with the old ones.
 
-Finish or stop those agents, then restart Yardsort and everything is back to normal. This can
-only happen when a release changes how the app and the daemon talk to each other, which is rare.
+Finish or stop those agents, then restart Yardsort and everything is back to normal. This is
+rare. Most releases leave the way the app and the daemon talk alone, and one that only adds to
+it keeps using the older daemon until nothing is running in it.
 
 ## Resume says the conversation was not found
 

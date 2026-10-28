@@ -136,17 +136,24 @@ two `process` calls. Viewers' own streams are never held back.
 
 `PtyHost::attach_numbered` is the same attach with positions: the snapshot says which item of
 the session's output it holds, and each later batch, and each resize, carries the next number.
-It is what a remote viewer will need to prove it lost and doubled nothing. It is in-process only
-for now: the daemon's protocol does not carry numbers until R2 of
-[remote access](26-remote-r0-r1.md).
+It is what a remote viewer will need to prove it lost and doubled nothing, and the daemon
+carries it since its protocol 2 ([27 §8](27-remote-r2.md#8--what-the-fifth-slice-adds)).
 
-**The host is the terminal when nobody is watching.** Programs can query the terminal and wait for
-an answer — above all "where is the cursor?" (`ESC [ 6 n`). With a viewer attached, xterm.js
-replies. With none, the host replies from its headless terminal (a numbered viewer does not
-count: it watches, and never answers); the decision is made under the
-same lock that delivers output, so exactly one reply is ever sent. This is load-bearing on Windows:
-`portable-pty` creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY
-ask that question at startup and run nothing until it is answered.
+**One terminal answers.** Programs can query the terminal and wait for an answer — above all
+"where is the cursor?" (`ESC [ 6 n`), but also what the terminal is, its colours and its modes.
+Only one viewer, the _responder_, is shown those questions: the terminal attached most recently.
+Every other viewer, numbered ones included, gets the output with them taken out
+(`pty_host::queries`), so the app and `ys attach` open on one terminal answer once. With no
+terminal attached, or while a lease holder controls the terminal, the host answers the cursor
+question from its headless terminal. The choice is made under the same lock that delivers
+output, so exactly one reply is ever sent. This is load-bearing on Windows: `portable-pty`
+creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY ask that
+question at startup and run nothing until it is answered.
+
+**One controller.** Typing or pasting from this computer gives it control of the terminal at
+once. Anyone else — the remote side, eventually — asks for a lease, renews it, and numbers its
+input under it; typing here ends the lease (`pty_host::control`). A lease holder's size stands
+while it holds control, and the size asked for here comes back after.
 
 - **Re-attach**: switching workspaces detaches the view; the session keeps running in the host.
   On re-mount: `attach` → write snapshot → stream live.
@@ -169,8 +176,8 @@ window or a webview.
 | How many        | **One per data directory**, addressed by an FNV-1a tag of its path. `YARDSORT_DATA_DIR` therefore isolates a throwaway profile's agents as well as its database.                                                                                                                                                                                                                                                    |
 | Who starts it   | Whichever app finds nobody listening, under a lock file so two starting at once produce one daemon. A socket left by a killed daemon is cleared first.                                                                                                                                                                                                                                                              |
 | Who stops it    | `Shutdown` from the app (the quit dialog's "Stop them"), or itself once no client is connected **and** no session is running, after a 10 s grace so a restarting app does not take it down.                                                                                                                                                                                                                         |
-| Upgrades        | A protocol number, separate from the app version. Same number → just talk. Different, and the daemon is idle → replace it silently. Different, with agents running → leave it alone, run terminals in-process, and tell the user. Killing work nobody agreed to lose is never the answer.                                                                                                                           |
-| Wire format     | `[u32 len][u8 kind][payload]`. Requests, responses and events are JSON, reusing the host types' `serde` impls; **output has a frame kind of its own and stays raw bytes**, so a repainting TUI never pays for JSON.                                                                                                                                                                                                 |
+| Upgrades        | A protocol number, separate from the app version. Same number → just talk. Older, and the daemon is idle → replace it silently. Older, with agents running, and only added to since (1 → 2) → keep using it; what came later waits until it is replaced. Anything else with agents running → leave it alone, run terminals in-process, and tell the user. Killing work nobody agreed to lose is never the answer.   |
+| Wire format     | `[u32 len][u8 kind][payload]`. Requests, responses and events are JSON, reusing the host types' `serde` impls; **output has a frame kind of its own and stays raw bytes**, so a repainting TUI never pays for JSON. Numbered output (protocol 2) has another, with the item's number in front.                                                                                                                      |
 | Back-pressure   | Each connection has a writer thread and a queue; a client that stops reading is dropped at 32 MiB rather than allowed to block the session's pump thread. Dropping it is safe — reattaching starts from a snapshot.                                                                                                                                                                                                 |
 | Logs            | The app hands the child `daemon.log` in the data directory, replaced on each start. Started by hand, it keeps its terminal.                                                                                                                                                                                                                                                                                         |
 | Exit spool      | A third argument, `<data-dir>/activity/spool`, where the daemon keeps one JSON file per `Exited` (atomic rename, capped at 2 000, drops counted) for clients that were not connected to hear it. Whichever client connects next drains it into SQLite. No protocol change; a daemon without the argument simply never spools.                                                                                       |
@@ -602,8 +609,9 @@ remote ever talks to it directly. Instead:
   allowlist of fields each checked again on the way out (`remote/activity.rs`).
 
 Nothing calls the facade yet. It gets a caller only once devices are enrolled and authenticated
-(R2). Terminal control waits for a lease and a single query responder enforced **in the daemon**,
-since a lease the app and `ys attach` could bypass would be no lease.
+(R2). Terminal control will go through the daemon's leases and its single query responder,
+which are **in the daemon** because a lease the app and `ys attach` could bypass would be no
+lease.
 
 ## Assist (optional, off by default)
 

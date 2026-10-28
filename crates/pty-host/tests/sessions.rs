@@ -761,3 +761,260 @@ fn the_host_still_answers_queries_when_only_numbered_viewers_watch() {
     let text = watching.text();
     assert!(text.contains("host-replied"), "{text:?}");
 }
+
+/// Ask for the cursor position once, then collect every reply that arrives within a second of
+/// the last, and print them with the escapes taken out: `got:[1;1R`, or `got:[1;1R[2;2R` if two
+/// terminals answered.
+#[cfg(unix)]
+const COUNT_CURSOR_REPLIES: &str = "stty raw -echo min 0 time 10; printf '\\033[6n'; \
+     r=$(dd bs=1 count=24 2>/dev/null); stty sane; \
+     printf 'got:%s\\n' \"$(printf '%s' \"$r\" | tr -d '\\033')\"";
+
+/// A terminal viewer that answers every cursor query it is shown with `reply`, and counts them.
+#[cfg(unix)]
+fn attach_answering(
+    host: &Arc<PtyHost>,
+    id: &SessionId,
+    capture: &Capture,
+    reply: &'static [u8],
+) -> (pty_host::AttachmentId, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let asked = Arc::new(AtomicUsize::new(0));
+    let (query_tx, query_rx) = mpsc::channel::<()>();
+    let mut record = capture.sink();
+    let counting = Arc::clone(&asked);
+    let attachment = host
+        .attach(
+            id,
+            Box::new(move |bytes| {
+                for _ in bytes.windows(4).filter(|w| *w == b"\x1b[6n") {
+                    counting.fetch_add(1, Ordering::SeqCst);
+                    let _ = query_tx.send(());
+                }
+                record(bytes)
+            }),
+        )
+        .unwrap();
+    let (host, id) = (Arc::downgrade(host), id.clone());
+    std::thread::spawn(move || {
+        while query_rx.recv().is_ok() {
+            let Some(host) = host.upgrade() else { break };
+            let _ = host.write(&id, reply);
+        }
+    });
+    (attachment, asked)
+}
+
+#[cfg(unix)]
+#[test]
+fn with_two_terminals_watching_only_the_newer_is_asked_and_the_program_hears_once() {
+    let (host, events) = host();
+    let session = host
+        .spawn(shell(&format!("sleep 1; {COUNT_CURSOR_REPLIES}")))
+        .unwrap();
+    let (older, newer) = (Capture::default(), Capture::default());
+    let (_, older_asked) = attach_answering(&host, &session.id, &older, b"\x1b[1;1R");
+    let (_, newer_asked) = attach_answering(&host, &session.id, &newer, b"\x1b[2;2R");
+    wait_for_exit(&host, &events, &session.id);
+
+    use std::sync::atomic::Ordering;
+    assert_eq!(newer_asked.load(Ordering::SeqCst), 1);
+    assert_eq!(older_asked.load(Ordering::SeqCst), 0, "{:?}", older.text());
+    // Both drew the same thing, and the program heard one answer.
+    for capture in [&older, &newer] {
+        assert!(
+            capture.text().contains("got:[2;2R\r"),
+            "{:?}",
+            capture.text()
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn when_the_answering_terminal_leaves_the_one_before_it_answers() {
+    let (host, events) = host();
+    let session = host
+        .spawn(shell(&format!("sleep 1; {COUNT_CURSOR_REPLIES}")))
+        .unwrap();
+    let (older, newer) = (Capture::default(), Capture::default());
+    let (_, older_asked) = attach_answering(&host, &session.id, &older, b"\x1b[1;1R");
+    let (attachment, newer_asked) = attach_answering(&host, &session.id, &newer, b"\x1b[2;2R");
+    host.detach(&session.id, attachment).unwrap();
+    wait_for_exit(&host, &events, &session.id);
+
+    use std::sync::atomic::Ordering;
+    assert_eq!(older_asked.load(Ordering::SeqCst), 1);
+    assert_eq!(newer_asked.load(Ordering::SeqCst), 0);
+    assert!(older.text().contains("got:[1;1R\r"), "{:?}", older.text());
+}
+
+#[cfg(unix)]
+#[test]
+fn while_a_lease_is_held_no_terminal_is_asked_and_the_host_answers() {
+    let (host, events) = host();
+    let session = host
+        .spawn(shell(&format!("sleep 1; {COUNT_CURSOR_REPLIES}")))
+        .unwrap();
+    let capture = Capture::default();
+    let (_, asked) = attach_answering(&host, &session.id, &capture, b"\x1b[9;9R");
+    let watching = Numbering::default();
+    watching.attach(&host, &session.id);
+    host.acquire(&session.id, "phone", false).unwrap();
+    wait_for_exit(&host, &events, &session.id);
+
+    use std::sync::atomic::Ordering;
+    assert_eq!(asked.load(Ordering::SeqCst), 0, "{:?}", capture.text());
+    assert!(
+        capture.text().contains("got:[1;1R\r"),
+        "{:?}",
+        capture.text()
+    );
+    assert!(
+        !watching.bytes().contains("\x1b[6n"),
+        "{:?}",
+        watching.bytes()
+    );
+    assert!(
+        watching.text().contains("got:[1;1R"),
+        "{:?}",
+        watching.text()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn input_under_a_lease_is_written_once_in_order_until_someone_here_types() {
+    let (host, _events) = host();
+    let session = host
+        .spawn(shell(
+            "stty -echo; while IFS= read -r line; do echo \"got:$line\"; done",
+        ))
+        .unwrap();
+    let capture = Capture::default();
+    attach_terminal(&host, &session.id, &capture);
+    let id = &session.id;
+
+    let lease = host.acquire(id, "phone", false).unwrap().reference();
+    assert_eq!(
+        host.controller(id).unwrap(),
+        pty_host::Controller::Leased {
+            holder: "phone".into()
+        }
+    );
+    host.input(id, &lease, 1, "one\r", false).unwrap();
+    // Sent again after a doubtful reconnect: not typed twice.
+    host.input(id, &lease, 1, "one\r", false).unwrap();
+    match host.input(id, &lease, 3, "three\r", false) {
+        Err(HostError::InputOutOfOrder {
+            expected: 2,
+            got: 3,
+            ..
+        }) => {}
+        other => panic!("a gap must be refused, got {other:?}"),
+    }
+    host.input(id, &lease, 2, "two\r", false).unwrap();
+    capture.wait_for("got:two");
+
+    // Someone at this computer types: control is theirs at once, and the lease is spent.
+    host.write(id, b"here\r").unwrap();
+    capture.wait_for("got:here");
+    assert_eq!(host.controller(id).unwrap(), pty_host::Controller::Local);
+    assert!(matches!(
+        host.input(id, &lease, 3, "late\r", false),
+        Err(HostError::LeaseLost(_))
+    ));
+    assert!(matches!(
+        host.acquire(id, "phone", true),
+        Err(HostError::ControlHeld {
+            by: pty_host::Controller::Local,
+            ..
+        })
+    ));
+    std::thread::sleep(Duration::from_millis(300));
+    let text = capture.text();
+    assert_eq!(text.matches("got:one").count(), 1, "{text:?}");
+    assert!(
+        !text.contains("got:three") && !text.contains("got:late"),
+        "{text:?}"
+    );
+    host.kill(id).unwrap();
+}
+
+#[test]
+fn a_lease_holders_size_stands_until_control_comes_back_here() {
+    let (host, _events) = host();
+    let session = host.spawn(long_running()).unwrap();
+    let id = &session.id;
+    let size = |cols, rows| TermSize { cols, rows };
+    let current = || host.info(id).unwrap().size;
+    let watching = Numbering::default();
+    watching.attach(&host, id);
+
+    let lease = host.acquire(id, "phone", false).unwrap().reference();
+    host.resize_leased(id, &lease, size(40, 12)).unwrap();
+    assert_eq!(current(), size(40, 12));
+    // The window here is resized meanwhile: noted, not applied.
+    host.resize(id, size(100, 30)).unwrap();
+    assert_eq!(current(), size(40, 12));
+    // Given back, the terminal takes the size asked for here.
+    host.release(id, &lease).unwrap();
+    assert_eq!(current(), size(100, 30));
+    assert!(matches!(
+        host.resize_leased(id, &lease, size(40, 12)),
+        Err(HostError::LeaseLost(_))
+    ));
+
+    // And taken back by typing here, the same.
+    let lease = host.acquire(id, "phone", false).unwrap().reference();
+    host.resize_leased(id, &lease, size(50, 15)).unwrap();
+    host.write(id, b"\r").unwrap();
+    assert_eq!(current(), size(100, 30));
+
+    let resizes: Vec<_> = watching
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Resized(_, size) => Some(size),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resizes,
+        [size(40, 12), size(100, 30), size(50, 15), size(100, 30)]
+    );
+    watching.assert_unbroken();
+    host.kill(id).unwrap();
+}
+
+#[test]
+fn an_exited_session_cannot_be_leased() {
+    let (host, events) = host();
+    let session = host.spawn(shell("echo done")).unwrap();
+    wait_for_exit(&host, &events, &session.id);
+    assert!(matches!(
+        host.acquire(&session.id, "phone", false),
+        Err(HostError::SessionExited(_))
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_terminal_answering_a_query_does_not_take_control() {
+    let (host, events) = host();
+    let session = host
+        .spawn(shell(&format!("sleep 1; {COUNT_CURSOR_REPLIES}; sleep 5")))
+        .unwrap();
+    let capture = Capture::default();
+    let (_, asked) = attach_answering(&host, &session.id, &capture, b"\x1b[24;80R");
+    capture.wait_for("got:[24;80R");
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // The answer was typed in from here, yet nobody holds control: a device may take it.
+    assert_eq!(
+        host.controller(&session.id).unwrap(),
+        pty_host::Controller::Nobody
+    );
+    host.acquire(&session.id, "phone", false).unwrap();
+    host.kill(&session.id).unwrap();
+    wait_for_exit(&host, &events, &session.id);
+}

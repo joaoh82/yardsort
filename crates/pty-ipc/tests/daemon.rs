@@ -435,3 +435,193 @@ fn an_exit_nobody_heard_is_waiting_in_the_spool_with_its_labels() {
         .collect();
     assert_eq!(codes, [7, 3], "oldest first");
 }
+
+/// One item a numbered viewer was sent: its number, what it was, and its bytes.
+type WatchedItem = (u64, &'static str, Vec<u8>);
+
+/// Everything one numbered viewer is sent over the socket.
+#[derive(Clone, Default)]
+struct Watching(Arc<Mutex<Vec<WatchedItem>>>);
+
+impl Watching {
+    fn sink(&self) -> pty_host::NumberedSink {
+        let items = Arc::clone(&self.0);
+        Box::new(move |item| {
+            let entry = match item {
+                pty_host::Numbered::Snapshot { seq, bytes, .. } => {
+                    (seq, "snapshot", bytes.to_vec())
+                }
+                pty_host::Numbered::Output { seq, bytes } => (seq, "output", bytes.to_vec()),
+                pty_host::Numbered::Resized { seq, size } => (
+                    seq,
+                    "resized",
+                    format!("{}x{}", size.cols, size.rows).into_bytes(),
+                ),
+            };
+            items.lock().unwrap().push(entry);
+            true
+        })
+    }
+
+    fn items(&self) -> Vec<WatchedItem> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn text(&self) -> String {
+        let bytes: Vec<u8> = self
+            .items()
+            .into_iter()
+            .filter(|(_, kind, _)| *kind != "resized")
+            .flat_map(|(_, _, bytes)| bytes)
+            .collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
+#[test]
+fn a_numbered_viewer_over_the_socket_gets_every_item_once_and_in_order() {
+    let daemon = Daemon::start();
+    let (client, events) = daemon.connect();
+    assert!(client.shares_control());
+    let session = client.spawn(long_running_echo()).unwrap();
+    let watching = Watching::default();
+    let stream = client
+        .attach_numbered(&session.id, watching.sink())
+        .unwrap();
+    client
+        .resize(
+            &session.id,
+            TermSize {
+                cols: 100,
+                rows: 30,
+            },
+        )
+        .unwrap();
+    wait_for_exit(&events, &session.id);
+    client.detach(&session.id, stream).unwrap();
+
+    let items = watching.items();
+    assert_eq!(items[0].1, "snapshot", "{items:?}");
+    for pair in items.windows(2) {
+        assert_eq!(pair[1].0, pair[0].0 + 1, "a gap or a repeat: {items:?}");
+    }
+    assert!(items
+        .iter()
+        .any(|(_, kind, size)| *kind == "resized" && size == b"100x30"));
+    assert!(
+        watching.text().contains("numbered-end"),
+        "{:?}",
+        watching.text()
+    );
+}
+
+/// Prints, pauses long enough to be resized, and prints again.
+fn long_running_echo() -> LaunchPlan {
+    shell(if cfg!(windows) {
+        "echo numbered-start&& ping -n 2 127.0.0.1 >NUL&& echo numbered-end"
+    } else {
+        "echo numbered-start; sleep 1; echo numbered-end"
+    })
+}
+
+#[test]
+fn a_lease_taken_over_the_socket_holds_until_someone_here_types() {
+    let daemon = Daemon::start();
+    let (here, _) = daemon.connect();
+    let (remote, _) = daemon.connect();
+    let session = here.spawn(echo_lines()).unwrap();
+    let capture = Capture::default();
+    attach_terminal(&here, &session.id, &capture);
+    let id = &session.id;
+
+    let lease = remote.acquire(id, "phone", false).unwrap();
+    assert_eq!((lease.ttl_ms, lease.renew_every_ms), (30_000, 10_000));
+    let lease = lease.reference();
+    remote
+        .input(id, &lease, 1, "from-the-lease\r", false)
+        .unwrap();
+    remote
+        .input(id, &lease, 1, "from-the-lease\r", false)
+        .unwrap();
+    capture.wait_for("got:from-the-lease");
+    assert!(matches!(
+        remote.input(id, &lease, 5, "skipped\r", false),
+        Err(pty_host::HostError::InputOutOfOrder {
+            expected: 2,
+            got: 5,
+            ..
+        })
+    ));
+    assert_eq!(
+        remote.renew(id, &lease).unwrap().generation,
+        lease.generation
+    );
+    assert_eq!(
+        here.controller(id).unwrap(),
+        pty_host::Controller::Leased {
+            holder: "phone".into()
+        }
+    );
+
+    // Typed here, on the other connection: control comes here, and the lease is spent.
+    here.write(id, b"from-here\r").unwrap();
+    capture.wait_for("got:from-here");
+    assert!(matches!(
+        remote.input(id, &lease, 2, "late\r", false),
+        Err(pty_host::HostError::LeaseLost(_))
+    ));
+    assert!(matches!(
+        remote.acquire(id, "phone", true),
+        Err(pty_host::HostError::ControlHeld {
+            by: pty_host::Controller::Local,
+            ..
+        })
+    ));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(capture.text().matches("got:from-the-lease").count(), 1);
+    assert!(!capture.text().contains("got:late"));
+    here.kill(id).unwrap();
+}
+
+/// Echoes every line it reads, `got:` in front.
+fn echo_lines() -> LaunchPlan {
+    if cfg!(windows) {
+        // PowerShell is on every Windows CI runner; cmd has no loop that reads lines.
+        LaunchPlan {
+            program: "powershell.exe".into(),
+            args: vec![
+                "-NoProfile".into(),
+                "-Command".into(),
+                "while ($true) { $l = [Console]::In.ReadLine(); if ($l -eq $null) { break }; \
+                 Write-Output \"got:$l\" }"
+                    .into(),
+            ],
+            ..shell("")
+        }
+    } else {
+        shell("stty -echo; while IFS= read -r line; do echo \"got:$line\"; done")
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn with_two_clients_watching_only_the_newer_is_asked() {
+    let daemon = Daemon::start();
+    let (first, events) = daemon.connect();
+    let (second, _) = daemon.connect();
+    let session = first
+        .spawn(shell(
+            "sleep 1; stty raw -echo min 0 time 10; printf '\\033[6n'; \
+             r=$(dd bs=1 count=24 2>/dev/null); stty sane; \
+             printf 'got:%s\\n' \"$(printf '%s' \"$r\" | tr -d '\\033')\"",
+        ))
+        .unwrap();
+    let (older, newer) = (Capture::default(), Capture::default());
+    attach_terminal(&first, &session.id, &older);
+    attach_terminal(&second, &session.id, &newer);
+    wait_for_exit(&events, &session.id);
+    // Each would answer `[1;1R` if asked: one answer, so one was asked.
+    assert!(newer.text().contains("got:[1;1R\r"), "{:?}", newer.text());
+    assert!(!older.text().contains("\x1b[6n"), "{:?}", older.text());
+    assert!(newer.text().contains("\x1b[6n"));
+}

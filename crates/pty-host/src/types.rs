@@ -184,6 +184,28 @@ pub enum HostError {
     OpenPty(String),
     #[error("could not start `{program}`: {reason}")]
     Spawn { program: String, reason: String },
+    /// The lease named is not the one in force: control changed hands, or it lapsed.
+    #[error("control of session {0} has passed to someone else")]
+    LeaseLost(SessionId),
+    #[error("someone else controls session {id}")]
+    ControlHeld {
+        id: SessionId,
+        by: crate::Controller,
+    },
+    /// Input skipped a number under its lease, so nothing more is written until the gap is
+    /// filled or a new lease starts afresh.
+    #[error("input to session {id} out of order: expected {expected}, got {got}")]
+    InputOutOfOrder {
+        id: SessionId,
+        expected: u64,
+        got: u64,
+    },
+    #[error("a lease holder's name must be 1 to 128 printable characters")]
+    InvalidHolder,
+    /// This host cannot hand out control or number its output: a daemon from before either
+    /// existed.
+    #[error("this terminal host cannot share control of its terminals")]
+    ControlUnavailable,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

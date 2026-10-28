@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use interprocess::local_socket::traits::ListenerExt as _;
 use interprocess::local_socket::{ListenerOptions, Stream};
-use pty_host::{AttachmentId, HostEvent, PtyHost, SessionState};
+use pty_host::{AttachmentId, HostEvent, Numbered, PtyHost, SessionState};
 
 use crate::endpoint::Endpoint;
 use crate::proto::{
@@ -240,7 +240,9 @@ impl Daemon {
     fn handle(&self, conn: &Arc<Conn>, op: Op) -> OpResult {
         match op {
             Op::Hello { protocol, client } => {
-                if protocol != PROTOCOL {
+                // A client of an older protocol is fine: everything it can ask for is still
+                // here, in the same shape.
+                if protocol > PROTOCOL {
                     eprintln!(
                         "client {client} speaks protocol {protocol}, this daemon speaks {PROTOCOL}"
                     );
@@ -268,6 +270,17 @@ impl Daemon {
                     Err(error) => failed(error),
                 }
             }
+            Op::Watch { session, stream } => {
+                let out = Arc::clone(conn);
+                let sink = Box::new(move |item: Numbered<'_>| out.send_numbered(stream, &item));
+                match self.host.attach_numbered(&session, sink) {
+                    Ok(attachment) => {
+                        conn.remember_attachment(session, stream, attachment);
+                        OpResult::Done
+                    }
+                    Err(error) => failed(error),
+                }
+            }
             Op::Detach { session, stream } => {
                 if let Some(attachment) = conn.forget_attachment(stream) {
                     let _ = self.host.detach(&session, attachment);
@@ -288,6 +301,29 @@ impl Daemon {
             Op::List => OpResult::Sessions {
                 sessions: self.host.list(),
             },
+            Op::Controller { session } => match self.host.controller(&session) {
+                Ok(controller) => OpResult::Controller { controller },
+                Err(error) => failed(error),
+            },
+            Op::Acquire {
+                session,
+                holder,
+                take_over,
+            } => leased(self.host.acquire(&session, &holder, take_over)),
+            Op::Renew { session, lease } => leased(self.host.renew(&session, &lease)),
+            Op::Release { session, lease } => done(self.host.release(&session, &lease)),
+            Op::Input {
+                session,
+                lease,
+                seq,
+                data,
+                paste,
+            } => done(self.host.input(&session, &lease, seq, &data, paste)),
+            Op::ResizeLeased {
+                session,
+                lease,
+                size,
+            } => done(self.host.resize_leased(&session, &lease, size)),
             // Handled before it gets here: the connection simply ends.
             Op::Goodbye => OpResult::Done,
             Op::Shutdown { stop_sessions } => {
@@ -325,6 +361,13 @@ impl Daemon {
 fn done(result: pty_host::Result<()>) -> OpResult {
     match result {
         Ok(()) => OpResult::Done,
+        Err(error) => failed(error),
+    }
+}
+
+fn leased(result: pty_host::Result<pty_host::Lease>) -> OpResult {
+    match result {
+        Ok(lease) => OpResult::Leased { lease },
         Err(error) => failed(error),
     }
 }
@@ -416,6 +459,12 @@ impl Conn {
     /// Returns false when this viewer is gone, which is how the host detaches it.
     fn send_output(&self, stream: StreamId, bytes: &[u8]) -> bool {
         self.send(Frame::output(stream, bytes));
+        !self.gone.load(Ordering::Relaxed)
+    }
+
+    /// As [`Conn::send_output`], for a numbered viewer.
+    fn send_numbered(&self, stream: StreamId, item: &Numbered<'_>) -> bool {
+        self.send(Frame::numbered(stream, item));
         !self.gone.load(Ordering::Relaxed)
     }
 

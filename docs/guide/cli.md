@@ -288,7 +288,9 @@ whichever changed last wins, and the app sets it again when you next focus the t
 leaves the size alone, at the cost of a program drawing to a width you cannot see.
 
 You can attach to a session the app also has open; both see the same output, and either can type.
-Only sessions that are still running can be attached to.
+When a program asks its terminal something — where the cursor is, or which colours it uses — only
+the one attached last answers, so the program hears one answer; while you are attached, that is
+your terminal, not the app's. Only sessions that are still running can be attached to.
 
 ### `ys logs [target]`
 

@@ -5,6 +5,16 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A terminal open in the app and in `ys attach` at once answers a program's questions once.**
+  When a program asked where the cursor was, or which colours the terminal used, both answered,
+  and the program could read the second answer as typing — `^[[24;1R` in a prompt. Now only the
+  terminal attached last is asked.
+
+- **Updating with agents running keeps new terminals in the daemon.** This version changes how
+  the app and its terminal daemon talk, but only by adding to it, so it goes on using the daemon
+  your running agents are in instead of starting new terminals inside the app, where they would
+  stop when it quits. The daemon is replaced once nothing runs in it.
+
 - **An agent can read what was said in the workspace's other conversations.**
   `ys workspace context` prints every message you typed and each turn's reply from the Claude Code
   and Codex conversations beside it, read from their own transcripts, without tool output, within

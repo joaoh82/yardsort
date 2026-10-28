@@ -33,6 +33,11 @@ impl From<HostError> for IpcError {
             HostError::OpenPty(_) => "pty_unavailable",
             HostError::Spawn { .. } => "spawn_failed",
             HostError::Io(_) => "io",
+            HostError::LeaseLost(_) => "lease_lost",
+            HostError::ControlHeld { .. } => "control_held",
+            HostError::InputOutOfOrder { .. } => "input_out_of_order",
+            HostError::InvalidHolder => "invalid_holder",
+            HostError::ControlUnavailable => "control_unavailable",
         };
         Self::new(code, error.to_string())
     }
