@@ -70,6 +70,28 @@ fn account_messages_match_their_fixtures() {
 }
 
 #[test]
+fn pairing_messages_match_their_fixtures() {
+    use crate::pairing::*;
+    let registration: HostRegistration = pinned("pairing-host-registration.json");
+    assert!(registration.validate().is_ok());
+    let _: HostPage = pinned("pairing-hosts.json");
+    let offer: Offer = pinned("pairing-offer.json");
+    assert!(normalize_code(offer.code.expose()).is_some());
+    let request: PairingRequest = pinned("pairing-request.json");
+    assert!(request.validate().is_ok());
+    let page: GrantPage = pinned("pairing-grants.json");
+    assert_eq!(page.grants[0].state, GrantState::Approved);
+    assert_eq!(page.grants[1].state, GrantState::Pending);
+    let decision: GrantDecision = pinned("pairing-decision.json");
+    assert!(decision.validate(&request.scopes).is_ok());
+    // A newer server's state reads as unknown, not as a failure to read the page.
+    let mut json = fixture("pairing-grants.json");
+    json["grants"][0]["state"] = "suspended".into();
+    let page: GrantPage = serde_json::from_value(json).unwrap();
+    assert_eq!(page.grants[0].state, GrantState::Unknown);
+}
+
+#[test]
 fn every_operation_has_the_name_it_is_sent_under() {
     let terminal = TerminalId::new("t").unwrap();
     let lease = LeaseRef {

@@ -4,7 +4,8 @@
 //! and with a short plain-text page when there is nowhere to send the browser. Everything else is
 //! JSON, and a failure is a [`RemoteError`] with the HTTP status that matches its code.
 //!
-//! Starting a sign-in and `/v1/token` are limited per client address ([`crate::limit`]). Behind a
+//! Starting a sign-in, `/v1/token`, making a pairing offer and redeeming one are limited per
+//! client address ([`crate::limit`]). Behind a
 //! proxy, the address is the one the proxy names in [`Options::client_ip_header`]; otherwise the
 //! connection's own, which needs the router served with `into_make_service_with_connect_info`.
 //!
@@ -23,8 +24,10 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use remote_proto::account::{LoginParams, TokenRequest};
-use remote_proto::{DeviceId, ErrorCode, RemoteError};
-use serde::Deserialize;
+use remote_proto::pairing::{GrantDecision, HostRegistration, PairingRequest};
+use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::limit::Limiter;
 use crate::records::Records;
@@ -39,6 +42,12 @@ pub const LOGINS_PER_MINUTE: u32 = 20;
 /// Token requests one address may make a minute. A device refreshes every quarter hour, so this
 /// leaves room for a few hundred devices behind one address.
 pub const TOKENS_PER_MINUTE: u32 = 60;
+/// Pairing offers one address may ask for a minute. A host makes one each time its person shows
+/// a code.
+pub const OFFERS_PER_MINUTE: u32 = 10;
+/// Pairings one address may try a minute, right or wrong. An account's wrong codes are also
+/// limited on their own (`MAX_OFFER_MISSES`), wherever they come from.
+pub const PAIRINGS_PER_MINUTE: u32 = 10;
 
 pub struct Options {
     /// The header a trusted proxy puts the client's address in (`Fly-Client-IP` on Fly.io). Set
@@ -46,6 +55,8 @@ pub struct Options {
     pub client_ip_header: Option<HeaderName>,
     pub logins_per_minute: u32,
     pub tokens_per_minute: u32,
+    pub offers_per_minute: u32,
+    pub pairings_per_minute: u32,
 }
 
 impl Default for Options {
@@ -54,6 +65,8 @@ impl Default for Options {
             client_ip_header: None,
             logins_per_minute: LOGINS_PER_MINUTE,
             tokens_per_minute: TOKENS_PER_MINUTE,
+            offers_per_minute: OFFERS_PER_MINUTE,
+            pairings_per_minute: PAIRINGS_PER_MINUTE,
         }
     }
 }
@@ -70,6 +83,8 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
     };
     let logins = gate(options.logins_per_minute, Answer::Page);
     let tokens = gate(options.tokens_per_minute, Answer::Json);
+    let offers = gate(options.offers_per_minute, Answer::Json);
+    let pairings = gate(options.pairings_per_minute, Answer::Json);
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/server", get(describe::<R>))
@@ -84,6 +99,22 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
         )
         .route("/v1/devices", get(devices::<R>))
         .route("/v1/devices/{id}/revoke", post(revoke::<R>))
+        .route("/v1/hosts", get(hosts::<R>).post(register_host::<R>))
+        .route(
+            "/v1/hosts/{id}/offers",
+            post(offer::<R>).route_layer(middleware::from_fn_with_state(offers, limited)),
+        )
+        .route("/v1/hosts/{id}/grants", get(host_grants::<R>))
+        .route("/v1/hosts/{id}/remove", post(remove_host::<R>))
+        .route(
+            "/v1/pairings",
+            post(pair::<R>).route_layer(middleware::from_fn_with_state(pairings, limited)),
+        )
+        .route("/v1/grants", get(device_grants::<R>))
+        .route("/v1/grants/{id}", get(grant::<R>))
+        .route("/v1/grants/{id}/approve", post(approve::<R>))
+        .route("/v1/grants/{id}/deny", post(deny::<R>))
+        .route("/v1/grants/{id}/revoke", post(revoke_grant::<R>))
         .fallback(|| async { failure(RemoteError::not_found()) })
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn(guard))
@@ -243,6 +274,212 @@ async fn revoke<R: Records>(
     };
     match service.revoke(&caller, &id, now_ms()).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
+}
+
+async fn hosts<R: Records>(State(service): State<Service<R>>, headers: HeaderMap) -> Response {
+    match caller(&service, &headers).await {
+        Ok(caller) => answer(service.hosts(&caller).await),
+        Err(error) => failure(error),
+    }
+}
+
+async fn register_host<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<HostRegistration>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    match body_of(body, "The request is not a host registration.") {
+        Ok(registration) => answer(
+            service
+                .register_host(&caller, &registration, now_ms())
+                .await,
+        ),
+        Err(refused) => refused.into_response(),
+    }
+}
+
+async fn offer<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (caller, host) = match host_call(&service, &headers, id).await {
+        Ok(call) => call,
+        Err(error) => return failure(error),
+    };
+    answer(service.offer(&caller, &host, now_ms()).await)
+}
+
+async fn host_grants<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (caller, host) = match host_call(&service, &headers, id).await {
+        Ok(call) => call,
+        Err(error) => return failure(error),
+    };
+    answer(service.host_grants(&caller, &host, now_ms()).await)
+}
+
+async fn remove_host<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (caller, host) = match host_call(&service, &headers, id).await {
+        Ok(call) => call,
+        Err(error) => return failure(error),
+    };
+    match service.remove_host(&caller, &host, now_ms()).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
+}
+
+async fn pair<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<PairingRequest>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    match body_of(body, "The request is not a pairing request.") {
+        Ok(request) => answer(service.pair(&caller, &request, now_ms()).await),
+        Err(refused) => refused.into_response(),
+    }
+}
+
+async fn device_grants<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+) -> Response {
+    match caller(&service, &headers).await {
+        Ok(caller) => answer(service.device_grants(&caller, now_ms()).await),
+        Err(error) => failure(error),
+    }
+}
+
+async fn grant<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (caller, id) = match grant_call(&service, &headers, id).await {
+        Ok(call) => call,
+        Err(error) => return failure(error),
+    };
+    answer(service.grant(&caller, &id, now_ms()).await)
+}
+
+async fn approve<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    body: Result<Json<GrantDecision>, JsonRejection>,
+) -> Response {
+    let (caller, id) = match grant_call(&service, &headers, id).await {
+        Ok(call) => call,
+        Err(error) => return failure(error),
+    };
+    match body_of(body, "The request is not an approval.") {
+        Ok(decision) => answer(
+            service
+                .decide(&caller, &id, Some(&decision), now_ms())
+                .await,
+        ),
+        Err(refused) => refused.into_response(),
+    }
+}
+
+async fn deny<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (caller, id) = match grant_call(&service, &headers, id).await {
+        Ok(call) => call,
+        Err(error) => return failure(error),
+    };
+    answer(service.decide(&caller, &id, None, now_ms()).await)
+}
+
+async fn revoke_grant<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (caller, id) = match grant_call(&service, &headers, id).await {
+        Ok(call) => call,
+        Err(error) => return failure(error),
+    };
+    match service.revoke_grant(&caller, &id, now_ms()).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => failure(error),
+    }
+}
+
+/// The caller, and the host its path names. A path that is not an id is `not_found`.
+async fn host_call<R: Records>(
+    service: &ControlService<R>,
+    headers: &HeaderMap,
+    id: String,
+) -> Result<(Caller, HostId), RemoteError> {
+    let caller = caller(service, headers).await?;
+    let host = HostId::new(id).map_err(|_| RemoteError::not_found())?;
+    Ok((caller, host))
+}
+
+/// The caller, and the grant its path names.
+async fn grant_call<R: Records>(
+    service: &ControlService<R>,
+    headers: &HeaderMap,
+    id: String,
+) -> Result<(Caller, GrantId), RemoteError> {
+    let caller = caller(service, headers).await?;
+    let grant = GrantId::new(id).map_err(|_| RemoteError::not_found())?;
+    Ok((caller, grant))
+}
+
+/// A JSON body, or the answer to one that is not what the route takes.
+fn body_of<T: DeserializeOwned>(
+    body: Result<Json<T>, JsonRejection>,
+    not_it: &'static str,
+) -> Result<T, NotTheBody> {
+    body.map(|Json(body)| body).map_err(|rejection| NotTheBody {
+        too_large: rejection.status() == StatusCode::PAYLOAD_TOO_LARGE,
+        not_it,
+    })
+}
+
+/// Why a body was refused: too large stays too large, rather than looking like any other
+/// malformed body.
+struct NotTheBody {
+    too_large: bool,
+    not_it: &'static str,
+}
+
+impl IntoResponse for NotTheBody {
+    fn into_response(self) -> Response {
+        let mut response = failure(RemoteError::new(ErrorCode::InvalidRequest, self.not_it));
+        if self.too_large {
+            *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
+        }
+        response
+    }
+}
+
+fn answer<T: Serialize>(result: Result<T, RemoteError>) -> Response {
+    match result {
+        Ok(value) => Json(value).into_response(),
         Err(error) => failure(error),
     }
 }

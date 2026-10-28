@@ -12,22 +12,33 @@
 use std::sync::Arc;
 
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Transaction};
+use std::collections::BTreeSet;
+
 use remote_proto::account::{DeviceKind, Secret};
-use remote_proto::{DeviceId, Platform, ServerId};
+use remote_proto::pairing::MAX_OFFER_MISSES;
+use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope, ServerId};
 use tokio_postgres::{Client, Row};
 
 use crate::records::{
-    AccountId, Device, Handoff, Issued, PendingLogin, Records, RecordsError, Result, RevokeReason,
+    AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host,
+    HostOffer, Issued, PendingLogin, Records, RecordsError, Redemption, Result, RevokeReason,
     Revoked, Rotation, SEEN_RESOLUTION_MS,
 };
 use crate::tokens::TokenHash;
 
 /// The schema, in the order it is applied. Append only.
-const MIGRATIONS: &[(i32, &str, &str)] = &[(
-    1,
-    "accounts_and_devices",
-    include_str!("../migrations/0001_accounts_and_devices.sql"),
-)];
+const MIGRATIONS: &[(i32, &str, &str)] = &[
+    (
+        1,
+        "accounts_and_devices",
+        include_str!("../migrations/0001_accounts_and_devices.sql"),
+    ),
+    (
+        2,
+        "hosts_and_grants",
+        include_str!("../migrations/0002_hosts_and_grants.sql"),
+    ),
+];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
 /// long as nothing else in the database uses it: "ysrv".
@@ -39,6 +50,14 @@ const POOL_SIZE: usize = 8;
 /// A device row, as every query that returns one selects it.
 const DEVICE: &str = "d.id, d.account, d.name, d.kind, d.platform, d.created_at, \
                       d.last_seen_at, d.revoked_at, d.revoked_reason";
+
+/// A host row, joined to its device for when that was last seen.
+const HOST: &str = "h.id, h.account, h.device, h.name, h.created_at, hd.last_seen_at";
+
+/// A grant row and its names, as [`GrantView`] holds them.
+const GRANT: &str = "g.id, g.account, g.host, g.device, g.requested, g.scopes, g.projects, \
+                     g.status, g.created_at, g.expires_at, g.decided_at, \
+                     h.name, d.name, d.revoked_at IS NOT NULL";
 
 pub struct PgRecords {
     pool: Pool,
@@ -461,6 +480,381 @@ impl Records for PgRecords {
         let (accounts, devices): (i64, i64) = (row.get(0), row.get(1));
         Ok((accounts > 0).then(|| usize::try_from(devices).unwrap_or(usize::MAX)))
     }
+
+    async fn add_host(&self, host: Host) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "INSERT INTO hosts (id, account, device, name, created_at)
+                 VALUES ($1, $2, $3, $4, $5)",
+                &[
+                    &host.id.as_str(),
+                    &host.account.0,
+                    &host.device.as_str(),
+                    &host.name,
+                    &host.created_at,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    async fn rebind_host(
+        &self,
+        account: &AccountId,
+        id: &HostId,
+        device: &DeviceId,
+        name: &str,
+    ) -> Result<Option<Host>> {
+        let row = self
+            .client()
+            .await?
+            .query_opt(
+                &format!(
+                    "WITH h AS (
+                         UPDATE hosts SET device = $3, name = $4
+                         WHERE id = $1 AND account = $2 AND removed_at IS NULL
+                         RETURNING *
+                     )
+                     SELECT {HOST} FROM h JOIN devices hd ON hd.id = h.device"
+                ),
+                &[&id.as_str(), &account.0, &device.as_str(), &name],
+            )
+            .await
+            .map_err(failed)?;
+        row.map(|row| host(&row)).transpose()
+    }
+
+    async fn host(&self, account: &AccountId, id: &HostId) -> Result<Option<Host>> {
+        let row = self
+            .client()
+            .await?
+            .query_opt(
+                &format!(
+                    "SELECT {HOST} FROM hosts h JOIN devices hd ON hd.id = h.device
+                     WHERE h.id = $1 AND h.account = $2 AND h.removed_at IS NULL"
+                ),
+                &[&id.as_str(), &account.0],
+            )
+            .await
+            .map_err(failed)?;
+        row.map(|row| host(&row)).transpose()
+    }
+
+    async fn hosts(&self, account: &AccountId) -> Result<Vec<Host>> {
+        self.client()
+            .await?
+            .query(
+                &format!(
+                    "SELECT {HOST} FROM hosts h JOIN devices hd ON hd.id = h.device
+                     WHERE h.account = $1 AND h.removed_at IS NULL"
+                ),
+                &[&account.0],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(host)
+            .collect()
+    }
+
+    async fn put_offer(&self, offer: HostOffer, now: i64) -> Result<()> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        tx.execute(
+            "DELETE FROM host_offers WHERE host = $1 OR expires_at <= $2",
+            &[&offer.host.as_str(), &now],
+        )
+        .await
+        .map_err(failed)?;
+        tx.execute(
+            "INSERT INTO host_offers (secret, code, host, account, expires_at)
+             VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &bytes(&offer.secret),
+                &bytes(&offer.code),
+                &offer.host.as_str(),
+                &offer.account.0,
+                &offer.expires_at,
+            ],
+        )
+        .await
+        .map_err(failed)?;
+        tx.commit().await.map_err(failed)
+    }
+
+    async fn redeem_offer(
+        &self,
+        account: &AccountId,
+        key: &TokenHash,
+        now: i64,
+    ) -> Result<Redemption> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        let taken = tx
+            .query_opt(
+                "DELETE FROM host_offers
+                 WHERE account = $1 AND (secret = $2 OR code = $2)
+                   AND expires_at > $3 AND misses < $4
+                 RETURNING secret, code, host, expires_at",
+                &[&account.0, &bytes(key), &now, &MAX_OFFER_MISSES],
+            )
+            .await
+            .map_err(failed)?;
+        let redemption = match taken {
+            Some(row) => Redemption::Taken(HostOffer {
+                secret: hash(&row, 0)?,
+                code: hash(&row, 1)?,
+                host: HostId::new(row.get::<_, String>(2)).map_err(failed)?,
+                account: account.clone(),
+                expires_at: row.get(3),
+            }),
+            None => {
+                tx.execute(
+                    "UPDATE host_offers SET misses = misses + 1
+                     WHERE account = $1 AND expires_at > $2 AND misses < $3",
+                    &[&account.0, &now, &MAX_OFFER_MISSES],
+                )
+                .await
+                .map_err(failed)?;
+                Redemption::Missed
+            }
+        };
+        tx.commit().await.map_err(failed)?;
+        Ok(redemption)
+    }
+
+    async fn add_grant(&self, grant: GrantRecord) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "INSERT INTO grants (id, account, host, device, requested, scopes, projects,
+                                     status, created_at, expires_at, decided_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                &[
+                    &grant.id.as_str(),
+                    &grant.account.0,
+                    &grant.host.as_str(),
+                    &grant.device.as_str(),
+                    &scopes_spelled(&grant.requested)?,
+                    &scopes_spelled(&grant.scopes)?,
+                    &projects_spelled(grant.projects.as_ref())?,
+                    &status_spelled(grant.status),
+                    &grant.created_at,
+                    &grant.expires_at,
+                    &grant.decided_at,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    async fn grants(&self, account: &AccountId, filter: GrantFilter) -> Result<Vec<GrantView>> {
+        let (column, id) = match &filter {
+            GrantFilter::One(id) => ("g.id", id.as_str()),
+            GrantFilter::OfHost(host) => ("g.host", host.as_str()),
+            GrantFilter::ForDevice(device) => ("g.device", device.as_str()),
+        };
+        self.client()
+            .await?
+            .query(
+                &format!(
+                    "SELECT {GRANT} FROM grants g
+                     JOIN hosts h ON h.id = g.host JOIN devices d ON d.id = g.device
+                     WHERE g.account = $1 AND {column} = $2
+                     ORDER BY g.created_at DESC"
+                ),
+                &[&account.0, &id],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(grant_view)
+            .collect()
+    }
+
+    async fn decide(
+        &self,
+        account: &AccountId,
+        id: &GrantId,
+        decision: Decision,
+        now: i64,
+    ) -> Result<Option<GrantRecord>> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        let (status, scopes, projects) = match &decision {
+            Decision::Approve { scopes, projects } => {
+                (GrantStatus::Approved, scopes.clone(), Some(projects))
+            }
+            Decision::Deny => (GrantStatus::Denied, BTreeSet::new(), None),
+        };
+        // Answers on one host take turns, so two approvals for the same device cannot both stand.
+        // The grant's row is then locked by the update: a revocation or another answer to it
+        // waits, and finds it no longer pending.
+        tx.execute(
+            "SELECT 1 FROM hosts WHERE id = (SELECT host FROM grants WHERE id = $1) FOR UPDATE",
+            &[&id.as_str()],
+        )
+        .await
+        .map_err(failed)?;
+        let Some(row) = tx
+            .query_opt(
+                &format!(
+                    "WITH g AS (
+                         UPDATE grants SET status = $3, scopes = $4, projects = $5,
+                                           decided_at = $6
+                         WHERE id = $1 AND account = $2 AND status = 'pending'
+                           AND expires_at > $6
+                         RETURNING *
+                     )
+                     SELECT {GRANT} FROM g
+                     JOIN hosts h ON h.id = g.host JOIN devices d ON d.id = g.device"
+                ),
+                &[
+                    &id.as_str(),
+                    &account.0,
+                    &status_spelled(status),
+                    &scopes_spelled(&scopes)?,
+                    &projects_spelled(projects)?,
+                    &now,
+                ],
+            )
+            .await
+            .map_err(failed)?
+        else {
+            return Ok(None);
+        };
+        let grant = grant_view(&row)?.grant;
+        if status == GrantStatus::Approved {
+            tx.execute(
+                "UPDATE grants SET status = 'revoked', decided_at = $4
+                 WHERE host = $1 AND device = $2 AND status = 'approved' AND id <> $3",
+                &[
+                    &grant.host.as_str(),
+                    &grant.device.as_str(),
+                    &id.as_str(),
+                    &now,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        }
+        tx.commit().await.map_err(failed)?;
+        Ok(Some(grant))
+    }
+
+    async fn revoke_grant(&self, account: &AccountId, id: &GrantId, now: i64) -> Result<bool> {
+        let row = self
+            .client()
+            .await?
+            .query_one(
+                "WITH revoked AS (
+                     UPDATE grants SET status = 'revoked', decided_at = $3
+                     WHERE id = $1 AND account = $2 AND status IN ('pending', 'approved')
+                 )
+                 SELECT count(*) FROM grants WHERE id = $1 AND account = $2",
+                &[&id.as_str(), &account.0, &now],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(row.get::<_, i64>(0) > 0)
+    }
+
+    async fn remove_host(&self, account: &AccountId, id: &HostId, now: i64) -> Result<bool> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await.map_err(failed)?;
+        let removed = tx
+            .execute(
+                "UPDATE hosts SET removed_at = $3
+                 WHERE id = $1 AND account = $2 AND removed_at IS NULL",
+                &[&id.as_str(), &account.0, &now],
+            )
+            .await
+            .map_err(failed)?;
+        if removed > 0 {
+            tx.execute("DELETE FROM host_offers WHERE host = $1", &[&id.as_str()])
+                .await
+                .map_err(failed)?;
+            tx.execute(
+                "UPDATE grants SET status = 'revoked', decided_at = $2
+                 WHERE host = $1 AND status IN ('pending', 'approved')",
+                &[&id.as_str(), &now],
+            )
+            .await
+            .map_err(failed)?;
+        }
+        tx.commit().await.map_err(failed)?;
+        Ok(removed > 0)
+    }
+}
+
+fn host(row: &Row) -> Result<Host> {
+    Ok(Host {
+        id: HostId::new(row.get::<_, String>(0)).map_err(failed)?,
+        account: AccountId(row.get(1)),
+        device: DeviceId::new(row.get::<_, String>(2)).map_err(failed)?,
+        name: row.get(3),
+        created_at: row.get(4),
+        last_seen_at: row.get(5),
+    })
+}
+
+fn grant_view(row: &Row) -> Result<GrantView> {
+    let scopes = |at: usize| -> Result<BTreeSet<Scope>> {
+        row.get::<_, Vec<String>>(at)
+            .into_iter()
+            .map(unspelled::<Scope>)
+            .collect()
+    };
+    let projects: Option<String> = row.get(6);
+    let status: String = row.get(7);
+    Ok(GrantView {
+        grant: GrantRecord {
+            id: GrantId::new(row.get::<_, String>(0)).map_err(failed)?,
+            account: AccountId(row.get(1)),
+            host: HostId::new(row.get::<_, String>(2)).map_err(failed)?,
+            device: DeviceId::new(row.get::<_, String>(3)).map_err(failed)?,
+            requested: scopes(4)?,
+            scopes: scopes(5)?,
+            projects: projects
+                .map(|text| serde_json::from_str::<ProjectGrant>(&text).map_err(failed))
+                .transpose()?,
+            status: match status.as_str() {
+                "pending" => GrantStatus::Pending,
+                "approved" => GrantStatus::Approved,
+                "denied" => GrantStatus::Denied,
+                "revoked" => GrantStatus::Revoked,
+                other => return Err(RecordsError(format!("a grant is {other:?}"))),
+            },
+            created_at: row.get(8),
+            expires_at: row.get(9),
+            decided_at: row.get(10),
+        },
+        host_name: row.get(11),
+        device_name: row.get(12),
+        device_revoked: row.get(13),
+    })
+}
+
+fn status_spelled(status: GrantStatus) -> &'static str {
+    match status {
+        GrantStatus::Pending => "pending",
+        GrantStatus::Approved => "approved",
+        GrantStatus::Denied => "denied",
+        GrantStatus::Revoked => "revoked",
+    }
+}
+
+fn scopes_spelled(scopes: &BTreeSet<Scope>) -> Result<Vec<String>> {
+    scopes.iter().map(spelled).collect()
+}
+
+fn projects_spelled(projects: Option<&ProjectGrant>) -> Result<Option<String>> {
+    projects
+        .map(|p| serde_json::to_string(p).map_err(failed))
+        .transpose()
 }
 
 async fn issue(tx: &Transaction<'_>, device: &DeviceId, issued: &Issued) -> Result<()> {

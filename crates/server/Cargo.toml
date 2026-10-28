@@ -44,6 +44,8 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# The device's side, for the pairing tool (examples/pair.rs).
+remote-client = { path = "../remote-client" }
 # A stand-in identity provider, served over real HTTP, for the tests.
 axum = "0.8"
 jsonwebtoken = { version = "11.1", default-features = false, features = ["rust_crypto"] }

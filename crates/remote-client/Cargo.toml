@@ -1,0 +1,29 @@
+[package]
+name = "remote-client"
+description = "A device's side of the Yardsort server's HTTP API: signing in through the system browser, refreshing, devices, hosts and pairing. Used by the app as a host, and by tools that stand in for a phone."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Apart from `yardsort-core` on purpose: the core is also `ys`, which never talks to a server,
+# and a headless host (R5) will use this without the app.
+[dependencies]
+remote-proto = { path = "../remote-proto" }
+base64 = "0.22"
+getrandom = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "time"] }
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }

@@ -162,7 +162,7 @@ Settled on 2026-10-23:
    - **Type:** **Web**.
    - **Authentication method:** **Code**, so the server authenticates with a client secret.
      The server sends PKCE as well, which ZITADEL accepts alongside the secret: confirmed against
-     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §7).
+     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §8).
    - **Redirect URI:** `https://remote-staging.yardsort.sh/v1/login/callback`.
    - **Development mode:** off.
    - **Refresh tokens:** leave them off. The server never asks ZITADEL for one.
@@ -242,8 +242,11 @@ the owner's go-ahead:
   (`.github/workflows/server-deploy.yml`), and the self-host recipe (`crates/server/self-host/`).
   Staging was first deployed from a workstation, with the workflow's arguments, before the
   workflow reached `main`. Step E and staging's smoke test followed on 2026-10-25, and the test
-  passed ([27](27-remote-r2.md) §7). Production's Fly config and its protected environment come
-  with its ZITADEL instance.
+  passed ([27](27-remote-r2.md) §8). The workflow first deployed it from Actions on 2026-10-25.
+  Production's Fly config and its protected environment come with its ZITADEL instance.
+- **Slice 4, built on 2026-10-25** ([27](27-remote-r2.md) §7): pairing, on the server and in the
+  app behind `YARDSORT_REMOTE_PREVIEW=1`. Its migration `0002_hosts_and_grants.sql` reaches
+  staging with its next deploy; nothing else about where it runs changes.
 
 ## 7 · Open decisions
 

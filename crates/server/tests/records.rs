@@ -6,12 +6,16 @@ mod common;
 
 use std::sync::Arc;
 
+use std::collections::BTreeSet;
+
 use remote_proto::account::{DeviceKind, Secret};
-use remote_proto::{DeviceId, Platform};
+use remote_proto::pairing::MAX_OFFER_MISSES;
+use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, ProjectId, Scope};
 use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{
-    AccountId, Device, Handoff, Issued, MemoryRecords, PendingLogin, Records, RevokeReason,
-    Revoked, Rotation, SEEN_RESOLUTION_MS,
+    AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, Handoff, Host, HostOffer,
+    Issued, MemoryRecords, PendingLogin, Records, Redemption, RevokeReason, Revoked, Rotation,
+    SEEN_RESOLUTION_MS,
 };
 use yardsort_server::tokens::{self, TokenHash};
 
@@ -55,6 +59,13 @@ for_each_store!(
     signed_in_devices_hold_a_live_refresh_credential,
     the_operator_revokes_every_device_of_one_account,
     devices_keep_every_wire_name,
+    a_host_is_registered_moved_and_removed_within_its_account,
+    an_offer_is_redeemed_once_within_its_account,
+    misses_spend_only_their_accounts_open_offers,
+    a_grant_is_answered_once_and_a_device_holds_one_per_host,
+    revoking_a_grant_or_removing_its_host_ends_it,
+    racing_approvals_leave_one_grant_in_force,
+    grants_keep_every_scope_and_project,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -527,6 +538,617 @@ async fn devices_keep_every_wire_name(records: Arc<impl Records>) {
             .unwrap();
         assert_eq!(found, device);
     }
+}
+
+fn new_host(account: &AccountId, device: &Device, name: &str, now: i64) -> Host {
+    Host {
+        id: HostId::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+        account: account.clone(),
+        device: device.id.clone(),
+        name: name.into(),
+        created_at: now,
+        last_seen_at: None,
+    }
+}
+
+async fn host_device(records: &impl Records, account: &AccountId, name: &str) -> Device {
+    let device = Device {
+        id: device_id(),
+        account: account.clone(),
+        name: name.into(),
+        kind: DeviceKind::Host,
+        platform: Platform::Linux,
+        created_at: T,
+        last_seen_at: None,
+        revoked: None,
+    };
+    records
+        .add_device(device.clone(), issued(name, T))
+        .await
+        .unwrap();
+    device
+}
+
+fn offer(host: &Host, name: &str, expires_at: i64) -> HostOffer {
+    HostOffer {
+        host: host.id.clone(),
+        account: host.account.clone(),
+        secret: h(&format!("{name}-secret")),
+        code: h(&format!("{name}-code")),
+        expires_at,
+    }
+}
+
+fn pending(host: &Host, device: &Device, now: i64) -> GrantRecord {
+    GrantRecord {
+        id: GrantId::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+        account: host.account.clone(),
+        host: host.id.clone(),
+        device: device.id.clone(),
+        requested: [Scope::WorkspaceRead, Scope::TerminalRead].into(),
+        scopes: BTreeSet::new(),
+        projects: None,
+        status: GrantStatus::Pending,
+        created_at: now,
+        expires_at: now + 300,
+        decided_at: None,
+    }
+}
+
+fn approve(scopes: &[Scope]) -> Decision {
+    Decision::Approve {
+        scopes: scopes.iter().copied().collect(),
+        projects: ProjectGrant::All,
+    }
+}
+
+async fn status(records: &impl Records, account: &AccountId, id: &GrantId) -> GrantStatus {
+    records
+        .grants(account, GrantFilter::One(id.clone()))
+        .await
+        .unwrap()
+        .pop()
+        .unwrap()
+        .grant
+        .status
+}
+
+async fn a_host_is_registered_moved_and_removed_within_its_account(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let first = host_device(&*records, &alice, "workstation").await;
+    let host = new_host(&alice, &first, "Workstation", T);
+    records.add_host(host.clone()).await.unwrap();
+    assert_eq!(
+        records.host(&alice, &host.id).await.unwrap(),
+        Some(host.clone())
+    );
+    assert_eq!(records.hosts(&alice).await.unwrap(), vec![host.clone()]);
+    assert_eq!(records.host(&bob, &host.id).await.unwrap(), None);
+    assert!(records.hosts(&bob).await.unwrap().is_empty());
+
+    // Its device's last use shows as the host's.
+    records.seen(&first.id, T + 7).await.unwrap();
+    let seen = records.host(&alice, &host.id).await.unwrap().unwrap();
+    assert_eq!(seen.last_seen_at, Some(T + 7));
+
+    // Signed in again: the same host, on its new device, under its new name.
+    let second = host_device(&*records, &alice, "workstation-again").await;
+    let moved = records
+        .rebind_host(&alice, &host.id, &second.id, "Desk")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (moved.device.clone(), moved.name.as_str()),
+        (second.id.clone(), "Desk")
+    );
+    assert_eq!(moved.last_seen_at, None);
+    assert_eq!(moved.created_at, T);
+    // Another account cannot take it over, and trying changes nothing.
+    let bobs = host_device(&*records, &bob, "bobs").await;
+    assert_eq!(
+        records
+            .rebind_host(&bob, &host.id, &bobs.id, "Mine")
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(records.host(&alice, &host.id).await.unwrap(), Some(moved));
+
+    assert!(!records.remove_host(&bob, &host.id, T + 9).await.unwrap());
+    assert!(records.remove_host(&alice, &host.id, T + 9).await.unwrap());
+    assert!(!records.remove_host(&alice, &host.id, T + 10).await.unwrap());
+    assert_eq!(records.host(&alice, &host.id).await.unwrap(), None);
+    assert!(records.hosts(&alice).await.unwrap().is_empty());
+    // A removed host stays removed: signing in again does not bring it back.
+    assert_eq!(
+        records
+            .rebind_host(&alice, &host.id, &second.id, "Back")
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+async fn an_offer_is_redeemed_once_within_its_account(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let device = host_device(&*records, &alice, "workstation").await;
+    let host = new_host(&alice, &device, "Workstation", T);
+    records.add_host(host.clone()).await.unwrap();
+
+    records
+        .put_offer(offer(&host, "o1", T + 300), T)
+        .await
+        .unwrap();
+    // Another account holding the secret gets nothing, and spends nothing.
+    assert_eq!(
+        records
+            .redeem_offer(&bob, &h("o1-secret"), T + 1)
+            .await
+            .unwrap(),
+        Redemption::Missed
+    );
+    assert_eq!(
+        records
+            .redeem_offer(&alice, &h("o1-code"), T + 1)
+            .await
+            .unwrap(),
+        Redemption::Taken(offer(&host, "o1", T + 300))
+    );
+    assert_eq!(
+        records
+            .redeem_offer(&alice, &h("o1-secret"), T + 2)
+            .await
+            .unwrap(),
+        Redemption::Missed
+    );
+
+    // A new offer replaces the host's open one.
+    records
+        .put_offer(offer(&host, "o2", T + 300), T)
+        .await
+        .unwrap();
+    records
+        .put_offer(offer(&host, "o3", T + 300), T)
+        .await
+        .unwrap();
+    assert_eq!(
+        records
+            .redeem_offer(&alice, &h("o2-secret"), T + 1)
+            .await
+            .unwrap(),
+        Redemption::Missed
+    );
+    assert!(matches!(
+        records
+            .redeem_offer(&alice, &h("o3-secret"), T + 1)
+            .await
+            .unwrap(),
+        Redemption::Taken(_)
+    ));
+
+    // A lapsed one is not redeemed.
+    records
+        .put_offer(offer(&host, "o4", T + 300), T)
+        .await
+        .unwrap();
+    assert_eq!(
+        records
+            .redeem_offer(&alice, &h("o4-code"), T + 300)
+            .await
+            .unwrap(),
+        Redemption::Missed
+    );
+
+    // Removing the host takes its open offer with it.
+    records
+        .put_offer(offer(&host, "o5", T + 300), T)
+        .await
+        .unwrap();
+    assert!(records.remove_host(&alice, &host.id, T + 1).await.unwrap());
+    assert_eq!(
+        records
+            .redeem_offer(&alice, &h("o5-code"), T + 2)
+            .await
+            .unwrap(),
+        Redemption::Missed
+    );
+}
+
+async fn misses_spend_only_their_accounts_open_offers(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let alices = new_host(&alice, &host_device(&*records, &alice, "a").await, "A", T);
+    let bobs = new_host(&bob, &host_device(&*records, &bob, "b").await, "B", T);
+    records.add_host(alices.clone()).await.unwrap();
+    records.add_host(bobs.clone()).await.unwrap();
+    records
+        .put_offer(offer(&alices, "a1", T + 300), T)
+        .await
+        .unwrap();
+    records
+        .put_offer(offer(&bobs, "b1", T + 300), T)
+        .await
+        .unwrap();
+    for i in 0..MAX_OFFER_MISSES - 1 {
+        let wrong = h(&format!("guess-{i}"));
+        assert_eq!(
+            records.redeem_offer(&alice, &wrong, T + 1).await.unwrap(),
+            Redemption::Missed
+        );
+    }
+    // One short of the limit, the right code still works.
+    assert!(matches!(
+        records
+            .redeem_offer(&alice, &h("a1-code"), T + 2)
+            .await
+            .unwrap(),
+        Redemption::Taken(_)
+    ));
+    records
+        .put_offer(offer(&alices, "a2", T + 300), T)
+        .await
+        .unwrap();
+    for i in 0..MAX_OFFER_MISSES {
+        let wrong = h(&format!("guess-{i}"));
+        records.redeem_offer(&alice, &wrong, T + 3).await.unwrap();
+    }
+    // At the limit, it no longer does: the host has to show a new one.
+    assert_eq!(
+        records
+            .redeem_offer(&alice, &h("a2-code"), T + 4)
+            .await
+            .unwrap(),
+        Redemption::Missed
+    );
+    records
+        .put_offer(offer(&alices, "a3", T + 300), T + 5)
+        .await
+        .unwrap();
+    assert!(matches!(
+        records
+            .redeem_offer(&alice, &h("a3-code"), T + 6)
+            .await
+            .unwrap(),
+        Redemption::Taken(_)
+    ));
+    // Alice's misses were not counted against Bob's offer.
+    assert!(matches!(
+        records
+            .redeem_offer(&bob, &h("b1-code"), T + 6)
+            .await
+            .unwrap(),
+        Redemption::Taken(_)
+    ));
+}
+
+async fn a_grant_is_answered_once_and_a_device_holds_one_per_host(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let host = new_host(
+        &alice,
+        &host_device(&*records, &alice, "ws").await,
+        "Workstation",
+        T,
+    );
+    records.add_host(host.clone()).await.unwrap();
+    let phone = enroll(&*records, &alice, "phone", T).await;
+    let laptop = enroll(&*records, &alice, "laptop", T).await;
+
+    let first = pending(&host, &phone, T);
+    records.add_grant(first.clone()).await.unwrap();
+    // Another account cannot answer it.
+    assert_eq!(
+        records
+            .decide(&bob, &first.id, approve(&[Scope::WorkspaceRead]), T + 1)
+            .await
+            .unwrap(),
+        None
+    );
+    let approved = records
+        .decide(&alice, &first.id, approve(&[Scope::WorkspaceRead]), T + 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(approved.status, GrantStatus::Approved);
+    assert_eq!(approved.scopes, [Scope::WorkspaceRead].into());
+    assert_eq!(approved.projects, Some(ProjectGrant::All));
+    assert_eq!(approved.decided_at, Some(T + 1));
+    assert_eq!(approved.requested, first.requested);
+    // Answered once.
+    assert_eq!(
+        records
+            .decide(&alice, &first.id, Decision::Deny, T + 2)
+            .await
+            .unwrap(),
+        None
+    );
+
+    // A second approval for the same device on the same host replaces the first.
+    let second = pending(&host, &phone, T + 3);
+    let laptops = pending(&host, &laptop, T + 3);
+    records.add_grant(second.clone()).await.unwrap();
+    records.add_grant(laptops.clone()).await.unwrap();
+    records
+        .decide(&alice, &laptops.id, approve(&[Scope::TerminalRead]), T + 4)
+        .await
+        .unwrap()
+        .unwrap();
+    records
+        .decide(&alice, &second.id, approve(&[Scope::TerminalRead]), T + 4)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        status(&*records, &alice, &first.id).await,
+        GrantStatus::Revoked
+    );
+    assert_eq!(
+        status(&*records, &alice, &second.id).await,
+        GrantStatus::Approved
+    );
+    // Another device's grant on it stands.
+    assert_eq!(
+        status(&*records, &alice, &laptops.id).await,
+        GrantStatus::Approved
+    );
+
+    // A denial is an answer too, and it revokes nothing.
+    let third = pending(&host, &phone, T + 5);
+    records.add_grant(third.clone()).await.unwrap();
+    let denied = records
+        .decide(&alice, &third.id, Decision::Deny, T + 6)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (denied.status, denied.projects),
+        (GrantStatus::Denied, None)
+    );
+    assert_eq!(
+        status(&*records, &alice, &second.id).await,
+        GrantStatus::Approved
+    );
+
+    // Nobody answered in time: too late to.
+    let late = pending(&host, &phone, T + 10);
+    records.add_grant(late.clone()).await.unwrap();
+    assert_eq!(
+        records
+            .decide(
+                &alice,
+                &late.id,
+                approve(&[Scope::WorkspaceRead]),
+                late.expires_at
+            )
+            .await
+            .unwrap(),
+        None
+    );
+
+    // Listed newest first, by host, by device and one by one, with names; never another
+    // account's.
+    let of_host = records
+        .grants(&alice, GrantFilter::OfHost(host.id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(of_host.len(), 5);
+    assert!(of_host
+        .windows(2)
+        .all(|w| w[0].grant.created_at >= w[1].grant.created_at));
+    assert!(of_host.iter().all(|v| v.host_name == "Workstation"));
+    let for_laptop = records
+        .grants(&alice, GrantFilter::ForDevice(laptop.id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(for_laptop.len(), 1);
+    assert_eq!(for_laptop[0].device_name, "laptop");
+    assert!(!for_laptop[0].device_revoked);
+    assert!(records
+        .grants(&bob, GrantFilter::OfHost(host.id.clone()))
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(records
+        .grants(&bob, GrantFilter::One(first.id.clone()))
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Signing a device out shows on its grants.
+    let by_owner = Revoked {
+        at: T + 20,
+        reason: RevokeReason::ByOwner,
+    };
+    assert!(records.revoke(&alice, &laptop.id, by_owner).await.unwrap());
+    let for_laptop = records
+        .grants(&alice, GrantFilter::ForDevice(laptop.id.clone()))
+        .await
+        .unwrap();
+    assert!(for_laptop[0].device_revoked);
+}
+
+async fn revoking_a_grant_or_removing_its_host_ends_it(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let bob = records.account("https://id.one", "bob", T).await.unwrap();
+    let host = new_host(
+        &alice,
+        &host_device(&*records, &alice, "ws").await,
+        "Workstation",
+        T,
+    );
+    records.add_host(host.clone()).await.unwrap();
+    let phone = enroll(&*records, &alice, "phone", T).await;
+
+    let given = pending(&host, &phone, T);
+    records.add_grant(given.clone()).await.unwrap();
+    records
+        .decide(&alice, &given.id, approve(&[Scope::WorkspaceRead]), T + 1)
+        .await
+        .unwrap();
+    assert!(!records.revoke_grant(&bob, &given.id, T + 2).await.unwrap());
+    assert_eq!(
+        status(&*records, &alice, &given.id).await,
+        GrantStatus::Approved
+    );
+    assert!(records
+        .revoke_grant(&alice, &given.id, T + 2)
+        .await
+        .unwrap());
+    let revoked = records
+        .grants(&alice, GrantFilter::One(given.id.clone()))
+        .await
+        .unwrap()
+        .pop()
+        .unwrap()
+        .grant;
+    assert_eq!(revoked.status, GrantStatus::Revoked);
+    assert_eq!(revoked.decided_at, Some(T + 2));
+    // It keeps what it gave.
+    assert_eq!(revoked.scopes, [Scope::WorkspaceRead].into());
+    // Revoked once; the first time stands.
+    assert!(records
+        .revoke_grant(&alice, &given.id, T + 3)
+        .await
+        .unwrap());
+    let again = records
+        .grants(&alice, GrantFilter::One(given.id.clone()))
+        .await
+        .unwrap()
+        .pop()
+        .unwrap()
+        .grant;
+    assert_eq!(again.decided_at, Some(T + 2));
+
+    // A denied grant stays denied.
+    let refused = pending(&host, &phone, T + 4);
+    records.add_grant(refused.clone()).await.unwrap();
+    records
+        .decide(&alice, &refused.id, Decision::Deny, T + 5)
+        .await
+        .unwrap();
+    assert!(records
+        .revoke_grant(&alice, &refused.id, T + 6)
+        .await
+        .unwrap());
+    assert_eq!(
+        status(&*records, &alice, &refused.id).await,
+        GrantStatus::Denied
+    );
+
+    // Removing the host revokes what is pending and what is in force.
+    let waiting = pending(&host, &phone, T + 7);
+    let in_force = pending(&host, &phone, T + 7);
+    records.add_grant(waiting.clone()).await.unwrap();
+    records.add_grant(in_force.clone()).await.unwrap();
+    records
+        .decide(&alice, &in_force.id, approve(&[Scope::TerminalRead]), T + 8)
+        .await
+        .unwrap();
+    assert!(records.remove_host(&alice, &host.id, T + 9).await.unwrap());
+    for id in [&waiting.id, &in_force.id] {
+        assert_eq!(status(&*records, &alice, id).await, GrantStatus::Revoked);
+    }
+    assert_eq!(
+        status(&*records, &alice, &refused.id).await,
+        GrantStatus::Denied
+    );
+}
+
+async fn racing_approvals_leave_one_grant_in_force(records: Arc<impl Records + 'static>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let host = new_host(
+        &alice,
+        &host_device(&*records, &alice, "ws").await,
+        "Workstation",
+        T,
+    );
+    records.add_host(host.clone()).await.unwrap();
+    let phone = enroll(&*records, &alice, "phone", T).await;
+    let grants: Vec<GrantRecord> = (0..8).map(|_| pending(&host, &phone, T)).collect();
+    for grant in &grants {
+        records.add_grant(grant.clone()).await.unwrap();
+    }
+    let racers: Vec<_> = grants
+        .iter()
+        .map(|grant| {
+            let (records, account, id) = (records.clone(), alice.clone(), grant.id.clone());
+            tokio::spawn(async move {
+                records
+                    .decide(&account, &id, approve(&[Scope::WorkspaceRead]), T + 1)
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+    for racer in racers {
+        assert!(racer.await.unwrap().is_some());
+    }
+    let in_force = records
+        .grants(&alice, GrantFilter::ForDevice(phone.id.clone()))
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|v| v.grant.status == GrantStatus::Approved)
+        .count();
+    assert_eq!(in_force, 1);
+}
+
+async fn grants_keep_every_scope_and_project(records: Arc<impl Records>) {
+    let alice = records.account("https://id.one", "alice", T).await.unwrap();
+    let host = new_host(
+        &alice,
+        &host_device(&*records, &alice, "ws").await,
+        "Ana’s desk — ü",
+        T,
+    );
+    records.add_host(host.clone()).await.unwrap();
+    let phone = enroll(&*records, &alice, "phone", T).await;
+    let every: BTreeSet<Scope> = [
+        Scope::WorkspaceRead,
+        Scope::ActivityRead,
+        Scope::MemoryRead,
+        Scope::TerminalRead,
+        Scope::TerminalControl,
+        Scope::DeviceManage,
+    ]
+    .into();
+    let projects = ProjectGrant::Only(
+        ["p-1", "p-2"]
+            .into_iter()
+            .map(|p| ProjectId::new(p).unwrap())
+            .collect(),
+    );
+    let grant = GrantRecord {
+        requested: every.clone(),
+        ..pending(&host, &phone, T)
+    };
+    records.add_grant(grant.clone()).await.unwrap();
+    let listed = records
+        .grants(&alice, GrantFilter::One(grant.id.clone()))
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(listed.grant, grant);
+    assert_eq!(listed.host_name, "Ana’s desk — ü");
+    let decided = records
+        .decide(
+            &alice,
+            &grant.id,
+            Decision::Approve {
+                scopes: every.clone(),
+                projects: projects.clone(),
+            },
+            T + 1,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(decided.scopes, every);
+    assert_eq!(decided.projects, Some(projects));
 }
 
 // What only PostgreSQL has to do.

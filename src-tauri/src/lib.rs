@@ -16,6 +16,7 @@ mod outcomes;
 mod preflight;
 mod publish;
 mod quit;
+mod remote;
 mod sessions;
 mod state;
 mod terminal;
@@ -141,6 +142,14 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::activity_clear,
             activity::workspace_provenance,
             activity::workspace_handoff,
+            remote::remote_status,
+            remote::remote_enable,
+            remote::remote_cancel,
+            remote::remote_disable,
+            remote::remote_pair,
+            remote::remote_requests,
+            remote::remote_answer,
+            remote::remote_revoke,
             activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,

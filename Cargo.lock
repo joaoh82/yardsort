@@ -4332,6 +4332,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+
+[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4531,6 +4537,23 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "remote-client"
+version = "0.20.2"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "remote-proto",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "tokio",
+ "url",
+]
 
 [[package]]
 name = "remote-proto"
@@ -7841,6 +7864,9 @@ dependencies = [
  "notify",
  "pty-host",
  "pty-ipc",
+ "qrcode",
+ "remote-client",
+ "remote-proto",
  "reqwest",
  "rusqlite",
  "rustls",
@@ -7861,6 +7887,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "toml 1.1.6+spec-1.1.0",
+ "url",
  "uuid",
  "which",
  "windows-sys 0.59.0",
@@ -7914,6 +7941,7 @@ dependencies = [
  "deadpool-postgres",
  "getrandom 0.3.4",
  "jsonwebtoken",
+ "remote-client",
  "remote-proto",
  "reqwest",
  "rustls",

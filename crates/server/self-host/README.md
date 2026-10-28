@@ -13,10 +13,11 @@ machine of yours, with everything it needs:
 
 Nothing in it calls Yardsort's own servers.
 
-**What works today.** Signing in, and listing and revoking devices: the server's first slices
-([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app does not
-connect to a server yet, so for now this is for trying the server and getting ready for what comes
-next.
+**What works today.** Signing in, listing and revoking devices, and pairing a device with a host,
+approved at the host: the server's first slices
+([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app pairs only
+as a preview (`YARDSORT_REMOTE_PREVIEW=1`), and a paired device cannot reach its host yet, so for
+now this is for trying the server and getting ready for what comes next.
 
 ## What you need
 

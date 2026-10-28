@@ -1,9 +1,9 @@
 //! What a caller is allowed to do: the scopes and resources of one device's grant.
 //!
-//! A host checks every request against a [`Grant`] before it reads anything. Where the grant
-//! comes from is not decided here. In this slice only tests construct one; enrollment, approval
-//! on the host and revocation (phase R2) will. Nothing in this crate can mint a grant from a
-//! request: it is always the host's own input.
+//! A host checks every request against a [`Grant`] before it reads anything. A grant comes from
+//! pairing ([`crate::pairing`]): a device asks, and the host's person approves it at the host,
+//! which keeps what they chose. Nothing in this crate can mint a grant from a request: it is
+//! always the host's own input.
 
 use std::collections::BTreeSet;
 

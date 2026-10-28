@@ -4,97 +4,16 @@
 
 mod common;
 
-use std::collections::HashMap;
-
-use common::idp::{Idp, APP, CLIENT_ID};
+use common::idp::APP;
+use common::served::*;
 use remote_proto::account::{
     Credentials, DeviceKind, DevicePage, NewDevice, Secret, ServerDescription, TokenRequest,
 };
-use remote_proto::{ErrorCode, Platform, RemoteError, ServerId};
+use remote_proto::{ErrorCode, Platform};
 use reqwest::header::{CACHE_CONTROL, LOCATION, WWW_AUTHENTICATE};
 use reqwest::StatusCode;
-use url::Url;
-use yardsort_server::oidc::{self, ProviderConfig};
 use yardsort_server::records::{MemoryRecords, Records};
-use yardsort_server::{http, tokens, ControlService, ServerConfig};
-
-const SECRET: &str = "the client secret";
-
-struct Served {
-    idp: Idp,
-    base: Url,
-    client: reqwest::Client,
-}
-
-impl Served {
-    async fn start(records: impl Records + 'static) -> Self {
-        Self::start_with(records, http::Options::default()).await
-    }
-
-    async fn start_with(records: impl Records + 'static, options: http::Options) -> Self {
-        let idp = Idp::start(Some(SECRET)).await;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
-        let client = oidc::http_client_builder().no_proxy().build().unwrap();
-        let service = ControlService::new(
-            ServerConfig {
-                server: ServerId::new("srv-test").unwrap(),
-                name: "Test server".into(),
-                public_url: base.clone(),
-                provider: ProviderConfig {
-                    issuer: idp.issuer(),
-                    client_id: CLIENT_ID.into(),
-                    client_secret: Some(Secret::new(SECRET)),
-                },
-                device_redirects: vec![APP.into()],
-            },
-            records,
-            client.clone(),
-        )
-        .unwrap();
-        let app = http::router(service, options)
-            .into_make_service_with_connect_info::<std::net::SocketAddr>();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        Self { idp, base, client }
-    }
-
-    fn url(&self, path: &str) -> Url {
-        self.base.join(path).unwrap()
-    }
-
-    async fn get(&self, path: &str) -> reqwest::Response {
-        self.client.get(self.url(path)).send().await.unwrap()
-    }
-
-    async fn token(&self, request: &TokenRequest) -> reqwest::Response {
-        self.client
-            .post(self.url("v1/token"))
-            .json(request)
-            .send()
-            .await
-            .unwrap()
-    }
-
-    async fn devices(&self, access: Option<&Secret>) -> reqwest::Response {
-        let mut request = self.client.get(self.url("v1/devices"));
-        if let Some(access) = access {
-            request = request.bearer_auth(access.expose());
-        }
-        request.send().await.unwrap()
-    }
-}
-
-fn location(response: &reqwest::Response) -> Url {
-    Url::parse(response.headers()[LOCATION].to_str().unwrap()).unwrap()
-}
-
-fn query(url: &Url) -> HashMap<String, String> {
-    url.query_pairs().into_owned().collect()
-}
-
-async fn error(response: reqwest::Response) -> RemoteError {
-    response.json().await.unwrap()
-}
+use yardsort_server::{http, tokens};
 
 macro_rules! for_each_store {
     ($($name:ident),* $(,)?) => {
@@ -284,6 +203,7 @@ async fn one_address_may_start_only_so_many_sign_ins_and_token_requests() {
             client_ip_header: Some("fly-client-ip".parse().unwrap()),
             logins_per_minute: 2,
             tokens_per_minute: 3,
+            ..http::Options::default()
         },
     )
     .await;
