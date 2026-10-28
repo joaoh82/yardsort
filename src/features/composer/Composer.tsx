@@ -63,6 +63,9 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // The same for a task handed over from the Tasks view, which brings its message and itself.
   const [note] = useState(() => (runIn ? null : useProjectsStore.getState().composingPrompt));
   const [task] = useState(() => (runIn ? null : useProjectsStore.getState().composingTask));
+  // Forked from another workspace: a new branch from its branch, and its packet after the
+  // message. The message is the user's own, the new workspace's task, so it starts empty.
+  const [fork] = useState(() => (runIn ? null : useProjectsStore.getState().composingFork));
   const [message, setMessage] = useState(handoff ?? note ?? "");
   // Asked for by one agent's button: that agent, and the last picks only if they were for it.
   const [handed] = useState(() => (runIn ? useProjectsStore.getState().composingHarness : null));
@@ -154,22 +157,32 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           prepared &&
           list.branches.includes(prepared.branch) &&
           !list.checkedOut.includes(prepared.branch);
-        setBase(pullRequest ? `open:${prepared.branch}` : start ? `new:${start}` : "");
+        const forked = fork && list.branches.includes(fork.branch) ? fork.branch : null;
+        setBase(
+          pullRequest
+            ? `open:${prepared.branch}`
+            : forked
+              ? `new:${forked}`
+              : start
+                ? `new:${start}`
+                : "",
+        );
       },
       (reason) => !stale && setError(reason?.message ?? String(reason)),
     );
     return () => {
       stale = true;
     };
-  }, [project.id, runIn, prepared]);
+  }, [project.id, runIn, prepared, fork]);
 
   // The project's memory, when it shares it: what goes after the message, and a way to leave it
-  // out of this one launch. A handoff's packet carries it already.
+  // out of this one launch. A handoff's or a fork's packet carries it already.
   const [memory, setMemory] = useState<{ preview: string; count: number } | null>(null);
   const [skipMemory, setSkipMemory] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [showPacket, setShowPacket] = useState(false);
   useEffect(() => {
-    if (handoff !== null || !hasCore()) return;
+    if (handoff !== null || fork || !hasCore()) return;
     let stale = false;
     ipc.memoryGet(project.id).then(
       (loaded) => {
@@ -182,7 +195,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     return () => {
       stale = true;
     };
-  }, [project.id, handoff]);
+  }, [project.id, handoff, fork]);
 
   // In a workspace with other conversations, in a project that shares them: what the agent is
   // told about them, and a way to leave that out of this one launch.
@@ -275,6 +288,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       prompt: message.trim() || null,
       ...(memory && skipMemory ? { skipMemory: true } : {}),
       ...(conversations && skipContext ? { skipContext: true } : {}),
+      ...(fork ? { forkPacket: fork.packet } : {}),
     };
     const remember = () =>
       projects.remember(picksKey(project.id), {
@@ -345,6 +359,11 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
                 </>
               )}
             </>
+          ) : fork ? (
+            <>
+              Fork <span className="font-medium text-ink">{fork.name}</span> into a new workspace in{" "}
+              <span className="font-medium text-ink">{project.name}</span>
+            </>
           ) : (
             <>
               New workspace in <span className="font-medium text-ink">{project.name}</span>
@@ -358,6 +377,38 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
             first message. Read it, change it, then start. The task on record stays what you first
             asked.
           </p>
+        )}
+        {fork && (
+          <p className="mb-2 text-[12px] text-ink-faint">
+            A new branch and worktree, started from{" "}
+            <span className="font-mono text-ink-muted">{fork.branch}</span> with all its commits.
+            Say what to do next: your message is the new workspace&rsquo;s task and names it. What
+            Yardsort recorded about {fork.name} goes after it, for context.{" "}
+            {fork.uncommitted > 0 && (
+              <span className="text-amber-400">
+                {fork.uncommitted === 1
+                  ? "1 uncommitted file stays behind"
+                  : `${fork.uncommitted} uncommitted files stay behind`}{" "}
+                — commit {fork.uncommitted === 1 ? "it" : "them"} there first to bring{" "}
+                {fork.uncommitted === 1 ? "it" : "them"} along.{" "}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowPacket((shown) => !shown)}
+              className="text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+            >
+              {showPacket ? "Hide" : "Show"} what goes with it
+            </button>
+          </p>
+        )}
+        {fork && showPacket && (
+          <pre
+            aria-label="Sent after your message"
+            className="mb-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-[11px] whitespace-pre-wrap select-text"
+          >
+            {fork.packet}
+          </pre>
         )}
         {task && (
           <p className="mb-2 text-[12px] text-ink-faint">

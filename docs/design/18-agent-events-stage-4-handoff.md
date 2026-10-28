@@ -147,3 +147,32 @@ base)` does what the app command did — head, base, commits since, the change l
 
 Not measured, as with the review itself: whether the order helps the next agent. The line in
 the packet keeps it honest until there is use to learn from.
+
+## 7 · Forking a workspace
+
+A handoff keeps the next agent in the same worktree, on the same branch. The other common case
+is starting the _next_ feature from where this one stands, in a worktree of its own, without
+the first one stopping. **Fork into new workspace…** in the workspace menu is that.
+
+- **It is the composer, not a new path.** A fork opens the ordinary new-workspace composer with
+  **Branch** on `new:<the workspace's branch>`, so the worktree is made by `workspace_create`
+  as for any branch the user picks there. The new workspace's `base_branch` is the forked
+  branch; its Changes list and pull request are measured against it, which is the stacked
+  shape the user asked for, and the picker still offers any other.
+- **The message is the task; the packet is context.** A handoff's packet _is_ the first
+  message, and its record keeps none. A fork's is not: the user writes what to do next, which
+  names the workspace and is what the record keeps, and the packet goes after it. That is the
+  same place the project's memory goes, so `HarnessRequest` gained `fork_packet` — sent to the
+  agent after the message, never recorded — which the launcher uses in place of the memory,
+  since the packet already carries it. (Not `context`: that word already means the workspace's
+  other conversations, which `skip_context` turns off.) A fork with no message still sends the
+  packet, and the conversation reader cuts it from a first message as it cuts the memory, so a
+  later handoff or `ys workspace context` quotes only the user's words.
+- **The same facts, worded for elsewhere.** `handoff::render_for(facts, Purpose::Fork)` writes
+  "that workspace" and "there", says its commits are in the new branch's history and its
+  uncommitted files are not, and that the user's message is the task. `render` is the handoff,
+  unchanged. `workspace_fork` returns the text, the branch git has out now and how many files
+  are uncommitted, which the composer warns about: a fork starts from commits only.
+- **Not carried: uncommitted work.** Copying it would mean writing into the new worktree on the
+  user's behalf, and a stash-and-apply that can conflict. Committing first is one step the user
+  already knows; the composer says so with the count.

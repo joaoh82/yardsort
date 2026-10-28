@@ -49,6 +49,11 @@ pub struct HarnessRequest {
     /// `docs/design/29-conversation-context.md`.
     #[serde(default)]
     pub skip_context: bool,
+    /// Sent to the agent after the first message, and only to the agent: the record keeps the
+    /// message alone as the task. A fork's packet (see `activity::handoff`), which carries the
+    /// project's memory already, so it goes in the memory's place.
+    #[serde(default)]
+    pub fork_packet: Option<String>,
 }
 
 /// What to run in a workspace.
@@ -172,8 +177,13 @@ impl Launcher<'_> {
         }
         // A first message gets the project's approved memory after it, when the project shares
         // it — except a handoff, whose packet carries it already, and a launch that opted out.
-        // It goes to the agent only: the record keeps the user's own words as the task.
+        // A fork's packet goes there instead, and carries the memory itself. Either goes to the
+        // agent only: the record keeps the user's own words as the task.
         let memory = match &launch {
+            Launch::Harness(HarnessRequest {
+                fork_packet: Some(packet),
+                ..
+            }) if !packet.trim().is_empty() => Some(packet.clone()),
             Launch::Harness(request)
                 if !request.handoff
                     && !request.skip_memory
@@ -510,8 +520,10 @@ pub fn resolve_launch_with(
                 .filter(|_| background.is_none() && prompt.is_some())
                 .map(activity::digest::note_section);
             // What the agent is given: the first message, then the memory and the note after it.
-            let sent = prompt.as_ref().map(|prompt| {
-                [Some(prompt.as_str()), memory, after.as_deref()]
+            // A fork's packet stands in the memory's place, and is sent even without a message;
+            // memory itself is only looked up for a first message, so it never goes alone.
+            let sent = (prompt.is_some() || memory.is_some()).then(|| {
+                [prompt.as_deref(), memory, after.as_deref()]
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>()
@@ -695,6 +707,7 @@ mod tests {
             skip_memory: false,
             quiet_memory: false,
             skip_context: false,
+            fork_packet: None,
         };
         let claude = resolve_launch(Launch::Harness(request("claude")), &[]).unwrap();
         assert_eq!(claude.program.as_deref(), Some("claude"));
@@ -733,6 +746,7 @@ mod tests {
             skip_memory: false,
             quiet_memory: false,
             skip_context: false,
+            fork_packet: None,
         };
         let stdin = [HarnessOverride {
             id: "claude".into(),
@@ -936,6 +950,7 @@ mod tests {
                         skip_memory,
                         quiet_memory: quiet.get(),
                         skip_context: false,
+                        fork_packet: None,
                     }),
                     SIZE,
                 )
@@ -988,6 +1003,52 @@ mod tests {
         assert!(start(Some("exit 0"), false, false).contains("Nothing is in it yet."));
         quiet.set(true);
         assert!(!start(Some("exit 0"), false, false).contains("Project memory"));
+    }
+
+    /// A fork's packet goes to the agent after the user's message, in place of the memory it
+    /// already carries; the record keeps the message alone, so it is the new workspace's task.
+    /// With no message, the packet is still sent.
+    #[test]
+    fn a_fork_packet_goes_to_the_agent_after_the_message_in_place_of_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(dir.path(), &store);
+        let project = store.workspace(&ws).unwrap().unwrap().project_id;
+        crate::memory::write(&store, &project, "The tests need TZ=UTC.").unwrap();
+        store.set_memory_shared(&project, true).unwrap();
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let launcher = launcher(&store, &host, &env, &harnesses, &activity, dir.path());
+        let start = |prompt: Option<&str>| {
+            launcher
+                .in_workspace(
+                    &ws,
+                    Launch::Harness(HarnessRequest {
+                        id: "sh-agent".into(),
+                        model: None,
+                        effort: None,
+                        prompt: prompt.map(str::to_owned),
+                        handoff: false,
+                        skip_memory: false,
+                        quiet_memory: false,
+                        skip_context: false,
+                        fork_packet: Some("# Forked from Yardsort".into()),
+                    }),
+                    SIZE,
+                )
+                .unwrap();
+            host.plans.lock().unwrap().pop().unwrap().args.join(" ")
+        };
+
+        let sent = start(Some("exit 0"));
+        assert!(sent.contains("exit 0\n\n# Forked from Yardsort"), "{sent}");
+        assert!(!sent.contains("Project memory"), "{sent}");
+        assert_eq!(store.session_prompts(&ws).unwrap(), ["exit 0"]);
+
+        let sent = start(None);
+        assert!(sent.contains("# Forked from Yardsort"), "{sent}");
     }
 
     /// Beside another conversation, in a project that shares them, a new agent is told it can
@@ -1049,6 +1110,7 @@ mod tests {
                         skip_memory: false,
                         quiet_memory: false,
                         skip_context,
+                        fork_packet: None,
                     }),
                     SIZE,
                 )
@@ -1136,6 +1198,7 @@ mod tests {
                     skip_memory: false,
                     quiet_memory: false,
                     skip_context: false,
+                    fork_packet: None,
                 }),
                 SIZE,
             )
@@ -1383,6 +1446,7 @@ mod tests {
                     skip_memory: false,
                     quiet_memory: false,
                     skip_context: false,
+                    fork_packet: None,
                 }),
                 SIZE,
             )
@@ -1489,6 +1553,7 @@ mod tests {
                     skip_memory: false,
                     quiet_memory: false,
                     skip_context: false,
+                    fork_packet: None,
                 }),
                 SIZE,
             )
@@ -1553,6 +1618,7 @@ mod tests {
                 skip_memory: false,
                 quiet_memory: false,
                 skip_context: false,
+                fork_packet: None,
             })
         };
         let on = ActivitySettings {
@@ -1619,6 +1685,7 @@ mod tests {
                     skip_memory: false,
                     quiet_memory: false,
                     skip_context: false,
+                    fork_packet: None,
                 }),
                 SIZE,
             )
@@ -1670,6 +1737,7 @@ mod tests {
                 skip_memory: false,
                 quiet_memory: false,
                 skip_context: false,
+                fork_packet: None,
             })
         };
         let on = ActivitySettings {
@@ -1752,6 +1820,7 @@ mod tests {
                 skip_memory: false,
                 quiet_memory: false,
                 skip_context: false,
+                fork_packet: None,
             })
         };
         let on = ActivitySettings {
@@ -1844,6 +1913,7 @@ mod tests {
                 skip_memory: true,
                 quiet_memory: false,
                 skip_context: false,
+                fork_packet: None,
             })
         };
         let on = ActivitySettings {
@@ -1923,6 +1993,7 @@ mod tests {
                 skip_memory: false,
                 quiet_memory: false,
                 skip_context: false,
+                fork_packet: None,
             })
         };
         let omp_only = ActivitySettings {
@@ -1990,6 +2061,7 @@ mod tests {
                 skip_memory: false,
                 quiet_memory: false,
                 skip_context: false,
+                fork_packet: None,
             })
         };
         let off = ActivitySettings::default();

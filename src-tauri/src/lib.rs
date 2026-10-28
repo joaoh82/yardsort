@@ -141,6 +141,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::activity_clear,
             activity::workspace_provenance,
             activity::workspace_handoff,
+            activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,
             memory::memory_edit,

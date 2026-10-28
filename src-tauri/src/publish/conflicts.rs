@@ -239,6 +239,7 @@ pub(super) fn deliver(
                     skip_memory: false,
                     quiet_memory: false,
                     skip_context: false,
+                    fork_packet: None,
                 }),
                 size,
             )?;

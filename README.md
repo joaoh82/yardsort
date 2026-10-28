@@ -284,6 +284,11 @@ as what the workspace was asked. From a terminal, `ys workspace handoff <workspa
 same message. See
 [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent).
 
+A handoff shares the workspace. To build the next feature on this one in a worktree of its own,
+**Fork into new workspace…** in the workspace menu makes a new branch from its branch and sends
+the same record after your message, which is the new workspace's task. Uncommitted files stay
+where they were. See [Fork into new workspace…](docs/guide/workspaces.md#fork-into-new-workspace).
+
 ## Workflows: named agent work, in steps
 
 A workflow is a named, reusable piece of agent work that runs in steps — have a second agent

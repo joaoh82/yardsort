@@ -284,6 +284,8 @@ export const commands = {
 	 *  key, or fails leaves the packet without a ranking, and the packet reads the same.
 	 */
 	workspaceHandoff: (workspaceId: string) => typedError<HandoffPacket, IpcError>(__TAURI_INVOKE("workspace_handoff", { workspaceId })),
+	/**  Assemble the fork packet for a workspace, from the same facts as a handoff. */
+	workspaceFork: (workspaceId: string) => typedError<ForkPacket, IpcError>(__TAURI_INVOKE("workspace_fork", { workspaceId })),
 	memoryGet: (projectId: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_get", { projectId })),
 	/**  The user writes an entry: approved as written. */
 	memoryWrite: (projectId: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_write", { projectId, text })),
@@ -999,6 +1001,22 @@ export type ForgeKind = "github" | "gitlab" | "bitbucket" |
  */
 "unknown";
 
+/**
+ *  A fork packet: what Yardsort recorded about a workspace, for an agent starting a new
+ *  workspace on a new branch made from this one's. See `yardsort_core::activity::handoff`.
+ */
+export type ForkPacket = {
+	/**  Markdown, sent after the user's own message, which is the new workspace's task. */
+	text: string,
+	/**
+	 *  The branch to start the new one from: the workspace's own, as git has it now. `None`
+	 *  when it is not on a branch, and there is nothing to fork.
+	 */
+	branch: string | null,
+	/**  Files changed and not committed there: a fork starts from the commits, so these stay. */
+	uncommitted: number,
+};
+
 export type GitStatus = {
 	path: string | null,
 	/**  As `git --version` prints it, e.g. `git version 2.55.0`. */
@@ -1143,6 +1161,12 @@ export type HarnessRequest = {
 	 *  `docs/design/29-conversation-context.md`.
 	 */
 	skipContext?: boolean,
+	/**
+	 *  Sent to the agent after the first message, and only to the agent: the record keeps the
+	 *  message alone as the task. A fork's packet (see `activity::handoff`), which carries the
+	 *  project's memory already, so it goes in the memory's place.
+	 */
+	forkPacket?: string | null,
 };
 
 export type HarnessStatus = {

@@ -481,6 +481,7 @@ pub(super) fn new(
                 skip_memory: false,
                 quiet_memory: false,
                 skip_context: false,
+                fork_packet: None,
             }),
             DETACHED_SIZE,
         )?;
