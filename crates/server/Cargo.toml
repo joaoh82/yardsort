@@ -3,7 +3,8 @@ name = "yardsort-server"
 description = "The Yardsort server: signing in through an OIDC identity provider, accounts, and the credentials it issues to devices, kept in PostgreSQL and served over HTTP."
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# The server alone is AGPL; the rest of the workspace is GPL (docs/design/30-open-source-and-managed.md).
+license = "AGPL-3.0-only"
 repository.workspace = true
 publish = false
 

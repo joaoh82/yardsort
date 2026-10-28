@@ -13,6 +13,11 @@ machine of yours, with everything it needs:
 
 Nothing in it calls Yardsort's own servers.
 
+**License.** The server is under the [AGPL-3.0](../LICENSE). Running it as it is asks nothing
+more of you. If you change it and let other people use it, you must offer those people the
+source of your changed version
+([docs/design/30](../../../docs/design/30-open-source-and-managed.md)).
+
 **What works today.** Signing in, listing and revoking devices, and pairing a device with a host,
 approved at the host: the server's first slices
 ([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app pairs only

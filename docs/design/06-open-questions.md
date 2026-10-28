@@ -288,6 +288,13 @@ still stands; these are what the code added to it.
     ([27 §10](27-remote-r2.md#10--risks)). A maximum session (30 to 90 days) bounds that, at the cost
     of a sign-in every so often, which a provider billing by daily active user counts. Lean: no
     maximum yet; an operator command revokes an account's devices (R2 slice 3).
+40. **Under what license is the phone app published?** It goes through Apple's App Store and
+    Google Play, and the Free Software Foundation's view is that the App Store's terms add
+    restrictions the GPL forbids ([30 §6](30-open-source-and-managed.md#6--the-phone-app-a-question-for-r3)).
+    The owner, as the only copyright holder, can publish it anyway; code others contribute under
+    the GPL alone would not allow it. Lean: decide at R3, before anyone else contributes to it,
+    between the GPL with an app-store exception (an additional permission under GPLv3 §7) and a
+    permissive license.
 
 ## Conversation context
 

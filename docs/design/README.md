@@ -34,6 +34,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 27  | [Remote, R2](27-remote-r2.md)                                           | Identity and relay. Started: sign-in server, its image and self-host recipe, pairing                                  |
 | 28  | [Remote infrastructure](28-remote-infrastructure.md)                    | Local, staging and production; Fly.io, ZITADEL Cloud, PostgreSQL. Staging live                                        |
 | 29  | [Conversation context](29-conversation-context.md)                      | Proposal: every agent in a workspace can read the others' conversations, as a digest from their transcripts; no model |
+| 30  | [Open source and the managed service](30-open-source-and-managed.md)    | The server is AGPL, the rest GPL; production runs the public server unmodified; what stays private, and where         |
 
 ## Vocabulary
 
