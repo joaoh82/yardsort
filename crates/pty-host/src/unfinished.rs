@@ -22,8 +22,9 @@
 /// the rest of it as a (truncated) string, rather than printing it as text.
 const MAX_UNFINISHED: usize = 4096;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum State {
+    #[default]
     Ground,
     /// Inside a UTF-8 character, with this many continuation bytes still to come.
     Utf8(u8),
@@ -34,9 +35,7 @@ enum State {
     /// `ESC [`, until its final byte.
     Csi,
     /// `ESC ]` (`ends_on_bel`), or `ESC P`, `ESC X`, `ESC ^`, `ESC _`: until `ESC \`.
-    String {
-        ends_on_bel: bool,
-    },
+    String { ends_on_bel: bool },
 }
 
 #[derive(Debug, Clone)]
@@ -109,7 +108,7 @@ const SUB: u8 = 0x1a;
 const BEL: u8 = 0x07;
 
 /// The state after `byte`, and whether `byte` begins a new sequence (abandoning any open one).
-fn step(state: State, byte: u8) -> (State, bool) {
+pub(crate) fn step(state: State, byte: u8) -> (State, bool) {
     // From anywhere: ESC starts a sequence, ending whatever was open; CAN and SUB cancel.
     match byte {
         ESC => return (State::Escape, true),

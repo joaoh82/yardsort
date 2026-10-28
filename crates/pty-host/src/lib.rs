@@ -9,13 +9,19 @@
 //! ```text
 //! spawn(LaunchPlan) -> SessionInfo        list() -> [SessionInfo]
 //! attach(id, sink)  -> AttachmentId       detach(id, attachment)
-//! attach_numbered(id, sink) -> AttachmentId   (in-process only, for now)
+//! attach_numbered(id, sink) -> AttachmentId
 //! write(id, bytes) / paste(id, text)       resize(id, size)
 //! kill(id)                                remove(id)
+//! acquire / renew / release(id, …)         input / resize_leased(id, lease, …)
 //! events: HostEvent::{Exited, Busy, Quiet}
 //! ```
 //!
 //! [`TerminalHost`] is that API as a trait, implemented here and by the daemon's client.
+//!
+//! **One controller.** `write`, `paste` and `resize` are the person at this computer, who always
+//! has control when they type. Anyone else asks for a lease first and types under it, numbered
+//! (see [`control`]). **One responder.** Only one viewer is shown the program's terminal queries,
+//! so only one terminal answers them; the others get the output without them (see [`queries`]).
 //!
 //! Each session keeps a headless terminal (`vt100`) fed with everything the process prints. A
 //! viewer that attaches — for the first time or the tenth — first receives a snapshot that
@@ -23,7 +29,9 @@
 //! the two — wherever the cut falls, even inside an escape sequence (see [`snapshot`]). A
 //! numbered viewer is also told which item of the stream the snapshot holds.
 
+pub mod control;
 mod prompt;
+mod queries;
 mod session;
 pub mod snapshot;
 mod types;
@@ -33,6 +41,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+pub use control::{Controller, Lease, LeaseRef};
 use session::Session;
 pub use types::{
     AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, PendingPrompt,
@@ -103,9 +112,9 @@ impl PtyHost {
     /// it reflects, then every later item numbered from there. What a viewer across a network
     /// needs in order to prove it lost nothing and doubled nothing.
     ///
-    /// A numbered viewer watches; it is not a terminal. It must not answer the program's
-    /// queries, and it does not stop the host from answering them when no terminal is attached.
-    /// It is not offered over the daemon's protocol yet. Detach with [`PtyHost::detach`].
+    /// A numbered viewer watches; it is not a terminal. It is never shown the program's queries,
+    /// and it does not stop the host from answering them when no terminal is attached. Detach
+    /// with [`PtyHost::detach`].
     pub fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
         Ok(self.get(id)?.attach_numbered(sink))
     }
@@ -115,18 +124,65 @@ impl PtyHost {
         Ok(())
     }
 
-    /// Send input to the session's process.
+    /// Type into the session from this computer. Takes control of it, from a lease holder if
+    /// one has it.
     pub fn write(&self, id: &SessionId, data: &[u8]) -> Result<()> {
-        self.get(id)?.write(data)
+        self.get(id)?.local_write(data)
     }
 
-    /// Paste text into the session, bracketed if the program enabled bracketed paste.
+    /// Paste text into the session, bracketed if the program enabled bracketed paste. Takes
+    /// control, as [`PtyHost::write`] does.
     pub fn paste(&self, id: &SessionId, text: &str) -> Result<()> {
-        self.get(id)?.paste(text)
+        self.get(id)?.local_paste(text)
     }
 
+    /// Type for the app itself rather than for the person here, such as a workflow's step.
+    /// Nobody typed it, so it takes no control; and while someone holds a lease it is refused
+    /// with [`HostError::ControlHeld`] rather than type over them.
+    pub fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        self.get(id)?.unattended(text, paste)
+    }
+
+    /// Resize to this computer's view. While a lease holder controls the session, its size
+    /// stands, and this one is put back when control returns.
     pub fn resize(&self, id: &SessionId, size: TermSize) -> Result<()> {
         self.get(id)?.resize(size)
+    }
+
+    /// Who may type into the session now.
+    pub fn controller(&self, id: &SessionId) -> Result<Controller> {
+        Ok(self.get(id)?.controller())
+    }
+
+    /// Ask for control of a session as `holder`. Refused while the person here has it, and
+    /// while another holder does unless `take_over`.
+    pub fn acquire(&self, id: &SessionId, holder: &str, take_over: bool) -> Result<Lease> {
+        self.get(id)?.acquire(holder, take_over)
+    }
+
+    pub fn renew(&self, id: &SessionId, lease: &LeaseRef) -> Result<Lease> {
+        self.get(id)?.renew(lease)
+    }
+
+    pub fn release(&self, id: &SessionId, lease: &LeaseRef) -> Result<()> {
+        self.get(id)?.release(lease)
+    }
+
+    /// Type under a lease. `seq` is 1 for the first input under it, then one more each time:
+    /// a repeat is dropped, and a gap refused.
+    pub fn input(
+        &self,
+        id: &SessionId,
+        lease: &LeaseRef,
+        seq: u64,
+        data: &str,
+        paste: bool,
+    ) -> Result<()> {
+        self.get(id)?.input(lease, seq, data, paste)
+    }
+
+    pub fn resize_leased(&self, id: &SessionId, lease: &LeaseRef, size: TermSize) -> Result<()> {
+        self.get(id)?.resize_leased(lease, size)
     }
 
     /// Ask the session's process to terminate. `Exited` follows once it has.
@@ -181,6 +237,9 @@ pub fn paste_and_submit(host: &dyn TerminalHost, id: &SessionId, text: &str) -> 
 
 /// What a client of the PTY host can ask for, whether the host is in this process or in the
 /// daemon at the other end of a socket. The app holds one of these and never knows which.
+///
+/// Numbered viewing and leases have defaults that refuse with [`HostError::ControlUnavailable`],
+/// for hosts that cannot offer them: a daemon from before they existed, or a test's stand-in.
 pub trait TerminalHost: Send + Sync {
     fn spawn(&self, plan: LaunchPlan) -> Result<SessionInfo>;
     fn attach(&self, id: &SessionId, sink: OutputSink) -> Result<AttachmentId>;
@@ -192,6 +251,44 @@ pub trait TerminalHost: Send + Sync {
     fn remove(&self, id: &SessionId) -> Result<()>;
     fn info(&self, id: &SessionId) -> Result<SessionInfo>;
     fn list(&self) -> Vec<SessionInfo>;
+
+    /// A host without leases has nobody to type over: it types as the person here would.
+    fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        if paste {
+            self.paste(id, text)
+        } else {
+            self.write(id, text.as_bytes())
+        }
+    }
+
+    fn attach_numbered(&self, _id: &SessionId, _sink: NumberedSink) -> Result<AttachmentId> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn controller(&self, _id: &SessionId) -> Result<Controller> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn acquire(&self, _id: &SessionId, _holder: &str, _take_over: bool) -> Result<Lease> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn renew(&self, _id: &SessionId, _lease: &LeaseRef) -> Result<Lease> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn release(&self, _id: &SessionId, _lease: &LeaseRef) -> Result<()> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn input(
+        &self,
+        _id: &SessionId,
+        _lease: &LeaseRef,
+        _seq: u64,
+        _data: &str,
+        _paste: bool,
+    ) -> Result<()> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn resize_leased(&self, _id: &SessionId, _lease: &LeaseRef, _size: TermSize) -> Result<()> {
+        Err(HostError::ControlUnavailable)
+    }
 }
 
 impl TerminalHost for PtyHost {
@@ -233,6 +330,45 @@ impl TerminalHost for PtyHost {
 
     fn list(&self) -> Vec<SessionInfo> {
         PtyHost::list(self)
+    }
+
+    fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        PtyHost::type_unattended(self, id, text, paste)
+    }
+
+    fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
+        PtyHost::attach_numbered(self, id, sink)
+    }
+
+    fn controller(&self, id: &SessionId) -> Result<Controller> {
+        PtyHost::controller(self, id)
+    }
+
+    fn acquire(&self, id: &SessionId, holder: &str, take_over: bool) -> Result<Lease> {
+        PtyHost::acquire(self, id, holder, take_over)
+    }
+
+    fn renew(&self, id: &SessionId, lease: &LeaseRef) -> Result<Lease> {
+        PtyHost::renew(self, id, lease)
+    }
+
+    fn release(&self, id: &SessionId, lease: &LeaseRef) -> Result<()> {
+        PtyHost::release(self, id, lease)
+    }
+
+    fn input(
+        &self,
+        id: &SessionId,
+        lease: &LeaseRef,
+        seq: u64,
+        data: &str,
+        paste: bool,
+    ) -> Result<()> {
+        PtyHost::input(self, id, lease, seq, data, paste)
+    }
+
+    fn resize_leased(&self, id: &SessionId, lease: &LeaseRef, size: TermSize) -> Result<()> {
+        PtyHost::resize_leased(self, id, lease, size)
     }
 }
 

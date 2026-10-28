@@ -15,9 +15,10 @@
 //!   drops duplicates and refuses gaps. After a reconnect, a client does not resend typing it
 //!   was unsure about: it shows the person that delivery is uncertain, and the lease it had is
 //!   gone anyway.
-//! - **One terminal answers terminal queries.** Only the controller's terminal (or the host's
-//!   own, when nobody controls) replies to "where is the cursor?" and its kin. A viewer's
-//!   renderer must not.
+//! - **One terminal answers terminal queries.** The host shows "where is the cursor?" and its kin
+//!   to one terminal only: the one attached last at the host, or, while a device controls, none,
+//!   and it answers the cursor itself. A remote viewer is sent the output without them, and its
+//!   renderer must not answer anyway.
 //! - **A snapshot is a boundary.** An attachment begins with a snapshot that is exactly the
 //!   screen after output `snapshot_seq`, then output `snapshot_seq + 1` onward, with nothing lost
 //!   or doubled. The PTY host already makes this atomic for local viewers; sequence numbers are
@@ -67,7 +68,7 @@ pub enum AttachStart {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Controller {
-    /// Nobody holds a lease. The host's own terminal answers queries.
+    /// Nobody has control: the next to ask gets it.
     Nobody,
     /// The person at the host, in the desktop app or `ys attach`.
     Local,

@@ -40,7 +40,8 @@ settled.
    resolved as: **one daemon per data directory**; the app starts it when nobody answers, under a
    lock file; it stops itself once no client is connected and no session is running, or when the
    app's quit dialog says to; an **update** that changes the protocol replaces an idle daemon
-   silently and leaves a busy one alone rather than kill work. "Background" on Windows is a
+   silently and leaves a busy one alone rather than kill work — still using it when the change
+   only added to the protocol (since protocol 2, [27 §8](27-remote-r2.md#8--what-the-fifth-slice-adds)). "Background" on Windows is a
    `DETACHED_PROCESS` in its own process group behind a named pipe. See
    [03-architecture](03-architecture.md#the-daemon-yardsortd).
 7. ~~**Windows harness support.**~~ **Settled 2026-09-21: the lean stands.** Native Windows
@@ -285,7 +286,7 @@ still stands; these are what the code added to it.
 39. **Should a device have to sign in again after some time however often it is used?** Each
     refresh starts its 90 days again, and the provider is asked only at sign-in, so a person
     disabled at the provider keeps their devices until the operator revokes them
-    ([27 §10](27-remote-r2.md#10--risks)). A maximum session (30 to 90 days) bounds that, at the cost
+    ([27 §11](27-remote-r2.md#11--risks)). A maximum session (30 to 90 days) bounds that, at the cost
     of a sign-in every so often, which a provider billing by daily active user counts. Lean: no
     maximum yet; an operator command revokes an account's devices (R2 slice 3).
 40. **Under what license is the phone app published?** It goes through Apple's App Store and

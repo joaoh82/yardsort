@@ -1,18 +1,19 @@
 # Remote, R2: identity and relay
 
-**Status:** R2 started on 2026-10-22. Four slices are built. The first (2026-10-22): signing in
+**Status:** R2 started on 2026-10-22. Five slices are built. The first (2026-10-22): signing in
 through the server's identity provider, and the server's own credentials for each device after
 that. The second (2026-10-23): the `yardsort-server` binary, which serves them over HTTP from
 PostgreSQL, and a local environment with a real ZITADEL in Docker. The third (2026-10-24): the
 server's container image, its Fly.io configuration and deploy workflow, the self-host recipe, an
 operator's command to sign an account out everywhere, and a sign-in against a real ZITADEL in CI.
 Staging was deployed on 2026-10-24 ([28](28-remote-infrastructure.md) §5), and passed the third
-slice's smoke test (§11) on 2026-10-25 at `https://remote-staging.yardsort.sh`. The fourth
+slice's smoke test (§12) on 2026-10-25 at `https://remote-staging.yardsort.sh`. The fourth
 (2026-10-25): pairing. A host registers on its account and shows a code; a device of the same
 account redeems it and asks; the host's person approves it at the host, which keeps its own record
 of what it gave. The app does this from Settings → Remote, shown only with
 `YARDSORT_REMOTE_PREVIEW=1`, because nothing can reach a paired host until the relay exists. The
-proposal is
+fifth (2026-10-28): the daemon's protocol 2, with one controller and one query responder per
+terminal, and numbered output and control leases over its socket (§8). The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -57,7 +58,7 @@ Why the server is the provider's client, and not the app:
 - **Revoking a device is the server's decision and takes effect on the next request.** Every
   access credential is checked against the records, so there is no window while a provider-issued
   token runs out.
-- **The provider's secrets and tokens stay on the server** (§12). Devices never hold a provider
+- **The provider's secrets and tokens stay on the server.** Devices never hold a provider
   token. Only `openid` is asked for, never `offline_access`, so the provider issues no refresh
   token, and the ID token's issuer and subject are all that is kept: not the email, not the name.
 - **One redirect URI is registered at the provider**: the server's own `/v1/login/callback`.
@@ -170,7 +171,7 @@ is sent anywhere, so the server is not an open redirector.
     two racing rotations exactly one gets through and the other is reuse.
   - Rotations also delete the device's lapsed access credentials, and its spent refresh
     credentials once they would have lapsed anyway, never sooner: a spent one must still revoke
-    the device when a copy is presented (§10).
+    the device when a copy is presented (§11).
   - `last_seen_at` is written at most once a minute (`SEEN_RESOLUTION_MS`); `MemoryRecords`
     follows the same rule.
   - The server's id is made the first time any instance starts, and kept.
@@ -220,7 +221,7 @@ is sent anywhere, so the server is not an open redirector.
   new reason, `byOperator`. The issuer defaults to the server's own. It needs only
   `DATABASE_URL`, and says how many devices it revoked; a subject that never signed in is an
   error rather than a quiet zero, and does not create an account. It does not stop the person
-  signing in again: that is the provider's to refuse (§10).
+  signing in again: that is the provider's to refuse (§11).
 - **The self-host recipe** (`crates/server/self-host/`): Compose with PostgreSQL 17, ZITADEL
   v4.19.5 (API and login), the server built from source, and Caddy, which gets certificates from
   Let's Encrypt. Secrets come from a `.env` the repository ignores. The server has its own
@@ -346,7 +347,151 @@ against the image: the host shows a code, the phone redeems it, the host lets it
 and then takes that back, and the phone sees each step. The run fails if the server's log holds
 anything starting `ys1.`, which every credential, code and pairing secret does.
 
-## 8 · Verification
+## 8 · What the fifth slice adds
+
+**The daemon, `pty_ipc::PROTOCOL` 2** (2026-10-28): one controller and one query responder per
+terminal, decided in `pty-host` and so in the daemon, where the app and `ys attach` cannot get
+round them; and numbered output and leases over the daemon's socket. Nothing outside this
+computer reaches a terminal yet. What a person can notice is local: a terminal shown in the app
+and in `ys attach` at once now answers a program's questions once.
+
+**One controller** (`pty_host::control`):
+
+| Who                                 | How they get control                                                                                                              | When it ends                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| The person at the computer, `Local` | By typing or pasting, in the app or `ys attach` (`write`, `paste`): at once, from a lease holder too                              | 30 s after the last thing typed here                    |
+| A lease holder, by the name it gave | `acquire`, refused while `Local` has it, and from another holder unless `take_over`. A lease lasts 30 s and is renewed every 10 s | `release`, 30 s without renewal, or someone typing here |
+
+Every change of hands bumps the terminal's generation, and every call under a lease names its id
+and generation, so a holder that lost control types nothing more even on a connection still
+open (`lease_lost`). Input under a lease is numbered from 1: a repeat is dropped, so a client
+unsure whether an input arrived may send it again, and a gap is refused (`input_out_of_order`)
+with nothing after it written. The holder's size stands while it holds control. A resize from
+here meanwhile is kept, and put back when control returns: on release, or with the next thing
+typed here after a lapse. The daemon does not decide who may ask: anything that reaches its
+socket is already this computer's user. Whether a device may is its grant's `terminal:control`,
+checked by the remote side before it asks.
+
+**One responder** (`pty_host::queries`). A program can ask its terminal where the cursor is,
+what it is, which colours it uses, whether a mode is set, and the terminal types the answer
+back. With two terminals attached both answered, and the program read the second answer as
+typing. Now exactly one viewer is shown the questions: the terminal attached most recently, or,
+while a lease holder controls the terminal, none, and the host answers where the cursor is
+itself, as it always did when nobody watched. Every other viewer, numbered ones included, is
+sent the output with the questions taken out. They are xterm's list (device status and
+attributes, mode and setting reports, window reports, colour and clipboard queries, XTVERSION,
+XTGETTCAP) and kitty's keyboard and colour queries. A question draws nothing, so every viewer
+still draws the same screen. A question cut across two batches has already gone out half-sent
+when it turns out to be one, so a quiet viewer gets `CAN` for the rest, which abandons it in the
+viewer's parser; xterm.js, `vte` and real terminals all treat it so. Nothing is held back or
+delayed. The app's webview and `ys attach` needed no change: they are simply not shown what
+they should not answer. Like the cursor answer before it, this reads only the terminal
+protocol, never what a program printed for a person.
+
+The responder's answer comes back as a write from here, which would take control. Windows'
+ConPTY asks where the cursor is whenever a terminal starts, so every launch would have shut
+devices out for 30 seconds. So for two seconds after a terminal is shown a question, a write
+made only of answer-shaped sequences is written without taking control.
+
+The app also types on its own: a workflow's `send_to_session` step. Nobody here typed that, so
+it goes through `type_unattended`, which takes no control and is refused (`controlHeld`) while a
+lease is held; the step waits and tries again at the next tick, as it does while the agent is
+busy. Once the message is pasted, its Enter goes even if a lease arrived in between, so a
+message is never typed twice. A request the person here makes in the app, such as asking the
+agent to resolve a pull request's conflicts, is theirs, and takes control as typing does. A
+launch's first message is typed by the host whoever controls the terminal: it is part of the
+launch the person asked for.
+
+**Over the socket** (`pty-ipc`). New requests: `watch` (numbered viewing), `controller`,
+`acquire`, `renew`, `release`, `input`, `resizeLeased` and `typeUnattended`, with the errors `leaseLost`,
+`controlHeld`, `inputOutOfOrder`, `invalidHolder` and `controlUnavailable`. Numbered output has
+a frame kind of its own, 5: `[u32 stream][u8 item][u64 number]`, then the size for a snapshot
+or a resize, then the bytes. `DaemonClient` speaks all of it, and `TerminalHost` has it with
+defaults that refuse, for the tests' stand-ins.
+
+**Upgrades.** Protocol 2 adds and changes nothing of 1, so this build still runs terminals in a
+daemon of 1 (`understood`), and refuses the new requests itself (`shares_control`): a daemon of 1
+would drop the connection on a request it cannot read, and with it every terminal the app shows.
+At start the app uses a daemon of its own protocol; replaces an older one that is idle; keeps
+an older one with agents in it, so sharing their terminals waits until it is idle and
+replaced; and runs terminals in-process only beside a daemon it does not understand, as every
+protocol change did before. With a daemon of 1, which has no leases, the app's own typing goes as
+`paste` and `write`, as before.
+
+**Not yet.** Nothing calls the leases but tests and the example below; the host facade still
+answers every terminal operation `unsupported` until the relay's connector uses them (§10). A
+lease holder's own terminal does not answer questions: while one controls a terminal, only the
+cursor question is answered, by the host. Making the controller's numbered viewer the responder
+is for R3. Nobody is told when control changes hands; a holder finds out at its next input or
+renewal, within ten seconds.
+
+**The lease tool** (`crates/pty-ipc/examples/lease.rs`) takes a terminal the app is showing, the
+way the connector will: it watches it numbered, takes a lease, types under it, sends an input
+twice and one out of order, then waits for a person to type in the app and shows the lease lost.
+It ends saying whether every item came, once and in order.
+
+## 9 · Verification
+
+On Linux, 2026-10-28, the fifth slice:
+
+- `pty-host` unit tests: 26, 13 new.
+  - Leases against a clock the test moves: renewed in time, they last; left alone, they lapse.
+    Input is written once and in order, and never after a gap. Typing here takes control from a
+    lease at once, and nobody may lease while the person here has it, until 30 s after their
+    last keystroke. Another holder needs `take_over`, and the one it took from is out. A
+    released or forged lease does nothing, and a holder's name must be printable.
+  - Questions told from everything else: 29 kinds of question, and 22 sequences that look alike
+    but are not questions (`CSI 6 m`, `CSI 8;24;80 t` that resizes a window, an OSC 8 link
+    ending in `?`, a kitty image). Answers told from typing: 13 answer shapes, 13 kinds of
+    keys and pastes. Controls carried out inside a question stay; a question too long, or
+    abandoned, is left alone.
+  - A stream with six questions among colours, a title, multibyte text and the alternate
+    screen, cut at every byte. The copy without the questions draws the same screen and cursor
+    as the whole, holds no question, and every cursor question is counted once. Leaving `CAN`
+    out fails it.
+- `pty-host` integration tests: 26, 7 new, real programs in real PTYs:
+  - Two terminals that each answer: only the newer is asked, and the program hears one
+    answer. Detach the newer, and the older answers.
+  - With a lease held, no terminal is asked and the host answers; a numbered viewer is never
+    sent the question.
+  - A terminal's answer leaves the terminal free to lease.
+  - Input under a lease is typed once, a gap refused, until typing here ends the lease.
+  - A holder's size stands, a resize from here meanwhile comes back on release and on typing
+    here, and numbered viewers hear every resize in order.
+  - An exited terminal cannot be leased.
+
+  Sending every viewer the questions fails two of these; counting a terminal's answer as typing
+  fails a third.
+
+- `pty-ipc`: 13 unit tests, 2 new, and 12 against a daemon in its own process, 3 new.
+  - Numbered frames keep their place and size, and a truncated or unknown one is refused.
+  - A client of a pretend protocol-1 daemon runs terminals in it, refuses the seven lease and
+    watch requests itself, and sends the app's own typing as a `paste`: the daemon hears only
+    `hello`, `list` and `paste`. Taking that guard out fails it. The test binds its socket in
+    its own temporary directory, not the runtime one, which CI does not have.
+  - Over the socket: a numbered viewer gets every item once and in order, the resize among
+    them. A lease on a second connection types once, is refused out of order, renews, and is
+    lost to typing on the first; the app's own typing is refused while the lease holds. With two connections each attaching a terminal, only the
+    newer is asked.
+- `yardsort-core`: two new tests.
+  - What the app does with the daemon it finds: use its own kind; replace an older one that is
+    idle; keep an older one with agents in it; and leave one it does not understand alone.
+  - A workflow's message due while a lease is held waits, against a real script in a real PTY:
+    nothing is typed, the lease keeps its generation, and once it is released the message goes
+    and the terminal is left with nobody in control. Typing it the way the person here types
+    fails it.
+- The lease tool against a real daemon, with a script on the socket standing in for the app:
+  the lease typed once, the out-of-order input never reached the shell, typing on the other
+  connection took control and the lease was refused, and five items came numbered without a gap.
+- `just check` passed with the `YARDSORT_*` variables unset: `pty-host` 26 + 26, `pty-ipc`
+  13 + 12, `yardsort-core` 595, the app crate 150, frontend 668. The frontend run once failed
+  `Summary.test.tsx`, which passed on its own run and again with the rest; this slice changes no
+  frontend code. `just bindings-check` passed, the bindings unchanged, and so did
+  `just lint-windows`.
+
+**Not run here:** the daemon on Windows and macOS, where CI runs the same tests. The lease test
+over the socket uses PowerShell on Windows to read lines, which has not run yet. No phone or
+remote client was involved: nothing outside this computer reaches a terminal yet.
 
 On Linux, 2026-10-25, the fourth slice:
 
@@ -390,7 +535,7 @@ On Linux, 2026-10-25, the fourth slice:
   `remote-proto` for Windows. `remote-client` could not be checked for Windows from here: `ring`
   needs Microsoft's C tools to cross-compile. CI's Windows runner builds it.
 
-**The smoke test on this machine** (§11), on 2026-10-27, run by a person: the app with a
+**The smoke test on this machine** (§12), on 2026-10-27, run by a person: the app with a
 throwaway profile and a credentials directory turned on against the local server, signed in
 through ZITADEL's login pages, showed a code, and let the pairing tool in to watch and type on
 every project; revoking it reached the tool; after a restart Remote was still on and paired
@@ -402,7 +547,7 @@ workflow's own arguments, since the branch was not yet pushed. The same Machine 
 the server made the new tables in Neon, `/v1/server` lists `host.list` and `host.pair`, and an
 unauthenticated `POST /v1/hosts` is answered `401`.
 
-**Staging's smoke test** (§11), on 2026-10-27, run by a person: the app turned on against
+**Staging's smoke test** (§12), on 2026-10-27, run by a person: the app turned on against
 staging, signed in on ZITADEL Cloud's pages, and let the pairing tool in to watch and type;
 revoking it reached the tool, and turning off removed the host. The first try looked like a
 fault: the device appeared under **Devices let in** and vanished a poll later. Staging's log
@@ -439,7 +584,7 @@ On Linux, 2026-10-24, the third slice:
   published ports; the API answered only with its public `Host` (`404` otherwise), and over h2c.
   No other proxy was tried. Two fixes came out of it: ZITADEL's health check ignores `--tlsMode`, so
   the recipe sets TLS by its settings, and the error above.
-- **The image with a browser**, the second local smoke test (§11): the sign-in tool started a
+- **The image with a browser**, the second local smoke test (§12): the sign-in tool started a
   sign-in at the image, headless Chromium went through ZITADEL's own login pages (name, then
   password) and back to the tool, which listed, refreshed and waited; `revoke-account` run in the
   container signed it out, and both its credentials were refused.
@@ -462,7 +607,7 @@ that never signed in it answered "no account" and changed nothing. Once the work
 `main`, it deployed staging from Actions on 2026-10-25 (run 40233851558) in 42 seconds: release
 v2 on the same Machine, the same server id, and both of its checks passing.
 
-**Staging's smoke test** (§11), on 2026-10-25, once its DNS records were in: Fly's certificate
+**Staging's smoke test** (§12), on 2026-10-25, once its DNS records were in: Fly's certificate
 from Let's Encrypt was issued within a minute, and `https://remote-staging.yardsort.sh` answered
 `/health`, with `/v1/server` naming the staging ZITADEL. The sign-in tool, run from this machine,
 sent the browser to ZITADEL Cloud and back; it listed its device, refreshed, and waited. The
@@ -546,7 +691,7 @@ On Linux, 2026-10-22, the first slice:
 **Not run here:** macOS and Windows, which CI covers, without the PostgreSQL half (above); ZITADEL
 Cloud, as opposed to ZITADEL in a container; anything on a phone; any deployment.
 
-## 9 · The rest of R2
+## 10 · The rest of R2
 
 Each item is a later slice. Where each runs, and the accounts to set up, are in
 [28](28-remote-infrastructure.md). The gate (proposal §13): two-account isolation, a revoked device
@@ -555,16 +700,17 @@ losing a live stream, and relay failure leaving PTYs alive.
 1. ~~Sign-in and device credentials, as a library.~~ Done (§4).
 2. ~~PostgreSQL records, the HTTP listener, rate limits, and the local environment.~~ Done (§5).
 3. ~~Deploying it, and the self-host recipe.~~ Done (§6): staging deployed and its smoke test
-   passed (§8). Production's deploy comes with its ZITADEL instance.
+   passed (§9). Production's deploy comes with its ZITADEL instance.
 4. ~~Host enrollment and grants.~~ Built (§7), behind the preview switch; done once its smoke
-   test (§11) passes here and on staging. The headless host's own way to approve a device comes
+   test (§12) passes here and on staging. The headless host's own way to approve a device comes
    with the headless host (R5): today only the desktop approves.
-5. **The daemon, `PROTOCOL` 2**: one controller lease and one query responder enforced in the
-   daemon, and numbered output over its IPC.
+5. ~~**The daemon, `PROTOCOL` 2**: one controller lease and one query responder enforced in the
+   daemon, and numbered output over its IPC.~~ Built (§8); done once its smoke test (§12) passes
+   here. Nothing of it runs on the server, so staging has no part in it.
 6. **The relay and the host's outbound connector**: WSS, single-use 60-second connection tickets,
    bounded queues, revocation closing live streams, and relay failure leaving every PTY running.
 
-## 10 · Risks
+## 11 · Risks
 
 - **Rate limits are per instance and per address.** Two instances allow twice the rate, and many
   addresses together are not limited as a whole. Once more than 10 000 are in play, newcomers
@@ -603,7 +749,7 @@ losing a live stream, and relay failure leaving PTYs alive.
   Nothing watches for that yet.
 - **CI's end-to-end run does not render ZITADEL's login pages.** It makes the calls they make, so
   a change in the pages themselves would get past it. A person signing in on staging is the check
-  for them (§11).
+  for them (§12).
 - **Staging sleeps.** The first request after it stopped waits for a Machine to start, and Neon's
   free compute to wake: a few seconds, not more, but enough to look like a failure. Neon also
   suspends its compute after a few idle minutes, which closes the connections the server keeps
@@ -627,8 +773,21 @@ losing a live stream, and relay failure leaving PTYs alive.
   lives only in the GitHub environment; replacing it is `fly tokens create deploy` again.
 - **The self-host recipe runs ZITADEL's containers as root**, as ZITADEL's own Compose example does,
   so that the API can write the login client's token where the login container reads it.
+- **The terminal attached last answers, which is a guess at where the person is.** Open in the
+  app and in `ys attach` in another window, the latter answers, so an agent asking for the
+  background colour learns that terminal's, not the app's theme, until it detaches.
+- **A question not on the list reaches every viewer.** Two terminals that both answer it answer
+  twice, as before. Kitty's graphics protocol is the known one, left alone because the same
+  sequence draws the image.
+- **Answers are told from typing by their shape, and only just after a question.** A key that
+  sends the same shape in those two seconds (Shift+F3 is `CSI 1 ; 2 R`) is still typed, but does
+  not take control.
+- **A busy daemon of protocol 1 postpones sharing its terminals** until nothing runs in it and
+  the app replaces it. Someone who always has an agent running would wait for a while; the
+  remote side will have to say why a terminal cannot be shared.
+- **A lease that lapses leaves its holder's size** until someone types or resizes here.
 
-## 11 · Smoke tests
+## 12 · Smoke tests
 
 From the third slice on, each slice ends with a smoke test a person runs: on their own machine,
 and on staging once the slice is deployed there. They are short on purpose. The tests above check
@@ -679,6 +838,25 @@ lists the device, refreshes, revokes itself, and shows the `401` after.
    still works, from the kept credential.
 7. **Turn off**. `/tmp/ys-credentials` is empty, and `just server-sign-in` lists the host's
    device as revoked.
+
+**Slice 5, on this machine** (no part runs on the server, so there is no staging half):
+
+1. A throwaway profile: `YARDSORT_DATA_DIR=/tmp/ys5 YARDSORT_WORKTREE_ROOT=/tmp/ys5-wt just dev`.
+   Add a project and open a shell in a workspace.
+2. In another terminal, `YARDSORT_DATA_DIR=/tmp/ys5 just cli attach`. In the shell, in either
+   window, ask for the cursor position and show every answer that comes within a second:
+   `stty raw -echo min 0 time 10; printf '\033[6n'; dd bs=1 count=64 2>/dev/null | od -c | head -2; stty sane`.
+   One answer, `033 [ … R`. The released app answers twice.
+3. Detach `ys attach` (`Ctrl-]`) and ask again in the app: still one.
+4. `cargo run -p pty-ipc --example lease -- /tmp/ys5` and follow it. The app's terminal shows
+   `typed-under-a-lease` once; typing in the app, then Enter in the tool, shows the lease lost,
+   the controller `Local`, and the items numbered without a gap or a repeat.
+5. Optionally, an update over a busy daemon of protocol 1: start the released app with
+   `YARDSORT_DATA_DIR=/tmp/ys5-old`, open a shell, quit leaving it running, then
+   `YARDSORT_DATA_DIR=/tmp/ys5-old YARDSORT_WORKTREE_ROOT=/tmp/ys5-old-wt just dev`. The shell is
+   there and takes typing, no "still running under a previous version" appears, and
+   `/tmp/ys5-old/daemon.log` is the old daemon's. `/tmp/ys5-old` is upgraded on the way: throw it
+   away after.
 
 **Slice 4, on staging**, once it is deployed there: steps 3 to 7 with
 `https://remote-staging.yardsort.sh` as the server, a staging account, and

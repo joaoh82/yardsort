@@ -22,5 +22,5 @@ pub mod spool;
 
 pub use client::DaemonClient;
 pub use endpoint::Endpoint;
-pub use proto::{DaemonInfo, PROTOCOL};
+pub use proto::{DaemonInfo, CONTROL_PROTOCOL, OLDEST_PROTOCOL, PROTOCOL};
 pub use server::{serve, serve_with, ServeOptions, IDLE_GRACE};
