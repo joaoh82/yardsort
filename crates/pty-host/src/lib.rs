@@ -136,6 +136,13 @@ impl PtyHost {
         self.get(id)?.local_paste(text)
     }
 
+    /// Type for the app itself rather than for the person here, such as a workflow's step.
+    /// Nobody typed it, so it takes no control; and while someone holds a lease it is refused
+    /// with [`HostError::ControlHeld`] rather than type over them.
+    pub fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        self.get(id)?.unattended(text, paste)
+    }
+
     /// Resize to this computer's view. While a lease holder controls the session, its size
     /// stands, and this one is put back when control returns.
     pub fn resize(&self, id: &SessionId, size: TermSize) -> Result<()> {
@@ -245,6 +252,15 @@ pub trait TerminalHost: Send + Sync {
     fn info(&self, id: &SessionId) -> Result<SessionInfo>;
     fn list(&self) -> Vec<SessionInfo>;
 
+    /// A host without leases has nobody to type over: it types as the person here would.
+    fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        if paste {
+            self.paste(id, text)
+        } else {
+            self.write(id, text.as_bytes())
+        }
+    }
+
     fn attach_numbered(&self, _id: &SessionId, _sink: NumberedSink) -> Result<AttachmentId> {
         Err(HostError::ControlUnavailable)
     }
@@ -314,6 +330,10 @@ impl TerminalHost for PtyHost {
 
     fn list(&self) -> Vec<SessionInfo> {
         PtyHost::list(self)
+    }
+
+    fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        PtyHost::type_unattended(self, id, text, paste)
     }
 
     fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {

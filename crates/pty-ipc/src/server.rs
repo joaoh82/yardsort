@@ -319,6 +319,11 @@ impl Daemon {
                 data,
                 paste,
             } => done(self.host.input(&session, &lease, seq, &data, paste)),
+            Op::TypeUnattended {
+                session,
+                text,
+                paste,
+            } => done(self.host.type_unattended(&session, &text, paste)),
             Op::ResizeLeased {
                 session,
                 lease,

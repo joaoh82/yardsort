@@ -562,6 +562,15 @@ fn a_lease_taken_over_the_socket_holds_until_someone_here_types() {
             holder: "phone".into()
         }
     );
+    // The app typing for itself, as a workflow does, waits rather than type over the lease.
+    assert!(matches!(
+        here.type_unattended(id, "from-a-workflow\r", false),
+        Err(pty_host::HostError::ControlHeld { .. })
+    ));
+    assert_eq!(
+        remote.renew(id, &lease).unwrap().generation,
+        lease.generation
+    );
 
     // Typed here, on the other connection: control comes here, and the lease is spent.
     here.write(id, b"from-here\r").unwrap();
@@ -580,6 +589,7 @@ fn a_lease_taken_over_the_socket_holds_until_someone_here_types() {
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(capture.text().matches("got:from-the-lease").count(), 1);
     assert!(!capture.text().contains("got:late"));
+    assert!(!capture.text().contains("got:from-a-workflow"));
     here.kill(id).unwrap();
 }
 

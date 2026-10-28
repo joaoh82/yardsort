@@ -282,6 +282,26 @@ impl Session {
         self.paste(text)
     }
 
+    /// Typing the app does on its own, such as a workflow's step: it takes no control, and is
+    /// refused while a lease holder has the session, so it never types over someone in control
+    /// from elsewhere.
+    pub(crate) fn unattended(&self, text: &str, paste: bool) -> Result<()> {
+        let payload = {
+            let mut view = self.view();
+            let now = Instant::now();
+            if view.control.leased(now) {
+                let by = view.control.controller(now);
+                return Err(self.refused(Refusal::Held(by)));
+            }
+            if paste {
+                pasted(text, view.terminal.screen().bracketed_paste())
+            } else {
+                text.to_owned()
+            }
+        };
+        self.write(payload.as_bytes())
+    }
+
     fn take_local_control(&self) -> Result<()> {
         let mut view = self.view();
         view.control.local_input(Instant::now());

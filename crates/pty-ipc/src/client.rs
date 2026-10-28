@@ -405,6 +405,22 @@ impl TerminalHost for DaemonClient {
         })
     }
 
+    /// A daemon from before leases has none to respect: there, the app types as before.
+    fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        if !self.shares_control() {
+            return if paste {
+                self.paste(id, text)
+            } else {
+                self.write(id, text.as_bytes())
+            };
+        }
+        self.expect_control_done(Op::TypeUnattended {
+            session: id.clone(),
+            text: text.to_owned(),
+            paste,
+        })
+    }
+
     fn input(
         &self,
         id: &SessionId,
@@ -515,7 +531,13 @@ mod tests {
     #[test]
     fn an_older_daemon_still_runs_terminals_and_is_never_sent_what_it_cannot_read() {
         let dir = tempfile::tempdir().unwrap();
-        let endpoint = Endpoint::for_data_dir(dir.path());
+        // In the temp directory, not the runtime one: nothing here creates that, as the daemon
+        // does before it binds.
+        let endpoint = if cfg!(windows) {
+            Endpoint::for_data_dir(dir.path())
+        } else {
+            Endpoint::Path(dir.path().join("d.sock"))
+        };
         let listener = ListenerOptions::new()
             .name(endpoint.to_name().unwrap())
             .create_sync()
@@ -579,10 +601,11 @@ mod tests {
         refused(client.release(&id, &lease));
         refused(client.input(&id, &lease, 1, "x", false));
         refused(client.resize_leased(&id, &lease, TermSize::DEFAULT));
-        // What protocol 1 has still works.
+        // What protocol 1 has still works, and the app's own typing goes the old way.
         assert!(client.list().is_empty());
+        client.type_unattended(&id, "x", true).unwrap();
 
         let heard: Vec<String> = heard.try_iter().collect();
-        assert_eq!(heard, ["hello", "list"]);
+        assert_eq!(heard, ["hello", "list", "paste"]);
     }
 }

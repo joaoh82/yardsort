@@ -243,7 +243,9 @@ same profile does not get it, so it does not drive runs.
 Rules the engine enforces regardless of what a file says:
 
 - **A busy agent is never written to.** `send_to_session` waits for quiet. A session that ended
-  skips the step rather than failing it.
+  skips the step rather than failing it. Nor is one controlled from elsewhere: while a lease is
+  held the step waits, and its typing never takes control from anyone
+  ([27 §8](27-remote-r2.md#8--what-the-fifth-slice-adds)).
 - **One run per workspace per workflow at a time.** Starting a second is refused with the first's
   id.
 - **Cancel stops the run, not the agents.** Sessions a run started keep running as ordinary

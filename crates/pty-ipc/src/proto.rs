@@ -133,6 +133,12 @@ pub enum Op {
         data: String,
         paste: bool,
     },
+    /// Type for the app itself: takes no control, refused while a lease is held.
+    TypeUnattended {
+        session: SessionId,
+        text: String,
+        paste: bool,
+    },
     ResizeLeased {
         session: SessionId,
         lease: LeaseRef,

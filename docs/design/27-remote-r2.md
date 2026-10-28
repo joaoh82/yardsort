@@ -393,8 +393,17 @@ ConPTY asks where the cursor is whenever a terminal starts, so every launch woul
 devices out for 30 seconds. So for two seconds after a terminal is shown a question, a write
 made only of answer-shaped sequences is written without taking control.
 
+The app also types on its own: a workflow's `send_to_session` step. Nobody here typed that, so
+it goes through `type_unattended`, which takes no control and is refused (`controlHeld`) while a
+lease is held; the step waits and tries again at the next tick, as it does while the agent is
+busy. Once the message is pasted, its Enter goes even if a lease arrived in between, so a
+message is never typed twice. A request the person here makes in the app, such as asking the
+agent to resolve a pull request's conflicts, is theirs, and takes control as typing does. A
+launch's first message is typed by the host whoever controls the terminal: it is part of the
+launch the person asked for.
+
 **Over the socket** (`pty-ipc`). New requests: `watch` (numbered viewing), `controller`,
-`acquire`, `renew`, `release`, `input` and `resizeLeased`, with the errors `leaseLost`,
+`acquire`, `renew`, `release`, `input`, `resizeLeased` and `typeUnattended`, with the errors `leaseLost`,
 `controlHeld`, `inputOutOfOrder`, `invalidHolder` and `controlUnavailable`. Numbered output has
 a frame kind of its own, 5: `[u32 stream][u8 item][u64 number]`, then the size for a snapshot
 or a resize, then the bytes. `DaemonClient` speaks all of it, and `TerminalHost` has it with
@@ -406,7 +415,8 @@ would drop the connection on a request it cannot read, and with it every termina
 At start the app uses a daemon of its own protocol; replaces an older one that is idle; keeps
 an older one with agents in it, so sharing their terminals waits until it is idle and
 replaced; and runs terminals in-process only beside a daemon it does not understand, as every
-protocol change did before.
+protocol change did before. With a daemon of 1, which has no leases, the app's own typing goes as
+`paste` and `write`, as before.
 
 **Not yet.** Nothing calls the leases but tests and the example below; the host facade still
 answers every terminal operation `unsupported` until the relay's connector uses them (§10). A
@@ -455,21 +465,26 @@ On Linux, 2026-10-28, the fifth slice:
 
 - `pty-ipc`: 13 unit tests, 2 new, and 12 against a daemon in its own process, 3 new.
   - Numbered frames keep their place and size, and a truncated or unknown one is refused.
-  - A client of a pretend protocol-1 daemon runs terminals in it, refuses all seven new
-    requests itself, and the daemon hears only `hello` and `list`. Taking that guard out fails
-    it.
+  - A client of a pretend protocol-1 daemon runs terminals in it, refuses the seven lease and
+    watch requests itself, and sends the app's own typing as a `paste`: the daemon hears only
+    `hello`, `list` and `paste`. Taking that guard out fails it. The test binds its socket in
+    its own temporary directory, not the runtime one, which CI does not have.
   - Over the socket: a numbered viewer gets every item once and in order, the resize among
     them. A lease on a second connection types once, is refused out of order, renews, and is
-    lost to typing on the first. With two connections each attaching a terminal, only the
+    lost to typing on the first; the app's own typing is refused while the lease holds. With two connections each attaching a terminal, only the
     newer is asked.
-- `yardsort-core`: one new test of what the app does with the daemon it finds: use its own
-  kind; replace an older one that is idle; keep an older one with agents in it; and leave one
-  it does not understand alone.
+- `yardsort-core`: two new tests.
+  - What the app does with the daemon it finds: use its own kind; replace an older one that is
+    idle; keep an older one with agents in it; and leave one it does not understand alone.
+  - A workflow's message due while a lease is held waits, against a real script in a real PTY:
+    nothing is typed, the lease keeps its generation, and once it is released the message goes
+    and the terminal is left with nobody in control. Typing it the way the person here types
+    fails it.
 - The lease tool against a real daemon, with a script on the socket standing in for the app:
   the lease typed once, the out-of-order input never reached the shell, typing on the other
   connection took control and the lease was refused, and five items came numbered without a gap.
 - `just check` passed with the `YARDSORT_*` variables unset: `pty-host` 26 + 26, `pty-ipc`
-  13 + 12, `yardsort-core` 594, the app crate 150, frontend 668. The frontend run once failed
+  13 + 12, `yardsort-core` 595, the app crate 150, frontend 668. The frontend run once failed
   `Summary.test.tsx`, which passed on its own run and again with the rest; this slice changes no
   frontend code. `just bindings-check` passed, the bindings unchanged, and so did
   `just lint-windows`.
