@@ -2,9 +2,10 @@
 //! See [`yardsort_core::remote::host`] for what is kept where, and
 //! [docs/design/27-remote-r2.md](../../docs/design/27-remote-r2.md) for the design.
 //!
-//! **A preview, off unless `YARDSORT_REMOTE_PREVIEW=1`.** Pairing works, but nothing can reach a
-//! paired host yet: the relay that will carry a device's requests comes in a later slice. Until
-//! then the Remote settings are not shown, and every command here refuses.
+//! **A preview, off unless `YARDSORT_REMOTE_PREVIEW=1`.** Without it the Remote settings are not
+//! shown, every command here refuses, and nothing connects. With it, a host that is on keeps a
+//! link to its server's relay ([`remote_host::Connector`]) from the moment the app starts, and
+//! paired devices reach it through that; there is no phone app yet to do so.
 //!
 //! The host signs in through the system browser, like any device, and keeps its refresh
 //! credential in the OS credential store (or `YARDSORT_CREDENTIALS_DIR`, a directory only its
@@ -15,8 +16,10 @@
 //! nothing an agent can reach, approves one.
 
 use std::collections::BTreeSet;
+use std::sync::{Arc, OnceLock};
 
 use remote_client::{Client, ClientError, Session, SIGN_IN_TIMEOUT};
+use remote_host::{Access, AccessError, AccessFuture, Connector, Serving};
 use remote_proto::account::{DeviceKind, NewDevice, Secret};
 use remote_proto::pairing::{
     GrantDecision, GrantState, GrantSummary, HostRegistration, OFFER_TTL_MS,
@@ -29,6 +32,8 @@ use tauri_plugin_opener::OpenerExt;
 use yardsort_core::remote::host::{
     self, refresh_entry, CredentialStore, FileCredentials, LocalGrant,
 };
+use yardsort_core::remote::serve::Context;
+use yardsort_core::remote::HostIdentity;
 use yardsort_core::store::RemoteHostRow;
 
 use crate::error::{IpcError, IpcResult};
@@ -48,11 +53,114 @@ const VIEW: [Scope; 4] = [
     Scope::TerminalRead,
 ];
 
-/// The host's session with its server, and a sign-in waiting for the browser.
+/// The host's session with its server, a sign-in waiting for the browser, and the link to the
+/// server's relay.
 #[derive(Default)]
 pub struct Remote {
     session: tokio::sync::Mutex<Option<Session>>,
     signing_in: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    connector: std::sync::Mutex<Option<Connector>>,
+}
+
+/// Keep a link to the relay, when Remote is on: at start, and once it is turned on. Needs a
+/// Tokio runtime: call it from async code.
+pub fn connect(app: &AppHandle) {
+    if !available() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let Ok(Some(row)) = state.store.remote_host() else {
+        return;
+    };
+    let Ok(host) = HostId::new(row.host_id) else {
+        return;
+    };
+    let connector = Connector::start(
+        host,
+        Arc::new(AppAccess(app.clone())),
+        Arc::new(AppServing {
+            app: app.clone(),
+            git: OnceLock::new(),
+        }),
+    );
+    // An earlier one stops as it is dropped.
+    let earlier = match state.remote.connector.lock() {
+        Ok(mut slot) => slot.replace(connector),
+        Err(_) => None,
+    };
+    drop(earlier);
+}
+
+/// Close the link, and with it every device's channel.
+async fn disconnect(state: &AppState) {
+    let connector = state
+        .remote
+        .connector
+        .lock()
+        .ok()
+        .and_then(|mut c| c.take());
+    if let Some(connector) = connector {
+        connector.stop().await;
+    }
+}
+
+/// The host's access credential, from its session with the server.
+struct AppAccess(AppHandle);
+
+impl Access for AppAccess {
+    fn access(&self) -> AccessFuture<'_> {
+        Box::pin(async move {
+            let state = self.0.state::<AppState>();
+            let row = state
+                .store
+                .remote_host()
+                .map_err(|e| AccessError::Unavailable(e.to_string()))?
+                .ok_or_else(|| AccessError::SignedOut("Remote is off.".into()))?;
+            let mut session = state.remote.session.lock().await;
+            let session = ensure(&mut session, &row).await.map_err(access_error)?;
+            let secret = access(session).await.map_err(access_error)?;
+            Ok((session.client.clone(), secret))
+        })
+    }
+}
+
+fn access_error(error: IpcError) -> AccessError {
+    if error.code == "remote_signed_out" {
+        AccessError::SignedOut(error.message)
+    } else {
+        AccessError::Unavailable(error.message)
+    }
+}
+
+/// What a device's channel answers from: this app's records and terminals.
+struct AppServing {
+    app: AppHandle,
+    git: OnceLock<Option<yardsort_core::git::Git>>,
+}
+
+impl Serving for AppServing {
+    fn with(&self, f: &mut dyn FnMut(&Context<'_>)) {
+        let state = self.app.state::<AppState>();
+        let Some(git) = self
+            .git
+            .get_or_init(|| yardsort_core::git::Git::new(&state.env()).ok())
+        else {
+            return;
+        };
+        let Ok(Some(row)) = state.store.remote_host() else {
+            return;
+        };
+        let Ok(id) = HostId::new(row.host_id) else {
+            return;
+        };
+        f(&Context {
+            store: &state.store,
+            git,
+            terminals: state.host.as_ref(),
+            host: &HostIdentity { id, name: row.name },
+            interactive: state.host.shares_control(),
+        });
+    }
 }
 
 pub fn available() -> bool {
@@ -83,6 +191,52 @@ pub struct RemoteHost {
     pub server_url: String,
     pub name: String,
     pub since: f64,
+    /// The link to the server's relay.
+    pub link: RemoteLink,
+}
+
+/// Where this computer's link to the relay stands.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RemoteLink {
+    /// Not kept: the app has not started it.
+    Off,
+    Connecting,
+    Connected {
+        /// Devices connected through it now.
+        devices: u32,
+    },
+    /// Not connected; trying again soon.
+    Waiting {
+        why: String,
+        #[serde(rename = "retryInMs")]
+        retry_in_ms: u32,
+    },
+    /// Given up: signed out at the server, or this host was removed there.
+    Stopped {
+        why: String,
+    },
+}
+
+fn link(state: &AppState) -> RemoteLink {
+    let connector = state.remote.connector.lock();
+    let Some(status) = connector
+        .ok()
+        .and_then(|c| c.as_ref().map(Connector::status))
+    else {
+        return RemoteLink::Off;
+    };
+    match status {
+        remote_host::Status::Connecting => RemoteLink::Connecting,
+        remote_host::Status::Connected { devices } => RemoteLink::Connected {
+            devices: u32::try_from(devices).unwrap_or(u32::MAX),
+        },
+        remote_host::Status::Waiting { why, retry_in } => RemoteLink::Waiting {
+            why,
+            retry_in_ms: u32::try_from(retry_in.as_millis()).unwrap_or(u32::MAX),
+        },
+        remote_host::Status::Stopped { why } => RemoteLink::Stopped { why },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -248,6 +402,7 @@ fn status(state: &AppState) -> IpcResult<RemoteStatus> {
             server_url: h.server_url,
             name: h.name,
             since: h.enabled_at as f64,
+            link: link(state),
         }),
         devices,
         signing_in: state
@@ -406,6 +561,7 @@ pub async fn remote_enable(
         }
     });
     *state.remote.session.lock().await = Some(session);
+    connect(&app);
     blocking(app, status).await
 }
 
@@ -430,6 +586,8 @@ pub async fn remote_disable(app: AppHandle) -> IpcResult<RemoteStatus> {
     let Some(row) = state.store.remote_host().map_err(store_failed)? else {
         return blocking(app, status).await;
     };
+    // Every device is let go of first: nothing comes through while Remote goes off.
+    disconnect(&state).await;
     let at_server = async {
         let mut session = state.remote.session.lock().await;
         let session = ensure(&mut session, &row).await?;
@@ -614,6 +772,17 @@ pub async fn remote_revoke(app: AppHandle, grant_id: String) -> IpcResult<Remote
         .store
         .drop_remote_grant(&grant_id)
         .map_err(store_failed)?;
+    // Its channel closes now, not at the next check.
+    if let Some(connector) = state
+        .remote
+        .connector
+        .lock()
+        .ok()
+        .as_deref()
+        .and_then(Option::as_ref)
+    {
+        connector.recheck();
+    }
     let id =
         GrantId::new(grant_id).map_err(|_| IpcError::new("remote_refused", "No such device."))?;
     {

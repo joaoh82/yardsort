@@ -405,6 +405,10 @@ impl TerminalHost for DaemonClient {
         })
     }
 
+    fn shares_control(&self) -> bool {
+        DaemonClient::shares_control(self)
+    }
+
     /// A daemon from before leases has none to respect: there, the app types as before.
     fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
         if !self.shares_control() {
@@ -583,6 +587,10 @@ mod tests {
         assert!(client.understood());
         assert!(!client.speaks_our_protocol());
         assert!(!client.shares_control());
+        assert!(
+            !TerminalHost::shares_control(&client),
+            "and says so as a terminal host"
+        );
         let id = SessionId("s".into());
         let lease = LeaseRef {
             id: "l".into(),

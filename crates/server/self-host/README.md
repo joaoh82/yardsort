@@ -175,6 +175,10 @@ Your proxy has to do what the `Caddyfile` does:
    `proxy_set_header X-Real-IP $remote_addr;`). The server counts its rate limits by it. If the
    header is not `X-Real-IP`, set `YARDSORT_CLIENT_IP_HEADER` to its name in `compose.yaml`.
    Never name a header the client can set itself, such as `X-Forwarded-For` passed on as it came.
+   Pass WebSocket upgrades on too: hosts and devices hold one open at `/v1/relay` for as long as
+   they are connected (in nginx, `proxy_http_version 1.1;` with `Upgrade` and `Connection`
+   headers set from the request's). It pings every 20 seconds, so a proxy may close a connection
+   quiet for a minute, but not sooner (nginx's `proxy_read_timeout` is 60 seconds already).
 4. **Let the server reach the auth name.** The server fetches ZITADEL's settings and keys at
    `https://<auth name>`. The override sends that name to this machine (`host-gateway`), so your
    proxy has to listen on 443 on an address the containers can reach, not on `127.0.0.1` alone.

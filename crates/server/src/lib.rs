@@ -15,7 +15,9 @@
 //!
 //! **Hosts and grants** (`pairing.rs`, and [`remote_proto::pairing`] for the messages): a host
 //! registers on its account, offers a code, and its person approves the device that redeemed it.
-//! The relay that will carry a device's requests to its hosts comes in a later slice of R2.
+//!
+//! **The relay** ([`relay`]) carries a device's traffic to its host and back. Both connect out to
+//! the server with a single-use ticket; neither listens.
 
 pub mod config;
 pub mod http;
@@ -24,6 +26,7 @@ pub mod oidc;
 mod pairing;
 pub mod postgres;
 pub mod records;
+pub mod relay;
 mod service;
 pub mod tokens;
 

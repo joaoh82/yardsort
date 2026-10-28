@@ -23,8 +23,10 @@ kill_timeout = "10s"
 [http_service]
   internal_port = 8080
   force_https = true
-  # Staging sleeps when nobody uses it, and Fly's proxy wakes it on the next request. That stops
-  # suiting once the relay holds long connections (R2's sixth slice).
+  # Staging sleeps when nobody uses it, and Fly's proxy wakes it on the next request: a host's
+  # next try at its relay link does, within the connector's minute of backing off. Whether an open
+  # relay socket keeps it awake is Fly's proxy's call (docs/design/27-remote-r2.md §13).
+  # One Machine only: the relay keeps its tickets and sockets in memory (27 §12).
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0

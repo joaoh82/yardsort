@@ -63,6 +63,7 @@ impl Fixture {
             git: &self.git,
             terminals,
             host: &self.identity,
+            interactive: false,
         }
     }
 

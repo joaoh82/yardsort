@@ -25,6 +25,8 @@ pub enum Kind {
     Handoff,
     /// The secret in a host's pairing QR code.
     Offer,
+    /// Presented once on a relay socket ([`crate::relay`]).
+    Ticket,
 }
 
 impl Kind {
@@ -34,6 +36,7 @@ impl Kind {
             Self::Refresh => "ys1.rt.",
             Self::Handoff => "ys1.hc.",
             Self::Offer => "ys1.po.",
+            Self::Ticket => "ys1.rl.",
         }
     }
 }

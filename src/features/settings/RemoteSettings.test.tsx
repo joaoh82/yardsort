@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
-import type { RemoteStatus } from "@/lib/ipc";
+import type { RemoteLink, RemoteStatus } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   remoteStatus: vi.fn(),
@@ -32,7 +32,12 @@ const off: RemoteStatus = {
 };
 const on: RemoteStatus = {
   ...off,
-  host: { serverUrl: "https://remote.example.com", name: "Workstation", since: 1 },
+  host: {
+    serverUrl: "https://remote.example.com",
+    name: "Workstation",
+    since: 1,
+    link: { kind: "connected", devices: 0 },
+  },
 };
 const phone = {
   grantId: "g-1",
@@ -214,4 +219,40 @@ it("revokes a device let in, and turns off", async () => {
   expect(await screen.findByRole("button", { name: "Turn on and sign in" })).toBeEnabled();
   expect(screen.getByRole("textbox", { name: "Server" })).toHaveValue("https://remote.example.com");
   expect(screen.getByRole("textbox", { name: "Name this computer" })).toHaveValue("Workstation");
+});
+
+it("says where the link to the relay stands, as the poll brings it", async () => {
+  const linked = (link: RemoteLink) => ({ ...on, host: { ...on.host!, link } });
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    core.remoteStatus.mockResolvedValue(linked({ kind: "connecting" }));
+    core.remoteRequests.mockResolvedValue({
+      requests: [],
+      status: linked({ kind: "waiting", why: "Could not reach the server.", retryInMs: 4000 }),
+    });
+    render(<RemoteSettings />);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Not connected to the relay: Could not reach the server. Trying again in 4 s.",
+    );
+
+    core.remoteRequests.mockResolvedValue({
+      requests: [],
+      status: linked({ kind: "connected", devices: 2 }),
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(
+      await screen.findByText("Connected to the relay. 2 devices are connected now."),
+    ).toBeInTheDocument();
+
+    core.remoteRequests.mockResolvedValue({
+      requests: [],
+      status: linked({ kind: "stopped", why: "This computer was signed out at the server." }),
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Not connected to the relay: This computer was signed out at the server. Turn Remote off, then on again.",
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });

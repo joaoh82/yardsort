@@ -1,0 +1,9 @@
+{
+  "event": "terminal.detached",
+  "stream": 1,
+  "error": {
+    "code": "resnapshot_required",
+    "message": "This device fell too far behind the terminal. Attach again.",
+    "retryable": false
+  }
+}

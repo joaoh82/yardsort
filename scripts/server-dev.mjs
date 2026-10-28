@@ -294,8 +294,10 @@ function signInAndRevoke(token) {
 }
 
 /** The pairing tool (`crates/server/examples/pair.rs`) as a host and as a phone, both signed in
- * through ZITADEL's API: the host shows a code, the phone redeems it and asks, the host lets it
- * watch and type, then takes that back, and the phone sees each step. */
+ * through ZITADEL's API: the host connects to the relay and shows a code, the phone redeems it and
+ * asks, the host lets it watch and type. The phone reaches the host through the relay and types
+ * into its program; the host takes the grant back, and the relay closes the phone's socket. The
+ * program got the line and was still running. */
 async function pairAndRevoke(token) {
   execFileSync("cargo", ["build", "-q", "-p", "yardsort-server", "--example", "pair"], {
     cwd: root,
@@ -333,12 +335,18 @@ async function pairAndRevoke(token) {
     });
   let phone;
   const host = run(
-    ["host", PUBLIC_URL, "--zitadel-api", "--control", "--revoke-after", "3"],
+    ["host", PUBLIC_URL, "--zitadel-api", "--control", "--serve", "--revoke-after", "10"],
     "[host] ",
     (line) => {
       const code = /^Code: (\S+)$/.exec(line)?.[1];
       if (code && !phone) {
-        phone = run(["phone", PUBLIC_URL, code, "--zitadel-api", "--wait-for-revoke"], "[phone]");
+        phone = run(
+          [
+            ...["phone", PUBLIC_URL, code, "--zitadel-api", "--wait-for-revoke"],
+            ...["--relay", "--type", "e2e-typed"],
+          ],
+          "[phone]",
+        );
       }
     },
   );
@@ -348,7 +356,11 @@ async function pairAndRevoke(token) {
     hosted.code === 0 &&
     phoned.code === 0 &&
     phoned.output.includes("watch and type on every project") &&
-    phoned.output.includes("Revoked:")
+    phoned.output.includes('Typed "e2e-typed"') &&
+    phoned.output.includes("numbered without a gap") &&
+    phoned.output.includes("access was revoked") &&
+    hosted.output.includes('"got:e2e-typed"') &&
+    hosted.output.includes("still running when the link closed")
   );
 }
 

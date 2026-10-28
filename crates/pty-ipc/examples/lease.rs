@@ -5,10 +5,10 @@
 //! cargo run -p pty-ipc --example lease -- <data dir> [session id prefix]
 //! ```
 //!
-//! For the smoke test of the daemon's control leases ([27 §12]). It talks to the daemon of the
+//! For the smoke test of the daemon's control leases ([27 §13]). It talks to the daemon of the
 //! profile in `<data dir>` — the one `YARDSORT_DATA_DIR` names — and never starts one.
 //!
-//! [27 §12]: ../../../docs/design/27-remote-r2.md
+//! [27 §13]: ../../../docs/design/27-remote-r2.md
 
 use std::io::BufRead;
 use std::sync::{Arc, Mutex};

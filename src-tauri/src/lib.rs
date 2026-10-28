@@ -441,6 +441,10 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Workflow runs, queued here or by `ys`, are moved on by a thread of their own.
     workflows::start(app.handle(), &data_dir);
 
+    // Remote, when it is on: the link to the server's relay.
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move { remote::connect(&handle) });
+
     // Warm the login-shell environment now, so the first terminal doesn't wait for it.
     // Then bring a `ys` an older version installed up to this one. Not from a development
     // build, which would put itself on the user's PATH, unless `YARDSORT_YS_DIR` says where.

@@ -79,6 +79,7 @@ async fn serve() -> Result<(), String> {
         .await
         .map_err(|e| format!("listening on {}: {e}", settings.listen))?;
     tracing::info!("listening on {}", settings.listen);
+    let relay = service.relay().clone();
     let app = http::router(
         service,
         http::Options {
@@ -90,7 +91,11 @@ async fn serve() -> Result<(), String> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(stopped())
+    // The relay's sockets stay open until told to close, and a graceful stop waits for them.
+    .with_graceful_shutdown(async move {
+        stopped().await;
+        relay.shutdown();
+    })
     .await
     .map_err(|e| e.to_string())
 }

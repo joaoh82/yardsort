@@ -1,9 +1,6 @@
-//! Terminal attachment and control: the schema, not yet the service.
+//! Terminal attachment and control.
 //!
-//! **Nothing here is answered by a host yet.** A host does not advertise these operations, and
-//! asking for one gets `unsupported`. They are defined now so the read side and the terminal side
-//! are one coherent protocol, and so the hard rules are written into types before anyone builds
-//! on a looser shape:
+//! Hosts answer these since minor 1, and list them in their capabilities. The rules:
 //!
 //! - **Many viewers, one controller.** Attaching is viewing. Typing and resizing need a control
 //!   lease, held by one client at a time, the desktop included. A viewer never resizes the
@@ -23,6 +20,12 @@
 //!   screen after output `snapshot_seq`, then output `snapshot_seq + 1` onward, with nothing lost
 //!   or doubled. The PTY host already makes this atomic for local viewers; sequence numbers are
 //!   what make it checkable across a network.
+//! - **How the numbers run.** After the [`Attached`] reply, the snapshot comes as output frames
+//!   numbered `position.seq`, then each later piece of output and each resize takes the next
+//!   number: output as frames, a resize as an [`Event`](crate::Event). A piece larger than
+//!   [`crate::MAX_OUTPUT_CHUNK`] comes as several frames with the same number, in order. So the
+//!   numbers a client sees never go down and never skip one; if they do, something was lost, and
+//!   it attaches again.
 //! - **Epochs, not guesses.** Sequence numbers count within an epoch. A new epoch (the daemon
 //!   restarted, the replay window was lost, a client fell too far behind) means a fresh snapshot
 //!   that *replaces* the screen — never one appended to an old screen.
@@ -87,6 +90,23 @@ pub struct Attached {
     pub position: StreamPosition,
     pub size: TermSize,
     pub controller: Controller,
+}
+
+/// The `terminal.resized` event: the terminal is now `size`, from item `position` on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Resized {
+    pub stream: StreamId,
+    pub position: StreamPosition,
+    pub size: TermSize,
+}
+
+/// The `terminal.detached` event: this stream is over, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Detached {
+    pub stream: StreamId,
+    pub error: crate::RemoteError,
 }
 
 /// `terminal.detach`.

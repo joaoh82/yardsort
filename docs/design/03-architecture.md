@@ -151,7 +151,7 @@ creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConP
 question at startup and run nothing until it is answered.
 
 **One controller.** Typing or pasting from this computer gives it control of the terminal at
-once. Anyone else — the remote side, eventually — asks for a lease, renews it, and numbers its
+once. Anyone else — a device through the relay — asks for a lease, renews it, and numbers its
 input under it; typing here ends the lease (`pty_host::control`). A lease holder's size stands
 while it holds control, and the size asked for here comes back after. What the app types on its
 own, a workflow's message, takes no control and waits while a lease is held
@@ -574,7 +574,7 @@ and wakes when the host reports a session quiet or exited. The app holds `app.lo
 directory for as long as it runs (`presence`), which is how `ys` knows it is there and why only
 one app drives a profile's runs.
 
-## Remote access (proposed; sign-in server built, not wired)
+## Remote access (preview: sign-in, pairing and the relay built; no phone app yet)
 
 Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the records are
 [26](26-remote-r0-r1.md) and [27](27-remote-r2.md). The daemon's socket stays local and file-permission protected. Nothing
@@ -590,30 +590,38 @@ remote ever talks to it directly. Instead:
   provider is never asked again for that device, and revoking it takes effect on its next
   request. It serves sign-in, the device routes, and pairing: a host registers on its account and
   offers a code, a device of the same account redeems it and asks, and the host's person approves
-  it at the host. It ships as a container image, which staging on Fly.io and the self-host recipe
+  it at the host. And it is the **relay** (`relay.rs`): host and device each connect out to it over
+  a WebSocket with a single-use ticket, and it carries each device's traffic to its host in a
+  channel of the host's link, bounded per socket, closing a socket within seconds of its grant,
+  device or host being revoked. It keeps nothing. It ships as a container image, which staging on Fly.io and the self-host recipe
   (`crates/server/self-host/`) both run; staging has run on Fly.io since 2026-10-24
   ([28](28-remote-infrastructure.md)).
 - `crates/remote-client` is a device's side of the server's API: signing in through the system
-  browser to a loopback listener, refreshing, and the device, host and pairing calls. The app
-  uses it as a host (`src-tauri/src/remote.rs`, Settings → Remote, behind
+  browser to a loopback listener, refreshing, the device, host and pairing calls, and relay
+  sockets. The app uses it as a host (`src-tauri/src/remote.rs`, Settings → Remote, behind
   `YARDSORT_REMOTE_PREVIEW=1`); `ys` never does.
+- `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
+  Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of
+  its own with `yardsort_core::remote::serve`. When the link fails, every channel lets go of what
+  its device watched and controlled; the terminals are the daemon's and run on.
 - `yardsort_core::remote::host` is this machine as a host: its server, the devices its person
   approved here (kept only when they approve, and only ever removed by what the server says), and
   `CredentialStore`, behind which the app puts the OS credential store and a headless host a
   directory only its owner can read. Credentials never go in the database, settings or a
   terminal's environment.
-- `yardsort_core::remote::HostFacade` answers that protocol for one host, read-only, checking
+- `yardsort_core::remote::HostFacade` answers that protocol's reads for one host, checking
   each request against a device's `Grant` (scopes plus projects), which only
   `remote::host::grant_for` hands it. It is built field by field
-  from what the app already shows, so paths, argv, environment, labels and terminal output have
-  nowhere to go. It answers host, workspace, session, activity and approved-memory reads, and
-  refuses every terminal operation. Activity is read only from the `metadata` class, through an
-  allowlist of fields each checked again on the way out (`remote/activity.rs`).
-
-Nothing calls the facade yet. It gets a caller only once devices are enrolled and authenticated
-(R2). Terminal control will go through the daemon's leases and its single query responder,
-which are **in the daemon** because a lease the app and `ys attach` could bypass would be no
-lease.
+  from what the app already shows, so paths, argv, environment, labels and command lines have
+  nowhere to go. It answers host, workspace, session, activity and approved-memory reads.
+  Activity is read only from the `metadata` class, through an allowlist of fields each checked
+  again on the way out (`remote/activity.rs`).
+- `yardsort_core::remote::serve::Visitor` is one device's channel: its greeting, the grant
+  looked up again for every request, and the terminal operations, which outlive a request. A
+  device watches a terminal as a numbered viewer of the daemon and types under the daemon's
+  lease, held as `device:<id>` and usable only on the channel that took it. Terminal control
+  goes through the daemon's leases and its single query responder, which are **in the daemon**
+  because a lease the app and `ys attach` could bypass would be no lease.
 
 ## Assist (optional, off by default)
 
@@ -749,7 +757,9 @@ yardsort/
 │  ├─ pty-host/              # owns the sessions; no Tauri deps (M1)
 │  ├─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
 │  ├─ remote-proto/          # the remote protocol's types and limits; no I/O (M26)
-│  └─ server/                # the remote server's control service: sign-in, devices (M26)
+│  ├─ remote-client/         # a device's side of the server: HTTP and relay sockets (M26)
+│  ├─ remote-host/           # the host's connector to the relay (M26)
+│  └─ server/                # the remote server: sign-in, devices, pairing, relay (M26)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 

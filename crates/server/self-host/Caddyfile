@@ -18,7 +18,7 @@
 }
 
 # The server. It counts its rate limits by the address Caddy names here, which Caddy sets itself,
-# so a client cannot choose it.
+# so a client cannot choose it. The relay's WebSockets (/v1/relay) pass through as they are.
 {$REMOTE_DOMAIN} {
 	reverse_proxy server:8080 {
 		header_up X-Real-IP {remote_host}

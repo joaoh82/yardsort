@@ -1,0 +1,6 @@
+{
+  "event": "terminal.resized",
+  "stream": 1,
+  "position": { "epoch": 0, "seq": 42 },
+  "size": { "cols": 80, "rows": 24 }
+}
