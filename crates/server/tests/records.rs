@@ -69,6 +69,7 @@ for_each_store!(
     a_link_place_is_kept_by_its_instance_and_taken_by_a_later_link,
     pairing_requests_waiting_on_an_instances_links,
     signals_come_back_to_every_listener_in_order,
+    a_listener_coming_after_the_last_one_left_still_hears,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -1310,6 +1311,38 @@ async fn signals_come_back_to_every_listener_in_order(records: Arc<impl Records>
     }
 }
 
+async fn a_listener_coming_after_the_last_one_left_still_hears(records: Arc<impl Records>) {
+    let mut first = records.signals();
+    let started = tokio::time::timeout(std::time::Duration::from_secs(10), first.recv()).await;
+    assert_eq!(
+        started.expect("never listening").unwrap(),
+        Signal::RecheckAll
+    );
+    drop(first);
+    // Heard with nobody listening, which is when listening stops; and long enough for it to.
+    records.signal(Signal::RecheckAll).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    let mut second = records.signals();
+    let account = AccountId("account-1".into());
+    // Sent again until heard, since listening may be starting over.
+    let heard = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            records
+                .signal(Signal::Recheck(account.clone()))
+                .await
+                .unwrap();
+            let next = std::time::Duration::from_millis(200);
+            if let Ok(Ok(Signal::Recheck(heard))) = tokio::time::timeout(next, second.recv()).await
+            {
+                return heard;
+            }
+        }
+    })
+    .await;
+    assert_eq!(heard.expect("a later listener heard nothing"), account);
+}
+
 #[test]
 fn signals_travel_as_a_few_words_and_nothing_else_reads_as_one() {
     let host = HostId::new("host-1").unwrap();
@@ -1329,6 +1362,8 @@ fn signals_travel_as_a_few_words_and_nothing_else_reads_as_one() {
         "pairing h g x",
         "revoke a",
         "host-renamed x",
+        // A listening connection's probe of itself.
+        "probe 0b5c3f9e-8f7a-4f1e-9d55-2f3c8f4c1a7e",
     ] {
         assert_eq!(Signal::decode(other), None, "{other:?}");
     }

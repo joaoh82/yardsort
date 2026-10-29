@@ -277,7 +277,9 @@ the owner's go-ahead:
   holds one more database connection, to listen, beside its pool of eight. Listening needs a
   direct connection, which `DATABASE_URL` already is on staging: through a pooler that hands out
   a connection per transaction, as Neon's pooled string does, signals would never arrive, and
-  only the five-second rounds would remain. No migration, no new secret, no new setting.
+  only the five-second rounds would remain. The server notices within a minute and logs "records:
+  not listening for signals: its own probe did not come back…". No migration, no new secret, no
+  new setting.
 
 ## 7 · Open decisions
 

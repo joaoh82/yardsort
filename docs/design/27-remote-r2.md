@@ -724,8 +724,13 @@ sender's own included: `recheck <account>` after anything of an account is revok
 `recheck-all` from the operator's `revoke-account`; `pairing <host> <grant>` when a device asks.
 They are a few words, ids only. In PostgreSQL they are notifications on one channel
 (`yardsort_relay`): sent on any pooled connection, and heard on a connection each running server
-opens for it, opened again with a growing wait when it breaks. In memory, for the tests, a
-broadcast that clones of the records share.
+opens for it, opened again with a growing wait when it breaks. That connection sends itself a
+probe every 30 seconds. A probe that has not come back by the next one means the connection died
+quietly, or goes through a pooler that never passes notifications on, and it is opened again,
+with a warning that says signals are not arriving and names `DATABASE_URL`. A probe is a word no
+signal reads as, so other instances let it be. The connection closes once nothing listens on its
+server, and opens again for the next listener. In memory, for the tests, a broadcast that clones
+of the records share.
 
 **On hearing one,** an instance checks that account's sockets it holds, or every socket it holds,
 or tells the host's link if it holds it. A listener says `recheck-all` each time it starts
@@ -748,10 +753,11 @@ old instance's next round (§17). Rate limits shared across instances.
 
 On Linux, 2026-10-29, the eleventh slice:
 
-- `yardsort-server`, the records (1 new test, on each store): two listeners each hear that they
+- `yardsort-server`, the records (2 new tests, on each store): two listeners each hear that they
   are listening, then every signal sent, in order, through PostgreSQL's notifications or the
-  memory store's broadcast. Signals read back as they were written, and nothing else reads as
-  one. A reused refresh credential now says whose account it was, in both stores.
+  memory store's broadcast; a listener that comes after the last one left, once listening has
+  stopped, still hears. Signals read back as they were written, and nothing else reads as one, a
+  probe included. A reused refresh credential now says whose account it was, in both stores.
 - `relay_instances` (1 new test, on each store, with rounds a minute apart, so that only a signal
   is in time): a tablet asks through `b` and the host's link on `a` is told within three seconds;
   the phone's grant revoked through `b` closes its socket on `a`; a copy of the host's refresh
@@ -761,15 +767,17 @@ On Linux, 2026-10-29, the eleventh slice:
   pairing signal replaced by an account's recheck (replaced by `recheck-all` it still arrived,
   since that looks for waiting requests too); a reused refresh credential not signalled; the relay
   ignoring an account's signal; no word that listening started.
-- `just check` with the `YARDSORT_*` variables unset: the server's unit tests 17, `records` 51,
+- `just check` with the `YARDSORT_*` variables unset: the server's unit tests 17, `records` 53,
   `relay` 9, `relay_instances` 10, `command` 2 (their PostgreSQL halves skipped), `remote-host` 3,
   `yardsort-core` 603, the app crate 150, frontend 673. `just lint-windows` and
   `just bindings-check` passed (no bindings change).
 
 **Not run here:** the PostgreSQL half of the server's tests, the operator command's test among
 them, and the end-to-end round, which need Docker access this session does not have; CI runs
-them. The smoke test (§18), which needs a person; Windows and macOS, where CI runs the same tests.
-No phone.
+them. Listening that stops and starts again for a later listener is PostgreSQL's alone, so CI runs
+its test first. No test makes a probe fail to come back, which needs a pooler or a connection
+dropped quietly. Windows and macOS, where CI runs the same tests. No phone. The smoke test (§18)
+passed, before the probe was added.
 
 On Linux, 2026-10-29, the tenth slice:
 
@@ -1372,7 +1380,8 @@ losing a live stream, and relay failure leaving PTYs alive.
   The operator's `revoke-account`, a device signed out for reusing a refresh credential, and a
   revocation through an instance that does not hold the socket reach it at once through the
   records (§14). While a server's listening connection is down, or the signal failed to go, they
-  reach it within five seconds.
+  reach it within five seconds. A listening connection that dies quietly, or one through a pooler,
+  is found by its probe within a minute and logged.
 - **Each running server holds one more database connection**, to listen for signals. Signals name
   accounts, hosts and grants by id, as the tables do; anyone who can read the database can hear
   them.
