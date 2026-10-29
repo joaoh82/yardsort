@@ -329,7 +329,7 @@ async fn host(
 mod serving {
     use std::sync::{Arc, Mutex};
 
-    use pty_host::{LaunchPlan, PtyHost, SessionId, SessionState, TerminalHost};
+    use pty_host::{LaunchPlan, Numbered, PtyHost, SessionId, SessionState, TerminalHost};
     use remote_client::Session;
     use remote_host::{Access, AccessError, AccessFuture, Serving};
     use remote_proto::pairing::{GrantDecision, GrantSummary, HostSummary};
@@ -387,14 +387,18 @@ mod serving {
                 .map_err(|e| e.to_string())?;
             let seen = Arc::new(Mutex::new(String::new()));
             let watching = Arc::clone(&seen);
+            // Watched, not attached as a terminal: a terminal is the one left to answer the
+            // program's queries, and on Windows ConPTY waits on its first one until answered.
             terminals
-                .attach(
+                .attach_numbered(
                     &program.id,
-                    Box::new(move |bytes| {
-                        watching
-                            .lock()
-                            .unwrap()
-                            .push_str(&String::from_utf8_lossy(bytes));
+                    Box::new(move |item| {
+                        if let Numbered::Output { bytes, .. } = item {
+                            watching
+                                .lock()
+                                .unwrap()
+                                .push_str(&String::from_utf8_lossy(bytes));
+                        }
                         true
                     }),
                 )
@@ -430,8 +434,8 @@ mod serving {
         /// What the program printed back, and whether it is still running.
         pub fn report(&self) -> String {
             let seen = self.seen.lock().unwrap();
-            // What is seen starts with the snapshot, which ends without a newline: the first
-            // line the program prints is drawn on the end of it.
+            // Only what the program printed is kept, but a line can still start after the
+            // escapes the program drew before it.
             let lines: Vec<&str> = seen
                 .split(['\r', '\n'])
                 .filter_map(|l| l.find("got:").map(|at| &l[at..]))

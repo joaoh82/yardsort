@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use common::served::*;
-use pty_host::{Controller, LaunchPlan, PtyHost, SessionState};
+use pty_host::{Controller, LaunchPlan, Numbered, PtyHost, SessionState};
 use remote_client::{Client, Incoming, LinkReader, RelayLink};
 use remote_host::{Access, AccessFuture, Connector, Serving, Status};
 use remote_proto::account::{Credentials, DeviceKind, Secret};
@@ -301,16 +301,20 @@ async fn a_phone_types_through_the_relay_loses_its_stream_when_revoked_and_a_fai
     });
     let program = here.terminals.spawn(echo_lines(&workspace.id)).unwrap();
     let terminal = program.id.0.clone();
-    // What the person at the host sees.
+    // What the person at the host sees. Watched rather than attached as a terminal: a terminal
+    // here would be the one to answer the program's queries, and this one never answers, so on
+    // Windows ConPTY would wait on its first question for ever.
     let at_host = Arc::new(Mutex::new(String::new()));
     let seen = Arc::clone(&at_host);
     here.terminals
-        .attach(
+        .attach_numbered(
             &program.id,
-            Box::new(move |bytes| {
-                seen.lock()
-                    .unwrap()
-                    .push_str(&String::from_utf8_lossy(bytes));
+            Box::new(move |item| {
+                if let Numbered::Snapshot { bytes, .. } | Numbered::Output { bytes, .. } = item {
+                    seen.lock()
+                        .unwrap()
+                        .push_str(&String::from_utf8_lossy(bytes));
+                }
                 true
             }),
         )
