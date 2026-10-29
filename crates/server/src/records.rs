@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope};
+use tokio::sync::broadcast;
 
 use crate::tokens::{self, TokenHash};
 
@@ -95,8 +96,8 @@ pub struct Issued {
 pub enum Rotation {
     /// It was current: it is now spent, and the new credentials are in its place.
     Rotated(Device),
-    /// It had already been traded in. The device is revoked in the same step.
-    Reused,
+    /// It had already been traded in. The device, of this account, is revoked in the same step.
+    Reused(AccountId),
     /// It lapsed unused.
     Expired,
     /// Its device was revoked.
@@ -219,6 +220,45 @@ pub struct LinkPlace {
     pub link: String,
     /// When its instance last said it still holds it.
     pub seen_at: i64,
+}
+
+/// What one instance of the server tells every instance sharing the records, itself included, so
+/// that each acts at once on what the others did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Signal {
+    /// Something of this account was revoked or replaced: check its live sockets now.
+    Recheck(AccountId),
+    /// Check every live socket: every account may have changed, or signals may have been missed.
+    RecheckAll,
+    /// A device asks this host to pair, through this grant.
+    Pairing(HostId, GrantId),
+}
+
+impl Signal {
+    /// As it travels between instances: a few words, ids only. Ids never hold a space.
+    pub fn encode(&self) -> String {
+        match self {
+            Self::Recheck(account) => format!("recheck {}", account.0),
+            Self::RecheckAll => "recheck-all".into(),
+            Self::Pairing(host, grant) => format!("pairing {host} {grant}"),
+        }
+    }
+
+    /// `None` for anything else, such as a newer server's signal.
+    pub fn decode(text: &str) -> Option<Self> {
+        let words: Vec<&str> = text.split(' ').collect();
+        match words.as_slice() {
+            ["recheck", account] if !account.is_empty() => {
+                Some(Self::Recheck(AccountId((*account).to_owned())))
+            }
+            ["recheck-all"] => Some(Self::RecheckAll),
+            ["pairing", host, grant] => Some(Self::Pairing(
+                HostId::new(*host).ok()?,
+                GrantId::new(*grant).ok()?,
+            )),
+            _ => None,
+        }
+    }
 }
 
 /// What the control service needs of a store. See the module documentation for what "one step"
@@ -398,6 +438,15 @@ pub trait Records: Send + Sync {
     /// `link` of `host` closed: forget its place, unless a later link has taken it.
     fn drop_link(&self, host: &HostId, link: &str) -> impl Future<Output = Result<()>> + Send;
 
+    /// Tell every instance sharing these records, this one included, of `signal`. Best effort:
+    /// what a signal hastens, the relay's rounds of checks do anyway.
+    fn signal(&self, signal: Signal) -> impl Future<Output = Result<()>> + Send;
+
+    /// The signals every instance sends from here on, as they arrive. A [`Signal::RecheckAll`]
+    /// comes once listening starts, and again after any break in which some may have been
+    /// missed. Needs a Tokio runtime.
+    fn signals(&self) -> broadcast::Receiver<Signal>;
+
     /// The grants still waiting for an answer at `now`, of the hosts whose links `instance`
     /// holds: what their hosts are to be told of.
     fn pending_on_links(
@@ -408,11 +457,24 @@ pub trait Records: Send + Sync {
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
-/// tests and trying the server out, not for running one. A clone shares them, as instances of a
-/// server share a database.
-#[derive(Default, Clone)]
+/// tests and trying the server out, not for running one. A clone shares them, and their signals,
+/// as instances of a server share a database.
+#[derive(Clone)]
 pub struct MemoryRecords {
     state: Arc<Mutex<State>>,
+    signals: broadcast::Sender<Signal>,
+}
+
+/// Signals waiting for a slow listener before it is told it missed some.
+pub const SIGNALS_KEPT: usize = 256;
+
+impl Default for MemoryRecords {
+    fn default() -> Self {
+        Self {
+            state: Arc::default(),
+            signals: broadcast::channel(SIGNALS_KEPT).0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -579,7 +641,7 @@ impl Records for MemoryRecords {
                         reason: RevokeReason::RefreshReused,
                     });
                 }
-                return Rotation::Reused;
+                return Rotation::Reused(device.account.clone());
             }
             if old.expires_at <= now {
                 return Rotation::Expired;
@@ -864,6 +926,18 @@ impl Records for MemoryRecords {
                 s.links.remove(host);
             }
         })
+    }
+
+    async fn signal(&self, signal: Signal) -> Result<()> {
+        // Nobody listening is not a failure: there is nothing to hasten.
+        let _ = self.signals.send(signal);
+        Ok(())
+    }
+
+    fn signals(&self) -> broadcast::Receiver<Signal> {
+        let listening = self.signals.subscribe();
+        let _ = self.signals.send(Signal::RecheckAll);
+        listening
     }
 
     async fn pending_on_links(&self, instance: &str, now: i64) -> Result<Vec<(HostId, GrantId)>> {

@@ -121,7 +121,7 @@ the accounts behind it, is [28](docs/design/28-remote-infrastructure.md).
 Staging deploys by hand, from Actions → **Deploy the server**, which the owner runs. Running the
 server yourself is [crates/server/self-host/README.md](crates/server/self-host/README.md). Each
 slice of the server ends with a smoke test a person runs, locally and on staging:
-[27 §17](docs/design/27-remote-r2.md#17--smoke-tests).
+[27 §18](docs/design/27-remote-r2.md#18--smoke-tests).
 
 ## Making a change
 

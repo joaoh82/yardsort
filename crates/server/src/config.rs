@@ -6,7 +6,8 @@
 //! - `YARDSORT_OIDC_ISSUER`: the identity provider, as its issuer URL.
 //! - `YARDSORT_OIDC_CLIENT_ID`: this server's client id at the provider.
 //! - `YARDSORT_OIDC_CLIENT_SECRET` (or `_FILE`): its client secret. Unset for a public PKCE client.
-//! - `DATABASE_URL` (or `_FILE`): PostgreSQL, as `postgres://…`.
+//! - `DATABASE_URL` (or `_FILE`): PostgreSQL, as `postgres://…`. A direct connection, not a pooler
+//!   that hands out one per transaction: the server listens for its instances' signals on it.
 //! - `YARDSORT_LISTEN`: the address to listen on; [`DEFAULT_LISTEN`] unless set.
 //! - `YARDSORT_SERVER_NAME`: what people see it called; [`DEFAULT_NAME`] unless set.
 //! - `YARDSORT_DEVICE_REDIRECTS`: comma-separated; [`DEFAULT_DEVICE_REDIRECTS`] unless set.

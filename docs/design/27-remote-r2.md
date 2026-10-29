@@ -1,13 +1,13 @@
 # Remote, R2: identity and relay
 
-**Status:** R2 started on 2026-10-22. Ten slices are built. The first (2026-10-22): signing in
+**Status:** R2 started on 2026-10-22. Eleven slices are built. The first (2026-10-22): signing in
 through the server's identity provider, and the server's own credentials for each device after
 that. The second (2026-10-23): the `yardsort-server` binary, which serves them over HTTP from
 PostgreSQL, and a local environment with a real ZITADEL in Docker. The third (2026-10-24): the
 server's container image, its Fly.io configuration and deploy workflow, the self-host recipe, an
 operator's command to sign an account out everywhere, and a sign-in against a real ZITADEL in CI.
 Staging was deployed on 2026-10-24 ([28](28-remote-infrastructure.md) §5), and passed the third
-slice's smoke test (§17) on 2026-10-25 at `https://remote-staging.yardsort.sh`. The fourth
+slice's smoke test (§18) on 2026-10-25 at `https://remote-staging.yardsort.sh`. The fourth
 (2026-10-25): pairing. A host registers on its account and shows a code; a device of the same
 account redeems it and asks; the host's person approves it at the host, which keeps its own record
 of what it gave. The app does this from Settings → Remote, shown only with
@@ -20,7 +20,9 @@ left off, and is told when control changes hands and when the program ends (§10
 (2026-10-29): a device follows the host's activity as it is recorded (§11). The ninth
 (2026-10-29): the relay on more than one instance of the server, so production can run its two
 Machines (§12). The tenth (2026-10-29): a host hears at once, over its link, that a device asks
-to pair, and the app says so wherever its window is (§13). The proposal is
+to pair, and the app says so wherever its window is (§13). The eleventh (2026-10-29): a
+revocation or a pairing request made through any instance, or by the operator, reaches every
+instance at once (§14). The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -178,7 +180,7 @@ is sent anywhere, so the server is not an open redirector.
     two racing rotations exactly one gets through and the other is reuse.
   - Rotations also delete the device's lapsed access credentials, and its spent refresh
     credentials once they would have lapsed anyway, never sooner: a spent one must still revoke
-    the device when a copy is presented (§16).
+    the device when a copy is presented (§17).
   - `last_seen_at` is written at most once a minute (`SEEN_RESOLUTION_MS`); `MemoryRecords`
     follows the same rule.
   - The server's id is made the first time any instance starts, and kept.
@@ -228,7 +230,7 @@ is sent anywhere, so the server is not an open redirector.
   new reason, `byOperator`. The issuer defaults to the server's own. It needs only
   `DATABASE_URL`, and says how many devices it revoked; a subject that never signed in is an
   error rather than a quiet zero, and does not create an account. It does not stop the person
-  signing in again: that is the provider's to refuse (§16).
+  signing in again: that is the provider's to refuse (§17).
 - **The self-host recipe** (`crates/server/self-host/`): Compose with PostgreSQL 17, ZITADEL
   v4.19.5 (API and login), the server built from source, and Caddy, which gets certificates from
   Let's Encrypt. Secrets come from a `.env` the repository ignores. The server has its own
@@ -426,7 +428,7 @@ protocol change did before. With a daemon of 1, which has no leases, the app's o
 `paste` and `write`, as before.
 
 **Not yet.** Nothing calls the leases but tests and the example below; the host facade still
-answers every terminal operation `unsupported` until the relay's connector uses them (§15). A
+answers every terminal operation `unsupported` until the relay's connector uses them (§16). A
 lease holder's own terminal does not answer questions: while one controls a terminal, only the
 cursor question is answered, by the host. Making the controller's numbered viewer the responder
 is for R3. Nobody is told when control changes hands; a holder finds out at its next input or
@@ -442,7 +444,7 @@ It ends saying whether every item came, once and in order.
 The relay, and the host's connector to it: a paired device now reaches its host through the
 server, with neither of them listening. The app keeps the link while Remote is on, still only
 with `YARDSORT_REMOTE_PREVIEW=1`. There is no phone app yet (R3); the pairing tool stands in for
-one (§17).
+one (§18).
 
 **Tickets** (`POST /v1/relay/tickets`, `remote_proto::relay`). A signed-in device asks with its
 access credential for a ticket, good once for 60 seconds. A host asks for its own link, and gets
@@ -518,7 +520,7 @@ why.
 **Not yet:** a phone app (R3). Telling a device when control changes hands, or when a terminal's
 program exits: it finds out at its next request. A replay window for resuming. (Those two came
 with the seventh slice, §10.) More than one
-relay instance (§16; it came with the ninth slice, §12). The entitlements question before opening a stream ([30](30-open-source-and-managed.md)).
+relay instance (§17; it came with the ninth slice, §12). The entitlements question before opening a stream ([30](30-open-source-and-managed.md)).
 Telling the host of a pairing request over its link: Settings → Remote still asks every three
 seconds while open. (The tenth slice does, §13.)
 
@@ -527,7 +529,7 @@ seconds while open. (The tenth slice does, §13.)
 A device that loses its connection carries on from where it was, instead of being sent the whole
 screen again, and a watching device is told who controls the terminal and when its program ends,
 without asking. Still only with `YARDSORT_REMOTE_PREVIEW=1`, and still no phone app (R3); the
-pairing tool stands in for one (§17).
+pairing tool stands in for one (§18).
 
 **The replay window** (`pty_host::replay`). From the first numbered viewer on, a session keeps
 the last 256 KiB of its numbered stream: output, without the program's terminal queries, and
@@ -567,7 +569,7 @@ arrive where the store must not be asked.
 the last item it drew, and says whether the host resumed from there. It says when control changes
 hands and when the program ends. CI's end-to-end round checks that it resumed.
 
-**Not yet:** the phone app (R3). More than one relay instance (§16; the ninth slice, §12). The entitlements question
+**Not yet:** the phone app (R3). More than one relay instance (§17; the ninth slice, §12). The entitlements question
 before opening a stream ([30](30-open-source-and-managed.md)). Telling the host of a pairing
 request over its link (the tenth slice, §13). Typing is never replayed, by design: after a reconnect the device's lease
 is gone (§9).
@@ -577,7 +579,7 @@ is gone (§9).
 A device can follow what the host's agents do as it happens, instead of asking for the list again:
 the protocol's `activity.subscribe`, which R1 left for a transport ([26](26-remote-r0-r1.md)).
 Still only with `YARDSORT_REMOTE_PREVIEW=1`, and still no phone app (R3); the pairing tool stands
-in for one (§17).
+in for one (§18).
 
 **Protocol 1.3.** The minor goes to 3. `activity.subscribe` (`activity:read`) follows one
 workspace, one conversation of it, or, without either, every workspace the grant reaches, those
@@ -619,7 +621,7 @@ that the phone heard of the exit.
 
 **Not yet:** the phone app (R3), and notifications when the app is not open (R4). Telling a
 device of a new conversation or workspace: it reads the lists again on an event it does not
-recognise. More than one relay instance (§16; the ninth slice, §12). Telling the host of a
+recognise. More than one relay instance (§17; the ninth slice, §12). Telling the host of a
 pairing request over its link (the tenth slice, §13).
 
 ## 12 · What the ninth slice adds
@@ -660,6 +662,7 @@ connect again and are sent to the new one.
 
 **Revocation across instances.** Revoking through one instance reaches sockets held by another at
 that instance's next check, within five seconds, as another process's revocation always has.
+(At once since the eleventh slice, §14.)
 
 **The protocol.** `RelayTicket` gains an optional `route`, which `remote-client` puts in the
 socket's URL. A client that ignores it still works with a server of one instance; with several,
@@ -672,7 +675,7 @@ smoke test (`cargo run -p yardsort-server --example replay_proxy`).
 
 **Not yet:** the phone app (R3). Telling another instance of a revocation at once, which a
 database notification could do. Production's Fly config, which comes with its ZITADEL instance.
-Rate limits shared across instances (§16). Telling the host of a pairing request over its link
+Rate limits shared across instances (§17). Telling the host of a pairing request over its link
 (the tenth slice, §13).
 
 ## 13 · What the tenth slice adds
@@ -704,10 +707,77 @@ server says is waiting.
 **The pairing tool**'s pretend host (`--serve`) says when the relay tells it, and looks at the
 host's grants at once. CI's end-to-end round checks that it was told.
 
-**Not yet:** the phone app (R3). Telling another instance of a revocation at once. Other notices,
-such as a grant revoked from another device, which the host learns of at its next check.
+**Not yet:** the phone app (R3). Telling another instance of a revocation at once (the eleventh
+slice, §14). Other notices, such as a grant revoked from another device, which the host learns of
+at its next check.
 
-## 14 · Verification
+## 14 · What the eleventh slice adds
+
+What happens through one instance of the server reaches every instance at once, rather than at
+its next round of checks: a revocation reaches the live sockets another instance holds, and a
+pairing request the host's link on another instance. So does what the operator's
+`revoke-account` does, from outside any running server. The rounds stay, every five seconds, for
+whatever a signal misses.
+
+**Signals** (`records::Signal`). The records carry them between every process sharing them, the
+sender's own included: `recheck <account>` after anything of an account is revoked or replaced;
+`recheck-all` from the operator's `revoke-account`; `pairing <host> <grant>` when a device asks.
+They are a few words, ids only. In PostgreSQL they are notifications on one channel
+(`yardsort_relay`): sent on any pooled connection, and heard on a connection each running server
+opens for it, opened again with a growing wait when it breaks. That connection sends itself a
+probe every 30 seconds. A probe that has not come back by the next one means the connection died
+quietly, or goes through a pooler that never passes notifications on, and it is opened again,
+with a warning that says signals are not arriving and names `DATABASE_URL`. A probe is a word no
+signal reads as, so other instances let it be. The connection closes once nothing listens on its
+server, and opens again for the next listener. In memory, for the tests, a broadcast that clones
+of the records share.
+
+**On hearing one,** an instance checks that account's sockets it holds, or every socket it holds,
+or tells the host's link if it holds it. A listener says `recheck-all` each time it starts
+listening, and an instance that fell behind on signals checks everything, so what went by while
+it was not listening is caught up at once, not at the next round.
+
+**What sends them:** a device revoked by its person, a grant revoked, a host removed, an approval
+replacing a device's earlier grant, and, newly, a device signed out for presenting a refresh
+credential it had already traded in: that one had waited for the next round even on its own
+instance. A signal that fails to go is logged; the request it came with has already succeeded.
+
+**The operator's `revoke-account`** signals every running server after revoking, and says so: "Running
+servers close their live connections now." It needs nothing new, only `DATABASE_URL`, which it
+already had.
+
+**Not yet:** the phone app (R3). A host's link replaced on another instance still waits for its
+old instance's next round (§17). Rate limits shared across instances.
+
+## 15 · Verification
+
+On Linux, 2026-10-29, the eleventh slice:
+
+- `yardsort-server`, the records (2 new tests, on each store): two listeners each hear that they
+  are listening, then every signal sent, in order, through PostgreSQL's notifications or the
+  memory store's broadcast; a listener that comes after the last one left, once listening has
+  stopped, still hears. Signals read back as they were written, and nothing else reads as one, a
+  probe included. A reused refresh credential now says whose account it was, in both stores.
+- `relay_instances` (1 new test, on each store, with rounds a minute apart, so that only a signal
+  is in time): a tablet asks through `b` and the host's link on `a` is told within three seconds;
+  the phone's grant revoked through `b` closes its socket on `a`; a copy of the host's refresh
+  credential presented through `b` signs the host out and closes its link on `a`.
+- `command` (PostgreSQL only): `revoke-account` signals a listening server, and says so.
+- Changes made on purpose, one at a time, each failing a test: revocations not signalled; the
+  pairing signal replaced by an account's recheck (replaced by `recheck-all` it still arrived,
+  since that looks for waiting requests too); a reused refresh credential not signalled; the relay
+  ignoring an account's signal; no word that listening started.
+- `just check` with the `YARDSORT_*` variables unset: the server's unit tests 17, `records` 53,
+  `relay` 9, `relay_instances` 10, `command` 2 (their PostgreSQL halves skipped), `remote-host` 3,
+  `yardsort-core` 603, the app crate 150, frontend 673. `just lint-windows` and
+  `just bindings-check` passed (no bindings change).
+
+**Not run here:** the PostgreSQL half of the server's tests, the operator command's test among
+them, and the end-to-end round, which need Docker access this session does not have; CI runs
+them. Listening that stops and starts again for a later listener is PostgreSQL's alone, so CI runs
+its test first. No test makes a probe fail to come back, which needs a pooler or a connection
+dropped quietly. Windows and macOS, where CI runs the same tests. No phone. The smoke test (§18)
+passed, before the probe was added.
 
 On Linux, 2026-10-29, the tenth slice:
 
@@ -733,7 +803,7 @@ On Linux, 2026-10-29, the tenth slice:
   skipped), `yardsort-core` 603, the app crate 150, frontend 673. `just lint-windows` and
   `just bindings-check` passed (one new event in the bindings).
 
-**The smoke test on this machine** (§17), on 2026-10-29, run by a person: passed.
+**The smoke test on this machine** (§18), on 2026-10-29, run by a person: passed.
 
 **Not run here:** the PostgreSQL half of the server's tests and the end-to-end round, which need
 Docker access this session does not have; CI runs both. Windows and macOS, where CI runs the
@@ -769,12 +839,12 @@ On Linux, 2026-10-29, the ninth slice:
   1, `remote-client` 6, `remote-host` 2, `yardsort-core` 603, the app crate 150, frontend 669.
   `just lint-windows` and `just bindings-check` passed.
 
-**The smoke test on this machine** (§17), on 2026-10-29, run by a person: passed.
+**The smoke test on this machine** (§18), on 2026-10-29, run by a person: passed.
 
 **Not run here:** the PostgreSQL half of the server's tests, which this session cannot run without
 Docker access: the new tests skipped it here, and CI requires it on Linux. Fly.io's own proxy: the
 stand-in follows its documentation (`fly-replay`'s `prefer_instance`, `fly-replay-src`,
-`fly-preferred-instance-unavailable`), and staging with two Machines (§17) is the check against
+`fly-preferred-instance-unavailable`), and staging with two Machines (§18) is the check against
 the real one, which waits for the owner's go-ahead. Windows and macOS, where CI runs the same
 tests. No phone.
 
@@ -809,7 +879,7 @@ On Linux, 2026-10-29, the eighth slice:
   tests with the gate test among them, the app crate 150, frontend 669. `just lint-windows` and
   `just bindings-check` passed (no bindings change).
 
-**The smoke test on this machine** (§17), on 2026-10-29, run by a person: passed.
+**The smoke test on this machine** (§18), on 2026-10-29, run by a person: passed.
 
 **Not run here:** the end-to-end run, which needs Docker access this session does not have, and
 which CI runs, now checking that the pretend phone heard of a program ending; Windows and macOS,
@@ -855,7 +925,7 @@ On Linux, 2026-10-29, the seventh slice:
   timed out under the full run's load, as it has on other branches). `just lint-windows` and
   `just bindings-check` passed.
 
-**The smoke test on this machine** (§17), on 2026-10-29, run by a person: passed.
+**The smoke test on this machine** (§18), on 2026-10-29, run by a person: passed.
 
 **Not run here:** the end-to-end run, which needs Docker access this session still does not have,
 and which CI runs, now checking that the pretend phone resumed; Windows and macOS, where CI runs
@@ -913,7 +983,7 @@ On Linux, 2026-10-28, the sixth slice:
   app crate 150, frontend 669. `just lint-windows` passed. `just bindings-check` differs only by
   the new `RemoteLink` type, generated, as the change needs.
 
-**Not run here:** the smoke test (§17), which needs a person to sign in at a browser, and the
+**Not run here:** the smoke test (§18), which needs a person to sign in at a browser, and the
 end-to-end run (`just server-e2e`), which needs Docker access this session does not have; CI runs
 it, and its pairing round now goes through the relay: the pretend host serves a program with the
 connector, and the pretend phone types into it. Windows and macOS, where CI runs the same tests;
@@ -1022,7 +1092,7 @@ On Linux, 2026-10-25, the fourth slice:
   `remote-proto` for Windows. `remote-client` could not be checked for Windows from here: `ring`
   needs Microsoft's C tools to cross-compile. CI's Windows runner builds it.
 
-**The smoke test on this machine** (§17), on 2026-10-27, run by a person: the app with a
+**The smoke test on this machine** (§18), on 2026-10-27, run by a person: the app with a
 throwaway profile and a credentials directory turned on against the local server, signed in
 through ZITADEL's login pages, showed a code, and let the pairing tool in to watch and type on
 every project; revoking it reached the tool; after a restart Remote was still on and paired
@@ -1034,7 +1104,7 @@ workflow's own arguments, since the branch was not yet pushed. The same Machine 
 the server made the new tables in Neon, `/v1/server` lists `host.list` and `host.pair`, and an
 unauthenticated `POST /v1/hosts` is answered `401`.
 
-**Staging's smoke test** (§17), on 2026-10-27, run by a person: the app turned on against
+**Staging's smoke test** (§18), on 2026-10-27, run by a person: the app turned on against
 staging, signed in on ZITADEL Cloud's pages, and let the pairing tool in to watch and type;
 revoking it reached the tool, and turning off removed the host. The first try looked like a
 fault: the device appeared under **Devices let in** and vanished a poll later. Staging's log
@@ -1071,7 +1141,7 @@ On Linux, 2026-10-24, the third slice:
   published ports; the API answered only with its public `Host` (`404` otherwise), and over h2c.
   No other proxy was tried. Two fixes came out of it: ZITADEL's health check ignores `--tlsMode`, so
   the recipe sets TLS by its settings, and the error above.
-- **The image with a browser**, the second local smoke test (§17): the sign-in tool started a
+- **The image with a browser**, the second local smoke test (§18): the sign-in tool started a
   sign-in at the image, headless Chromium went through ZITADEL's own login pages (name, then
   password) and back to the tool, which listed, refreshed and waited; `revoke-account` run in the
   container signed it out, and both its credentials were refused.
@@ -1094,7 +1164,7 @@ that never signed in it answered "no account" and changed nothing. Once the work
 `main`, it deployed staging from Actions on 2026-10-25 (run 40233851558) in 42 seconds: release
 v2 on the same Machine, the same server id, and both of its checks passing.
 
-**Staging's smoke test** (§17), on 2026-10-25, once its DNS records were in: Fly's certificate
+**Staging's smoke test** (§18), on 2026-10-25, once its DNS records were in: Fly's certificate
 from Let's Encrypt was issued within a minute, and `https://remote-staging.yardsort.sh` answered
 `/health`, with `/v1/server` naming the staging ZITADEL. The sign-in tool, run from this machine,
 sent the browser to ZITADEL Cloud and back; it listed its device, refreshed, and waited. The
@@ -1178,7 +1248,7 @@ On Linux, 2026-10-22, the first slice:
 **Not run here:** macOS and Windows, which CI covers, without the PostgreSQL half (above); ZITADEL
 Cloud, as opposed to ZITADEL in a container; anything on a phone; any deployment.
 
-## 15 · The rest of R2
+## 16 · The rest of R2
 
 Each item is a later slice. Where each runs, and the accounts to set up, are in
 [28](28-remote-infrastructure.md). The gate (proposal §13): two-account isolation, a revoked device
@@ -1187,32 +1257,34 @@ losing a live stream, and relay failure leaving PTYs alive.
 1. ~~Sign-in and device credentials, as a library.~~ Done (§4).
 2. ~~PostgreSQL records, the HTTP listener, rate limits, and the local environment.~~ Done (§5).
 3. ~~Deploying it, and the self-host recipe.~~ Done (§6): staging deployed and its smoke test
-   passed (§14). Production's deploy comes with its ZITADEL instance.
+   passed (§15). Production's deploy comes with its ZITADEL instance.
 4. ~~Host enrollment and grants.~~ Built (§7), behind the preview switch; done once its smoke
-   test (§17) passes here and on staging. The headless host's own way to approve a device comes
+   test (§18) passes here and on staging. The headless host's own way to approve a device comes
    with the headless host (R5): today only the desktop approves.
 5. ~~**The daemon, `PROTOCOL` 2**: one controller lease and one query responder enforced in the
-   daemon, and numbered output over its IPC.~~ Built (§8); done once its smoke test (§17) passes
+   daemon, and numbered output over its IPC.~~ Built (§8); done once its smoke test (§18) passes
    here. Nothing of it runs on the server, so staging has no part in it.
 6. ~~**The relay and the host's outbound connector**: WSS, single-use 60-second connection tickets,
    bounded queues, revocation closing live streams, and relay failure leaving every PTY running.~~
-   Built (§9); done once its smoke test (§17) passes here and on staging. With it, the gate's three
-   checks have tests (§14): another account reaches nothing, a revoked device's live socket closes
+   Built (§9); done once its smoke test (§18) passes here and on staging. With it, the gate's three
+   checks have tests (§15): another account reaches nothing, a revoked device's live socket closes
    within seconds, and the relay failing leaves the program running and the person here in
    control. Production runs two Machines, which the relay could not share until the ninth slice
    (§12).
 7. ~~**Resuming, and telling a device of control and the exit**: a replay window in the daemon,
    `resumeAfter` honoured, and the `terminal.control` and `terminal.exited` events.~~ Built (§10);
-   done once its smoke test (§17) passes here and on staging.
+   done once its smoke test (§18) passes here and on staging.
 8. ~~**Following activity**: `activity.subscribe`, which R1 left for a transport.~~ Built (§11);
-   done once its smoke test (§17) passes here and on staging.
+   done once its smoke test (§18) passes here and on staging.
 9. ~~**The relay on several instances**: a device sent to the instance holding its host's link,
-   through Fly.io's `fly-replay`.~~ Built (§12); done once its smoke test (§17) passes here, and
+   through Fly.io's `fly-replay`.~~ Built (§12); done once its smoke test (§18) passes here, and
    on staging with a second Machine.
 10. ~~**Telling the host of a pairing request over its link.**~~ Built (§13); done once its smoke
-    test (§17) passes here and on staging.
+    test (§18) passes here and on staging.
+11. ~~**Instant revocation everywhere**: signals between instances through the records.~~ Built
+    (§14); done once its smoke test (§18) passes here and on staging.
 
-## 16 · Risks
+## 17 · Risks
 
 - **Rate limits are per instance and per address.** Two instances allow twice the rate, and many
   addresses together are not limited as a whole. Once more than 10 000 are in play, newcomers
@@ -1251,7 +1323,7 @@ losing a live stream, and relay failure leaving PTYs alive.
   Nothing watches for that yet.
 - **CI's end-to-end run does not render ZITADEL's login pages.** It makes the calls they make, so
   a change in the pages themselves would get past it. A person signing in on staging is the check
-  for them (§17).
+  for them (§18).
 - **Staging sleeps.** The first request after it stopped waits for a Machine to start, and Neon's
   free compute to wake: a few seconds, not more, but enough to look like a failure. Neon also
   suspends its compute after a few idle minutes, which closes the connections the server keeps
@@ -1264,7 +1336,7 @@ losing a live stream, and relay failure leaving PTYs alive.
   the stronger path.
 - **A host hears of a request only while its link is up.** With the app closed, or its link
   down, a device waits; the host is told as it connects, if the request has not lapsed. A request
-  made through another instance reaches the host up to five seconds later.
+  made through another instance reaches it at once by its signal, or at the next round without.
 - **A desktop notification names the device**, as its person named it at sign-in, on the screen
   of this computer, where anyone near it can read it. It says nothing else, and only while the
   window is not focused.
@@ -1304,11 +1376,15 @@ losing a live stream, and relay failure leaving PTYs alive.
   host is offline.
 - **A route is in a URL.** The socket's URL names a Machine's id, which proxies may log. It names
   no device, host or person, and opens nothing.
-- **Revocation from another process, or through another instance, waits for the next check.** The
-  operator's `revoke-account`, a device signed out for reusing a refresh credential, and a
-  revocation through an instance that does not hold the socket reach it within five seconds;
-  revoking through the instance that holds it reaches it at once. A database notification would
-  make it immediate everywhere.
+- **Revocation reaches other instances by a signal, and waits for the next check without one.**
+  The operator's `revoke-account`, a device signed out for reusing a refresh credential, and a
+  revocation through an instance that does not hold the socket reach it at once through the
+  records (§14). While a server's listening connection is down, or the signal failed to go, they
+  reach it within five seconds. A listening connection that dies quietly, or one through a pooler,
+  is found by its probe within a minute and logged.
+- **Each running server holds one more database connection**, to listen for signals. Signals name
+  accounts, hosts and grants by id, as the tables do; anyone who can read the database can hear
+  them.
 - **A socket is let in by its ticket.** Its access credential lapsing later does not close it;
   only revocation does, which the checks catch.
 - **The relay reads what it carries.** TLS ends at the server, which forwards terminal output and
@@ -1339,7 +1415,7 @@ losing a live stream, and relay failure leaving PTYs alive.
 - **Whether an open relay socket keeps staging's Machine awake** is Fly's proxy's call, not yet
   watched. If it stops anyway, the host's next try wakes it within its minute of backing off.
 
-## 17 · Smoke tests
+## 18 · Smoke tests
 
 From the third slice on, each slice ends with a smoke test a person runs: on their own machine,
 and on staging once the slice is deployed there. They are short on purpose. The tests above check
@@ -1498,6 +1574,22 @@ the server's usual address.
 4. Turn Remote off and on again while a request waits (or pair with the app closed, then start
    it): the status bar shows the request once the link is up.
 
+**Slice 11, on this machine:** step 1 of slice 9, two instances behind the stand-in proxy, then
+steps 2 and 3 of slice 6 with `/tmp/ys11`, `/tmp/ys11-wt` and `/tmp/ys11-credentials`. Then:
+
+1. **Pair a device**, then `just server-pair phone <code> --relay --wait-for-revoke`, and sign in
+   again in the browser. **Let it watch.** One instance's log says "relay: device connected".
+2. **Revoke** the tool's device in the app. The proxy's output shows which instance the revoke
+   reached (`POST /v1/grants/…/revoke`). Whichever it was, the tool says access was revoked within
+   a second, not five. Repeat steps 1 and 2 until a revoke has reached the instance that does not
+   hold the tool's socket.
+3. Pair again and leave the tool watching. Revoke the account as its operator, from another
+   terminal:
+   `set -a; . crates/server/dev/server.env.local; set +a; cargo run -q -p yardsort-server -- revoke-account --subject <id>`,
+   with the id of `developer@yardsort.test` from ZITADEL's console. It says running servers close
+   their live connections now; within a second the tool says access was revoked, and Settings →
+   Remote says this computer was signed out. Turn Remote off.
+
 **Slice 4, on staging**, once it is deployed there: steps 3 to 7 with
 `https://remote-staging.yardsort.sh` as the server, a staging account, and
 `just server-pair phone https://remote-staging.yardsort.sh <code> --wait-for-revoke`; then
@@ -1527,3 +1619,8 @@ the other Machine answered 409 and then served on the host's. Then `fly scale co
 **Slice 10, on staging**, once this slice is deployed there: its steps above with
 `https://remote-staging.yardsort.sh` as the server and a staging account;
 `fly logs -a yardsort-remote-staging` holds no code or device name.
+
+**Slice 11, on staging**, once this slice is deployed there: steps 1 and 2 above against
+`https://remote-staging.yardsort.sh`, on one Machine and, with the owner's go-ahead, on two as
+in slice 9's; then step 3 with
+`fly ssh console -a yardsort-remote-staging -C "/usr/local/bin/yardsort-server revoke-account --subject <id>"`.

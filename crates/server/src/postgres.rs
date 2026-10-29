@@ -5,11 +5,21 @@
 //! value is taken with `DELETE … RETURNING`, and a refresh credential is checked and replaced with
 //! its row and its device's locked.
 //!
+//! **Signals** between instances ([`Signal`]) are PostgreSQL notifications on one channel
+//! ([`SIGNAL_CHANNEL`]): sent on any pooled connection, and heard on one connection of each
+//! instance's own, opened the first time something listens and opened again when it breaks, with a
+//! [`Signal::RecheckAll`] each time it starts listening, for whatever went by meanwhile. That
+//! connection sends itself a probe every 30 seconds; one that does not come back means the
+//! connection has died quietly, or goes through a pooler that never passes notifications on, and
+//! it is opened again, with a warning that says so. It closes once nobody listens, and the next
+//! listener opens it again.
+//!
 //! The schema is in `migrations/`, applied in order when the server connects, under an advisory
 //! lock so that two instances starting together do not both apply it. Migrations are append-only:
 //! a shipped file is never edited, and a change is a new file.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Transaction};
 use std::collections::BTreeSet;
@@ -17,12 +27,13 @@ use std::collections::BTreeSet;
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope, ServerId};
-use tokio_postgres::{Client, Row};
+use tokio::sync::{broadcast, mpsc};
+use tokio_postgres::{AsyncMessage, Client, Row};
 
 use crate::records::{
     AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host,
     HostOffer, Issued, LinkPlace, PendingLogin, Records, RecordsError, Redemption, Result,
-    RevokeReason, Revoked, Rotation, SEEN_RESOLUTION_MS,
+    RevokeReason, Revoked, Rotation, Signal, SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
 use crate::tokens::TokenHash;
 
@@ -64,8 +75,27 @@ const GRANT: &str = "g.id, g.account, g.host, g.device, g.requested, g.scopes, g
                      g.status, g.created_at, g.expires_at, g.decided_at, \
                      h.name, d.name, d.revoked_at IS NOT NULL";
 
+/// The notification channel signals travel on.
+pub const SIGNAL_CHANNEL: &str = "yardsort_relay";
+
+/// The longest wait before listening again after the connection broke.
+const MAX_LISTEN_BACKOFF: Duration = Duration::from_secs(30);
+
+/// How often the listening connection sends itself a probe, and how long the probe has to come
+/// back before the connection counts as broken.
+const PROBE_EVERY: Duration = Duration::from_secs(30);
+
+/// The first word of a probe's text, which no [`Signal`] reads as.
+const PROBE: &str = "probe";
+
+/// Where an instance's signals are handed out: `None` while nothing listens for them.
+type Listeners = Arc<Mutex<Option<broadcast::Sender<Signal>>>>;
+
 pub struct PgRecords {
     pool: Pool,
+    /// For the listening connection, which is not one of the pool's.
+    config: tokio_postgres::Config,
+    listeners: Listeners,
 }
 
 impl PgRecords {
@@ -80,7 +110,7 @@ impl PgRecords {
 
     pub async fn connect_with(config: tokio_postgres::Config) -> Result<Self> {
         let manager = Manager::from_config(
-            config,
+            config.clone(),
             tls()?,
             ManagerConfig {
                 recycling_method: RecyclingMethod::Fast,
@@ -90,7 +120,11 @@ impl PgRecords {
             .max_size(POOL_SIZE)
             .build()
             .map_err(failed)?;
-        let records = Self { pool };
+        let records = Self {
+            pool,
+            config,
+            listeners: Listeners::default(),
+        };
         let mut client = records.client().await?;
         migrate(&mut client).await?;
         Ok(records)
@@ -117,6 +151,124 @@ impl PgRecords {
     async fn client(&self) -> Result<deadpool_postgres::Object> {
         self.pool.get().await.map_err(failed)
     }
+}
+
+/// Hear the signals every instance sends, on a connection of this instance's own, until nobody
+/// listens any more. Each time it starts listening it says [`Signal::RecheckAll`]: whatever went
+/// by while it was not is checked that way.
+async fn listen(
+    config: tokio_postgres::Config,
+    listeners: Listeners,
+    signals: broadcast::Sender<Signal>,
+) {
+    let mut backoff = Duration::from_secs(1);
+    loop {
+        match listen_once(&config, &listeners, &signals, &mut backoff).await {
+            Ok(()) => return,
+            Err(error) => tracing::warn!("records: not listening for signals: {error}"),
+        }
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(MAX_LISTEN_BACKOFF);
+        if nobody_listens(&listeners, &signals) {
+            return;
+        }
+    }
+}
+
+/// One connection's worth of listening: until it breaks, or nobody listens. `backoff` starts over
+/// once its probe comes back, so a connection that keeps breaking at once waits longer each time.
+async fn listen_once(
+    config: &tokio_postgres::Config,
+    listeners: &Listeners,
+    signals: &broadcast::Sender<Signal>,
+    backoff: &mut Duration,
+) -> Result<()> {
+    let (client, mut connection) = config.connect(tls()?).await.map_err(failed)?;
+    let (heard, mut hearing) = mpsc::unbounded_channel();
+    // The connection is driven here, which is also where its notifications come out.
+    let driving = tokio::spawn(async move {
+        let mut messages = futures_util::stream::poll_fn(move |cx| connection.poll_message(cx));
+        while let Some(Ok(message)) = futures_util::StreamExt::next(&mut messages).await {
+            if let AsyncMessage::Notification(notification) = message {
+                if heard.send(notification.payload().to_owned()).is_err() {
+                    return;
+                }
+            }
+        }
+    });
+    let listening = hear(&client, &mut hearing, listeners, signals, backoff).await;
+    driving.abort();
+    listening
+}
+
+async fn hear(
+    client: &Client,
+    hearing: &mut mpsc::UnboundedReceiver<String>,
+    listeners: &Listeners,
+    signals: &broadcast::Sender<Signal>,
+    backoff: &mut Duration,
+) -> Result<()> {
+    client
+        .batch_execute(&format!("LISTEN {SIGNAL_CHANNEL}"))
+        .await
+        .map_err(failed)?;
+    let _ = signals.send(Signal::RecheckAll);
+    // This connection's own, so that another instance's probe is not taken for it.
+    let probe = format!("{PROBE} {}", uuid::Uuid::new_v4());
+    let mut waiting = false;
+    let mut probing = tokio::time::interval(PROBE_EVERY);
+    probing.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            payload = hearing.recv() => {
+                let Some(payload) = payload else {
+                    return Err(RecordsError("the listening connection closed".into()));
+                };
+                if nobody_listens(listeners, signals) {
+                    return Ok(());
+                }
+                if payload == probe {
+                    waiting = false;
+                    *backoff = Duration::from_secs(1);
+                } else if let Some(signal) = Signal::decode(&payload) {
+                    let _ = signals.send(signal);
+                }
+            }
+            _ = probing.tick() => {
+                if waiting {
+                    return Err(RecordsError(format!(
+                        "its own probe did not come back within {}s, so signals are not arriving \
+                         and revocations wait for the relay's rounds; DATABASE_URL must be a direct \
+                         connection, not a transaction pooler",
+                        PROBE_EVERY.as_secs()
+                    )));
+                }
+                if nobody_listens(listeners, signals) {
+                    return Ok(());
+                }
+                tokio::time::timeout(
+                    PROBE_EVERY,
+                    client.execute("SELECT pg_notify($1, $2)", &[&SIGNAL_CHANNEL, &probe]),
+                )
+                .await
+                .map_err(|_| RecordsError("sending a probe timed out".into()))?
+                .map_err(failed)?;
+                waiting = true;
+            }
+        }
+    }
+}
+
+/// Whether nobody listens any more, in which case listening stops and the next listener starts it
+/// again. Decided under the lock new listeners subscribe under, so that none subscribes to a
+/// channel nothing feeds.
+fn nobody_listens(listeners: &Listeners, signals: &broadcast::Sender<Signal>) -> bool {
+    let mut listeners = listeners.lock().unwrap();
+    if signals.receiver_count() > 0 {
+        return false;
+    }
+    *listeners = None;
+    true
 }
 
 fn tls() -> Result<tokio_postgres_rustls::MakeRustlsConnect> {
@@ -351,7 +503,7 @@ impl Records for PgRecords {
             )
             .await
             .map_err(failed)?;
-            Rotation::Reused
+            Rotation::Reused(device.account.clone())
         } else if expires_at <= now {
             Rotation::Expired
         } else {
@@ -840,6 +992,35 @@ impl Records for PgRecords {
             .iter()
             .map(link_place)
             .collect()
+    }
+
+    async fn signal(&self, signal: Signal) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "SELECT pg_notify($1, $2)",
+                &[&SIGNAL_CHANNEL, &signal.encode()],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    fn signals(&self) -> broadcast::Receiver<Signal> {
+        let mut listeners = self.listeners.lock().unwrap();
+        if let Some(sender) = &*listeners {
+            return sender.subscribe();
+        }
+        // The first listener exists before the task that serves it starts, or the task could
+        // find nobody listening and stop at once.
+        let (sender, first) = broadcast::channel(SIGNALS_KEPT);
+        tokio::spawn(listen(
+            self.config.clone(),
+            Arc::clone(&self.listeners),
+            sender.clone(),
+        ));
+        *listeners = Some(sender);
+        first
     }
 
     async fn pending_on_links(&self, instance: &str, now: i64) -> Result<Vec<(HostId, GrantId)>> {

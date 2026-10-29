@@ -10,6 +10,7 @@ use url::Url;
 use crate::oidc::{OidcError, Provider, ProviderConfig};
 use crate::records::{
     AccountId, Device, Handoff, Issued, PendingLogin, Records, RevokeReason, Revoked, Rotation,
+    Signal,
 };
 use crate::relay::Relay;
 use crate::tokens::{self, Kind};
@@ -96,6 +97,16 @@ impl<R: Records> ControlService<R> {
     /// The relay's sockets, to close them all when the server stops.
     pub fn relay(&self) -> &Relay {
         &self.relay
+    }
+
+    /// Something of `account` was revoked or replaced: every instance checks its sockets now,
+    /// this one without waiting for the signal to come back. A signal that fails to go is caught
+    /// up with by the other instances' next round of checks.
+    pub(crate) async fn revoked(&self, account: &AccountId) {
+        self.relay.nudge(account);
+        if let Err(error) = self.records.signal(Signal::Recheck(account.clone())).await {
+            tracing::error!("relay: records: {error}");
+        }
     }
 
     /// With `relay` in place of one instance named at random: for a server that runs as several.
@@ -340,10 +351,14 @@ impl<R: Records> ControlService<R> {
                     .map_err(unreadable)?
                 {
                     Rotation::Rotated(device) => Ok(pair.for_device(device.id)),
-                    Rotation::Reused => Err(unauthenticated(
+                    Rotation::Reused(account) => {
+                        // A copy's holder may have a socket open as that device: it closes now.
+                        self.revoked(&account).await;
+                        Err(unauthenticated(
                         "This device's sign-in was used from somewhere else, so the device was \
                          signed out. Sign in again.",
-                    )),
+                        ))
+                    }
                     Rotation::Expired | Rotation::Revoked | Rotation::Unknown => Err(signed_out()),
                 }
             }
@@ -420,7 +435,7 @@ impl<R: Records> ControlService<R> {
             .await
             .map_err(unreadable)?;
         if revoked {
-            self.relay.nudge(&caller.account);
+            self.revoked(&caller.account).await;
             Ok(())
         } else {
             Err(RemoteError::not_found())
