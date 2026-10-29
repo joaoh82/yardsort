@@ -609,9 +609,11 @@ On Linux, 2026-10-29, the seventh slice:
   timed out under the full run's load, as it has on other branches). `just lint-windows` and
   `just bindings-check` passed.
 
-**Not run here:** the smoke test (§14); the end-to-end run, which needs Docker access this session
-still does not have, and which CI runs, now checking that the pretend phone resumed; Windows and
-macOS, where CI runs the same tests. No phone.
+**The smoke test on this machine** (§14), on 2026-10-29, run by a person: passed.
+
+**Not run here:** the end-to-end run, which needs Docker access this session still does not have,
+and which CI runs, now checking that the pretend phone resumed; Windows and macOS, where CI runs
+the same tests; staging's smoke test, which waits for slice 6 to be deployed there. No phone.
 
 On Linux, 2026-10-28, the sixth slice:
 
