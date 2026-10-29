@@ -201,8 +201,9 @@ impl Phone {
         }
     }
 
-    /// Take control, watch, and type `line`; wait until the program answers it.
-    async fn take_and_type(&mut self, terminal: &str, line: &str) {
+    /// Take control, watch, and type `line`; wait until the program answers it. Returns the
+    /// lease.
+    async fn take_and_type(&mut self, terminal: &str, line: &str) -> Value {
         let lease = self
             .ask("terminal.acquire", json!({"terminal": terminal}))
             .await;
@@ -225,6 +226,24 @@ impl Phone {
             assert!(start.elapsed() < SOON, "never drawn: {:?}", self.drawn);
             let _ = tokio::time::timeout(Duration::from_millis(200), self.text()).await;
         }
+        lease["result"].clone()
+    }
+
+    /// Type input number `seq` under `lease`, and give control back straight away, without
+    /// waiting to see the answer.
+    async fn type_and_release(&mut self, terminal: &str, lease: &Value, seq: u64, line: &str) {
+        let held = json!({
+            "terminal": terminal,
+            "lease": lease["id"],
+            "generation": lease["generation"],
+        });
+        let mut input = held.clone();
+        input["seq"] = seq.into();
+        input["data"] = format!("{line}\r").into();
+        let typed = self.ask("terminal.input", input).await;
+        assert_eq!(typed["result"]["kind"], "done", "{typed}");
+        let released = self.ask("terminal.release", held).await;
+        assert_eq!(released["result"]["kind"], "done", "{released}");
     }
 
     async fn closed(&mut self) -> CloseReason {
@@ -329,10 +348,19 @@ async fn a_phone_types_through_the_relay_loses_its_stream_when_revoked_and_a_fai
     let (credentials, grant) = approved_phone(&s, "alice", &host, &host_id).await;
     let_in(&credentials, &grant);
     let mut phone = Phone::connect(&s, &credentials, &host_id).await;
-    phone.take_and_type(&terminal, "from-the-phone").await;
+    let lease = phone.take_and_type(&terminal, "from-the-phone").await;
     until("the host's own view shows it", || {
         at_host.lock().unwrap().contains("got:from-the-phone")
     })
+    .await;
+    // Typed and let go at once, as the pairing tool does: the line still reaches the program.
+    phone
+        .type_and_release(&terminal, &lease, 2, "then-let-go")
+        .await;
+    until(
+        "the program answers the line typed before letting go",
+        || at_host.lock().unwrap().contains("got:then-let-go"),
+    )
     .await;
 
     // Its grant is revoked at the server: the live stream closes within seconds, and what it

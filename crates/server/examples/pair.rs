@@ -430,10 +430,22 @@ mod serving {
         /// What the program printed back, and whether it is still running.
         pub fn report(&self) -> String {
             let seen = self.seen.lock().unwrap();
+            // What is seen starts with the snapshot, which ends without a newline: the first
+            // line the program prints is drawn on the end of it.
             let lines: Vec<&str> = seen
                 .split(['\r', '\n'])
-                .filter(|l| l.starts_with("got:"))
+                .filter_map(|l| l.find("got:").map(|at| &l[at..]))
                 .collect();
+            if lines.is_empty() {
+                let tail = seen.len().saturating_sub(400);
+                let tail = (tail..=seen.len())
+                    .find(|&at| seen.is_char_boundary(at))
+                    .unwrap_or(seen.len());
+                println!(
+                    "Nothing printed back; the terminal here last drew {:?}.",
+                    &seen[tail..]
+                );
+            }
             let running = matches!(
                 self.terminals.info(&self.program).map(|i| i.state),
                 Ok(SessionState::Running)
@@ -586,6 +598,8 @@ async fn through_relay(
         .map_err(|e| e.to_string())?;
 
     let mut items: Vec<u64> = Vec::new();
+    // What the program drew after the snapshot.
+    let mut drawn: Vec<u8> = Vec::new();
     let mut stream = None;
     // The next text message, keeping count of output frames on the way.
     macro_rules! next_text {
@@ -607,6 +621,9 @@ async fn through_relay(
                         if let Ok(frame) = remote_proto::OutputFrame::decode(&frame) {
                             if items.last() != Some(&frame.position.seq) {
                                 items.push(frame.position.seq);
+                            }
+                            if items.first() != Some(&frame.position.seq) {
+                                drawn.extend_from_slice(frame.bytes);
                             }
                         }
                     }
@@ -779,6 +796,10 @@ async fn through_relay(
         } else {
             "NOT IN ORDER"
         }
+    );
+    println!(
+        "After the snapshot the program drew {:?}.",
+        String::from_utf8_lossy(&drawn)
     );
     writer.close().await;
     match ended {

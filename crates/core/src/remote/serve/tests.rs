@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pty_host::{LaunchPlan, PtyHost, SessionInfo, SessionState};
+use pty_host::{LaunchPlan, Numbered, PtyHost, SessionId, SessionInfo, SessionState};
 use remote_proto::{DeviceId, GrantId, HostId, ProjectGrant, ProjectId, ProtocolVersion, Scope};
 use serde_json::{json, Value};
 
@@ -207,6 +207,49 @@ fn shell(script: &str) -> LaunchPlan {
         labels: Default::default(),
         prompt: None,
     }
+}
+
+/// A program written once for PowerShell on Windows, and once for `sh` everywhere else.
+fn script(windows: &str, unix: &str) -> LaunchPlan {
+    if cfg!(windows) {
+        LaunchPlan {
+            program: "powershell.exe".into(),
+            args: vec!["-NoProfile".into(), "-Command".into(), windows.into()],
+            ..shell(unix)
+        }
+    } else {
+        shell(unix)
+    }
+}
+
+/// Wait until the program has drawn `text`, watching as a viewer that is not a terminal, so
+/// the host goes on answering the program's queries meanwhile.
+fn wait_until_drawn(host: &PtyHost, id: &SessionId, text: &str) {
+    let seen = Arc::new(Mutex::new(String::new()));
+    let watching = Arc::clone(&seen);
+    let attachment = host
+        .attach_numbered(
+            id,
+            Box::new(move |item| {
+                if let Numbered::Snapshot { bytes, .. } | Numbered::Output { bytes, .. } = item {
+                    watching
+                        .lock()
+                        .unwrap()
+                        .push_str(&String::from_utf8_lossy(bytes));
+                }
+                true
+            }),
+        )
+        .unwrap();
+    let start = Instant::now();
+    while !seen.lock().unwrap().contains(text) {
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "never drew {text:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    host.detach(id, attachment).unwrap();
 }
 
 fn long_running() -> LaunchPlan {
@@ -477,29 +520,29 @@ fn closing_a_channel_lets_go_of_everything_and_the_program_runs_on() {
 }
 
 /// Waits for a line, prints it back, a hundred times.
-#[cfg(unix)]
 fn echo_lines() -> LaunchPlan {
-    shell("i=0; while [ $i -lt 100 ]; do read line; echo \"got:$line\"; i=$((i+1)); done")
+    script(
+        "for ($i = 0; $i -lt 100; $i++) { $l = [Console]::In.ReadLine(); Write-Output \"got:$l\" }",
+        "i=0; while [ $i -lt 100 ]; do read line; echo \"got:$line\"; i=$((i+1)); done",
+    )
 }
 
-#[cfg(unix)]
 #[test]
 fn a_device_watches_from_a_snapshot_and_types_under_its_lease() {
     let fx = Fixture::new();
     fx.approve(PHONE, "g-phone", &ALL, ProjectGrant::All);
     let terminal = fx.terminal(
         &fx.alpha,
-        shell("printf 'before\\n'; exec sh -c 'read l; echo \"got:$l\"; sleep 30'"),
+        script(
+            "Write-Output before; $l = [Console]::In.ReadLine(); Write-Output \"got:$l\"; \
+             Start-Sleep 30",
+            "printf 'before\\n'; exec sh -c 'read l; echo \"got:$l\"; sleep 30'",
+        ),
     );
     let out = Recorded::new(usize::MAX);
     let phone = fx.visitor(PHONE, "g-phone", &out);
     // Something drawn before the device came.
-    let start = Instant::now();
-    while !fx.host.info(&terminal.id).unwrap().has_output {
-        assert!(start.elapsed() < Duration::from_secs(10));
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    std::thread::sleep(Duration::from_millis(100));
+    wait_until_drawn(&fx.host, &terminal.id, "before");
 
     let attached = ask(
         &fx,
@@ -600,7 +643,6 @@ fn a_device_watches_from_a_snapshot_and_types_under_its_lease() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_device_that_falls_behind_is_detached_and_told_and_the_program_never_waits() {
     let fx = Fixture::new();

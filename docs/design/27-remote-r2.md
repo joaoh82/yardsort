@@ -1040,7 +1040,8 @@ lists the device, refreshes, revokes itself, and shows the `401` after.
    keeps control here, and the tool says it could not take it.)
 5. Type in the app's shell. The tool keeps watching, and stops at nothing.
 6. **Revoke** the tool's device in the app. Within five seconds the tool says the relay closed the
-   socket because access was revoked, and that it saw its items numbered without a gap.
+   socket because access was revoked, that it saw its items numbered without a gap, and what the
+   shell drew after the snapshot it was attached with.
 7. The relay failing: pair and run the tool again, without `--type`. While it watches, stop
    `just server-run` with Ctrl-C. The tool says the server is restarting; the app's shell still
    runs and takes typing; Settings → Remote says it is not connected and tries again. Start
