@@ -21,8 +21,9 @@
 //! ([`Routing::FlyReplay`]), a device's ticket request that reaches another instance is sent to
 //! the link's, which issues the ticket with its own name as the route; the socket names the
 //! route, and is sent there too. A link that a later one of the same host replaced on another
-//! instance is closed at the next round. Without such a proxy ([`Routing::Single`]) the server
-//! must run as one instance.
+//! instance is closed at once, by the later link's [`Signal`], once the records say the later one
+//! took its place; the rounds catch a signal that did not arrive. Without such a proxy
+//! ([`Routing::Single`]) the server must run as one instance.
 //!
 //! **A host hears of a device asking to pair** on its link's own channel ([`HostNotice`]), at
 //! once: from the instance the device asked through, or by its [`Signal`] from another. Each
@@ -643,6 +644,10 @@ impl<R: Records> ControlService<R> {
                     .push(json_message(&Greeting::Connected { host: host.clone() }));
                 self.relay.attach_host(&link);
                 tracing::info!(%host, "relay: host connected");
+                // An earlier link of this host on another instance is closed there now.
+                if let Err(error) = self.records.signal(Signal::Linked(host.clone())).await {
+                    tracing::error!("relay: records: {error}");
+                }
                 // What already waits for it, rather than at the next round.
                 tell_pending(&self).await;
                 let reason = pump(sink, stream, &link.out, |message| {
@@ -951,6 +956,30 @@ async fn keep_places<R: Records>(service: &ControlService<R>) {
     }
 }
 
+/// Close this instance's link of `host`, if it has one and the records say a later link took its
+/// place.
+async fn keep_place<R: Records>(service: &ControlService<R>, host: &HostId) {
+    let Some(link) = lock(&service.relay.hub.hosts).get(host).cloned() else {
+        return;
+    };
+    match service.records.link_place(host).await {
+        Ok(Some(place)) if place.link == link.place => {}
+        // Noted before it was attached, so a place gone or another's was taken since.
+        Ok(_) => {
+            // Unless it was replaced here meanwhile, by a link the records already name.
+            let still = lock(&service.relay.hub.hosts)
+                .get(host)
+                .is_some_and(|l| Arc::ptr_eq(l, &link));
+            if still {
+                tracing::info!(%host, "relay: host connected again elsewhere");
+                link.close_all(CloseReason::HostOffline);
+                link.out.close(CloseReason::Replaced);
+            }
+        }
+        Err(error) => tracing::error!("relay: records: {error}"),
+    }
+}
+
 /// Tell this instance's hosts of the pairing requests waiting for them that they were not told
 /// of: those made through another instance, or before the host connected.
 async fn tell_pending<R: Records>(service: &ControlService<R>) {
@@ -998,8 +1027,13 @@ pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R
                         service.relay.tell_pairing(&host, &grant);
                         Vec::new()
                     }
+                    Some(Ok(Signal::Linked(host))) => {
+                        keep_place(&service, &host).await;
+                        Vec::new()
+                    }
                     // Started listening, or missed some: everything, as a round does.
                     Some(Ok(Signal::RecheckAll) | Err(broadcast::error::RecvError::Lagged(_))) => {
+                        keep_places(&service).await;
                         tell_pending(&service).await;
                         service.relay.accounts()
                     }

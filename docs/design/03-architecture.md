@@ -606,7 +606,9 @@ remote ever talks to it directly. Instead:
   channel when a device asks to pair, a hint the app follows by asking the server
   ([27 §13](27-remote-r2.md#13--what-the-tenth-slice-adds)). Instances signal each other through
   PostgreSQL's notifications, so a revocation anywhere reaches every live socket at once
-  ([27 §14](27-remote-r2.md#14--what-the-eleventh-slice-adds)). It ships as a container image,
+  ([27 §14](27-remote-r2.md#14--what-the-eleventh-slice-adds)), and a host link replaced on
+  another instance closes at once; rate limits are counted across every instance in the records
+  ([27 §15](27-remote-r2.md#15--what-the-twelfth-slice-adds)). It ships as a container image,
   which staging on Fly.io and the self-host recipe
   (`crates/server/self-host/`) both run; staging has run on Fly.io since 2026-10-24
   ([28](28-remote-infrastructure.md)).

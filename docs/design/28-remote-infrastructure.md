@@ -166,7 +166,7 @@ Settled on 2026-10-23:
    - **Type:** **Web**.
    - **Authentication method:** **Code**, so the server authenticates with a client secret.
      The server sends PKCE as well, which ZITADEL accepts alongside the secret: confirmed against
-     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §15).
+     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §16).
    - **Redirect URI:** `https://remote-staging.yardsort.sh/v1/login/callback`.
    - **Development mode:** off.
    - **Refresh tokens:** leave them off. The server never asks ZITADEL for one.
@@ -247,7 +247,7 @@ the owner's go-ahead:
   (`.github/workflows/server-deploy.yml`), and the self-host recipe (`crates/server/self-host/`).
   Staging was first deployed from a workstation, with the workflow's arguments, before the
   workflow reached `main`. Step E and staging's smoke test followed on 2026-10-25, and the test
-  passed ([27](27-remote-r2.md) §15). The workflow first deployed it from Actions on 2026-10-25.
+  passed ([27](27-remote-r2.md) §16). The workflow first deployed it from Actions on 2026-10-25.
   Production's Fly config and its protected environment come with its ZITADEL instance.
 - **Slice 4, built on 2026-10-25** ([27](27-remote-r2.md) §7): pairing, on the server and in the
   app behind `YARDSORT_REMOTE_PREVIEW=1`. Its migration `0002_hosts_and_grants.sql` reaches
@@ -279,6 +279,11 @@ the owner's go-ahead:
   a connection per transaction, as Neon's pooled string does, signals would never arrive, and
   only the five-second rounds would remain. The server notices within a minute and logs "records:
   not listening for signals: its own probe did not come back…". No migration, no new secret, no
+  new setting.
+- **Slice 12, built on 2026-10-29** ([27](27-remote-r2.md) §15): rate limits shared across
+  instances, in a new table, `rate_limits` (migration `0004`, applied as the server starts), with
+  one more write per limited request; each instance sweeps its full buckets every minute. A host
+  link replaced on another instance closes at once, by one more kind of signal. No new secret, no
   new setting.
 
 ## 7 · Open decisions

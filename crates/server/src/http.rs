@@ -4,8 +4,8 @@
 //! and with a short plain-text page when there is nowhere to send the browser. Everything else is
 //! JSON, and a failure is a [`RemoteError`] with the HTTP status that matches its code.
 //!
-//! Starting a sign-in, `/v1/token`, making a pairing offer and redeeming one are limited per
-//! client address ([`crate::limit`]). Behind a
+//! Starting a sign-in, `/v1/token`, making a pairing offer, redeeming one and asking for a relay
+//! ticket are limited per client address, across every instance ([`crate::limit`]). Behind a
 //! proxy, the address is the one the proxy names in [`Options::client_ip_header`]; otherwise the
 //! connection's own, which needs the router served with `into_make_service_with_connect_info`.
 //!
@@ -83,44 +83,48 @@ impl Default for Options {
 type Service<R> = Arc<ControlService<R>>;
 
 pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options) -> Router {
-    let gate = |per_minute, answer| {
+    let service = Arc::new(service);
+    let gate = |name, per_minute, answer| {
         Arc::new(Gate {
+            name,
+            per_minute,
             limiter: Limiter::per_minute(per_minute),
+            service: Arc::clone(&service),
             client_ip_header: options.client_ip_header.clone(),
             answer,
         })
     };
-    let logins = gate(options.logins_per_minute, Answer::Page);
-    let tokens = gate(options.tokens_per_minute, Answer::Json);
-    let offers = gate(options.offers_per_minute, Answer::Json);
-    let pairings = gate(options.pairings_per_minute, Answer::Json);
-    let tickets = gate(options.tickets_per_minute, Answer::Json);
-    let service = Arc::new(service);
+    let logins = gate("logins", options.logins_per_minute, Answer::Page);
+    let tokens = gate("tokens", options.tokens_per_minute, Answer::Json);
+    let offers = gate("offers", options.offers_per_minute, Answer::Json);
+    let pairings = gate("pairings", options.pairings_per_minute, Answer::Json);
+    let tickets = gate("tickets", options.tickets_per_minute, Answer::Json);
     crate::relay::start_rechecks(Arc::clone(&service));
+    crate::limit::start_sweeping(Arc::downgrade(&service));
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/server", get(describe::<R>))
         .route(
             "/v1/login",
-            get(login::<R>).route_layer(middleware::from_fn_with_state(logins, limited)),
+            get(login::<R>).route_layer(middleware::from_fn_with_state(logins, limited::<R>)),
         )
         .route("/v1/login/callback", get(callback::<R>))
         .route(
             "/v1/token",
-            post(token::<R>).route_layer(middleware::from_fn_with_state(tokens, limited)),
+            post(token::<R>).route_layer(middleware::from_fn_with_state(tokens, limited::<R>)),
         )
         .route("/v1/devices", get(devices::<R>))
         .route("/v1/devices/{id}/revoke", post(revoke::<R>))
         .route("/v1/hosts", get(hosts::<R>).post(register_host::<R>))
         .route(
             "/v1/hosts/{id}/offers",
-            post(offer::<R>).route_layer(middleware::from_fn_with_state(offers, limited)),
+            post(offer::<R>).route_layer(middleware::from_fn_with_state(offers, limited::<R>)),
         )
         .route("/v1/hosts/{id}/grants", get(host_grants::<R>))
         .route("/v1/hosts/{id}/remove", post(remove_host::<R>))
         .route(
             "/v1/pairings",
-            post(pair::<R>).route_layer(middleware::from_fn_with_state(pairings, limited)),
+            post(pair::<R>).route_layer(middleware::from_fn_with_state(pairings, limited::<R>)),
         )
         .route("/v1/grants", get(device_grants::<R>))
         .route("/v1/grants/{id}", get(grant::<R>))
@@ -129,7 +133,7 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
         .route("/v1/grants/{id}/revoke", post(revoke_grant::<R>))
         .route(
             "/v1/relay/tickets",
-            post(ticket::<R>).route_layer(middleware::from_fn_with_state(tickets, limited)),
+            post(ticket::<R>).route_layer(middleware::from_fn_with_state(tickets, limited::<R>)),
         )
         .route("/v1/relay", get(relay::<R>))
         .fallback(|| async { failure(RemoteError::not_found()) })
@@ -138,8 +142,13 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
         .with_state(service)
 }
 
-struct Gate {
+/// One rate limit: counted here, then in the records every instance shares ([`crate::limit`]).
+struct Gate<R> {
+    /// Its name in the records.
+    name: &'static str,
+    per_minute: u32,
     limiter: Limiter,
+    service: Service<R>,
     client_ip_header: Option<HeaderName>,
     answer: Answer,
 }
@@ -150,9 +159,20 @@ enum Answer {
     Json,
 }
 
-async fn limited(State(gate): State<Arc<Gate>>, request: Request, next: Next) -> Response {
+async fn limited<R: Records>(
+    State(gate): State<Arc<Gate<R>>>,
+    request: Request,
+    next: Next,
+) -> Response {
     let address = client_address(&request, gate.client_ip_header.as_ref());
-    let Err(wait) = gate.limiter.check(address, Instant::now()) else {
+    let wait = match gate.limiter.check(address, Instant::now()) {
+        Ok(()) => {
+            let records = &gate.service.records;
+            crate::limit::take_shared(records, gate.name, address, gate.per_minute).await
+        }
+        Err(wait) => Some(wait),
+    };
+    let Some(wait) = wait else {
         return next.run(request).await;
     };
     let message = "Too many attempts from this address. Try again in a minute.";

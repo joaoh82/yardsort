@@ -1,9 +1,14 @@
-//! How often one address may start a sign-in or ask for credentials: a token bucket per address,
-//! in this process. Credentials are 256-bit random, so this is not what stops guessing; it keeps
-//! one address from filling the records with sign-ins in progress or keeping the server busy.
+//! How often one address may start a sign-in or ask for credentials: a token bucket per address.
+//! Credentials are 256-bit random, so this is not what stops guessing; it keeps one address from
+//! filling the records with sign-ins in progress or keeping the server busy.
 //!
-//! Each instance counts on its own, so two instances allow twice the rate. An IPv6 address counts
-//! with the rest of its /64, which one subscriber usually holds whole.
+//! Each request is counted twice, against the same rate: first in this process ([`Limiter`]),
+//! then in the records, which every instance of the server shares ([`take_shared`]). The first
+//! keeps a flood from one address, or from many, off the database; the second keeps two instances
+//! from allowing twice the rate. When the records cannot answer, the request goes through on this
+//! process's count alone. The records keep an address as a hash, for a minute or two after its
+//! last request ([`start_sweeping`]); a hash of an IPv4 address can be found by trying them all.
+//! An IPv6 address counts with the rest of its /64, which one subscriber usually holds whole.
 //!
 //! At most [`MAX_TRACKED`] addresses are counted one by one. When that many are, full buckets
 //! (which say nothing) are swept out at most once every [`SWEEP_EVERY`], and an address that
@@ -13,8 +18,13 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
-use std::sync::Mutex;
+use std::sync::{Mutex, Weak};
 use std::time::{Duration, Instant};
+
+use crate::http::now_ms;
+use crate::records::{Allowance, Records, ALLOWANCE_REFILLS_MS};
+use crate::tokens::{self, TokenHash};
+use crate::ControlService;
 
 /// Addresses counted one by one.
 const MAX_TRACKED: usize = 10_000;
@@ -98,6 +108,52 @@ impl Limiter {
         let elapsed = now.saturating_duration_since(bucket.at).as_secs_f64();
         (bucket.tokens + elapsed * self.per_minute / 60.0).min(self.per_minute)
     }
+}
+
+/// How often the records' full buckets are swept.
+const SWEEP_SHARED_EVERY: Duration = Duration::from_secs(60);
+
+/// Take one for `address` from `gate`'s limit in the records, which every instance shares, or say
+/// how long until one is free. `None` too when the records cannot say.
+pub async fn take_shared<R: Records>(
+    records: &R,
+    gate: &str,
+    address: IpAddr,
+    per_minute: u32,
+) -> Option<Duration> {
+    match records
+        .take_allowance(gate, &shared_key(address), per_minute, now_ms())
+        .await
+    {
+        Ok(Allowance::Taken) => None,
+        Ok(Allowance::Wait(wait)) => Some(wait),
+        Err(error) => {
+            tracing::error!("limit: records: {error}");
+            None
+        }
+    }
+}
+
+/// What the records count `address` as: a hash of its group, with a prefix of its own.
+pub fn shared_key(address: IpAddr) -> TokenHash {
+    tokens::hash(&format!("ys1.ip.{}", grouped(address)))
+}
+
+/// Sweep the records' full buckets every [`SWEEP_SHARED_EVERY`], while the service lasts.
+pub(crate) fn start_sweeping<R: Records + 'static>(service: Weak<ControlService<R>>) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(SWEEP_SHARED_EVERY);
+        loop {
+            every.tick().await;
+            let Some(service) = service.upgrade() else {
+                return;
+            };
+            let before = now_ms() - ALLOWANCE_REFILLS_MS;
+            if let Err(error) = service.records.sweep_allowances(before).await {
+                tracing::error!("limit: records: {error}");
+            }
+        }
+    });
 }
 
 /// What an address is counted as: itself, or its /64 for IPv6.

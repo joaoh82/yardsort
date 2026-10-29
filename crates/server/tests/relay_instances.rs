@@ -3,7 +3,8 @@
 //! requests land on, a host that connects again on the other instance takes its link with it, a
 //! revocation through one instance closes a socket held by the other, a place nobody keeps is
 //! not believed, and a host hears of a device asking to pair through the other instance: at the
-//! other's next round, and at once through the records' signals.
+//! other's next round, and at once through the records' signals, as a host's old link is closed.
+//! The two also share their rate limits.
 //!
 //! Everyone signs in and pairs at instance `a` itself; only the relay goes through the proxy. Each
 //! test also holds the records the two share, to look at them as a third instance would.
@@ -64,6 +65,8 @@ for_each_store!(
     a_place_nobody_keeps_is_not_believed,
     a_host_hears_of_a_device_asking_through_the_other_instance,
     what_happens_through_one_instance_reaches_the_other_at_once,
+    a_host_link_taken_elsewhere_closes_at_once,
+    two_instances_share_one_rate_limit,
 );
 
 /// Long enough for anything done at once.
@@ -505,4 +508,69 @@ async fn what_happens_through_one_instance_reaches_the_other_at_once(
         closed_within(SOON, &mut host.reader).await,
         CloseReason::Revoked
     );
+}
+
+async fn a_host_link_taken_elsewhere_closes_at_once(
+    a: impl Records + 'static,
+    b: impl Records + 'static,
+    _records: impl Records,
+) {
+    // A round a minute apart: only a signal gets anything there in time.
+    let i = instances_with_rounds(a, b, Duration::from_secs(60)).await;
+    let p = pair(&i.a).await;
+    i.proxy.land_on(Some("a"));
+    let mut first = i.host_link(&p).await;
+    let mut phone = i.phone_link(&p).await;
+    opened(&mut first.reader).await;
+
+    // The host connects again, landing on b: a lets its old link go at once, and the phone on it.
+    i.proxy.land_on(Some("b"));
+    let mut second = i.host_link(&p).await;
+    assert_eq!(
+        closed_within(SOON, &mut first.reader).await,
+        CloseReason::Replaced
+    );
+    assert_eq!(
+        closed_within(SOON, &mut phone.reader).await,
+        CloseReason::HostOffline
+    );
+
+    // The phone comes back, landing on a, and is sent to the new link on b.
+    i.proxy.land_on(Some("a"));
+    let mut phone = i.phone_link(&p).await;
+    they_talk(&mut second, &mut phone).await;
+}
+
+async fn two_instances_share_one_rate_limit(
+    a: impl Records + 'static,
+    b: impl Records + 'static,
+    _records: impl Records,
+) {
+    let options = || http::Options {
+        client_ip_header: Some("fly-client-ip".parse().unwrap()),
+        tokens_per_minute: 3,
+        ..http::Options::default()
+    };
+    let a = Served::start_with(a, options()).await;
+    let b = Served::start_with(b, options()).await;
+    let forged = json!({"grant": "refresh", "refresh": "ys1.rt.not-one-the-server-issued"});
+    let token = |s: &Served, from: &'static str| {
+        s.client
+            .post(s.url("v1/token"))
+            .header("fly-client-ip", from)
+            .json(&forged)
+            .send()
+    };
+    let status = |r: reqwest::Result<reqwest::Response>| r.unwrap().status();
+    // Three a minute from one address, wherever its requests land.
+    assert_eq!(status(token(&a, "192.0.2.1").await), 401);
+    assert_eq!(status(token(&a, "192.0.2.1").await), 401);
+    assert_eq!(status(token(&b, "192.0.2.1").await), 401);
+    let refused = token(&b, "192.0.2.1").await.unwrap();
+    assert_eq!(refused.status(), 429);
+    assert_eq!(refused.headers()["retry-after"], "20");
+    // a has counted only two of its own, and still refuses: the third was b's.
+    assert_eq!(status(token(&a, "192.0.2.1").await), 429);
+    // Another address is counted on its own.
+    assert_eq!(status(token(&b, "192.0.2.2").await), 401);
 }
