@@ -5,8 +5,10 @@
 //! Each request is counted twice, against the same rate: first in this process ([`Limiter`]),
 //! then in the records, which every instance of the server shares ([`take_shared`]). The first
 //! keeps a flood from one address, or from many, off the database; the second keeps two instances
-//! from allowing twice the rate. When the records cannot answer, the request goes through on this
-//! process's count alone. The records keep an address as a hash, for a minute or two after its
+//! from allowing twice the rate. A request this instance sends on to another (`fly-replay`) is
+//! given back to the records before the answer leaves, so that only the instance answering it
+//! counts it there ([`return_shared`]). When the records cannot answer, the request goes through
+//! on this process's count alone. The records keep an address as a hash, for a minute or two after its
 //! last request ([`start_sweeping`]); a hash of an IPv4 address can be found by trying them all.
 //! An IPv6 address counts with the rest of its /64, which one subscriber usually holds whole.
 //!
@@ -114,23 +116,31 @@ impl Limiter {
 const SWEEP_SHARED_EVERY: Duration = Duration::from_secs(60);
 
 /// Take one for `address` from `gate`'s limit in the records, which every instance shares, or say
-/// how long until one is free. `None` too when the records cannot say.
+/// how long until one is free. `None` when the records cannot say.
 pub async fn take_shared<R: Records>(
     records: &R,
     gate: &str,
     address: IpAddr,
     per_minute: u32,
-) -> Option<Duration> {
+) -> Option<Allowance> {
     match records
         .take_allowance(gate, &shared_key(address), per_minute, now_ms())
         .await
     {
-        Ok(Allowance::Taken) => None,
-        Ok(Allowance::Wait(wait)) => Some(wait),
+        Ok(allowance) => Some(allowance),
         Err(error) => {
             tracing::error!("limit: records: {error}");
             None
         }
+    }
+}
+
+/// Give back the one [`take_shared`] took for `address`: the request was sent on to another
+/// instance, which takes one for it there.
+pub async fn return_shared<R: Records>(records: &R, gate: &str, address: IpAddr, per_minute: u32) {
+    let key = shared_key(address);
+    if let Err(error) = records.return_allowance(gate, &key, per_minute).await {
+        tracing::error!("limit: records: {error}");
     }
 }
 

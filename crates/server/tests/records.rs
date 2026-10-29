@@ -72,6 +72,7 @@ for_each_store!(
     a_listener_coming_after_the_last_one_left_still_hears,
     a_rate_limit_is_one_bucket_per_gate_and_key_and_refills_over_a_minute,
     racing_requests_take_no_more_than_a_rate_limit_holds,
+    one_given_back_is_there_to_take_again_and_never_overfills,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -1431,6 +1432,41 @@ async fn racing_requests_take_no_more_than_a_rate_limit_holds(
         }
     }
     assert_eq!(taken, 5);
+}
+
+async fn one_given_back_is_there_to_take_again_and_never_overfills(records: Arc<impl Records>) {
+    let key = h("address-1");
+    // Nothing taken yet: nothing to give back, and nothing made.
+    records.return_allowance("tickets", &key, 2).await.unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+            Allowance::Taken
+        );
+    }
+    records.return_allowance("tickets", &key, 2).await.unwrap();
+    assert_eq!(
+        records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+        Allowance::Taken
+    );
+    assert!(matches!(
+        records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+        Allowance::Wait(_)
+    ));
+    // Given back more often than taken, it holds no more than its limit.
+    for _ in 0..5 {
+        records.return_allowance("tickets", &key, 2).await.unwrap();
+    }
+    for _ in 0..2 {
+        assert_eq!(
+            records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+            Allowance::Taken
+        );
+    }
+    assert!(matches!(
+        records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+        Allowance::Wait(_)
+    ));
 }
 
 #[test]

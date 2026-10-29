@@ -67,6 +67,7 @@ for_each_store!(
     what_happens_through_one_instance_reaches_the_other_at_once,
     a_host_link_taken_elsewhere_closes_at_once,
     two_instances_share_one_rate_limit,
+    a_ticket_request_sent_on_counts_once,
 );
 
 /// Long enough for anything done at once.
@@ -93,10 +94,20 @@ async fn instances_with_rounds(
     b: impl Records + 'static,
     rounds: Duration,
 ) -> Instances {
+    instances_with(a, b, rounds, http::Options::default).await
+}
+
+/// With rounds of checks `rounds` apart, each instance with `options`.
+async fn instances_with(
+    a: impl Records + 'static,
+    b: impl Records + 'static,
+    rounds: Duration,
+    options: impl Fn() -> http::Options,
+) -> Instances {
     let relay =
         |name: &str| Relay::with_rounds(Instance::new(name).unwrap(), Routing::FlyReplay, rounds);
-    let a = Served::start_as(a, http::Options::default(), relay("a")).await;
-    let b = Served::start_as(b, http::Options::default(), relay("b")).await;
+    let a = Served::start_as(a, options(), relay("a")).await;
+    let b = Served::start_as(b, options(), relay("b")).await;
     let addr = |s: &Served| s.base.socket_addrs(|| None).unwrap()[0];
     let proxy = ReplayProxy::start(vec![("a".into(), addr(&a)), ("b".into(), addr(&b))]).await;
     Instances { a, b, proxy }
@@ -573,4 +584,36 @@ async fn two_instances_share_one_rate_limit(
     assert_eq!(status(token(&a, "192.0.2.1").await), 429);
     // Another address is counted on its own.
     assert_eq!(status(token(&b, "192.0.2.2").await), 401);
+}
+
+async fn a_ticket_request_sent_on_counts_once(
+    a: impl Records + 'static,
+    b: impl Records + 'static,
+    _records: impl Records,
+) {
+    // Everyone's requests come from the proxy's address, so all count against one limit.
+    let options = || http::Options {
+        tickets_per_minute: 3,
+        ..http::Options::default()
+    };
+    let i = instances_with(a, b, RECHECK_EVERY, options).await;
+    let p = pair(&i.a).await;
+    i.proxy.land_on(Some("b"));
+    let _host = i.host_link(&p).await;
+
+    // The phone's requests land on a, which sends them on to b: each counts once, at b.
+    i.proxy.land_on(Some("a"));
+    let replays = i.proxy.replays();
+    for _ in 0..2 {
+        i.client()
+            .ticket(&p.phone.access, &device(&p))
+            .await
+            .expect("a ticket within the limit");
+    }
+    assert_eq!(i.proxy.replays(), replays + 2, "sent on from a");
+    let refused = i.client().ticket(&p.phone.access, &device(&p)).await;
+    assert!(
+        matches!(&refused, Err(remote_client::ClientError::Remote(e)) if e.code == ErrorCode::RateLimited),
+        "{refused:?}"
+    );
 }

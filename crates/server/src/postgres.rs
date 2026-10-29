@@ -1089,6 +1089,20 @@ impl Records for PgRecords {
         Ok(allowance(row.get(0), row.get(1), per_minute))
     }
 
+    async fn return_allowance(&self, gate: &str, key: &TokenHash, per_minute: u32) -> Result<()> {
+        let per_minute = f64::from(per_minute.max(1));
+        self.client()
+            .await?
+            .execute(
+                "UPDATE rate_limits SET tokens = LEAST($3::float8, tokens + 1)
+                 WHERE gate = $1 AND key = $2",
+                &[&gate, &bytes(key), &per_minute],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
     async fn sweep_allowances(&self, before: i64) -> Result<()> {
         self.client()
             .await?

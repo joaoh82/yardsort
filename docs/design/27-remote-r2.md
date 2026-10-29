@@ -775,6 +775,12 @@ refuses never reaches the records, and newcomers beyond the 10 000 addresses it 
 allowance there. When the records cannot answer, the request goes through on the process's count
 alone, and the error is logged.
 
+A device's ticket request that lands on the instance without its host's link is sent on with
+`fly-replay` (§12) and arrives a second time at the link's. The first instance gives its shared
+token back before its answer leaves, so only the instance that answers counts the request there.
+Giving back, rather than skipping the count for a request that says it was sent on, keeps
+`fly-replay-src`, which a client could send itself, from buying anything.
+
 The records keep an address as a SHA-256 of it (of its /64, for IPv6) with a prefix of its own.
 A bucket untouched for a minute is full again, and each instance sweeps those every minute, so an
 address stays in the records a minute or two after its last limited request. A hash of an IPv4
@@ -802,11 +808,17 @@ On Linux, 2026-10-29, the twelfth slice:
   host offline, and the phone reaches the new link from `a`; two instances allow one address
   three token requests a minute between them, and the instance that counted only two of its own
   refuses the fourth.
+- After review (1 more test in each file, on each store): a token given back can be taken again,
+  and giving back more than was taken leaves no more than the limit; with three tickets a
+  minute, a host's ticket at `b` and two of the phone's through `a`, each sent on to `b`, are
+  issued, and the next is refused. Without the giving back the phone's second was refused.
+  Giving back past the limit, made on purpose, failed nothing: taking caps a bucket at its limit
+  anyway.
 - Changes made on purpose, one at a time, each failing a test: no `linked` signal (replaced by an
   account's recheck: replaced by `recheck-all` it still passed, since that now keeps places too);
   the relay ignoring `linked`; no shared count; a bucket that never empties.
-- `just check` with the `YARDSORT_*` variables unset: the server's unit tests 17, `records` 57,
-  `relay` 9, `relay_instances` 14, `http` 4, `pairing` 7 (their PostgreSQL halves skipped),
+- `just check` with the `YARDSORT_*` variables unset: the server's unit tests 17, `records` 59,
+  `relay` 9, `relay_instances` 16, `http` 4, `pairing` 7 (their PostgreSQL halves skipped),
   `remote-host` 3, `yardsort-core` 603, the app crate 150, frontend 673. `just lint-windows` and
   `just bindings-check` passed (no bindings change).
 

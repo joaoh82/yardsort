@@ -500,6 +500,15 @@ pub trait Records: Send + Sync {
         now: i64,
     ) -> impl Future<Output = Result<Allowance>> + Send;
 
+    /// Give back one taken from `key`'s bucket at `gate`: the request it was taken for was sent on to
+    /// another instance, which counts it there.
+    fn return_allowance(
+        &self,
+        gate: &str,
+        key: &TokenHash,
+        per_minute: u32,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Forget the buckets untouched since `before`, which are full again if `before` is at least
     /// [`ALLOWANCE_REFILLS_MS`] ago.
     fn sweep_allowances(&self, before: i64) -> impl Future<Output = Result<()>> + Send;
@@ -1024,6 +1033,15 @@ impl Records for MemoryRecords {
             let left = if taken { tokens - 1.0 } else { tokens };
             *bucket = (left, bucket.1.max(now));
             allowance(taken, left, per_minute)
+        })
+    }
+
+    async fn return_allowance(&self, gate: &str, key: &TokenHash, per_minute: u32) -> Result<()> {
+        let per_minute = f64::from(per_minute.max(1));
+        self.with(|s| {
+            if let Some(bucket) = s.allowances.get_mut(&(gate.to_owned(), *key)) {
+                bucket.0 = (bucket.0 + 1.0).min(per_minute);
+            }
         })
     }
 

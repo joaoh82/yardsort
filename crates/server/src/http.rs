@@ -33,9 +33,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::limit::Limiter;
-use crate::records::Records;
+use crate::records::{Allowance, Records};
 use crate::relay::{Instance, Ticketed};
 use crate::{Caller, ControlService, LoginFinish};
+
+/// The answer's header that has Fly.io's proxy send the request to another instance.
+const FLY_REPLAY: &str = "fly-replay";
 
 /// The largest request body accepted. The biggest real one, a sign-in redemption, is well under a
 /// kilobyte.
@@ -165,15 +168,22 @@ async fn limited<R: Records>(
     next: Next,
 ) -> Response {
     let address = client_address(&request, gate.client_ip_header.as_ref());
-    let wait = match gate.limiter.check(address, Instant::now()) {
-        Ok(()) => {
-            let records = &gate.service.records;
-            crate::limit::take_shared(records, gate.name, address, gate.per_minute).await
-        }
-        Err(wait) => Some(wait),
+    let records = &gate.service.records;
+    let shared = match gate.limiter.check(address, Instant::now()) {
+        Ok(()) => crate::limit::take_shared(records, gate.name, address, gate.per_minute).await,
+        Err(wait) => Some(Allowance::Wait(wait)),
     };
-    let Some(wait) = wait else {
-        return next.run(request).await;
+    let wait = match shared {
+        Some(Allowance::Wait(wait)) => wait,
+        taken => {
+            let response = next.run(request).await;
+            // Sent on to the instance holding the link, which counts it: given back before the
+            // proxy sends it there.
+            if taken == Some(Allowance::Taken) && response.headers().contains_key(FLY_REPLAY) {
+                crate::limit::return_shared(records, gate.name, address, gate.per_minute).await;
+            }
+            return response;
+        }
     };
     let message = "Too many attempts from this address. Try again in a minute.";
     let mut response = match gate.answer {
@@ -435,7 +445,7 @@ fn replay_to(instance: &Instance) -> Response {
     if let Ok(value) = HeaderValue::from_str(&format!("prefer_instance={instance}")) {
         response
             .headers_mut()
-            .insert(HeaderName::from_static("fly-replay"), value);
+            .insert(HeaderName::from_static(FLY_REPLAY), value);
     }
     response
 }
