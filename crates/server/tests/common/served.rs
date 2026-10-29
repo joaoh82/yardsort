@@ -9,6 +9,7 @@ use reqwest::header::LOCATION;
 use url::Url;
 use yardsort_server::oidc::{self, ProviderConfig};
 use yardsort_server::records::Records;
+use yardsort_server::relay::Relay;
 use yardsort_server::{http, tokens, ControlService, ServerConfig};
 
 use super::idp::{Idp, APP, CLIENT_ID};
@@ -31,6 +32,16 @@ impl Served {
     }
 
     pub async fn start_with(records: impl Records + 'static, options: http::Options) -> Self {
+        Self::start_as(records, options, Relay::default()).await
+    }
+
+    /// As one of several instances of a server: `relay` names this one, and how requests reach
+    /// the others.
+    pub async fn start_as(
+        records: impl Records + 'static,
+        options: http::Options,
+        relay: Relay,
+    ) -> Self {
         let idp = Idp::start(Some(SECRET)).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
@@ -50,7 +61,8 @@ impl Served {
             records,
             client.clone(),
         )
-        .unwrap();
+        .unwrap()
+        .with_relay(relay);
         let relay = service.relay().clone();
         let app = http::router(service, options)
             .into_make_service_with_connect_info::<std::net::SocketAddr>();

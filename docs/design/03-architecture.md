@@ -599,7 +599,11 @@ remote ever talks to it directly. Instead:
   it at the host. And it is the **relay** (`relay.rs`): host and device each connect out to it over
   a WebSocket with a single-use ticket, and it carries each device's traffic to its host in a
   channel of the host's link, bounded per socket, closing a socket within seconds of its grant,
-  device or host being revoked. It keeps nothing. It ships as a container image, which staging on Fly.io and the self-host recipe
+  device or host being revoked. It keeps nothing but which instance of the server holds which
+  host's link: behind Fly.io's proxy, an instance answers a device's request for another's link
+  with `fly-replay`, so the server can run as several
+  ([27 §12](27-remote-r2.md#12--what-the-ninth-slice-adds)). It ships as a container image,
+  which staging on Fly.io and the self-host recipe
   (`crates/server/self-host/`) both run; staging has run on Fly.io since 2026-10-24
   ([28](28-remote-infrastructure.md)).
 - `crates/remote-client` is a device's side of the server's API: signing in through the system

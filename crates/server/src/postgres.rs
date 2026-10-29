@@ -21,8 +21,8 @@ use tokio_postgres::{Client, Row};
 
 use crate::records::{
     AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host,
-    HostOffer, Issued, PendingLogin, Records, RecordsError, Redemption, Result, RevokeReason,
-    Revoked, Rotation, SEEN_RESOLUTION_MS,
+    HostOffer, Issued, LinkPlace, PendingLogin, Records, RecordsError, Redemption, Result,
+    RevokeReason, Revoked, Rotation, SEEN_RESOLUTION_MS,
 };
 use crate::tokens::TokenHash;
 
@@ -37,6 +37,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         2,
         "hosts_and_grants",
         include_str!("../migrations/0002_hosts_and_grants.sql"),
+    ),
+    (
+        3,
+        "relay_links",
+        include_str!("../migrations/0003_relay_links.sql"),
     ),
 ];
 
@@ -788,6 +793,75 @@ impl Records for PgRecords {
         tx.commit().await.map_err(failed)?;
         Ok(removed > 0)
     }
+
+    async fn put_link(&self, place: LinkPlace) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "INSERT INTO relay_links (host, instance, link, seen_at) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (host) DO UPDATE
+                 SET instance = EXCLUDED.instance, link = EXCLUDED.link,
+                     seen_at = EXCLUDED.seen_at",
+                &[
+                    &place.host.as_str(),
+                    &place.instance,
+                    &place.link,
+                    &place.seen_at,
+                ],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    async fn link_place(&self, host: &HostId) -> Result<Option<LinkPlace>> {
+        let row = self
+            .client()
+            .await?
+            .query_opt(
+                "SELECT host, instance, link, seen_at FROM relay_links WHERE host = $1",
+                &[&host.as_str()],
+            )
+            .await
+            .map_err(failed)?;
+        row.map(|row| link_place(&row)).transpose()
+    }
+
+    async fn keep_links(&self, instance: &str, now: i64) -> Result<Vec<LinkPlace>> {
+        self.client()
+            .await?
+            .query(
+                "UPDATE relay_links SET seen_at = $2 WHERE instance = $1
+                 RETURNING host, instance, link, seen_at",
+                &[&instance, &now],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(link_place)
+            .collect()
+    }
+
+    async fn drop_link(&self, host: &HostId, link: &str) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "DELETE FROM relay_links WHERE host = $1 AND link = $2",
+                &[&host.as_str(), &link],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+}
+
+fn link_place(row: &Row) -> Result<LinkPlace> {
+    Ok(LinkPlace {
+        host: HostId::new(row.get::<_, String>(0)).map_err(failed)?,
+        instance: row.get(1),
+        link: row.get(2),
+        seen_at: row.get(3),
+    })
 }
 
 fn host(row: &Row) -> Result<Host> {

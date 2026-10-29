@@ -19,14 +19,18 @@ kill_timeout = "10s"
   YARDSORT_OIDC_CLIENT_ID = "396580739791025500"
   # Fly's proxy names the client's address here; the rate limits count by it.
   YARDSORT_CLIENT_IP_HEADER = "Fly-Client-IP"
+  # The relay answers `fly-replay` to send a device's requests to the Machine holding its host's
+  # link, named by FLY_MACHINE_ID, which Fly sets. With it the app can run on more than one
+  # Machine (docs/design/27-remote-r2.md §12).
+  YARDSORT_ROUTING = "fly-replay"
 
 [http_service]
   internal_port = 8080
   force_https = true
   # Staging sleeps when nobody uses it, and Fly's proxy wakes it on the next request: a host's
   # next try at its relay link does, within the connector's minute of backing off. Whether an open
-  # relay socket keeps it awake is Fly's proxy's call (docs/design/27-remote-r2.md §14).
-  # One Machine only: the relay keeps its tickets and sockets in memory (27 §14).
+  # relay socket keeps it awake is Fly's proxy's call (docs/design/27-remote-r2.md §15).
+  # One Machine, to keep staging cheap; a second works, with the routing above.
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0

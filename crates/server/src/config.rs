@@ -12,6 +12,12 @@
 //! - `YARDSORT_DEVICE_REDIRECTS`: comma-separated; [`DEFAULT_DEVICE_REDIRECTS`] unless set.
 //! - `YARDSORT_CLIENT_IP_HEADER`: behind a proxy, the header it names the client's address in
 //!   (`Fly-Client-IP`), for rate limits.
+//! - `YARDSORT_ROUTING`: `fly-replay` behind Fly.io's proxy, which lets the server run as several
+//!   instances: the relay sends a request on to the instance it belongs to. Unset, or `single`,
+//!   the server must run as one instance.
+//! - `YARDSORT_INSTANCE`: this instance's name, as that proxy knows it. On Fly.io it is the
+//!   Machine's id, which Fly.io sets as `FLY_MACHINE_ID` and is used when this is unset; anywhere
+//!   else, a name made up at each start.
 
 use std::net::SocketAddr;
 
@@ -20,6 +26,7 @@ use remote_proto::account::Secret;
 use url::Url;
 
 use crate::oidc::ProviderConfig;
+use crate::relay::{Instance, Routing};
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8787";
 pub const DEFAULT_NAME: &str = "Yardsort";
@@ -37,6 +44,8 @@ pub struct Settings {
     /// Where a trusted proxy names the client's address, for rate limits. Unset, the connection's
     /// own address is used.
     pub client_ip_header: Option<HeaderName>,
+    pub routing: Routing,
+    pub instance: Instance,
 }
 
 impl std::fmt::Debug for Settings {
@@ -50,6 +59,8 @@ impl std::fmt::Debug for Settings {
             .field("client_secret", &self.provider.client_secret.is_some())
             .field("device_redirects", &self.device_redirects)
             .field("client_ip_header", &self.client_ip_header)
+            .field("routing", &self.routing)
+            .field("instance", &self.instance.as_str())
             .finish_non_exhaustive()
     }
 }
@@ -96,8 +107,24 @@ impl Settings {
                     .map_err(|e| ConfigError(format!("YARDSORT_CLIENT_IP_HEADER {name:?}: {e}")))
             })
             .transpose()?;
+        let routing = match get("YARDSORT_ROUTING").as_deref().map(str::trim) {
+            None | Some("single") => Routing::Single,
+            Some("fly-replay") => Routing::FlyReplay,
+            Some(other) => {
+                return Err(ConfigError(format!(
+                    "YARDSORT_ROUTING {other:?}: single or fly-replay"
+                )))
+            }
+        };
+        let instance = match get("YARDSORT_INSTANCE").or_else(|| get("FLY_MACHINE_ID")) {
+            Some(name) => Instance::new(name.trim())
+                .map_err(|e| ConfigError(format!("YARDSORT_INSTANCE: {e}")))?,
+            None => Instance::random(),
+        };
         Ok(Self {
             client_ip_header,
+            routing,
+            instance,
             listen,
             name: get("YARDSORT_SERVER_NAME").unwrap_or_else(|| DEFAULT_NAME.into()),
             public_url,
@@ -209,6 +236,44 @@ mod tests {
         pairs.push(("YARDSORT_OIDC_CLIENT_SECRET", "another"));
         assert!(settings(&pairs).is_err(), "both ways at once is refused");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn routing_and_the_instance_name() {
+        let s = settings(MINIMAL).unwrap();
+        assert_eq!(s.routing, Routing::Single);
+        assert_ne!(
+            s.instance,
+            settings(MINIMAL).unwrap().instance,
+            "made up at each start"
+        );
+
+        let mut pairs = MINIMAL.to_vec();
+        pairs.push(("YARDSORT_ROUTING", "fly-replay"));
+        pairs.push(("FLY_MACHINE_ID", "148e21eae69398"));
+        let s = settings(&pairs).unwrap();
+        assert_eq!(s.routing, Routing::FlyReplay);
+        assert_eq!(
+            s.instance.as_str(),
+            "148e21eae69398",
+            "Fly.io's name for it"
+        );
+        pairs.push(("YARDSORT_INSTANCE", "b"));
+        assert_eq!(
+            settings(&pairs).unwrap().instance.as_str(),
+            "b",
+            "named here first"
+        );
+
+        for (name, bad) in [
+            ("YARDSORT_ROUTING", "round-robin"),
+            ("YARDSORT_INSTANCE", "a/b"),
+        ] {
+            let mut pairs = MINIMAL.to_vec();
+            pairs.push((name, bad));
+            let error = settings(&pairs).unwrap_err().to_string();
+            assert!(error.contains(name), "{error}");
+        }
     }
 
     #[test]

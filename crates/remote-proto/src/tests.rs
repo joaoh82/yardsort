@@ -119,6 +119,9 @@ fn relay_messages_and_events_match_their_fixtures() {
     assert!(matches!(request, TicketRequest::Device { .. }));
     let ticket: RelayTicket = pinned("relay-ticket.json");
     assert_eq!(ticket.expires_in_ms, TICKET_TTL_MS);
+    assert_eq!(ticket.route, None, "a server of one instance");
+    let routed: RelayTicket = pinned("relay-ticket-routed.json");
+    assert!(routed.route.as_deref().is_some_and(valid_route));
     let _: Presented = pinned("relay-presented.json");
     let greeting: Greeting = pinned("relay-greeting.json");
     assert!(matches!(greeting, Greeting::Connected { .. }));

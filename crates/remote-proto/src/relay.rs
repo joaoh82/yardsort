@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! either  POST /v1/relay/tickets   TicketRequest            → RelayTicket
-//! either  GET  /v1/relay           WebSocket upgrade
+//! either  GET  /v1/relay?route=…   WebSocket upgrade, with the ticket's route if it has one
 //!         → {"ticket": …}                                     first message, within FIRST_MESSAGE_MS
 //!         ← Greeting                                          then the relay carries traffic
 //! ```
@@ -23,6 +23,13 @@
 //! it when the device leaves, its grant goes, or it falls too far behind ([`CloseReason`]). The
 //! host closes a channel too, when its own record no longer lets the device in. Nothing a host
 //! sends on a channel reaches any other device.
+//!
+//! **Where the socket goes.** A server can run as several instances, and a device's socket has
+//! to reach the one holding its host's link. The server sends a device's ticket request there,
+//! and the ticket says where that is ([`RelayTicket::route`]); the socket names it in its URL
+//! ([`ROUTE_PARAM`]), and the server sends the socket on to it. A route names an instance of the
+//! server, nothing about the device or the host, and is no secret. A ticket without one is from
+//! a server that runs as one instance.
 //!
 //! **What the relay keeps:** nothing. Tickets and queues are in memory and go with the
 //! connection or the process; the relay never logs or stores what it carries.
@@ -87,6 +94,24 @@ impl TicketRequest {
 pub struct RelayTicket {
     pub ticket: Secret,
     pub expires_in_ms: u64,
+    /// Which instance of the server holds the ticket: the socket's URL names it as
+    /// [`ROUTE_PARAM`]. Absent from a server that runs as one instance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
+}
+
+/// The relay socket's query parameter naming a ticket's [`RelayTicket::route`].
+pub const ROUTE_PARAM: &str = "route";
+/// The longest route: letters, digits, `-` and `_`.
+pub const MAX_ROUTE_LEN: usize = 64;
+
+/// Whether `route` could name an instance: what a server checks before it acts on one.
+pub fn valid_route(route: &str) -> bool {
+    !route.is_empty()
+        && route.len() <= MAX_ROUTE_LEN
+        && route
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// The first message on a relay socket.
@@ -339,6 +364,15 @@ mod tests {
         assert_eq!(LinkFrame::decode(&big), Err(LinkError::TooLarge));
         big.truncate(MAX_MESSAGE);
         assert!(LinkFrame::decode(&big).is_ok());
+    }
+
+    #[test]
+    fn a_route_is_a_short_plain_name() {
+        assert!(valid_route("148e21eae69398"));
+        assert!(valid_route("instance-a_1"));
+        for bad in ["", "a b", "a/b", "a?b", "é", &"a".repeat(MAX_ROUTE_LEN + 1)] {
+            assert!(!valid_route(bad), "{bad:?}");
+        }
     }
 
     #[test]

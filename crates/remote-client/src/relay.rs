@@ -16,7 +16,8 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use remote_proto::account::Secret;
 use remote_proto::relay::{
-    CloseReason, Greeting, Presented, RelayTicket, TicketRequest, MAX_MESSAGE, SILENCE_MS,
+    CloseReason, Greeting, Presented, RelayTicket, TicketRequest, MAX_MESSAGE, ROUTE_PARAM,
+    SILENCE_MS,
 };
 use remote_proto::HostId;
 use tokio::net::TcpStream;
@@ -113,18 +114,21 @@ impl Client {
     /// [`TicketRequest::Host`], or a device's way to a host with [`TicketRequest::Device`].
     pub async fn open_relay(&self, access: &Secret, request: &TicketRequest) -> Result<RelayLink> {
         let ticket = self.ticket(access, request).await?;
-        self.open_relay_with(ticket.ticket).await
+        self.open_relay_with(ticket).await
     }
 
-    /// Open the relay with a ticket already in hand.
-    pub async fn open_relay_with(&self, ticket: Secret) -> Result<RelayLink> {
+    /// Open the relay with a ticket already in hand, at the instance its route names.
+    pub async fn open_relay_with(&self, ticket: RelayTicket) -> Result<RelayLink> {
         tokio::time::timeout(OPEN_TIMEOUT, self.present(ticket))
             .await
             .map_err(|_| ClientError::Unreachable("the relay did not answer in time".into()))?
     }
 
-    async fn present(&self, ticket: Secret) -> Result<RelayLink> {
+    async fn present(&self, RelayTicket { ticket, route, .. }: RelayTicket) -> Result<RelayLink> {
         let mut url = self.url("v1/relay")?;
+        if let Some(route) = route {
+            url.query_pairs_mut().append_pair(ROUTE_PARAM, &route);
+        }
         let tls = url.scheme() == "https";
         url.set_scheme(if tls { "wss" } else { "ws" })
             .map_err(|()| ClientError::Invalid("not a relay address".into()))?;

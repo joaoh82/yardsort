@@ -166,7 +166,7 @@ Settled on 2026-10-23:
    - **Type:** **Web**.
    - **Authentication method:** **Code**, so the server authenticates with a client secret.
      The server sends PKCE as well, which ZITADEL accepts alongside the secret: confirmed against
-     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §12).
+     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §13).
    - **Redirect URI:** `https://remote-staging.yardsort.sh/v1/login/callback`.
    - **Development mode:** off.
    - **Refresh tokens:** leave them off. The server never asks ZITADEL for one.
@@ -246,7 +246,7 @@ the owner's go-ahead:
   (`.github/workflows/server-deploy.yml`), and the self-host recipe (`crates/server/self-host/`).
   Staging was first deployed from a workstation, with the workflow's arguments, before the
   workflow reached `main`. Step E and staging's smoke test followed on 2026-10-25, and the test
-  passed ([27](27-remote-r2.md) §12). The workflow first deployed it from Actions on 2026-10-25.
+  passed ([27](27-remote-r2.md) §13). The workflow first deployed it from Actions on 2026-10-25.
   Production's Fly config and its protected environment come with its ZITADEL instance.
 - **Slice 4, built on 2026-10-25** ([27](27-remote-r2.md) §7): pairing, on the server and in the
   app behind `YARDSORT_REMOTE_PREVIEW=1`. Its migration `0002_hosts_and_grants.sql` reaches
@@ -261,6 +261,13 @@ the owner's go-ahead:
   the server itself does not change. Staging needs slice 6 deployed for its smoke test.
 - **Slice 8, built on 2026-10-29** ([27](27-remote-r2.md) §11): following activity. Also all on
   the host; the server does not change, and staging needs slice 6 deployed for its smoke test.
+- **Slice 9, built on 2026-10-29** ([27](27-remote-r2.md) §12): the relay on more than one
+  Machine, which production's two need. Each instance notes which host links it holds, in the
+  migration `0003_relay_links.sql`, and a device's ticket request and socket that reach another
+  Machine are answered `fly-replay`, so Fly's proxy sends them to the right one. Staging's config
+  turns it on (`YARDSORT_ROUTING=fly-replay`) and still runs one Machine; its smoke test adds a
+  second for a while, which needs the owner's go-ahead. No new secret. The self-host recipe stays
+  one instance.
 
 ## 7 · Open decisions
 

@@ -98,6 +98,12 @@ impl<R: Records> ControlService<R> {
         &self.relay
     }
 
+    /// With `relay` in place of one instance named at random: for a server that runs as several.
+    pub fn with_relay(mut self, relay: Relay) -> Self {
+        self.relay = relay;
+        self
+    }
+
     /// The redirect URI to register at the identity provider.
     pub fn callback_url(&self) -> &Url {
         &self.callback
