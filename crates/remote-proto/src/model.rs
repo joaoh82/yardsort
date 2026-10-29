@@ -528,6 +528,39 @@ pub struct ActivityPage {
     pub newer: Option<Cursor>,
 }
 
+/// One activity subscription on one connection. Chosen by the host.
+pub type SubscriptionId = u32;
+
+/// The reply to `activity.subscribe`. Batches for it follow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Subscribed {
+    pub subscription: SubscriptionId,
+    /// Where it starts: what is recorded after this follows. `None` only when nothing in its
+    /// scope was recorded yet and none was given.
+    pub newer: Option<Cursor>,
+}
+
+/// `activity.events`: what a subscription's scope recorded next, oldest first. As many events
+/// as fit in a message; more batches follow when there were more.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityBatch {
+    pub subscription: SubscriptionId,
+    pub events: Vec<ActivityEvent>,
+    /// Where this batch got to, to subscribe after again or to read on with `activity.list`.
+    pub newer: Cursor,
+}
+
+/// `activity.ended`: the host stopped a subscription. Today only `not_found`, when the
+/// workspace it followed is no longer on show to the device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionEnded {
+    pub subscription: SubscriptionId,
+    pub error: crate::RemoteError,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

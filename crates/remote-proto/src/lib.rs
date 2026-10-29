@@ -22,7 +22,8 @@
 //!
 //! Hosts answer the read side (`host.describe`, `workspace.list`, `workspace.describe`,
 //! `session.list`, `activity.list`, `memory.list`) and, since minor 1, the `terminal.*`
-//! operations: see [`terminal`]. A host lists what it answers in
+//! operations: see [`terminal`]. Since minor 3 a client can follow activity as it is recorded,
+//! with `activity.subscribe`: see [`ActivitySubscribeParams`]. A host lists what it answers in
 //! [`HostDescription::capabilities`].
 
 pub mod account;
@@ -53,7 +54,9 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 ///
 /// - 1: [`HelloReply`], [`Event`]s, and hosts answering the `terminal.*` operations.
 /// - 2: resuming a stream, and the `terminal.control` and `terminal.exited` events.
-pub const PROTOCOL_MINOR: u16 = 2;
+/// - 3: `activity.subscribe` and `activity.unsubscribe`, and the `activity.events` and
+///   `activity.ended` events.
+pub const PROTOCOL_MINOR: u16 = 3;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
 /// parsing. A host keeps its responses within it: a page holds fewer items than asked when they
@@ -77,6 +80,8 @@ pub const LEASE_TTL_MS: u32 = 30_000;
 pub const LEASE_RENEW_MS: u32 = 10_000;
 /// Longest client name in a [`Hello`].
 pub const MAX_CLIENT_NAME: usize = 128;
+/// The most activity subscriptions one connection holds at once.
+pub const MAX_SUBSCRIPTIONS: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolVersion {
@@ -135,6 +140,12 @@ pub enum Event {
     /// The terminal's program ended. Since minor 2.
     #[serde(rename = "terminal.exited")]
     TerminalExited(Exited),
+    /// Activity recorded since a subscription's last batch, or since it began. Since minor 3.
+    #[serde(rename = "activity.events")]
+    ActivityEvents(ActivityBatch),
+    /// A subscription ended, and nothing more comes on it: its error says why. Since minor 3.
+    #[serde(rename = "activity.ended")]
+    ActivityEnded(SubscriptionEnded),
 }
 
 /// Pick the protocol to speak with a client, or say why there is none.
@@ -302,6 +313,41 @@ pub struct ActivityListParams {
     pub limit: Option<u32>,
 }
 
+/// `activity.subscribe`: follow activity as it is recorded. Needs `activity:read`.
+///
+/// The host replies [`Subscribed`], then sends what was recorded after `after`, if given, and
+/// from then on what is recorded, in `activity.events` events ([`ActivityBatch`]), oldest first
+/// and each event once. Each batch's `newer` is where it got to: a client that loses its
+/// connection subscribes again after the last one it took in, and misses nothing still kept.
+/// When the host no longer keeps the event `after` names (the events were pruned or cleared, or
+/// the workspace is no longer on show), the reply is `cursor_expired`: the client reads the list
+/// again (`activity.list`) and subscribes after its `newer`.
+///
+/// A subscription holds nothing at the host but its position. A client that falls behind is
+/// sent the rest when it catches up, not detached: the events are on disk, not in a queue.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySubscribeParams {
+    /// Only this workspace's. Without one, every workspace the grant reaches, those made later
+    /// included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<WorkspaceId>,
+    /// Only this conversation's. Needs `workspace`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionRecordId>,
+    /// A `newer` cursor: from an [`ActivityPage`], an [`ActivityBatch`] or a [`Subscribed`] of
+    /// the same scope. Without one, only what is recorded from now on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<Cursor>,
+}
+
+/// `activity.unsubscribe`: stop following. Needs `activity:read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityUnsubscribeParams {
+    pub subscription: SubscriptionId,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryListParams {
@@ -347,6 +393,10 @@ pub enum Operation {
     TerminalInput(InputRequest),
     #[serde(rename = "terminal.resize")]
     TerminalResize(ResizeRequest),
+    #[serde(rename = "activity.subscribe")]
+    ActivitySubscribe(ActivitySubscribeParams),
+    #[serde(rename = "activity.unsubscribe")]
+    ActivityUnsubscribe(ActivityUnsubscribeParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -364,6 +414,8 @@ pub const OPERATIONS: &[&str] = &[
     "terminal.release",
     "terminal.input",
     "terminal.resize",
+    "activity.subscribe",
+    "activity.unsubscribe",
 ];
 
 impl Operation {
@@ -382,6 +434,8 @@ impl Operation {
             Self::TerminalRelease(_) => 10,
             Self::TerminalInput(_) => 11,
             Self::TerminalResize(_) => 12,
+            Self::ActivitySubscribe(_) => 13,
+            Self::ActivityUnsubscribe(_) => 14,
         };
         OPERATIONS[index]
     }
@@ -394,7 +448,9 @@ impl Operation {
             Self::WorkspaceList(_) | Self::WorkspaceDescribe(_) | Self::SessionList(_) => {
                 Scope::WorkspaceRead
             }
-            Self::ActivityList(_) => Scope::ActivityRead,
+            Self::ActivityList(_) | Self::ActivitySubscribe(_) | Self::ActivityUnsubscribe(_) => {
+                Scope::ActivityRead
+            }
             Self::MemoryList(_) => Scope::MemoryRead,
             Self::TerminalAttach(_) | Self::TerminalDetach(_) => Scope::TerminalRead,
             Self::TerminalAcquire(_)
@@ -421,6 +477,11 @@ impl Operation {
                 invalid("That input is larger than one request may carry.")
             }
             Self::TerminalInput(input) if input.seq == 0 => invalid("Input is numbered from 1."),
+            Self::ActivitySubscribe(ActivitySubscribeParams {
+                workspace: None,
+                session: Some(_),
+                ..
+            }) => invalid("A conversation is followed within its workspace: name both."),
             Self::TerminalResize(resize) if resize.size.cols == 0 || resize.size.rows == 0 => {
                 invalid("A terminal needs at least one row and one column.")
             }
@@ -455,6 +516,7 @@ pub enum Reply {
     Memory(MemoryPage),
     Attached(Attached),
     Lease(Lease),
+    Subscribed(Subscribed),
     Done,
 }
 

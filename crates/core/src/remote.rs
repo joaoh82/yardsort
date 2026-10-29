@@ -32,7 +32,10 @@
 //! ([`HostFacade::check`]) and with its rules for which terminals a grant reaches
 //! ([`HostFacade::reachable_terminal`]). The facade on its own still answers them `unsupported`,
 //! and advertises them only when it is `interactive`. It never writes to a terminal, resizes one
-//! or attaches to one itself.
+//! or attaches to one itself. Following activity (`activity.subscribe`) is the same: the visitor
+//! keeps each subscription's position, and asks the facade where one starts
+//! ([`HostFacade::subscription_start`]) and what came after it ([`HostFacade::recorded_after`]),
+//! under the same rules as `activity.list`.
 //!
 //! Nothing here writes to the store either. In particular there is no route to approve, edit or
 //! propose memory: an agent can reach a terminal, and a terminal could one day reach a remote
@@ -40,14 +43,15 @@
 
 use pty_host::{SessionInfo, SessionState, TerminalHost};
 use remote_proto::{
-    clip, page_size, ActivityEvent, ActivityListParams, ActivityPage, BranchRef, Cursor, ErrorCode,
-    Grant, Hello, HostDescription, HostId, MemoryId, MemoryListParams, MemoryNote, MemoryPage,
-    Operation, Outcome, Platform, ProcessState, ProjectId, ProjectSummary, ProtocolVersion,
-    RemoteError, Reply, Request, Response, SessionListParams, SessionPage, SessionRecordId,
-    SessionSummary, TaskLink, TermSize, TerminalActivity, TerminalId, TerminalPurpose,
-    TerminalSummary, Welcome, WorkspaceDetail, WorkspaceId, WorkspaceKind, WorkspaceListParams,
-    WorkspacePage, WorkspaceSummary, WorkspaceTerminal, MAX_LABEL, MAX_LINK, MAX_NOTE, MAX_TASKS,
-    MAX_TERMINALS, MAX_TEXT, PROTOCOL_MAJOR,
+    clip, page_size, ActivityEvent, ActivityListParams, ActivityPage, ActivitySubscribeParams,
+    BranchRef, Cursor, ErrorCode, Grant, Hello, HostDescription, HostId, MemoryId,
+    MemoryListParams, MemoryNote, MemoryPage, Operation, Outcome, Platform, ProcessState,
+    ProjectId, ProjectSummary, ProtocolVersion, RemoteError, Reply, Request, Response,
+    SessionListParams, SessionPage, SessionRecordId, SessionSummary, TaskLink, TermSize,
+    TerminalActivity, TerminalId, TerminalPurpose, TerminalSummary, Welcome, WorkspaceDetail,
+    WorkspaceId, WorkspaceKind, WorkspaceListParams, WorkspacePage, WorkspaceSummary,
+    WorkspaceTerminal, MAX_LABEL, MAX_LINK, MAX_NOTE, MAX_PAGE, MAX_TASKS, MAX_TERMINALS, MAX_TEXT,
+    PROTOCOL_MAJOR,
 };
 use serde::Serialize;
 
@@ -80,6 +84,10 @@ pub const TERMINAL_OPERATIONS: &[&str] = &[
     "terminal.resize",
 ];
 
+/// Following activity, answered by [`serve::Visitor`] and advertised when the facade serves a
+/// device's channel.
+pub const SUBSCRIPTION_OPERATIONS: &[&str] = &["activity.subscribe", "activity.unsubscribe"];
+
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
 /// is stored before Remote is enabled, so nothing is created for people who never use it.
 #[derive(Debug, Clone)]
@@ -98,6 +106,9 @@ pub struct HostFacade<'a> {
     /// The terminal operations are answered, by [`serve::Visitor`]: the facade is serving a
     /// device's channel, and the daemon shares control.
     pub interactive: bool,
+    /// Activity subscriptions are answered, by [`serve::Visitor`]: the facade is serving a
+    /// device's channel.
+    pub subscriptions: bool,
 }
 
 type Answer<T> = Result<T, RemoteError>;
@@ -185,6 +196,12 @@ impl HostFacade<'_> {
                 ErrorCode::Unsupported,
                 "Remote terminals are not available on this host yet.",
             )),
+            Operation::ActivitySubscribe(_) | Operation::ActivityUnsubscribe(_) => {
+                Err(RemoteError::new(
+                    ErrorCode::Unsupported,
+                    "Following activity is not available on this host yet.",
+                ))
+            }
         }
     }
 
@@ -199,6 +216,11 @@ impl HostFacade<'_> {
                 .iter()
                 .chain(if self.interactive {
                     TERMINAL_OPERATIONS
+                } else {
+                    &[]
+                })
+                .chain(if self.subscriptions {
+                    SUBSCRIPTION_OPERATIONS
                 } else {
                     &[]
                 })
@@ -408,18 +430,9 @@ impl HostFacade<'_> {
     /// walk, and [`activity`] for what of each event is shown.
     fn activity(&self, grant: &Grant, params: &ActivityListParams) -> Answer<ActivityPage> {
         let (workspace, _) = self.reachable_workspace(grant, &params.workspace)?;
-        if let Some(session) = &params.session {
-            let theirs = self
-                .store
-                .session(session.as_str())
-                .map_err(|_| unreadable())?
-                .is_some_and(|row| row.workspace_id == workspace.id);
-            if !theirs {
-                return Err(RemoteError::not_found());
-            }
-        }
+        self.own_session(&workspace, params.session.as_ref())?;
         let filter = EventFilter {
-            workspace_id: &workspace.id,
+            workspace_ids: std::slice::from_ref(&workspace.id),
             privacy_class: activity::SHOWN_CLASS,
             session_id: params.session.as_ref().map(SessionRecordId::as_str),
         };
@@ -439,11 +452,38 @@ impl HostFacade<'_> {
                 bound
             }
         };
-        let size = page_size(params.limit);
+        let window = self.activity_window(&filter, bound, page_size(params.limit))?;
+        let older = match (window.first, bound) {
+            // Walking forward from a cursor, the cursor's own event is older than this page.
+            (Some(first), EventBound::After(_)) => Some(activity_cursor('o', first)?),
+            (Some(first), _) if window.more => Some(activity_cursor('o', first)?),
+            _ => None,
+        };
+        let newer = match (window.last, bound) {
+            (Some(last), _) => Some(activity_cursor('n', last)?),
+            // Nothing new since the cursor: the same position, to ask from again.
+            (None, EventBound::After(seq)) => Some(activity_cursor('n', seq)?),
+            (None, _) => None,
+        };
+        Ok(ActivityPage {
+            events: window.events,
+            older,
+            newer,
+        })
+    }
+
+    /// Up to `size` events on one side of `bound`, oldest first, as many as fit in a frame:
+    /// those nearest the bound when not all do.
+    fn activity_window(
+        &self,
+        filter: &EventFilter<'_>,
+        bound: EventBound,
+        size: usize,
+    ) -> Answer<EventWindow> {
         // One more than a page says whether there is another, without a count query.
         let mut rows = self
             .store
-            .events_window(&filter, bound, size + 1)
+            .events_window(filter, bound, size + 1)
             .map_err(|_| unreadable())?;
         let mut more = rows.len() > size;
         if more {
@@ -483,23 +523,131 @@ impl HostFacade<'_> {
                 EventBound::After(_) => events.truncate(fit),
             }
         }
-        let older = match (events.first(), bound) {
-            // Walking forward from a cursor, the cursor's own event is older than this page.
-            (Some((first, _)), EventBound::After(_)) => Some(activity_cursor('o', *first)?),
-            (Some((first, _)), _) if more => Some(activity_cursor('o', *first)?),
-            _ => None,
-        };
-        let newer = match (events.last(), bound) {
-            (Some((last, _)), _) => Some(activity_cursor('n', *last)?),
-            // Nothing new since the cursor: the same position, to ask from again.
-            (None, EventBound::After(seq)) => Some(activity_cursor('n', seq)?),
-            (None, _) => None,
-        };
-        Ok(ActivityPage {
+        Ok(EventWindow {
+            first: events.first().map(|(seq, _)| *seq),
+            last: events.last().map(|(seq, _)| *seq),
             events: shown(&events),
-            older,
-            newer,
+            more,
         })
+    }
+
+    /// Where a subscription starts: the sequence number it follows on from, and the cursor
+    /// naming it, when it names an event of the subscription's scope.
+    ///
+    /// After a cursor, from that cursor's event, on the same terms as `activity.list`: an event
+    /// the host no longer keeps in that scope is `cursor_expired`. Without one, from the newest
+    /// event recorded anywhere, so nothing recorded before the subscription is sent.
+    pub fn subscription_start(
+        &self,
+        grant: &Grant,
+        params: &ActivitySubscribeParams,
+    ) -> Answer<(i64, Option<Cursor>)> {
+        let workspaces =
+            self.followed(grant, params.workspace.as_ref(), params.session.as_ref())?;
+        let filter = EventFilter {
+            workspace_ids: &workspaces,
+            privacy_class: activity::SHOWN_CLASS,
+            session_id: params.session.as_ref().map(SessionRecordId::as_str),
+        };
+        if let Some(cursor) = &params.after {
+            let seq = match activity_bound(cursor)? {
+                (EventBound::After(seq), _) => seq,
+                // An `older` cursor walks back; there is nothing to follow from it.
+                _ => {
+                    return Err(RemoteError::new(
+                        ErrorCode::InvalidRequest,
+                        "Follow on from a `newer` cursor.",
+                    ))
+                }
+            };
+            if !self
+                .store
+                .event_matches(&filter, seq)
+                .map_err(|_| unreadable())?
+            {
+                return Err(cursor_expired());
+            }
+            return Ok((seq, Some(cursor.clone())));
+        }
+        let Some(now) = self.store.newest_event_seq().map_err(|_| unreadable())? else {
+            return Ok((0, None));
+        };
+        // The scope's newest up to that one, not any recorded since: those follow.
+        let newest = self
+            .store
+            .events_window(&filter, EventBound::Before(now + 1), 1)
+            .map_err(|_| unreadable())?;
+        let newer = newest
+            .first()
+            .map(|row| activity_cursor('n', row.seq))
+            .transpose()?;
+        Ok((now, newer))
+    }
+
+    /// What a subscription's scope recorded after `after`, oldest first, as many as fit in a
+    /// frame, and how far that got: past `after` whenever anything was recorded, even if none
+    /// of it is shown. A workspace no longer on show to the grant is `not_found`.
+    pub fn recorded_after(
+        &self,
+        grant: &Grant,
+        workspace: Option<&WorkspaceId>,
+        session: Option<&SessionRecordId>,
+        after: i64,
+    ) -> Answer<(Vec<ActivityEvent>, i64)> {
+        let workspaces = self.followed(grant, workspace, session)?;
+        let filter = EventFilter {
+            workspace_ids: &workspaces,
+            privacy_class: activity::SHOWN_CLASS,
+            session_id: session.map(SessionRecordId::as_str),
+        };
+        let window = self.activity_window(&filter, EventBound::After(after), MAX_PAGE as usize)?;
+        Ok((window.events, window.last.unwrap_or(after)))
+    }
+
+    /// The workspaces a subscription follows: the one it names, when the grant reaches it and
+    /// the conversation is its own, or else every one on show that the grant reaches.
+    fn followed(
+        &self,
+        grant: &Grant,
+        workspace: Option<&WorkspaceId>,
+        session: Option<&SessionRecordId>,
+    ) -> Answer<Vec<String>> {
+        let Some(workspace) = workspace else {
+            return Ok(self
+                .store
+                .workspaces()
+                .map_err(|_| unreadable())?
+                .into_iter()
+                .filter(|w| {
+                    ProjectId::new(w.project_id.as_str()).is_ok_and(|id| grant.reaches(&id))
+                })
+                .map(|w| w.id)
+                .collect());
+        };
+        let (workspace, _) = self.reachable_workspace(grant, workspace)?;
+        self.own_session(&workspace, session)?;
+        Ok(vec![workspace.id])
+    }
+
+    /// `not_found` unless `session`, when given, was recorded in `workspace`.
+    fn own_session(
+        &self,
+        workspace: &WorkspaceRow,
+        session: Option<&SessionRecordId>,
+    ) -> Answer<()> {
+        let Some(session) = session else {
+            return Ok(());
+        };
+        let theirs = self
+            .store
+            .session(session.as_str())
+            .map_err(|_| unreadable())?
+            .is_some_and(|row| row.workspace_id == workspace.id);
+        if theirs {
+            Ok(())
+        } else {
+            Err(RemoteError::not_found())
+        }
     }
 
     /// Approved entries only, newest first.
@@ -685,11 +833,20 @@ fn terminal_summary(info: &SessionInfo) -> Answer<TerminalSummary> {
     })
 }
 
+/// What [`HostFacade::activity_window`] read: the events shown, the first and last sequence
+/// numbers read (shown or not), and whether more lay beyond.
+struct EventWindow {
+    events: Vec<ActivityEvent>,
+    first: Option<i64>,
+    last: Option<i64>,
+    more: bool,
+}
+
 /// Activity cursors name an event by its sequence number, and which way to walk from it: `o`
 /// for older, `n` for newer. Versioned like [`CURSOR_PREFIX`].
 const ACTIVITY_CURSOR_PREFIX: &str = "a1.";
 
-fn activity_cursor(direction: char, seq: i64) -> Answer<Cursor> {
+pub(crate) fn activity_cursor(direction: char, seq: i64) -> Answer<Cursor> {
     Cursor::new(format!("{ACTIVITY_CURSOR_PREFIX}{direction}{seq}")).map_err(|_| unreadable())
 }
 

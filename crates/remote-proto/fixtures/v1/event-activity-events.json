@@ -1,0 +1,17 @@
+{
+  "event": "activity.events",
+  "subscription": 1,
+  "events": [
+    {
+      "id": "5b3a4f5e-6d7c-4b8a-9998-877665544332",
+      "workspace": "0b6c1f0e-8f8e-4a57-9a43-5c1d2a0e9f11",
+      "session": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "run": "5d4c3b2a-1908-4f7e-8d6c-5b4a39281706",
+      "occurredAt": 1790000012000,
+      "kind": "permission.requested",
+      "source": { "producer": "claude", "method": "hook", "fidelity": "reported" },
+      "detail": { "tool": "Bash" }
+    }
+  ],
+  "newer": "a1.n4223"
+}

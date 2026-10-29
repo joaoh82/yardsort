@@ -32,6 +32,9 @@ fn requests_match_their_fixtures() {
     assert_eq!(request.operation.scope(), Some(Scope::ActivityRead));
     let request: Request = pinned("request-terminal-input.json");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
+    let request: Request = pinned("request-activity-subscribe.json");
+    assert_eq!(request.operation.scope(), Some(Scope::ActivityRead));
+    assert!(request.operation.validate().is_ok());
     let hello: Hello = pinned("hello.json");
     assert_eq!(negotiate(&hello), Ok(ProtocolVersion::CURRENT));
 }
@@ -46,9 +49,18 @@ fn responses_match_their_fixtures() {
         "response-error-incompatible.json",
         "response-attached.json",
         "response-attached-resumed.json",
+        "response-subscribed.json",
     ] {
         let _: Response = pinned(name);
     }
+    let subscribed: Response = pinned("response-subscribed.json");
+    assert!(matches!(
+        subscribed.outcome,
+        Outcome::Result(Reply::Subscribed(Subscribed {
+            subscription: 1,
+            newer: Some(_)
+        }))
+    ));
     let resumed: Response = pinned("response-attached-resumed.json");
     assert!(matches!(
         resumed.outcome,
@@ -138,6 +150,17 @@ fn relay_messages_and_events_match_their_fixtures() {
             ..
         })
     ));
+    let batch: Event = pinned("event-activity-events.json");
+    let Event::ActivityEvents(batch) = batch else {
+        panic!("{batch:?}")
+    };
+    assert_eq!(batch.events.len(), 1);
+    assert_eq!(batch.newer.as_str(), "a1.n4223");
+    let ended: Event = pinned("event-activity-ended.json");
+    let Event::ActivityEnded(ended) = ended else {
+        panic!("{ended:?}")
+    };
+    assert_eq!(ended.error, RemoteError::not_found());
     // An event is told from a response by its `event` field.
     assert!(serde_json::from_value::<Event>(fixture("response-host.json")).is_err());
 }
@@ -198,6 +221,8 @@ fn every_operation_has_the_name_it_is_sent_under() {
             lease,
             size: TermSize { cols: 80, rows: 24 },
         }),
+        Operation::ActivitySubscribe(ActivitySubscribeParams::default()),
+        Operation::ActivityUnsubscribe(ActivityUnsubscribeParams { subscription: 1 }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());
     for operation in all {
@@ -334,6 +359,21 @@ fn bounds_are_checked_after_parsing() {
     assert_eq!(
         error_of(request.as_bytes()).1.code,
         ErrorCode::InvalidRequest
+    );
+
+    // A conversation is followed within its workspace.
+    let (_, error) = error_of(
+        br#"{"requestId":"r","protocol":{"major":1,"minor":3},"op":"activity.subscribe","params":{"session":"s"}}"#,
+    );
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+    // Everything is optional: all the grant reaches, from now on.
+    let request = decode_request(
+        br#"{"requestId":"r","protocol":{"major":1,"minor":3},"op":"activity.subscribe","params":{}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        request.operation,
+        Operation::ActivitySubscribe(ActivitySubscribeParams::default())
     );
 
     assert_eq!(page_size(None), DEFAULT_PAGE as usize);

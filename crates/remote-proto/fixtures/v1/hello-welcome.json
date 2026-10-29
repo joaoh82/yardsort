@@ -1,13 +1,13 @@
 {
   "welcome": {
-    "protocol": { "major": 1, "minor": 2 },
+    "protocol": { "major": 1, "minor": 3 },
     "host": {
       "host": "host-example",
       "name": "Example workstation",
       "platform": "linux",
       "appVersion": "0.20.2",
-      "protocol": { "major": 1, "minor": 2 },
-      "capabilities": ["host.describe", "terminal.attach"]
+      "protocol": { "major": 1, "minor": 3 },
+      "capabilities": ["host.describe", "terminal.attach", "activity.subscribe"]
     }
   }
 }

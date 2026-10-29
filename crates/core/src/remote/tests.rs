@@ -64,6 +64,7 @@ impl Fixture {
             terminals,
             host: &self.identity,
             interactive: false,
+            subscriptions: false,
         }
     }
 
@@ -227,6 +228,17 @@ fn the_host_describes_itself_and_advertises_only_what_it_answers() {
             .any(|op| op.starts_with("terminal.")),
         "terminals are not offered before leases are enforced"
     );
+    // Following activity needs a channel to send it on, which the facade alone does not have.
+    assert!(!host
+        .capabilities
+        .iter()
+        .any(|op| op == "activity.subscribe"));
+    let refused = refusal(ask(
+        &facade,
+        &everything(),
+        Operation::ActivitySubscribe(Default::default()),
+    ));
+    assert_eq!(refused.code, ErrorCode::Unsupported);
 }
 
 #[test]

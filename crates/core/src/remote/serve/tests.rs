@@ -20,9 +20,10 @@ enum Sent {
     Output(u32, u64, Vec<u8>),
 }
 
-/// The relay's side of a channel, with a queue of `room` bytes that nothing drains.
+/// The relay's side of a channel, with a queue of `capacity` bytes that drains only when told.
 struct Recorded {
     sent: Mutex<Vec<Sent>>,
+    capacity: usize,
     room: Mutex<usize>,
 }
 
@@ -30,8 +31,14 @@ impl Recorded {
     fn new(room: usize) -> Arc<Self> {
         Arc::new(Self {
             sent: Mutex::new(Vec::new()),
+            capacity: room,
             room: Mutex::new(room),
         })
+    }
+
+    /// The relay sent everything waiting.
+    fn drain(&self) {
+        *self.room.lock().unwrap() = self.capacity;
     }
 
     fn sent(&self) -> Vec<Sent> {
@@ -92,6 +99,17 @@ impl Outbound for Recorded {
             decoded.position.seq,
             decoded.bytes.to_vec(),
         ));
+        true
+    }
+
+    fn activity(&self, text: String) -> bool {
+        let mut room = self.room.lock().unwrap();
+        if self.capacity - *room > ACTIVITY_WAITING {
+            return false;
+        }
+        *room = room.saturating_sub(text.len());
+        drop(room);
+        self.text(text);
         true
     }
 }
@@ -797,4 +815,371 @@ fn a_device_that_comes_back_resumes_and_hears_who_controls_and_that_the_program_
         .find(|t| t["event"] == "terminal.exited" && t["stream"] == second)
         .unwrap();
     assert_eq!(exited["exit"]["success"], false, "{exited}");
+}
+
+/// Record an event in `workspace`, as a producer would, with `path` in its detail.
+fn record(
+    store: &Store,
+    id: &str,
+    workspace: &str,
+    session: Option<&str>,
+    class: &str,
+    path: &str,
+) {
+    assert!(store
+        .add_event(&crate::store::NewEvent {
+            id,
+            schema_version: 1,
+            workspace_id: workspace,
+            session_id: session,
+            occurred_at: 1_000,
+            kind: "file.reported_write",
+            producer: "claude",
+            method: "hook",
+            fidelity: "reported",
+            privacy_class: class,
+            payload: &json!({ "path": path, "kind": "edit" }).to_string(),
+            ..Default::default()
+        })
+        .unwrap());
+}
+
+/// The ids in every `activity.events` batch for `subscription`, in the order sent.
+fn followed(out: &Recorded, subscription: u64) -> Vec<String> {
+    out.texts()
+        .into_iter()
+        .filter(|t| t["event"] == "activity.events" && t["subscription"] == subscription)
+        .flat_map(|t| {
+            t["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| e["id"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The `newer` of the last batch for `subscription`.
+fn last_newer(out: &Recorded, subscription: u64) -> Value {
+    out.texts()
+        .into_iter()
+        .rev()
+        .find(|t| t["event"] == "activity.events" && t["subscription"] == subscription)
+        .map(|t| t["newer"].clone())
+        .unwrap_or_else(|| panic!("no batch for {subscription}"))
+}
+
+const READ: [Scope; 2] = [Scope::WorkspaceRead, Scope::ActivityRead];
+
+#[test]
+fn a_device_follows_activity_as_it_is_recorded_and_picks_up_where_it_left_off() {
+    let fx = Fixture::new();
+    fx.approve(
+        PHONE,
+        "g-phone",
+        &READ,
+        ProjectGrant::Only([ProjectId::new(fx.alpha_project.as_str()).unwrap()].into()),
+    );
+    fx.store
+        .add_session(&crate::store::NewSession {
+            id: "rec-a",
+            workspace_id: &fx.alpha,
+            harness_id: "claude",
+            model: None,
+            effort: None,
+            harness_session_id: None,
+            title: "t",
+            forked_from: None,
+            pty_session_id: "pty-a",
+            prompt: None,
+        })
+        .unwrap();
+    record(
+        &fx.store,
+        "before",
+        &fx.alpha,
+        None,
+        "metadata",
+        "src/old.rs",
+    );
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(PHONE, "g-phone", &out);
+    let welcome = out.texts().last().unwrap().clone();
+    assert!(
+        welcome.to_string().contains("activity.subscribe"),
+        "{welcome}"
+    );
+    assert!(!visitor.following());
+
+    // Everything the grant reaches, from now on: what was recorded before is not sent, and the
+    // reply names it, to read back from or to subscribe after.
+    let all = ask(&fx, &visitor, &out, "s1", "activity.subscribe", json!({}));
+    assert_eq!(all["result"]["kind"], "subscribed", "{all}");
+    let all_id = all["result"]["subscription"].as_u64().unwrap();
+    assert!(all["result"]["newer"].as_str().unwrap().starts_with("a1.n"));
+    assert!(visitor.following());
+    // One conversation of one workspace.
+    let one = ask(
+        &fx,
+        &visitor,
+        &out,
+        "s2",
+        "activity.subscribe",
+        json!({"workspace": fx.alpha, "session": "rec-a"}),
+    );
+    let one_id = one["result"]["subscription"].as_u64().unwrap();
+    assert!(followed(&out, all_id).is_empty());
+
+    // Another project's, and a class a device is never shown, interleaved; nothing private.
+    record(
+        &fx.store,
+        "a1",
+        &fx.alpha,
+        Some("rec-a"),
+        "metadata",
+        "src/a.rs",
+    );
+    record(&fx.store, "b1", &fx.beta, None, "metadata", "src/b.rs");
+    record(&fx.store, "c1", &fx.alpha, None, "content", "src/c.rs");
+    record(
+        &fx.store,
+        "a2",
+        &fx.alpha,
+        None,
+        "metadata",
+        "/home/someone/secret",
+    );
+    visitor.poll(&fx.context());
+    assert_eq!(followed(&out, all_id), ["a1", "a2"]);
+    assert_eq!(followed(&out, one_id), ["a1"]);
+    let batches = out.texts();
+    let batch = batches
+        .iter()
+        .find(|t| t["event"] == "activity.events")
+        .unwrap();
+    assert_eq!(batch["events"][0]["detail"]["path"], "src/a.rs");
+    assert!(!out.texts().iter().any(|t| t.to_string().contains("secret")));
+    // Nothing new: nothing sent.
+    let sent = out.texts().len();
+    visitor.poll(&fx.context());
+    assert_eq!(out.texts().len(), sent);
+
+    // Unsubscribed, it hears no more; a subscription that is not this channel's is not found.
+    let done = ask(
+        &fx,
+        &visitor,
+        &out,
+        "u1",
+        "activity.unsubscribe",
+        json!({"subscription": one_id}),
+    );
+    assert_eq!(done["result"]["kind"], "done", "{done}");
+    let again = ask(
+        &fx,
+        &visitor,
+        &out,
+        "u2",
+        "activity.unsubscribe",
+        json!({"subscription": one_id}),
+    );
+    assert_eq!(code(&again), "not_found");
+    record(
+        &fx.store,
+        "a3",
+        &fx.alpha,
+        Some("rec-a"),
+        "metadata",
+        "src/a.rs",
+    );
+    visitor.poll(&fx.context());
+    assert_eq!(followed(&out, one_id), ["a1"]);
+    assert_eq!(followed(&out, all_id), ["a1", "a2", "a3"]);
+
+    // The device goes, and comes back on another channel after the last batch it took in: what
+    // was recorded meanwhile comes right after the reply, without waiting for a poll.
+    let resume_from = last_newer(&out, all_id);
+    visitor.close(&fx.host);
+    assert!(!visitor.following());
+    record(&fx.store, "a4", &fx.alpha, None, "metadata", "src/a.rs");
+    record(&fx.store, "a5", &fx.alpha, None, "metadata", "src/a.rs");
+    let back = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(PHONE, "g-phone", &back);
+    let resumed = ask(
+        &fx,
+        &visitor,
+        &back,
+        "s3",
+        "activity.subscribe",
+        json!({"after": resume_from}),
+    );
+    assert_eq!(resumed["result"]["newer"], resume_from, "{resumed}");
+    let resumed_id = resumed["result"]["subscription"].as_u64().unwrap();
+    assert_eq!(followed(&back, resumed_id), ["a4", "a5"]);
+    let texts = back.texts();
+    let reply_at = texts.iter().position(|t| t["requestId"] == "s3").unwrap();
+    let batch_at = texts
+        .iter()
+        .position(|t| t["event"] == "activity.events")
+        .unwrap();
+    assert!(reply_at < batch_at, "the reply comes first: {texts:?}");
+
+    // A cursor the host no longer keeps: start again from the list.
+    let gone = last_newer(&back, resumed_id);
+    fx.store.clear_activity(Some(&fx.alpha)).unwrap();
+    let expired = ask(
+        &fx,
+        &visitor,
+        &back,
+        "s4",
+        "activity.subscribe",
+        json!({"after": gone}),
+    );
+    assert_eq!(code(&expired), "cursor_expired");
+    // A cursor that walks back, another project's workspace, a conversation of another
+    // workspace: none of them followed.
+    let older = ask(
+        &fx,
+        &visitor,
+        &back,
+        "s5",
+        "activity.subscribe",
+        json!({"after": "a1.o1"}),
+    );
+    assert_eq!(code(&older), "invalid_request");
+    let other = ask(
+        &fx,
+        &visitor,
+        &back,
+        "s6",
+        "activity.subscribe",
+        json!({"workspace": fx.beta}),
+    );
+    assert_eq!(code(&other), "not_found");
+    let elsewhere = ask(
+        &fx,
+        &visitor,
+        &back,
+        "s7",
+        "activity.subscribe",
+        json!({"workspace": fx.alpha, "session": "rec-elsewhere"}),
+    );
+    assert_eq!(code(&elsewhere), "not_found");
+
+    // A grant without activity:read follows nothing.
+    fx.approve(
+        LAPTOP,
+        "g-laptop",
+        &[Scope::WorkspaceRead],
+        ProjectGrant::All,
+    );
+    let laptop_out = Recorded::new(usize::MAX);
+    let laptop = fx.visitor(LAPTOP, "g-laptop", &laptop_out);
+    let refused = ask(
+        &fx,
+        &laptop,
+        &laptop_out,
+        "s8",
+        "activity.subscribe",
+        json!({}),
+    );
+    assert_eq!(code(&refused), "forbidden");
+    assert!(!laptop.following());
+}
+
+#[test]
+fn catching_up_waits_for_the_device_and_a_workspace_that_goes_ends_its_subscription() {
+    let fx = Fixture::new();
+    fx.approve(PHONE, "g-phone", &READ, ProjectGrant::All);
+    record(
+        &fx.store,
+        "first",
+        &fx.alpha,
+        None,
+        "metadata",
+        "src/first.rs",
+    );
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(PHONE, "g-phone", &out);
+    let first = ask(
+        &fx,
+        &visitor,
+        &out,
+        "s1",
+        "activity.subscribe",
+        json!({"workspace": fx.alpha}),
+    );
+    let after = first["result"]["newer"].clone();
+    ask(
+        &fx,
+        &visitor,
+        &out,
+        "u1",
+        "activity.unsubscribe",
+        json!({"subscription": first["result"]["subscription"]}),
+    );
+
+    // Far more than may wait for a device, each event as large as a path may be.
+    let path = format!("src/{}.rs", "p".repeat(remote_proto::MAX_TEXT));
+    let count = 2 * ACTIVITY_WAITING / path.len() + 10;
+    let ids: Vec<String> = (0..count).map(|n| format!("ev-{n:04}")).collect();
+    for id in &ids {
+        record(&fx.store, id, &fx.alpha, None, "metadata", &path);
+    }
+    let caught = ask(
+        &fx,
+        &visitor,
+        &out,
+        "s2",
+        "activity.subscribe",
+        json!({"workspace": fx.alpha, "after": after}),
+    );
+    let id = caught["result"]["subscription"].as_u64().unwrap();
+    let sent = followed(&out, id);
+    assert!(
+        !sent.is_empty() && sent.len() < count,
+        "{} of {count} went before the device had enough waiting",
+        sent.len()
+    );
+    // Every message within a frame.
+    for text in out.texts() {
+        assert!(text.to_string().len() <= remote_proto::MAX_CONTROL_FRAME);
+    }
+    // Nothing more goes until the device has taken some in; then the rest, each once, in order.
+    visitor.poll(&fx.context());
+    assert_eq!(followed(&out, id).len(), sent.len());
+    while followed(&out, id).len() < count {
+        let before = followed(&out, id).len();
+        out.drain();
+        visitor.poll(&fx.context());
+        assert!(
+            followed(&out, id).len() > before,
+            "a poll after draining sends more"
+        );
+    }
+    assert_eq!(followed(&out, id), ids);
+
+    // The workspace is forgotten: its subscription ends, and the device is told why.
+    assert!(fx.store.forget_workspace(&fx.alpha, true).unwrap());
+    visitor.poll(&fx.context());
+    let ended = out.texts().last().unwrap().clone();
+    assert_eq!(ended["event"], "activity.ended", "{ended}");
+    assert_eq!(ended["subscription"], id);
+    assert_eq!(ended["error"]["code"], "not_found");
+    assert!(!visitor.following());
+
+    // At most so many at once on one channel.
+    for n in 0..remote_proto::MAX_SUBSCRIPTIONS {
+        let reply = ask(
+            &fx,
+            &visitor,
+            &out,
+            &format!("m{n}"),
+            "activity.subscribe",
+            json!({}),
+        );
+        assert_eq!(reply["result"]["kind"], "subscribed", "{reply}");
+    }
+    let refused = ask(&fx, &visitor, &out, "over", "activity.subscribe", json!({}));
+    assert_eq!(code(&refused), "invalid_request");
 }

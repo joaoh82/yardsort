@@ -13,8 +13,10 @@
 //!
 //! **Nothing waits on a slow device.** Each channel's output is bounded
 //! ([`remote_proto::MAX_QUEUED_OUTPUT`]): past it, the stream is detached and the device told to
-//! attach again. Each channel's requests are answered on a thread of its own, in order, so a
-//! device's slow request holds up only that device.
+//! attach again. Activity a device follows goes only while less than [`ACTIVITY_WAITING`] waits
+//! for it, and the rest at a later look. Each channel's requests are answered on a thread of its
+//! own, in order, so a device's slow request holds up only that device. The same thread looks
+//! for new activity about every [`POLL_EVERY`], while its device follows some.
 //!
 //! **Grants are checked here too.** A channel opens only when this host's record has the grant
 //! the relay names, every request looks it up again, and every [`RECHECK_EVERY`] — or at once,
@@ -32,7 +34,7 @@ use remote_proto::account::Secret;
 use remote_proto::relay::{CloseReason, LinkFrame, TicketRequest};
 use remote_proto::{ErrorCode, HostId, MAX_QUEUED_OUTPUT};
 use tokio::sync::{mpsc as tokio_mpsc, Notify};
-use yardsort_core::remote::serve::{Context, Outbound, Visitor};
+use yardsort_core::remote::serve::{Context, Outbound, Visitor, ACTIVITY_WAITING, POLL_EVERY};
 
 /// How often every channel's grant is checked against this host's record.
 pub const RECHECK_EVERY: Duration = Duration::from_secs(5);
@@ -242,8 +244,23 @@ impl Outbound for ChannelOut {
         if self.queued.load(Ordering::SeqCst) + size > MAX_QUEUED_OUTPUT {
             return false;
         }
-        self.queued.fetch_add(size, Ordering::SeqCst);
         let frame = LinkFrame::Binary(self.channel, &frame).encode();
+        self.counted(frame, size)
+    }
+
+    fn activity(&self, text: String) -> bool {
+        if self.queued.load(Ordering::SeqCst) > ACTIVITY_WAITING {
+            return false;
+        }
+        let frame = LinkFrame::Text(self.channel, text.as_bytes()).encode();
+        self.counted(frame, text.len())
+    }
+}
+
+impl ChannelOut {
+    /// Queue a frame, counting `size` as waiting for the device until it is written.
+    fn counted(&self, frame: Vec<u8>, size: usize) -> bool {
+        self.queued.fetch_add(size, Ordering::SeqCst);
         self.link
             .send(Out {
                 frame,
@@ -391,14 +408,38 @@ fn visit(
         Some(Err(reason)) => return close(reason),
         None => return close(CloseReason::Gone),
     };
-    while let Ok(message) = messages.recv() {
+    // While the device follows activity, look for more at least this often, however busy the
+    // channel is otherwise.
+    let mut next_poll = Instant::now() + POLL_EVERY;
+    loop {
+        let message = if visitor.following() {
+            match messages.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
+                Ok(message) => Some(message),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            match messages.recv() {
+                Ok(message) => Some(message),
+                Err(mpsc::RecvError) => break,
+            }
+        };
+        let poll = Instant::now() >= next_poll;
+        if poll {
+            next_poll = Instant::now() + POLL_EVERY;
+        }
         let mut outcome = Ok(());
         serving.with(&mut |context| {
             outcome = match &message {
-                Inbox::Text(text) => visitor.handle(context, text),
-                Inbox::Recheck if !visitor.allowed(context.store) => Err(CloseReason::Revoked),
-                Inbox::Recheck => Ok(()),
+                Some(Inbox::Text(text)) => visitor.handle(context, text),
+                Some(Inbox::Recheck) if !visitor.allowed(context.store) => {
+                    Err(CloseReason::Revoked)
+                }
+                Some(Inbox::Recheck) | None => Ok(()),
             };
+            if outcome.is_ok() && poll {
+                visitor.poll(context);
+            }
         });
         if let Err(reason) = outcome {
             close(reason);

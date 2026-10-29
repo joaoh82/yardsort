@@ -1,6 +1,7 @@
 //! The connector against a stand-in relay on a real socket, a real store and programs in real
 //! PTYs: devices come through the link, a failed link lets go of everything they held while the
-//! programs run on, and the connector comes back by itself.
+//! programs run on, and the connector comes back by itself. Activity a device follows reaches it
+//! without its asking again.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -174,6 +175,7 @@ fn here() -> Arc<Here> {
         "Phone",
         &[
             Scope::WorkspaceRead,
+            Scope::ActivityRead,
             Scope::TerminalRead,
             Scope::TerminalControl,
         ]
@@ -339,4 +341,69 @@ async fn devices_come_through_the_link_and_a_failed_link_leaves_the_programs_run
     })
     .await;
     assert!(closed.is_ok(), "the link stayed open after stopping");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn activity_a_device_follows_reaches_it_as_it_is_recorded() {
+    let mut relay = FakeRelay::start().await;
+    let here = here();
+    let connector = Connector::start(
+        HostId::new("host-test").unwrap(),
+        Arc::new(Credentials(relay.base.clone())),
+        Arc::clone(&here) as Arc<dyn Serving>,
+    );
+    let mut socket = relay.next_socket().await;
+    send(&mut socket, open(1, "g-phone")).await;
+    say(
+        &mut socket,
+        1,
+        json!({"client": "test-phone/1", "protocols": [1]}),
+    )
+    .await;
+    let (_, welcome) = text(&mut socket).await;
+    assert!(welcome["welcome"]["host"]["capabilities"]
+        .to_string()
+        .contains("activity.subscribe"));
+    say(
+        &mut socket,
+        1,
+        request("r1", "activity.subscribe", json!({})),
+    )
+    .await;
+    let (_, subscribed) = text(&mut socket).await;
+    assert_eq!(subscribed["result"]["kind"], "subscribed", "{subscribed}");
+    // Answered in order: once this is, the subscription's first look is over.
+    say(&mut socket, 1, request("r2", "host.describe", json!({}))).await;
+    let (_, described) = text(&mut socket).await;
+    assert_eq!(described["requestId"], "r2");
+
+    // Recorded after that, by whatever writes the store: the device hears of it at the next
+    // look, without asking.
+    let recorded = Instant::now();
+    assert!(here
+        .store
+        .add_event(&yardsort_core::store::NewEvent {
+            id: "ev-1",
+            schema_version: 1,
+            workspace_id: &here.workspace,
+            occurred_at: 1_000,
+            kind: "turn.completed",
+            producer: "claude",
+            method: "hook",
+            fidelity: "reported",
+            privacy_class: "metadata",
+            payload: "{}",
+            ..Default::default()
+        })
+        .unwrap());
+    let (channel, batch) = text(&mut socket).await;
+    assert_eq!(channel, 1);
+    assert_eq!(batch["event"], "activity.events", "{batch}");
+    assert_eq!(batch["events"][0]["id"], "ev-1");
+    assert!(
+        recorded.elapsed() < yardsort_core::remote::serve::POLL_EVERY * 3,
+        "heard of it after {:?}",
+        recorded.elapsed()
+    );
+    connector.stop().await;
 }
