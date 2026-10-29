@@ -18,11 +18,13 @@ more of you. If you change it and let other people use it, you must offer those 
 source of your changed version
 ([docs/design/30](../../../docs/design/30-open-source-and-managed.md)).
 
-**What works today.** Signing in, listing and revoking devices, and pairing a device with a host,
-approved at the host: the server's first slices
-([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app pairs only
-as a preview (`YARDSORT_REMOTE_PREVIEW=1`), and a paired device cannot reach its host yet, so for
-now this is for trying the server and getting ready for what comes next.
+**What works today.** Signing in, listing and revoking devices, pairing a device with a host
+(approved at the host), and the relay, through which a paired device reaches its host's
+workspaces and terminals with neither of them listening for connections
+([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app is a host
+only as a preview (`YARDSORT_REMOTE_PREVIEW=1`), and there is no phone app yet: the repository's
+pairing tool stands in for one. So for now this is for trying the server and getting ready for
+what comes next.
 
 ## What you need
 
@@ -101,7 +103,8 @@ once, take their **user id** from their page in ZITADEL's console and run:
 docker compose exec server yardsort-server revoke-account --subject <user id>
 ```
 
-It says how many devices it revoked. Each one stops on its next request.
+It says how many devices it revoked. Each one stops on its next request, and the running server
+closes their live connections at once.
 
 ## Backing up
 
@@ -179,12 +182,23 @@ Your proxy has to do what the `Caddyfile` does:
    they are connected (in nginx, `proxy_http_version 1.1;` with `Upgrade` and `Connection`
    headers set from the request's). It pings every 20 seconds, so a proxy may close a connection
    quiet for a minute, but not sooner (nginx's `proxy_read_timeout` is 60 seconds already).
-   Run one `server`: each instance holds its own relay sockets, and only a proxy that can send a
-   request on to a named instance (Fly.io's, with `YARDSORT_ROUTING=fly-replay`) lets several
-   share the work.
+   Run one `server` ([One instance](#one-instance)).
 4. **Let the server reach the auth name.** The server fetches ZITADEL's settings and keys at
    `https://<auth name>`. The override sends that name to this machine (`host-gateway`), so your
    proxy has to listen on 443 on an address the containers can reach, not on `127.0.0.1` alone.
+
+## One instance
+
+Run one `server`. Each instance holds its own relay sockets, and a device's connection has to
+reach the instance holding its host's. Only a proxy that can send a request on to a named
+instance does that: Fly.io's, with `YARDSORT_ROUTING=fly-replay`. Behind any other proxy, several
+instances would leave devices unable to reach hosts connected to another.
+
+The server keeps one more connection to PostgreSQL than its pool, to hear what other processes
+sharing the database did, such as the operator's `revoke-account` ([Running it](#running-it)). `DATABASE_URL`
+has to be a direct connection, as this recipe's is, not a pooler that hands out a connection per
+transaction. Behind one, what another process revokes reaches live connections only at the
+server's next five-second check, and its log warns about it about once a minute.
 
 ## Trying it on one machine first
 

@@ -286,6 +286,10 @@ the owner's go-ahead:
   link replaced on another instance closes at once, by one more kind of signal. No new secret, no
   new setting.
 
+R2's code is complete with slice 12. What staging still owes before R2 closes (the smoke tests of
+slices 6 to 12, three of them also on a second Machine) is listed in R2's exit review
+([27 §20](27-remote-r2.md#20--r2s-exit-review)).
+
 ## 7 · Open decisions
 
 - When "something to launch" is, for ZITADEL Pro: the public beta, or launch (R7).
