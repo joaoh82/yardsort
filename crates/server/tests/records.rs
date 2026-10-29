@@ -15,7 +15,7 @@ use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{
     AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, Handoff, Host, HostOffer,
     Issued, LinkPlace, MemoryRecords, PendingLogin, Records, Redemption, RevokeReason, Revoked,
-    Rotation, SEEN_RESOLUTION_MS,
+    Rotation, Signal, SEEN_RESOLUTION_MS,
 };
 use yardsort_server::tokens::{self, TokenHash};
 
@@ -68,6 +68,7 @@ for_each_store!(
     grants_keep_every_scope_and_project,
     a_link_place_is_kept_by_its_instance_and_taken_by_a_later_link,
     pairing_requests_waiting_on_an_instances_links,
+    signals_come_back_to_every_listener_in_order,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -229,7 +230,7 @@ async fn a_refresh_credential_rotates_once_and_a_copy_revokes_the_device(
             .rotate(&h("phone-refresh"), third, T + 200)
             .await
             .unwrap(),
-        Rotation::Reused
+        Rotation::Reused(account.clone())
     );
     let (found, _) = records.access(&h("second-access")).await.unwrap().unwrap();
     assert_eq!(
@@ -279,7 +280,7 @@ async fn a_spent_refresh_credential_is_remembered_through_later_rotations(
             .rotate(&h("phone-refresh"), issued("copy", T + 6_000), T + 6_000)
             .await
             .unwrap(),
-        Rotation::Reused
+        Rotation::Reused(account.clone())
     );
 }
 
@@ -321,7 +322,7 @@ async fn racing_rotations_of_one_credential_let_exactly_one_through(
     for racer in racers {
         match racer.await.unwrap() {
             Rotation::Rotated(_) => through += 1,
-            Rotation::Reused | Rotation::Revoked => {}
+            Rotation::Reused(_) | Rotation::Revoked => {}
             other => panic!("{other:?}"),
         }
     }
@@ -1269,6 +1270,68 @@ async fn pairing_requests_waiting_on_an_instances_links(records: Arc<impl Record
         .await
         .unwrap()
         .is_empty());
+}
+
+async fn signals_come_back_to_every_listener_in_order(records: Arc<impl Records>) {
+    let mut first = records.signals();
+    let mut second = records.signals();
+    for listening in [&mut first, &mut second] {
+        // Each says it is listening, so that nothing sent from here on is missed.
+        loop {
+            let heard = tokio::time::timeout(std::time::Duration::from_secs(10), listening.recv())
+                .await
+                .expect("never listening")
+                .unwrap();
+            if heard == Signal::RecheckAll {
+                break;
+            }
+        }
+    }
+    let account = AccountId("account-1".into());
+    let pairing = Signal::Pairing(HostId::new("host-1").unwrap(), GrantId::new("g-1").unwrap());
+    records
+        .signal(Signal::Recheck(account.clone()))
+        .await
+        .unwrap();
+    records.signal(pairing.clone()).await.unwrap();
+    for listening in [&mut first, &mut second] {
+        let mut heard = Vec::new();
+        while heard.len() < 2 {
+            let signal = tokio::time::timeout(std::time::Duration::from_secs(10), listening.recv())
+                .await
+                .expect("a signal never came")
+                .unwrap();
+            // Another listener starting says so to everyone; that is no harm.
+            if signal != Signal::RecheckAll {
+                heard.push(signal);
+            }
+        }
+        assert_eq!(heard, [Signal::Recheck(account.clone()), pairing.clone()]);
+    }
+}
+
+#[test]
+fn signals_travel_as_a_few_words_and_nothing_else_reads_as_one() {
+    let host = HostId::new("host-1").unwrap();
+    let grant = GrantId::new("grant:1").unwrap();
+    for signal in [
+        Signal::Recheck(AccountId("9b2f6c1e-account".into())),
+        Signal::RecheckAll,
+        Signal::Pairing(host, grant),
+    ] {
+        assert_eq!(Signal::decode(&signal.encode()), Some(signal));
+    }
+    for other in [
+        "",
+        "recheck",
+        "recheck ",
+        "pairing h",
+        "pairing h g x",
+        "revoke a",
+        "host-renamed x",
+    ] {
+        assert_eq!(Signal::decode(other), None, "{other:?}");
+    }
 }
 
 // What only PostgreSQL has to do.

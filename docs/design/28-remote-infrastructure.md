@@ -166,7 +166,7 @@ Settled on 2026-10-23:
    - **Type:** **Web**.
    - **Authentication method:** **Code**, so the server authenticates with a client secret.
      The server sends PKCE as well, which ZITADEL accepts alongside the secret: confirmed against
-     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §14).
+     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §15).
    - **Redirect URI:** `https://remote-staging.yardsort.sh/v1/login/callback`.
    - **Development mode:** off.
    - **Refresh tokens:** leave them off. The server never asks ZITADEL for one.
@@ -198,8 +198,9 @@ Settled on 2026-10-23:
 
 - **Staging:** create a Neon project in Frankfurt (AWS `eu-central-1`), with one database
   `yardsort`. Use its direct connection string, not the pooled one, as `DATABASE_URL`, keeping
-  `sslmode=require`: the server keeps its own pool of eight connections per instance, and makes
-  its tables itself when it first starts.
+  `sslmode=require`: the server keeps its own pool of eight connections per instance, listens for
+  its instances' signals on one more, which a pooler would not carry, and makes its tables itself
+  when it first starts.
 - **Production, later:** `fly mpg create`, on the Basic plan, in the primary region.
 
 **E. DNS**
@@ -246,7 +247,7 @@ the owner's go-ahead:
   (`.github/workflows/server-deploy.yml`), and the self-host recipe (`crates/server/self-host/`).
   Staging was first deployed from a workstation, with the workflow's arguments, before the
   workflow reached `main`. Step E and staging's smoke test followed on 2026-10-25, and the test
-  passed ([27](27-remote-r2.md) §14). The workflow first deployed it from Actions on 2026-10-25.
+  passed ([27](27-remote-r2.md) §15). The workflow first deployed it from Actions on 2026-10-25.
   Production's Fly config and its protected environment come with its ZITADEL instance.
 - **Slice 4, built on 2026-10-25** ([27](27-remote-r2.md) §7): pairing, on the server and in the
   app behind `YARDSORT_REMOTE_PREVIEW=1`. Its migration `0002_hosts_and_grants.sql` reaches
@@ -271,6 +272,12 @@ the owner's go-ahead:
 - **Slice 10, built on 2026-10-29** ([27](27-remote-r2.md) §13): a host told over its link that
   a device asks to pair. One more query per instance every five seconds; no migration, no new
   secret, no new setting.
+- **Slice 11, built on 2026-10-29** ([27](27-remote-r2.md) §14): signals between instances, as
+  PostgreSQL notifications, so a revocation reaches every instance at once. Each running server
+  holds one more database connection, to listen, beside its pool of eight. Listening needs a
+  direct connection, which `DATABASE_URL` already is on staging: through a pooler that hands out
+  a connection per transaction, as Neon's pooled string does, signals would never arrive, and
+  only the five-second rounds would remain. No migration, no new secret, no new setting.
 
 ## 7 · Open decisions
 

@@ -14,7 +14,7 @@ use remote_proto::{ErrorCode, GrantId, HostId, RemoteError};
 
 use crate::records::{
     Decision, GrantFilter, GrantRecord, GrantStatus, GrantView, Host, HostOffer, Records,
-    Redemption,
+    Redemption, Signal,
 };
 use crate::service::unreadable;
 use crate::tokens::{self, Kind};
@@ -170,8 +170,16 @@ impl<R: Records> ControlService<R> {
             .add_grant(grant.clone())
             .await
             .map_err(unreadable)?;
-        // At once if its link is here; otherwise its instance tells it at its next round.
+        // At once if its link is here, and through the signal wherever it is. The instance
+        // holding it also finds the request at its next round, should the signal not go.
         self.relay.tell_pairing(&grant.host, &grant.id);
+        if let Err(error) = self
+            .records
+            .signal(Signal::Pairing(grant.host.clone(), grant.id.clone()))
+            .await
+        {
+            tracing::error!("relay: records: {error}");
+        }
         self.visible_grant(caller, &grant.id, now).await
     }
 
@@ -264,7 +272,7 @@ impl<R: Records> ControlService<R> {
             .map_err(unreadable)?
             .ok_or_else(not_waiting)?;
         // An approval revokes the device's earlier grant on this host.
-        self.relay.nudge(&caller.account);
+        self.revoked(&caller.account).await;
         self.visible_grant(caller, id, now).await
     }
 
@@ -280,7 +288,7 @@ impl<R: Records> ControlService<R> {
             .revoke_grant(&caller.account, id, now)
             .await
             .map_err(unreadable)?;
-        self.relay.nudge(&caller.account);
+        self.revoked(&caller.account).await;
         Ok(())
     }
 
@@ -297,7 +305,7 @@ impl<R: Records> ControlService<R> {
             .remove_host(&caller.account, &host.id, now)
             .await
             .map_err(unreadable)?;
-        self.relay.nudge(&caller.account);
+        self.revoked(&caller.account).await;
         Ok(())
     }
 

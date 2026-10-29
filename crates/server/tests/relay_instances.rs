@@ -2,7 +2,8 @@
 //! proxy (`common/replay.rs`), on each store: a phone reaches its host whichever instance its
 //! requests land on, a host that connects again on the other instance takes its link with it, a
 //! revocation through one instance closes a socket held by the other, a place nobody keeps is
-//! not believed, and a host hears of a device asking to pair through the other instance.
+//! not believed, and a host hears of a device asking to pair through the other instance: at the
+//! other's next round, and at once through the records' signals.
 //!
 //! Everyone signs in and pairs at instance `a` itself; only the relay goes through the proxy. Each
 //! test also holds the records the two share, to look at them as a third instance would.
@@ -62,6 +63,7 @@ for_each_store!(
     a_host_that_connects_again_elsewhere_takes_its_link_with_it,
     a_place_nobody_keeps_is_not_believed,
     a_host_hears_of_a_device_asking_through_the_other_instance,
+    what_happens_through_one_instance_reaches_the_other_at_once,
 );
 
 /// Long enough for anything done at once.
@@ -79,7 +81,17 @@ struct Instances {
 }
 
 async fn instances(a: impl Records + 'static, b: impl Records + 'static) -> Instances {
-    let relay = |name: &str| Relay::new(Instance::new(name).unwrap(), Routing::FlyReplay);
+    instances_with_rounds(a, b, RECHECK_EVERY).await
+}
+
+/// With rounds of checks `rounds` apart.
+async fn instances_with_rounds(
+    a: impl Records + 'static,
+    b: impl Records + 'static,
+    rounds: Duration,
+) -> Instances {
+    let relay =
+        |name: &str| Relay::with_rounds(Instance::new(name).unwrap(), Routing::FlyReplay, rounds);
     let a = Served::start_as(a, http::Options::default(), relay("a")).await;
     let b = Served::start_as(b, http::Options::default(), relay("b")).await;
     let addr = |s: &Served| s.base.socket_addrs(|| None).unwrap()[0];
@@ -262,7 +274,7 @@ async fn a_phone_reaches_its_host_whichever_instance_it_lands_on(
     assert_eq!(phone.host, p.host_id);
     they_talk(&mut host, &mut phone).await;
 
-    // Revoked through b, which holds nothing of it: a closes the socket at its next round.
+    // Revoked through b, which holds nothing of it: a closes the socket.
     let revoked =
         i.b.post_as(
             &p.host.access,
@@ -407,5 +419,90 @@ async fn a_host_hears_of_a_device_asking_through_the_other_instance(
     assert_eq!(
         LinkFrame::decode(&bytes).unwrap(),
         LinkFrame::Text(NOTICE_CHANNEL, &notice)
+    );
+}
+
+async fn what_happens_through_one_instance_reaches_the_other_at_once(
+    a: impl Records + 'static,
+    b: impl Records + 'static,
+    _records: impl Records,
+) {
+    // A round a minute apart: only a signal gets anything there in time.
+    let i = instances_with_rounds(a, b, Duration::from_secs(60)).await;
+    let p = pair(&i.a).await;
+    i.proxy.land_on(Some("a"));
+    let mut host = i.host_link(&p).await;
+    let mut phone = i.phone_link(&p).await;
+    opened(&mut host.reader).await;
+
+    // A tablet asks through b: the host on a hears of it at once.
+    let offer: Offer = ok(i
+        .a
+        .post_as(
+            &p.host.access,
+            &format!("v1/hosts/{}/offers", p.host_id),
+            None,
+        )
+        .await)
+    .await;
+    let tablet = i.a.sign_in("alice", "Tablet", DeviceKind::Phone).await;
+    let asked: GrantSummary = ok(i
+        .b
+        .post_as(
+            &tablet.access,
+            "v1/pairings",
+            Some(&json!({
+                "offer": {"kind": "code", "value": offer.code.expose()},
+                "scopes": ["workspace:read"],
+            })),
+        )
+        .await)
+    .await;
+    let heard = tokio::time::timeout(SOON, host.reader.next())
+        .await
+        .expect("the host was not told at once")
+        .unwrap();
+    let notice = serde_json::to_vec(&HostNotice::PairingRequested { grant: asked.id }).unwrap();
+    assert_eq!(
+        heard,
+        Incoming::Binary(LinkFrame::Text(NOTICE_CHANNEL, &notice).encode())
+    );
+
+    // The phone's grant revoked through b: its socket on a closes at once.
+    let revoked =
+        i.b.post_as(
+            &p.host.access,
+            &format!("v1/grants/{}/revoke", p.grant),
+            None,
+        )
+        .await;
+    assert!(revoked.status().is_success(), "{}", revoked.status());
+    assert_eq!(
+        closed_within(SOON, &mut phone.reader).await,
+        CloseReason::Revoked
+    );
+
+    // A copy of the host's refresh credential presented through b after the host traded it in:
+    // the host is signed out, and its link on a closes at once.
+    let refresh = |credential: &remote_proto::account::Secret| json!({"grant": "refresh", "refresh": credential.expose()});
+    let rotated =
+        i.b.client
+            .post(i.b.url("v1/token"))
+            .json(&refresh(&p.host.refresh))
+            .send()
+            .await
+            .unwrap();
+    assert!(rotated.status().is_success(), "{}", rotated.status());
+    let copy =
+        i.b.client
+            .post(i.b.url("v1/token"))
+            .json(&refresh(&p.host.refresh))
+            .send()
+            .await
+            .unwrap();
+    assert_eq!(copy.status(), reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        closed_within(SOON, &mut host.reader).await,
+        CloseReason::Revoked
     );
 }

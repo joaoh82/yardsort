@@ -7,11 +7,12 @@
 //! its own record before it answers anything ([`ChannelOpen`] names the grant).
 //!
 //! **Revocation reaches live sockets.** Every connected account is checked again every
-//! [`RECHECK_EVERY`], and at once when this process revokes something: a device, a grant, a
-//! host, or a grant replaced by a new approval. A socket whose device, grant or host is no
-//! longer in force is closed with [`CloseReason::Revoked`], and its host is told to drop the
-//! channel. Another process's revocation (the operator's `revoke-account`) is seen at the next
-//! check.
+//! [`RECHECK_EVERY`], and at once when anything revokes something: a device, a grant, a host, a
+//! grant replaced by a new approval, a device signed out for reusing its refresh credential, or
+//! the operator's `revoke-account`. Whatever instance it happened on signals every instance
+//! through the records ([`Signal`]), and each checks the sockets it holds; the rounds are what
+//! catches a signal that did not arrive. A socket whose device, grant or host is no longer in
+//! force is closed with [`CloseReason::Revoked`], and its host is told to drop the channel.
 //!
 //! **Several instances.** A server can run as several instances behind one address, and a
 //! device's socket has to reach the one holding its host's link. Each instance notes in the
@@ -24,8 +25,9 @@
 //! must run as one instance.
 //!
 //! **A host hears of a device asking to pair** on its link's own channel ([`HostNotice`]), at
-//! once when the device asked through the instance holding the link, and otherwise at that
-//! instance's next round, which also tells a host that just connected of what waits for it. Each
+//! once: from the instance the device asked through, or by its [`Signal`] from another. Each
+//! round also looks for requests waiting, in case a signal went missing, and a host that just
+//! connected is told of what waits for it. Each
 //! request is told once per link. The host then asks the server, as it would anyway.
 //!
 //! **Nothing waits on a slow socket.** What is to be sent to each socket waits in its own queue,
@@ -53,10 +55,10 @@ use remote_proto::relay::{
     PING_EVERY_MS, SILENCE_MS, TICKET_TTL_MS,
 };
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
-use tokio::sync::Notify;
+use tokio::sync::{broadcast, Notify};
 
 use crate::http::now_ms;
-use crate::records::{AccountId, GrantFilter, GrantStatus, LinkPlace, Records};
+use crate::records::{AccountId, GrantFilter, GrantStatus, LinkPlace, Records, Signal};
 use crate::service::unreadable;
 use crate::tokens::{self, Kind, TokenHash};
 use crate::{Caller, ControlService};
@@ -175,6 +177,8 @@ impl Default for Relay {
 struct Hub {
     instance: Instance,
     routing: Routing,
+    /// How often the rounds of checks come: [`RECHECK_EVERY`], but for tests.
+    rounds: Duration,
     tickets: Mutex<HashMap<TokenHash, Pending>>,
     hosts: Mutex<HashMap<HostId, Arc<HostLink>>>,
     /// Accounts to check again now, rather than at the next round.
@@ -212,10 +216,17 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Relay {
     pub fn new(instance: Instance, routing: Routing) -> Self {
+        Self::with_rounds(instance, routing, RECHECK_EVERY)
+    }
+
+    /// With rounds of checks this far apart: long, for a test that shows something happened
+    /// without one.
+    pub fn with_rounds(instance: Instance, routing: Routing, rounds: Duration) -> Self {
         Self {
             hub: Arc::new(Hub {
                 instance,
                 routing,
+                rounds,
                 tickets: Mutex::default(),
                 hosts: Mutex::default(),
                 dirty: Mutex::default(),
@@ -963,8 +974,15 @@ async fn tell_pending<R: Records>(service: &ControlService<R>) {
 /// hosts of pairing requests made elsewhere.
 pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R>>) {
     tokio::spawn(async move {
-        let mut round = tokio::time::interval(RECHECK_EVERY);
+        let mut round = tokio::time::interval(service.relay.hub.rounds);
+        let mut signals = Some(service.records.signals());
         loop {
+            let heard = async {
+                match &mut signals {
+                    Some(signals) => Some(signals.recv().await),
+                    None => std::future::pending().await,
+                }
+            };
             let accounts = tokio::select! {
                 _ = round.tick() => {
                     keep_places(&service).await;
@@ -974,6 +992,22 @@ pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R
                 () = service.relay.hub.recheck.notified() => {
                     lock(&service.relay.hub.dirty).drain().collect()
                 }
+                heard = heard => match heard {
+                    Some(Ok(Signal::Recheck(account))) => vec![account],
+                    Some(Ok(Signal::Pairing(host, grant))) => {
+                        service.relay.tell_pairing(&host, &grant);
+                        Vec::new()
+                    }
+                    // Started listening, or missed some: everything, as a round does.
+                    Some(Ok(Signal::RecheckAll) | Err(broadcast::error::RecvError::Lagged(_))) => {
+                        tell_pending(&service).await;
+                        service.relay.accounts()
+                    }
+                    Some(Err(broadcast::error::RecvError::Closed)) | None => {
+                        signals = None;
+                        Vec::new()
+                    }
+                },
             };
             if service.relay.hub.stopping.load(Ordering::SeqCst) {
                 return;

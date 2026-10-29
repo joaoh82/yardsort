@@ -5,11 +5,17 @@
 //! value is taken with `DELETE … RETURNING`, and a refresh credential is checked and replaced with
 //! its row and its device's locked.
 //!
+//! **Signals** between instances ([`Signal`]) are PostgreSQL notifications on one channel
+//! ([`SIGNAL_CHANNEL`]): sent on any pooled connection, and heard on one connection of each
+//! instance's own, opened the first time something listens and opened again when it breaks, with a
+//! [`Signal::RecheckAll`] each time it starts listening, for whatever went by meanwhile.
+//!
 //! The schema is in `migrations/`, applied in order when the server connects, under an advisory
 //! lock so that two instances starting together do not both apply it. Migrations are append-only:
 //! a shipped file is never edited, and a change is a new file.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod, Transaction};
 use std::collections::BTreeSet;
@@ -17,12 +23,13 @@ use std::collections::BTreeSet;
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, Scope, ServerId};
-use tokio_postgres::{Client, Row};
+use tokio::sync::{broadcast, mpsc};
+use tokio_postgres::{AsyncMessage, Client, Row};
 
 use crate::records::{
     AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host,
     HostOffer, Issued, LinkPlace, PendingLogin, Records, RecordsError, Redemption, Result,
-    RevokeReason, Revoked, Rotation, SEEN_RESOLUTION_MS,
+    RevokeReason, Revoked, Rotation, Signal, SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
 use crate::tokens::TokenHash;
 
@@ -64,8 +71,17 @@ const GRANT: &str = "g.id, g.account, g.host, g.device, g.requested, g.scopes, g
                      g.status, g.created_at, g.expires_at, g.decided_at, \
                      h.name, d.name, d.revoked_at IS NOT NULL";
 
+/// The notification channel signals travel on.
+pub const SIGNAL_CHANNEL: &str = "yardsort_relay";
+
+/// The longest wait before listening again after the connection broke.
+const MAX_LISTEN_BACKOFF: Duration = Duration::from_secs(30);
+
 pub struct PgRecords {
     pool: Pool,
+    /// For the listening connection, which is not one of the pool's.
+    config: tokio_postgres::Config,
+    signals: OnceLock<broadcast::Sender<Signal>>,
 }
 
 impl PgRecords {
@@ -80,7 +96,7 @@ impl PgRecords {
 
     pub async fn connect_with(config: tokio_postgres::Config) -> Result<Self> {
         let manager = Manager::from_config(
-            config,
+            config.clone(),
             tls()?,
             ManagerConfig {
                 recycling_method: RecyclingMethod::Fast,
@@ -90,7 +106,11 @@ impl PgRecords {
             .max_size(POOL_SIZE)
             .build()
             .map_err(failed)?;
-        let records = Self { pool };
+        let records = Self {
+            pool,
+            config,
+            signals: OnceLock::new(),
+        };
         let mut client = records.client().await?;
         migrate(&mut client).await?;
         Ok(records)
@@ -117,6 +137,58 @@ impl PgRecords {
     async fn client(&self) -> Result<deadpool_postgres::Object> {
         self.pool.get().await.map_err(failed)
     }
+}
+
+/// Hear the signals every instance sends, on a connection of this instance's own, until nobody
+/// listens any more. Each time it starts listening it says [`Signal::RecheckAll`]: whatever went
+/// by while it was not is checked that way.
+async fn listen(config: tokio_postgres::Config, signals: broadcast::Sender<Signal>) {
+    let mut backoff = Duration::from_secs(1);
+    while signals.receiver_count() > 0 {
+        match listen_once(&config, &signals).await {
+            Ok(()) => backoff = Duration::from_secs(1),
+            Err(error) => tracing::warn!("records: not listening for signals: {error}"),
+        }
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(MAX_LISTEN_BACKOFF);
+    }
+}
+
+/// One connection's worth of listening: until it breaks, or nobody listens.
+async fn listen_once(
+    config: &tokio_postgres::Config,
+    signals: &broadcast::Sender<Signal>,
+) -> Result<()> {
+    let (client, mut connection) = config.connect(tls()?).await.map_err(failed)?;
+    let (heard, mut hearing) = mpsc::unbounded_channel();
+    // The connection is driven here, which is also where its notifications come out.
+    let driving = tokio::spawn(async move {
+        let mut messages = futures_util::stream::poll_fn(move |cx| connection.poll_message(cx));
+        while let Some(Ok(message)) = futures_util::StreamExt::next(&mut messages).await {
+            if let AsyncMessage::Notification(notification) = message {
+                if heard.send(notification.payload().to_owned()).is_err() {
+                    return;
+                }
+            }
+        }
+    });
+    let listening = client
+        .batch_execute(&format!("LISTEN {SIGNAL_CHANNEL}"))
+        .await
+        .map_err(failed);
+    if listening.is_ok() {
+        let _ = signals.send(Signal::RecheckAll);
+        while let Some(payload) = hearing.recv().await {
+            if signals.receiver_count() == 0 {
+                break;
+            }
+            if let Some(signal) = Signal::decode(&payload) {
+                let _ = signals.send(signal);
+            }
+        }
+    }
+    driving.abort();
+    listening
 }
 
 fn tls() -> Result<tokio_postgres_rustls::MakeRustlsConnect> {
@@ -351,7 +423,7 @@ impl Records for PgRecords {
             )
             .await
             .map_err(failed)?;
-            Rotation::Reused
+            Rotation::Reused(device.account.clone())
         } else if expires_at <= now {
             Rotation::Expired
         } else {
@@ -840,6 +912,31 @@ impl Records for PgRecords {
             .iter()
             .map(link_place)
             .collect()
+    }
+
+    async fn signal(&self, signal: Signal) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "SELECT pg_notify($1, $2)",
+                &[&SIGNAL_CHANNEL, &signal.encode()],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    fn signals(&self) -> broadcast::Receiver<Signal> {
+        // The first listener exists before the task that serves it starts, or the task could
+        // find nobody listening and stop at once.
+        let mut first = None;
+        let sender = self.signals.get_or_init(|| {
+            let (sender, receiver) = broadcast::channel(SIGNALS_KEPT);
+            first = Some(receiver);
+            tokio::spawn(listen(self.config.clone(), sender.clone()));
+            sender
+        });
+        first.unwrap_or_else(|| sender.subscribe())
     }
 
     async fn pending_on_links(&self, instance: &str, now: i64) -> Result<Vec<(HostId, GrantId)>> {

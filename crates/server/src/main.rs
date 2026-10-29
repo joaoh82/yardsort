@@ -3,7 +3,8 @@
 //!
 //! `yardsort-server revoke-account --subject SUBJECT [--issuer ISSUER]` signs every device of one
 //! account out instead, for an operator: the provider's subject, at the provider the server is
-//! configured with unless `--issuer` names another. It needs only `DATABASE_URL`.
+//! configured with unless `--issuer` names another. It needs only `DATABASE_URL`, and signals the
+//! running servers through it, which close those devices' live sockets at once.
 
 use std::io::IsTerminal;
 use std::net::SocketAddr;
@@ -13,7 +14,7 @@ use tracing_subscriber::EnvFilter;
 use yardsort_server::config::{AdminSettings, Settings};
 use yardsort_server::http::{self, now_ms};
 use yardsort_server::postgres::PgRecords;
-use yardsort_server::records::{Records, RevokeReason, Revoked};
+use yardsort_server::records::{Records, RevokeReason, Revoked, Signal};
 use yardsort_server::relay::Relay;
 use yardsort_server::{oidc, ControlService, ServerConfig};
 
@@ -145,6 +146,13 @@ async fn revoke_account(args: &[String]) -> Result<(), String> {
         Some(count) => {
             let devices = if count == 1 { "device" } else { "devices" };
             println!("Revoked {count} {devices} of the account for {subject} at {issuer}.");
+            // Running servers close the devices' live sockets now, not at their next check.
+            match records.signal(Signal::RecheckAll).await {
+                Ok(()) => println!("Running servers close their live connections now."),
+                Err(error) => println!(
+                    "Running servers close their live connections within five seconds ({error})."
+                ),
+            }
             Ok(())
         }
         None => Err(format!(

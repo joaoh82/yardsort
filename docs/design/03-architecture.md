@@ -604,7 +604,9 @@ remote ever talks to it directly. Instead:
   with `fly-replay`, so the server can run as several
   ([27 §12](27-remote-r2.md#12--what-the-ninth-slice-adds)). It tells a host on its link's own
   channel when a device asks to pair, a hint the app follows by asking the server
-  ([27 §13](27-remote-r2.md#13--what-the-tenth-slice-adds)). It ships as a container image,
+  ([27 §13](27-remote-r2.md#13--what-the-tenth-slice-adds)). Instances signal each other through
+  PostgreSQL's notifications, so a revocation anywhere reaches every live socket at once
+  ([27 §14](27-remote-r2.md#14--what-the-eleventh-slice-adds)). It ships as a container image,
   which staging on Fly.io and the self-host recipe
   (`crates/server/self-host/`) both run; staging has run on Fly.io since 2026-10-24
   ([28](28-remote-infrastructure.md)).

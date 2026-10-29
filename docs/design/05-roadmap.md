@@ -869,7 +869,7 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       a character showed the rest as text, or lost a byte (`vt100` 0.16 drops one after a split
       character).
 - [ ] R2: identity and relay, in progress ([27](27-remote-r2.md)). The self-host recipe's
-      identity provider is ZITADEL; the server takes any OIDC issuer. Ten slices built: a person
+      identity provider is ZITADEL; the server takes any OIDC issuer. Eleven slices built: a person
       signs in at the provider once per device, and the device then holds the server's own
       credentials (15-minute access, single-use refresh), so the provider is never asked again
       and revocation is immediate; the `yardsort-server` binary on PostgreSQL; its image, staging
@@ -885,7 +885,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       activity as it is recorded (`activity.subscribe`), from the store, through the same
       allowlist as the list; and the relay on several instances of the server, a device's
       requests sent to the one holding its host's link with Fly.io's `fly-replay`; and a host
-      told over its link when a device asks to pair, shown wherever the window is. The gate's
+      told over its link when a device asks to pair, shown wherever the window is; and signals
+      between instances through PostgreSQL, so a revocation anywhere, the operator's included,
+      reaches every live socket at once. The gate's
       three checks have tests: another account reaches nothing, a revoked device's live socket
       closes within seconds, and the relay failing leaves the program running with the person
       here in control. Found on the way and fixed: a session

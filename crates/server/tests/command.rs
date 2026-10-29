@@ -4,10 +4,11 @@
 mod common;
 
 use std::process::{Command, Output};
+use std::time::Duration;
 
 use remote_proto::account::DeviceKind;
 use remote_proto::{DeviceId, Platform};
-use yardsort_server::records::{AccountId, Device, Issued, Records, RevokeReason};
+use yardsort_server::records::{AccountId, Device, Issued, Records, RevokeReason, Signal};
 use yardsort_server::tokens;
 
 const ISSUER: &str = "https://id.example.invalid";
@@ -67,6 +68,14 @@ async fn revoke_account_signs_out_every_device_of_that_account_only() {
     let phone = enroll(&*db.records, &alice, "phone").await;
     let bobs = enroll(&*db.records, &bob, "bobs").await;
 
+    // As a running server listens.
+    let mut signals = db.records.signals();
+    let listening = tokio::time::timeout(Duration::from_secs(10), signals.recv()).await;
+    assert_eq!(
+        listening.expect("never listening").unwrap(),
+        Signal::RecheckAll
+    );
+
     let env = [
         ("DATABASE_URL", url.as_str()),
         ("YARDSORT_OIDC_ISSUER", ISSUER),
@@ -78,6 +87,14 @@ async fn revoke_account_signs_out_every_device_of_that_account_only() {
         "{}",
         text(&output)
     );
+    // Running servers are told, and check every live socket now.
+    assert!(
+        text(&output).contains("Running servers close their live connections now."),
+        "{}",
+        text(&output)
+    );
+    let told = tokio::time::timeout(Duration::from_secs(10), signals.recv()).await;
+    assert_eq!(told.expect("no signal").unwrap(), Signal::RecheckAll);
 
     let devices = db.records.devices(&alice).await.unwrap();
     for id in [&laptop, &phone] {
