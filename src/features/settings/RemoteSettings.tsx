@@ -9,6 +9,7 @@ import {
   type RemoteStatus,
 } from "@/lib/ipc";
 import { useProjectsStore } from "@/stores/projects";
+import { useRemoteStore } from "@/stores/remote";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
 
 /** How often the open section asks the server who is waiting. */
@@ -58,13 +59,17 @@ export function RemoteSettings() {
           setError(null);
           setRequests(answer.requests);
           setStatus(answer.status);
+          useRemoteStore.getState().settled(answer.requests);
         })
         .catch((reason) => live && setError(errorMessage(reason)));
     void poll();
     const timer = window.setInterval(() => void poll(), POLL_MS);
+    // A device asking is shown at once, not at the next look.
+    const told = ipc.onRemotePairingRequested(() => void poll());
     return () => {
       live = false;
       window.clearInterval(timer);
+      void told.then((stop) => stop());
     };
   }, [on]);
 

@@ -123,6 +123,11 @@ fn relay_messages_and_events_match_their_fixtures() {
     let routed: RelayTicket = pinned("relay-ticket-routed.json");
     assert!(routed.route.as_deref().is_some_and(valid_route));
     let _: Presented = pinned("relay-presented.json");
+    let notice: HostNotice = pinned("relay-notice-pairing.json");
+    assert!(matches!(notice, HostNotice::PairingRequested { .. }));
+    // A newer server's notice reads as one to ignore, not as a broken link.
+    let newer: HostNotice = serde_json::from_str(r#"{"kind":"hostRenamed","name":"x"}"#).unwrap();
+    assert_eq!(newer, HostNotice::Unknown);
     let greeting: Greeting = pinned("relay-greeting.json");
     assert!(matches!(greeting, Greeting::Connected { .. }));
     let reply: HelloReply = pinned("hello-welcome.json");

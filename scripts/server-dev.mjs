@@ -295,7 +295,7 @@ function signInAndRevoke(token) {
 
 /** The pairing tool (`crates/server/examples/pair.rs`) as a host and as a phone, both signed in
  * through ZITADEL's API: the host connects to the relay and shows a code, the phone redeems it and
- * asks, the host lets it watch and type. The phone reaches the host through the relay and types
+ * asks, the relay tells the host so, and the host lets it watch and type. The phone reaches the host through the relay and types
  * into its program, and hears of a second program the host starts and that ends; the host takes
  * the grant back, and the relay closes the phone's socket. The program got the line and was still
  * running. */
@@ -362,6 +362,7 @@ async function pairAndRevoke(token) {
     phoned.output.includes("numbered without a gap") &&
     phoned.output.includes("Activity: process.exited") &&
     phoned.output.includes("access was revoked") &&
+    hosted.output.includes("The relay says a device asks to pair.") &&
     hosted.output.includes('"got:e2e-typed"') &&
     hosted.output.includes("still running when the link closed")
   );

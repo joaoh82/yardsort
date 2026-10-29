@@ -1,9 +1,10 @@
 //! The connector against a stand-in relay on a real socket, a real store and programs in real
 //! PTYs: devices come through the link, a failed link lets go of everything they held while the
 //! programs run on, and the connector comes back by itself. Activity a device follows reaches it
-//! without its asking again.
+//! without its asking again. The relay's notices reach the host, and ones it does not know are
+//! let be.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -15,7 +16,9 @@ use pty_host::{Controller, LaunchPlan, PtyHost, SessionState};
 use remote_client::Client;
 use remote_host::{Access, AccessFuture, Connector, Serving, Status};
 use remote_proto::account::Secret;
-use remote_proto::relay::{ChannelOpen, CloseReason, Greeting, LinkFrame};
+use remote_proto::relay::{
+    ChannelOpen, CloseReason, Greeting, HostNotice, LinkFrame, NOTICE_CHANNEL,
+};
 use remote_proto::{DeviceId, GrantId, HostId, ProjectGrant, Scope};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -147,6 +150,7 @@ struct Here {
     terminals: Arc<PtyHost>,
     identity: HostIdentity,
     workspace: String,
+    told: Mutex<Vec<HostNotice>>,
 }
 
 impl Serving for Here {
@@ -158,6 +162,10 @@ impl Serving for Here {
             host: &self.identity,
             interactive: true,
         });
+    }
+
+    fn told(&self, notice: HostNotice) {
+        self.told.lock().unwrap().push(notice);
     }
 }
 
@@ -195,6 +203,7 @@ fn here() -> Arc<Here> {
             name: "Test host".into(),
         },
         workspace: workspace.id,
+        told: Mutex::new(Vec::new()),
     })
 }
 
@@ -405,5 +414,57 @@ async fn activity_a_device_follows_reaches_it_as_it_is_recorded() {
         "heard of it after {:?}",
         recorded.elapsed()
     );
+    connector.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_relays_notices_reach_the_host_and_unknown_ones_are_let_be() {
+    let mut relay = FakeRelay::start().await;
+    let here = here();
+    let connector = Connector::start(
+        HostId::new("host-test").unwrap(),
+        Arc::new(Credentials(relay.base.clone())),
+        Arc::clone(&here) as Arc<dyn Serving>,
+    );
+    let mut socket = relay.next_socket().await;
+
+    // A notice from a newer server, and one that does not read: neither breaks the link.
+    let newer = json!({"kind": "hostRenamed", "name": "x"}).to_string();
+    send(
+        &mut socket,
+        LinkFrame::Text(NOTICE_CHANNEL, newer.as_bytes()),
+    )
+    .await;
+    send(&mut socket, LinkFrame::Text(NOTICE_CHANNEL, b"not json")).await;
+    let asked = json!({"kind": "pairingRequested", "grant": "g-tablet"}).to_string();
+    send(
+        &mut socket,
+        LinkFrame::Text(NOTICE_CHANNEL, asked.as_bytes()),
+    )
+    .await;
+    let told = || here.told.lock().unwrap().clone();
+    let start = Instant::now();
+    while told().is_empty() {
+        assert!(start.elapsed() < SOON, "the host was not told");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        told(),
+        [HostNotice::PairingRequested {
+            grant: GrantId::new("g-tablet").unwrap()
+        }]
+    );
+
+    // The link carries on: a phone comes through and is greeted.
+    send(&mut socket, open(1, "g-phone")).await;
+    say(
+        &mut socket,
+        1,
+        json!({"client": "test-phone/1", "protocols": [1]}),
+    )
+    .await;
+    let (channel, welcome) = text(&mut socket).await;
+    assert_eq!(channel, 1);
+    assert!(welcome.get("welcome").is_some(), "{welcome}");
     connector.stop().await;
 }

@@ -16,6 +16,8 @@ yardsort-core = { path = "../core" }
 pty-host = { path = "../pty-host" }
 remote-client = { path = "../remote-client" }
 remote-proto = { path = "../remote-proto" }
+# The relay's notices to the host.
+serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]

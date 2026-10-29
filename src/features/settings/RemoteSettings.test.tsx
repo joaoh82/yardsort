@@ -12,6 +12,7 @@ const core = vi.hoisted(() => ({
   remoteRequests: vi.fn(),
   remoteAnswer: vi.fn(),
   remoteRevoke: vi.fn(),
+  onRemotePairingRequested: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -19,6 +20,7 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 import { useProjectsStore } from "@/stores/projects";
+import { useRemoteStore } from "@/stores/remote";
 import { RemoteSettings } from "./RemoteSettings";
 
 const off: RemoteStatus = {
@@ -50,6 +52,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   core.remoteStatus.mockResolvedValue(off);
   core.remoteRequests.mockResolvedValue({ requests: [], status: on });
+  core.onRemotePairingRequested.mockResolvedValue(() => {});
+  useRemoteStore.setState({ asking: [] });
   useProjectsStore.setState({
     projects: [
       { id: "p-1", name: "api", rootPath: "/repos/api" },
@@ -100,6 +104,32 @@ it("says why turning on failed", async () => {
   await userEvent.type(screen.getByRole("textbox", { name: "Name this computer" }), "W");
   await userEvent.click(screen.getByRole("button", { name: "Turn on and sign in" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("starts with https://");
+});
+
+it("asks who is waiting as soon as a device asks, and keeps the window's list to it", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    core.remoteStatus.mockResolvedValue(on);
+    let told: () => void = () => {};
+    core.onRemotePairingRequested.mockImplementation((handler: () => void) => {
+      told = handler;
+      return Promise.resolve(() => {});
+    });
+    useRemoteStore.setState({ asking: [{ ...phone, grantId: "g-answered" }] });
+    render(<RemoteSettings />);
+    await waitFor(() => expect(core.remoteRequests).toHaveBeenCalledTimes(1));
+    // What the server says is waiting stands: the request answered elsewhere goes.
+    await waitFor(() => expect(useRemoteStore.getState().asking).toEqual([]));
+
+    core.remoteRequests.mockResolvedValue({ requests: [phone], status: on });
+    told();
+    // Well before the next look.
+    expect(await screen.findByText("Ana's phone")).toBeInTheDocument();
+    expect(core.remoteRequests).toHaveBeenCalledTimes(2);
+    expect(useRemoteStore.getState().asking).toEqual([phone]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("takes a failed poll's error down once the server answers again", async () => {

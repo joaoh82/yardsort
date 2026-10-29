@@ -490,6 +490,7 @@ export const events = {
 	activityChanged: makeEvent<ActivityChanged>("activity-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
+	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
 	workflowRunsChanged: makeEvent<WorkflowRunsChanged>("workflow-runs-changed"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
@@ -1914,6 +1915,11 @@ export type RemotePairing = {
 	/**  An SVG image of the QR code: the server's address and the offer's secret. */
 	qrSvg: string,
 	expiresInMs: number,
+};
+
+/**  A device asks to be let in: shown in the window wherever it is, until answered or lapsed. */
+export type RemotePairingRequested = {
+	request: RemoteRequest,
 };
 
 export type RemoteParent = {

@@ -67,6 +67,7 @@ for_each_store!(
     racing_approvals_leave_one_grant_in_force,
     grants_keep_every_scope_and_project,
     a_link_place_is_kept_by_its_instance_and_taken_by_a_later_link,
+    pairing_requests_waiting_on_an_instances_links,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -1217,6 +1218,57 @@ async fn a_link_place_is_kept_by_its_instance_and_taken_by_a_later_link(
     records.drop_link(&hosts[0], "link-3").await.unwrap();
     assert_eq!(records.link_place(&hosts[0]).await.unwrap(), None);
     assert!(records.link_place(&hosts[1]).await.unwrap().is_some());
+}
+
+async fn pairing_requests_waiting_on_an_instances_links(records: Arc<impl Records>) {
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    let mut hosts = Vec::new();
+    for name in ["Workstation", "Laptop"] {
+        let device = host_device(&*records, &account, name).await;
+        let host = new_host(&account, &device, name, T);
+        records.add_host(host.clone()).await.unwrap();
+        hosts.push((host, device));
+    }
+    let phone = enroll(&*records, &account, "Phone", T).await;
+    let mut asking = Vec::new();
+    for (host, _) in &hosts {
+        let grant = pending(host, &phone, T);
+        records.add_grant(grant.clone()).await.unwrap();
+        asking.push(grant.id);
+    }
+    // One already answered is not waiting.
+    let tablet = enroll(&*records, &account, "Tablet", T).await;
+    let answered = pending(&hosts[0].0, &tablet, T);
+    records.add_grant(answered.clone()).await.unwrap();
+    records
+        .decide(&account, &answered.id, Decision::Deny, T + 1)
+        .await
+        .unwrap();
+
+    // Only the hosts whose links are on a.
+    assert!(records.pending_on_links("a", T).await.unwrap().is_empty());
+    for (host, instance) in [(&hosts[0].0, "a"), (&hosts[1].0, "b")] {
+        records
+            .put_link(LinkPlace {
+                host: host.id.clone(),
+                instance: instance.into(),
+                link: format!("link-{instance}"),
+                seen_at: T,
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        records.pending_on_links("a", T + 2).await.unwrap(),
+        [(hosts[0].0.id.clone(), asking[0].clone())]
+    );
+    // Lapsed: no longer waiting.
+    let lapsed = pending(&hosts[0].0, &phone, T).expires_at;
+    assert!(records
+        .pending_on_links("a", lapsed)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 // What only PostgreSQL has to do.

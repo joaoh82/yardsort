@@ -213,7 +213,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::ActivityChanged,
             quit::QuitRequested,
             workflows::SessionStarted,
-            workflows::commands::WorkflowRunsChanged
+            workflows::commands::WorkflowRunsChanged,
+            remote::RemotePairingRequested
         ])
 }
 
