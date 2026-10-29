@@ -45,9 +45,18 @@ fn responses_match_their_fixtures() {
         "response-activity.json",
         "response-error-incompatible.json",
         "response-attached.json",
+        "response-attached-resumed.json",
     ] {
         let _: Response = pinned(name);
     }
+    let resumed: Response = pinned("response-attached-resumed.json");
+    assert!(matches!(
+        resumed.outcome,
+        Outcome::Result(Reply::Attached(Attached {
+            start: AttachStart::Resumed,
+            ..
+        }))
+    ));
     let response: Response = pinned("response-error-incompatible.json");
     assert_eq!(
         response.outcome,
@@ -110,6 +119,25 @@ fn relay_messages_and_events_match_their_fixtures() {
         panic!("{detached:?}")
     };
     assert_eq!(detached.error.code, ErrorCode::ResnapshotRequired);
+    let control: Event = pinned("event-terminal-control.json");
+    assert!(matches!(
+        control,
+        Event::TerminalControl(ControlChanged {
+            controller: Controller::Device { .. },
+            ..
+        })
+    ));
+    let exited: Event = pinned("event-terminal-exited.json");
+    assert!(matches!(
+        exited,
+        Event::TerminalExited(Exited {
+            exit: ProgramExit {
+                code: 0,
+                success: true
+            },
+            ..
+        })
+    ));
     // An event is told from a response by its `event` field.
     assert!(serde_json::from_value::<Event>(fixture("response-host.json")).is_err());
 }

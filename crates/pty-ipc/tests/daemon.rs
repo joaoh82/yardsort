@@ -457,13 +457,31 @@ impl Watching {
                     "resized",
                     format!("{}x{}", size.cols, size.rows).into_bytes(),
                 ),
+                pty_host::Numbered::Resumed { seq, size } => (
+                    seq,
+                    "resumed",
+                    format!("{}x{}", size.cols, size.rows).into_bytes(),
+                ),
+                pty_host::Numbered::Control(controller) => {
+                    (0, "control", serde_json::to_vec(&controller).unwrap())
+                }
+                pty_host::Numbered::Exited(exit) => (0, "exited", exit.code.to_string().into()),
             };
             items.lock().unwrap().push(entry);
             true
         })
     }
 
+    /// The numbered items: the stream, without who controls it or the exit.
     fn items(&self) -> Vec<WatchedItem> {
+        self.all()
+            .into_iter()
+            .filter(|(_, kind, _)| !["control", "exited"].contains(kind))
+            .collect()
+    }
+
+    /// Everything, in the order it came.
+    fn all(&self) -> Vec<WatchedItem> {
         self.0.lock().unwrap().clone()
     }
 
@@ -471,7 +489,7 @@ impl Watching {
         let bytes: Vec<u8> = self
             .items()
             .into_iter()
-            .filter(|(_, kind, _)| *kind != "resized")
+            .filter(|(_, kind, _)| !["resized", "resumed"].contains(kind))
             .flat_map(|(_, _, bytes)| bytes)
             .collect();
         String::from_utf8_lossy(&bytes).into_owned()
@@ -513,6 +531,58 @@ fn a_numbered_viewer_over_the_socket_gets_every_item_once_and_in_order() {
         "{:?}",
         watching.text()
     );
+    // Told who controls it straight after the snapshot, and that it ended, last.
+    let all = watching.all();
+    assert_eq!(all[1], (0, "control", br#"{"kind":"nobody"}"#.to_vec()));
+    assert_eq!(all.last().unwrap().1, "exited", "{all:?}");
+}
+
+#[test]
+fn a_watch_over_the_socket_resumes_where_it_left_off() {
+    let daemon = Daemon::start();
+    let (client, _events) = daemon.connect();
+    let session = client.spawn(echo_lines()).unwrap();
+    let id = &session.id;
+    let staying = Watching::default();
+    client.attach_numbered(id, staying.sink()).unwrap();
+    let away = Watching::default();
+    let stream = client.attach_numbered(id, away.sink()).unwrap();
+    let size = |cols, rows| TermSize { cols, rows };
+    client.resize(id, size(100, 30)).unwrap();
+    wait_until("the resize is seen", || {
+        away.items().iter().any(|(_, kind, _)| *kind == "resized")
+    });
+    client.detach(id, stream).unwrap();
+    let left_at = away.items().last().unwrap().0;
+
+    client.resize(id, size(90, 20)).unwrap();
+    let back = Watching::default();
+    client.resume_numbered(id, left_at, back.sink()).unwrap();
+    wait_until("the resumed watch catches up", || {
+        back.items().iter().any(|(_, _, size)| size == b"90x20")
+    });
+    let items = back.items();
+    assert_eq!(
+        items[0],
+        (left_at, "resumed", b"100x30".to_vec()),
+        "{items:?}"
+    );
+    let last = items.last().unwrap().0;
+    let missed: Vec<WatchedItem> = staying
+        .items()
+        .into_iter()
+        .filter(|(seq, ..)| *seq > left_at && *seq <= last)
+        .collect();
+    assert_eq!(items[1..], missed[..]);
+    let _ = client.kill(id);
+}
+
+fn wait_until(what: &str, done: impl Fn() -> bool) {
+    let deadline = Instant::now() + TIMEOUT;
+    while !done() {
+        assert!(Instant::now() < deadline, "timed out waiting until {what}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Prints, pauses long enough to be resized, and prints again.

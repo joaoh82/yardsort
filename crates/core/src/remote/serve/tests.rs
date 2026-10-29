@@ -694,3 +694,107 @@ fn a_device_that_falls_behind_is_detached_and_told_and_the_program_never_waits()
     }
     assert_eq!(out.sent().len(), frames);
 }
+
+/// The last number a stream has sent, output or resize.
+fn last_seq(out: &Recorded, stream: u32) -> u64 {
+    out.sent()
+        .into_iter()
+        .filter_map(|s| match s {
+            Sent::Output(s, seq, _) if s == stream => Some(seq),
+            Sent::Text(v) if v["event"] == "terminal.resized" && v["stream"] == stream => {
+                v["position"]["seq"].as_u64()
+            }
+            _ => None,
+        })
+        .max()
+        .expect("the stream sent something")
+}
+
+#[test]
+fn a_device_that_comes_back_resumes_and_hears_who_controls_and_that_the_program_ended() {
+    let fx = Fixture::new();
+    fx.approve(PHONE, "g-phone", &ALL, ProjectGrant::All);
+    let terminal = fx.terminal(&fx.alpha, echo_lines());
+    let id = json!({"terminal": terminal.id.0});
+    let out = Recorded::new(usize::MAX);
+    let phone = fx.visitor(PHONE, "g-phone", &out);
+    let attached = ask(&fx, &phone, &out, "r1", "terminal.attach", id.clone());
+    assert_eq!(attached["result"]["controller"]["kind"], "nobody");
+    let first = attached["result"]["stream"].as_u64().unwrap() as u32;
+
+    // Typed at the host: the person here has control, and the device is told.
+    fx.host.write(&terminal.id, b"one\r").unwrap();
+    out.wait_for("the program's first answer", |out| {
+        out.drawn(first).contains("got:one")
+    });
+    out.wait_for("the control event", |out| {
+        out.texts()
+            .iter()
+            .any(|t| t["event"] == "terminal.control" && t["stream"] == first)
+    });
+    let control = out
+        .texts()
+        .into_iter()
+        .find(|t| t["event"] == "terminal.control")
+        .unwrap();
+    assert_eq!(control["controller"]["kind"], "local", "{control}");
+
+    // The device goes, the program carries on, and the device comes back where it left off.
+    let left_at = last_seq(&out, first);
+    let detached = ask(
+        &fx,
+        &phone,
+        &out,
+        "r2",
+        "terminal.detach",
+        json!({"terminal": terminal.id.0, "stream": first}),
+    );
+    assert_eq!(detached["result"]["kind"], "done", "{detached}");
+    fx.host.write(&terminal.id, b"two\r").unwrap();
+    wait_until_drawn(&fx.host, &terminal.id, "got:two");
+    let mut again = id.clone();
+    again["resumeAfter"] = json!({"epoch": 0, "seq": left_at});
+    let resumed = ask(&fx, &phone, &out, "r3", "terminal.attach", again);
+    assert_eq!(resumed["result"]["start"], "resumed", "{resumed}");
+    assert_eq!(resumed["result"]["position"]["seq"], left_at);
+    assert_eq!(resumed["result"]["controller"]["kind"], "local");
+    let second = resumed["result"]["stream"].as_u64().unwrap() as u32;
+    out.wait_for("what it missed", |out| {
+        out.drawn(second).contains("got:two")
+    });
+    // Only what it missed: nothing from before it left.
+    assert!(
+        !out.drawn(second).contains("got:one"),
+        "{:?}",
+        out.drawn(second)
+    );
+    let numbers: Vec<u64> = out
+        .sent()
+        .into_iter()
+        .filter_map(|s| match s {
+            Sent::Output(s, seq, _) if s == second => Some(seq),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(numbers.first(), Some(&(left_at + 1)), "{numbers:?}");
+
+    // A position from another epoch is not this terminal's: a snapshot.
+    let mut stranger = id.clone();
+    stranger["resumeAfter"] = json!({"epoch": 7, "seq": left_at});
+    let fresh = ask(&fx, &phone, &out, "r4", "terminal.attach", stranger);
+    assert_eq!(fresh["result"]["start"], "snapshot", "{fresh}");
+
+    // The program ends: every stream watching it is told, after everything it printed.
+    fx.host.kill(&terminal.id).unwrap();
+    out.wait_for("the exit event", |out| {
+        out.texts()
+            .iter()
+            .any(|t| t["event"] == "terminal.exited" && t["stream"] == second)
+    });
+    let exited = out
+        .texts()
+        .into_iter()
+        .find(|t| t["event"] == "terminal.exited" && t["stream"] == second)
+        .unwrap();
+    assert_eq!(exited["exit"]["success"], false, "{exited}");
+}

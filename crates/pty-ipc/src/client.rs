@@ -14,13 +14,14 @@ use interprocess::local_socket::traits::Stream as _;
 use interprocess::local_socket::Stream;
 use pty_host::{
     AttachmentId, Controller, EventSink, HostError, HostEvent, LaunchPlan, Lease, LeaseRef,
-    NumberedSink, OutputSink, Result, SessionId, SessionInfo, TermSize, TerminalHost,
+    NumberedSink, OutputSeq, OutputSink, Result, SessionId, SessionInfo, TermSize, TerminalHost,
 };
 
 use crate::endpoint::Endpoint;
 use crate::proto::{
     DaemonInfo, Frame, Op, OpResult, Request, RequestId, Response, StreamId, CONTROL_PROTOCOL,
     KIND_EVENT, KIND_NUMBERED, KIND_OUTPUT, KIND_REQUEST, KIND_RESPONSE, OLDEST_PROTOCOL, PROTOCOL,
+    RESUME_PROTOCOL,
 };
 
 /// How long to wait for the daemon to answer. Generous: a spawn forks a process, and the machine
@@ -146,6 +147,36 @@ impl DaemonClient {
             OpResult::Leased { lease } => Ok(lease),
             OpResult::Failed { error } => Err(error.into()),
             other => Err(unexpected(&other)),
+        }
+    }
+
+    fn watch(
+        &self,
+        id: &SessionId,
+        after: Option<OutputSeq>,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        if !self.shares_control() {
+            return Err(HostError::ControlUnavailable);
+        }
+        let stream = self.next_stream.fetch_add(1, Ordering::Relaxed);
+        self.watchers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(stream, sink);
+        match self.expect_control_done(Op::Watch {
+            session: id.clone(),
+            stream,
+            after,
+        }) {
+            Ok(()) => Ok(stream),
+            Err(error) => {
+                self.watchers
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(&stream);
+                Err(error)
+            }
         }
     }
 
@@ -350,27 +381,18 @@ impl TerminalHost for DaemonClient {
 
     /// As [`TerminalHost::attach`], numbered. Detach with [`TerminalHost::detach`].
     fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
-        if !self.shares_control() {
-            return Err(HostError::ControlUnavailable);
-        }
-        let stream = self.next_stream.fetch_add(1, Ordering::Relaxed);
-        self.watchers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(stream, sink);
-        match self.expect_control_done(Op::Watch {
-            session: id.clone(),
-            stream,
-        }) {
-            Ok(()) => Ok(stream),
-            Err(error) => {
-                self.watchers
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(&stream);
-                Err(error)
-            }
-        }
+        self.watch(id, None, sink)
+    }
+
+    /// A daemon from before protocol 3 keeps nothing to resume from, and sends a snapshot.
+    fn resume_numbered(
+        &self,
+        id: &SessionId,
+        after: OutputSeq,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        let resumes = self.info.protocol >= RESUME_PROTOCOL;
+        self.watch(id, resumes.then_some(after), sink)
     }
 
     fn controller(&self, id: &SessionId) -> Result<Controller> {

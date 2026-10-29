@@ -1,6 +1,8 @@
 //! Terminal attachment and control.
 //!
-//! Hosts answer these since minor 1, and list them in their capabilities. The rules:
+//! Hosts answer these since minor 1, and list them in their capabilities. Since minor 2 they
+//! resume a stream ([`AttachRequest::resume_after`]), and say when control changes hands
+//! ([`ControlChanged`]) and when the program ends ([`Exited`]). The rules:
 //!
 //! - **Many viewers, one controller.** Attaching is viewing. Typing and resizing need a control
 //!   lease, held by one client at a time, the desktop included. A viewer never resizes the
@@ -26,9 +28,20 @@
 //!   [`crate::MAX_OUTPUT_CHUNK`] comes as several frames with the same number, in order. So the
 //!   numbers a client sees never go down and never skip one; if they do, something was lost, and
 //!   it attaches again.
+//! - **Resuming is the host's call.** A client that lost its connection asks to attach again
+//!   with the last position it drew. The host resumes when it still keeps everything since: the
+//!   reply says `resumed`, and the items after that position follow, as they would have. When it
+//!   does not (the client was away too long, or the position is not one of this terminal's), the
+//!   reply says `snapshot`, and the client clears its screen and draws the snapshot. Either way
+//!   nothing is lost or doubled. Typing is never part of it (see above).
 //! - **Epochs, not guesses.** Sequence numbers count within an epoch. A new epoch (the daemon
 //!   restarted, the replay window was lost, a client fell too far behind) means a fresh snapshot
 //!   that *replaces* the screen — never one appended to an old screen.
+//! - **Who controls it, and whether it ended, carry no number.** They change nothing drawn. An
+//!   attachment is told who controls the terminal in its reply, and then each time that changes,
+//!   a hold lapsing included. Once the program has ended, and everything it printed has been
+//!   sent, the stream says so; nothing follows on it. A resumed stream is not sent the changes it
+//!   missed: its reply says who controls the terminal now.
 
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +112,31 @@ pub struct Resized {
     pub stream: StreamId,
     pub position: StreamPosition,
     pub size: TermSize,
+}
+
+/// The `terminal.control` event: who controls the terminal from now on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlChanged {
+    pub stream: StreamId,
+    pub controller: Controller,
+}
+
+/// How a terminal's program ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramExit {
+    pub code: u32,
+    pub success: bool,
+}
+
+/// The `terminal.exited` event: the program has ended, and the stream has carried everything it
+/// printed. The terminal can still be attached, to see its last screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Exited {
+    pub stream: StreamId,
+    pub exit: ProgramExit,
 }
 
 /// The `terminal.detached` event: this stream is over, and why.

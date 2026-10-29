@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::control::Controller;
+
 /// Opaque, globally unique session identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -32,9 +34,14 @@ pub type AttachmentId = u32;
 /// means nothing for another session or after the host restarts.
 pub type OutputSeq = u64;
 
-/// What a numbered viewer is sent: see [`crate::PtyHost::attach_numbered`]. Every item after the
-/// snapshot carries the next number, with no gaps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a numbered viewer is sent: see [`crate::PtyHost::attach_numbered`]. It begins with a
+/// [`Numbered::Snapshot`], or a [`Numbered::Resumed`], then [`Numbered::Control`]; every
+/// numbered item after that carries the next number, with no gaps.
+///
+/// `Control` and `Exited` carry no number. They change nothing on the screen, so a viewer that
+/// resumes is not sent the ones it missed: it is sent who controls the session now, and whether
+/// it has exited.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Numbered<'a> {
     /// First, once: the terminal exactly as it stood after item `seq`, at `size`.
     Snapshot {
@@ -42,10 +49,18 @@ pub enum Numbered<'a> {
         size: TermSize,
         bytes: &'a [u8],
     },
+    /// First, once, instead of a snapshot: the viewer's screen already shows everything up to
+    /// item `seq`, which left the terminal at `size`. The items after it follow, from `seq + 1`.
+    Resumed { seq: OutputSeq, size: TermSize },
     /// A batch of the program's output, as it printed it.
     Output { seq: OutputSeq, bytes: &'a [u8] },
     /// The terminal was resized: output after this is drawn at `size`.
     Resized { seq: OutputSeq, size: TermSize },
+    /// Who controls the session: once after the first item, then whenever it changes hands,
+    /// including when a hold lapses.
+    Control(Controller),
+    /// The program has ended, and everything it printed has been sent. Nothing follows.
+    Exited(ExitInfo),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

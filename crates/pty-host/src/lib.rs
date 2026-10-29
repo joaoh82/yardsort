@@ -9,7 +9,7 @@
 //! ```text
 //! spawn(LaunchPlan) -> SessionInfo        list() -> [SessionInfo]
 //! attach(id, sink)  -> AttachmentId       detach(id, attachment)
-//! attach_numbered(id, sink) -> AttachmentId
+//! attach_numbered(id, sink) -> AttachmentId   resume_numbered(id, after, sink)
 //! write(id, bytes) / paste(id, text)       resize(id, size)
 //! kill(id)                                remove(id)
 //! acquire / renew / release(id, …)         input / resize_leased(id, lease, …)
@@ -27,11 +27,14 @@
 //! viewer that attaches — for the first time or the tenth — first receives a snapshot that
 //! repaints scrollback and screen, then the live stream, with nothing lost or duplicated between
 //! the two — wherever the cut falls, even inside an escape sequence (see [`snapshot`]). A
-//! numbered viewer is also told which item of the stream the snapshot holds.
+//! numbered viewer is also told which item of the stream the snapshot holds, and one that lost
+//! its connection can carry on from the last item it saw while the session still keeps what came
+//! since (see [`replay`]).
 
 pub mod control;
 mod prompt;
 mod queries;
+pub mod replay;
 mod session;
 pub mod snapshot;
 mod types;
@@ -41,7 +44,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-pub use control::{Controller, Lease, LeaseRef};
+pub use control::{Controller, Holds, Lease, LeaseRef};
 use session::Session;
 pub use types::{
     AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, PendingPrompt,
@@ -70,6 +73,7 @@ pub struct PtyHost {
     sessions: Mutex<HashMap<SessionId, Arc<Session>>>,
     events: EventSink,
     quiet_after: Duration,
+    holds: Holds,
 }
 
 impl PtyHost {
@@ -78,6 +82,7 @@ impl PtyHost {
             sessions: Mutex::new(HashMap::new()),
             events,
             quiet_after: DEFAULT_QUIET_AFTER,
+            holds: Holds::default(),
         }
     }
 
@@ -87,10 +92,17 @@ impl PtyHost {
         self
     }
 
+    /// Hold control for other lengths of time in sessions spawned from now on: a test's, which
+    /// cannot wait half a minute for a hold to lapse.
+    pub fn with_holds(mut self, holds: Holds) -> Self {
+        self.holds = holds;
+        self
+    }
+
     /// Start `plan.program` in a new PTY.
     pub fn spawn(&self, plan: LaunchPlan) -> Result<SessionInfo> {
         let pending = plan.prompt.clone();
-        let session = Session::spawn(plan, Arc::clone(&self.events), self.quiet_after)?;
+        let session = Session::spawn(plan, Arc::clone(&self.events), self.quiet_after, self.holds)?;
         let info = session.info();
         self.lock().insert(info.id.clone(), Arc::clone(&session));
         // Delivery runs here rather than in the client, so the message still arrives if whoever
@@ -112,11 +124,27 @@ impl PtyHost {
     /// it reflects, then every later item numbered from there. What a viewer across a network
     /// needs in order to prove it lost nothing and doubled nothing.
     ///
+    /// A numbered viewer is also told who controls the session, and when that changes
+    /// ([`Numbered::Control`]), and when the program ends ([`Numbered::Exited`]). From the first
+    /// one on, the session keeps the last stretch of its stream for viewers that resume.
+    ///
     /// A numbered viewer watches; it is not a terminal. It is never shown the program's queries,
     /// and it does not stop the host from answering them when no terminal is attached. Detach
     /// with [`PtyHost::detach`].
     pub fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
-        Ok(self.get(id)?.attach_numbered(sink))
+        Ok(self.get(id)?.attach_numbered(None, sink))
+    }
+
+    /// As [`PtyHost::attach_numbered`], for a viewer that already shows everything up to item
+    /// `after`: it is sent [`Numbered::Resumed`] and the items since, when the session still
+    /// keeps them all (see [`replay`]), and a snapshot otherwise.
+    pub fn resume_numbered(
+        &self,
+        id: &SessionId,
+        after: OutputSeq,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        Ok(self.get(id)?.attach_numbered(Some(after), sink))
     }
 
     pub fn detach(&self, id: &SessionId, attachment: AttachmentId) -> Result<()> {
@@ -270,6 +298,15 @@ pub trait TerminalHost: Send + Sync {
     fn attach_numbered(&self, _id: &SessionId, _sink: NumberedSink) -> Result<AttachmentId> {
         Err(HostError::ControlUnavailable)
     }
+    /// A host that keeps nothing to resume from sends a snapshot, which is always correct.
+    fn resume_numbered(
+        &self,
+        id: &SessionId,
+        _after: OutputSeq,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        self.attach_numbered(id, sink)
+    }
     fn controller(&self, _id: &SessionId) -> Result<Controller> {
         Err(HostError::ControlUnavailable)
     }
@@ -348,6 +385,14 @@ impl TerminalHost for PtyHost {
 
     fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
         PtyHost::attach_numbered(self, id, sink)
+    }
+    fn resume_numbered(
+        &self,
+        id: &SessionId,
+        after: OutputSeq,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        PtyHost::resume_numbered(self, id, after, sink)
     }
 
     fn controller(&self, id: &SessionId) -> Result<Controller> {

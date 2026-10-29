@@ -1,0 +1,11 @@
+{
+  "requestId": "r-9",
+  "result": {
+    "kind": "attached",
+    "stream": 2,
+    "start": "resumed",
+    "position": { "epoch": 0, "seq": 57 },
+    "size": { "cols": 120, "rows": 30 },
+    "controller": { "kind": "local" }
+  }
+}

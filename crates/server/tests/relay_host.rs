@@ -147,6 +147,8 @@ struct Phone {
     reader: LinkReader,
     writer: remote_client::LinkWriter,
     drawn: String,
+    /// The last output item drawn.
+    last: u64,
     asked: u32,
 }
 
@@ -162,6 +164,7 @@ impl Phone {
             reader,
             writer,
             drawn: String::new(),
+            last: 0,
             asked: 0,
         };
         let hello = json!({"client": "test-phone/1", "protocols": [1]});
@@ -183,6 +186,7 @@ impl Phone {
                 Incoming::Binary(frame) => {
                     let frame = OutputFrame::decode(&frame).unwrap();
                     self.drawn.push_str(&String::from_utf8_lossy(frame.bytes));
+                    self.last = self.last.max(frame.position.seq);
                 }
             }
         }
@@ -202,8 +206,8 @@ impl Phone {
     }
 
     /// Take control, watch, and type `line`; wait until the program answers it. Returns the
-    /// lease.
-    async fn take_and_type(&mut self, terminal: &str, line: &str) -> Value {
+    /// lease and the stream.
+    async fn take_and_type(&mut self, terminal: &str, line: &str) -> (Value, Value) {
         let lease = self
             .ask("terminal.acquire", json!({"terminal": terminal}))
             .await;
@@ -226,7 +230,10 @@ impl Phone {
             assert!(start.elapsed() < SOON, "never drawn: {:?}", self.drawn);
             let _ = tokio::time::timeout(Duration::from_millis(200), self.text()).await;
         }
-        lease["result"].clone()
+        (
+            lease["result"].clone(),
+            attached["result"]["stream"].clone(),
+        )
     }
 
     /// Type input number `seq` under `lease`, and give control back straight away, without
@@ -352,7 +359,7 @@ async fn a_phone_types_through_the_relay_loses_its_stream_when_revoked_and_a_fai
     let (credentials, grant) = approved_phone(&s, "alice", &host, &host_id).await;
     let_in(&credentials, &grant);
     let mut phone = Phone::connect(&s, &credentials, &host_id).await;
-    let lease = phone.take_and_type(&terminal, "from-the-phone").await;
+    let (lease, stream) = phone.take_and_type(&terminal, "from-the-phone").await;
     until("the host's own view shows it", || {
         at_host.lock().unwrap().contains("got:from-the-phone")
     })
@@ -366,6 +373,24 @@ async fn a_phone_types_through_the_relay_loses_its_stream_when_revoked_and_a_fai
         || at_host.lock().unwrap().contains("got:then-let-go"),
     )
     .await;
+    // The phone lets go of its stream and comes back from the last item it drew, as it would
+    // after losing its connection: the host resumes from there.
+    let left_at = phone.last;
+    let detached = phone
+        .ask(
+            "terminal.detach",
+            json!({"terminal": terminal, "stream": stream}),
+        )
+        .await;
+    assert_eq!(detached["result"]["kind"], "done", "{detached}");
+    let back = phone
+        .ask(
+            "terminal.attach",
+            json!({"terminal": terminal, "resumeAfter": {"epoch": 0, "seq": left_at}}),
+        )
+        .await;
+    assert_eq!(back["result"]["start"], "resumed", "{back}");
+    assert_eq!(back["result"]["position"]["seq"], left_at);
 
     // Its grant is revoked at the server: the live stream closes within seconds, and what it
     // controlled is let go.

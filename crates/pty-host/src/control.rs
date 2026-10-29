@@ -26,6 +26,23 @@ pub const RENEW_EVERY: Duration = Duration::from_secs(10);
 /// How long local control lasts after the last thing typed locally. Until then nobody else can
 /// take a lease; the person may only have looked away.
 pub const LOCAL_HOLD: Duration = Duration::from_secs(30);
+/// How long each kind of hold lasts: [`LOCAL_HOLD`] and [`LEASE_TTL`], unless a host is given
+/// others with [`crate::PtyHost::with_holds`]. A holder is asked to renew three times a lease.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Holds {
+    pub local: Duration,
+    pub lease: Duration,
+}
+
+impl Default for Holds {
+    fn default() -> Self {
+        Self {
+            local: LOCAL_HOLD,
+            lease: LEASE_TTL,
+        }
+    }
+}
+
 /// A holder's name is a device id in practice; this is far more than one needs.
 const MAX_HOLDER: usize = 128;
 
@@ -102,6 +119,7 @@ pub(crate) enum Delivery {
 pub(crate) struct Control {
     generation: u64,
     state: State,
+    holds: Holds,
 }
 
 #[derive(Debug)]
@@ -121,14 +139,19 @@ enum State {
 
 impl Default for Control {
     fn default() -> Self {
-        Self {
-            generation: 0,
-            state: State::Nobody,
-        }
+        Self::new(Holds::default())
     }
 }
 
 impl Control {
+    pub(crate) fn new(holds: Holds) -> Self {
+        Self {
+            generation: 0,
+            state: State::Nobody,
+            holds,
+        }
+    }
+
     /// Who controls the session at `now`.
     pub(crate) fn controller(&mut self, now: Instant) -> Controller {
         self.lapse(now);
@@ -183,7 +206,7 @@ impl Control {
         self.state = State::Leased {
             holder: holder.to_owned(),
             id: id.clone(),
-            expires: now + LEASE_TTL,
+            expires: now + self.holds.lease,
             input: 0,
         };
         Ok(self.lease(id))
@@ -193,7 +216,7 @@ impl Control {
     pub(crate) fn renew(&mut self, lease: &LeaseRef, now: Instant) -> Result<Lease, Refusal> {
         self.check(lease, now)?;
         if let State::Leased { expires, .. } = &mut self.state {
-            *expires = now + LEASE_TTL;
+            *expires = now + self.holds.lease;
         }
         Ok(self.lease(lease.id.clone()))
     }
@@ -248,15 +271,24 @@ impl Control {
         Lease {
             id,
             generation: self.generation,
-            ttl_ms: millis(LEASE_TTL),
-            renew_every_ms: millis(RENEW_EVERY),
+            ttl_ms: millis(self.holds.lease),
+            renew_every_ms: millis(self.holds.lease / 3),
+        }
+    }
+
+    /// When the hold in force lapses, if nothing renews it first.
+    pub(crate) fn lapses_at(&self) -> Option<Instant> {
+        match &self.state {
+            State::Nobody => None,
+            State::Local { last } => Some(*last + self.holds.local),
+            State::Leased { expires, .. } => Some(*expires),
         }
     }
 
     fn lapse(&mut self, now: Instant) {
         let lapsed = match &self.state {
             State::Nobody => false,
-            State::Local { last } => now.saturating_duration_since(*last) >= LOCAL_HOLD,
+            State::Local { last } => now.saturating_duration_since(*last) >= self.holds.local,
             State::Leased { expires, .. } => now >= *expires,
         };
         if lapsed {

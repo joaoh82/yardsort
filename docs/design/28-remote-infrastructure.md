@@ -166,7 +166,7 @@ Settled on 2026-10-23:
    - **Type:** **Web**.
    - **Authentication method:** **Code**, so the server authenticates with a client secret.
      The server sends PKCE as well, which ZITADEL accepts alongside the secret: confirmed against
-     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §10).
+     ZITADEL v4.19.5 in the local environment on 2026-10-23 ([27](27-remote-r2.md) §11).
    - **Redirect URI:** `https://remote-staging.yardsort.sh/v1/login/callback`.
    - **Development mode:** off.
    - **Refresh tokens:** leave them off. The server never asks ZITADEL for one.
@@ -246,7 +246,7 @@ the owner's go-ahead:
   (`.github/workflows/server-deploy.yml`), and the self-host recipe (`crates/server/self-host/`).
   Staging was first deployed from a workstation, with the workflow's arguments, before the
   workflow reached `main`. Step E and staging's smoke test followed on 2026-10-25, and the test
-  passed ([27](27-remote-r2.md) §10). The workflow first deployed it from Actions on 2026-10-25.
+  passed ([27](27-remote-r2.md) §11). The workflow first deployed it from Actions on 2026-10-25.
   Production's Fly config and its protected environment come with its ZITADEL instance.
 - **Slice 4, built on 2026-10-25** ([27](27-remote-r2.md) §7): pairing, on the server and in the
   app behind `YARDSORT_REMOTE_PREVIEW=1`. Its migration `0002_hosts_and_grants.sql` reaches
@@ -256,6 +256,9 @@ the owner's go-ahead:
   Machine busy. It keeps its tickets and sockets in memory, so it runs on **one Machine**:
   staging already does, and production's two need the relay to send a connection to the Machine
   holding the host's link (`fly-replay`) first. No migration, no new secret, no new setting.
+- **Slice 7, built on 2026-10-29** ([27](27-remote-r2.md) §10): resuming a stream, and telling a
+  device of control and the exit. All of it is on the host, and the server relays it unchanged:
+  the server itself does not change. Staging needs slice 6 deployed for its smoke test.
 
 ## 7 · Open decisions
 
