@@ -8,21 +8,29 @@
 //! this side speaks, and nothing else — there is no "try anyway".
 //!
 //! ```text
+//! client → host   Hello    { client, protocols }                   JSON, first, once
+//! host → client   HelloReply: { welcome } | { error }              JSON
 //! client → host   Request  { requestId, protocol, op, params }     JSON, ≤ MAX_CONTROL_FRAME
 //! host → client   Response { requestId, result | error }           JSON, ≤ MAX_CONTROL_FRAME
+//! host → client   Event    { event, … }                            JSON, unasked
 //! host → client   terminal output                                  binary, see OutputFrame
 //! ```
 //!
-//! What hosts answer so far is the read side: `host.describe`, `workspace.list`,
-//! `workspace.describe`, `session.list`, `activity.list` and `memory.list`. The `terminal.*` operations are
-//! defined (see [`terminal`]) but no host answers them yet: they need authenticated devices and
-//! enforced control leases first.
+//! A host's text message is an [`Event`] when it has an `event` field, and a [`Response`]
+//! otherwise. Messages reach a host through the server's relay ([`relay`]), which carries them
+//! unchanged.
+//!
+//! Hosts answer the read side (`host.describe`, `workspace.list`, `workspace.describe`,
+//! `session.list`, `activity.list`, `memory.list`) and, since minor 1, the `terminal.*`
+//! operations: see [`terminal`]. A host lists what it answers in
+//! [`HostDescription::capabilities`].
 
 pub mod account;
 pub mod grant;
 pub mod ids;
 pub mod model;
 pub mod pairing;
+pub mod relay;
 pub mod terminal;
 
 use serde::{Deserialize, Serialize};
@@ -34,14 +42,16 @@ pub use ids::{
 };
 pub use model::*;
 pub use terminal::{
-    AcquireRequest, AttachRequest, AttachStart, Attached, Controller, DetachRequest, InputRequest,
-    Lease, LeaseRef, OutputFrame, ResizeRequest, StreamId, StreamPosition,
+    AcquireRequest, AttachRequest, AttachStart, Attached, Controller, DetachRequest, Detached,
+    InputRequest, Lease, LeaseRef, OutputFrame, ResizeRequest, Resized, StreamId, StreamPosition,
 };
 
 /// The major this build speaks. Changes only for a change an older peer would misread.
 pub const PROTOCOL_MAJOR: u16 = 1;
 /// The minor this build speaks. Raised for each additive change; never required of a peer.
-pub const PROTOCOL_MINOR: u16 = 0;
+///
+/// - 1: [`HelloReply`], [`Event`]s, and hosts answering the `terminal.*` operations.
+pub const PROTOCOL_MINOR: u16 = 1;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
 /// parsing. A host keeps its responses within it: a page holds fewer items than asked when they
@@ -95,6 +105,28 @@ pub struct Hello {
 pub struct Welcome {
     pub protocol: ProtocolVersion,
     pub host: HostDescription,
+}
+
+/// The host's answer to a [`Hello`]: `{"welcome": …}` or `{"error": …}`. After an error the host
+/// closes the connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HelloReply {
+    Welcome(Welcome),
+    Error(RemoteError),
+}
+
+/// Something a host tells a client without being asked, about a stream the client attached.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "event")]
+pub enum Event {
+    /// The terminal changed size, at this point in its output.
+    #[serde(rename = "terminal.resized")]
+    TerminalResized(Resized),
+    /// The stream ended, and nothing more comes on it. Today only for a client that fell too far
+    /// behind (`resnapshot_required`); its error says why, so other reasons can come later.
+    #[serde(rename = "terminal.detached")]
+    TerminalDetached(Detached),
 }
 
 /// Pick the protocol to speak with a client, or say why there is none.

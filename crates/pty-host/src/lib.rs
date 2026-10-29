@@ -252,6 +252,12 @@ pub trait TerminalHost: Send + Sync {
     fn info(&self, id: &SessionId) -> Result<SessionInfo>;
     fn list(&self) -> Vec<SessionInfo>;
 
+    /// Whether numbered viewing and leases are offered: what [`TerminalHost::attach_numbered`]
+    /// and the lease operations need. A daemon from before them says no.
+    fn shares_control(&self) -> bool {
+        false
+    }
+
     /// A host without leases has nobody to type over: it types as the person here would.
     fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
         if paste {
@@ -334,6 +340,10 @@ impl TerminalHost for PtyHost {
 
     fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
         PtyHost::type_unattended(self, id, text, paste)
+    }
+
+    fn shares_control(&self) -> bool {
+        true
     }
 
     fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {

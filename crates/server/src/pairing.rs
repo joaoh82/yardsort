@@ -261,6 +261,8 @@ impl<R: Records> ControlService<R> {
             .await
             .map_err(unreadable)?
             .ok_or_else(not_waiting)?;
+        // An approval revokes the device's earlier grant on this host.
+        self.relay.nudge(&caller.account);
         self.visible_grant(caller, id, now).await
     }
 
@@ -276,6 +278,7 @@ impl<R: Records> ControlService<R> {
             .revoke_grant(&caller.account, id, now)
             .await
             .map_err(unreadable)?;
+        self.relay.nudge(&caller.account);
         Ok(())
     }
 
@@ -292,6 +295,7 @@ impl<R: Records> ControlService<R> {
             .remove_host(&caller.account, &host.id, now)
             .await
             .map_err(unreadable)?;
+        self.relay.nudge(&caller.account);
         Ok(())
     }
 

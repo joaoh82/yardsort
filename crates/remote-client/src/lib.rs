@@ -10,6 +10,9 @@
 //! that matters: each works once, and presenting a spent one signs the device out, so a caller
 //! must keep each new one ([`Session::access`] says how).
 //!
+//! **The relay** ([`Client::open_relay`]) is a WebSocket opened with a single-use ticket, for a
+//! host's own link or a device's way to a host.
+//!
 //! Only HTTPS servers are spoken to, apart from a server on a loopback address written as one
 //! (`http://127.0.0.1:8787`), which is how a development server runs. Certificates are checked
 //! against the operating system's roots; there is no switch to skip that.
@@ -31,6 +34,9 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use url::Url;
+
+mod relay;
+pub use relay::{Incoming, LinkReader, LinkWriter, RelayLink};
 
 /// How long one request may take.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -477,7 +483,7 @@ fn s256(verifier: &str) -> String {
 }
 
 /// An error and its causes: reqwest's own message is often only "error sending request".
-fn chain(error: &dyn std::error::Error) -> String {
+pub(crate) fn chain(error: &dyn std::error::Error) -> String {
     let mut text = error.to_string();
     let mut cause = error.source();
     while let Some(next) = cause {

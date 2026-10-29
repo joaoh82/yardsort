@@ -92,6 +92,29 @@ fn pairing_messages_match_their_fixtures() {
 }
 
 #[test]
+fn relay_messages_and_events_match_their_fixtures() {
+    use crate::relay::*;
+    let request: TicketRequest = pinned("relay-ticket-request.json");
+    assert!(matches!(request, TicketRequest::Device { .. }));
+    let ticket: RelayTicket = pinned("relay-ticket.json");
+    assert_eq!(ticket.expires_in_ms, TICKET_TTL_MS);
+    let _: Presented = pinned("relay-presented.json");
+    let greeting: Greeting = pinned("relay-greeting.json");
+    assert!(matches!(greeting, Greeting::Connected { .. }));
+    let reply: HelloReply = pinned("hello-welcome.json");
+    assert!(matches!(reply, HelloReply::Welcome(_)));
+    let resized: Event = pinned("event-terminal-resized.json");
+    assert!(matches!(resized, Event::TerminalResized(_)));
+    let detached: Event = pinned("event-terminal-detached.json");
+    let Event::TerminalDetached(detached) = detached else {
+        panic!("{detached:?}")
+    };
+    assert_eq!(detached.error.code, ErrorCode::ResnapshotRequired);
+    // An event is told from a response by its `event` field.
+    assert!(serde_json::from_value::<Event>(fixture("response-host.json")).is_err());
+}
+
+#[test]
 fn every_operation_has_the_name_it_is_sent_under() {
     let terminal = TerminalId::new("t").unwrap();
     let lease = LeaseRef {

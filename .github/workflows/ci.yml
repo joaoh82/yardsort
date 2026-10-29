@@ -70,11 +70,13 @@ jobs:
       - name: PostgreSQL for the server's tests
         if: runner.os == 'Linux'
         timeout-minutes: 5
+        # The image creates the database itself. It does that on a temporary server that listens
+        # only on its socket and then restarts, so readiness is asked over TCP: asked over the
+        # socket, it can say yes just before the restart.
         run: |
-          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:55432:5432 \
-            postgres:17.10-alpine
-          until docker exec postgres pg_isready -U postgres; do sleep 1; done
-          docker exec postgres psql -U postgres -c 'CREATE DATABASE yardsort_test'
+          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=yardsort_test \
+            -p 127.0.0.1:55432:5432 postgres:17.10-alpine
+          until docker exec postgres pg_isready -h 127.0.0.1 -U postgres -d yardsort_test; do sleep 1; done
           echo "YARDSORT_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/yardsort_test?sslmode=disable" >> "$GITHUB_ENV"
           echo "YARDSORT_REQUIRE_TEST_DATABASE=1" >> "$GITHUB_ENV"
 

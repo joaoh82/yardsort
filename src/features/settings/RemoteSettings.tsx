@@ -3,6 +3,7 @@ import {
   errorMessage,
   ipc,
   type RemoteDevice,
+  type RemoteLink,
   type RemotePairing,
   type RemoteRequest,
   type RemoteStatus,
@@ -16,9 +17,10 @@ const POLL_MS = 3000;
 /**
  * Remote, a preview: this computer as a host on a Yardsort server, and the devices let in.
  *
- * Shown only when the app was started with `YARDSORT_REMOTE_PREVIEW=1`. Pairing works, but no
- * device can reach this computer yet: that needs the relay, which comes later. Approving a device
- * happens here and nowhere else — not in `ys`, not anywhere an agent could reach.
+ * Shown only when the app was started with `YARDSORT_REMOTE_PREVIEW=1`. While Remote is on, the
+ * app keeps a link to the server's relay, and paired devices reach this computer through it; there
+ * is no phone app yet. Approving a device happens here and nowhere else — not in `ys`, not
+ * anywhere an agent could reach.
  */
 export function RemoteSettings() {
   const [status, setStatus] = useState<RemoteStatus | null>(null);
@@ -95,9 +97,8 @@ export function RemoteSettings() {
           running on this computer whatever happens to the connection.
         </p>
         <p className="text-ink-faint">
-          This preview pairs devices but does not connect them yet: the part that carries a
-          device&rsquo;s requests to this computer comes next. Whoever runs the server can see what
-          passes through it; it is not end-to-end encrypted.
+          In this preview there is no phone app yet. Whoever runs the server can see what passes
+          through it; it is not end-to-end encrypted.
         </p>
       </section>
 
@@ -115,6 +116,7 @@ export function RemoteSettings() {
               <span className="font-mono text-[12px] select-text">{status.host.serverUrl}</span>.
             </p>
             <p className="text-ink-faint">Its sign-in is kept {status.credentials}.</p>
+            <LinkLine link={status.host.link} />
             <div className="flex gap-2">
               <button
                 type="button"
@@ -407,4 +409,38 @@ function Device(props: { device: RemoteDevice; busy: boolean; onRevoke: () => vo
       </button>
     </li>
   );
+}
+
+/** Where the link to the relay stands, in a sentence. Nothing while the app keeps none. */
+function LinkLine({ link }: { link: RemoteLink }) {
+  switch (link.kind) {
+    case "off":
+      return null;
+    case "connecting":
+      return <p className="text-ink-faint">Connecting to the relay…</p>;
+    case "connected":
+      return (
+        <p>
+          Connected to the relay.{" "}
+          {link.devices === 0
+            ? "No device is connected now."
+            : link.devices === 1
+              ? "1 device is connected now."
+              : `${link.devices} devices are connected now.`}
+        </p>
+      );
+    case "waiting":
+      return (
+        <p role="status" className="text-amber-300 select-text">
+          Not connected to the relay: {link.why} Trying again in{" "}
+          {Math.max(1, Math.round(link.retryInMs / 1000))} s.
+        </p>
+      );
+    case "stopped":
+      return (
+        <p role="alert" className="text-red-400 select-text">
+          Not connected to the relay: {link.why} Turn Remote off, then on again.
+        </p>
+      );
+  }
 }

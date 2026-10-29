@@ -1893,7 +1893,20 @@ export type RemoteHost = {
 	serverUrl: string,
 	name: string,
 	since: number | null,
+	/**  The link to the server's relay. */
+	link: RemoteLink,
 };
+
+/**  Where this computer's link to the relay stands. */
+export type RemoteLink = 
+/**  Not kept: the app has not started it. */
+{ kind: "off" } | { kind: "connecting" } | { kind: "connected"; 
+/**  Devices connected through it now. */
+devices: number } | 
+/**  Not connected; trying again soon. */
+{ kind: "waiting"; why: string; retryInMs: number } | 
+/**  Given up: signed out at the server, or this host was removed there. */
+{ kind: "stopped"; why: string };
 
 /**  What to show for a device to pair: the code to type, and a QR code holding the secret. */
 export type RemotePairing = {

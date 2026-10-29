@@ -1,5 +1,5 @@
-//! The host's side of the remote protocol: an allowlisted, read-only facade over the store,
-//! git and the terminal daemon.
+//! The host's side of the remote protocol: an allowlisted facade over the store, git and the
+//! terminal daemon.
 //!
 //! What a phone or another computer may ask is [`remote_proto::Operation`]; this module answers
 //! it for one host. It is a translation layer, not a passage: each answer is built field by field
@@ -8,9 +8,9 @@
 //!
 //! **There is no listener here, and none may be added in front of this.** Every call takes a
 //! [`Grant`], and the only one that may be passed is what [`host::grant_for`] returns: a device
-//! this host's person approved here, whose grant the server still has in force. Requests will
-//! reach a host through the relay, which connects out to the server, never through a port of its
-//! own (phase R2 of [the remote design](../../../docs/design/27-remote-r2.md)).
+//! this host's person approved here, whose grant the server still has in force. Requests reach a
+//! host through the server's relay, which the host connects out to, never through a port of its
+//! own: [`serve`] answers one device's channel on that link.
 //!
 //! What is checked, in order, for every request:
 //!
@@ -27,10 +27,12 @@
 //! protocol's limits as it is copied, which bounds one item of any list, and a page holds as
 //! many items as fit, never more than asked: see [`fitting`].
 //!
-//! The terminal operations stop after step 3 with `unsupported`, and the host does not advertise
-//! them: viewing and typing need control leases enforced across the desktop and every device,
-//! which do not exist yet. This facade never writes to a terminal, never resizes one and never
-//! attaches to one; [`TerminalHost::list`] is the only call it makes on the daemon.
+//! The terminal operations need state that outlives one request — the streams a device watches
+//! and the leases it holds — so [`serve::Visitor`] answers them, after this facade's checks
+//! ([`HostFacade::check`]) and with its rules for which terminals a grant reaches
+//! ([`HostFacade::reachable_terminal`]). The facade on its own still answers them `unsupported`,
+//! and advertises them only when it is `interactive`. It never writes to a terminal, resizes one
+//! or attaches to one itself.
 //!
 //! Nothing here writes to the store either. In particular there is no route to approve, edit or
 //! propose memory: an agent can reach a terminal, and a terminal could one day reach a remote
@@ -66,6 +68,18 @@ pub const ANSWERED: &[&str] = &[
     "memory.list",
 ];
 
+/// The terminal operations, answered by [`serve::Visitor`] and advertised when the facade is
+/// `interactive`.
+pub const TERMINAL_OPERATIONS: &[&str] = &[
+    "terminal.attach",
+    "terminal.detach",
+    "terminal.acquire",
+    "terminal.renew",
+    "terminal.release",
+    "terminal.input",
+    "terminal.resize",
+];
+
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
 /// is stored before Remote is enabled, so nothing is created for people who never use it.
 #[derive(Debug, Clone)]
@@ -81,6 +95,9 @@ pub struct HostFacade<'a> {
     /// go on, and its process state is reported as unknown rather than guessed.
     pub terminals: Option<&'a dyn TerminalHost>,
     pub host: &'a HostIdentity,
+    /// The terminal operations are answered, by [`serve::Visitor`]: the facade is serving a
+    /// device's channel, and the daemon shares control.
+    pub interactive: bool,
 }
 
 type Answer<T> = Result<T, RemoteError>;
@@ -113,7 +130,8 @@ impl HostFacade<'_> {
         }
     }
 
-    fn answer(&self, grant: &Grant, request: &Request) -> Answer<Reply> {
+    /// What every request must pass, whatever it asks: steps 1 to 3 above.
+    pub fn check(&self, grant: &Grant, request: &Request) -> Answer<()> {
         if request.protocol.major != PROTOCOL_MAJOR {
             return Err(RemoteError::incompatible());
         }
@@ -124,6 +142,28 @@ impl HostFacade<'_> {
                 return Err(RemoteError::forbidden(scope));
             }
         }
+        Ok(())
+    }
+
+    /// A terminal of a workspace the grant reaches. Any other terminal — one in another
+    /// project, one that belongs to no workspace, one that does not exist — is `not_found`.
+    pub fn reachable_terminal(&self, grant: &Grant, id: &TerminalId) -> Answer<SessionInfo> {
+        let info = self
+            .terminals
+            .ok_or_else(RemoteError::not_found)?
+            .info(&pty_host::SessionId(id.as_str().to_owned()))
+            .map_err(|_| RemoteError::not_found())?;
+        let workspace = info
+            .labels
+            .get(WORKSPACE_LABEL)
+            .ok_or_else(RemoteError::not_found)?;
+        self.reachable_workspace(grant, &local_id(workspace)?)?;
+        Ok(info)
+    }
+
+    fn answer(&self, grant: &Grant, request: &Request) -> Answer<Reply> {
+        self.check(grant, request)?;
+        let operation = &request.operation;
         match operation {
             Operation::HostDescribe => Ok(Reply::Host(self.describe())),
             Operation::WorkspaceList(params) => {
@@ -155,7 +195,15 @@ impl HostFacade<'_> {
             platform: Platform::current(),
             app_version: env!("CARGO_PKG_VERSION").to_owned(),
             protocol: ProtocolVersion::CURRENT,
-            capabilities: ANSWERED.iter().map(|&op| op.to_owned()).collect(),
+            capabilities: ANSWERED
+                .iter()
+                .chain(if self.interactive {
+                    TERMINAL_OPERATIONS
+                } else {
+                    &[]
+                })
+                .map(|&op| op.to_owned())
+                .collect(),
         }
     }
 
@@ -776,5 +824,6 @@ fn encoded_len(value: &impl Serialize) -> usize {
 
 mod activity;
 pub mod host;
+pub mod serve;
 #[cfg(test)]
 mod tests;

@@ -11,6 +11,7 @@ use crate::oidc::{OidcError, Provider, ProviderConfig};
 use crate::records::{
     AccountId, Device, Handoff, Issued, PendingLogin, Records, RevokeReason, Revoked, Rotation,
 };
+use crate::relay::Relay;
 use crate::tokens::{self, Kind};
 use crate::{ACCESS_TTL_MS, HANDOFF_TTL_MS, LOGIN_TTL_MS, MAX_DEVICES_PER_ACCOUNT, REFRESH_TTL_MS};
 
@@ -58,6 +59,7 @@ pub struct ControlService<R> {
     redirects: Vec<Url>,
     provider: Provider,
     pub(crate) records: R,
+    pub(crate) relay: Relay,
 }
 
 impl<R: Records> ControlService<R> {
@@ -83,11 +85,17 @@ impl<R: Records> ControlService<R> {
             callback,
             redirects,
             records,
+            relay: Relay::default(),
         })
     }
 
     pub fn records(&self) -> &R {
         &self.records
+    }
+
+    /// The relay's sockets, to close them all when the server stops.
+    pub fn relay(&self) -> &Relay {
+        &self.relay
     }
 
     /// The redirect URI to register at the identity provider.
@@ -406,6 +414,7 @@ impl<R: Records> ControlService<R> {
             .await
             .map_err(unreadable)?;
         if revoked {
+            self.relay.nudge(&caller.account);
             Ok(())
         } else {
             Err(RemoteError::not_found())

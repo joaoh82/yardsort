@@ -17,6 +17,8 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::rejection::{JsonRejection, QueryRejection};
+use axum::extract::ws::rejection::WebSocketUpgradeRejection;
+use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
@@ -25,6 +27,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use remote_proto::account::{LoginParams, TokenRequest};
 use remote_proto::pairing::{GrantDecision, HostRegistration, PairingRequest};
+use remote_proto::relay::{TicketRequest, MAX_MESSAGE};
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -48,6 +51,9 @@ pub const OFFERS_PER_MINUTE: u32 = 10;
 /// Pairings one address may try a minute, right or wrong. An account's wrong codes are also
 /// limited on their own (`MAX_OFFER_MISSES`), wherever they come from.
 pub const PAIRINGS_PER_MINUTE: u32 = 10;
+/// Relay tickets one address may ask for a minute. A host asks for one each time it connects,
+/// and a device each time it opens a host.
+pub const TICKETS_PER_MINUTE: u32 = 60;
 
 pub struct Options {
     /// The header a trusted proxy puts the client's address in (`Fly-Client-IP` on Fly.io). Set
@@ -57,6 +63,7 @@ pub struct Options {
     pub tokens_per_minute: u32,
     pub offers_per_minute: u32,
     pub pairings_per_minute: u32,
+    pub tickets_per_minute: u32,
 }
 
 impl Default for Options {
@@ -67,6 +74,7 @@ impl Default for Options {
             tokens_per_minute: TOKENS_PER_MINUTE,
             offers_per_minute: OFFERS_PER_MINUTE,
             pairings_per_minute: PAIRINGS_PER_MINUTE,
+            tickets_per_minute: TICKETS_PER_MINUTE,
         }
     }
 }
@@ -85,6 +93,9 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
     let tokens = gate(options.tokens_per_minute, Answer::Json);
     let offers = gate(options.offers_per_minute, Answer::Json);
     let pairings = gate(options.pairings_per_minute, Answer::Json);
+    let tickets = gate(options.tickets_per_minute, Answer::Json);
+    let service = Arc::new(service);
+    crate::relay::start_rechecks(Arc::clone(&service));
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/server", get(describe::<R>))
@@ -115,10 +126,15 @@ pub fn router<R: Records + 'static>(service: ControlService<R>, options: Options
         .route("/v1/grants/{id}/approve", post(approve::<R>))
         .route("/v1/grants/{id}/deny", post(deny::<R>))
         .route("/v1/grants/{id}/revoke", post(revoke_grant::<R>))
+        .route(
+            "/v1/relay/tickets",
+            post(ticket::<R>).route_layer(middleware::from_fn_with_state(tickets, limited)),
+        )
+        .route("/v1/relay", get(relay::<R>))
         .fallback(|| async { failure(RemoteError::not_found()) })
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn(guard))
-        .with_state(Arc::new(service))
+        .with_state(service)
 }
 
 struct Gate {
@@ -356,6 +372,38 @@ async fn pair<R: Records>(
         Ok(request) => answer(service.pair(&caller, &request, now_ms()).await),
         Err(refused) => refused.into_response(),
     }
+}
+
+async fn ticket<R: Records>(
+    State(service): State<Service<R>>,
+    headers: HeaderMap,
+    body: Result<Json<TicketRequest>, JsonRejection>,
+) -> Response {
+    let caller = match caller(&service, &headers).await {
+        Ok(caller) => caller,
+        Err(error) => return failure(error),
+    };
+    match body_of(body, "The request is not a ticket request.") {
+        Ok(request) => answer(service.ticket(&caller, &request).await),
+        Err(refused) => refused.into_response(),
+    }
+}
+
+/// The relay's WebSocket. Anyone may open one; what it may do is the ticket it presents first.
+async fn relay<R: Records + 'static>(
+    State(service): State<Service<R>>,
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+) -> Response {
+    let Ok(upgrade) = upgrade else {
+        return failure(RemoteError::new(
+            ErrorCode::InvalidRequest,
+            "The relay speaks WebSocket only.",
+        ));
+    };
+    upgrade
+        .max_message_size(MAX_MESSAGE)
+        .max_frame_size(MAX_MESSAGE)
+        .on_upgrade(move |socket| service.serve_socket(socket))
 }
 
 async fn device_grants<R: Records>(

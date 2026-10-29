@@ -19,6 +19,10 @@ pub struct Served {
     pub idp: Idp,
     pub base: Url,
     pub client: reqwest::Client,
+    /// The relay's sockets, to fail them all as a restart would.
+    #[allow(dead_code)]
+    pub relay: yardsort_server::relay::Relay,
+    serving: tokio::task::JoinHandle<()>,
 }
 
 impl Served {
@@ -47,10 +51,24 @@ impl Served {
             client.clone(),
         )
         .unwrap();
+        let relay = service.relay().clone();
         let app = http::router(service, options)
             .into_make_service_with_connect_info::<std::net::SocketAddr>();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        Self { idp, base, client }
+        let serving = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        Self {
+            idp,
+            base,
+            client,
+            relay,
+            serving,
+        }
+    }
+
+    /// Stop the server as a crash would: no new connections, every relay socket closed.
+    #[allow(dead_code)]
+    pub fn fail(&self) {
+        self.serving.abort();
+        self.relay.shutdown();
     }
 
     pub fn url(&self, path: &str) -> Url {
