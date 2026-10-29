@@ -13,9 +13,9 @@ use remote_proto::pairing::MAX_OFFER_MISSES;
 use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, ProjectId, Scope};
 use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{
-    AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, Handoff, Host, HostOffer,
-    Issued, LinkPlace, MemoryRecords, PendingLogin, Records, Redemption, RevokeReason, Revoked,
-    Rotation, Signal, SEEN_RESOLUTION_MS,
+    AccountId, Allowance, Decision, Device, GrantFilter, GrantRecord, GrantStatus, Handoff, Host,
+    HostOffer, Issued, LinkPlace, MemoryRecords, PendingLogin, Records, Redemption, RevokeReason,
+    Revoked, Rotation, Signal, SEEN_RESOLUTION_MS,
 };
 use yardsort_server::tokens::{self, TokenHash};
 
@@ -70,6 +70,9 @@ for_each_store!(
     pairing_requests_waiting_on_an_instances_links,
     signals_come_back_to_every_listener_in_order,
     a_listener_coming_after_the_last_one_left_still_hears,
+    a_rate_limit_is_one_bucket_per_gate_and_key_and_refills_over_a_minute,
+    racing_requests_take_no_more_than_a_rate_limit_holds,
+    one_given_back_is_there_to_take_again_and_never_overfills,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -1343,6 +1346,129 @@ async fn a_listener_coming_after_the_last_one_left_still_hears(records: Arc<impl
     assert_eq!(heard.expect("a later listener heard nothing"), account);
 }
 
+async fn a_rate_limit_is_one_bucket_per_gate_and_key_and_refills_over_a_minute(
+    records: Arc<impl Records>,
+) {
+    let (one, two) = (h("address-1"), h("address-2"));
+    for _ in 0..3 {
+        assert_eq!(
+            records.take_allowance("logins", &one, 3, T).await.unwrap(),
+            Allowance::Taken
+        );
+    }
+    // Empty: a third of a minute until the next, at three a minute.
+    let Allowance::Wait(wait) = records.take_allowance("logins", &one, 3, T).await.unwrap() else {
+        panic!("a fourth was let through");
+    };
+    assert!((wait.as_secs_f64() - 20.0).abs() < 0.01, "{wait:?}");
+    // Another key, and another gate, have buckets of their own.
+    assert_eq!(
+        records.take_allowance("logins", &two, 3, T).await.unwrap(),
+        Allowance::Taken
+    );
+    assert_eq!(
+        records.take_allowance("tokens", &one, 3, T).await.unwrap(),
+        Allowance::Taken
+    );
+    // Asking while empty takes nothing, and a third of a minute brings one back.
+    let Allowance::Wait(wait) = records
+        .take_allowance("logins", &one, 3, T + 10_000)
+        .await
+        .unwrap()
+    else {
+        panic!("let through before the refill");
+    };
+    assert!((wait.as_secs_f64() - 10.0).abs() < 0.01, "{wait:?}");
+    assert_eq!(
+        records
+            .take_allowance("logins", &one, 3, T + 20_000)
+            .await
+            .unwrap(),
+        Allowance::Taken
+    );
+    // A clock behind the bucket's refills nothing.
+    assert!(matches!(
+        records.take_allowance("logins", &one, 3, T).await.unwrap(),
+        Allowance::Wait(_)
+    ));
+
+    // A sweep forgets buckets untouched since `before`, and only those.
+    records.sweep_allowances(T + 20_000).await.unwrap();
+    assert!(matches!(
+        records
+            .take_allowance("logins", &one, 3, T + 20_000)
+            .await
+            .unwrap(),
+        Allowance::Wait(_)
+    ));
+    records.sweep_allowances(T + 20_001).await.unwrap();
+    assert_eq!(
+        records
+            .take_allowance("logins", &one, 3, T + 20_000)
+            .await
+            .unwrap(),
+        Allowance::Taken
+    );
+}
+
+async fn racing_requests_take_no_more_than_a_rate_limit_holds(
+    records: Arc<impl Records + 'static>,
+) {
+    let racers: Vec<_> = (0..12)
+        .map(|_| {
+            let records = records.clone();
+            tokio::spawn(async move {
+                records
+                    .take_allowance("pairings", &h("address-1"), 5, T)
+                    .await
+                    .unwrap()
+            })
+        })
+        .collect();
+    let mut taken = 0;
+    for racer in racers {
+        if racer.await.unwrap() == Allowance::Taken {
+            taken += 1;
+        }
+    }
+    assert_eq!(taken, 5);
+}
+
+async fn one_given_back_is_there_to_take_again_and_never_overfills(records: Arc<impl Records>) {
+    let key = h("address-1");
+    // Nothing taken yet: nothing to give back, and nothing made.
+    records.return_allowance("tickets", &key, 2).await.unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+            Allowance::Taken
+        );
+    }
+    records.return_allowance("tickets", &key, 2).await.unwrap();
+    assert_eq!(
+        records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+        Allowance::Taken
+    );
+    assert!(matches!(
+        records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+        Allowance::Wait(_)
+    ));
+    // Given back more often than taken, it holds no more than its limit.
+    for _ in 0..5 {
+        records.return_allowance("tickets", &key, 2).await.unwrap();
+    }
+    for _ in 0..2 {
+        assert_eq!(
+            records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+            Allowance::Taken
+        );
+    }
+    assert!(matches!(
+        records.take_allowance("tickets", &key, 2, T).await.unwrap(),
+        Allowance::Wait(_)
+    ));
+}
+
 #[test]
 fn signals_travel_as_a_few_words_and_nothing_else_reads_as_one() {
     let host = HostId::new("host-1").unwrap();
@@ -1350,7 +1476,8 @@ fn signals_travel_as_a_few_words_and_nothing_else_reads_as_one() {
     for signal in [
         Signal::Recheck(AccountId("9b2f6c1e-account".into())),
         Signal::RecheckAll,
-        Signal::Pairing(host, grant),
+        Signal::Pairing(host.clone(), grant),
+        Signal::Linked(host),
     ] {
         assert_eq!(Signal::decode(&signal.encode()), Some(signal));
     }
@@ -1362,6 +1489,8 @@ fn signals_travel_as_a_few_words_and_nothing_else_reads_as_one() {
         "pairing h g x",
         "revoke a",
         "host-renamed x",
+        "linked",
+        "linked h x",
         // A listening connection's probe of itself.
         "probe 0b5c3f9e-8f7a-4f1e-9d55-2f3c8f4c1a7e",
     ] {

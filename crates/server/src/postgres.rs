@@ -31,9 +31,9 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_postgres::{AsyncMessage, Client, Row};
 
 use crate::records::{
-    AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, GrantView, Handoff, Host,
-    HostOffer, Issued, LinkPlace, PendingLogin, Records, RecordsError, Redemption, Result,
-    RevokeReason, Revoked, Rotation, Signal, SEEN_RESOLUTION_MS, SIGNALS_KEPT,
+    allowance, AccountId, Allowance, Decision, Device, GrantFilter, GrantRecord, GrantStatus,
+    GrantView, Handoff, Host, HostOffer, Issued, LinkPlace, PendingLogin, Records, RecordsError,
+    Redemption, Result, RevokeReason, Revoked, Rotation, Signal, SEEN_RESOLUTION_MS, SIGNALS_KEPT,
 };
 use crate::tokens::TokenHash;
 
@@ -53,6 +53,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         3,
         "relay_links",
         include_str!("../migrations/0003_relay_links.sql"),
+    ),
+    (
+        4,
+        "rate_limits",
+        include_str!("../migrations/0004_rate_limits.sql"),
     ),
 ];
 
@@ -1050,6 +1055,58 @@ impl Records for PgRecords {
                 "DELETE FROM relay_links WHERE host = $1 AND link = $2",
                 &[&host.as_str(), &link],
             )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    async fn take_allowance(
+        &self,
+        gate: &str,
+        key: &TokenHash,
+        per_minute: u32,
+        now: i64,
+    ) -> Result<Allowance> {
+        let per_minute = f64::from(per_minute.max(1));
+        // As `records::refilled`: every expression of the update reads the row as it was.
+        let row = self
+            .client()
+            .await?
+            .query_one(
+                "INSERT INTO rate_limits AS r (gate, key, tokens, at, taken)
+                 VALUES ($1, $2, $3::float8 - 1, $4, TRUE)
+                 ON CONFLICT (gate, key) DO UPDATE SET
+                     tokens = LEAST($3::float8, r.tokens + GREATEST(0, $4 - r.at) * $3::float8 / 60000.0::float8)
+                         - CASE WHEN LEAST($3::float8, r.tokens + GREATEST(0, $4 - r.at) * $3::float8 / 60000.0::float8)
+                                     >= 1 THEN 1 ELSE 0 END,
+                     taken = LEAST($3::float8, r.tokens + GREATEST(0, $4 - r.at) * $3::float8 / 60000.0::float8) >= 1,
+                     at = GREATEST(r.at, $4)
+                 RETURNING taken, tokens",
+                &[&gate, &bytes(key), &per_minute, &now],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(allowance(row.get(0), row.get(1), per_minute))
+    }
+
+    async fn return_allowance(&self, gate: &str, key: &TokenHash, per_minute: u32) -> Result<()> {
+        let per_minute = f64::from(per_minute.max(1));
+        self.client()
+            .await?
+            .execute(
+                "UPDATE rate_limits SET tokens = LEAST($3::float8, tokens + 1)
+                 WHERE gate = $1 AND key = $2",
+                &[&gate, &bytes(key), &per_minute],
+            )
+            .await
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    async fn sweep_allowances(&self, before: i64) -> Result<()> {
+        self.client()
+            .await?
+            .execute("DELETE FROM rate_limits WHERE at < $1", &[&before])
             .await
             .map_err(failed)?;
         Ok(())

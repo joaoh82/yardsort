@@ -15,6 +15,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::pairing::MAX_OFFER_MISSES;
@@ -222,6 +223,34 @@ pub struct LinkPlace {
     pub seen_at: i64,
 }
 
+/// What is left of a rate limit for one address: taken, or how long until one is free.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Allowance {
+    Taken,
+    Wait(Duration),
+}
+
+/// A bucket of `per_minute`, holding `tokens` at `at`, refilled until `now`: `per_minute` at most,
+/// and full again a minute after it was empty. A clock behind `at` refills nothing.
+pub fn refilled(tokens: f64, at: i64, per_minute: f64, now: i64) -> f64 {
+    let elapsed = (now - at).max(0) as f64;
+    (tokens + elapsed * per_minute / 60_000.0).min(per_minute)
+}
+
+/// What a bucket of `per_minute` left with `tokens` says, one having been taken or not.
+pub fn allowance(taken: bool, tokens: f64, per_minute: f64) -> Allowance {
+    if taken {
+        Allowance::Taken
+    } else {
+        Allowance::Wait(Duration::from_secs_f64(
+            (1.0 - tokens).max(0.0) * 60.0 / per_minute,
+        ))
+    }
+}
+
+/// How long a bucket goes untouched before it is full again, and is swept.
+pub const ALLOWANCE_REFILLS_MS: i64 = 60_000;
+
 /// What one instance of the server tells every instance sharing the records, itself included, so
 /// that each acts at once on what the others did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,6 +261,9 @@ pub enum Signal {
     RecheckAll,
     /// A device asks this host to pair, through this grant.
     Pairing(HostId, GrantId),
+    /// This host's link was just noted ([`LinkPlace`]): an instance holding an earlier one closes
+    /// it, once the records say a later one took its place.
+    Linked(HostId),
 }
 
 impl Signal {
@@ -241,6 +273,7 @@ impl Signal {
             Self::Recheck(account) => format!("recheck {}", account.0),
             Self::RecheckAll => "recheck-all".into(),
             Self::Pairing(host, grant) => format!("pairing {host} {grant}"),
+            Self::Linked(host) => format!("linked {host}"),
         }
     }
 
@@ -256,6 +289,7 @@ impl Signal {
                 HostId::new(*host).ok()?,
                 GrantId::new(*grant).ok()?,
             )),
+            ["linked", host] => Some(Self::Linked(HostId::new(*host).ok()?)),
             _ => None,
         }
     }
@@ -454,6 +488,30 @@ pub trait Records: Send + Sync {
         instance: &str,
         now: i64,
     ) -> impl Future<Output = Result<Vec<(HostId, GrantId)>>> + Send;
+
+    /// Take one for `key` from `gate`'s rate limit, which every instance sharing these records
+    /// shares: a bucket holding `per_minute` ([`refilled`]). One step, so racing requests never
+    /// take more than there is.
+    fn take_allowance(
+        &self,
+        gate: &str,
+        key: &TokenHash,
+        per_minute: u32,
+        now: i64,
+    ) -> impl Future<Output = Result<Allowance>> + Send;
+
+    /// Give back one taken from `key`'s bucket at `gate`: the request it was taken for was sent on to
+    /// another instance, which counts it there.
+    fn return_allowance(
+        &self,
+        gate: &str,
+        key: &TokenHash,
+        per_minute: u32,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Forget the buckets untouched since `before`, which are full again if `before` is at least
+    /// [`ALLOWANCE_REFILLS_MS`] ago.
+    fn sweep_allowances(&self, before: i64) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
@@ -491,6 +549,8 @@ struct State {
     offers: Vec<(HostOffer, i32)>,
     grants: Vec<GrantRecord>,
     links: HashMap<HostId, LinkPlace>,
+    /// Each gate's and key's bucket: what it held, and when.
+    allowances: HashMap<(String, TokenHash), (f64, i64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -953,5 +1013,39 @@ impl Records for MemoryRecords {
                 .map(|g| (g.host.clone(), g.id.clone()))
                 .collect()
         })
+    }
+
+    async fn take_allowance(
+        &self,
+        gate: &str,
+        key: &TokenHash,
+        per_minute: u32,
+        now: i64,
+    ) -> Result<Allowance> {
+        let per_minute = f64::from(per_minute.max(1));
+        self.with(|s| {
+            let bucket = s
+                .allowances
+                .entry((gate.to_owned(), *key))
+                .or_insert((per_minute, now));
+            let tokens = refilled(bucket.0, bucket.1, per_minute, now);
+            let taken = tokens >= 1.0;
+            let left = if taken { tokens - 1.0 } else { tokens };
+            *bucket = (left, bucket.1.max(now));
+            allowance(taken, left, per_minute)
+        })
+    }
+
+    async fn return_allowance(&self, gate: &str, key: &TokenHash, per_minute: u32) -> Result<()> {
+        let per_minute = f64::from(per_minute.max(1));
+        self.with(|s| {
+            if let Some(bucket) = s.allowances.get_mut(&(gate.to_owned(), *key)) {
+                bucket.0 = (bucket.0 + 1.0).min(per_minute);
+            }
+        })
+    }
+
+    async fn sweep_allowances(&self, before: i64) -> Result<()> {
+        self.with(|s| s.allowances.retain(|_, (_, at)| *at >= before))
     }
 }
