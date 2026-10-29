@@ -13,7 +13,7 @@ use common::served::*;
 use remote_client::{Client, ClientError, Incoming, LinkReader, RelayLink};
 use remote_proto::account::{Credentials, DeviceKind};
 use remote_proto::pairing::{GrantSummary, HostSummary, Offer};
-use remote_proto::relay::{CloseReason, LinkFrame, TicketRequest, MAX_QUEUED};
+use remote_proto::relay::{CloseReason, LinkFrame, RelayTicket, TicketRequest, MAX_QUEUED};
 use remote_proto::{ErrorCode, GrantId, HostId};
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -282,15 +282,20 @@ async fn a_phone_reaches_its_host_and_nothing_else_does(records: impl Records + 
 
     // A ticket works once, and only as a ticket.
     let ticket = c.ticket(&p.phone.access, &device).await.unwrap();
-    let again = ticket.ticket.clone();
-    let mut second = c.open_relay_with(ticket.ticket).await.unwrap();
+    assert_eq!(ticket.route, None, "one instance needs no route");
+    let again = ticket.clone();
+    let mut second = c.open_relay_with(ticket).await.unwrap();
     assert!(matches!(heard(&mut host.reader).await, Heard::Open(..)));
     assert_eq!(
-        refused(c.open_relay_with(again).await),
+        refused(c.open_relay_with(again.clone()).await),
         ErrorCode::Unauthenticated
     );
+    let access = RelayTicket {
+        ticket: p.phone.access.clone(),
+        ..again
+    };
     assert_eq!(
-        refused(c.open_relay_with(p.phone.access.clone()).await),
+        refused(c.open_relay_with(access).await),
         ErrorCode::Unauthenticated
     );
 

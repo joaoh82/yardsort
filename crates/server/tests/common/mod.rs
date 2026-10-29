@@ -3,4 +3,5 @@
 
 pub mod idp;
 pub mod pg;
+pub mod replay;
 pub mod served;

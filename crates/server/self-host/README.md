@@ -179,6 +179,9 @@ Your proxy has to do what the `Caddyfile` does:
    they are connected (in nginx, `proxy_http_version 1.1;` with `Upgrade` and `Connection`
    headers set from the request's). It pings every 20 seconds, so a proxy may close a connection
    quiet for a minute, but not sooner (nginx's `proxy_read_timeout` is 60 seconds already).
+   Run one `server`: each instance holds its own relay sockets, and only a proxy that can send a
+   request on to a named instance (Fly.io's, with `YARDSORT_ROUTING=fly-replay`) lets several
+   share the work.
 4. **Let the server reach the auth name.** The server fetches ZITADEL's settings and keys at
    `https://<auth name>`. The override sends that name to this machine (`host-gateway`), so your
    proxy has to listen on 443 on an address the containers can reach, not on `127.0.0.1` alone.

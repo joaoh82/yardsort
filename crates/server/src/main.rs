@@ -14,6 +14,7 @@ use yardsort_server::config::{AdminSettings, Settings};
 use yardsort_server::http::{self, now_ms};
 use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{Records, RevokeReason, Revoked};
+use yardsort_server::relay::Relay;
 use yardsort_server::{oidc, ControlService, ServerConfig};
 
 const USAGE: &str = "usage: yardsort-server [revoke-account --subject SUBJECT [--issuer ISSUER]]";
@@ -67,7 +68,8 @@ async fn serve() -> Result<(), String> {
         records,
         http_client,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?
+    .with_relay(Relay::new(settings.instance, settings.routing));
     tracing::info!(
         server = %service.describe().server,
         issuer = %service.describe().issuer,
@@ -78,7 +80,12 @@ async fn serve() -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(settings.listen)
         .await
         .map_err(|e| format!("listening on {}: {e}", settings.listen))?;
-    tracing::info!("listening on {}", settings.listen);
+    tracing::info!(
+        instance = %service.relay().instance(),
+        routing = ?service.relay().routing(),
+        "listening on {}",
+        settings.listen
+    );
     let relay = service.relay().clone();
     let app = http::router(
         service,

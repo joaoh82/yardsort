@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::limit::Limiter;
 use crate::records::Records;
+use crate::relay::{Instance, Ticketed};
 use crate::{Caller, ControlService, LoginFinish};
 
 /// The largest request body accepted. The biggest real one, a sign-in redemption, is well under a
@@ -383,17 +384,57 @@ async fn ticket<R: Records>(
         Ok(caller) => caller,
         Err(error) => return failure(error),
     };
-    match body_of(body, "The request is not a ticket request.") {
-        Ok(request) => answer(service.ticket(&caller, &request).await),
-        Err(refused) => refused.into_response(),
+    let request = match body_of(body, "The request is not a ticket request.") {
+        Ok(request) => request,
+        Err(refused) => return refused.into_response(),
+    };
+    let replayed = service.relay.routing().replayed(&headers);
+    match service.ticket(&caller, &request, replayed, now_ms()).await {
+        Ok(Ticketed::Here(ticket)) => Json(ticket).into_response(),
+        Ok(Ticketed::Elsewhere(instance)) => replay_to(&instance),
+        Err(error) => failure(error),
     }
 }
 
+#[derive(Deserialize)]
+struct RelayQuery {
+    route: Option<String>,
+}
+
+/// Send this request on to `instance`, through the proxy in front of every instance
+/// ([`crate::relay::Routing::FlyReplay`]). If the instance cannot be reached, the proxy gives the request to
+/// another, which answers it as best it can; a client that sees this answer itself has no such
+/// proxy in front of the server.
+fn replay_to(instance: &Instance) -> Response {
+    let mut response = failure(RemoteError::new(
+        ErrorCode::HostOffline,
+        "That host is connected to another instance of this server, and nothing sent this \
+         request there.",
+    ));
+    *response.status_mut() = StatusCode::CONFLICT;
+    if let Ok(value) = HeaderValue::from_str(&format!("prefer_instance={instance}")) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static("fly-replay"), value);
+    }
+    response
+}
+
 /// The relay's WebSocket. Anyone may open one; what it may do is the ticket it presents first.
+/// One that names another instance's route is sent there before it is upgraded.
 async fn relay<R: Records + 'static>(
     State(service): State<Service<R>>,
+    headers: HeaderMap,
+    query: Result<Query<RelayQuery>, QueryRejection>,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
+    let route = query.ok().and_then(|Query(q)| q.route);
+    let replayed = service.relay.routing().replayed(&headers);
+    match service.relay.socket_route(route.as_deref(), replayed) {
+        Ok(None) => {}
+        Ok(Some(instance)) => return replay_to(&instance),
+        Err(error) => return failure(error),
+    }
     let Ok(upgrade) = upgrade else {
         return failure(RemoteError::new(
             ErrorCode::InvalidRequest,

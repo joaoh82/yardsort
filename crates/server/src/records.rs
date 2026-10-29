@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::pairing::MAX_OFFER_MISSES;
@@ -207,6 +207,20 @@ pub type Result<T> = std::result::Result<T, RecordsError>;
 /// not written again, so a busy device does not write on every request.
 pub const SEEN_RESOLUTION_MS: i64 = 60_000;
 
+/// Where a host's relay link is held: which instance of the server, and which of its links, so
+/// that a device reaching another instance can be sent there. Its instance notes it again every
+/// few seconds while the link stays; a place not noted for a while is from an instance that went
+/// away, and is not believed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkPlace {
+    pub host: HostId,
+    pub instance: String,
+    /// Tells this link from a later one of the same host, on any instance.
+    pub link: String,
+    /// When its instance last said it still holds it.
+    pub seen_at: i64,
+}
+
 /// What the control service needs of a store. See the module documentation for what "one step"
 /// means for each method.
 pub trait Records: Send + Sync {
@@ -365,13 +379,32 @@ pub trait Records: Send + Sync {
         id: &HostId,
         now: i64,
     ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Note where `place.host`'s relay link is now, in place of wherever it was.
+    fn put_link(&self, place: LinkPlace) -> impl Future<Output = Result<()>> + Send;
+
+    /// Where `host`'s relay link was last noted, believed or not.
+    fn link_place(&self, host: &HostId) -> impl Future<Output = Result<Option<LinkPlace>>> + Send;
+
+    /// `instance` still holds its links: note each of its places as seen at `now`, and return
+    /// them. A link it holds that is not among them was taken by a later one, on another
+    /// instance.
+    fn keep_links(
+        &self,
+        instance: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<Vec<LinkPlace>>> + Send;
+
+    /// `link` of `host` closed: forget its place, unless a later link has taken it.
+    fn drop_link(&self, host: &HostId, link: &str) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
-/// tests and trying the server out, not for running one.
-#[derive(Default)]
+/// tests and trying the server out, not for running one. A clone shares them, as instances of a
+/// server share a database.
+#[derive(Default, Clone)]
 pub struct MemoryRecords {
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
 }
 
 #[derive(Default)]
@@ -387,6 +420,7 @@ struct State {
     /// With the misses counted against each.
     offers: Vec<(HostOffer, i32)>,
     grants: Vec<GrantRecord>,
+    links: HashMap<HostId, LinkPlace>,
 }
 
 #[derive(Debug, Clone)]
@@ -790,6 +824,37 @@ impl Records for MemoryRecords {
                 }
             }
             true
+        })
+    }
+
+    async fn put_link(&self, place: LinkPlace) -> Result<()> {
+        self.with(|s| {
+            s.links.insert(place.host.clone(), place);
+        })
+    }
+
+    async fn link_place(&self, host: &HostId) -> Result<Option<LinkPlace>> {
+        self.with(|s| s.links.get(host).cloned())
+    }
+
+    async fn keep_links(&self, instance: &str, now: i64) -> Result<Vec<LinkPlace>> {
+        self.with(|s| {
+            s.links
+                .values_mut()
+                .filter(|place| place.instance == instance)
+                .map(|place| {
+                    place.seen_at = now;
+                    place.clone()
+                })
+                .collect()
+        })
+    }
+
+    async fn drop_link(&self, host: &HostId, link: &str) -> Result<()> {
+        self.with(|s| {
+            if s.links.get(host).is_some_and(|place| place.link == link) {
+                s.links.remove(host);
+            }
         })
     }
 }

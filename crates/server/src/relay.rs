@@ -13,6 +13,16 @@
 //! channel. Another process's revocation (the operator's `revoke-account`) is seen at the next
 //! check.
 //!
+//! **Several instances.** A server can run as several instances behind one address, and a
+//! device's socket has to reach the one holding its host's link. Each instance notes in the
+//! records where the links it holds are ([`LinkPlace`]), and notes them again every
+//! [`RECHECK_EVERY`]. Behind a proxy that can send a request on to a named instance
+//! ([`Routing::FlyReplay`]), a device's ticket request that reaches another instance is sent to
+//! the link's, which issues the ticket with its own name as the route; the socket names the
+//! route, and is sent there too. A link that a later one of the same host replaced on another
+//! instance is closed at the next round. Without such a proxy ([`Routing::Single`]) the server
+//! must run as one instance.
+//!
 //! **Nothing waits on a slow socket.** What is to be sent to each socket waits in its own queue,
 //! bounded by bytes ([`MAX_QUEUED`]). A device that falls that far behind is closed with
 //! [`CloseReason::Overloaded`] and attaches again for a snapshot; its host and the other devices
@@ -20,8 +30,8 @@
 //! the relay from reading it, or anything else.
 //!
 //! **Nothing is kept.** Tickets and queues live in this process's memory and go with the
-//! socket, or the process. What a socket carries is never logged: only who connected, to which
-//! host, and why a socket closed.
+//! socket, or the process; the records hold only which instance holds which host's link. What a
+//! socket carries is never logged: only who connected, to which host, and why a socket closed.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -29,16 +39,19 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::http::HeaderMap;
 use futures_util::{SinkExt, StreamExt};
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::relay::{
-    Channel, ChannelOpen, CloseReason, Greeting, LinkFrame, Presented, RelayTicket, TicketRequest,
-    FIRST_MESSAGE_MS, MAX_DEVICES_PER_HOST, MAX_QUEUED, PING_EVERY_MS, SILENCE_MS, TICKET_TTL_MS,
+    valid_route, Channel, ChannelOpen, CloseReason, Greeting, LinkFrame, Presented, RelayTicket,
+    TicketRequest, FIRST_MESSAGE_MS, MAX_DEVICES_PER_HOST, MAX_QUEUED, PING_EVERY_MS, SILENCE_MS,
+    TICKET_TTL_MS,
 };
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
 use tokio::sync::Notify;
 
-use crate::records::{AccountId, GrantFilter, GrantStatus, Records};
+use crate::http::now_ms;
+use crate::records::{AccountId, GrantFilter, GrantStatus, LinkPlace, Records};
 use crate::service::unreadable;
 use crate::tokens::{self, Kind, TokenHash};
 use crate::{Caller, ControlService};
@@ -50,6 +63,75 @@ const CLOSING: Duration = Duration::from_secs(5);
 /// Tickets waiting to be presented, across all accounts. Past this, new ones are refused until
 /// some are spent or lapse.
 pub const MAX_PENDING_TICKETS: usize = 10_000;
+
+/// How long a link's place is believed without its instance noting it again: several rounds of
+/// [`RECHECK_EVERY`], so one slow round does not lose it.
+pub const PLACE_LAPSES_AFTER_MS: i64 = 30_000;
+
+/// The name of one instance of the server, as the proxy in front of them knows it: on Fly.io, the
+/// Machine's id. Letters, digits, `-` and `_`, as [`valid_route`] says.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Instance(String);
+
+impl Instance {
+    pub fn new(name: impl Into<String>) -> Result<Self, String> {
+        let name = name.into();
+        if valid_route(&name) {
+            Ok(Self(name))
+        } else {
+            Err(format!(
+                "{name:?} is not an instance name: letters, digits, - and _ only"
+            ))
+        }
+    }
+
+    /// A name of its own, for an instance nobody named.
+    pub fn random() -> Self {
+        Self(uuid::Uuid::new_v4().simple().to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Instance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// How a request that reached one instance gets to the instance it belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Routing {
+    /// It does not: the server runs as one instance, and everything is here.
+    #[default]
+    Single,
+    /// Fly.io's proxy: an answer carrying `fly-replay` is not passed on, and the request goes
+    /// again to the instance it names.
+    FlyReplay,
+}
+
+impl Routing {
+    /// Whether the proxy already sent this request on once. It is then answered here, whatever
+    /// the records say, so a request is never sent round in circles.
+    pub fn replayed(self, headers: &HeaderMap) -> bool {
+        match self {
+            Self::Single => false,
+            Self::FlyReplay => {
+                headers.contains_key("fly-replay-src")
+                    || headers.contains_key("fly-preferred-instance-unavailable")
+            }
+        }
+    }
+}
+
+/// A ticket request's answer: a ticket, or the instance to send the request on to.
+#[derive(Debug)]
+pub enum Ticketed {
+    Here(RelayTicket),
+    Elsewhere(Instance),
+}
 
 /// What a ticket lets its socket do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,13 +155,21 @@ struct Pending {
 }
 
 /// The relay's state: tickets waiting, and the hosts connected with their devices.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Relay {
     hub: Arc<Hub>,
 }
 
-#[derive(Default)]
+impl Default for Relay {
+    /// One instance, named at random.
+    fn default() -> Self {
+        Self::new(Instance::random(), Routing::Single)
+    }
+}
+
 struct Hub {
+    instance: Instance,
+    routing: Routing,
     tickets: Mutex<HashMap<TokenHash, Pending>>,
     hosts: Mutex<HashMap<HostId, Arc<HostLink>>>,
     /// Accounts to check again now, rather than at the next round.
@@ -92,6 +182,8 @@ struct Hub {
 struct HostLink {
     /// Tells this link from a later one of the same host.
     id: u64,
+    /// The same, on every instance: as its [`LinkPlace`] names it.
+    place: String,
     account: AccountId,
     host: HostId,
     device: DeviceId,
@@ -112,6 +204,47 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Relay {
+    pub fn new(instance: Instance, routing: Routing) -> Self {
+        Self {
+            hub: Arc::new(Hub {
+                instance,
+                routing,
+                tickets: Mutex::default(),
+                hosts: Mutex::default(),
+                dirty: Mutex::default(),
+                recheck: Notify::new(),
+                stopping: AtomicBool::new(false),
+                next_link: AtomicU64::new(0),
+            }),
+        }
+    }
+
+    /// This instance.
+    pub fn instance(&self) -> &Instance {
+        &self.hub.instance
+    }
+
+    pub fn routing(&self) -> Routing {
+        self.hub.routing
+    }
+
+    /// Where a socket that names `route` belongs: `None` for here, or the instance to send it on
+    /// to. A route that cannot name an instance is refused.
+    pub fn socket_route(
+        &self,
+        route: Option<&str>,
+        replayed: bool,
+    ) -> Result<Option<Instance>, RemoteError> {
+        let Some(route) = route else {
+            return Ok(None);
+        };
+        let route = Instance::new(route).map_err(|_| {
+            RemoteError::new(ErrorCode::InvalidRequest, "That route names no instance.")
+        })?;
+        let here = self.hub.routing == Routing::Single || replayed || route == self.hub.instance;
+        Ok((!here).then_some(route))
+    }
+
     /// Close every socket, for a restart. New sockets are refused from here on.
     pub fn shutdown(&self) {
         self.hub.stopping.store(true, Ordering::SeqCst);
@@ -156,6 +289,7 @@ impl Relay {
         Ok(RelayTicket {
             ticket: minted.secret,
             expires_in_ms: TICKET_TTL_MS,
+            route: (self.hub.routing != Routing::Single).then(|| self.hub.instance.0.clone()),
         })
     }
 
@@ -321,12 +455,16 @@ fn message_len(message: &Message) -> usize {
 }
 
 impl<R: Records> ControlService<R> {
-    /// `POST /v1/relay/tickets`.
+    /// `POST /v1/relay/tickets`. A device's ticket is issued by the instance holding its host's
+    /// link: from another, the answer is to send the request there, unless it was sent on once
+    /// already (`replayed`).
     pub async fn ticket(
         &self,
         caller: &Caller,
         request: &TicketRequest,
-    ) -> Result<RelayTicket, RemoteError> {
+        replayed: bool,
+        now: i64,
+    ) -> Result<Ticketed, RemoteError> {
         if self.relay.hub.stopping.load(Ordering::SeqCst) {
             return Err(restarting());
         }
@@ -368,6 +506,9 @@ impl<R: Records> ControlService<R> {
                             "This device has no grant on that host. Pair with it first.",
                         )
                     })?;
+                if let Some(there) = self.link_elsewhere(&host.id, replayed, now).await? {
+                    return Ok(Ticketed::Elsewhere(there));
+                }
                 Role::Device {
                     account: caller.account.clone(),
                     host: host.id,
@@ -376,7 +517,24 @@ impl<R: Records> ControlService<R> {
                 }
             }
         };
-        self.relay.issue(role)
+        self.relay.issue(role).map(Ticketed::Here)
+    }
+
+    /// The other instance believed to hold `host`'s link, when requests can be sent there.
+    async fn link_elsewhere(
+        &self,
+        host: &HostId,
+        replayed: bool,
+        now: i64,
+    ) -> Result<Option<Instance>, RemoteError> {
+        let hub = &self.relay.hub;
+        if hub.routing == Routing::Single || replayed {
+            return Ok(None);
+        }
+        let place = self.records.link_place(host).await.map_err(unreadable)?;
+        Ok(place
+            .filter(|p| now - p.seen_at <= PLACE_LAPSES_AFTER_MS && p.instance != hub.instance.0)
+            .and_then(|p| Instance::new(p.instance).ok()))
     }
 
     /// Serve one relay socket, from its first message to its close.
@@ -412,6 +570,7 @@ impl<R: Records> ControlService<R> {
             } => {
                 let link = Arc::new(HostLink {
                     id: self.relay.hub.next_link.fetch_add(1, Ordering::Relaxed),
+                    place: uuid::Uuid::new_v4().simple().to_string(),
                     account,
                     host: host.clone(),
                     device,
@@ -419,6 +578,26 @@ impl<R: Records> ControlService<R> {
                     channels: Mutex::new(HashMap::new()),
                     next_channel: AtomicU32::new(1),
                 });
+                // Noted before it is attached, so that every round finds the place of each link it
+                // judges (`keep_places`).
+                let place = LinkPlace {
+                    host: host.clone(),
+                    instance: self.relay.hub.instance.0.clone(),
+                    link: link.place.clone(),
+                    seen_at: now_ms(),
+                };
+                if let Err(error) = self.records.put_link(place).await {
+                    tracing::error!("relay: records: {error}");
+                    return refuse(
+                        &mut sink,
+                        RemoteError::new(
+                            ErrorCode::Internal,
+                            "The server could not take the link. Connect again in a moment.",
+                        ),
+                        CloseReason::Restarting,
+                    )
+                    .await;
+                }
                 link.out
                     .push(json_message(&Greeting::Connected { host: host.clone() }));
                 self.relay.attach_host(&link);
@@ -428,6 +607,9 @@ impl<R: Records> ControlService<R> {
                 })
                 .await;
                 self.relay.detach_host(&link);
+                if let Err(error) = self.records.drop_link(&host, &link.place).await {
+                    tracing::error!("relay: records: {error}");
+                }
                 tracing::info!(%host, reason = reason.text(), "relay: host left");
             }
             Role::Device {
@@ -696,14 +878,47 @@ async fn recheck<R: Records>(service: &ControlService<R>, account: &AccountId) {
     }
 }
 
+/// Note again that this instance holds its links, and close each one a later link of the same
+/// host took on another instance.
+async fn keep_places<R: Records>(service: &ControlService<R>) {
+    let hub = &service.relay.hub;
+    // Taken before the records are read: each of these was noted before it was attached, so a
+    // place missing from what comes back was taken since, or is going with its closing link.
+    let here: Vec<Arc<HostLink>> = lock(&hub.hosts).values().cloned().collect();
+    let kept = match service
+        .records
+        .keep_links(hub.instance.as_str(), now_ms())
+        .await
+    {
+        Ok(kept) => kept,
+        Err(error) => {
+            tracing::error!("relay: records: {error}");
+            return;
+        }
+    };
+    for link in here {
+        if !kept
+            .iter()
+            .any(|p| p.host == link.host && p.link == link.place)
+        {
+            tracing::info!(host = %link.host, "relay: host connected again elsewhere");
+            link.close_all(CloseReason::HostOffline);
+            link.out.close(CloseReason::Replaced);
+        }
+    }
+}
+
 /// Check every connected account every [`RECHECK_EVERY`], and nudged ones at once, until the
-/// relay shuts down.
+/// relay shuts down. Each round notes again where this instance's links are.
 pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R>>) {
     tokio::spawn(async move {
         let mut round = tokio::time::interval(RECHECK_EVERY);
         loop {
             let accounts = tokio::select! {
-                _ = round.tick() => service.relay.accounts(),
+                _ = round.tick() => {
+                    keep_places(&service).await;
+                    service.relay.accounts()
+                }
                 () = service.relay.hub.recheck.notified() => {
                     lock(&service.relay.hub.dirty).drain().collect()
                 }
@@ -758,6 +973,46 @@ mod tests {
             },
         );
         assert_eq!(relay.redeem(&access.secret), None);
+    }
+
+    #[test]
+    fn a_ticket_names_its_instance_only_when_requests_can_be_sent_there() {
+        let single = Relay::new(Instance::new("a").unwrap(), Routing::Single);
+        assert_eq!(single.issue(role()).unwrap().route, None);
+        let routed = Relay::new(Instance::new("a").unwrap(), Routing::FlyReplay);
+        assert_eq!(routed.issue(role()).unwrap().route.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn a_socket_is_sent_to_its_route_once() {
+        let routed = Relay::new(Instance::new("a").unwrap(), Routing::FlyReplay);
+        let b = Instance::new("b").unwrap();
+        assert_eq!(routed.socket_route(None, false).unwrap(), None);
+        assert_eq!(routed.socket_route(Some("a"), false).unwrap(), None, "here");
+        assert_eq!(routed.socket_route(Some("b"), false).unwrap(), Some(b));
+        assert_eq!(
+            routed.socket_route(Some("b"), true).unwrap(),
+            None,
+            "sent on once already: answered here"
+        );
+        let error = routed.socket_route(Some("b/../c"), false).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+
+        // With nothing to send it there, everything is answered here.
+        let single = Relay::new(Instance::new("a").unwrap(), Routing::Single);
+        assert_eq!(single.socket_route(Some("b"), false).unwrap(), None);
+    }
+
+    #[test]
+    fn only_the_proxy_says_a_request_was_sent_on() {
+        let mut headers = HeaderMap::new();
+        assert!(!Routing::FlyReplay.replayed(&headers));
+        headers.insert("fly-replay-src", "instance=b".parse().unwrap());
+        assert!(Routing::FlyReplay.replayed(&headers));
+        assert!(!Routing::Single.replayed(&headers), "nothing sends it on");
+        let mut fallen_back = HeaderMap::new();
+        fallen_back.insert("fly-preferred-instance-unavailable", "b".parse().unwrap());
+        assert!(Routing::FlyReplay.replayed(&fallen_back));
     }
 
     #[test]

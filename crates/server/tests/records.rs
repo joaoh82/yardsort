@@ -14,8 +14,8 @@ use remote_proto::{DeviceId, GrantId, HostId, Platform, ProjectGrant, ProjectId,
 use yardsort_server::postgres::PgRecords;
 use yardsort_server::records::{
     AccountId, Decision, Device, GrantFilter, GrantRecord, GrantStatus, Handoff, Host, HostOffer,
-    Issued, MemoryRecords, PendingLogin, Records, Redemption, RevokeReason, Revoked, Rotation,
-    SEEN_RESOLUTION_MS,
+    Issued, LinkPlace, MemoryRecords, PendingLogin, Records, Redemption, RevokeReason, Revoked,
+    Rotation, SEEN_RESOLUTION_MS,
 };
 use yardsort_server::tokens::{self, TokenHash};
 
@@ -66,6 +66,7 @@ for_each_store!(
     revoking_a_grant_or_removing_its_host_ends_it,
     racing_approvals_leave_one_grant_in_force,
     grants_keep_every_scope_and_project,
+    a_link_place_is_kept_by_its_instance_and_taken_by_a_later_link,
 );
 
 const T: i64 = 1_800_000_000_000;
@@ -1149,6 +1150,73 @@ async fn grants_keep_every_scope_and_project(records: Arc<impl Records>) {
         .unwrap();
     assert_eq!(decided.scopes, every);
     assert_eq!(decided.projects, Some(projects));
+}
+
+async fn a_link_place_is_kept_by_its_instance_and_taken_by_a_later_link(
+    records: Arc<impl Records>,
+) {
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    let mut hosts = Vec::new();
+    for name in ["Workstation", "Laptop"] {
+        let device = host_device(&*records, &account, name).await;
+        let host = new_host(&account, &device, name, T);
+        records.add_host(host.clone()).await.unwrap();
+        hosts.push(host.id);
+    }
+    let place = |host: &HostId, instance: &str, link: &str, seen_at| LinkPlace {
+        host: host.clone(),
+        instance: instance.into(),
+        link: link.into(),
+        seen_at,
+    };
+    assert_eq!(records.link_place(&hosts[0]).await.unwrap(), None);
+    records
+        .put_link(place(&hosts[0], "a", "link-1", T))
+        .await
+        .unwrap();
+    records
+        .put_link(place(&hosts[1], "b", "link-2", T))
+        .await
+        .unwrap();
+
+    // Each instance keeps only its own.
+    let kept = records.keep_links("a", T + 5_000).await.unwrap();
+    assert_eq!(kept, [place(&hosts[0], "a", "link-1", T + 5_000)]);
+    assert_eq!(
+        records.link_place(&hosts[1]).await.unwrap(),
+        Some(place(&hosts[1], "b", "link-2", T)),
+        "another instance's is not touched"
+    );
+
+    // The host connects again on b: a's link is no longer among a's.
+    records
+        .put_link(place(&hosts[0], "b", "link-3", T + 6_000))
+        .await
+        .unwrap();
+    assert!(records
+        .keep_links("a", T + 10_000)
+        .await
+        .unwrap()
+        .is_empty());
+    let mut on_b = records.keep_links("b", T + 10_000).await.unwrap();
+    on_b.sort_by(|x, y| x.link.cmp(&y.link));
+    assert_eq!(
+        on_b,
+        [
+            place(&hosts[1], "b", "link-2", T + 10_000),
+            place(&hosts[0], "b", "link-3", T + 10_000),
+        ]
+    );
+
+    // The old link closing late forgets nothing of the new one's; the new one closing does.
+    records.drop_link(&hosts[0], "link-1").await.unwrap();
+    assert_eq!(
+        records.link_place(&hosts[0]).await.unwrap(),
+        Some(place(&hosts[0], "b", "link-3", T + 10_000))
+    );
+    records.drop_link(&hosts[0], "link-3").await.unwrap();
+    assert_eq!(records.link_place(&hosts[0]).await.unwrap(), None);
+    assert!(records.link_place(&hosts[1]).await.unwrap().is_some());
 }
 
 // What only PostgreSQL has to do.
