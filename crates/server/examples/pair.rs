@@ -31,8 +31,9 @@
 //! real terminal, which prints back every line typed into it (`got:` in front). Two seconds after
 //! a device comes through the link it starts a second, short program in the same workspace, and
 //! records its start and its exit as the app's launcher does, so the device has activity to hear
-//! of; `--revoke-after` counts from then. At the end it says what the program was sent, and that
-//! it was still running when the link closed.
+//! of; `--revoke-after` counts from then. It says when the relay tells it a device asks to pair.
+//! At the end it says what the program was sent, and that it was still running when the link
+//! closed.
 //!
 //! `--zitadel-api` signs in without a browser, as the sign-in example does (see `sign-in.rs`).
 //! Credentials and the QR code's secret are never printed. The short code is: it is what a person
@@ -285,7 +286,13 @@ async fn host(
         if tokio::time::Instant::now() > deadline {
             return Err("nobody redeemed the code".into());
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Serving, the relay says when a device asks; this looks again at once.
+        match &served {
+            Some((here, _)) => {
+                let _ = tokio::time::timeout(Duration::from_secs(1), here.asked.notified()).await;
+            }
+            None => tokio::time::sleep(Duration::from_secs(1)).await,
+        }
     };
     let mut offered: Vec<Scope> = WATCH.into();
     if control {
@@ -352,6 +359,7 @@ mod serving {
     use remote_client::Session;
     use remote_host::{Access, AccessError, AccessFuture, Serving};
     use remote_proto::pairing::{GrantDecision, GrantSummary, HostSummary};
+    use remote_proto::relay::HostNotice;
     use yardsort_core::git::Git;
     use yardsort_core::remote::serve::Context;
     use yardsort_core::remote::HostIdentity;
@@ -382,6 +390,8 @@ mod serving {
         program: SessionId,
         workspace: String,
         seen: Arc<Mutex<String>>,
+        /// The relay said a device asks to pair.
+        pub asked: tokio::sync::Notify,
     }
 
     impl Pretend {
@@ -435,6 +445,7 @@ mod serving {
                 program: program.id,
                 workspace: workspace.id,
                 seen,
+                asked: tokio::sync::Notify::new(),
             }))
         }
 
@@ -546,6 +557,13 @@ mod serving {
                 host: &self.identity,
                 interactive: self.terminals.shares_control(),
             });
+        }
+
+        fn told(&self, notice: HostNotice) {
+            if let HostNotice::PairingRequested { .. } = notice {
+                println!("The relay says a device asks to pair.");
+                self.asked.notify_one();
+            }
         }
     }
 

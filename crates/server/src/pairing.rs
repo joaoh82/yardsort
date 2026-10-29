@@ -170,6 +170,8 @@ impl<R: Records> ControlService<R> {
             .add_grant(grant.clone())
             .await
             .map_err(unreadable)?;
+        // At once if its link is here; otherwise its instance tells it at its next round.
+        self.relay.tell_pairing(&grant.host, &grant.id);
         self.visible_grant(caller, &grant.id, now).await
     }
 

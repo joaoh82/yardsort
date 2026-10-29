@@ -18,6 +18,9 @@
 //! own, in order, so a device's slow request holds up only that device. The same thread looks
 //! for new activity about every [`POLL_EVERY`], while its device follows some.
 //!
+//! **The relay's notices** come on the link's own channel ([`NOTICE_CHANNEL`]) and go to
+//! [`Serving::told`]: a device asking to pair, so the person here hears of it at once.
+//!
 //! **Grants are checked here too.** A channel opens only when this host's record has the grant
 //! the relay names, every request looks it up again, and every [`RECHECK_EVERY`] — or at once,
 //! with [`Connector::recheck`] — a channel whose grant is gone here is closed.
@@ -31,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use remote_client::{Client, ClientError, Incoming, RelayLink};
 use remote_proto::account::Secret;
-use remote_proto::relay::{CloseReason, LinkFrame, TicketRequest};
+use remote_proto::relay::{CloseReason, HostNotice, LinkFrame, TicketRequest, NOTICE_CHANNEL};
 use remote_proto::{ErrorCode, HostId, MAX_QUEUED_OUTPUT};
 use tokio::sync::{mpsc as tokio_mpsc, Notify};
 use yardsort_core::remote::serve::{Context, Outbound, Visitor, ACTIVITY_WAITING, POLL_EVERY};
@@ -67,6 +70,13 @@ pub trait Access: Send + Sync + 'static {
 pub trait Serving: Send + Sync + 'static {
     /// Run `f` with what a channel answers from. Blocking: called on a channel's own thread.
     fn with(&self, f: &mut dyn FnMut(&Context<'_>));
+
+    /// The relay told this host something: a hint to ask the server again, such as a device
+    /// asking to pair. Called on the link's own task, so it must not block. A notice this build
+    /// does not know never arrives here.
+    fn told(&self, notice: HostNotice) {
+        let _ = notice;
+    }
 }
 
 /// Where the link stands, for the person here.
@@ -337,6 +347,12 @@ async fn serve(
                     }
                     LinkFrame::Close(channel, _) => {
                         channels.remove(&channel);
+                    }
+                    LinkFrame::Text(NOTICE_CHANNEL, text) => {
+                        match serde_json::from_slice::<HostNotice>(text) {
+                            Ok(HostNotice::Unknown) | Err(_) => {}
+                            Ok(notice) => serving.told(notice),
+                        }
                     }
                     LinkFrame::Text(channel, text) => {
                         let text = String::from_utf8_lossy(text).into_owned();

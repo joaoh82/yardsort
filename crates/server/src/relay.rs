@@ -23,6 +23,11 @@
 //! instance is closed at the next round. Without such a proxy ([`Routing::Single`]) the server
 //! must run as one instance.
 //!
+//! **A host hears of a device asking to pair** on its link's own channel ([`HostNotice`]), at
+//! once when the device asked through the instance holding the link, and otherwise at that
+//! instance's next round, which also tells a host that just connected of what waits for it. Each
+//! request is told once per link. The host then asks the server, as it would anyway.
+//!
 //! **Nothing waits on a slow socket.** What is to be sent to each socket waits in its own queue,
 //! bounded by bytes ([`MAX_QUEUED`]). A device that falls that far behind is closed with
 //! [`CloseReason::Overloaded`] and attaches again for a snapshot; its host and the other devices
@@ -43,9 +48,9 @@ use axum::http::HeaderMap;
 use futures_util::{SinkExt, StreamExt};
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::relay::{
-    valid_route, Channel, ChannelOpen, CloseReason, Greeting, LinkFrame, Presented, RelayTicket,
-    TicketRequest, FIRST_MESSAGE_MS, MAX_DEVICES_PER_HOST, MAX_QUEUED, PING_EVERY_MS, SILENCE_MS,
-    TICKET_TTL_MS,
+    valid_route, Channel, ChannelOpen, CloseReason, Greeting, HostNotice, LinkFrame, Presented,
+    RelayTicket, TicketRequest, FIRST_MESSAGE_MS, MAX_DEVICES_PER_HOST, MAX_QUEUED, NOTICE_CHANNEL,
+    PING_EVERY_MS, SILENCE_MS, TICKET_TTL_MS,
 };
 use remote_proto::{DeviceId, ErrorCode, GrantId, HostId, RemoteError};
 use tokio::sync::Notify;
@@ -190,6 +195,8 @@ struct HostLink {
     out: Outbox,
     channels: Mutex<HashMap<Channel, Arc<DeviceLink>>>,
     next_channel: AtomicU32,
+    /// The pairing requests this link was told of, so each is told once.
+    told: Mutex<HashSet<GrantId>>,
 }
 
 struct DeviceLink {
@@ -323,6 +330,14 @@ impl Relay {
         }
     }
 
+    /// Tell `host`'s link here, if there is one, that a device asks to pair through `grant`.
+    pub fn tell_pairing(&self, host: &HostId, grant: &GrantId) {
+        let link = lock(&self.hub.hosts).get(host).cloned();
+        if let Some(link) = link {
+            link.tell_pairing(grant);
+        }
+    }
+
     /// Take `link` away, if it is still the host's current one, and close its devices.
     fn detach_host(&self, link: &HostLink) {
         {
@@ -336,6 +351,19 @@ impl Relay {
 }
 
 impl HostLink {
+    /// Tell the host of a pairing request, unless it was told already.
+    fn tell_pairing(&self, grant: &GrantId) {
+        if !lock(&self.told).insert(grant.clone()) {
+            return;
+        }
+        let notice = HostNotice::PairingRequested {
+            grant: grant.clone(),
+        };
+        let text = serde_json::to_vec(&notice).expect("serialises");
+        self.out
+            .push(link_message(&LinkFrame::Text(NOTICE_CHANNEL, &text)));
+    }
+
     /// Close every device on this link, and forget them.
     fn close_all(&self, reason: CloseReason) {
         for device in lock(&self.channels).drain().map(|(_, d)| d) {
@@ -576,7 +604,9 @@ impl<R: Records> ControlService<R> {
                     device,
                     out: Outbox::new(),
                     channels: Mutex::new(HashMap::new()),
-                    next_channel: AtomicU32::new(1),
+                    // Channel 0 is the link's own, for notices: no device is given it.
+                    next_channel: AtomicU32::new(NOTICE_CHANNEL + 1),
+                    told: Mutex::new(HashSet::new()),
                 });
                 // Noted before it is attached, so that every round finds the place of each link it
                 // judges (`keep_places`).
@@ -602,6 +632,8 @@ impl<R: Records> ControlService<R> {
                     .push(json_message(&Greeting::Connected { host: host.clone() }));
                 self.relay.attach_host(&link);
                 tracing::info!(%host, "relay: host connected");
+                // What already waits for it, rather than at the next round.
+                tell_pending(&self).await;
                 let reason = pump(sink, stream, &link.out, |message| {
                     host_message(&link, message)
                 })
@@ -908,8 +940,27 @@ async fn keep_places<R: Records>(service: &ControlService<R>) {
     }
 }
 
+/// Tell this instance's hosts of the pairing requests waiting for them that they were not told
+/// of: those made through another instance, or before the host connected.
+async fn tell_pending<R: Records>(service: &ControlService<R>) {
+    let hub = &service.relay.hub;
+    match service
+        .records
+        .pending_on_links(hub.instance.as_str(), now_ms())
+        .await
+    {
+        Ok(pending) => {
+            for (host, grant) in pending {
+                service.relay.tell_pairing(&host, &grant);
+            }
+        }
+        Err(error) => tracing::error!("relay: records: {error}"),
+    }
+}
+
 /// Check every connected account every [`RECHECK_EVERY`], and nudged ones at once, until the
-/// relay shuts down. Each round notes again where this instance's links are.
+/// relay shuts down. Each round notes again where this instance's links are, and tells their
+/// hosts of pairing requests made elsewhere.
 pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R>>) {
     tokio::spawn(async move {
         let mut round = tokio::time::interval(RECHECK_EVERY);
@@ -917,6 +968,7 @@ pub(crate) fn start_rechecks<R: Records + 'static>(service: Arc<ControlService<R
             let accounts = tokio::select! {
                 _ = round.tick() => {
                     keep_places(&service).await;
+                    tell_pending(&service).await;
                     service.relay.accounts()
                 }
                 () = service.relay.hub.recheck.notified() => {

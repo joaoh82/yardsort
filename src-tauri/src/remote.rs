@@ -14,6 +14,11 @@
 //!
 //! Only these commands approve a device, and only the desktop calls them. Nothing in `ys`, and
 //! nothing an agent can reach, approves one.
+//!
+//! **A device asking is shown at once.** The relay tells the host on its link
+//! ([`HostNotice`]); the app then asks the server, as Settings → Remote does, and tells the window
+//! of the request only if the server has it waiting ([`RemotePairingRequested`]). The window
+//! offers the answer; it never answers by itself.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
@@ -24,11 +29,13 @@ use remote_proto::account::{DeviceKind, NewDevice, Secret};
 use remote_proto::pairing::{
     GrantDecision, GrantState, GrantSummary, HostRegistration, OFFER_TTL_MS,
 };
+use remote_proto::relay::HostNotice;
 use remote_proto::{ErrorCode, GrantId, HostId, Platform, ProjectGrant, ProjectId, Scope};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
+use tauri_specta::Event;
 use yardsort_core::remote::host::{
     self, refresh_entry, CredentialStore, FileCredentials, LocalGrant,
 };
@@ -160,6 +167,55 @@ impl Serving for AppServing {
             host: &HostIdentity { id, name: row.name },
             interactive: state.host.shares_control(),
         });
+    }
+
+    fn told(&self, notice: HostNotice) {
+        let HostNotice::PairingRequested { grant } = notice else {
+            return;
+        };
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = asked(&app, &grant).await {
+                eprintln!("remote: a pairing request: {}", error.message);
+            }
+        });
+    }
+}
+
+/// A device asks to be let in: shown in the window wherever it is, until answered or lapsed.
+#[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePairingRequested {
+    pub request: RemoteRequest,
+}
+
+/// The relay said `grant` asks: tell the window, if the server has it waiting. The notice is only
+/// a hint; what is shown is what the server answers this host.
+async fn asked(app: &AppHandle, grant: &GrantId) -> IpcResult<()> {
+    let state = app.state::<AppState>();
+    let row = enabled(&state)?;
+    let waiting = host_grants(&state, &row)
+        .await?
+        .into_iter()
+        .find(|g| g.id == *grant && g.state == GrantState::Pending);
+    if let Some(waiting) = waiting {
+        let _ = RemotePairingRequested {
+            request: request(waiting),
+        }
+        .emit(app);
+    }
+    Ok(())
+}
+
+fn request(grant: GrantSummary) -> RemoteRequest {
+    RemoteRequest {
+        wants_control: grant.requested.contains(&Scope::TerminalControl),
+        grant_id: grant.id.to_string(),
+        device_name: grant.device_name,
+        expires_in_ms: grant
+            .expires_in_ms
+            .unwrap_or_default()
+            .min(OFFER_TTL_MS as u64) as u32,
     }
 }
 
@@ -673,12 +729,7 @@ pub async fn remote_requests(app: AppHandle) -> IpcResult<RemoteRequests> {
     let requests = grants
         .into_iter()
         .filter(|g| g.state == GrantState::Pending)
-        .map(|g| RemoteRequest {
-            wants_control: g.requested.contains(&Scope::TerminalControl),
-            grant_id: g.id.to_string(),
-            device_name: g.device_name,
-            expires_in_ms: g.expires_in_ms.unwrap_or_default().min(OFFER_TTL_MS as u64) as u32,
-        })
+        .map(request)
         .collect();
     Ok(RemoteRequests {
         requests,

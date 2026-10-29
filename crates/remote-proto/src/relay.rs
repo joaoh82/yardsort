@@ -24,6 +24,12 @@
 //! host closes a channel too, when its own record no longer lets the device in. Nothing a host
 //! sends on a channel reaches any other device.
 //!
+//! **Channel 0 is the link's own** ([`NOTICE_CHANNEL`]): never a device's. The relay tells the
+//! host something there, as text: a [`HostNotice`], such as a device asking to pair. A notice is
+//! only a hint to ask the server again, never something to act on by itself, and a host that
+//! does not know a notice ignores it. A host from before notices ignores the channel, since no
+//! device is on it.
+//!
 //! **Where the socket goes.** A server can run as several instances, and a device's socket has
 //! to reach the one holding its host's link. The server sends a device's ticket request there,
 //! and the ticket says where that is ([`RelayTicket::route`]); the socket names it in its URL
@@ -223,6 +229,22 @@ impl CloseReason {
 
 /// One channel is one device's connection, numbered by the relay.
 pub type Channel = u32;
+
+/// The channel no device is ever given: the relay's notices to the host go on it as text.
+pub const NOTICE_CHANNEL: Channel = 0;
+
+/// Something the relay tells a host on [`NOTICE_CHANNEL`]. A hint: the host asks the server
+/// for what it says changed, with its own credential, as it would anyway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HostNotice {
+    /// A device redeemed one of this host's pairing offers and waits for its person's answer:
+    /// the grant is among the host's, pending.
+    PairingRequested { grant: GrantId },
+    /// A notice from a newer server. Ignored.
+    #[serde(other)]
+    Unknown,
+}
 
 /// A message on a host's link.
 ///

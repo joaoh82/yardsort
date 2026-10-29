@@ -397,6 +397,14 @@ pub trait Records: Send + Sync {
 
     /// `link` of `host` closed: forget its place, unless a later link has taken it.
     fn drop_link(&self, host: &HostId, link: &str) -> impl Future<Output = Result<()>> + Send;
+
+    /// The grants still waiting for an answer at `now`, of the hosts whose links `instance`
+    /// holds: what their hosts are to be told of.
+    fn pending_on_links(
+        &self,
+        instance: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<Vec<(HostId, GrantId)>>> + Send;
 }
 
 /// Records kept in this process. A restart forgets every account, device and credential: for
@@ -855,6 +863,21 @@ impl Records for MemoryRecords {
             if s.links.get(host).is_some_and(|place| place.link == link) {
                 s.links.remove(host);
             }
+        })
+    }
+
+    async fn pending_on_links(&self, instance: &str, now: i64) -> Result<Vec<(HostId, GrantId)>> {
+        self.with(|s| {
+            s.grants
+                .iter()
+                .filter(|g| g.status == GrantStatus::Pending && g.expires_at > now)
+                .filter(|g| {
+                    s.links
+                        .get(&g.host)
+                        .is_some_and(|place| place.instance == instance)
+                })
+                .map(|g| (g.host.clone(), g.id.clone()))
+                .collect()
         })
     }
 }

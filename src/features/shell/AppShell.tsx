@@ -18,6 +18,7 @@ import { useHarnessStore } from "@/stores/harnesses";
 import { useLayoutStore, type SidePanel } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { listenForQuitRequests } from "@/stores/quit";
+import { listenForPairingRequests } from "@/stores/remote";
 import { listenForWorkflowRuns } from "@/stores/workflows";
 import { useUpdatesStore } from "@/stores/updates";
 import { StatusBar } from "./StatusBar";
@@ -69,9 +70,11 @@ export function AppShell() {
     if (hasCore()) void useHarnessStore.getState().load();
     const listening = listenForQuitRequests();
     const runs = listenForWorkflowRuns();
+    const pairing = listenForPairingRequests();
     return () => {
       void listening.then((stop) => stop());
       void runs.then((stop) => stop());
+      void pairing.then((stop) => stop());
     };
   }, []);
 

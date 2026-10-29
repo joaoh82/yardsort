@@ -1,8 +1,8 @@
 //! The relay on two instances of the server sharing their records, behind a stand-in for Fly.io's
 //! proxy (`common/replay.rs`), on each store: a phone reaches its host whichever instance its
 //! requests land on, a host that connects again on the other instance takes its link with it, a
-//! revocation through one instance closes a socket held by the other, and a place nobody keeps
-//! is not believed.
+//! revocation through one instance closes a socket held by the other, a place nobody keeps is
+//! not believed, and a host hears of a device asking to pair through the other instance.
 //!
 //! Everyone signs in and pairs at instance `a` itself; only the relay goes through the proxy. Each
 //! test also holds the records the two share, to look at them as a third instance would.
@@ -16,7 +16,7 @@ use common::served::*;
 use remote_client::{Client, Incoming, LinkReader, RelayLink};
 use remote_proto::account::{Credentials, DeviceKind};
 use remote_proto::pairing::{GrantSummary, HostSummary, Offer};
-use remote_proto::relay::{CloseReason, LinkFrame, TicketRequest};
+use remote_proto::relay::{CloseReason, HostNotice, LinkFrame, TicketRequest, NOTICE_CHANNEL};
 use remote_proto::{ErrorCode, GrantId, HostId};
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -61,6 +61,7 @@ for_each_store!(
     a_phone_reaches_its_host_whichever_instance_it_lands_on,
     a_host_that_connects_again_elsewhere_takes_its_link_with_it,
     a_place_nobody_keeps_is_not_believed,
+    a_host_hears_of_a_device_asking_through_the_other_instance,
 );
 
 /// Long enough for anything done at once.
@@ -356,4 +357,55 @@ async fn a_place_nobody_keeps_is_not_believed(
     // Either way the host is not connected, which is what the phone is told.
     let refused = i.client().open_relay_with(ticket).await.err().unwrap();
     assert_eq!(refused.code(), Some(ErrorCode::HostOffline));
+}
+
+async fn a_host_hears_of_a_device_asking_through_the_other_instance(
+    a: impl Records + 'static,
+    b: impl Records + 'static,
+    records: impl Records,
+) {
+    let i = instances(a, b).await;
+    let p = pair(&i.a).await;
+    i.proxy.land_on(Some("a"));
+    let mut host = i.host_link(&p).await;
+
+    // A tablet redeems a code through b, which holds nothing of the host's link.
+    let offer: Offer = ok(i
+        .a
+        .post_as(
+            &p.host.access,
+            &format!("v1/hosts/{}/offers", p.host_id),
+            None,
+        )
+        .await)
+    .await;
+    let tablet = i.a.sign_in("alice", "Tablet", DeviceKind::Phone).await;
+    let asked: GrantSummary = ok(i
+        .b
+        .post_as(
+            &tablet.access,
+            "v1/pairings",
+            Some(&json!({
+                "offer": {"kind": "code", "value": offer.code.expose()},
+                "scopes": ["workspace:read"],
+            })),
+        )
+        .await)
+    .await;
+    let pending = records.pending_on_links("a", http::now_ms()).await.unwrap();
+    assert_eq!(pending, [(p.host_id.clone(), asked.id.clone())]);
+
+    // a tells its host at its next round.
+    let heard = tokio::time::timeout(next_round(), host.reader.next())
+        .await
+        .expect("the host was not told")
+        .unwrap();
+    let Incoming::Binary(bytes) = heard else {
+        panic!("{heard:?}");
+    };
+    let notice = serde_json::to_vec(&HostNotice::PairingRequested { grant: asked.id }).unwrap();
+    assert_eq!(
+        LinkFrame::decode(&bytes).unwrap(),
+        LinkFrame::Text(NOTICE_CHANNEL, &notice)
+    );
 }

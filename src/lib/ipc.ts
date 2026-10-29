@@ -648,6 +648,9 @@ export const ipc = {
   remoteAnswer: (grantId: string, answer: RemoteAnswer) =>
     unwrap(commands.remoteAnswer(grantId, answer)),
   remoteRevoke: (grantId: string) => unwrap(commands.remoteRevoke(grantId)),
+  /** The relay told this host a device asks to be let in, and the server has it waiting. */
+  onRemotePairingRequested: (handler: (request: RemoteRequest) => void) =>
+    events.remotePairingRequested.listen((event) => handler(event.payload.request)),
 
   /** Assist: whether a TypeSafe key is in force and which features are on. */
   assistStatus: () => unwrap(commands.assistStatus()),

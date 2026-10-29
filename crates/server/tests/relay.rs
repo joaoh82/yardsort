@@ -1,6 +1,7 @@
 //! The relay over a real socket, on each store: a phone reaches its host and nothing else does,
 //! revocation closes a live socket, a slow phone is let go without holding anyone up, and a host
-//! that leaves or comes back takes its phones' sockets with it.
+//! that leaves or comes back takes its phones' sockets with it. A host hears of a device asking
+//! to pair, once.
 //!
 //! The host here is the test itself, holding the host's link the way the app does: it sees each
 //! phone as a channel, and answers on it.
@@ -13,11 +14,14 @@ use common::served::*;
 use remote_client::{Client, ClientError, Incoming, LinkReader, RelayLink};
 use remote_proto::account::{Credentials, DeviceKind};
 use remote_proto::pairing::{GrantSummary, HostSummary, Offer};
-use remote_proto::relay::{CloseReason, LinkFrame, RelayTicket, TicketRequest, MAX_QUEUED};
+use remote_proto::relay::{
+    CloseReason, HostNotice, LinkFrame, RelayTicket, TicketRequest, MAX_QUEUED, NOTICE_CHANNEL,
+};
 use remote_proto::{ErrorCode, GrantId, HostId};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use yardsort_server::records::{MemoryRecords, Records};
+use yardsort_server::relay::RECHECK_EVERY;
 
 macro_rules! for_each_store {
     ($($name:ident),* $(,)?) => {
@@ -51,6 +55,7 @@ macro_rules! for_each_store {
 for_each_store!(
     a_phone_reaches_its_host_and_nothing_else_does,
     revoking_closes_a_live_socket,
+    a_host_hears_of_each_device_asking_to_pair_once,
 );
 
 #[tokio::test]
@@ -495,4 +500,53 @@ async fn rule_breakers(records: impl Records + 'static) {
         .await
         .unwrap();
     assert_eq!(closed(&mut host.reader).await, CloseReason::Invalid);
+}
+
+/// `asking` redeems a new offer of `host`'s: a grant waiting for the host's person.
+async fn ask_to_pair(s: &Served, host: &Credentials, host_id: &HostId, asking: &str) -> GrantId {
+    let offer: Offer = ok(s
+        .post_as(&host.access, &format!("v1/hosts/{host_id}/offers"), None)
+        .await)
+    .await;
+    let device = s.sign_in("alice", asking, DeviceKind::Phone).await;
+    let asked: GrantSummary = ok(s
+        .post_as(
+            &device.access,
+            "v1/pairings",
+            Some(&json!({
+                "offer": {"kind": "code", "value": offer.code.expose()},
+                "scopes": ["workspace:read"],
+            })),
+        )
+        .await)
+    .await;
+    asked.id
+}
+
+fn pairing(grant: &GrantId) -> Heard {
+    let notice = HostNotice::PairingRequested {
+        grant: grant.clone(),
+    };
+    Heard::Text(NOTICE_CHANNEL, serde_json::to_string(&notice).unwrap())
+}
+
+async fn a_host_hears_of_each_device_asking_to_pair_once(records: impl Records + 'static) {
+    let s = Served::start(records).await;
+    let (host, host_id) = host(&s, "alice").await;
+
+    // One asked while the host was away: it hears of it as it connects.
+    let earlier = ask_to_pair(&s, &host, &host_id, "Tablet").await;
+    let request = TicketRequest::Host {
+        host: host_id.clone(),
+    };
+    let mut link = link(&s, &host, request).await;
+    assert_eq!(heard(&mut link.reader).await, pairing(&earlier));
+
+    // One asking now: at once, well before the next round.
+    let now = ask_to_pair(&s, &host, &host_id, "Phone").await;
+    assert_eq!(heard(&mut link.reader).await, pairing(&now));
+
+    // A round later it has not been told of either again.
+    let again = tokio::time::timeout(RECHECK_EVERY + SOON, link.reader.next()).await;
+    assert!(again.is_err(), "told again: {again:?}");
 }

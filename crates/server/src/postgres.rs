@@ -842,6 +842,26 @@ impl Records for PgRecords {
             .collect()
     }
 
+    async fn pending_on_links(&self, instance: &str, now: i64) -> Result<Vec<(HostId, GrantId)>> {
+        self.client()
+            .await?
+            .query(
+                "SELECT g.host, g.id FROM grants g JOIN relay_links l ON l.host = g.host
+                 WHERE l.instance = $1 AND g.status = 'pending' AND g.expires_at > $2",
+                &[&instance, &now],
+            )
+            .await
+            .map_err(failed)?
+            .iter()
+            .map(|row| {
+                Ok((
+                    HostId::new(row.get::<_, String>(0)).map_err(failed)?,
+                    GrantId::new(row.get::<_, String>(1)).map_err(failed)?,
+                ))
+            })
+            .collect()
+    }
+
     async fn drop_link(&self, host: &HostId, link: &str) -> Result<()> {
         self.client()
             .await?

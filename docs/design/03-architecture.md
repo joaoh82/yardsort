@@ -602,7 +602,9 @@ remote ever talks to it directly. Instead:
   device or host being revoked. It keeps nothing but which instance of the server holds which
   host's link: behind Fly.io's proxy, an instance answers a device's request for another's link
   with `fly-replay`, so the server can run as several
-  ([27 §12](27-remote-r2.md#12--what-the-ninth-slice-adds)). It ships as a container image,
+  ([27 §12](27-remote-r2.md#12--what-the-ninth-slice-adds)). It tells a host on its link's own
+  channel when a device asks to pair, a hint the app follows by asking the server
+  ([27 §13](27-remote-r2.md#13--what-the-tenth-slice-adds)). It ships as a container image,
   which staging on Fly.io and the self-host recipe
   (`crates/server/self-host/`) both run; staging has run on Fly.io since 2026-10-24
   ([28](28-remote-infrastructure.md)).
