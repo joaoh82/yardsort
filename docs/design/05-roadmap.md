@@ -868,7 +868,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       Found on the way and fixed: a snapshot taken between two halves of an escape sequence or
       a character showed the rest as text, or lost a byte (`vt100` 0.16 drops one after a split
       character).
-- [ ] R2: identity and relay, in progress ([27](27-remote-r2.md)). The self-host recipe's
+- [ ] R2: identity and relay, code complete on 2026-10-29, closing once staging has run its
+      smoke tests ([27](27-remote-r2.md); exit review in
+      [27 §20](27-remote-r2.md#20--r2s-exit-review)). The self-host recipe's
       identity provider is ZITADEL; the server takes any OIDC issuer. Twelve slices built: a person
       signs in at the provider once per device, and the device then holds the server's own
       credentials (15-minute access, single-use refresh), so the provider is never asked again

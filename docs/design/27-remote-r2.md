@@ -23,7 +23,8 @@ Machines (§12). The tenth (2026-10-29): a host hears at once, over its link, th
 to pair, and the app says so wherever its window is (§13). The eleventh (2026-10-29): a
 revocation or a pairing request made through any instance, or by the operator, reaches every
 instance at once (§14). The twelfth (2026-10-29): a host's link replaced on another instance
-closes at once, and rate limits count across every instance (§15). The proposal is
+closes at once, and rate limits count across every instance (§15). With it R2's code is complete;
+its exit review is §20, and R2 closes once staging has run what it still owes. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -1366,6 +1367,8 @@ losing a live stream, and relay failure leaving PTYs alive.
     limits shared across instances.~~ Built (§15); done once its smoke test (§19) passes here,
     and on staging with a second Machine.
 
+Every item is built. Where R2 stands against its gate, and what staging still owes, is §20.
+
 ## 18 · Risks
 
 - **Rate limits are per address, across every instance.** Many addresses together are not
@@ -1731,3 +1734,111 @@ in slice 9's; then step 3 with
 go-ahead as in slice 9's: step 3 above against `https://remote-staging.yardsort.sh/v1/token`.
 About sixty say 401 and the rest 429, whichever Machine each reached; `fly logs` shows both
 answering. Then `fly scale count 1` again.
+
+## 20 · R2's exit review
+
+Written on 2026-10-29, after the twelfth slice. R2's code is complete, and the gate's three checks
+have tests that pass. R2 closes once staging has run what it still owes (below); until then the
+roadmap keeps it open.
+
+### The deliverables
+
+The proposal's R2 deliverables (§13 of [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)), and
+where each is:
+
+| Deliverable               | Where                                                                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server-scoped accounts    | Slices 1 to 3 (§4–§6): one sign-in at the provider per device, then the server's own credentials; the server on PostgreSQL; its image, staging and the self-host recipe                                 |
+| Enrollment and revocation | Slice 4 (§7): pairing, approved only at the host. Revoking a device, a grant or a host, and the operator's `revoke-account` (§6). Reaching every live socket at once since slice 11 (§14)               |
+| Outbound host connector   | Slice 6 (§9): `remote-host`, which the app runs as a host behind `YARDSORT_REMOTE_PREVIEW=1`                                                                                                            |
+| Bounded relay             | Slice 6 (§9): single-use 60-second tickets, and each socket's queue bounded by bytes (`MAX_QUEUED`), a slow device let go rather than waited for. On several instances since slices 9 and 12 (§12, §15) |
+
+Beyond them, because the relay needed them: the daemon's protocol 2, with one controller and one
+query responder per terminal (§8); resuming a stream from its number (§10); following activity
+(§11); and a host told of pairing requests over its link (§13).
+
+### The gate
+
+Each check runs in CI on Linux, macOS and Windows against the memory store. On Linux the tests that
+run on each store also run against PostgreSQL, which CI requires there
+(`YARDSORT_REQUIRE_TEST_DATABASE`).
+
+1. **Two-account isolation.**
+   - `pairing::another_account_reaches_none_of_it`, on each store: another account holding a
+     host's code or secret gets nothing from it, and spends nothing of it.
+   - `relay::a_phone_reaches_its_host_and_nothing_else_does`, on each store: a device of another
+     account is refused a ticket to the host (`not_found`), neither another account's host nor
+     the paired phone can take the host's link, and a device of the same account without a grant
+     is `forbidden`.
+   - The records, on each store: `an_account_lists_and_revokes_only_its_own_devices`,
+     `a_host_is_registered_moved_and_removed_within_its_account` and
+     `an_offer_is_redeemed_once_within_its_account`.
+   - Within one account, the host's own check: `a_grant_for_one_project_cannot_see_or_probe_another`
+     (`yardsort-core`, `remote`).
+2. **A revoked device loses an active stream.**
+   - `relay_host`, with the connector, the core's records and a program in a real PTY (memory
+     store): the phone's grant revoked at the server closes its socket in under five seconds and
+     lets go of its control.
+   - `relay::revoking_closes_a_live_socket`, on each store: revoking a grant, signing a device out
+     and removing a host each close the live sockets within three seconds.
+   - `relay_instances::what_happens_through_one_instance_reaches_the_other_at_once`, on each store:
+     the same through the other instance, with the rounds slowed to a minute so only the signal is
+     in time.
+   - `command` (PostgreSQL): the operator's `revoke-account` signals running servers.
+3. **Relay failure leaves PTYs alive.**
+   - `relay_host`: the server fails while another phone holds control. Its socket closes, nothing
+     holds control, the program runs on and answers what is typed at the host, and the connector
+     says it is waiting to reconnect.
+   - `remote-host`: `devices_come_through_the_link_and_a_failed_link_leaves_the_programs_running`.
+   - By hand: slice 9's smoke test stopped the instance holding the host's link. The app's shell
+     kept running, and the host connected again to the other instance.
+
+### The constraints R2 started under
+
+- **Terminal output stays opaque.** The relay carries frames without reading them, and logs who
+  connected, to which host, and why a socket closed (§9). Nothing infers an approval from output.
+- **Local processes outlive the relay.** The gate's third check.
+- **One PTY host.** Leases, the single query responder and numbered output are the existing
+  daemon's protocol 2 (§8). There is no second PTY host.
+- **SQLite stays canonical locally.** The host keeps its own record of the grants it gave and
+  checks it before answering anything (§7, §9). The server's PostgreSQL holds accounts, devices,
+  hosts, grants, link places and rate limits: nothing of a host's sessions or output.
+- **Identities stay separate.** The server's id, accounts, devices, hosts, grants, link places and
+  projects each have their own ids (§3, §7, §12). Local paths never leave the host (R1's facade).
+- **Nothing secret in logs or schemas.** Credentials and one-time values are kept as hashes (§3);
+  addresses as hashes too (§15). Staging's logs were checked for credentials and codes in its smoke
+  tests (§19).
+- **Many viewers, one controller, one responder.** §8. A reconnect resumes output from its number
+  and never replays typing (§10).
+- **Memory stays as it was.** The protocol has no operation that approves, edits or proposes memory
+  (`remote_proto`); a grant can only read it.
+- **Migrations are append-only.** The server's are `0001` to `0004`, each a new file. The core
+  gained `0018_remote_host.sql`, and no shipped file was edited.
+- **Three platforms.** CI runs every test on Linux, macOS and Windows. PostgreSQL and the end-to-end
+  round run on Linux alone, since the other runners have no containers.
+- **The license.** The server is AGPL-3.0 since 2026-10-28 ([30](30-open-source-and-managed.md));
+  the rest keeps the repository's license and notices.
+
+### What staging still owes
+
+Each needs a deploy of the current `main`, and the owner's go-ahead.
+
+1. **One Machine:** the smoke tests (§19) of slices 6, 7, 8, 10 and 11. Slices 3 and 4 passed
+   there already; slice 5 runs nothing on the server.
+2. **Two Machines** (`fly scale count 2`): the smoke tests of slices 9, 11 and 12. Then back to one.
+
+Production is not part of R2's exit: its deploy comes with its own ZITADEL instance
+([28](28-remote-infrastructure.md)).
+
+### What moves on
+
+- **R3:** the phone app; a TypeScript client and a conformance run over `fixtures/v1`
+  ([26](26-remote-r0-r1.md)); the phone app's license and whether the session title crosses
+  ([06](06-open-questions.md) #40, #36).
+- **R4:** notifications while the app is closed; the hardening the proposal lists.
+- **R5:** the headless host, and its own way to approve a device. Today only the desktop approves.
+- **Still open** ([06](06-open-questions.md)): what a device sees of terminals an old daemon cannot
+  lease (#37); a grace window for a spent refresh credential (#38); a maximum session (#39).
+- **Known limits** (§18): many addresses together are not limited as a whole; a host hears of a
+  pairing request only while its link is up; each instance holds its own sockets, so several
+  instances need a proxy that can send a request on to a named one.
