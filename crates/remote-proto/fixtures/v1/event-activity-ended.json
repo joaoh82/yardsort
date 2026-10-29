@@ -1,0 +1,9 @@
+{
+  "event": "activity.ended",
+  "subscription": 1,
+  "error": {
+    "code": "not_found",
+    "message": "There is nothing by that id here.",
+    "retryable": false
+  }
+}

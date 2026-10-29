@@ -296,7 +296,8 @@ pub struct EventRow {
 /// Which events [`Store::events_window`] reads.
 #[derive(Debug, Clone, Copy)]
 pub struct EventFilter<'a> {
-    pub workspace_id: &'a str,
+    /// Any of these workspaces'. None is none at all.
+    pub workspace_ids: &'a [String],
     pub privacy_class: &'a str,
     /// Only this session's, when given.
     pub session_id: Option<&'a str>,
@@ -1727,13 +1728,13 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!(
             "SELECT {EVENT_COLUMNS} FROM agent_events
-             WHERE workspace_id = ?1 AND privacy_class = ?2 AND (?3 IS NULL OR session_id = ?3)
-               AND {condition}
+             WHERE workspace_id IN (SELECT value FROM json_each(?1)) AND privacy_class = ?2
+               AND (?3 IS NULL OR session_id = ?3) AND {condition}
              ORDER BY seq {order} LIMIT ?5"
         ))?;
         let rows = stmt.query_map(
             params![
-                filter.workspace_id,
+                id_list(filter.workspace_ids),
                 filter.privacy_class,
                 filter.session_id,
                 seq,
@@ -1748,17 +1749,24 @@ impl Store {
         Ok(rows)
     }
 
+    /// The sequence number of the newest event kept, of any workspace or class.
+    pub fn newest_event_seq(&self) -> StoreResult<Option<i64>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT MAX(seq) FROM agent_events", [], |row| row.get(0))?)
+    }
+
     /// Whether the event at `seq` is still kept and matches `filter`.
     pub fn event_matches(&self, filter: &EventFilter<'_>, seq: i64) -> StoreResult<bool> {
         Ok(self
             .conn()
             .query_row(
                 "SELECT 1 FROM agent_events
-                 WHERE seq = ?1 AND workspace_id = ?2 AND privacy_class = ?3
-                   AND (?4 IS NULL OR session_id = ?4)",
+                 WHERE seq = ?1 AND workspace_id IN (SELECT value FROM json_each(?2))
+                   AND privacy_class = ?3 AND (?4 IS NULL OR session_id = ?4)",
                 params![
                     seq,
-                    filter.workspace_id,
+                    id_list(filter.workspace_ids),
                     filter.privacy_class,
                     filter.session_id
                 ],
@@ -2401,6 +2409,12 @@ fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
 
 const EVENT_COLUMNS: &str = "seq, id, schema_version, workspace_id, session_id, run_id, \
      occurred_at, received_at, kind, producer, method, fidelity, source_key, privacy_class, payload";
+
+/// Ids as one JSON array, for `IN (SELECT value FROM json_each(?))`: one parameter however many
+/// there are.
+fn id_list(ids: &[String]) -> String {
+    serde_json::to_string(ids).expect("strings serialise")
+}
 
 fn event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
     Ok(EventRow {

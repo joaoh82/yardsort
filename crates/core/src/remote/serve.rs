@@ -18,13 +18,21 @@
 //!   behind is detached with `resnapshot_required`: the daemon never waits for it.
 //! - **Control** is a daemon lease, held as `device:<id>`. A lease is this channel's: another
 //!   device naming its id gets `lease_lost`, exactly as for a lease that is gone.
+//! - **Following activity** is a position per subscription, nothing more: each
+//!   [`Visitor::poll`] reads what was recorded after it from the store and sends it in
+//!   `activity.events` batches, and moves it on. The host's owner calls `poll` about every
+//!   [`POLL_EVERY`] while [`Visitor::following`]. A batch goes only while little waits for the
+//!   device ([`Outbound::activity`]), so catching up never crowds out a terminal's output; what
+//!   did not go is read again at the next poll, because it is on disk, not in a queue.
 //! - **Closing the channel** — the device left, its grant went, the relay or the network failed —
-//!   detaches everything it watched and releases every lease it held. The terminals and their
-//!   programs are untouched: they belong to the daemon, not to the connection.
+//!   detaches everything it watched and releases every lease it held, and ends its
+//!   subscriptions. The terminals and their programs are untouched: they belong to the daemon,
+//!   not to the connection.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use pty_host::{AttachmentId, HostError, Numbered, SessionId, TerminalHost};
 use remote_proto::relay::CloseReason;
@@ -34,8 +42,10 @@ use remote_proto::terminal::{
     ResizeRequest, Resized, StreamId, StreamPosition,
 };
 use remote_proto::{
-    DeviceId, ErrorCode, Event, Grant, GrantId, Hello, HelloReply, LeaseId, Operation, Outcome,
-    RemoteError, Reply, Request, Response, TermSize, MAX_OUTPUT_CHUNK,
+    ActivityBatch, ActivitySubscribeParams, ActivityUnsubscribeParams, DeviceId, ErrorCode, Event,
+    Grant, GrantId, Hello, HelloReply, LeaseId, Operation, Outcome, RemoteError, Reply, Request,
+    Response, SessionRecordId, Subscribed, SubscriptionEnded, SubscriptionId, TermSize,
+    WorkspaceId, MAX_OUTPUT_CHUNK, MAX_QUEUED_OUTPUT, MAX_SUBSCRIPTIONS,
 };
 
 use super::{host, HostFacade, HostIdentity};
@@ -50,6 +60,14 @@ const EPOCH: u32 = 0;
 /// The prefix of a device's name as a lease holder in the daemon.
 const HOLDER_PREFIX: &str = "device:";
 
+/// How often a channel that follows activity looks for more: how late, at most, a device hears
+/// of an event once it is in the store.
+pub const POLL_EVERY: Duration = Duration::from_secs(1);
+
+/// How much may wait for a device before activity holds back: a quarter of what it may fall
+/// behind on a terminal, so the rest stays for terminals' output.
+pub const ACTIVITY_WAITING: usize = MAX_QUEUED_OUTPUT / 4;
+
 /// Where a channel's messages go: to the relay, for the device.
 pub trait Outbound: Send + Sync {
     /// Queue a text message.
@@ -57,6 +75,9 @@ pub trait Outbound: Send + Sync {
     /// Queue terminal output. `false` when the device is more than
     /// [`remote_proto::MAX_QUEUED_OUTPUT`] behind: nothing was queued.
     fn output(&self, frame: Vec<u8>) -> bool;
+    /// Queue a batch of activity, counted with output, unless more than [`ACTIVITY_WAITING`]
+    /// waits for the device already: `false` when nothing was queued, to send at a later poll.
+    fn activity(&self, text: String) -> bool;
 }
 
 /// What a channel needs of this host to answer.
@@ -77,6 +98,7 @@ impl Context<'_> {
             terminals: Some(self.terminals),
             host: self.host,
             interactive: self.interactive,
+            subscriptions: true,
         }
     }
 }
@@ -92,6 +114,16 @@ pub struct Visitor {
     /// The leases this channel holds: each one's terminal and generation.
     leases: Mutex<HashMap<LeaseId, (SessionId, u64)>>,
     names: Names,
+    next_subscription: AtomicU32,
+    subscriptions: Mutex<HashMap<SubscriptionId, Following>>,
+}
+
+/// One activity subscription: what it follows, and the sequence number of the last event its
+/// device was sent or need not be.
+struct Following {
+    workspace: Option<WorkspaceId>,
+    session: Option<SessionRecordId>,
+    after: i64,
 }
 
 /// What this host calls each device it let in, for telling a device who controls a terminal.
@@ -148,6 +180,8 @@ impl Visitor {
                 streams: Mutex::new(HashMap::new()),
                 leases: Mutex::new(HashMap::new()),
                 names: Names::default(),
+                next_subscription: AtomicU32::new(1),
+                subscriptions: Mutex::new(HashMap::new()),
             }),
             Ok(None) => Err(CloseReason::Refused),
             Err(_) => Err(CloseReason::Gone),
@@ -217,14 +251,27 @@ impl Visitor {
             ));
             return Err(CloseReason::Revoked);
         };
-        if !is_terminal(&request.operation) || !context.interactive {
-            self.respond(&context.facade().handle(&grant, &request));
-            return Ok(());
-        }
         let facade = context.facade();
-        let answered = facade
-            .check(&grant, &request)
-            .and_then(|()| self.terminal(context, &facade, &grant, &request));
+        let answered = match &request.operation {
+            operation if is_terminal(operation) && context.interactive => facade
+                .check(&grant, &request)
+                .and_then(|()| self.terminal(context, &facade, &grant, &request)),
+            Operation::ActivitySubscribe(params) => facade
+                .check(&grant, &request)
+                .and_then(|()| self.subscribe(context, &facade, &grant, params, &request)),
+            Operation::ActivityUnsubscribe(ActivityUnsubscribeParams { subscription }) => {
+                facade.check(&grant, &request).and_then(|()| {
+                    lock(&self.subscriptions)
+                        .remove(subscription)
+                        .map(|_| Some(Reply::Done))
+                        .ok_or_else(RemoteError::not_found)
+                })
+            }
+            _ => {
+                self.respond(&facade.handle(&grant, &request));
+                return Ok(());
+            }
+        };
         match answered {
             // An attachment's reply was sent already, ahead of its output.
             Ok(None) => {}
@@ -237,8 +284,74 @@ impl Visitor {
         Ok(())
     }
 
+    /// Whether this channel follows any activity: then call [`Self::poll`] about every
+    /// [`POLL_EVERY`].
+    pub fn following(&self) -> bool {
+        !lock(&self.subscriptions).is_empty()
+    }
+
+    /// Send each subscription what was recorded since its last batch, as much as the device's
+    /// queue takes now. A subscription whose workspace the device can no longer see ends, and
+    /// the device is told; one the store cannot answer for now waits for the next poll.
+    pub fn poll(&self, context: &Context<'_>) {
+        if !self.following() {
+            return;
+        }
+        // A grant gone here ends the channel at the next check; until then, nothing more.
+        let Ok(Some(grant)) = host::grant_for(context.store, &self.device, &self.grant) else {
+            return;
+        };
+        let facade = context.facade();
+        let mut subscriptions = lock(&self.subscriptions);
+        let mut ended = Vec::new();
+        'subscriptions: for (&subscription, following) in subscriptions.iter_mut() {
+            loop {
+                let (events, last) = match facade.recorded_after(
+                    &grant,
+                    following.workspace.as_ref(),
+                    following.session.as_ref(),
+                    following.after,
+                ) {
+                    Ok(read) => read,
+                    Err(error) if error.code == ErrorCode::NotFound => {
+                        ended.push((subscription, error));
+                        continue 'subscriptions;
+                    }
+                    Err(_) => continue 'subscriptions,
+                };
+                if last == following.after {
+                    continue 'subscriptions;
+                }
+                if !events.is_empty() {
+                    let Ok(newer) = super::activity_cursor('n', last) else {
+                        continue 'subscriptions;
+                    };
+                    let batch = event(&Event::ActivityEvents(ActivityBatch {
+                        subscription,
+                        events,
+                        newer,
+                    }));
+                    // The device has enough waiting: the rest goes at a later poll.
+                    if !self.out.activity(batch) {
+                        break 'subscriptions;
+                    }
+                }
+                following.after = last;
+            }
+        }
+        for (subscription, error) in ended {
+            subscriptions.remove(&subscription);
+            self.out
+                .text(event(&Event::ActivityEnded(SubscriptionEnded {
+                    subscription,
+                    error,
+                })));
+        }
+    }
+
     /// Detach everything this channel watched, and release every lease it held.
     pub fn close(&self, terminals: &dyn TerminalHost) {
+        lock(&self.subscriptions).clear();
         for (_, watch) in lock(&self.streams).drain() {
             let _ = terminals.detach(&watch.session, watch.attachment);
         }
@@ -355,6 +468,44 @@ impl Visitor {
             }
             _ => return Err(internal()),
         }))
+    }
+
+    /// Start following activity: the reply, then at once what was recorded after the position
+    /// it starts from. `None`: the reply has been sent.
+    fn subscribe(
+        &self,
+        context: &Context<'_>,
+        facade: &HostFacade<'_>,
+        grant: &Grant,
+        params: &ActivitySubscribeParams,
+        request: &Request,
+    ) -> Result<Option<Reply>, RemoteError> {
+        if lock(&self.subscriptions).len() >= MAX_SUBSCRIPTIONS {
+            return Err(RemoteError::new(
+                ErrorCode::InvalidRequest,
+                "This device follows as much activity as one connection may. Stop following \
+                 something first.",
+            ));
+        }
+        let (after, newer) = facade.subscription_start(grant, params)?;
+        let subscription = self.next_subscription.fetch_add(1, Ordering::Relaxed);
+        lock(&self.subscriptions).insert(
+            subscription,
+            Following {
+                workspace: params.workspace.clone(),
+                session: params.session.clone(),
+                after,
+            },
+        );
+        self.respond(&Response {
+            request_id: Some(request.request_id.clone()),
+            outcome: Outcome::Result(Reply::Subscribed(Subscribed {
+                subscription,
+                newer,
+            })),
+        });
+        self.poll(context);
+        Ok(None)
     }
 
     /// The terminal a lease of this channel is for, while the grant still reaches it. Another

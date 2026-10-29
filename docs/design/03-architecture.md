@@ -629,7 +629,11 @@ remote ever talks to it directly. Instead:
   and types under the daemon's lease, held as `device:<id>` and usable only on the channel that
   took it. Terminal control
   goes through the daemon's leases and its single query responder, which are **in the daemon**
-  because a lease the app and `ys attach` could bypass would be no lease.
+  because a lease the app and `ys attach` could bypass would be no lease. A device can also
+  follow activity (`activity.subscribe`): the channel keeps only each subscription's position,
+  looks in the store for more about every second, and sends it through the facade's allowlist,
+  holding back while the device has much waiting
+  ([27 §11](27-remote-r2.md#11--what-the-eighth-slice-adds)).
 
 ## Assist (optional, off by default)
 

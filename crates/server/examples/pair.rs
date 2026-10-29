@@ -16,8 +16,10 @@
 //! checking that every item comes numbered without a gap. `--type TEXT` takes control and types
 //! `TEXT` and Enter. Then it lets go of the stream and attaches again from the last item it drew,
 //! as a phone does after losing its connection, and says whether the host resumed from there.
-//! It says when control changes hands and when the program ends. It watches for ten seconds, or,
-//! with `--wait-for-revoke`, until the relay closes the socket, and says why it closed.
+//! It says when control changes hands and when the program ends. It follows the host's activity
+//! from the moment it is welcomed, and prints each event as it arrives. It watches for ten
+//! seconds, or, with `--wait-for-revoke`, until the relay closes the socket, and says why it
+//! closed, and how many events it heard of.
 //!
 //! **host** stands in for the app as a host: it signs in as one, registers, prints a pairing code,
 //! and approves the first device that redeems it: to watch, or to watch and type with
@@ -26,8 +28,11 @@
 //!
 //! With `--serve` it is a host a device can reach: it keeps a link to the relay with the app's
 //! own connector (`remote_host`), and answers from a throwaway workspace with one program in a
-//! real terminal, which prints back every line typed into it (`got:` in front). At the end it
-//! says what the program was sent, and that it was still running when the link closed.
+//! real terminal, which prints back every line typed into it (`got:` in front). Two seconds after
+//! a device comes through the link it starts a second, short program in the same workspace, and
+//! records its start and its exit as the app's launcher does, so the device has activity to hear
+//! of; `--revoke-after` counts from then. At the end it says what the program was sent, and that
+//! it was still running when the link closed.
 //!
 //! `--zitadel-api` signs in without a browser, as the sign-in example does (see `sign-in.rs`).
 //! Credentials and the QR code's secret are never printed. The short code is: it is what a person
@@ -305,6 +310,18 @@ async fn host(
         .await
         .map_err(|e| e.to_string())?;
     println!("{}", described(&given));
+    if let Some((here, connector)) = &served {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        while !matches!(connector.status(), remote_host::Status::Connected { devices } if devices > 0)
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        // Long enough for the device to start following.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        here.run_briefly()?;
+        println!("Started a short program, so the device has activity to hear of.");
+    }
     if let Some(seconds) = revoke_after {
         tokio::time::sleep(Duration::from_secs(seconds)).await;
         client
@@ -363,6 +380,7 @@ mod serving {
         terminals: PtyHost,
         identity: HostIdentity,
         program: SessionId,
+        workspace: String,
         seen: Arc<Mutex<String>>,
     }
 
@@ -415,6 +433,7 @@ mod serving {
                     name: host.name.clone(),
                 },
                 program: program.id,
+                workspace: workspace.id,
                 seen,
             }))
         }
@@ -431,6 +450,56 @@ mod serving {
                 0,
             )
             .map_err(|e| e.to_string())
+        }
+
+        /// Start a short program in the workspace, and record its start and its exit as the
+        /// app's launcher does.
+        pub fn run_briefly(self: &Arc<Self>) -> Result<(), String> {
+            use yardsort_core::activity::{
+                record_exit, Continuation, ExitFacts, LaunchedBy, Recorder, RunDraft, RunKind, Via,
+            };
+            let draft = RunDraft {
+                workspace_id: self.workspace.clone(),
+                session_id: None,
+                kind: RunKind::Shell,
+                harness_id: None,
+                harness_session_id: None,
+                model: None,
+                effort: None,
+                program: "sh".into(),
+                continuation: Continuation::Fresh,
+            };
+            let recorder = Recorder::new(&self.store, &Default::default(), LaunchedBy::App);
+            let run = recorder.begin(&draft);
+            let plan = if cfg!(windows) {
+                ("cmd.exe", "/C", "ping -n 2 127.0.0.1 > NUL")
+            } else {
+                ("/bin/sh", "-c", "sleep 1")
+            };
+            let info = self
+                .terminals
+                .spawn(LaunchPlan {
+                    program: plan.0.into(),
+                    args: vec![plan.1.into(), plan.2.into()],
+                    ..echo_lines(&self.workspace)
+                })
+                .map_err(|e| e.to_string())?;
+            if let Some(run) = &run {
+                recorder.spawned(run, &draft, &info.id.0, None);
+            }
+            let here = Arc::clone(self);
+            std::thread::spawn(move || {
+                for _ in 0..100 {
+                    if let Ok(SessionState::Exited { exit }) =
+                        here.terminals.info(&info.id).map(|i| i.state)
+                    {
+                        record_exit(&here.store, &info.id.0, &ExitFacts::from(&exit), Via::Live);
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            });
+            Ok(())
         }
 
         /// What the program printed back, and whether it is still running.
@@ -603,6 +672,7 @@ async fn through_relay(
         .await
         .map_err(|e| e.to_string())?;
 
+    let mut heard: Vec<String> = Vec::new();
     let mut items: Vec<u64> = Vec::new();
     // What the program drew after the snapshot.
     let mut drawn: Vec<u8> = Vec::new();
@@ -635,6 +705,29 @@ async fn through_relay(
                         }
                         if value["event"] == "terminal.exited" && ours {
                             println!("The program ended, with code {}.", value["exit"]["code"]);
+                            continue;
+                        }
+                        if value["event"] == "activity.events" {
+                            for event in value["events"].as_array().into_iter().flatten() {
+                                let kind = event["kind"].as_str().unwrap_or("?").to_owned();
+                                let detail = &event["detail"];
+                                println!(
+                                    "Activity: {kind}{}{}.",
+                                    detail["program"]
+                                        .as_str()
+                                        .map(|p| format!(", {p}"))
+                                        .unwrap_or_default(),
+                                    detail["exitCode"]
+                                        .as_i64()
+                                        .map(|c| format!(", code {c}"))
+                                        .unwrap_or_default()
+                                );
+                                heard.push(kind);
+                            }
+                            continue;
+                        }
+                        if value["event"] == "activity.ended" {
+                            println!("Stopped following activity: {}", value["error"]["message"]);
                             continue;
                         }
                         break value;
@@ -672,9 +765,30 @@ async fn through_relay(
     let mut ask = |op: &str, params: Value| {
         asked += 1;
         let id = format!("r{asked}");
-        let request = json!({"requestId": id, "protocol": {"major": 1, "minor": 1}, "op": op, "params": params});
+        let request = json!({"requestId": id, "protocol": {"major": 1, "minor": 3}, "op": op, "params": params});
         (id, request.to_string())
     };
+
+    // Everything this device may see, from now on.
+    let follows = host["host"]["capabilities"]
+        .as_array()
+        .is_some_and(|c| c.iter().any(|op| op == "activity.subscribe"));
+    if follows {
+        let (id, request) = ask("activity.subscribe", json!({}));
+        writer.text(request).await.map_err(|e| e.to_string())?;
+        let subscribed = loop {
+            let reply = next_text!();
+            if reply["requestId"] == id {
+                break reply;
+            }
+        };
+        match subscribed["error"]["message"].as_str() {
+            None => println!("Following the host's activity."),
+            Some(why) => println!("Could not follow the host's activity: {why}"),
+        }
+    } else {
+        println!("This host does not offer activity as it happens.");
+    }
 
     // A running terminal in a workspace this device may see.
     let (id, request) = ask("workspace.list", json!({}));
@@ -866,6 +980,10 @@ async fn through_relay(
     println!(
         "After the snapshot the program drew {:?}.",
         String::from_utf8_lossy(&drawn)
+    );
+    println!(
+        "Heard of {} events as they were recorded: {heard:?}.",
+        heard.len()
     );
     writer.close().await;
     match ended {
