@@ -42,8 +42,9 @@ pub use ids::{
 };
 pub use model::*;
 pub use terminal::{
-    AcquireRequest, AttachRequest, AttachStart, Attached, Controller, DetachRequest, Detached,
-    InputRequest, Lease, LeaseRef, OutputFrame, ResizeRequest, Resized, StreamId, StreamPosition,
+    AcquireRequest, AttachRequest, AttachStart, Attached, ControlChanged, Controller,
+    DetachRequest, Detached, Exited, InputRequest, Lease, LeaseRef, OutputFrame, ProgramExit,
+    ResizeRequest, Resized, StreamId, StreamPosition,
 };
 
 /// The major this build speaks. Changes only for a change an older peer would misread.
@@ -51,7 +52,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// The minor this build speaks. Raised for each additive change; never required of a peer.
 ///
 /// - 1: [`HelloReply`], [`Event`]s, and hosts answering the `terminal.*` operations.
-pub const PROTOCOL_MINOR: u16 = 1;
+/// - 2: resuming a stream, and the `terminal.control` and `terminal.exited` events.
+pub const PROTOCOL_MINOR: u16 = 2;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
 /// parsing. A host keeps its responses within it: a page holds fewer items than asked when they
@@ -127,6 +129,12 @@ pub enum Event {
     /// behind (`resnapshot_required`); its error says why, so other reasons can come later.
     #[serde(rename = "terminal.detached")]
     TerminalDetached(Detached),
+    /// Control of the terminal changed hands, or a hold lapsed. Since minor 2.
+    #[serde(rename = "terminal.control")]
+    TerminalControl(ControlChanged),
+    /// The terminal's program ended. Since minor 2.
+    #[serde(rename = "terminal.exited")]
+    TerminalExited(Exited),
 }
 
 /// Pick the protocol to speak with a client, or say why there is none.

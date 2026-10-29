@@ -12,8 +12,10 @@
 //!
 //! - **Watching** is a numbered attachment to the daemon. The reply comes first, then the
 //!   snapshot, then everything after it, each numbered (see [`remote_proto::terminal`]). A device
-//!   more than [`remote_proto::MAX_QUEUED_OUTPUT`] behind is detached with
-//!   `resnapshot_required`: the daemon never waits for it.
+//!   that asks to resume is sent only what came after the position it gives, when the daemon
+//!   still keeps all of it, and a snapshot otherwise. Who controls the terminal, and that its
+//!   program ended, come as events. A device more than [`remote_proto::MAX_QUEUED_OUTPUT`]
+//!   behind is detached with `resnapshot_required`: the daemon never waits for it.
 //! - **Control** is a daemon lease, held as `device:<id>`. A lease is this channel's: another
 //!   device naming its id gets `lease_lost`, exactly as for a lease that is gone.
 //! - **Closing the channel** — the device left, its grant went, the relay or the network failed —
@@ -27,8 +29,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use pty_host::{AttachmentId, HostError, Numbered, SessionId, TerminalHost};
 use remote_proto::relay::CloseReason;
 use remote_proto::terminal::{
-    AcquireRequest, AttachRequest, AttachStart, Attached, Controller, DetachRequest, Detached,
-    InputRequest, Lease, LeaseRef, OutputFrame, ResizeRequest, Resized, StreamId, StreamPosition,
+    AcquireRequest, AttachRequest, AttachStart, Attached, ControlChanged, Controller,
+    DetachRequest, Detached, Exited, InputRequest, Lease, LeaseRef, OutputFrame, ProgramExit,
+    ResizeRequest, Resized, StreamId, StreamPosition,
 };
 use remote_proto::{
     DeviceId, ErrorCode, Event, Grant, GrantId, Hello, HelloReply, LeaseId, Operation, Outcome,
@@ -40,8 +43,8 @@ use crate::git::Git;
 use crate::store::Store;
 
 /// The epoch of every stream. Output numbers are the daemon's, which count from a terminal's
-/// start for its whole life, so they never need a new epoch; a client that asks to resume is
-/// sent a fresh snapshot, since no replay is kept.
+/// start for its whole life, so they never need a new epoch. A position in another epoch is not
+/// one of this terminal's, and gets a snapshot.
 const EPOCH: u32 = 0;
 
 /// The prefix of a device's name as a lease holder in the daemon.
@@ -88,7 +91,13 @@ pub struct Visitor {
     streams: Mutex<HashMap<StreamId, Watch>>,
     /// The leases this channel holds: each one's terminal and generation.
     leases: Mutex<HashMap<LeaseId, (SessionId, u64)>>,
+    names: Names,
 }
+
+/// What this host calls each device it let in, for telling a device who controls a terminal.
+/// Kept here because the daemon's items arrive where the store cannot be asked: a sink must not
+/// wait on anything. Read again whenever the grants are checked, and on each attach and lease.
+type Names = Arc<Mutex<HashMap<DeviceId, String>>>;
 
 struct Watch {
     session: SessionId,
@@ -99,9 +108,13 @@ struct Watch {
 struct Flow {
     stream: StreamId,
     out: Arc<dyn Outbound>,
+    names: Names,
     /// Items that came before the reply was sent; `None` once it has been.
     held: Option<Vec<Item>>,
-    snapshot: Option<(u64, pty_host::TermSize)>,
+    /// How the stream began: a snapshot or a resume, after which item, at which size.
+    start: Option<(AttachStart, u64, pty_host::TermSize)>,
+    /// Who controlled the terminal when the reply was sent, as the daemon last said.
+    controller: Option<pty_host::Controller>,
     /// Detached for falling behind: everything after is refused.
     over: bool,
 }
@@ -109,6 +122,8 @@ struct Flow {
 enum Item {
     Bytes(u64, Vec<u8>),
     Resized(u64, pty_host::TermSize),
+    Control(pty_host::Controller),
+    Exited(pty_host::ExitInfo),
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -132,6 +147,7 @@ impl Visitor {
                 next_stream: AtomicU32::new(1),
                 streams: Mutex::new(HashMap::new()),
                 leases: Mutex::new(HashMap::new()),
+                names: Names::default(),
             }),
             Ok(None) => Err(CloseReason::Refused),
             Err(_) => Err(CloseReason::Gone),
@@ -144,10 +160,22 @@ impl Visitor {
 
     /// Whether this host still lets the device in. When not, close the channel.
     pub fn allowed(&self, store: &Store) -> bool {
+        self.learn_names(store);
         matches!(
             host::grant_for(store, &self.device, &self.grant),
             Ok(Some(_))
         )
+    }
+
+    /// Read again what this host calls each device it let in. Left as it was if the store
+    /// cannot say.
+    fn learn_names(&self, store: &Store) {
+        if let Ok(grants) = host::local_grants(store) {
+            *lock(&self.names) = grants
+                .into_iter()
+                .map(|g| (g.grant.device, g.device_name))
+                .collect();
+        }
     }
 
     /// Answer one message from the device. `Err` means close the channel, for that reason.
@@ -260,6 +288,7 @@ impl Visitor {
                 take_over,
             }) => {
                 let info = facade.reachable_terminal(grant, terminal)?;
+                self.learn_names(context.store);
                 let lease = terminals
                     .acquire(&info.id, &self.holder(), *take_over)
                     .map_err(terminal_error)?;
@@ -365,35 +394,51 @@ impl Visitor {
     ) -> Result<(), RemoteError> {
         let terminals = context.terminals;
         let info = facade.reachable_terminal(grant, &attach.terminal)?;
+        self.learn_names(context.store);
         let stream = self.next_stream.fetch_add(1, Ordering::Relaxed);
         let flow = Arc::new(Mutex::new(Flow {
             stream,
             out: Arc::clone(&self.out),
+            names: Arc::clone(&self.names),
             held: Some(Vec::new()),
-            snapshot: None,
+            start: None,
+            controller: None,
             over: false,
         }));
         let feeding = Arc::clone(&flow);
-        let attachment = terminals
-            .attach_numbered(&info.id, Box::new(move |item| lock(&feeding).take(item)))
-            .map_err(terminal_error)?;
-        let controller = terminals
-            .controller(&info.id)
-            .map(|c| controller(context.store, c))
-            .unwrap_or(Controller::Nobody);
+        let sink: pty_host::NumberedSink =
+            Box::new(move |item: Numbered<'_>| lock(&feeding).take(item));
+        let attachment = match attach.resume_after {
+            Some(after) if after.epoch == EPOCH => {
+                terminals.resume_numbered(&info.id, after.seq, sink)
+            }
+            _ => terminals.attach_numbered(&info.id, sink),
+        }
+        .map_err(terminal_error)?;
+        // A daemon from before it told watchers who controls a terminal is asked instead.
+        let asked = lock(&flow)
+            .controller
+            .is_none()
+            .then(|| terminals.controller(&info.id).ok())
+            .flatten();
         let mut flow = lock(&flow);
-        let Some((seq, size)) = flow.snapshot else {
+        let Some((start, seq, size)) = flow.start else {
             drop(flow);
             let _ = terminals.detach(&info.id, attachment);
             return Err(internal());
         };
+        let controller = flow
+            .controller
+            .clone()
+            .or(asked)
+            .map_or(Controller::Nobody, |c| device_controller(&flow.names, c));
         // The reply, then what was held back, with nothing from the daemon in between: it waits
         // on this lock to hand over anything newer.
         self.respond(&Response {
             request_id: Some(request.request_id.clone()),
             outcome: Outcome::Result(Reply::Attached(Attached {
                 stream,
-                start: AttachStart::Snapshot,
+                start,
                 position: StreamPosition { epoch: EPOCH, seq },
                 size: TermSize {
                     cols: size.cols,
@@ -432,11 +477,22 @@ impl Flow {
         }
         let item = match item {
             Numbered::Snapshot { seq, size, bytes } => {
-                self.snapshot = Some((seq, size));
+                self.start = Some((AttachStart::Snapshot, seq, size));
                 Item::Bytes(seq, bytes.to_vec())
+            }
+            Numbered::Resumed { seq, size } => {
+                self.start = Some((AttachStart::Resumed, seq, size));
+                return true;
             }
             Numbered::Output { seq, bytes } => Item::Bytes(seq, bytes.to_vec()),
             Numbered::Resized { seq, size } => Item::Resized(seq, size),
+            // Before the reply, the reply says who controls the terminal.
+            Numbered::Control(controller) if self.held.is_some() => {
+                self.controller = Some(controller);
+                return true;
+            }
+            Numbered::Control(controller) => Item::Control(controller),
+            Numbered::Exited(exit) => Item::Exited(exit),
         };
         match &mut self.held {
             Some(held) => {
@@ -490,6 +546,19 @@ impl Flow {
                     rows: size.rows,
                 },
             }))),
+            Item::Control(controller) => {
+                self.out.text(event(&Event::TerminalControl(ControlChanged {
+                    stream: self.stream,
+                    controller: device_controller(&self.names, controller.clone()),
+                })));
+            }
+            Item::Exited(exit) => self.out.text(event(&Event::TerminalExited(Exited {
+                stream: self.stream,
+                exit: ProgramExit {
+                    code: exit.code,
+                    success: exit.success,
+                },
+            }))),
         }
         true
     }
@@ -519,9 +588,10 @@ fn daemon_lease(id: &LeaseId, generation: u64) -> pty_host::LeaseRef {
     }
 }
 
-/// Who controls a terminal, as a device is told: a device by the name this host knows it by,
-/// and anything else on this computer as the person here.
-fn controller(store: &Store, controller: pty_host::Controller) -> Controller {
+/// Who controls a terminal, as a device is told: a device by the name this host knows it by
+/// (empty for one let in since the names were last read), and anything else on this computer as
+/// the person here.
+fn device_controller(names: &Names, controller: pty_host::Controller) -> Controller {
     match controller {
         pty_host::Controller::Nobody => Controller::Nobody,
         pty_host::Controller::Local => Controller::Local,
@@ -529,15 +599,7 @@ fn controller(store: &Store, controller: pty_host::Controller) -> Controller {
             .strip_prefix(HOLDER_PREFIX)
             .and_then(|id| DeviceId::new(id).ok())
             .map(|device| {
-                let name = host::local_grants(store)
-                    .ok()
-                    .and_then(|grants| {
-                        grants
-                            .into_iter()
-                            .find(|g| g.grant.device == device)
-                            .map(|g| g.device_name)
-                    })
-                    .unwrap_or_default();
+                let name = lock(names).get(&device).cloned().unwrap_or_default();
                 Controller::Device {
                     device,
                     name: remote_proto::clip(&name, remote_proto::MAX_TEXT),

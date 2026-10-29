@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pty_host::{
-    HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, PtyHost, SessionId, SessionState,
-    TermSize,
+    Controller, ExitInfo, Holds, HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, PtyHost,
+    SessionId, SessionState, TermSize,
 };
 
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -527,10 +527,11 @@ fn a_plans_prompt_is_typed_in_once_the_program_is_ready() {
     capture.wait_for("got:[fix the bug]");
 }
 
-/// One item a numbered viewer was sent, owned.
+/// One numbered item a viewer was sent, owned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Item {
     Snapshot(OutputSeq, TermSize, Vec<u8>),
+    Resumed(OutputSeq, TermSize),
     Output(OutputSeq, Vec<u8>),
     Resized(OutputSeq, TermSize),
 }
@@ -538,49 +539,98 @@ enum Item {
 impl Item {
     fn seq(&self) -> OutputSeq {
         match self {
-            Self::Snapshot(seq, ..) | Self::Output(seq, _) | Self::Resized(seq, _) => *seq,
+            Self::Snapshot(seq, ..)
+            | Self::Resumed(seq, _)
+            | Self::Output(seq, _)
+            | Self::Resized(seq, _) => *seq,
         }
     }
 }
 
+/// What a viewer was told besides the stream, and how many numbered items it had by then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Notice {
+    Control(usize, Controller),
+    Exited(usize, ExitInfo),
+}
+
 /// Everything one numbered viewer was sent, in order.
 #[derive(Clone, Default)]
-struct Numbering(Arc<Mutex<Vec<Item>>>);
+struct Numbering(Arc<Mutex<(Vec<Item>, Vec<Notice>)>>);
 
 impl Numbering {
-    fn attach(&self, host: &PtyHost, id: &SessionId) {
-        let items = Arc::clone(&self.0);
-        host.attach_numbered(
-            id,
-            Box::new(move |item| {
-                items.lock().unwrap().push(match item {
-                    Numbered::Snapshot { seq, size, bytes } => {
-                        Item::Snapshot(seq, size, bytes.to_vec())
-                    }
-                    Numbered::Output { seq, bytes } => Item::Output(seq, bytes.to_vec()),
-                    Numbered::Resized { seq, size } => Item::Resized(seq, size),
-                });
-                true
-            }),
-        )
-        .unwrap();
+    fn attach(&self, host: &PtyHost, id: &SessionId) -> pty_host::AttachmentId {
+        host.attach_numbered(id, self.sink()).unwrap()
+    }
+
+    /// Attach as a viewer that already has everything up to item `after`.
+    fn resume(&self, host: &PtyHost, id: &SessionId, after: OutputSeq) {
+        host.resume_numbered(id, after, self.sink()).unwrap();
+    }
+
+    fn sink(&self) -> pty_host::NumberedSink {
+        let seen = Arc::clone(&self.0);
+        Box::new(move |item| {
+            let mut seen = seen.lock().unwrap();
+            let (items, notices) = &mut *seen;
+            match item {
+                Numbered::Snapshot { seq, size, bytes } => {
+                    items.push(Item::Snapshot(seq, size, bytes.to_vec()));
+                }
+                Numbered::Resumed { seq, size } => items.push(Item::Resumed(seq, size)),
+                Numbered::Output { seq, bytes } => items.push(Item::Output(seq, bytes.to_vec())),
+                Numbered::Resized { seq, size } => items.push(Item::Resized(seq, size)),
+                Numbered::Control(controller) => {
+                    notices.push(Notice::Control(items.len(), controller));
+                }
+                Numbered::Exited(exit) => notices.push(Notice::Exited(items.len(), exit)),
+            }
+            true
+        })
     }
 
     fn items(&self) -> Vec<Item> {
-        self.0.lock().unwrap().clone()
+        self.0.lock().unwrap().0.clone()
+    }
+
+    fn notices(&self) -> Vec<Notice> {
+        self.0.lock().unwrap().1.clone()
+    }
+
+    /// Who the viewer was told controls the session, in order.
+    fn controllers(&self) -> Vec<Controller> {
+        self.notices()
+            .into_iter()
+            .filter_map(|n| match n {
+                Notice::Control(_, c) => Some(c),
+                Notice::Exited(..) => None,
+            })
+            .collect()
     }
 
     fn snapshot_seq(&self) -> OutputSeq {
         self.items()[0].seq()
     }
 
-    /// The snapshot comes first, and every item after it carries the next number.
+    /// The snapshot (or the resume) comes first, and every item after it carries the next
+    /// number.
     fn assert_unbroken(&self) {
         let items = self.items();
-        assert!(matches!(items[0], Item::Snapshot(..)), "{items:?}");
+        assert!(
+            matches!(items[0], Item::Snapshot(..) | Item::Resumed(..)),
+            "{items:?}"
+        );
         for (n, pair) in items.windows(2).enumerate() {
             assert_eq!(pair[1].seq(), pair[0].seq() + 1, "a gap after item {n}");
-            assert!(!matches!(pair[1], Item::Snapshot(..)));
+            assert!(!matches!(pair[1], Item::Snapshot(..) | Item::Resumed(..)));
+        }
+    }
+
+    fn wait_until(&self, what: &str, done: impl Fn(&Self) -> bool) {
+        let start = std::time::Instant::now();
+        while !done(self) {
+            assert!(start.elapsed() < TIMEOUT, "timed out waiting until {what}");
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 
@@ -598,6 +648,7 @@ impl Numbering {
                     viewer = Some(vt100::Parser::new(size.rows, size.cols, 10_000));
                     pending = bytes;
                 }
+                Item::Resumed(..) => panic!("a resumed viewer has no screen of its own here"),
                 Item::Output(_, bytes) => pending.extend_from_slice(&bytes),
                 Item::Resized(_, size) => {
                     let viewer = viewer.as_mut().unwrap();
@@ -655,12 +706,159 @@ fn numbered_viewers_get_every_item_once_and_in_order() {
     early.assert_unbroken();
     let text = early.bytes();
     assert!(text.contains("numbered-second"), "{text:?}");
+    // Told it ended once everything it printed had been sent.
+    let notices = early.notices();
+    assert!(
+        matches!(notices.last(), Some(Notice::Exited(n, exit)) if *n == early.items().len() && exit.success),
+        "{notices:?}"
+    );
 
-    // After the exit, a snapshot of where it all ended, and nothing more.
+    // After the exit, a snapshot of where it all ended, who controls it, that it ended, and
+    // nothing more.
     let late = Numbering::default();
     late.attach(&host, &session.id);
     assert_eq!(late.items().len(), 1);
     assert_eq!(late.snapshot_seq(), early.items().last().unwrap().seq());
+    assert!(
+        matches!(
+            late.notices().as_slice(),
+            [Notice::Control(1, Controller::Nobody), Notice::Exited(1, _)]
+        ),
+        "{:?}",
+        late.notices()
+    );
+}
+
+#[test]
+fn a_viewer_that_resumes_is_sent_just_what_it_missed() {
+    let (host, _events) = host();
+    let session = host.spawn(long_running()).unwrap();
+    let id = &session.id;
+    let size = |cols, rows| TermSize { cols, rows };
+    // One viewer stays the whole time; the other goes away for a while.
+    let staying = Numbering::default();
+    staying.attach(&host, id);
+    let away = Numbering::default();
+    let attachment = away.attach(&host, id);
+    host.resize(id, size(100, 30)).unwrap();
+    away.wait_until("it sees the resize", |v| {
+        v.items().iter().any(|i| matches!(i, Item::Resized(..)))
+    });
+    host.detach(id, attachment).unwrap();
+    let left_at = away.items().last().unwrap().seq();
+
+    // While it is away, something is typed here, which the terminal echoes where it echoes
+    // (not ConPTY, under a program that reads nothing), and the terminal changes size twice.
+    host.write(id, b"while-away\r").unwrap();
+    if cfg!(unix) {
+        staying.wait_until("the echo", |v| v.bytes().contains("while-away"));
+    }
+    host.resize(id, size(90, 20)).unwrap();
+    host.resize(id, size(110, 35)).unwrap();
+    let back = Numbering::default();
+    back.resume(&host, id, left_at);
+    back.assert_unbroken();
+
+    // It starts where it left off, at the size it had then, and is sent exactly what the one
+    // that stayed was sent after that.
+    let size_then = staying
+        .items()
+        .iter()
+        .take_while(|i| i.seq() <= left_at)
+        .fold(size(80, 24), |at, item| match item {
+            Item::Resized(_, to) => *to,
+            _ => at,
+        });
+    assert_eq!(back.items()[0], Item::Resumed(left_at, size_then));
+    let last = back.items().last().unwrap().seq();
+    let missed: Vec<Item> = staying
+        .items()
+        .into_iter()
+        .filter(|i| i.seq() > left_at && i.seq() <= last)
+        .collect();
+    assert_eq!(back.items()[1..], missed[..]);
+    assert!(
+        missed
+            .iter()
+            .any(|i| matches!(i, Item::Resized(_, to) if *to == size(110, 35))),
+        "{missed:?}"
+    );
+    if cfg!(unix) {
+        assert!(back.bytes().contains("while-away"), "{:?}", back.bytes());
+    }
+    // Who controls it now, not the changes it missed.
+    assert_eq!(back.controllers(), [Controller::Local]);
+
+    // A place the stream has not reached is not one to resume from: a snapshot instead.
+    let confused = Numbering::default();
+    confused.resume(&host, id, last + 1_000);
+    assert!(matches!(confused.items()[0], Item::Snapshot(..)));
+    let _ = host.kill(id);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_viewer_away_for_more_than_the_window_holds_is_sent_a_snapshot() {
+    let (host, _events) = host();
+    let more = pty_host::replay::REPLAY_BYTES + 50_000;
+    let session = host
+        .spawn(shell(&format!(
+            "read go; head -c {more} /dev/zero | tr '\\0' x; sleep 30"
+        )))
+        .unwrap();
+    let id = &session.id;
+    let staying = Numbering::default();
+    staying.attach(&host, id);
+    let away = Numbering::default();
+    let attachment = away.attach(&host, id);
+    host.detach(id, attachment).unwrap();
+    let left_at = away.items().last().unwrap().seq();
+
+    host.write(id, b"go\r").unwrap();
+    staying.wait_until("all of it is printed", |v| {
+        v.bytes().matches('x').count() >= more
+    });
+    let back = Numbering::default();
+    back.resume(&host, id, left_at);
+    assert!(matches!(back.items()[0], Item::Snapshot(..)));
+    back.assert_unbroken();
+    let _ = host.kill(id);
+}
+
+#[test]
+fn numbered_viewers_are_told_who_controls_and_when_a_hold_lapses_by_itself() {
+    let holds = Holds {
+        local: Duration::from_millis(300),
+        lease: Duration::from_millis(600),
+    };
+    let host = PtyHost::new(Arc::new(|_| {})).with_holds(holds);
+    let session = host.spawn(long_running()).unwrap();
+    let id = &session.id;
+    let watching = Numbering::default();
+    watching.attach(&host, id);
+    assert_eq!(watching.controllers(), [Controller::Nobody]);
+
+    let phone = Controller::Leased {
+        holder: "device:phone".into(),
+    };
+    host.acquire(id, "device:phone", false).unwrap();
+    assert_eq!(watching.controllers(), [Controller::Nobody, phone.clone()]);
+    // Nobody renews it and nothing else happens: it lapses, and the viewer hears so anyway.
+    watching.wait_until("the lease lapses", |v| v.controllers().len() == 3);
+    // Typed at the computer: the person here has it, until they stop for long enough.
+    host.write(id, b" ").unwrap();
+    watching.wait_until("the local hold lapses", |v| v.controllers().len() == 5);
+    assert_eq!(
+        watching.controllers(),
+        [
+            Controller::Nobody,
+            phone,
+            Controller::Nobody,
+            Controller::Local,
+            Controller::Nobody
+        ]
+    );
+    let _ = host.kill(id);
 }
 
 #[cfg(unix)]

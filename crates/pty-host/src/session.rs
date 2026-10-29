@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
-use crate::control::{Control, Controller, Delivery, Lease, LeaseRef, Refusal};
+use crate::control::{Control, Controller, Delivery, Holds, Lease, LeaseRef, Refusal};
 use crate::queries::{self, Queries};
+use crate::replay::Replay;
 use crate::snapshot::Headless;
 use crate::types::{
     AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, Result,
@@ -43,6 +44,8 @@ enum Msg {
     Output(Vec<u8>),
     Eof,
     ChildExited(ExitInfo),
+    /// A hold now lapses sooner than the pump may be waiting for: look again.
+    Wake,
 }
 
 pub(crate) struct Session {
@@ -52,6 +55,8 @@ pub(crate) struct Session {
     io: Mutex<Io>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     view: Mutex<View>,
+    /// The pump's own channel, to wake it.
+    wake: Mutex<Sender<Msg>>,
 }
 
 /// The write side. Dropped when the session ends, which also unblocks the reader on Windows.
@@ -79,6 +84,10 @@ struct View {
     local_size: TermSize,
     /// Until when the responder's answer to the last query it was shown may arrive.
     answers_until: Option<Instant>,
+    /// The last stretch of the numbered stream, from the first numbered viewer on.
+    replay: Option<Replay>,
+    /// Who numbered viewers were last told controls the session.
+    announced: Controller,
 }
 
 enum Viewer {
@@ -110,6 +119,20 @@ impl View {
             .find(|(_, viewer)| matches!(viewer, Viewer::Terminal(_)))
             .map(|(id, _)| *id)
     }
+
+    /// Tell numbered viewers who controls the session, if that changed since they were last
+    /// told: control changing hands, or a hold lapsing, which nobody else would notice.
+    fn announce(&mut self, now: Instant) {
+        let controller = self.control.controller(now);
+        if controller == self.announced {
+            return;
+        }
+        self.announced = controller.clone();
+        self.sinks.retain_mut(|(_, viewer)| match viewer {
+            Viewer::Terminal(_) => true,
+            Viewer::Numbered(sink) => sink(Numbered::Control(controller.clone())),
+        });
+    }
 }
 
 impl Session {
@@ -117,6 +140,7 @@ impl Session {
         plan: LaunchPlan,
         events: EventSink,
         quiet_after: Duration,
+        holds: Holds,
     ) -> Result<Arc<Self>> {
         let size = plan.size.sanitized();
         let pair = native_pty_system()
@@ -148,7 +172,9 @@ impl Session {
             .take_writer()
             .map_err(|e| HostError::OpenPty(e.to_string()))?;
 
+        let (tx, rx) = mpsc::channel();
         let session = Arc::new(Self {
+            wake: Mutex::new(tx.clone()),
             id: SessionId::generate(),
             pid: child.process_id(),
             killer: Mutex::new(child.clone_killer()),
@@ -166,15 +192,16 @@ impl Session {
                 last_output: Instant::now(),
                 has_output: false,
                 busy: false,
-                control: Control::default(),
+                control: Control::new(holds),
                 queries: Queries::default(),
                 local_size: size,
                 answers_until: None,
+                replay: None,
+                announced: Controller::Nobody,
             }),
             plan,
         });
 
-        let (tx, rx) = mpsc::channel();
         let name = |role: &str| format!("pty-{role}-{}", &session.id.0[..8]);
 
         let reader_tx = tx.clone();
@@ -240,17 +267,39 @@ impl Session {
     }
 
     /// As [`Session::attach`], with every item numbered: the snapshot is the terminal after item
-    /// `seq`, and the first item after it is `seq + 1`.
-    pub(crate) fn attach_numbered(&self, mut sink: NumberedSink) -> AttachmentId {
+    /// `seq`, and the first item after it is `seq + 1`. With `after`, the items since that one
+    /// instead, when they are all still kept (see [`crate::replay`]).
+    pub(crate) fn attach_numbered(
+        &self,
+        after: Option<OutputSeq>,
+        mut sink: NumberedSink,
+    ) -> AttachmentId {
         let mut view = self.view();
+        let view = &mut *view;
         let id = view.next_attachment();
-        let snapshot = view.terminal.snapshot();
-        let (seq, size) = (view.seq, view.size);
-        if sink(Numbered::Snapshot {
-            seq,
-            size,
-            bytes: &snapshot,
-        }) {
+        let replay = view
+            .replay
+            .get_or_insert_with(|| Replay::new(view.seq, view.size));
+        let mut open = match after.and_then(|after| Some((after, replay.since(after)?))) {
+            Some((seq, (size, items))) => {
+                let mut open = sink(Numbered::Resumed { seq, size });
+                for item in items {
+                    open = open && sink(item);
+                }
+                open
+            }
+            None => sink(Numbered::Snapshot {
+                seq: view.seq,
+                size: view.size,
+                bytes: &view.terminal.snapshot(),
+            }),
+        };
+        view.announce(Instant::now());
+        open = open && sink(Numbered::Control(view.announced.clone()));
+        if let SessionState::Exited { exit } = &view.state {
+            open = open && sink(Numbered::Exited(exit.clone()));
+        }
+        if open {
             view.sinks.push((id, Viewer::Numbered(sink)));
         }
         id
@@ -286,27 +335,51 @@ impl Session {
     /// refused while a lease holder has the session, so it never types over someone in control
     /// from elsewhere.
     pub(crate) fn unattended(&self, text: &str, paste: bool) -> Result<()> {
-        let payload = {
-            let mut view = self.view();
-            let now = Instant::now();
+        let payload = self.controlling(|view, now| {
             if view.control.leased(now) {
                 let by = view.control.controller(now);
                 return Err(self.refused(Refusal::Held(by)));
             }
-            if paste {
+            Ok(if paste {
                 pasted(text, view.terminal.screen().bracketed_paste())
             } else {
                 text.to_owned()
-            }
-        };
+            })
+        })?;
         self.write(payload.as_bytes())
     }
 
     fn take_local_control(&self) -> Result<()> {
+        self.controlling(|view, now| {
+            view.control.local_input(now);
+            let size = view.local_size;
+            self.apply_size(view, size)
+        })
+    }
+
+    /// Do something that may change who controls the session, or find that a hold lapsed, and
+    /// then tell numbered viewers if it did. Whether `f` succeeded or not: a refusal can be the
+    /// first to notice a lapse.
+    ///
+    /// A hold that now lapses sooner than before wakes the pump, which waits for lapses (see
+    /// [`Session::pump`]); one that lapses later needs nothing: the pump wakes early, finds it
+    /// held, and waits again.
+    fn controlling<T>(&self, f: impl FnOnce(&mut View, Instant) -> Result<T>) -> Result<T> {
         let mut view = self.view();
-        view.control.local_input(Instant::now());
-        let size = view.local_size;
-        self.apply_size(&mut view, size)
+        let now = Instant::now();
+        let before = view.control.lapses_at();
+        let result = f(&mut view, now);
+        view.announce(now);
+        if let Some(after) = view.control.lapses_at() {
+            if before.is_none_or(|before| after < before) {
+                let _ = self
+                    .wake
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .send(Msg::Wake);
+            }
+        }
+        result
     }
 
     /// Write to the program, whoever controls it: the host's own replies, and a launch's first
@@ -332,71 +405,78 @@ impl Session {
     /// stands, and this one is kept for when control comes back.
     pub(crate) fn resize(&self, size: TermSize) -> Result<()> {
         let size = size.sanitized();
-        let mut view = self.view();
-        view.local_size = size;
-        if view.control.leased(Instant::now()) {
-            return Ok(());
-        }
-        self.apply_size(&mut view, size)
+        self.controlling(|view, now| {
+            view.local_size = size;
+            if view.control.leased(now) {
+                return Ok(());
+            }
+            self.apply_size(view, size)
+        })
     }
 
     pub(crate) fn controller(&self) -> Controller {
-        self.view().control.controller(Instant::now())
+        let mut view = self.view();
+        view.announce(Instant::now());
+        view.announced.clone()
     }
 
     pub(crate) fn acquire(&self, holder: &str, take_over: bool) -> Result<Lease> {
-        let mut view = self.view();
-        if matches!(view.state, SessionState::Exited { .. }) {
-            return Err(HostError::SessionExited(self.id.clone()));
-        }
-        view.control
-            .acquire(holder, take_over, Instant::now())
-            .map_err(|refusal| self.refused(refusal))
+        self.controlling(|view, now| {
+            if matches!(view.state, SessionState::Exited { .. }) {
+                return Err(HostError::SessionExited(self.id.clone()));
+            }
+            view.control
+                .acquire(holder, take_over, now)
+                .map_err(|refusal| self.refused(refusal))
+        })
     }
 
     pub(crate) fn renew(&self, lease: &LeaseRef) -> Result<Lease> {
-        self.view()
-            .control
-            .renew(lease, Instant::now())
-            .map_err(|refusal| self.refused(refusal))
+        self.controlling(|view, now| {
+            view.control
+                .renew(lease, now)
+                .map_err(|refusal| self.refused(refusal))
+        })
     }
 
     /// Give control back, and the person here their size.
     pub(crate) fn release(&self, lease: &LeaseRef) -> Result<()> {
-        let mut view = self.view();
-        if view.control.release(lease, Instant::now()) {
-            let size = view.local_size;
-            self.apply_size(&mut view, size)?;
-        }
-        Ok(())
+        self.controlling(|view, now| {
+            if view.control.release(lease, now) {
+                let size = view.local_size;
+                self.apply_size(view, size)?;
+            }
+            Ok(())
+        })
     }
 
     /// Input number `seq` from a lease holder: written once, in order, and only while the
     /// lease is in force.
     pub(crate) fn input(&self, lease: &LeaseRef, seq: u64, data: &str, paste: bool) -> Result<()> {
-        let payload = {
-            let mut view = self.view();
-            match view.control.input(lease, seq, Instant::now()) {
-                Ok(Delivery::Fresh) => {}
-                Ok(Delivery::Repeat) => return Ok(()),
+        let payload = self.controlling(|view, now| {
+            Ok(match view.control.input(lease, seq, now) {
+                Ok(Delivery::Fresh) if paste => {
+                    Some(pasted(data, view.terminal.screen().bracketed_paste()))
+                }
+                Ok(Delivery::Fresh) => Some(data.to_owned()),
+                Ok(Delivery::Repeat) => None,
                 Err(refusal) => return Err(self.refused(refusal)),
-            }
-            if paste {
-                pasted(data, view.terminal.screen().bracketed_paste())
-            } else {
-                data.to_owned()
-            }
-        };
-        self.write(payload.as_bytes())
+            })
+        })?;
+        match payload {
+            Some(payload) => self.write(payload.as_bytes()),
+            None => Ok(()),
+        }
     }
 
     /// A lease holder resizing the terminal to its own view.
     pub(crate) fn resize_leased(&self, lease: &LeaseRef, size: TermSize) -> Result<()> {
-        let mut view = self.view();
-        view.control
-            .check(lease, Instant::now())
-            .map_err(|refusal| self.refused(refusal))?;
-        self.apply_size(&mut view, size.sanitized())
+        self.controlling(|view, now| {
+            view.control
+                .check(lease, now)
+                .map_err(|refusal| self.refused(refusal))?;
+            self.apply_size(view, size.sanitized())
+        })
     }
 
     fn refused(&self, refusal: Refusal) -> HostError {
@@ -433,6 +513,9 @@ impl Session {
         view.terminal.set_size(size.rows, size.cols);
         view.seq += 1;
         let seq = view.seq;
+        if let Some(replay) = &mut view.replay {
+            replay.resized(size);
+        }
         view.sinks.retain_mut(|(_, viewer)| match viewer {
             Viewer::Terminal(_) => true,
             Viewer::Numbered(sink) => sink(Numbered::Resized { seq, size }),
@@ -468,6 +551,8 @@ impl Session {
         let mut last_deliver: Option<Instant> = None;
 
         while !(eof && exit.is_some()) {
+            // When the hold in force lapses. Asked here, so the lock is let go before waiting.
+            let lapses_at = self.view().control.lapses_at();
             // Once the child is gone, stop as soon as the PTY goes quiet.
             let first = if exit.is_some() {
                 match rx.recv_timeout(EXIT_DRAIN_QUIET) {
@@ -490,6 +575,17 @@ impl Session {
                     }
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
+            } else if let Some(at) = lapses_at {
+                // A hold lapsing changes who controls the session with nothing happening: wake
+                // when it does, to say so.
+                match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                    Ok(msg) => msg,
+                    Err(RecvTimeoutError::Timeout) => {
+                        self.view().announce(Instant::now());
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
             } else {
                 match rx.recv() {
                     Ok(msg) => msg,
@@ -501,6 +597,7 @@ impl Session {
                 Msg::Output(bytes) => batch.extend_from_slice(&bytes),
                 Msg::Eof => eof = true,
                 Msg::ChildExited(info) => exit = Some(info),
+                Msg::Wake => {}
             };
             absorb(first, &mut batch);
 
@@ -557,6 +654,10 @@ impl Session {
             let mut view = self.view();
             view.busy = false;
             view.state = SessionState::Exited { exit: exit.clone() };
+            view.sinks.retain_mut(|(_, viewer)| match viewer {
+                Viewer::Terminal(_) => true,
+                Viewer::Numbered(sink) => sink(Numbered::Exited(exit.clone())),
+            });
         }
         events(HostEvent::Exited {
             id: self.id.clone(),
@@ -585,12 +686,17 @@ impl Session {
     /// view attaches would hang forever.
     fn deliver(&self, batch: &[u8]) -> Vec<u8> {
         let mut view = self.view();
-        let responder = view.responder(Instant::now());
+        let now = Instant::now();
+        view.announce(now);
+        let responder = view.responder(now);
         let scan = view.queries.feed(batch);
         let without = (!scan.is_empty()).then(|| scan.without(batch));
         let quiet = without.as_deref().unwrap_or(batch);
         view.seq += 1;
         let seq = view.seq;
+        if let Some(replay) = &mut view.replay {
+            replay.output(quiet);
+        }
         // Hand the bytes to the viewers before parsing them into the headless terminal. The
         // parse is only there for snapshots, and nothing below needs it except the cursor
         // reply, which is only reached when there is no terminal to have waited for it.

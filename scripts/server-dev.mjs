@@ -357,6 +357,7 @@ async function pairAndRevoke(token) {
     phoned.code === 0 &&
     phoned.output.includes("watch and type on every project") &&
     phoned.output.includes('Typed "e2e-typed"') &&
+    phoned.output.includes("resumed from there") &&
     phoned.output.includes("numbered without a gap") &&
     phoned.output.includes("access was revoked") &&
     hosted.output.includes('"got:e2e-typed"') &&

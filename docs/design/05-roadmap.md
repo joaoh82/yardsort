@@ -869,7 +869,7 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       a character showed the rest as text, or lost a byte (`vt100` 0.16 drops one after a split
       character).
 - [ ] R2: identity and relay, in progress ([27](27-remote-r2.md)). The self-host recipe's
-      identity provider is ZITADEL; the server takes any OIDC issuer. Six slices built: a person
+      identity provider is ZITADEL; the server takes any OIDC issuer. Seven slices built: a person
       signs in at the provider once per device, and the device then holds the server's own
       credentials (15-minute access, single-use refresh), so the provider is never asked again
       and revocation is immediate; the `yardsort-server` binary on PostgreSQL; its image, staging
@@ -879,7 +879,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       with one controller (typing here, or a lease) and one terminal answering queries per
       session, and numbered output over its socket; and the relay, with the host's outbound
       connector, so a paired device reaches its host's workspaces and terminals through the
-      server with neither listening. The gate's three checks have tests: another account reaches
+      server with neither listening; and a device that reconnects resumes from the last item it
+      drew, while the daemon keeps the last 256 KiB of a watched terminal, and is told when
+      control changes hands and when the program ends. The gate's three checks have tests: another account reaches
       nothing, a revoked device's live socket closes within seconds, and the relay failing leaves
       the program running with the person here in control. Found on the way and fixed: a session
       open in the app and `ys attach` answered a program's questions twice.

@@ -21,11 +21,17 @@ use serde::{Deserialize, Serialize};
 /// 2 added numbered output ([`Op::Watch`]) and control leases ([`Op::Acquire`] and the rest),
 /// and nothing else: every message of 1 kept its shape. So a client of 2 still uses a daemon of
 /// 1 for everything 1 had, which keeps agents running under one through an update.
-pub const PROTOCOL: u32 = 2;
+///
+/// 3 added resuming a watch (`after` on [`Op::Watch`]), and three numbered items: resumed, who
+/// controls the session, and that it exited. A daemon of 2 ignores `after` and sends a snapshot,
+/// which is always correct; a daemon of 3 sends the new items only to clients of 3.
+pub const PROTOCOL: u32 = 3;
 /// The oldest daemon this build can still run terminals in.
 pub const OLDEST_PROTOCOL: u32 = 1;
 /// The first protocol with numbered output and control leases.
 pub const CONTROL_PROTOCOL: u32 = 2;
+/// The first protocol that resumes a watch and tells a watcher of control and of the exit.
+pub const RESUME_PROTOCOL: u32 = 3;
 
 pub const KIND_REQUEST: u8 = 1;
 pub const KIND_RESPONSE: u8 = 2;
@@ -103,10 +109,13 @@ pub enum Op {
     },
     // Protocol 2 from here on. A daemon of 1 cannot read these, and drops the connection on
     // them, so the client never sends one there.
-    /// Watch a session, numbered: as `Attach`, but output comes as numbered frames.
+    /// Watch a session, numbered: as `Attach`, but output comes as numbered frames. With
+    /// `after` (protocol 3), carry on from that item when the daemon still keeps what came since.
     Watch {
         session: SessionId,
         stream: StreamId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<OutputSeq>,
     },
     /// Who controls a session.
     Controller {
@@ -303,12 +312,23 @@ impl Frame {
 
     /// One numbered item for one watching viewer:
     /// `[u32 stream][u8 item][u64 seq]`, then for a snapshot `[u16 cols][u16 rows][bytes]`, for
-    /// output `[bytes]`, and for a resize `[u16 cols][u16 rows]`.
+    /// output `[bytes]`, and for a resize or a resume `[u16 cols][u16 rows]`. Who controls the
+    /// session, and how it exited, are JSON after a `seq` of 0: they carry no number.
     pub fn numbered(stream: StreamId, item: &Numbered<'_>) -> Self {
-        let (tag, seq, size, bytes) = match *item {
-            Numbered::Snapshot { seq, size, bytes } => (ITEM_SNAPSHOT, seq, Some(size), bytes),
-            Numbered::Output { seq, bytes } => (ITEM_OUTPUT, seq, None, bytes),
-            Numbered::Resized { seq, size } => (ITEM_RESIZED, seq, Some(size), &[][..]),
+        let json;
+        let (tag, seq, size, bytes) = match item {
+            Numbered::Snapshot { seq, size, bytes } => (ITEM_SNAPSHOT, *seq, Some(*size), *bytes),
+            Numbered::Output { seq, bytes } => (ITEM_OUTPUT, *seq, None, *bytes),
+            Numbered::Resized { seq, size } => (ITEM_RESIZED, *seq, Some(*size), &[][..]),
+            Numbered::Resumed { seq, size } => (ITEM_RESUMED, *seq, Some(*size), &[][..]),
+            Numbered::Control(controller) => {
+                json = serde_json::to_vec(controller).expect("serialises");
+                (ITEM_CONTROL, 0, None, &json[..])
+            }
+            Numbered::Exited(exit) => {
+                json = serde_json::to_vec(exit).expect("serialises");
+                (ITEM_EXITED, 0, None, &json[..])
+            }
         };
         let mut payload = Vec::with_capacity(NUMBERED_HEADER + 4 + bytes.len());
         payload.extend_from_slice(&stream.to_le_bytes());
@@ -352,6 +372,16 @@ impl Frame {
                 seq,
                 size: size()?.0,
             },
+            ITEM_RESUMED => Numbered::Resumed {
+                seq,
+                size: size()?.0,
+            },
+            ITEM_CONTROL => {
+                Numbered::Control(serde_json::from_slice(rest).map_err(io::Error::other)?)
+            }
+            ITEM_EXITED => {
+                Numbered::Exited(serde_json::from_slice(rest).map_err(io::Error::other)?)
+            }
             other => return Err(io::Error::other(format!("unknown numbered item {other}"))),
         };
         Ok((stream, item))
@@ -412,6 +442,10 @@ impl Frame {
 const ITEM_SNAPSHOT: u8 = 0;
 const ITEM_OUTPUT: u8 = 1;
 const ITEM_RESIZED: u8 = 2;
+// Protocol 3.
+const ITEM_RESUMED: u8 = 3;
+const ITEM_CONTROL: u8 = 4;
+const ITEM_EXITED: u8 = 5;
 /// Stream, item and number, before what each item carries.
 const NUMBERED_HEADER: usize = 4 + 1 + 8;
 
@@ -507,16 +541,29 @@ mod tests {
                 seq: u64::MAX,
                 size,
             },
+            Numbered::Resumed { seq: 12, size },
+            Numbered::Control(Controller::Leased {
+                holder: "device:phone".into(),
+            }),
+            Numbered::Control(Controller::Local),
+            Numbered::Exited(pty_host::ExitInfo {
+                code: 3,
+                success: false,
+                signal: Some("SIGTERM".into()),
+            }),
         ];
-        for item in items {
+        for item in items.clone() {
             let frame = Frame::numbered(3, &item);
             let read = Frame::read_from(&mut frame.encode().as_slice()).unwrap();
             assert_eq!(read.as_numbered().unwrap(), (3, item));
         }
-        for cut in 0..NUMBERED_HEADER + 3 {
-            let mut frame = Frame::numbered(3, &items[3]);
-            frame.payload.truncate(cut);
-            assert!(frame.as_numbered().is_err(), "cut at {cut}");
+        for whole in [&items[3], &items[4], &items[5], &items[7]] {
+            let length = Frame::numbered(3, whole).payload.len();
+            for cut in 0..length {
+                let mut frame = Frame::numbered(3, whole);
+                frame.payload.truncate(cut);
+                assert!(frame.as_numbered().is_err(), "{whole:?} cut at {cut}");
+            }
         }
         let mut unknown = Frame::numbered(3, &items[1]);
         unknown.payload[4] = 9;

@@ -14,8 +14,10 @@
 //! With `--relay` it then reaches the host through the server's relay, as the phone app will:
 //! greets it, finds a running terminal in a workspace it may see, and watches it from a snapshot,
 //! checking that every item comes numbered without a gap. `--type TEXT` takes control and types
-//! `TEXT` and Enter. It watches for ten seconds, or, with `--wait-for-revoke`, until the relay
-//! closes the socket, and says why it closed.
+//! `TEXT` and Enter. Then it lets go of the stream and attaches again from the last item it drew,
+//! as a phone does after losing its connection, and says whether the host resumed from there.
+//! It says when control changes hands and when the program ends. It watches for ten seconds, or,
+//! with `--wait-for-revoke`, until the relay closes the socket, and says why it closed.
 //!
 //! **host** stands in for the app as a host: it signs in as one, registers, prints a pairing code,
 //! and approves the first device that redeems it: to watch, or to watch and type with
@@ -613,16 +615,35 @@ async fn through_relay(
                     Ok(Incoming::Text(text)) => {
                         let value: Value =
                             serde_json::from_str(&text).map_err(|e| e.to_string())?;
-                        if value["event"] == "terminal.resized"
-                            && Some(&value["stream"]) == stream.as_ref()
-                        {
+                        let ours = Some(&value["stream"]) == stream.as_ref();
+                        if value["event"] == "terminal.resized" && ours {
                             items.push(value["position"]["seq"].as_u64().unwrap_or_default());
+                            continue;
+                        }
+                        if value["event"] == "terminal.control" && ours {
+                            let controller = &value["controller"];
+                            println!(
+                                "Control is now {}{}.",
+                                controller["kind"].as_str().unwrap_or("unknown"),
+                                controller["name"]
+                                    .as_str()
+                                    .filter(|name| !name.is_empty())
+                                    .map(|name| format!(" ({name})"))
+                                    .unwrap_or_default()
+                            );
+                            continue;
+                        }
+                        if value["event"] == "terminal.exited" && ours {
+                            println!("The program ended, with code {}.", value["exit"]["code"]);
                             continue;
                         }
                         break value;
                     }
                     Ok(Incoming::Binary(frame)) => {
-                        if let Ok(frame) = remote_proto::OutputFrame::decode(&frame) {
+                        let frame = remote_proto::OutputFrame::decode(&frame).ok().filter(|f| {
+                            stream.as_ref().and_then(Value::as_u64) == Some(f.stream.into())
+                        });
+                        if let Some(frame) = frame {
                             if items.last() != Some(&frame.position.seq) {
                                 items.push(frame.position.seq);
                             }
@@ -771,6 +792,47 @@ async fn through_relay(
             let (_, request) = ask("terminal.release", held);
             writer.text(request).await.map_err(|e| e.to_string())?;
         }
+    }
+
+    // Away and back: let go of the stream, and attach again from the last item drawn, as a
+    // phone does after losing its connection.
+    let left_at = items.last().copied().unwrap_or_default();
+    let (id, request) = ask(
+        "terminal.detach",
+        json!({"terminal": terminal, "stream": stream}),
+    );
+    writer.text(request).await.map_err(|e| e.to_string())?;
+    while next_text!()["requestId"] != id {}
+    let (id, request) = ask(
+        "terminal.attach",
+        json!({"terminal": terminal, "resumeAfter": {"epoch": 0, "seq": left_at}}),
+    );
+    writer.text(request).await.map_err(|e| e.to_string())?;
+    let again = loop {
+        let reply = next_text!();
+        if reply["requestId"] == id {
+            break reply;
+        }
+    };
+    let result = &again["result"];
+    if result.is_null() {
+        return Err(format!(
+            "could not watch it again: {}",
+            again["error"]["message"]
+        ));
+    }
+    stream = Some(result["stream"].clone());
+    if result["start"] == "resumed" {
+        println!(
+            "Came back after item {left_at}: resumed from there; controlled by {}.",
+            result["controller"]["kind"]
+        );
+    } else {
+        println!(
+            "Came back after item {left_at}: sent a snapshot at item {} instead.",
+            result["position"]["seq"]
+        );
+        items.clear();
     }
 
     let watching = async {
