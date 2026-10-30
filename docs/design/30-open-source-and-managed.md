@@ -14,10 +14,11 @@ sold is running it. What must stay private is a short, specific list, and none o
 
 ## 1 · Licenses
 
-| Part                                                                                                             | License       | Where it says so                        |
-| ---------------------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------- |
-| The server: `crates/server` (`yardsort-server`), its image, its Fly configs and the self-host recipe             | AGPL-3.0-only | `crates/server/LICENSE`, its Cargo.toml |
-| Everything else: the app, the core, `ys`, the PTY crates, `remote-proto`, `remote-client`, the website, the docs | GPL-3.0-only  | `LICENSE`, the workspace's Cargo.toml   |
+| Part                                                                                                             | License       | Where it says so                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------- |
+| The server: `crates/server` (`yardsort-server`), its image, its Fly configs and the self-host recipe             | AGPL-3.0-only | `crates/server/LICENSE`, its Cargo.toml                                                                               |
+| Everything else: the app, the core, `ys`, the PTY crates, `remote-proto`, `remote-client`, the website, the docs | GPL-3.0-only  | `LICENSE`, the workspace's Cargo.toml                                                                                 |
+| The phone app and its TypeScript protocol client: `apps/mobile`, `packages/remote-client` (R3; not created yet)  | MPL-2.0       | Their own `LICENSE` and `package.json`, from the slice that creates each ([31 §6](31-remote-r3.md#6--the-license-43)) |
 
 **Why the server is AGPL.** The GPL's obligations follow distribution: whoever gives someone a
 copy must give them the source too. A hosted service gives nobody a copy, so under the GPL anyone
@@ -117,4 +118,6 @@ The phone app (R3) will be published through Apple's App Store and Google Play. 
 Foundation's view is that the App Store's terms add restrictions the GPL forbids. VLC was
 withdrawn from it in 2011 over exactly that. As the only copyright holder, the owner can publish
 anyway. Code others contribute under the GPL alone would not allow it. Decide before anyone else
-contributes to the phone app: [open question 43](06-open-questions.md#remote).
+contributes to the phone app: [open question 43](06-open-questions.md#remote). Decided on
+2026-10-30, with R3's plan: the phone app and its TypeScript protocol client are MPL-2.0
+([31 §6](31-remote-r3.md#6--the-license-43)).

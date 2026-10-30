@@ -899,7 +899,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)): a refresh whose
       answer was lost is answered once more, a device hears why terminals under an earlier daemon
       wait, and there is no maximum session.
-- [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch. The server is
+- [ ] R3: the phone app. Planned on 2026-10-30 in [31](31-remote-r3.md): a TypeScript protocol
+      client tested against the same fixtures as the Rust side, then an Expo app signed in,
+      paired, showing computers, workspaces and activity, watching and controlling a terminal,
+      and the states a phone can be left in. Seven slices, then a run on a physical iPhone and
+      Android phone, which is the gate. Nothing is built. The app and its client are MPL-2.0
+      (06 #43). There is no Android phone to test on yet, and R3 cannot close without one.
+- [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
       ([30](30-open-source-and-managed.md)).

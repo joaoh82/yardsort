@@ -1928,7 +1928,7 @@ Production is not part of R2's exit: its deploy comes with its own ZITADEL insta
 
 - **R3:** the phone app; a TypeScript client and a conformance run over `fixtures/v1`
   ([26](26-remote-r0-r1.md)); the phone app's license and whether the session title crosses
-  ([06](06-open-questions.md) #40, #36).
+  ([06](06-open-questions.md) #43, #36). Planned in [31](31-remote-r3.md).
 - **R4:** notifications while the app is closed; the hardening the proposal lists.
 - **R5:** the headless host, and its own way to approve a device. Today only the desktop approves.
 - **Settled after** ([06](06-open-questions.md) #37 to #39, §21): what a device sees of terminals

@@ -31,10 +31,11 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 24  | [Repositories](24-repositories.md)                                      | Pick a repository from the forge, clone from any host, start from an issue or pull request link. Built                |
 | 25  | [Remote, mobile & sync](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md) | Proposal: reach your agents from a phone or another computer; self-hostable; durable sync after that                  |
 | 26  | [Remote, R0–R1](26-remote-r0-r1.md)                                     | The fit report, the versioned protocol and a read-only host facade. Not wired; no terminals yet                       |
-| 27  | [Remote, R2](27-remote-r2.md)                                           | Identity and relay. Started: sign-in server, its image and self-host recipe, pairing                                  |
+| 27  | [Remote, R2](27-remote-r2.md)                                           | Identity and relay. Done: sign-in, pairing, the relay, staging                                                        |
 | 28  | [Remote infrastructure](28-remote-infrastructure.md)                    | Local, staging and production; Fly.io, ZITADEL Cloud, PostgreSQL. Staging live                                        |
 | 29  | [Conversation context](29-conversation-context.md)                      | Proposal: every agent in a workspace can read the others' conversations, as a digest from their transcripts; no model |
-| 30  | [Open source and the managed service](30-open-source-and-managed.md)    | The server is AGPL, the rest GPL; production runs the public server unmodified; what stays private, and where         |
+| 30  | [Open source and the managed service](30-open-source-and-managed.md)    | The server is AGPL, the phone app MPL, the rest GPL; production runs the public server unmodified; what stays private |
+| 31  | [Remote, R3](31-remote-r3.md)                                           | The phone app. Planned: a TypeScript client, an Expo app, seven slices and a device run                               |
 
 ## Vocabulary
 
