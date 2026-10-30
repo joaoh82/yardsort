@@ -29,6 +29,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 22  | [Pull requests](22-pull-requests.md)                                    | Every project's pull requests in one view. All four slices built: list, actions, Summary, Code, writing |
 | 23  | [Tasks](23-tasks.md)                                                    | Every project's GitHub issues in one view, and `ys task`. All three slices built                        |
 | 24  | [Repositories](24-repositories.md)                                      | Pick a repository from the forge, clone from any host, start from an issue or pull request link. Built  |
+| 25  | [Smoke tests](25-smoke-tests.md)                                        | Proposal: a test file in the repository an agent writes and Yardsort runs and shows, approved first     |
 
 ## Vocabulary
 

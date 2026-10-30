@@ -259,3 +259,20 @@ From the design pass in [24-repositories](24-repositories.md).
     hosts and the pull requests view already passes `--hostname` for a project whose remote is
     not github.com. The list has no project to read a host from. Lean: github.com only until
     someone with an Enterprise host asks; a pasted URL from such a host clones already.
+
+## Smoke tests
+
+From the design pass in [25-smoke-tests](25-smoke-tests.md), 2026-10-30.
+
+35. **Should an approval follow a rebase?** A file whose content is unchanged but whose path
+    moved with a rename keeps its approval under the hash; a file that changed only in a comment
+    does not. Whether to hash the parsed form instead of the text is a slice 2 finding.
+36. **Should a run tell the agent without being asked?** When `ys test run` came from an
+    agent's terminal, the result could be typed into that agent once quiet, as `send_to_session`
+    does. Version one does not: the agent asked by running `wait`, and an agent that did not is
+    doing something else. Revisit after dogfooding.
+37. **How much output to keep per step.** Unbounded files with pruning by age is the proposal;
+    a dev server that logs a line per millisecond for an hour fills a disk. A per-step cap, with
+    the head and the tail kept, is likely the slice 2 answer.
+38. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
+    common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.

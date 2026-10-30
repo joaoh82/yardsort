@@ -843,6 +843,33 @@ being chosen; one already added is selected instead; a GitLab URL clones; a past
 ends in that issue's **Delegate**; and without `gh`, logged out, or offline, the clone step still
 takes a URL and says why there is no list.
 
+## M26 — Smoke tests
+
+Proposed in [25-smoke-tests](25-smoke-tests.md), after a six-question design pass on
+2026-10-30.
+
+- A smoke test is a file in the repository, `.yardsort/tests/<id>.yaml`: setup, steps and
+  teardown in order, with typed steps (`run`, `shell`, `start`, `wait_for`, `http`, `browser`,
+  `manual`), expectations in words, `{{ variables }}` checked at load time, a free
+  `{{ run.port }}` per run and a per-project test environment for secrets. The agent in a
+  workspace writes it like any file, checks it with `ys test validate`, runs it with
+  `ys test run`, and reads the verdict with `ys test wait`.
+- A file from a repository never runs unseen: the app shows a new or changed file's steps and
+  the user approves, once per content hash. `ys` has no way to approve.
+- A run is rows and files, carried out by a runner thread in the app, shown as a tab in the
+  workspace with live output, screenshots and **Pass** / **Fail** for `manual` steps; a Tests
+  view lists every project's tests and every run, with filters, and opens any of them.
+  Workflows gain a `run_test` step.
+- Six slices, each its own pull request: file and core; the runner and `ys test`; the UI;
+  browser steps over the DevTools protocol; agents and workflows; the Tests view, docs and
+  pictures.
+
+_Exit:_ on all three platforms, an agent in a workspace writes a test with `run`, `http`,
+`browser` and `manual` steps, runs it, and is told in its own terminal which step failed and
+why, with the user having approved the file once in the app and watched the run in its tab; a
+changed file is never run without being shown again; a cancel kills every process the run
+started; and `ys test validate` has a failing fixture for every error it can report.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
