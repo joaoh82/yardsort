@@ -148,6 +148,62 @@ it("takes a failed poll's error down once the server answers again", async () =>
   }
 });
 
+it("shows where this computer stands when the server refuses it, and nothing from before", async () => {
+  const linked = (link: RemoteLink, devices: RemoteStatus["devices"]) => ({
+    ...on,
+    host: { ...on.host!, link },
+    devices,
+  });
+  const phoneLetIn = [
+    { grantId: "g-1", name: "Ana's phone", control: false, projects: null, approvedAt: 2 },
+  ];
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    core.remoteStatus.mockResolvedValue(linked({ kind: "connected", devices: 1 }, phoneLetIn));
+    core.remoteRequests.mockResolvedValue({
+      requests: [],
+      status: linked({ kind: "connected", devices: 1 }, phoneLetIn),
+    });
+    render(<RemoteSettings />);
+    expect(await screen.findByText("watches, all projects")).toBeInTheDocument();
+
+    // Signed out at the server: the poll is refused, and the link has not given up yet.
+    const refused = {
+      code: "remote_signed_out",
+      message: "This computer was signed out at the server. Turn Remote off, then on again.",
+    };
+    core.remoteRequests.mockRejectedValue(refused);
+    core.remoteStatus.mockResolvedValue(
+      linked(
+        { kind: "waiting", why: "The relay closed the link: access was revoked.", retryInMs: 1000 },
+        phoneLetIn,
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Not connected to the relay: The relay closed the link: access was revoked.",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(refused.message);
+    expect(screen.queryByText(/Connected to the relay/)).toBeNull();
+
+    // It has given up: one line says why, and nothing offers what needs the server.
+    core.remoteStatus.mockResolvedValue(
+      linked({ kind: "stopped", why: "This computer was signed out at the server." }, phoneLetIn),
+    );
+    await vi.advanceTimersByTimeAsync(3000);
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Not connected to the relay: This computer was signed out at the server. Turn Remote off, then on again.",
+    );
+    expect(screen.queryByText("Ana's phone")).toBeNull();
+    expect(screen.getByText("None can reach this computer now.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pair a device" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Turn off" })).toBeEnabled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("shows a code to pair with until it is done", async () => {
   core.remoteStatus.mockResolvedValue(on);
   core.remotePair.mockResolvedValue({

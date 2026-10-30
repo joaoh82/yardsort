@@ -286,9 +286,11 @@ the owner's go-ahead:
   link replaced on another instance closes at once, by one more kind of signal. No new secret, no
   new setting.
 
-R2's code is complete with slice 12. What staging still owes before R2 closes (the smoke tests of
-slices 6 to 12, three of them also on a second Machine) is listed in R2's exit review
-([27 §20](27-remote-r2.md#20--r2s-exit-review)).
+R2's code is complete with slice 12. Staging ran the smoke tests of slices 6 to 12 on 2026-10-30,
+three of them also on a second Machine for a while, and they passed
+([27 §20](27-remote-r2.md#20--r2s-exit-review)). Two things learnt there about where it runs: Fly
+stops a second Machine with nothing open on it after about six minutes, so a two-Machine test has
+minutes; and a Machine holding a host's link stays up.
 
 ## 7 · Open decisions
 

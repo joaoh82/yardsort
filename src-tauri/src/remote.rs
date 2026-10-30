@@ -133,7 +133,12 @@ impl Access for AppAccess {
 
 fn access_error(error: IpcError) -> AccessError {
     if error.code == "remote_signed_out" {
-        AccessError::SignedOut(error.message)
+        // The link's own line says what to do.
+        let why = error
+            .message
+            .strip_suffix(AGAIN)
+            .map_or(error.message.as_str(), str::trim_end);
+        AccessError::SignedOut(why.to_owned())
     } else {
         AccessError::Unavailable(error.message)
     }
@@ -371,6 +376,23 @@ fn failed(error: ClientError) -> IpcError {
     IpcError::new(code, error.to_string())
 }
 
+/// What to do once signed out at the server.
+const AGAIN: &str = "Turn Remote off, then on again.";
+
+fn signed_out(why: &str) -> IpcError {
+    IpcError::new("remote_signed_out", format!("{why} {AGAIN}"))
+}
+
+/// A request made with this computer's own credential. Refused, it was signed out at the server;
+/// the server's own words ("Sign in again.") are for any client.
+fn refused_here(error: ClientError) -> IpcError {
+    if error.code() == Some(ErrorCode::Unauthenticated) {
+        signed_out("This computer was signed out at the server.")
+    } else {
+        failed(error)
+    }
+}
+
 fn store_failed(error: impl std::fmt::Display) -> IpcError {
     IpcError::new("remote_store", error.to_string())
 }
@@ -438,7 +460,7 @@ async fn access(session: &mut Session) -> IpcResult<Secret> {
     session
         .access(|refresh| keep_refresh(device.as_str(), refresh))
         .await
-        .map_err(failed)
+        .map_err(refused_here)
 }
 
 fn status(state: &AppState) -> IpcResult<RemoteStatus> {
@@ -653,12 +675,12 @@ pub async fn remote_disable(app: AppHandle) -> IpcResult<RemoteStatus> {
             .client
             .remove_host(&access, &host)
             .await
-            .map_err(failed)?;
+            .map_err(refused_here)?;
         session
             .client
             .revoke_device(&access, &session.device)
             .await
-            .map_err(failed)
+            .map_err(refused_here)
     }
     .await;
     *state.remote.session.lock().await = None;
@@ -690,7 +712,11 @@ pub async fn remote_pair(app: AppHandle) -> IpcResult<RemotePairing> {
     let session = ensure(&mut session, &row).await?;
     let access = access(session).await?;
     let host = HostId::new(row.host_id.clone()).map_err(store_failed)?;
-    let offer = session.client.offer(&access, &host).await.map_err(failed)?;
+    let offer = session
+        .client
+        .offer(&access, &host)
+        .await
+        .map_err(refused_here)?;
     let mut link = url::Url::parse("yardsort://pair").map_err(store_failed)?;
     link.query_pairs_mut()
         .append_pair("server", &row.server_url)
@@ -794,7 +820,7 @@ pub async fn remote_answer(
             .client
             .decide(&access, &id, decision.as_ref())
             .await
-            .map_err(failed)?
+            .map_err(refused_here)?
     };
     if let (Some(decision), GrantState::Approved) = (&decision, decided.state) {
         // What this host's person chose, as they chose it: the server's copy is not trusted for
@@ -844,7 +870,7 @@ pub async fn remote_revoke(app: AppHandle, grant_id: String) -> IpcResult<Remote
             .client
             .revoke_grant(&access, &id)
             .await
-            .map_err(failed)?;
+            .map_err(refused_here)?;
     }
     blocking(app, status).await
 }
@@ -876,7 +902,7 @@ async fn host_grants(state: &AppState, row: &RemoteHostRow) -> IpcResult<Vec<Gra
         .client
         .host_grants(&access, &host)
         .await
-        .map_err(failed)?
+        .map_err(refused_here)?
         .grants)
 }
 
@@ -889,22 +915,11 @@ async fn ensure<'a>(
         let refresh = credentials()?
             .get(&refresh_entry(&row.device_id))
             .map_err(|e| IpcError::new("remote_credentials", e))?
-            .ok_or_else(|| {
-                IpcError::new(
-                    "remote_signed_out",
-                    "This computer's sign-in is missing. Turn Remote off, then on again.",
-                )
-            })?;
+            .ok_or_else(|| signed_out("This computer's sign-in is missing."))?;
         let client = Client::new(&row.server_url).map_err(failed)?;
         let session = Session::resume(client, &refresh)
             .await
-            .map_err(|e| match e.code() {
-                Some(ErrorCode::Unauthenticated) => IpcError::new(
-                    "remote_signed_out",
-                    "This computer was signed out at the server. Turn Remote off, then on again.",
-                ),
-                _ => failed(e),
-            })?;
+            .map_err(refused_here)?;
         let session = slot.insert(session);
         // The kept one is spent now. Should this fail, the session carries on with the new one
         // until the app quits, and the error says why the next start will be signed out.
@@ -913,4 +928,31 @@ async fn ensure<'a>(
         return Ok(session);
     }
     Ok(slot.as_mut().expect("just filled"))
+}
+
+#[cfg(test)]
+mod tests {
+    use remote_proto::RemoteError;
+
+    use super::*;
+
+    #[test]
+    fn a_refusal_of_this_computers_credential_says_it_was_signed_out() {
+        let refused = |code| ClientError::Remote(RemoteError::new(code, "Sign in again."));
+        let error = refused_here(refused(ErrorCode::Unauthenticated));
+        assert_eq!(error.code, "remote_signed_out");
+        assert_eq!(
+            error.message,
+            "This computer was signed out at the server. Turn Remote off, then on again."
+        );
+        // The link's own line adds what to do.
+        assert!(matches!(
+            access_error(error),
+            AccessError::SignedOut(why) if why == "This computer was signed out at the server."
+        ));
+        assert_eq!(
+            refused_here(refused(ErrorCode::NotFound)).code,
+            "remote_refused"
+        );
+    }
 }

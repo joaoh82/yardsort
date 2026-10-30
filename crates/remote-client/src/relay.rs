@@ -48,7 +48,11 @@ pub enum Incoming {
     Binary(Vec<u8>),
 }
 
-pub struct LinkReader(SplitStream<Socket>);
+pub struct LinkReader {
+    stream: SplitStream<Socket>,
+    /// The close frame's code, once one came.
+    close_code: Option<u16>,
+}
 
 impl LinkReader {
     /// The next message, or why the socket closed. Pings are answered and not shown. A socket
@@ -56,17 +60,30 @@ impl LinkReader {
     pub async fn next(&mut self) -> std::result::Result<Incoming, CloseReason> {
         let silence = Duration::from_millis(SILENCE_MS);
         loop {
-            match tokio::time::timeout(silence, self.0.next()).await {
+            match tokio::time::timeout(silence, self.stream.next()).await {
                 Err(_) | Ok(None) | Ok(Some(Err(_))) => return Err(CloseReason::Gone),
                 Ok(Some(Ok(Message::Text(text)))) => return Ok(Incoming::Text(text.to_string())),
                 Ok(Some(Ok(Message::Binary(bytes)))) => return Ok(Incoming::Binary(bytes.into())),
                 Ok(Some(Ok(Message::Close(frame)))) => {
-                    return Err(frame.map_or(CloseReason::Gone, |f| {
-                        CloseReason::from_code(u16::from(f.code))
-                    }))
+                    let Some(frame) = frame else {
+                        return Err(CloseReason::Gone);
+                    };
+                    let code = u16::from(frame.code);
+                    self.close_code = Some(code);
+                    return Err(CloseReason::from_code(code));
                 }
                 Ok(Some(Ok(_))) => {}
             }
+        }
+    }
+
+    /// Why the socket closed, in a few words: [`CloseReason::text`], and the close frame's code
+    /// when the reason is not one of the relay's. Something between the two ends, such as a
+    /// proxy, can close a socket with a code of its own, and the code is then all there is.
+    pub fn describe(&self, reason: CloseReason) -> String {
+        match (reason, self.close_code) {
+            (CloseReason::Unknown, Some(code)) => format!("{} (code {code})", reason.text()),
+            _ => reason.text().to_owned(),
         }
     }
 }
@@ -152,7 +169,11 @@ impl Client {
         .await
         .map_err(|e| ClientError::Unreachable(chain(&e)))?;
         let (writer, reader) = socket.split();
-        let (mut reader, mut writer) = (LinkReader(reader), LinkWriter(writer));
+        let mut reader = LinkReader {
+            stream: reader,
+            close_code: None,
+        };
+        let mut writer = LinkWriter(writer);
         let presented = serde_json::to_string(&Presented { ticket }).expect("serialises");
         writer.text(presented).await?;
         let greeting = match reader.next().await {
@@ -161,7 +182,7 @@ impl Client {
             Ok(Incoming::Binary(_)) => {
                 return Err(ClientError::Unexpected("binary before the greeting".into()))
             }
-            Err(reason) => return Err(ClientError::Unreachable(reason.text().into())),
+            Err(reason) => return Err(ClientError::Unreachable(reader.describe(reason))),
         };
         match greeting {
             Greeting::Connected { host } => Ok(RelayLink {

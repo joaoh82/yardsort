@@ -174,24 +174,26 @@ async fn keep(
         let why = match opened {
             Ok(link) => {
                 let since = Instant::now();
-                let reason = serve(link, &serving, &status, &recheck, &stop).await;
-                if reason.is_none() {
+                let Some(reason) = serve(link, &serving, &status, &recheck, &stop).await else {
                     return;
-                }
+                };
                 if since.elapsed() >= STEADY {
                     backoff = FIRST_BACKOFF;
                 }
-                format!(
-                    "The relay closed the link: {}.",
-                    reason.map_or("", CloseReason::text)
-                )
+                format!("The relay closed the link: {reason}.")
             }
             Err(AccessError::SignedOut(why)) => {
+                eprintln!("remote: not connecting to the relay again: {why}");
                 set(Status::Stopped { why });
                 return;
             }
             Err(AccessError::Unavailable(why)) => why,
         };
+        // Said only for a moment in Settings: kept here, for a link that drops now and then.
+        eprintln!(
+            "remote: not connected to the relay, trying again in {} s: {why}",
+            backoff.as_secs()
+        );
         set(Status::Waiting {
             why,
             retry_in: backoff,
@@ -211,17 +213,23 @@ async fn open(host: &HostId, access: &dyn Access) -> Result<RelayLink, AccessErr
         .open_relay(&secret, &request)
         .await
         .map_err(|error| match error.code() {
-            Some(ErrorCode::Unauthenticated | ErrorCode::NotFound | ErrorCode::Forbidden) => {
-                AccessError::SignedOut(error.to_string())
+            Some(ErrorCode::NotFound | ErrorCode::Forbidden) => {
+                AccessError::SignedOut(NO_LONGER_A_HOST.into())
             }
-            _ => AccessError::Unavailable(error.to_string()),
+            _ => error.into(),
         })
 }
+
+/// The server refused this computer's credential. Its own words are for any client ("Sign in
+/// again."); these say what it means for a host.
+const SIGNED_OUT: &str = "This computer was signed out at the server.";
+/// The server has no such host for this computer's account.
+const NO_LONGER_A_HOST: &str = "This computer is no longer a host at the server.";
 
 impl From<ClientError> for AccessError {
     fn from(error: ClientError) -> Self {
         match error.code() {
-            Some(ErrorCode::Unauthenticated) => Self::SignedOut(error.to_string()),
+            Some(ErrorCode::Unauthenticated) => Self::SignedOut(SIGNED_OUT.into()),
             _ => Self::Unavailable(error.to_string()),
         }
     }
@@ -293,7 +301,7 @@ async fn serve(
     status: &Mutex<Status>,
     recheck: &Notify,
     stop: &Notify,
-) -> Option<CloseReason> {
+) -> Option<String> {
     let RelayLink {
         mut reader,
         mut writer,
@@ -323,11 +331,11 @@ async fn serve(
             incoming = reader.next() => {
                 let bytes = match incoming {
                     Ok(Incoming::Binary(bytes)) => bytes,
-                    Ok(Incoming::Text(_)) => break Some(CloseReason::Invalid),
-                    Err(reason) => break Some(reason),
+                    Ok(Incoming::Text(_)) => break Some(CloseReason::Invalid.text().to_owned()),
+                    Err(reason) => break Some(reader.describe(reason)),
                 };
                 let Ok(frame) = LinkFrame::decode(&bytes) else {
-                    break Some(CloseReason::Invalid);
+                    break Some(CloseReason::Invalid.text().to_owned());
                 };
                 match frame {
                     LinkFrame::Open(channel, open) => {
