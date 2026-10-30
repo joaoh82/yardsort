@@ -333,6 +333,10 @@ pub trait Records: Send + Sync {
 
     /// The device an access credential belongs to, and when that credential lapses. Revoked
     /// devices are returned as they are: the caller decides.
+    ///
+    /// The credential is used from then on, so the refresh credential traded in for it can no
+    /// longer be retried ([`Rotation::Retried`]). Marking it and a retry's check of it must
+    /// exclude each other: a credential this returns is never one a retry drops.
     fn access(
         &self,
         access: &TokenHash,
@@ -352,15 +356,9 @@ pub trait Records: Send + Sync {
         now: i64,
     ) -> impl Future<Output = Result<Rotation>> + Send;
 
-    /// Note that a device used `access`: that credential is used from now on, so the refresh
-    /// credential traded in for it can no longer be retried ([`Rotation::Retried`]); and the
-    /// device was seen, unless that was noted less than [`SEEN_RESOLUTION_MS`] ago.
-    fn seen(
-        &self,
-        device: &DeviceId,
-        access: &TokenHash,
-        now: i64,
-    ) -> impl Future<Output = Result<()>> + Send;
+    /// Note that a device used its access, unless one was noted less than
+    /// [`SEEN_RESOLUTION_MS`] ago.
+    fn seen(&self, device: &DeviceId, now: i64) -> impl Future<Output = Result<()>> + Send;
 
     /// The account's devices, revoked ones included.
     fn devices(&self, account: &AccountId) -> impl Future<Output = Result<Vec<Device>>> + Send;
@@ -710,9 +708,11 @@ impl Records for MemoryRecords {
 
     async fn access(&self, access: &TokenHash) -> Result<Option<(Device, i64)>> {
         self.with(|s| {
-            let access = s.access.get(access)?;
-            let device = s.devices.iter().find(|d| d.id == access.device)?.clone();
-            Some((device, access.expires_at))
+            let access = s.access.get_mut(access)?;
+            access.used = true;
+            let (owner, expires_at) = (access.device.clone(), access.expires_at);
+            let device = s.devices.iter().find(|d| d.id == owner)?.clone();
+            Some((device, expires_at))
         })
     }
 
@@ -765,11 +765,8 @@ impl Records for MemoryRecords {
         })
     }
 
-    async fn seen(&self, device: &DeviceId, access: &TokenHash, now: i64) -> Result<()> {
+    async fn seen(&self, device: &DeviceId, now: i64) -> Result<()> {
         self.with(|s| {
-            if let Some(access) = s.access.get_mut(access) {
-                access.used = true;
-            }
             if let Some(device) = s.device_mut(device) {
                 if device
                     .last_seen_at

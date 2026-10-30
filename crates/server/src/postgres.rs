@@ -463,13 +463,34 @@ impl Records for PgRecords {
     }
 
     async fn access(&self, access: &TokenHash) -> Result<Option<(Device, i64)>> {
-        let row = self
-            .client()
-            .await?
+        let client = self.client().await?;
+        let Some(row) = client
             .query_opt(
                 &format!(
-                    "SELECT {DEVICE}, a.expires_at FROM access_credentials a
+                    "SELECT {DEVICE}, a.expires_at, a.used FROM access_credentials a
                      JOIN devices d ON d.id = a.device WHERE a.hash = $1"
+                ),
+                &[&bytes(access)],
+            )
+            .await
+            .map_err(failed)?
+        else {
+            return Ok(None);
+        };
+        if row.get::<_, bool>(10) {
+            return Ok(Some((device(&row)?, row.get(9))));
+        }
+        // Its first use, so a second round trip that claims it. A retry holds the row's lock while
+        // it decides, so this waits for it; if the retry dropped the credential, this finds
+        // nothing, and the read above, which saw it, does not count.
+        let row = client
+            .query_opt(
+                &format!(
+                    "WITH claimed AS (
+                         UPDATE access_credentials SET used = TRUE WHERE hash = $1
+                         RETURNING device, expires_at
+                     )
+                     SELECT {DEVICE}, a.expires_at FROM claimed a JOIN devices d ON d.id = a.device"
                 ),
                 &[&bytes(access)],
             )
@@ -486,12 +507,11 @@ impl Records for PgRecords {
         let Some(row) = tx
             .query_opt(
                 &format!(
-                    "SELECT {DEVICE}, r.expires_at, r.spent_at, r.retried,
-                            (s.spent_at IS NULL AND NOT a.used)
+                    "SELECT {DEVICE}, r.expires_at, r.spent_at, r.retried, r.successor_access,
+                            (s.hash IS NOT NULL AND s.spent_at IS NULL)
                      FROM refresh_credentials r
                      JOIN devices d ON d.id = r.device
                      LEFT JOIN refresh_credentials s ON s.hash = r.successor_refresh
-                     LEFT JOIN access_credentials a ON a.hash = r.successor_access
                      WHERE r.hash = $1
                      FOR UPDATE OF r, d"
                 ),
@@ -506,17 +526,32 @@ impl Records for PgRecords {
         let expires_at: i64 = row.get(9);
         let spent_at: Option<i64> = row.get(10);
         let retried: bool = row.get(11);
-        // Null when either successor is gone: then it is not a retry.
-        let successors_unused: Option<bool> = row.get(12);
-        let retry = spent_at.is_some_and(|at| {
-            !retried && now - at < crate::REFRESH_RETRY_MS && successors_unused == Some(true)
-        });
+        let successor_access: Option<Vec<u8>> = row.get(12);
+        // False when the successor refresh is gone: then it is not a retry.
+        let successor_unspent: bool = row.get(13);
+        let may_retry = device.revoked.is_none()
+            && successor_unspent
+            && spent_at.is_some_and(|at| !retried && now - at < crate::REFRESH_RETRY_MS);
+        let retry = match successor_access.filter(|_| may_retry) {
+            // Locked, so a request's first use of it (`access`) waits until this is decided, or
+            // this waits for that. PostgreSQL cannot lock the nullable side of an outer join, so
+            // it is read on its own.
+            Some(successor) => tx
+                .query_opt(
+                    "SELECT used FROM access_credentials WHERE hash = $1 FOR UPDATE",
+                    &[&successor],
+                )
+                .await
+                .map_err(failed)?
+                .is_some_and(|row| !row.get::<_, bool>(0)),
+            None => false,
+        };
         let outcome = if device.revoked.is_some() {
             Rotation::Revoked
         } else if retry {
-            // The device never had what was issued in its place: drop it, and issue again. Whether
-            // the successors were used is read under the device's lock, which every rotation of
-            // this device takes, so the successor cannot be traded in meanwhile.
+            // The device never had what was issued in its place: drop it, and issue again. The
+            // successor refresh was read under the device's lock, which every rotation of this
+            // device takes, so it cannot be traded in meanwhile; the successor access is locked.
             tx.execute(
                 "DELETE FROM refresh_credentials WHERE hash = (
                      SELECT successor_refresh FROM refresh_credentials WHERE hash = $1)",
@@ -595,19 +630,14 @@ impl Records for PgRecords {
         Ok(outcome)
     }
 
-    async fn seen(&self, device: &DeviceId, access: &TokenHash, now: i64) -> Result<()> {
-        // One round trip: the credential marked used the first time only, the device at most once
-        // a resolution.
+    async fn seen(&self, device: &DeviceId, now: i64) -> Result<()> {
         self.client()
             .await?
             .execute(
-                "WITH used AS (
-                     UPDATE access_credentials SET used = TRUE WHERE hash = $4 AND NOT used
-                 )
-                 UPDATE devices SET last_seen_at = $2
+                "UPDATE devices SET last_seen_at = $2
                  WHERE id = $1
                    AND (last_seen_at IS NULL OR last_seen_at <= $2::BIGINT - $3::BIGINT)",
-                &[&device.as_str(), &now, &SEEN_RESOLUTION_MS, &bytes(access)],
+                &[&device.as_str(), &now, &SEEN_RESOLUTION_MS],
             )
             .await
             .map_err(failed)?;

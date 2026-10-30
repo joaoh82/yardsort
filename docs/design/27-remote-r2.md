@@ -809,6 +809,11 @@ On Linux, 2026-10-30, the open questions (§21):
   traded in, it revokes the device. Changed: the rotation test uses its new access before
   presenting the old refresh again, and of eight racing rotations one goes through, at most one
   more as a retry, and the device ends revoked.
+- PostgreSQL only (3 new tests, after review): a first use waits for a retry holding its access
+  credential, and is refused once the retry has dropped it; a retry waits for a first use in
+  progress, and is then reuse; a spent credential whose successor refresh is gone is reuse, as in
+  the memory store. Without the lock, the claim and the `s.hash IS NOT NULL` check, one of them
+  fails each time; without the claim in the memory store, the rotation test fails.
 - `sign_in` (1 new test): the same through the service. `relay_instances`: the host uses its new
   credentials before the copy is presented.
 - Broken on purpose, one at a time, in the memory store: ignoring whether the access credential
@@ -1957,9 +1962,13 @@ caught, and it needs the copy in hand within half a minute of a rotation (§18).
 
 The records keep, with each spent refresh credential, what was issued in its place and whether it
 was retried, and with each access credential whether it was used (migration
-`0005_refresh_retry.sql`). An access credential is marked used in the statement that notes its
-device seen, so a request still makes one round trip to the records. Credentials from before the
-migration have no successor kept, so presenting one of those again is reuse.
+`0005_refresh_retry.sql`). An access credential is marked used by the lookup that lets its first
+request through, which costs that request a second round trip to the records; later requests make
+one, as before. A retry locks the access credential it is about to drop while it decides, so the
+two exclude each other. A request that was let in always rules out a retry, and a request waiting
+on a retry that dropped its credential is refused. That leaves only the case above: a copy that
+got there before the device used anything. Credentials from before the migration have no
+successor kept, so presenting one of those again is reuse.
 
 A client that retries keeps only the retry's answer. The first answer's credentials, should it
 arrive late, no longer work.

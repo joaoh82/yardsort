@@ -227,13 +227,9 @@ async fn a_refresh_credential_rotates_once_and_a_copy_revokes_the_device(
         Rotation::Rotated(device) => assert_eq!(device.id, phone.id),
         other => panic!("{other:?}"),
     }
+    // The device has what it was given: it uses it.
     let (found, _) = records.access(&h("second-access")).await.unwrap().unwrap();
     assert_eq!(found.id, phone.id);
-    // The device has what it was given: it uses it.
-    records
-        .seen(&phone.id, &h("second-access"), T + 150)
-        .await
-        .unwrap();
 
     // The first one again: only a copy could still hold it.
     let third = issued("third", T + 200);
@@ -448,13 +444,12 @@ async fn seen_is_written_at_most_once_a_minute(records: Arc<impl Records>) {
     let phone = enroll(&*records, &account, "phone", T).await;
     let last_seen = || async { records.devices(&account).await.unwrap()[0].last_seen_at };
     assert_eq!(last_seen().await, None);
-    let access = h("phone-access");
-    records.seen(&phone.id, &access, T + 1).await.unwrap();
+    records.seen(&phone.id, T + 1).await.unwrap();
     assert_eq!(last_seen().await, Some(T + 1));
-    records.seen(&phone.id, &access, T + 2).await.unwrap();
+    records.seen(&phone.id, T + 2).await.unwrap();
     assert_eq!(last_seen().await, Some(T + 1));
     records
-        .seen(&phone.id, &access, T + 1 + SEEN_RESOLUTION_MS)
+        .seen(&phone.id, T + 1 + SEEN_RESOLUTION_MS)
         .await
         .unwrap();
     assert_eq!(last_seen().await, Some(T + 1 + SEEN_RESOLUTION_MS));
@@ -746,10 +741,7 @@ async fn a_host_is_registered_moved_and_removed_within_its_account(records: Arc<
     assert!(records.hosts(&bob).await.unwrap().is_empty());
 
     // Its device's last use shows as the host's.
-    records
-        .seen(&first.id, &h("workstation-access"), T + 7)
-        .await
-        .unwrap();
+    records.seen(&first.id, T + 7).await.unwrap();
     let seen = records.host(&alice, &host.id).await.unwrap().unwrap();
     assert_eq!(seen.last_seen_at, Some(T + 7));
 
@@ -1613,6 +1605,126 @@ fn signals_travel_as_a_few_words_and_nothing_else_reads_as_one() {
 }
 
 // What only PostgreSQL has to do.
+
+/// A connection of the test's own to the test's schema, to hold a lock the way another request
+/// would.
+async fn raw(db: &common::pg::TestDatabase) -> tokio_postgres::Client {
+    let (client, connection) = db.config.connect(tokio_postgres::NoTls).await.unwrap();
+    tokio::spawn(connection);
+    client
+}
+
+/// A retry has locked the access credential issued in its place and dropped it. A request
+/// presenting that credential for the first time waits, and is then refused: it may not count as
+/// a use the retry did not see.
+#[tokio::test]
+async fn a_first_use_waits_for_a_retry_and_loses_to_it() {
+    let Some(db) = common::pg::database().await else {
+        return;
+    };
+    let records = db.records.clone();
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    enroll(&*records, &account, "phone", T).await;
+    records
+        .rotate(&h("phone-refresh"), issued("second", T + 100), T + 100)
+        .await
+        .unwrap();
+
+    let retry = raw(&db).await;
+    let second = h("second-access").0.to_vec();
+    retry.batch_execute("BEGIN").await.unwrap();
+    retry
+        .execute(
+            "SELECT used FROM access_credentials WHERE hash = $1 FOR UPDATE",
+            &[&second],
+        )
+        .await
+        .unwrap();
+    retry
+        .execute("DELETE FROM access_credentials WHERE hash = $1", &[&second])
+        .await
+        .unwrap();
+    let request = tokio::spawn({
+        let records = records.clone();
+        async move { records.access(&h("second-access")).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!request.is_finished(), "the first use waits for the retry");
+    retry.batch_execute("COMMIT").await.unwrap();
+    assert!(request.await.unwrap().unwrap().is_none());
+    db.drop().await;
+}
+
+/// What was issued in place of a spent refresh credential is gone, which nothing does within the
+/// window today: presenting it again is then reuse, as in the memory store.
+#[tokio::test]
+async fn a_spent_refresh_credential_whose_successor_is_gone_is_a_copy() {
+    let Some(db) = common::pg::database().await else {
+        return;
+    };
+    let records = db.records.clone();
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    enroll(&*records, &account, "phone", T).await;
+    records
+        .rotate(&h("phone-refresh"), issued("second", T + 100), T + 100)
+        .await
+        .unwrap();
+    raw(&db)
+        .await
+        .execute(
+            "DELETE FROM refresh_credentials WHERE hash = $1",
+            &[&h("second-refresh").0.to_vec()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        records
+            .rotate(&h("phone-refresh"), issued("again", T + 200), T + 200)
+            .await
+            .unwrap(),
+        Rotation::Reused(account)
+    );
+    db.drop().await;
+}
+
+/// A request is using the access credential issued in place of a spent refresh credential. That
+/// refresh credential presented again waits for the request, and is then a copy.
+#[tokio::test]
+async fn a_retry_waits_for_a_first_use_and_loses_to_it() {
+    let Some(db) = common::pg::database().await else {
+        return;
+    };
+    let records = db.records.clone();
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    enroll(&*records, &account, "phone", T).await;
+    records
+        .rotate(&h("phone-refresh"), issued("second", T + 100), T + 100)
+        .await
+        .unwrap();
+
+    let request = raw(&db).await;
+    request.batch_execute("BEGIN").await.unwrap();
+    request
+        .execute(
+            "UPDATE access_credentials SET used = TRUE WHERE hash = $1",
+            &[&h("second-access").0.to_vec()],
+        )
+        .await
+        .unwrap();
+    let copy = tokio::spawn({
+        let records = records.clone();
+        async move {
+            records
+                .rotate(&h("phone-refresh"), issued("copy", T + 200), T + 200)
+                .await
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!copy.is_finished(), "the retry waits for the first use");
+    request.batch_execute("COMMIT").await.unwrap();
+    assert_eq!(copy.await.unwrap().unwrap(), Rotation::Reused(account));
+    db.drop().await;
+}
 
 #[tokio::test]
 async fn a_server_keeps_its_id_and_its_schema_across_restarts() {

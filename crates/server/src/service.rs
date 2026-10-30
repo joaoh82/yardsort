@@ -382,7 +382,7 @@ impl<R: Records> ControlService<R> {
             return Err(signed_out());
         }
         self.records
-            .seen(&device.id, &hash, now)
+            .seen(&device.id, now)
             .await
             .map_err(unreadable)?;
         Ok(Caller {
