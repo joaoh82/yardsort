@@ -61,7 +61,15 @@ export function RemoteSettings() {
           setStatus(answer.status);
           useRemoteStore.getState().settled(answer.requests);
         })
-        .catch((reason) => live && setError(errorMessage(reason)));
+        .catch(async (reason) => {
+          // The server did not answer, but where this computer stands is known here: shown, so
+          // nothing from before is left up as if it were still so.
+          const here = await ipc.remoteStatus().catch(() => null);
+          if (!live) return;
+          if (here) show(here);
+          // A link that gave up says why itself.
+          setError(here?.host?.link.kind === "stopped" ? null : errorMessage(reason));
+        });
     void poll();
     const timer = window.setInterval(() => void poll(), POLL_MS);
     // A device asking is shown at once, not at the next look.
@@ -76,6 +84,9 @@ export function RemoteSettings() {
   if (!status) {
     return error ? <p role="alert">{error}</p> : null;
   }
+  // Signed out at the server, or no longer a host there: nothing here can reach it until Remote is
+  // turned off and on again.
+  const stopped = status.host?.link.kind === "stopped";
 
   const run = async (action: () => Promise<RemoteStatus>) => {
     setBusy(true);
@@ -123,24 +134,26 @@ export function RemoteSettings() {
             <p className="text-ink-faint">Its sign-in is kept {status.credentials}.</p>
             <LinkLine link={status.host.link} />
             <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  setError(null);
-                  try {
-                    setPairing(await ipc.remotePair());
-                  } catch (reason) {
-                    setError(errorMessage(reason));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-                className={primaryButtonClass}
-              >
-                Pair a device
-              </button>
+              {!stopped && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    setError(null);
+                    try {
+                      setPairing(await ipc.remotePair());
+                    } catch (reason) {
+                      setError(errorMessage(reason));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className={primaryButtonClass}
+                >
+                  Pair a device
+                </button>
+              )}
               <button
                 type="button"
                 disabled={busy}
@@ -155,9 +168,9 @@ export function RemoteSettings() {
             </div>
           </section>
 
-          {pairing && <Pairing pairing={pairing} onDone={() => setPairing(null)} />}
+          {pairing && !stopped && <Pairing pairing={pairing} onDone={() => setPairing(null)} />}
 
-          {requests.length > 0 && (
+          {requests.length > 0 && !stopped && (
             <section aria-label="Waiting for you" className="grid gap-2">
               <h4 className="text-ink-muted">Waiting for you</h4>
               {requests.map((request) => (
@@ -180,7 +193,9 @@ export function RemoteSettings() {
 
           <section aria-label="Devices let in" className="grid gap-2">
             <h4 className="text-ink-muted">Devices let in</h4>
-            {status.devices.length === 0 ? (
+            {stopped ? (
+              <p className="text-ink-faint">None can reach this computer now.</p>
+            ) : status.devices.length === 0 ? (
               <p className="text-ink-faint">None yet.</p>
             ) : (
               <ul className="grid gap-1">

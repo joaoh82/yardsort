@@ -2,12 +2,12 @@
 //! PTYs: devices come through the link, a failed link lets go of everything they held while the
 //! programs run on, and the connector comes back by itself. Activity a device follows reaches it
 //! without its asking again. The relay's notices reach the host, and ones it does not know are
-//! let be.
+//! let be. A link closed by something in between says the code it was closed with.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -466,5 +466,42 @@ async fn the_relays_notices_reach_the_host_and_unknown_ones_are_let_be() {
     let (channel, welcome) = text(&mut socket).await;
     assert_eq!(channel, 1);
     assert!(welcome.get("welcome").is_some(), "{welcome}");
+    connector.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_closed_by_something_in_between_says_its_code() {
+    let mut relay = FakeRelay::start().await;
+    let here = here();
+    let connector = Connector::start(
+        HostId::new("host-test").unwrap(),
+        Arc::new(Credentials(relay.base.clone())),
+        Arc::clone(&here) as Arc<dyn Serving>,
+    );
+    let mut socket = relay.next_socket().await;
+
+    // A proxy going away closes with a code of its own, not one of the relay's reasons.
+    socket
+        .send(Message::Close(Some(CloseFrame {
+            code: 1001,
+            reason: "going away".into(),
+        })))
+        .await
+        .unwrap();
+    let start = Instant::now();
+    let why = loop {
+        if let Status::Waiting { why, .. } = connector.status() {
+            break why;
+        }
+        assert!(
+            start.elapsed() < SOON,
+            "the connector did not wait to connect again"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    };
+    assert_eq!(why, "The relay closed the link: closed (code 1001).");
+
+    // And connects again by itself.
+    let _socket = relay.next_socket().await;
     connector.stop().await;
 }

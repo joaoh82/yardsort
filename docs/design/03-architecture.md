@@ -619,7 +619,10 @@ remote ever talks to it directly. Instead:
 - `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
   Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of
   its own with `yardsort_core::remote::serve`. When the link fails, every channel lets go of what
-  its device watched and controlled; the terminals are the daemon's and run on.
+  its device watched and controlled; the terminals are the daemon's and run on. Why the link
+  closed or could not open goes to standard error. It gives up only when the server refuses this
+  computer (signed out there, or no longer a host), and Settings → Remote then offers only
+  **Turn off**.
 - `yardsort_core::remote::host` is this machine as a host: its server, the devices its person
   approved here (kept only when they approve, and only ever removed by what the server says), and
   `CredentialStore`, behind which the app puts the OS credential store and a headless host a

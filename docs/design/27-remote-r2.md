@@ -24,7 +24,8 @@ to pair, and the app says so wherever its window is (§13). The eleventh (2026-1
 revocation or a pairing request made through any instance, or by the operator, reaches every
 instance at once (§14). The twelfth (2026-10-29): a host's link replaced on another instance
 closes at once, and rate limits count across every instance (§15). With it R2's code is complete;
-its exit review is §20, and R2 closes once staging has run what it still owes. The proposal is
+its exit review is §20. Staging ran the smoke tests it still owed on 2026-10-30, which found two
+things fixed with the record of them (§16), and R2 is done. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -797,6 +798,53 @@ go-ahead. Many addresses together are still not limited as a whole (§18).
 
 ## 16 · Verification
 
+On Linux and staging, 2026-10-30, the smoke tests staging still owed (§20), with `main` at
+`1ecfce7` deployed as release v4:
+
+- **Staging's smoke tests** (§19), run by a person with the app and the pairing tool, and by this
+  session with `curl`, `fly logs` and `fly scale`:
+  - **One Machine:** slices 6, 7, 8, 10 and 11 passed. The link held over Fly's proxy for minutes
+    with nothing happening. Revoking a device closed its socket within about a second, and the
+    operator's `revoke-account` closed the app's link and the tool's socket in the second the
+    command ran. The first try at that step was given an id other than the signed-in account's:
+    the command found an account, said it revoked none of its devices, and closed nothing. That
+    line is easy to pass over, so §19 now says to read it.
+  - **Two Machines** (`fly scale count 2`, then back to one): slice 9 passed. Twice, the tool's
+    ticket request and socket reached the Machine without the host's link, were answered `409`
+    and were served on the other. Slice 11 passed: a revoke that reached one Machine closed the
+    tool's socket on the other within a second. Slice 12 passed: of seventy token requests, 65
+    were answered `401` and 5 `429`, by both Machines (30 and 40), neither of which saw enough to
+    refuse on its own count. Five more than sixty got through because the loop took five seconds
+    and the bucket refills one a second. Slice 11's `revoke-account` was not repeated: the
+    command signals through the database from a process of its own, as it did on one Machine.
+  - Fly stopped the second Machine as excess capacity after about six minutes with nothing open
+    on it, and again after it was started by hand (`auto_stop_machines`, with
+    `min_machines_running = 0`). The one holding the app's link ran on for three hours. A
+    two-Machine test on staging has minutes, not hours.
+  - **Logs:** what `fly logs` still held of the one-Machine run, and all of the two-Machine run,
+    recorded as it happened, have no credential, code, ticket, typed text, device or host name,
+    event or path.
+- **Found by them, and fixed:**
+  - After `revoke-account`, Settings → Remote went on showing the link connected, one device
+    connected and the phone let in, under the server's bare "Sign in again.". The section's poll
+    asks the server first, and once that was refused nothing below it was read again. Now a
+    refused poll shows this computer's own status; once the link has given up, its line alone
+    says why, and the section offers only **Turn off**. A request made with this computer's own
+    credential that is refused says "This computer was signed out at the server. Turn Remote off,
+    then on again.", and the link the same. Tests: `RemoteSettings` (1 new, which fails without
+    the change) and the app's `remote::tests` (1 new).
+  - On two Machines, at 11:01:05 UTC, the app's link closed with the tool on it. The server saw
+    the host's socket end ("the other end left") and told the tool its host was offline; the app
+    connected again a second later, to the other Machine, and its programs ran on throughout.
+    The tool said only "closed": a close frame with a code that is not one of the relay's, which
+    neither end sends, so something in between does, most likely Fly's proxy. Nothing recorded
+    more, so the cause is not known. Now the relay client keeps a close frame's code when the
+    reason is not the relay's (`closed (code 1001)`), and the connector writes why its link
+    closed or could not open to the app's standard error
+    (`remote: not connected to the relay, trying again in 1 s: …`), since Settings shows it for
+    only a second. Test: `connector::a_link_closed_by_something_in_between_says_its_code`, which
+    fails without the code.
+
 On Linux, 2026-10-29, the twelfth slice:
 
 - `yardsort-server`, the records (2 new tests, on each store): a rate limit is one bucket per
@@ -1367,7 +1415,7 @@ losing a live stream, and relay failure leaving PTYs alive.
     limits shared across instances.~~ Built (§15); done once its smoke test (§19) passes here,
     and on staging with a second Machine.
 
-Every item is built. Where R2 stands against its gate, and what staging still owes, is §20.
+Every item is built. Where R2 stands against its gate, and what staging showed, is §20.
 
 ## 18 · Risks
 
@@ -1499,8 +1547,14 @@ Every item is built. Where R2 stands against its gate, and what staging still ow
 - **Following everything ends with nothing to say when the grant shrinks.** A workspace that
   leaves the grant or is forgotten simply stops appearing in it; only a subscription that named
   the workspace is told it ended.
-- **Whether an open relay socket keeps staging's Machine awake** is Fly's proxy's call, not yet
-  watched. If it stops anyway, the host's next try wakes it within its minute of backing off.
+- **An open relay socket keeps a Machine awake.** On staging, on 2026-10-30, the Machine holding
+  the app's link ran for three hours, while a second one with nothing open was stopped after
+  about six minutes. Fly's proxy decides; if it stops one anyway, the host's next try wakes it
+  within its minute of backing off.
+- **A link can close for a reason neither end sees.** Once on staging (§16), something between
+  the app and the server closed the app's link and a device's socket together. Both connected
+  again by themselves, and nothing on the host stopped. The code it closed with and the
+  connector's reason are now logged, so another time says more.
 
 ## 19 · Smoke tests
 
@@ -1673,9 +1727,12 @@ steps 2 and 3 of slice 6 with `/tmp/ys11`, `/tmp/ys11-wt` and `/tmp/ys11-credent
 3. Pair again and leave the tool watching. Revoke the account as its operator, from another
    terminal:
    `set -a; . crates/server/dev/server.env.local; set +a; cargo run -q -p yardsort-server -- revoke-account --subject <id>`,
-   with the id of `developer@yardsort.test` from ZITADEL's console. It says running servers close
-   their live connections now; within a second the tool says access was revoked, and Settings →
-   Remote says this computer was signed out. Turn Remote off.
+   with the id of `developer@yardsort.test` from ZITADEL's console: the number at the end of the
+   user's page's address, without brackets. It says how many devices it revoked, at least the
+   app's and the tool's (with none, the id was another account's), and that running servers close
+   their live connections now. Within a second the tool says access was revoked, and Settings →
+   Remote says this computer was signed out at the server, lists no device and offers only
+   **Turn off**. Turn Remote off.
 
 **Slice 12, on this machine.** A host connecting again while its old link still looks alive takes
 a network that drops without a word, so that half is left to the tests. The shared rate limits:
@@ -1738,8 +1795,8 @@ answering. Then `fly scale count 1` again.
 ## 20 · R2's exit review
 
 Written on 2026-10-29, after the twelfth slice. R2's code is complete, and the gate's three checks
-have tests that pass. R2 closes once staging has run what it still owes (below); until then the
-roadmap keeps it open.
+have tests that pass. R2 was to close once staging had run what it still owed; it did on
+2026-10-30 (below), and R2 is done.
 
 ### The deliverables
 
@@ -1819,13 +1876,19 @@ run on each store also run against PostgreSQL, which CI requires there
 - **The license.** The server is AGPL-3.0 since 2026-10-28 ([30](30-open-source-and-managed.md));
   the rest keeps the repository's license and notices.
 
-### What staging still owes
+### What staging showed
 
-Each needs a deploy of the current `main`, and the owner's go-ahead.
+On 2026-10-30, with `main` deployed and the owner's go-ahead (§16):
 
-1. **One Machine:** the smoke tests (§19) of slices 6, 7, 8, 10 and 11. Slices 3 and 4 passed
-   there already; slice 5 runs nothing on the server.
-2. **Two Machines** (`fly scale count 2`): the smoke tests of slices 9, 11 and 12. Then back to one.
+1. **One Machine:** the smoke tests (§19) of slices 6, 7, 8, 10 and 11 passed. Slices 3 and 4
+   had passed there already; slice 5 runs nothing on the server.
+2. **Two Machines** (`fly scale count 2`, then back to one): the smoke tests of slices 9, 11 and
+   12 passed.
+
+They found two things, both fixed with this record: Settings → Remote kept showing a computer
+signed out at the server as connected, with its devices; and a link that closed by itself left
+nothing that said why. The gate's third check was seen there too: when that link closed, the app
+connected again to the other Machine within a second, and its programs ran on.
 
 Production is not part of R2's exit: its deploy comes with its own ZITADEL instance
 ([28](28-remote-infrastructure.md)).

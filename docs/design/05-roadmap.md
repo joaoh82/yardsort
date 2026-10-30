@@ -868,8 +868,8 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       Found on the way and fixed: a snapshot taken between two halves of an escape sequence or
       a character showed the rest as text, or lost a byte (`vt100` 0.16 drops one after a split
       character).
-- [ ] R2: identity and relay, code complete on 2026-10-29, closing once staging has run its
-      smoke tests ([27](27-remote-r2.md); exit review in
+- [x] R2: identity and relay, done on 2026-10-30, once staging had run its smoke tests
+      ([27](27-remote-r2.md); exit review in
       [27 §20](27-remote-r2.md#20--r2s-exit-review)). The self-host recipe's
       identity provider is ZITADEL; the server takes any OIDC issuer. Twelve slices built: a person
       signs in at the provider once per device, and the device then holds the server's own
@@ -893,7 +893,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       three checks have tests: another account reaches nothing, a revoked device's live socket
       closes within seconds, and the relay failing leaves the program running with the person
       here in control. Found on the way and fixed: a session
-      open in the app and `ys attach` answered a program's questions twice.
+      open in the app and `ys attach` answered a program's questions twice; and, on staging,
+      Settings → Remote went on showing a computer signed out at the server as connected, with
+      its devices.
 - [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

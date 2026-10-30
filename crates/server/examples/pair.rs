@@ -764,7 +764,10 @@ async fn through_relay(
                         }
                     }
                     Err(reason) => {
-                        return Err(format!("the relay closed the socket: {}", reason.text()))
+                        return Err(format!(
+                            "the relay closed the socket: {}",
+                            reader.describe(reason)
+                        ))
                     }
                 }
             }
