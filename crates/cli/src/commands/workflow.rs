@@ -285,7 +285,7 @@ impl runs::Look for Looking<'_> {
 }
 
 /// The workspace this is run in: the agent's own, from its launch environment, or the folder.
-fn here(ys: &Yardsort) -> Result<WorkspaceRow, Failure> {
+pub(crate) fn here(ys: &Yardsort) -> Result<WorkspaceRow, Failure> {
     let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
     let cwd = std::env::current_dir().map_err(|e| Failure::new(format!("cwd: {e}")))?;
     let located = memory::locate(

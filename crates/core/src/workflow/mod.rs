@@ -14,7 +14,9 @@ pub mod driver;
 pub mod engine;
 mod parse;
 pub mod runs;
-pub mod template;
+
+/// Shared with smoke tests: `{{ variables }}` are written the same way in both.
+pub use crate::template;
 
 use std::path::{Path, PathBuf};
 
@@ -23,6 +25,7 @@ use specta::Type;
 
 use crate::error::{IpcError, IpcResult};
 
+pub use crate::yaml::{Invalid, Problem};
 pub use parse::{parse, step_lines};
 
 /// The schema version this build reads. A file asking for a later one is listed, not run.
@@ -188,53 +191,6 @@ pub enum PrActivity {
     Any,
 }
 
-/// One thing wrong with a file, where it is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct Problem {
-    /// 1-based. `None` when the problem is the file as a whole.
-    pub line: Option<u32>,
-    pub column: Option<u32>,
-    pub message: String,
-}
-
-impl Problem {
-    pub fn at(line: usize, column: usize, message: impl Into<String>) -> Self {
-        Self {
-            line: Some(line as u32),
-            column: Some(column as u32),
-            message: message.into(),
-        }
-    }
-
-    pub fn whole(message: impl Into<String>) -> Self {
-        Self {
-            line: None,
-            column: None,
-            message: message.into(),
-        }
-    }
-}
-
-impl std::fmt::Display for Problem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (self.line, self.column) {
-            (Some(line), Some(column)) => write!(f, "{line}:{column}: {}", self.message),
-            (Some(line), None) => write!(f, "{line}: {}", self.message),
-            _ => f.write_str(&self.message),
-        }
-    }
-}
-
-/// A file that did not check out. Whatever could be read of it comes along, so it can still be
-/// listed by name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Invalid {
-    pub id: Option<String>,
-    pub name: Option<String>,
-    pub problems: Vec<Problem>,
-}
-
 /// Where a workflow came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(
@@ -398,7 +354,7 @@ pub fn copy(data_dir: &Path, id: &str, as_id: Option<&str>) -> IpcResult<PathBuf
         )
     })?;
     let target = as_id.unwrap_or(id);
-    if !parse::is_id(target) {
+    if !crate::yaml::is_id(target) {
         return Err(IpcError::new(
             "workflow_invalid_id",
             format!(
@@ -487,7 +443,7 @@ pub fn save(data_dir: &Path, path: Option<&Path>, text: &str) -> IpcResult<PathB
         Ok(workflow) => Some(workflow.id),
         Err(invalid) => invalid.id,
     }
-    .filter(|id| parse::is_id(id))
+    .filter(|id| crate::yaml::is_id(id))
     .ok_or_else(|| {
         IpcError::new(
             "workflow_invalid_id",

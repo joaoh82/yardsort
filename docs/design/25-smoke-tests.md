@@ -453,7 +453,7 @@ other than manual exists.
 
 Each is one pull request with its docs, tests and changelog line, each standing on its own.
 
-1. **The file and the core.** `yardsort_core::smoke`: the schema types, the parser sharing the
+1. **The file and the core.** ✅ `yardsort_core::smoke`: the schema types, the parser sharing the
    workflow's spanned-YAML machinery (moved into `crates/core/src/yaml.rs`), the validator with
    line and column, the variable checker over the new namespaces, the `shell`-has-no-braces
    rule, the catalog of a worktree's `.yardsort/tests`, `ys test list | show | validate |
@@ -487,6 +487,36 @@ example | guide`, and `docs/guide/smoke-tests.md` with the format. Fixtures: one
 Slices 1 and 2 work with no window but for approval, which is the point: a test queued by a
 workflow or, later, a schedule needs nothing the window has except a person to approve a new
 file once.
+
+## Slice 1: what shipped
+
+`yardsort_core::smoke` reads and checks files; nothing runs yet. What changed from the proposal
+above, and why:
+
+- **The shared machinery is two modules at the crate root,** `yaml.rs` (the problem type, serde's
+  errors tidied, the lenient heading read, positions, durations, names, "did you mean") and
+  `template.rs` (moved from `workflow/`), rather than one `yaml.rs`. The workflow module
+  re-exports both, so nothing that used them moved. The spanned raw structs stay with each parser:
+  what a key means is each file's own business.
+- **Defaults are explicit in the parsed form.** `expect.exit` is `0` and `expect.status` is `2xx`
+  unless the file says, and the parsed `ProcessExpect` and `HttpExpect` carry that, so the runner
+  reads one shape. The proposal's "with no `expect`, exit 0" became "exit 0 unless said", which
+  is what people mean when they write only `stdout_contains`.
+- **`json` bodies and expectations are JSON text,** not a tree: the YAML mapping is written out
+  as one line of JSON, with any `{{ variables }}` still inside it to render at run time. The
+  generated bindings have no type for an arbitrary tree, and the runner wants text anyway.
+- **A wrong key in a browser action is reported once.** `fill: { selector, value }` says `fill`
+  has no `value`; it does not also say `text` is missing, since the one is the other misnamed.
+- **The run's variables reach `shell` as `YS_…` environment variables,** and every `run` and
+  `start` process gets them too, so a script a test calls can read them. The names are in the
+  guide and the validator's message.
+- **The guide is tested.** Every ` ```yaml ` block in `smoke::GUIDE` is a whole file, and a
+  test parses each; a block that stops validating fails the build.
+- **`ys test list` with no tests** says where the folder is and how to start one, rather than
+  printing an empty table.
+- **Not here:** readiness beyond "ready" or "N problems". Whether a `browser` test has a browser
+  on the machine is the finder's answer, which is slice 4; `--json` says `usesBrowser` so a
+  caller can tell.
 
 ## Not in version one, on purpose
 

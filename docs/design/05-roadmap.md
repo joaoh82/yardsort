@@ -863,6 +863,11 @@ Proposed in [25-smoke-tests](25-smoke-tests.md), after a six-question design pas
 - Six slices, each its own pull request: file and core; the runner and `ys test`; the UI;
   browser steps over the DevTools protocol; agents and workflows; the Tests view, docs and
   pictures.
+- [x] Slice 1: the file format, the parser sharing the workflow parser's machinery (now
+      `yaml.rs` and `template.rs` in the core), the validator with a line and column on every
+      problem, the catalog of a worktree's `.yardsort/tests`, the five reading commands of
+      `ys test` (list, show, validate, example, guide), and the guide. Recorded in
+      [25 § slice 1](25-smoke-tests.md#slice-1-what-shipped).
 
 _Exit:_ on all three platforms, an agent in a workspace writes a test with `run`, `http`,
 `browser` and `manual` steps, runs it, and is told in its own terminal which step failed and

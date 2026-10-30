@@ -119,6 +119,12 @@ export const DOCS_NAV: DocSection[] = [
           "Create reusable agent workflows in YAML, inspect their steps, run code reviews and follow workflow runs in Yardsort or through ys.",
       },
       {
+        slug: "guide/smoke-tests",
+        title: "Smoke tests",
+        description:
+          "Write smoke tests as YAML files in your repository: typed steps, expectations, browser actions and variables, checked line by line with ys test validate.",
+      },
+      {
         slug: "guide/updates",
         title: "Updates",
         description:

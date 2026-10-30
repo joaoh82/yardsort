@@ -6990,6 +6990,7 @@ dependencies = [
  "libc",
  "pty-host",
  "pty-ipc",
+ "regex",
  "rusqlite",
  "serde",
  "serde-saphyr",

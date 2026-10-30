@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Smoke tests: the file format and `ys test`.** A smoke test is a YAML file in your
+  repository, `.yardsort/tests/<id>.yaml`: setup, steps and teardown in order, with typed steps
+  (`run`, `shell`, `start`, `wait_for`, `http`, `browser`, `manual`), expectations, and
+  `{{ variables }}` checked when the file is read. `ys test validate` names every mistake at its
+  line and column, `ys test list` and `show` read a workspace's tests, `ys test example` prints
+  one to start from and `ys test guide` tells an agent how to write one. Running a test from
+  Yardsort comes in a later release. See [Smoke tests](docs/guide/smoke-tests.md).
+
 ## 0.20.2
 
 - **An AppImage updated from inside the app now starts the new version clean.** The old

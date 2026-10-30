@@ -32,6 +32,8 @@ specta = "=2.0.0-rc.25"
 # Workflow files. Chosen over `serde_yaml`, which is archived, for its maintained parser and
 # its `Spanned` values: a mistake deep in a file is reported at its own line, not the file's.
 serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
+# A smoke test's `stdout_matches` and `body_matches` are checked to compile when the file is read.
+regex = "1"
 
 # `setsid` and `flock`, for putting the daemon out of reach of signals meant for the app.
 [target.'cfg(unix)'.dependencies]
