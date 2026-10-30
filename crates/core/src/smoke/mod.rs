@@ -256,6 +256,8 @@ pub enum ExitExpect {
 #[serde(rename_all = "camelCase")]
 pub struct JsonExpect {
     pub path: String,
+    /// The expected value as JSON text, so its type is kept: `ok` is `"ok"`, `1` is `1`, `true`
+    /// is `true`, and `"1"` stays a string.
     pub equals: String,
 }
 

@@ -320,6 +320,30 @@ fn exit_is_a_code_or_nonzero() {
 }
 
 #[test]
+fn stdout_json_keeps_the_type_of_the_expected_value() {
+    let equals = |value: &str| {
+        let test = parse(&with_steps(&format!(
+            "  - id: x\n    action: run\n    program: ls\n    expect:\n      stdout_json: {{ path: count, equals: {value} }}\n"
+        )))
+        .unwrap();
+        let Action::Run { expect, .. } = &test.steps[1].action else {
+            panic!()
+        };
+        expect.stdout_json.clone().unwrap().equals
+    };
+    assert_eq!(equals("1"), "1");
+    assert_eq!(equals("'1'"), "\"1\"");
+    assert_eq!(equals("ok"), "\"ok\"");
+    assert_eq!(equals("true"), "true");
+    assert_eq!(equals("[1, 2]"), "[1,2]");
+    assert_eq!(equals("\"{{ inputs.user }}\""), "\"{{ inputs.user }}\"");
+    let found = problem(&with_steps(
+        "  - id: x\n    action: run\n    program: ls\n    expect:\n      stdout_json: { path: count, equals: \"{{ inputs.nope }}\" }\n",
+    ));
+    assert!(found.contains("no input `nope`"), "{found}");
+}
+
+#[test]
 fn an_http_expectation_on_a_run_step_is_named_as_such() {
     let found = problem(&with_steps(
         "  - id: x\n    action: run\n    program: ls\n    expect:\n      status: 200\n",
@@ -354,6 +378,19 @@ fn wait_for_waits_for_exactly_one_thing() {
         found.contains("`url` is a second thing to wait for"),
         "{found}"
     );
+    for target in ["port: 80", "url: http://localhost/", "file: ready.txt"] {
+        let found = problem(&with_steps(&format!(
+            "  - id: x\n    action: wait_for\n    {target}\n    args: [\"{{{{ inputs.nope }}}}\"]\n"
+        )));
+        assert!(
+            found.contains("`args` goes with `program`"),
+            "{target}: {found}"
+        );
+    }
+    let found = problem(&with_steps(
+        "  - id: x\n    action: wait_for\n    program: test\n    args: [-f, \"{{ inputs.nope }}\"]\n",
+    ));
+    assert!(found.contains("no input `nope`"), "{found}");
     let found = problem(&with_steps(
         "  - id: x\n    action: wait_for\n    port: 70000\n",
     ));
@@ -421,6 +458,32 @@ fn browser_actions_are_one_key_each_from_the_vocabulary_with_the_right_shape() {
     );
     let found = problem(&step("fill: { selector: \"#name\", value: x }"));
     assert!(found.contains("`fill` has no `value`"), "{found}");
+    let found = problem(&step("fill: { selector: \"\", text: hi }"));
+    assert!(found.contains("`fill` needs `selector`"), "{found}");
+    let found = problem(&step("wait_for: { text: \"\" }"));
+    assert!(found.contains("`wait_for` needs `text`"), "{found}");
+    // Empty data is data: clearing a field, choosing the blank option.
+    let test = parse(&step(
+        "fill: { selector: \"#name\", text: \"\" }\n      - select: { selector: \"#plan\", value: \"\" }",
+    ))
+    .unwrap();
+    let Action::Browser { actions, .. } = &test.steps[1].action else {
+        panic!()
+    };
+    assert_eq!(
+        actions[0],
+        BrowserAction::Fill {
+            selector: "#name".into(),
+            text: String::new()
+        }
+    );
+    assert_eq!(
+        actions[1],
+        BrowserAction::Select {
+            selector: "#plan".into(),
+            value: String::new()
+        }
+    );
     let found = problem(&step("goto: \"\""));
     assert!(found.contains("`goto` takes an address"), "{found}");
     let found = problem(&step("screenshots: never\n      - goto: http://a/"));

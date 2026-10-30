@@ -123,15 +123,15 @@ Every step has an `id`, named the same way as an input, and an `action`. Each ma
 `timeout` (`5m` when left out), except `start`, which runs to the end of the test, and `manual`,
 which waits for a person.
 
-| Action     | Keys                                                                                                                       | What it does                                                                                                                                                                                    |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`      | `program` (required), `args`, `cwd`, `env`, `stdin`, `expect`                                                              | Runs a program with its arguments, each argument its own item of the list, and waits for it to exit. Passes when every expectation holds; with none given, when it exits 0.                     |
-| `shell`    | `line` (required), `cwd`, `env`, `expect`                                                                                  | Runs one line in your shell, for pipes: the login shell on Unix, PowerShell on Windows. Passes as `run` does.                                                                                   |
-| `start`    | `program` (required), `args`, `cwd`, `env`                                                                                 | Starts a program and leaves it running, a dev server for example, until the end of the test, when it is stopped.                                                                                |
-| `wait_for` | One of `port`, `url`, `file`, or `program` with `args`; `interval` (`1s` when left out)                                    | Waits until a port on localhost accepts a connection, an address answers 2xx, a file exists, or a program exits 0, asking again every `interval`. Fails when the `timeout` runs out first.      |
-| `http`     | One of `get`, `post`, `put`, `delete`, `patch` with the address; `headers`, `body` or `json`, `expect`                     | Makes one request. `json` is sent as JSON with the matching content type. Passes when every expectation holds; with none given, on any 2xx.                                                     |
-| `browser`  | `do` (required), `screenshots` (`on_failure` when left out, `every_step`, `never`), `viewport` (like `1280x800`), `headed` | Opens a page in a Chromium found on your machine, headless unless `headed: true`, and does each action in `do` in turn. A failing action takes a screenshot; `every_step` takes one after each. |
-| `manual`   | `prompt` (required)                                                                                                        | Shows `prompt` to a person and waits for **Pass** or **Fail**, with an optional note. The half of a smoke test a machine cannot judge stays in the file.                                        |
+| Action     | Keys                                                                                                                       | What it does                                                                                                                                                                                                                |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`      | `program` (required), `args`, `cwd`, `env`, `stdin`, `expect`                                                              | Runs a program with its arguments, each argument its own item of the list, and waits for it to exit. Passes when every expectation holds; with none given, when it exits 0.                                                 |
+| `shell`    | `line` (required), `cwd`, `env`, `expect`                                                                                  | Runs one line in your shell, for pipes: the login shell on Unix, PowerShell on Windows. Passes as `run` does.                                                                                                               |
+| `start`    | `program` (required), `args`, `cwd`, `env`                                                                                 | Starts a program and leaves it running, a dev server for example, until the end of the test, when it is stopped.                                                                                                            |
+| `wait_for` | One of `port`, `url`, `file`, or `program` with `args`; `interval` (`1s` when left out)                                    | Waits until a port on localhost accepts a connection, an address answers 2xx, a file exists, or a program exits 0, asking again every `interval`. `args` goes with `program` only. Fails when the `timeout` runs out first. |
+| `http`     | One of `get`, `post`, `put`, `delete`, `patch` with the address; `headers`, `body` or `json`, `expect`                     | Makes one request. `json` is sent as JSON with the matching content type. Passes when every expectation holds; with none given, on any 2xx.                                                                                 |
+| `browser`  | `do` (required), `screenshots` (`on_failure` when left out, `every_step`, `never`), `viewport` (like `1280x800`), `headed` | Opens a page in a Chromium found on your machine, headless unless `headed: true`, and does each action in `do` in turn. A failing action takes a screenshot; `every_step` takes one after each.                             |
+| `manual`   | `prompt` (required)                                                                                                        | Shows `prompt` to a person and waits for **Pass** or **Fail**, with an optional note. The half of a smoke test a machine cannot judge stays in the file.                                                                    |
 
 A key that belongs to another action is reported as misplaced. `prompt` on a `run` step is an
 example.
@@ -162,13 +162,13 @@ the same on every platform.
 
 Under `expect`, for `run` and `shell`:
 
-| Key               | What it checks                                                                      |
-| ----------------- | ----------------------------------------------------------------------------------- |
-| `exit`            | The exit code: a number, or `nonzero`. `0` when left out.                           |
-| `stdout_contains` | The output has this text.                                                           |
-| `stdout_matches`  | The output matches this regular expression. One that does not compile is reported.  |
-| `stderr_empty`    | `true`: nothing was written to standard error.                                      |
-| `stdout_json`     | `{ path: status, equals: ok }`: the output is JSON and has this value at this path. |
+| Key               | What it checks                                                                                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exit`            | The exit code: a number, or `nonzero`. `0` when left out.                                                                                                                                     |
+| `stdout_contains` | The output has this text.                                                                                                                                                                     |
+| `stdout_matches`  | The output matches this regular expression. One that does not compile is reported.                                                                                                            |
+| `stderr_empty`    | `true`: nothing was written to standard error.                                                                                                                                                |
+| `stdout_json`     | `{ path: status, equals: ok }`: the output is JSON and has this value at this path. `equals` is compared as JSON: `ok` is the string, `1` the number, `true` the boolean, and `"1"` a string. |
 
 For `http`:
 
@@ -194,7 +194,7 @@ text. Every action waits for its selector to exist and be visible before acting,
 | ---------------- | ----------------------------------------------- |
 | `goto`           | An address                                      |
 | `click`          | A selector                                      |
-| `fill`           | `{ selector, text }`                            |
+| `fill`           | `{ selector, text }`; an empty `text` clears it |
 | `press`          | A key, to the focused element: `Enter`, `Tab`   |
 | `select`         | `{ selector, value }`                           |
 | `wait_for`       | A selector, or `{ text: … }`                    |

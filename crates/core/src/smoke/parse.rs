@@ -280,7 +280,8 @@ impl RawExpect {
 #[serde(deny_unknown_fields)]
 struct RawJsonExpect {
     path: Spanned<String>,
-    equals: Spanned<NumberOrText>,
+    /// Any JSON value, kept as one: `1` and `"1"` are different answers.
+    equals: Spanned<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -749,6 +750,13 @@ impl Checker<'_> {
         .collect();
         let usage = "A `wait_for` step waits for one thing: `port`, `url`, `file`, or `program` \
                      with `args`.";
+        if let (Some(args), None) = (&raw.args, &raw.program) {
+            self.problem(
+                &args.referenced,
+                "`args` goes with `program`. A `wait_for` on a port, an address or a file takes \
+                 none.",
+            );
+        }
         match given.as_slice() {
             [] => {
                 self.problem(&raw.action.referenced, usage);
@@ -909,14 +917,11 @@ impl Checker<'_> {
             if json.value.path.value.trim().is_empty() {
                 self.problem(&json.value.path.referenced, "`path` is empty.");
             }
-            self.placeholders(
-                &json.value.equals.referenced,
-                &json.value.equals.value.text(),
-                scope,
-            );
+            let equals = compact_json(&json.value.equals.value);
+            self.placeholders(&json.value.equals.referenced, &equals, scope);
             expect.stdout_json = Some(JsonExpect {
                 path: json.value.path.value.trim().to_owned(),
-                equals: json.value.equals.value.text(),
+                equals,
             });
         }
         expect
@@ -1099,8 +1104,9 @@ impl Checker<'_> {
                 }
             }
         };
-        // A mapping with exactly these keys.
-        let fields = |this: &mut Self, wanted: &[&str]| -> Option<Vec<String>> {
+        // A mapping with exactly these keys. The ones in `data` may be empty: filling an input
+        // with nothing clears it, and selecting `value=""` is choosing the blank option.
+        let fields = |this: &mut Self, wanted: &[&str], data: &[&str]| -> Option<Vec<String>> {
             let BrowserArg::Map(map) = arg else {
                 this.problem(at, format!("`{key}` takes {}.", mapping_usage(key, wanted)));
                 return None;
@@ -1125,7 +1131,7 @@ impl Checker<'_> {
             let mut values = Vec::new();
             for name in wanted {
                 match map.get(*name) {
-                    Some(value) if !value.trim().is_empty() => {
+                    Some(value) if data.contains(name) || !value.trim().is_empty() => {
                         this.placeholders(at, value, scope);
                         values.push(value.clone());
                     }
@@ -1148,7 +1154,7 @@ impl Checker<'_> {
                 selector: text(self, "a selector")?,
             },
             "fill" => {
-                let mut values = fields(self, &["selector", "text"])?.into_iter();
+                let mut values = fields(self, &["selector", "text"], &["text"])?.into_iter();
                 BrowserAction::Fill {
                     selector: values.next()?,
                     text: values.next()?,
@@ -1158,7 +1164,7 @@ impl Checker<'_> {
                 key: text(self, "a key, like `Enter`")?,
             },
             "select" => {
-                let mut values = fields(self, &["selector", "value"])?.into_iter();
+                let mut values = fields(self, &["selector", "value"], &["value"])?.into_iter();
                 BrowserAction::Select {
                     selector: values.next()?,
                     value: values.next()?,
@@ -1170,7 +1176,7 @@ impl Checker<'_> {
                     text: None,
                 },
                 BrowserArg::Map(_) => {
-                    let mut values = fields(self, &["text"])?.into_iter();
+                    let mut values = fields(self, &["text"], &[])?.into_iter();
                     BrowserAction::WaitFor {
                         selector: None,
                         text: values.next(),

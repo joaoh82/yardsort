@@ -141,7 +141,7 @@ steps:
 
 For `run` and `shell`, under `expect`: `exit` (a number, or `nonzero`; 0 unless said),
 `stdout_contains`, `stdout_matches` (a regular expression), `stderr_empty` (`true`),
-`stdout_json` (`{ path: status, equals: ok }`). For `http`: `status` (a number, or a class like
+`stdout_json` (`{ path: status, equals: ok }`; `equals` is compared as JSON, so `ok` is the string, `1` the number and `"1"` a string). For `http`: `status` (a number, or a class like
 `2xx`; 2xx unless said), `json` (a mapping whose every key must appear, with its value, in the
 response), `body_contains`, `body_matches`, `header` (`{ name, contains }`). Every expectation
 given is checked, and the step's note lists each one that failed.
@@ -156,7 +156,7 @@ text. Every action waits for its selector to exist and be visible before acting,
 | ---------------- | ----------------------------------------------- |
 | `goto`           | An address                                      |
 | `click`          | A selector                                      |
-| `fill`           | `{ selector, text }`                            |
+| `fill`           | `{ selector, text }`; an empty `text` clears it |
 | `press`          | A key, to the focused element: `Enter`, `Tab`   |
 | `select`         | `{ selector, value }`                           |
 | `wait_for`       | A selector, or `{ text: … }`                    |
