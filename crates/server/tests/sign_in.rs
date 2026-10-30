@@ -629,6 +629,30 @@ async fn a_device_that_only_refreshes_still_counts_after_ninety_days() {
 }
 
 #[tokio::test]
+async fn a_refresh_whose_answer_was_lost_is_answered_again_once() {
+    let s = setup(None).await;
+    let now = now_ms();
+    let first = sign_in(&s, "subject-1", "Phone", now).await;
+
+    // Rotated, but the answer never reached the phone, which tries again with what it has.
+    let lost = refresh(&s, &first.refresh, now + 1).await.unwrap();
+    let again = refresh(&s, &first.refresh, now + 2).await.unwrap();
+    assert_eq!(again.device, first.device);
+    assert!(caller(&s, &lost, now + 3).await.is_err());
+    assert!(refresh(&s, &lost.refresh, now + 3).await.is_err());
+    assert!(caller(&s, &again, now + 3).await.is_ok());
+    let next = refresh(&s, &again.refresh, now + 4).await.unwrap();
+    assert!(caller(&s, &next, now + 4).await.is_ok(), "still signed in");
+
+    // Once only: the same again is a copy.
+    assert_eq!(
+        code_of(refresh(&s, &first.refresh, now + 5).await),
+        ErrorCode::Unauthenticated
+    );
+    assert!(caller(&s, &next, now + 5).await.is_err());
+}
+
+#[tokio::test]
 async fn a_refresh_credential_works_once_and_a_copy_signs_the_device_out() {
     let s = setup(None).await;
     let now = now_ms();

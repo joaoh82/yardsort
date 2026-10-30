@@ -507,6 +507,10 @@ async fn what_happens_through_one_instance_reaches_the_other_at_once(
             .await
             .unwrap();
     assert!(rotated.status().is_success(), "{}", rotated.status());
+    // The host has its new credentials, and uses them: what comes next is not a lost answer.
+    let rotated: remote_proto::account::Credentials = rotated.json().await.unwrap();
+    let used = i.b.get_as(&rotated.access, "v1/devices").await;
+    assert!(used.status().is_success(), "{}", used.status());
     let copy =
         i.b.client
             .post(i.b.url("v1/token"))

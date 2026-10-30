@@ -782,11 +782,14 @@ async fn through_relay(
         host["host"]["name"].as_str().unwrap_or("?"),
         host["host"]["platform"].as_str().unwrap_or("?")
     );
+    if let Some(why) = host["host"]["terminalsLater"]["message"].as_str() {
+        println!("Its terminals wait: {why}");
+    }
     let mut asked = 0;
     let mut ask = |op: &str, params: Value| {
         asked += 1;
         let id = format!("r{asked}");
-        let request = json!({"requestId": id, "protocol": {"major": 1, "minor": 3}, "op": op, "params": params});
+        let request = json!({"requestId": id, "protocol": {"major": 1, "minor": 4}, "op": op, "params": params});
         (id, request.to_string())
     };
 

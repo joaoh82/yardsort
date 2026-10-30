@@ -65,6 +65,7 @@ impl Fixture {
             host: &self.identity,
             interactive: false,
             subscriptions: false,
+            terminals_later: None,
         }
     }
 
@@ -1558,6 +1559,7 @@ fn the_largest_item_of_every_list_fits_in_a_frame() {
             app_version: env!("CARGO_PKG_VERSION").to_owned(),
             protocol: ProtocolVersion::CURRENT,
             capabilities: ANSWERED.iter().map(|&op| op.to_owned()).collect(),
+            terminals_later: Some(earlier_daemon()),
         }),
     ];
     for reply in pages {

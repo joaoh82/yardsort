@@ -350,7 +350,10 @@ impl<R: Records> ControlService<R> {
                     .await
                     .map_err(unreadable)?
                 {
-                    Rotation::Rotated(device) => Ok(pair.for_device(device.id)),
+                    // A retry gets what the lost answer carried, freshly minted.
+                    Rotation::Rotated(device) | Rotation::Retried(device) => {
+                        Ok(pair.for_device(device.id))
+                    }
                     Rotation::Reused(account) => {
                         // A copy's holder may have a socket open as that device: it closes now.
                         self.revoked(&account).await;

@@ -1,0 +1,25 @@
+{
+  "requestId": "r-0",
+  "result": {
+    "kind": "host",
+    "host": "host-example",
+    "name": "Example workstation",
+    "platform": "macos",
+    "appVersion": "0.21.0",
+    "protocol": { "major": 1, "minor": 4 },
+    "capabilities": [
+      "host.describe",
+      "workspace.list",
+      "workspace.get",
+      "session.list",
+      "activity.list",
+      "memory.list",
+      "activity.subscribe",
+      "activity.unsubscribe"
+    ],
+    "terminalsLater": {
+      "reason": "earlierDaemon",
+      "message": "This computer's terminals run under an earlier version of Yardsort, which cannot share them. They can be opened from here once the programs running there have ended and Yardsort has started again."
+    }
+  }
+}
