@@ -25,7 +25,9 @@ revocation or a pairing request made through any instance, or by the operator, r
 instance at once (§14). The twelfth (2026-10-29): a host's link replaced on another instance
 closes at once, and rate limits count across every instance (§15). With it R2's code is complete;
 its exit review is §20. Staging ran the smoke tests it still owed on 2026-10-30, which found two
-things fixed with the record of them (§16), and R2 is done. The proposal is
+things fixed with the record of them (§16), and R2 is done. The three questions it left open
+were settled the same day (§21): a refresh whose answer was lost is answered once more, a device
+hears why terminals under an earlier daemon wait, and there is no maximum session. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are recorded in
 [26](26-remote-r0-r1.md).
 
@@ -85,13 +87,13 @@ device kept, so another app that claims the same scheme gets nothing usable.
 
 ## 3 · Credentials
 
-| Credential        | Looks like | Lifetime                        | Kept as | Use                                                                                                         |
-| ----------------- | ---------- | ------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
-| Access            | `ys1.at.…` | 15 minutes                      | SHA-256 | `Authorization: Bearer`, checked against the records on every request                                       |
-| Refresh           | `ys1.rt.…` | 90 days unused, then signed out | SHA-256 | Once. The answer carries the next one. Presenting a spent one revokes the device: only a copy could hold it |
-| Sign-in code      | `ys1.hc.…` | 60 seconds                      | SHA-256 | Once, with the device's verifier. A wrong verifier spends it too                                            |
-| `state`, `nonce`  | random     | 10 minutes (the sign-in)        | SHA-256 | Sent to the provider; the answer must bring them back                                                       |
-| Provider verifier | random     | 10 minutes (the sign-in)        | As is   | Sent to the provider with the code exchange, so it cannot be a hash                                         |
+| Credential        | Looks like | Lifetime                        | Kept as | Use                                                                                                                                                            |
+| ----------------- | ---------- | ------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Access            | `ys1.at.…` | 15 minutes                      | SHA-256 | `Authorization: Bearer`, checked against the records on every request                                                                                          |
+| Refresh           | `ys1.rt.…` | 90 days unused, then signed out | SHA-256 | Once. The answer carries the next one. Presenting a spent one revokes the device, since only a copy could hold it, unless it is a retry of a lost answer (§21) |
+| Sign-in code      | `ys1.hc.…` | 60 seconds                      | SHA-256 | Once, with the device's verifier. A wrong verifier spends it too                                                                                               |
+| `state`, `nonce`  | random     | 10 minutes (the sign-in)        | SHA-256 | Sent to the provider; the answer must bring them back                                                                                                          |
+| Provider verifier | random     | 10 minutes (the sign-in)        | As is   | Sent to the provider with the code exchange, so it cannot be a hash                                                                                            |
 
 Each has 256 random bits, so a plain SHA-256 is enough: there is nothing to guess, and a slow hash
 would only slow every request. The prefix says which kind a credential is, and one kind is never
@@ -798,6 +800,30 @@ go-ahead. Many addresses together are still not limited as a whole (§18).
 
 ## 16 · Verification
 
+On Linux, 2026-10-30, the open questions (§21):
+
+- `yardsort-server`, the records (2 new tests, on each store): a spent refresh credential
+  presented again within the window, with nothing issued in its place used, is retried. What the
+  lost answer carried works no more, the retry's does, and the device stays signed in; a third
+  presentation revokes it. Presented after the window, or once what was issued in its place was
+  traded in, it revokes the device. Changed: the rotation test uses its new access before
+  presenting the old refresh again, and of eight racing rotations one goes through, at most one
+  more as a retry, and the device ends revoked.
+- `sign_in` (1 new test): the same through the service. `relay_instances`: the host uses its new
+  credentials before the copy is presented.
+- Broken on purpose, one at a time, in the memory store: ignoring whether the access credential
+  was used, whether a retry was made already, the window, and whether the successor was traded
+  in. A test failed each time.
+- `yardsort-core` (1 new test): over an earlier daemon, the welcome's host carries
+  `terminalsLater` with `earlierDaemon` and no `terminal.*`, the running terminal is listed, and
+  `terminal.attach` is refused with the same words. It fails without the reason. `remote-proto`:
+  a new fixture, `response-host-terminals-later.json`, pinned; a reason it does not know reads as
+  `unknown`.
+- `just check`, `just bindings-check` and `just lint-windows`.
+
+**Not run here:** the PostgreSQL half and migration `0005`, which need Docker this session does
+not have and which CI runs; macOS and Windows, which CI covers; a phone.
+
 On Linux and staging, 2026-10-30, the smoke tests staging still owed (§20), with `main` at
 `1ecfce7` deployed as release v4:
 
@@ -1426,10 +1452,10 @@ Every item is built. Where R2 stands against its gate, and what staging showed, 
   share one allowance, so during such a burst a person signing in from a new address may be
   told to wait a minute. The callback is not limited: it only takes a sign-in that
   was started, which is.
-- **Refresh reuse signs a device out even when the device is honest**, when the answer carrying
-  its new credentials was lost in transit after the server rotated them. That is the standard
-  trade, and a sign-in fixes it. A short grace window would trade some of the protection away;
-  [open question 38](06-open-questions.md#remote).
+- **A copy of a refresh credential presented within half a minute of its rotation can pass for a
+  retry**, if the device has not yet used anything it was given. The copy's holder then has the
+  device, and the device is signed out on its next request (§21). Outside that, reuse revokes the
+  device as before. A device that gets its answer uses it at once, which closes the window.
 - **An access credential is a bearer credential.** A copy works until its quarter hour is up,
   or until the device is revoked, which takes effect on the next request.
 - **Disabling a person at the provider does not sign their devices out.** The provider is asked
@@ -1437,9 +1463,9 @@ Every item is built. Where R2 stands against its gate, and what staging showed, 
   keeps working for as long as it stays in use. That follows from asking the provider only at
   sign-in (§2), which is what keeps a provider that bills by daily active user cheap. Until it
   is answered, the operator's path is to disable the person at the provider and then run
-  `yardsort-server revoke-account` (§6). A maximum session length, after which
-  a device has to sign in again however often it is used, is the other answer; it costs a sign-in
-  every so often and is not chosen yet ([open question 39](06-open-questions.md#remote)).
+  `yardsort-server revoke-account` (§6), which closes their live connections at once. A maximum
+  session length, after which a device has to sign in again however often it is used, was the
+  other answer, and was not chosen (§21).
 - **Spent refresh credentials must outlive their rotation.** A store that dropped a spent one at
   once would answer a stolen copy with "unknown" and leave its holder signed in, instead of
   revoking the device. The `Records` contract says so; `MemoryRecords` keeps everything, and
@@ -1900,8 +1926,56 @@ Production is not part of R2's exit: its deploy comes with its own ZITADEL insta
   ([06](06-open-questions.md) #40, #36).
 - **R4:** notifications while the app is closed; the hardening the proposal lists.
 - **R5:** the headless host, and its own way to approve a device. Today only the desktop approves.
-- **Still open** ([06](06-open-questions.md)): what a device sees of terminals an old daemon cannot
-  lease (#37); a grace window for a spent refresh credential (#38); a maximum session (#39).
+- **Settled after** ([06](06-open-questions.md) #37 to #39, §21): what a device sees of terminals
+  an old daemon cannot lease; a retry for a refresh whose answer was lost; no maximum session.
 - **Known limits** (§18): many addresses together are not limited as a whole; a host hears of a
   pairing request only while its link is up; each instance holds its own sockets, so several
   instances need a proxy that can send a request on to a named one.
+
+## 21 · After the exit review: what R2 left open
+
+On 2026-10-30 the three questions R2 left open ([06](06-open-questions.md) #37 to #39) were
+settled. Two of them needed code; verification is in §16.
+
+**A refresh whose answer was lost (#38).** A phone on a train sends its refresh credential, the
+server trades it in, and the answer never arrives. The phone's next try presents a spent
+credential, which only a copy could hold, so the device was revoked; signing in again makes a new
+device, which has to be paired at the computer again. Now a spent refresh credential presented
+again is answered once more when all of these hold:
+
+- it was traded in less than 30 seconds ago (`REFRESH_RETRY_MS`);
+- it has not been retried already;
+- neither credential issued in its place has been used: the refresh credential not traded in, the
+  access credential never presented.
+
+What was issued in its place is dropped, and the answer carries new credentials
+(`Rotation::Retried`). Anything else is reuse, as before, and revokes the device. A device that
+got its answer uses its new access credential at once, which closes the window. A copy presented
+within it, before the device used anything, would take the device's place; the device is then
+signed out on its next request, and a sign-in fixes it. That is the one case a copy is not
+caught, and it needs the copy in hand within half a minute of a rotation (§18).
+
+The records keep, with each spent refresh credential, what was issued in its place and whether it
+was retried, and with each access credential whether it was used (migration
+`0005_refresh_retry.sql`). An access credential is marked used in the statement that notes its
+device seen, so a request still makes one round trip to the records. Credentials from before the
+migration have no successor kept, so presenting one of those again is reuse.
+
+A client that retries keeps only the retry's answer. The first answer's credentials, should it
+arrive late, no longer work.
+
+**Terminals under an earlier daemon (#37).** When the app is updated while agents run in a daemon
+of protocol 1, it keeps that daemon for them until it next starts with nothing running there (§8).
+Until then nothing in it can be leased, so a device can neither watch nor type, and it was told
+only that remote terminals were "not available on this host yet". Now `host.describe` carries
+`terminalsLater` (protocol 1.4): a reason, `earlierDaemon`, and what to wait for: "…They can be
+opened from here once the programs running there have ended and Yardsort has started again." The
+terminal operations are refused with the same words. The terminals are listed as before, and
+nothing restarts the daemon. A reason a client does not know reads as `unknown`. The pairing tool
+prints it ("Its terminals wait: …").
+
+**A maximum session (#39).** None. A device stays signed in for as long as it is used. Cutting a
+person off is the operator's: disable them at the provider, then `yardsort-server revoke-account`,
+which since slice 11 closes their live connections at once. A maximum would cost every device a
+sign-in at the provider every so often, which ZITADEL bills as an active user, and would not cut
+anyone off sooner than the operator can.

@@ -292,6 +292,11 @@ three of them also on a second Machine for a while, and they passed
 stops a second Machine with nothing open on it after about six minutes, so a two-Machine test has
 minutes; and a Machine holding a host's link stays up.
 
+- **After R2, 2026-10-30** ([27](27-remote-r2.md) §21): a refresh whose answer was lost is
+  answered once more. Migration `0005_refresh_retry.sql` adds three columns to
+  `refresh_credentials` and one to `access_credentials`, applied as the server starts. No new
+  secret, no new setting. Staging has it with its next deploy.
+
 ## 7 · Open decisions
 
 - When "something to launch" is, for ZITADEL Pro: the public beta, or launch (R7).

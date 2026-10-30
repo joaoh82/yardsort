@@ -592,7 +592,8 @@ remote ever talks to it directly. Instead:
 - `crates/server` is the server: the `yardsort-server` binary, on PostgreSQL, over HTTP
   ([27](27-remote-r2.md)). A person signs in at the server's OIDC provider once per device; the
   server checks the ID token, keeps the account as issuer and subject, and from then on issues
-  its own credentials (a 15-minute access, a single-use refresh), kept only as hashes. The
+  its own credentials (a 15-minute access, a single-use refresh, retried once if its answer was
+  lost), kept only as hashes. The
   provider is never asked again for that device, and revoking it takes effect on its next
   request. It serves sign-in, the device routes, and pairing: a host registers on its account and
   offers a code, a device of the same account redeems it and asks, and the host's person approves

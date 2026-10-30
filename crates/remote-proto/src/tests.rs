@@ -43,6 +43,7 @@ fn requests_match_their_fixtures() {
 fn responses_match_their_fixtures() {
     for name in [
         "response-host.json",
+        "response-host-terminals-later.json",
         "response-workspaces.json",
         "response-sessions.json",
         "response-activity.json",
@@ -53,6 +54,27 @@ fn responses_match_their_fixtures() {
     ] {
         let _: Response = pinned(name);
     }
+    // A host before minor 4 says nothing of it; one that keeps an earlier daemon says why.
+    let Outcome::Result(Reply::Host(older)) = pinned::<Response>("response-host.json").outcome
+    else {
+        panic!("not a host");
+    };
+    assert_eq!(older.terminals_later, None);
+    let Outcome::Result(Reply::Host(waiting)) =
+        pinned::<Response>("response-host-terminals-later.json").outcome
+    else {
+        panic!("not a host");
+    };
+    let later = waiting.terminals_later.unwrap();
+    assert_eq!(later.reason, TerminalsLaterReason::EarlierDaemon);
+    assert!(!waiting
+        .capabilities
+        .iter()
+        .any(|c| c.starts_with("terminal.")));
+    let newer: TerminalsLater =
+        serde_json::from_value(serde_json::json!({"reason": "somethingNew", "message": "Later."}))
+            .unwrap();
+    assert_eq!(newer.reason, TerminalsLaterReason::Unknown);
     let subscribed: Response = pinned("response-subscribed.json");
     assert!(matches!(
         subscribed.outcome,

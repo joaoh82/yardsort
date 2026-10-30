@@ -42,6 +42,9 @@ pub const ACCESS_TTL_MS: i64 = 15 * 60_000;
 /// How long a refresh credential works unused. Each refresh starts this again, so a device in
 /// use stays signed in, and one left unused for this long must sign in again.
 pub const REFRESH_TTL_MS: i64 = 90 * 24 * 60 * 60_000;
+/// How long after a refresh credential is traded in it may be presented once more, by a device
+/// whose answer was lost on the way, as long as nothing issued in its place has been used.
+pub const REFRESH_RETRY_MS: i64 = 30_000;
 /// How many devices one account may have signed in. A device counts while it is not revoked and
 /// holds a refresh credential that is neither spent nor lapsed.
 pub const MAX_DEVICES_PER_ACCOUNT: usize = 50;

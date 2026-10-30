@@ -56,7 +56,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 2: resuming a stream, and the `terminal.control` and `terminal.exited` events.
 /// - 3: `activity.subscribe` and `activity.unsubscribe`, and the `activity.events` and
 ///   `activity.ended` events.
-pub const PROTOCOL_MINOR: u16 = 3;
+/// - 4: `terminalsLater` in `host.describe`, saying why terminals are not offered yet.
+pub const PROTOCOL_MINOR: u16 = 4;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
 /// parsing. A host keeps its responses within it: a page holds fewer items than asked when they

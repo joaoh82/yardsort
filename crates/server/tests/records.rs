@@ -18,6 +18,7 @@ use yardsort_server::records::{
     Revoked, Rotation, Signal, SEEN_RESOLUTION_MS,
 };
 use yardsort_server::tokens::{self, TokenHash};
+use yardsort_server::REFRESH_RETRY_MS;
 
 /// Each test, once per store.
 macro_rules! for_each_store {
@@ -52,6 +53,8 @@ for_each_store!(
     an_access_credential_finds_its_device,
     a_refresh_credential_rotates_once_and_a_copy_revokes_the_device,
     a_spent_refresh_credential_is_remembered_through_later_rotations,
+    a_refresh_whose_answer_was_lost_can_be_presented_once_more,
+    a_spent_refresh_credential_is_not_retried_late,
     a_lapsed_refresh_credential_is_expired,
     racing_rotations_of_one_credential_let_exactly_one_through,
     seen_is_written_at_most_once_a_minute,
@@ -226,6 +229,11 @@ async fn a_refresh_credential_rotates_once_and_a_copy_revokes_the_device(
     }
     let (found, _) = records.access(&h("second-access")).await.unwrap().unwrap();
     assert_eq!(found.id, phone.id);
+    // The device has what it was given: it uses it.
+    records
+        .seen(&phone.id, &h("second-access"), T + 150)
+        .await
+        .unwrap();
 
     // The first one again: only a copy could still hold it.
     let third = issued("third", T + 200);
@@ -288,6 +296,103 @@ async fn a_spent_refresh_credential_is_remembered_through_later_rotations(
     );
 }
 
+/// A device whose answer was lost presents the spent credential again: it never had what was
+/// issued in its place, so that is dropped and the device carries on. Once only.
+async fn a_refresh_whose_answer_was_lost_can_be_presented_once_more(records: Arc<impl Records>) {
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    let phone = enroll(&*records, &account, "phone", T).await;
+    let rotated = records
+        .rotate(&h("phone-refresh"), issued("lost", T + 100), T + 100)
+        .await
+        .unwrap();
+    assert!(matches!(rotated, Rotation::Rotated(_)), "{rotated:?}");
+
+    // The answer never arrived; the device tries again with what it has.
+    match records
+        .rotate(&h("phone-refresh"), issued("again", T + 200), T + 200)
+        .await
+        .unwrap()
+    {
+        Rotation::Retried(device) => {
+            assert_eq!(device.id, phone.id);
+            assert_eq!(device.revoked, None);
+        }
+        other => panic!("{other:?}"),
+    }
+    // What the lost answer carried works no more; what the retry got does.
+    assert!(records.access(&h("lost-access")).await.unwrap().is_none());
+    assert_eq!(
+        records
+            .rotate(&h("lost-refresh"), issued("x", T + 300), T + 300)
+            .await
+            .unwrap(),
+        Rotation::Unknown
+    );
+    let (found, _) = records.access(&h("again-access")).await.unwrap().unwrap();
+    assert_eq!(found.revoked, None);
+    assert_eq!(
+        records.signed_in_devices(&account, T + 300).await.unwrap(),
+        1
+    );
+
+    // A third time is not a lost answer.
+    assert_eq!(
+        records
+            .rotate(&h("phone-refresh"), issued("third", T + 400), T + 400)
+            .await
+            .unwrap(),
+        Rotation::Reused(account.clone())
+    );
+    let (found, _) = records.access(&h("again-access")).await.unwrap().unwrap();
+    assert!(found.revoked.is_some());
+}
+
+/// After the window, or once the device has traded in what it was given, presenting a spent
+/// credential again is a copy.
+async fn a_spent_refresh_credential_is_not_retried_late(records: Arc<impl Records>) {
+    let account = records.account("https://id.one", "alice", T).await.unwrap();
+    let phone = enroll(&*records, &account, "phone", T).await;
+    records
+        .rotate(&h("phone-refresh"), issued("second", T + 100), T + 100)
+        .await
+        .unwrap();
+    let late = T + 100 + REFRESH_RETRY_MS;
+    assert_eq!(
+        records
+            .rotate(&h("phone-refresh"), issued("late", late), late)
+            .await
+            .unwrap(),
+        Rotation::Reused(account.clone())
+    );
+    let (found, _) = records.access(&h("second-access")).await.unwrap().unwrap();
+    assert_eq!(found.id, phone.id);
+    assert!(found.revoked.is_some());
+
+    let tablet = enroll(&*records, &account, "tablet", T).await;
+    records
+        .rotate(&h("tablet-refresh"), issued("tablet-2", T + 100), T + 100)
+        .await
+        .unwrap();
+    records
+        .rotate(&h("tablet-2-refresh"), issued("tablet-3", T + 200), T + 200)
+        .await
+        .unwrap();
+    assert_eq!(
+        records
+            .rotate(&h("tablet-refresh"), issued("copy", T + 300), T + 300)
+            .await
+            .unwrap(),
+        Rotation::Reused(account.clone())
+    );
+    let (found, _) = records
+        .access(&h("tablet-3-access"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.id, tablet.id);
+    assert!(found.revoked.is_some());
+}
+
 async fn a_lapsed_refresh_credential_is_expired(records: Arc<impl Records>) {
     let account = records.account("https://id.one", "alice", T).await.unwrap();
     enroll(&*records, &account, "phone", T).await;
@@ -322,15 +427,20 @@ async fn racing_rotations_of_one_credential_let_exactly_one_through(
             })
         })
         .collect();
-    let mut through = 0;
+    let (mut through, mut retried) = (0, 0);
     for racer in racers {
         match racer.await.unwrap() {
             Rotation::Rotated(_) => through += 1,
+            // One more may look like a lost answer; a third cannot.
+            Rotation::Retried(_) => retried += 1,
             Rotation::Reused(_) | Rotation::Revoked => {}
             other => panic!("{other:?}"),
         }
     }
     assert_eq!(through, 1);
+    assert!(retried <= 1, "{retried} retries");
+    let devices = records.devices(&account).await.unwrap();
+    assert!(devices[0].revoked.is_some(), "eight at once are copies");
 }
 
 async fn seen_is_written_at_most_once_a_minute(records: Arc<impl Records>) {
@@ -338,12 +448,13 @@ async fn seen_is_written_at_most_once_a_minute(records: Arc<impl Records>) {
     let phone = enroll(&*records, &account, "phone", T).await;
     let last_seen = || async { records.devices(&account).await.unwrap()[0].last_seen_at };
     assert_eq!(last_seen().await, None);
-    records.seen(&phone.id, T + 1).await.unwrap();
+    let access = h("phone-access");
+    records.seen(&phone.id, &access, T + 1).await.unwrap();
     assert_eq!(last_seen().await, Some(T + 1));
-    records.seen(&phone.id, T + 2).await.unwrap();
+    records.seen(&phone.id, &access, T + 2).await.unwrap();
     assert_eq!(last_seen().await, Some(T + 1));
     records
-        .seen(&phone.id, T + 1 + SEEN_RESOLUTION_MS)
+        .seen(&phone.id, &access, T + 1 + SEEN_RESOLUTION_MS)
         .await
         .unwrap();
     assert_eq!(last_seen().await, Some(T + 1 + SEEN_RESOLUTION_MS));
@@ -635,7 +746,10 @@ async fn a_host_is_registered_moved_and_removed_within_its_account(records: Arc<
     assert!(records.hosts(&bob).await.unwrap().is_empty());
 
     // Its device's last use shows as the host's.
-    records.seen(&first.id, T + 7).await.unwrap();
+    records
+        .seen(&first.id, &h("workstation-access"), T + 7)
+        .await
+        .unwrap();
     let seen = records.host(&alice, &host.id).await.unwrap().unwrap();
     assert_eq!(seen.last_seen_at, Some(T + 7));
 

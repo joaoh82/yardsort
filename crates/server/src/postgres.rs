@@ -59,6 +59,11 @@ const MIGRATIONS: &[(i32, &str, &str)] = &[
         "rate_limits",
         include_str!("../migrations/0004_rate_limits.sql"),
     ),
+    (
+        5,
+        "refresh_retry",
+        include_str!("../migrations/0005_refresh_retry.sql"),
+    ),
 ];
 
 /// Held while migrating, so instances starting together take turns. Any constant will do, as
@@ -481,8 +486,13 @@ impl Records for PgRecords {
         let Some(row) = tx
             .query_opt(
                 &format!(
-                    "SELECT {DEVICE}, r.expires_at, r.spent_at FROM refresh_credentials r
-                     JOIN devices d ON d.id = r.device WHERE r.hash = $1
+                    "SELECT {DEVICE}, r.expires_at, r.spent_at, r.retried,
+                            (s.spent_at IS NULL AND NOT a.used)
+                     FROM refresh_credentials r
+                     JOIN devices d ON d.id = r.device
+                     LEFT JOIN refresh_credentials s ON s.hash = r.successor_refresh
+                     LEFT JOIN access_credentials a ON a.hash = r.successor_access
+                     WHERE r.hash = $1
                      FOR UPDATE OF r, d"
                 ),
                 &[&bytes(refresh)],
@@ -495,8 +505,46 @@ impl Records for PgRecords {
         let device = device(&row)?;
         let expires_at: i64 = row.get(9);
         let spent_at: Option<i64> = row.get(10);
+        let retried: bool = row.get(11);
+        // Null when either successor is gone: then it is not a retry.
+        let successors_unused: Option<bool> = row.get(12);
+        let retry = spent_at.is_some_and(|at| {
+            !retried && now - at < crate::REFRESH_RETRY_MS && successors_unused == Some(true)
+        });
         let outcome = if device.revoked.is_some() {
             Rotation::Revoked
+        } else if retry {
+            // The device never had what was issued in its place: drop it, and issue again. Whether
+            // the successors were used is read under the device's lock, which every rotation of
+            // this device takes, so the successor cannot be traded in meanwhile.
+            tx.execute(
+                "DELETE FROM refresh_credentials WHERE hash = (
+                     SELECT successor_refresh FROM refresh_credentials WHERE hash = $1)",
+                &[&bytes(refresh)],
+            )
+            .await
+            .map_err(failed)?;
+            tx.execute(
+                "DELETE FROM access_credentials WHERE hash = (
+                     SELECT successor_access FROM refresh_credentials WHERE hash = $1)",
+                &[&bytes(refresh)],
+            )
+            .await
+            .map_err(failed)?;
+            issue(&tx, &device.id, &issued).await?;
+            tx.execute(
+                "UPDATE refresh_credentials
+                 SET retried = TRUE, successor_refresh = $2, successor_access = $3
+                 WHERE hash = $1",
+                &[
+                    &bytes(refresh),
+                    &bytes(&issued.refresh),
+                    &bytes(&issued.access),
+                ],
+            )
+            .await
+            .map_err(failed)?;
+            Rotation::Retried(device)
         } else if spent_at.is_some() {
             tx.execute(
                 "UPDATE devices SET revoked_at = $2, revoked_reason = $3 WHERE id = $1",
@@ -513,8 +561,15 @@ impl Records for PgRecords {
             Rotation::Expired
         } else {
             tx.execute(
-                "UPDATE refresh_credentials SET spent_at = $2 WHERE hash = $1",
-                &[&bytes(refresh), &now],
+                "UPDATE refresh_credentials
+                 SET spent_at = $2, successor_refresh = $3, successor_access = $4
+                 WHERE hash = $1",
+                &[
+                    &bytes(refresh),
+                    &now,
+                    &bytes(&issued.refresh),
+                    &bytes(&issued.access),
+                ],
             )
             .await
             .map_err(failed)?;
@@ -540,14 +595,19 @@ impl Records for PgRecords {
         Ok(outcome)
     }
 
-    async fn seen(&self, device: &DeviceId, now: i64) -> Result<()> {
+    async fn seen(&self, device: &DeviceId, access: &TokenHash, now: i64) -> Result<()> {
+        // One round trip: the credential marked used the first time only, the device at most once
+        // a resolution.
         self.client()
             .await?
             .execute(
-                "UPDATE devices SET last_seen_at = $2
+                "WITH used AS (
+                     UPDATE access_credentials SET used = TRUE WHERE hash = $4 AND NOT used
+                 )
+                 UPDATE devices SET last_seen_at = $2
                  WHERE id = $1
                    AND (last_seen_at IS NULL OR last_seen_at <= $2::BIGINT - $3::BIGINT)",
-                &[&device.as_str(), &now, &SEEN_RESOLUTION_MS],
+                &[&device.as_str(), &now, &SEEN_RESOLUTION_MS, &bytes(access)],
             )
             .await
             .map_err(failed)?;

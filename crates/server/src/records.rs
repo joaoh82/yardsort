@@ -97,7 +97,12 @@ pub struct Issued {
 pub enum Rotation {
     /// It was current: it is now spent, and the new credentials are in its place.
     Rotated(Device),
-    /// It had already been traded in. The device, of this account, is revoked in the same step.
+    /// It was traded in less than [`crate::REFRESH_RETRY_MS`] ago, not presented again since,
+    /// and neither credential issued in its place has been used: the device never had them. They
+    /// are dropped, and the new credentials are in their place.
+    Retried(Device),
+    /// It had already been traded in, and this is not such a retry. The device, of this account,
+    /// is revoked in the same step.
     Reused(AccountId),
     /// It lapsed unused.
     Expired,
@@ -337,7 +342,9 @@ pub trait Records: Send + Sync {
     ///
     /// A spent refresh credential must be kept until its own expiry: one presented again has to
     /// come back [`Rotation::Reused`], which revokes the device, and not [`Rotation::Unknown`],
-    /// which leaves the copy's holder signed in. A store may drop it once it has lapsed.
+    /// which leaves the copy's holder signed in. A store may drop it once it has lapsed. It keeps
+    /// what was issued in its place, to tell a [`Rotation::Retried`] from a copy; with that gone,
+    /// presenting it is reuse.
     fn rotate(
         &self,
         refresh: &TokenHash,
@@ -345,9 +352,15 @@ pub trait Records: Send + Sync {
         now: i64,
     ) -> impl Future<Output = Result<Rotation>> + Send;
 
-    /// Note that a device used its access, unless one was noted less than
-    /// [`SEEN_RESOLUTION_MS`] ago.
-    fn seen(&self, device: &DeviceId, now: i64) -> impl Future<Output = Result<()>> + Send;
+    /// Note that a device used `access`: that credential is used from now on, so the refresh
+    /// credential traded in for it can no longer be retried ([`Rotation::Retried`]); and the
+    /// device was seen, unless that was noted less than [`SEEN_RESOLUTION_MS`] ago.
+    fn seen(
+        &self,
+        device: &DeviceId,
+        access: &TokenHash,
+        now: i64,
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// The account's devices, revoked ones included.
     fn devices(&self, account: &AccountId) -> impl Future<Output = Result<Vec<Device>>> + Send;
@@ -541,7 +554,7 @@ struct State {
     logins: Vec<PendingLogin>,
     handoffs: Vec<Handoff>,
     devices: Vec<Device>,
-    access: HashMap<TokenHash, (DeviceId, i64)>,
+    access: HashMap<TokenHash, Access>,
     refresh: HashMap<TokenHash, Refresh>,
     /// With when each was removed.
     hosts: Vec<(Host, Option<i64>)>,
@@ -554,11 +567,23 @@ struct State {
 }
 
 #[derive(Debug, Clone)]
+struct Access {
+    device: DeviceId,
+    expires_at: i64,
+    used: bool,
+}
+
+#[derive(Debug, Clone)]
 struct Refresh {
     device: DeviceId,
     expires_at: i64,
-    /// Traded in already. Kept so that presenting it again is recognised as reuse.
-    spent: bool,
+    /// When it was traded in. Kept so that presenting it again is recognised as reuse, or as a
+    /// retry.
+    spent_at: Option<i64>,
+    /// What was issued in its place: refresh, then access.
+    successor: Option<(TokenHash, TokenHash)>,
+    /// Presented once more as a retry already.
+    retried: bool,
 }
 
 impl MemoryRecords {
@@ -578,14 +603,22 @@ impl MemoryRecords {
 
 impl State {
     fn issue(&mut self, device: &DeviceId, issued: Issued) {
-        self.access
-            .insert(issued.access, (device.clone(), issued.access_expires_at));
+        self.access.insert(
+            issued.access,
+            Access {
+                device: device.clone(),
+                expires_at: issued.access_expires_at,
+                used: false,
+            },
+        );
         self.refresh.insert(
             issued.refresh,
             Refresh {
                 device: device.clone(),
                 expires_at: issued.refresh_expires_at,
-                spent: false,
+                spent_at: None,
+                successor: None,
+                retried: false,
             },
         );
     }
@@ -677,9 +710,9 @@ impl Records for MemoryRecords {
 
     async fn access(&self, access: &TokenHash) -> Result<Option<(Device, i64)>> {
         self.with(|s| {
-            let (id, expires_at) = s.access.get(access)?.clone();
-            let device = s.devices.iter().find(|d| d.id == id)?.clone();
-            Some((device, expires_at))
+            let access = s.access.get(access)?;
+            let device = s.devices.iter().find(|d| d.id == access.device)?.clone();
+            Some((device, access.expires_at))
         })
     }
 
@@ -694,7 +727,24 @@ impl Records for MemoryRecords {
             if device.revoked.is_some() {
                 return Rotation::Revoked;
             }
-            if old.spent {
+            if let Some(spent_at) = old.spent_at {
+                // A retry: soon after, once, and with nothing issued in its place used.
+                let unused = old.successor.as_ref().is_some_and(|(refresh, access)| {
+                    s.refresh.get(refresh).is_some_and(|r| r.spent_at.is_none())
+                        && s.access.get(access).is_some_and(|a| !a.used)
+                });
+                if !old.retried && now - spent_at < crate::REFRESH_RETRY_MS && unused {
+                    if let Some((refresh, access)) = &old.successor {
+                        s.refresh.remove(refresh);
+                        s.access.remove(access);
+                    }
+                    if let Some(retried) = s.refresh.get_mut(refresh) {
+                        retried.retried = true;
+                        retried.successor = Some((issued.refresh, issued.access));
+                    }
+                    s.issue(&device.id, issued);
+                    return Rotation::Retried(device);
+                }
                 if let Some(device) = s.device_mut(&old.device) {
                     device.revoked = Some(Revoked {
                         at: now,
@@ -707,15 +757,19 @@ impl Records for MemoryRecords {
                 return Rotation::Expired;
             }
             if let Some(spent) = s.refresh.get_mut(refresh) {
-                spent.spent = true;
+                spent.spent_at = Some(now);
+                spent.successor = Some((issued.refresh, issued.access));
             }
             s.issue(&device.id, issued);
             Rotation::Rotated(device)
         })
     }
 
-    async fn seen(&self, device: &DeviceId, now: i64) -> Result<()> {
+    async fn seen(&self, device: &DeviceId, access: &TokenHash, now: i64) -> Result<()> {
         self.with(|s| {
+            if let Some(access) = s.access.get_mut(access) {
+                access.used = true;
+            }
             if let Some(device) = s.device_mut(device) {
                 if device
                     .last_seen_at
@@ -745,7 +799,7 @@ impl Records for MemoryRecords {
                 .filter(|d| {
                     s.refresh
                         .values()
-                        .any(|r| r.device == d.id && !r.spent && r.expires_at > now)
+                        .any(|r| r.device == d.id && r.spent_at.is_none() && r.expires_at > now)
                 })
                 .count()
         })

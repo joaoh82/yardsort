@@ -48,10 +48,10 @@ use remote_proto::{
     MemoryListParams, MemoryNote, MemoryPage, Operation, Outcome, Platform, ProcessState,
     ProjectId, ProjectSummary, ProtocolVersion, RemoteError, Reply, Request, Response,
     SessionListParams, SessionPage, SessionRecordId, SessionSummary, TaskLink, TermSize,
-    TerminalActivity, TerminalId, TerminalPurpose, TerminalSummary, Welcome, WorkspaceDetail,
-    WorkspaceId, WorkspaceKind, WorkspaceListParams, WorkspacePage, WorkspaceSummary,
-    WorkspaceTerminal, MAX_LABEL, MAX_LINK, MAX_NOTE, MAX_PAGE, MAX_TASKS, MAX_TERMINALS, MAX_TEXT,
-    PROTOCOL_MAJOR,
+    TerminalActivity, TerminalId, TerminalPurpose, TerminalSummary, TerminalsLater,
+    TerminalsLaterReason, Welcome, WorkspaceDetail, WorkspaceId, WorkspaceKind,
+    WorkspaceListParams, WorkspacePage, WorkspaceSummary, WorkspaceTerminal, MAX_LABEL, MAX_LINK,
+    MAX_NOTE, MAX_PAGE, MAX_TASKS, MAX_TERMINALS, MAX_TEXT, PROTOCOL_MAJOR,
 };
 use serde::Serialize;
 
@@ -109,6 +109,22 @@ pub struct HostFacade<'a> {
     /// Activity subscriptions are answered, by [`serve::Visitor`]: the facade is serving a
     /// device's channel.
     pub subscriptions: bool,
+    /// Why the terminal operations are not answered, when a device should hear it: they would
+    /// be, but for something that passes. Said in `host.describe`, and as their refusal.
+    pub terminals_later: Option<TerminalsLater>,
+}
+
+/// What a device is told of terminals in a daemon from before leases, which the app keeps for the
+/// programs running in it and replaces when it next starts with none (`daemon::Verdict`).
+pub fn earlier_daemon() -> TerminalsLater {
+    TerminalsLater {
+        reason: TerminalsLaterReason::EarlierDaemon,
+        message:
+            "This computer's terminals run under an earlier version of Yardsort, which cannot \
+                  share them. They can be opened from here once the programs running there have \
+                  ended and Yardsort has started again."
+                .into(),
+    }
 }
 
 type Answer<T> = Result<T, RemoteError>;
@@ -194,7 +210,10 @@ impl HostFacade<'_> {
             | Operation::TerminalInput(_)
             | Operation::TerminalResize(_) => Err(RemoteError::new(
                 ErrorCode::Unsupported,
-                "Remote terminals are not available on this host yet.",
+                self.terminals_later.as_ref().map_or(
+                    "Remote terminals are not available on this host yet.",
+                    |later| later.message.as_str(),
+                ),
             )),
             Operation::ActivitySubscribe(_) | Operation::ActivityUnsubscribe(_) => {
                 Err(RemoteError::new(
@@ -226,6 +245,7 @@ impl HostFacade<'_> {
                 })
                 .map(|&op| op.to_owned())
                 .collect(),
+            terminals_later: self.terminals_later.clone(),
         }
     }
 

@@ -895,7 +895,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       here in control. Found on the way and fixed: a session
       open in the app and `ys attach` answered a program's questions twice; and, on staging,
       Settings → Remote went on showing a computer signed out at the server as connected, with
-      its devices.
+      its devices. The three questions R2 left open were settled after it
+      ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)): a refresh whose
+      answer was lost is answered once more, a device hears why terminals under an earlier daemon
+      wait, and there is no maximum session.
 - [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

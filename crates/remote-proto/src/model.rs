@@ -94,6 +94,32 @@ pub struct HostDescription {
     pub protocol: ProtocolVersion,
     /// The operations this host will answer. See [`crate::capability`].
     pub capabilities: Vec<String>,
+    /// Present when this host lists terminals it does not let be watched or typed in yet: why,
+    /// and what will change that. The `terminal.*` operations are then not in `capabilities`.
+    /// From minor 4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminals_later: Option<TerminalsLater>,
+}
+
+/// Why a host's terminals are listed, but cannot be watched or typed in yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalsLater {
+    pub reason: TerminalsLaterReason,
+    /// What to wait for, for a person.
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalsLaterReason {
+    /// They run in a terminal daemon from an earlier release, which cannot share them. It is kept
+    /// rather than stopped, for the programs running in it. Once they have ended and the app has
+    /// started again, a current one takes over.
+    EarlierDaemon,
+    /// A reason from a newer host.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

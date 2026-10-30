@@ -275,20 +275,20 @@ still stands; these are what the code added to it.
 36. **Should the session title cross to remote clients?** It may quote the first message. Without
     it a phone cannot tell two conversations apart. Lean: yes, as now, marked user content that
     clients never log; revisit if a title-only privacy mode is asked for.
-37. **When an old daemon with agents running cannot enforce leases, what does a remote client
-    see?** Lean: the terminal listed as viewable later, with the reason ("this computer's
-    terminals predate remote control; they will be available once these agents finish"), never
-    a forced daemon restart.
-38. **Should a spent refresh credential be accepted again for a few seconds?** Today presenting
-    one revokes the device ([27](27-remote-r2.md#3--credentials)), which also signs out an honest
-    device whose answer was lost in transit. Lean: no grace window until reports show it
-    happening; a sign-in fixes it.
-39. **Should a device have to sign in again after some time however often it is used?** Each
-    refresh starts its 90 days again, and the provider is asked only at sign-in, so a person
-    disabled at the provider keeps their devices until the operator revokes them
-    ([27 §18](27-remote-r2.md#18--risks)). A maximum session (30 to 90 days) bounds that, at the cost
-    of a sign-in every so often, which a provider billing by daily active user counts. Lean: no
-    maximum yet; an operator command revokes an account's devices (R2 slice 3).
+37. ~~**When an old daemon with agents running cannot enforce leases, what does a remote client
+    see?**~~ **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
+    the terminals are listed as before, and `host.describe` says why they cannot be opened yet
+    (`terminalsLater`, `earlierDaemon`) and what to wait for. The terminal operations are refused
+    with the same words. Nothing restarts the daemon.
+38. ~~**Should a spent refresh credential be accepted again for a few seconds?**~~ **Settled
+    2026-10-30, against the lean** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
+    a device signed out by a lost answer has to be paired at the computer again, which is too
+    much for a train tunnel. A spent one is answered once more within 30 seconds, and only while
+    neither credential issued in its place has been used; anything else still revokes the device.
+39. ~~**Should a device have to sign in again after some time however often it is used?**~~
+    **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
+    no maximum. The operator disables the person at the provider and runs
+    `yardsort-server revoke-account`, which closes their live connections at once.
 40. **Under what license is the phone app published?** It goes through Apple's App Store and
     Google Play, and the Free Software Foundation's view is that the App Store's terms add
     restrictions the GPL forbids ([30 §6](30-open-source-and-managed.md#6--the-phone-app-a-question-for-r3)).

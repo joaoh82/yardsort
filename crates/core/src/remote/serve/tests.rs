@@ -1183,3 +1183,53 @@ fn catching_up_waits_for_the_device_and_a_workspace_that_goes_ends_its_subscript
     let refused = ask(&fx, &visitor, &out, "over", "activity.subscribe", json!({}));
     assert_eq!(code(&refused), "invalid_request");
 }
+
+#[test]
+fn a_device_hears_why_terminals_under_an_earlier_daemon_wait() {
+    let fx = Fixture::new();
+    fx.approve(PHONE, "g-phone", &ALL, ProjectGrant::All);
+    let running = fx.terminal(&fx.alpha, long_running());
+    // The daemon is one from before leases: kept for what runs in it.
+    let earlier = Context {
+        interactive: false,
+        ..fx.context()
+    };
+    let out = Recorded::new(usize::MAX);
+    let visitor = Visitor::open(
+        &fx.store,
+        DeviceId::new(PHONE).unwrap(),
+        GrantId::new("g-phone").unwrap(),
+        Arc::clone(&out) as Arc<dyn Outbound>,
+    )
+    .unwrap();
+    let hello = json!({"client": "test-phone/1", "protocols": [1]}).to_string();
+    visitor.handle(&earlier, &hello).unwrap();
+    let host = out.texts().last().unwrap()["welcome"]["host"].clone();
+    assert_eq!(host["terminalsLater"]["reason"], "earlierDaemon", "{host}");
+    let capabilities = host["capabilities"].to_string();
+    assert!(!capabilities.contains("terminal."), "{capabilities}");
+
+    let ask = |id: &str, op: &str, params: Value| {
+        let request = json!({
+            "requestId": id,
+            "protocol": ProtocolVersion::CURRENT,
+            "op": op,
+            "params": params,
+        });
+        visitor.handle(&earlier, &request.to_string()).unwrap();
+        out.texts()
+            .into_iter()
+            .rev()
+            .find(|t| t["requestId"] == id)
+            .unwrap()
+    };
+    // Listed, as it is: only opening it waits.
+    let listed = ask("r1", "session.list", json!({"workspace": fx.alpha}));
+    assert!(listed.to_string().contains(&running.id.0), "{listed}");
+    let refused = ask("r2", "terminal.attach", json!({"terminal": running.id.0}));
+    assert_eq!(code(&refused), "unsupported");
+    assert_eq!(
+        refused["error"]["message"],
+        crate::remote::earlier_daemon().message
+    );
+}

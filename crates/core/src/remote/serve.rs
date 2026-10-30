@@ -99,6 +99,8 @@ impl Context<'_> {
             host: self.host,
             interactive: self.interactive,
             subscriptions: true,
+            // A channel's daemon that does not share control is one from before leases.
+            terminals_later: (!self.interactive).then(super::earlier_daemon),
         }
     }
 }
