@@ -1,0 +1,11 @@
+{
+  "hosts": [
+    {
+      "id": "7d2e4f60-1a3b-4c5d-8e9f-0a1b2c3d4e5f",
+      "name": "Workstation",
+      "createdAt": 1791000000000,
+      "lastSeenAt": 1792000600000,
+      "current": false
+    }
+  ]
+}

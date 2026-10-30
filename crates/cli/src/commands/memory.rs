@@ -95,15 +95,16 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             };
             out.emit(&result, || {
                 if result.added {
-                    println!(
+                    sayln!(
                         "Proposed ({}). It waits for the user to approve it in Yardsort; until \
                          then no agent sees it.",
                         result.id
                     );
                 } else {
-                    println!(
+                    sayln!(
                         "Already there ({}), {}. Nothing was added.",
-                        result.id, result.state
+                        result.id,
+                        result.state
                     );
                 }
             })
@@ -127,7 +128,7 @@ fn print(rows: &[MemoryRow], out: &Output, empty: &str) -> Result<(), Failure> {
     let entries: Vec<Entry> = rows.iter().map(Entry::from).collect();
     out.emit(&entries, || {
         if entries.is_empty() {
-            println!("{empty}");
+            sayln!("{empty}");
             return;
         }
         let mut lines = vec![vec!["ID".to_owned(), "FROM".to_owned(), "ENTRY".to_owned()]];

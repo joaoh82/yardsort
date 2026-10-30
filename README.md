@@ -1,10 +1,11 @@
 <div align="center">
   <img src="assets/icon.svg" width="96" alt="" />
   <h1>Yardsort</h1>
-  <p><strong>Run AI coding agents in parallel — each on its own track.</strong></p>
+  <p><strong>Orchestrate any coding agent — on Linux, macOS and Windows.</strong></p>
   <p>
-    Yardsort is an open-source desktop app for Linux, macOS and Windows. Every task gets its own git worktree and its
-    own terminal, running the coding agent of your choice.
+    Open-source desktop for Claude Code, Codex and any CLI agent you already use. Parallel tasks get their own git
+    worktrees; several agents can share one. Hand the work to the next agent with the context Yardsort already
+    recorded — no re-explaining the branch.
   </p>
   <p>
     <a href="https://yardsort.sh">yardsort.sh</a> ·
@@ -26,12 +27,15 @@
 ## What it is
 
 A sorting yard is where rail cars are sorted onto parallel tracks and later joined back into one
-train. That is the job: fan work out onto parallel branches, then merge it back.
+train. That is the job: fan work out onto parallel branches, then merge it back — and hand a car
+from one crew to another without retelling the whole journey.
 
 You describe a task, pick an agent, and press Enter. Yardsort creates a branch and a **git
 worktree** for it — a separate folder — and starts the agent there in a real terminal. Start
-another, and another. They cannot disturb each other, or your own checkout. On the right you
-watch the files each one touches, live, with diffs.
+another task on another track, or start a second agent in the same worktree. **Hand off** writes
+the next agent a first message from what happened here: your task, the branch, who wrote each file,
+what every run did. Project memory carries the short lessons you approved. On the right you watch
+the files each one touches, live, with diffs.
 
 It is modeled on tools like Conductor and Superset, with the requirement they do not meet:
 **Linux, macOS and Windows are all first-class**, built and tested together on every change.
@@ -140,7 +144,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   starts a workspace and an agent without opening the window: `ys workspace new <project>
 "<prompt>"`. The agent belongs to the background process, so it carries on after the command
   returns — and `ys attach` puts it back on your terminal, `ys logs` prints what a session ended
-  up with, `ys workspace handoff` prints the next agent's first message, `ys workflow run`
+  up with, `ys workspace handoff` prints the next agent's first message, `ys workspace fork`
+  starts the next feature on a new branch from a workspace's, `ys workflow run`
   queues a workflow for the open app to carry out. `ys workspace delete` removes one when the
   work is done, keeping the branch. Every command takes `--json`.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
@@ -243,8 +248,10 @@ and press Enter.
 
 ![Hand off: the composer holding the next agent's first message](docs/images/handoff.png)
 
-It is written from the record, not from the last agent's words — Yardsort never keeps a
-conversation — and no model writes it. An excerpt of a real one:
+It is written from the record, and no model writes it. Yardsort never keeps a conversation; in a
+project where you let the agents read each other's, a _What was said_ part adds your messages and
+each turn's final reply, read from the agents' own transcripts when you press **Hand off…**. An
+excerpt of a real one, from a project that does not share them:
 
 ```markdown
 ## What this workspace was asked
@@ -277,6 +284,12 @@ would look at them. The handoff is not the task: the new conversation keeps your
 as what the workspace was asked. From a terminal, `ys workspace handoff <workspace>` prints the
 same message. See
 [Handing work to another agent](docs/guide/terminals-and-sessions.md#handing-work-to-another-agent).
+
+A handoff shares the workspace. To build the next feature on this one in a worktree of its own,
+**Fork into new workspace…** in the workspace menu makes a new branch from its branch and sends
+the same record after your message, which is the new workspace's task. Uncommitted files stay
+where they were. From a terminal, `ys workspace fork <workspace> "<prompt>"` does the same. See
+[Fork into new workspace…](docs/guide/workspaces.md#fork-into-new-workspace).
 
 ## Workflows: named agent work, in steps
 
@@ -492,6 +505,10 @@ with it — write to **[hello@yardsort.sh](mailto:hello@yardsort.sh)**.
 
 [GPL-3.0](LICENSE). Yardsort is free software: you may use, study, share and change it, and
 versions you distribute must stay free under the same terms.
+
+The remote server, `crates/server`, is [AGPL-3.0](crates/server/LICENSE): the same terms, and
+whoever runs a changed copy for others over a network must offer them its source too. Why, and
+what stays out of this repository: [docs/design/30](docs/design/30-open-source-and-managed.md).
 
 Yardsort was called **Switchyard** until v0.2; if you used that, your projects and settings come
 along automatically the first time you start Yardsort.

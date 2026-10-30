@@ -12,6 +12,7 @@ import {
 import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
+import { ConversationsDialog } from "@/features/terminal/ConversationsDialog";
 import { useFileDrop } from "@/lib/useFileDrop";
 import { useShortcutLabel } from "@/stores/preferences";
 import { insertDroppedPaths } from "./drop";
@@ -62,10 +63,16 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   // The same for a task handed over from the Tasks view, which brings its message and itself.
   const [note] = useState(() => (runIn ? null : useProjectsStore.getState().composingPrompt));
   const [task] = useState(() => (runIn ? null : useProjectsStore.getState().composingTask));
+  // Forked from another workspace: a new branch from its branch, and its packet after the
+  // message. The message is the user's own, the new workspace's task, so it starts empty.
+  const [fork] = useState(() => (runIn ? null : useProjectsStore.getState().composingFork));
   const [message, setMessage] = useState(handoff ?? note ?? "");
-  const [harnessId, setHarnessId] = useState<string | null>(null);
-  const [model, setModel] = useState(last.model ?? "");
-  const [effort, setEffort] = useState(last.effort ?? "");
+  // Asked for by one agent's button: that agent, and the last picks only if they were for it.
+  const [handed] = useState(() => (runIn ? useProjectsStore.getState().composingHarness : null));
+  const lastFits = !handed || handed === last.harness;
+  const [harnessId, setHarnessId] = useState<string | null>(handed);
+  const [model, setModel] = useState((lastFits && last.model) || "");
+  const [effort, setEffort] = useState((lastFits && last.effort) || "");
   const [branches, setBranches] = useState<BranchList | null>(null);
   // "new:<branch>" starts a new branch from <branch>; "open:<branch>" opens <branch> itself.
   const [base, setBase] = useState("");
@@ -150,20 +157,31 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
           prepared &&
           list.branches.includes(prepared.branch) &&
           !list.checkedOut.includes(prepared.branch);
-        setBase(pullRequest ? `open:${prepared.branch}` : start ? `new:${start}` : "");
+        const forked = fork && list.branches.includes(fork.branch) ? fork.branch : null;
+        setBase(
+          pullRequest
+            ? `open:${prepared.branch}`
+            : forked
+              ? `new:${forked}`
+              : start
+                ? `new:${start}`
+                : "",
+        );
       },
       (reason) => !stale && setError(reason?.message ?? String(reason)),
     );
     return () => {
       stale = true;
     };
-  }, [project.id, runIn, prepared]);
+  }, [project.id, runIn, prepared, fork]);
 
   // The project's memory, when it shares it: what goes after the message, and a way to leave it
-  // out of this one launch. A handoff's packet carries it already.
+  // out of this one launch. A handoff's packet carries it already, and so does a fork's — but
+  // only while the fork starts from the forked branch, so it is read for a fork too.
   const [memory, setMemory] = useState<{ preview: string; count: number } | null>(null);
   const [skipMemory, setSkipMemory] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [showPacket, setShowPacket] = useState(false);
   useEffect(() => {
     if (handoff !== null || !hasCore()) return;
     let stale = false;
@@ -179,6 +197,24 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       stale = true;
     };
   }, [project.id, handoff]);
+
+  // In a workspace with other conversations, in a project that shares them: what the agent is
+  // told about them, and a way to leave that out of this one launch.
+  const [conversations, setConversations] = useState<{ about: string } | null>(null);
+  const [skipContext, setSkipContext] = useState(false);
+  const [showConversations, setShowConversations] = useState(false);
+  const runInId = runIn?.id;
+  useEffect(() => {
+    if (!runInId || !hasCore()) return;
+    let stale = false;
+    ipc.conversationContext(runInId, null).then(
+      (read) => !stale && setConversations(read && { about: read.about }),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [runInId]);
 
   // Your history with each agent, across projects: shown beside the picker, never used to pick.
   const [histories, setHistories] = useState<AgentOutcomes[]>([]);
@@ -226,11 +262,28 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
 
   const ready = !busy && !!harness?.resolvedPath && (!!runIn || base !== "");
   const [mode, branch] = [base.slice(0, base.indexOf(":")), base.slice(base.indexOf(":") + 1)];
+  // The packet tells the agent the forked branch's commits are its history, which is true only
+  // when the new branch starts there: picked something else under Branch, or the forked branch
+  // was not offered, and it is an ordinary new workspace, the packet left out.
+  const forking = !!fork && base === `new:${fork.branch}`;
+  const offersMemory = !!memory && !forking;
   // A branch lives in one worktree at a time, so only branches nobody has checked out can open.
   const openable = branches?.branches.filter((name) => !branches.checkedOut.includes(name)) ?? [];
 
+  // Taken before anything is awaited: a second Start while the first is still spawning would
+  // start a second agent on the same task.
+  const starting = useRef(false);
   const start = async () => {
-    if (!ready || !harness) return;
+    if (!ready || !harness || starting.current) return;
+    starting.current = true;
+    try {
+      await launch(harness);
+    } finally {
+      starting.current = false;
+    }
+  };
+
+  const launch = async (harness: HarnessInfo) => {
     setBusy(true);
     setError(null);
     const projects = useProjectsStore.getState();
@@ -239,7 +292,9 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       model: model.trim() || null,
       effort: effortChoice || null,
       prompt: message.trim() || null,
-      ...(memory && skipMemory ? { skipMemory: true } : {}),
+      ...(offersMemory && skipMemory ? { skipMemory: true } : {}),
+      ...(conversations && skipContext ? { skipContext: true } : {}),
+      ...(forking ? { forkPacket: fork.packet } : {}),
     };
     const remember = () =>
       projects.remember(picksKey(project.id), {
@@ -310,6 +365,11 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
                 </>
               )}
             </>
+          ) : fork ? (
+            <>
+              Fork <span className="font-medium text-ink">{fork.name}</span> into a new workspace in{" "}
+              <span className="font-medium text-ink">{project.name}</span>
+            </>
           ) : (
             <>
               New workspace in <span className="font-medium text-ink">{project.name}</span>
@@ -318,10 +378,50 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         </h1>
         {handoff !== null && (
           <p className="mb-2 text-[12px] text-ink-faint">
-            This is what Yardsort recorded about the workspace, written as the next agent&rsquo;s
-            first message — never the last agent&rsquo;s words, which it does not keep. Read it,
-            change it, then start. The task on record stays what you first asked.
+            This is what Yardsort recorded about the workspace — and, where the project shares its
+            agents&rsquo; conversations, what was said in them — written as the next agent&rsquo;s
+            first message. Read it, change it, then start. The task on record stays what you first
+            asked.
           </p>
+        )}
+        {fork && base !== "" && !forking && (
+          <p role="note" className="mb-2 text-[12px] text-amber-400">
+            Not starting from <span className="font-mono">{fork.branch}</span>, so its commits will
+            not be in the new branch and nothing of {fork.name}&rsquo;s record goes with your
+            message. Pick <span className="font-mono">{fork.branch}</span> under Branch to fork it.
+          </p>
+        )}
+        {forking && (
+          <p className="mb-2 text-[12px] text-ink-faint">
+            A new branch and worktree, started from{" "}
+            <span className="font-mono text-ink-muted">{fork.branch}</span> with all its commits.
+            Say what to do next: your message is the new workspace&rsquo;s task and names it. What
+            Yardsort recorded about {fork.name} goes after it, for context.{" "}
+            {fork.uncommitted > 0 && (
+              <span className="text-amber-400">
+                {fork.uncommitted === 1
+                  ? "1 uncommitted file stays behind"
+                  : `${fork.uncommitted} uncommitted files stay behind`}{" "}
+                — commit {fork.uncommitted === 1 ? "it" : "them"} there first to bring{" "}
+                {fork.uncommitted === 1 ? "it" : "them"} along.{" "}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowPacket((shown) => !shown)}
+              className="text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+            >
+              {showPacket ? "Hide" : "Show"} what goes with it
+            </button>
+          </p>
+        )}
+        {forking && showPacket && (
+          <pre
+            aria-label="Sent after your message"
+            className="mb-2 max-h-48 overflow-auto rounded border border-line bg-surface p-2 text-[11px] whitespace-pre-wrap select-text"
+          >
+            {fork.packet}
+          </pre>
         )}
         {task && (
           <p className="mb-2 text-[12px] text-ink-faint">
@@ -476,7 +576,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
 
         {harness && <AgentHistoryLine history={histories.find((h) => h.harness === harness.id)} />}
 
-        {memory && (
+        {offersMemory && (
           <div className="mt-2 text-[12px] text-ink-faint">
             <label className="flex items-center gap-2">
               <input
@@ -517,6 +617,43 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
               </pre>
             )}
           </div>
+        )}
+
+        {conversations && harness && (
+          <div className="mt-2 text-[12px] text-ink-faint">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={!skipContext}
+                disabled={busy}
+                onChange={(event) => setSkipContext(!event.target.checked)}
+                className="accent-(--color-accent)"
+              />
+              <span>
+                Tell the agent it can read {conversations.about} here
+                {(harness.contextArgs ?? []).length > 0
+                  ? ", as background context."
+                  : message.trim()
+                    ? ", after the message. Your message stays the task on record."
+                    : " — after a message, so write one; with none it is not told."}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowConversations(true)}
+                aria-label="Show the other conversations"
+                className="ml-auto text-ink-muted underline decoration-line underline-offset-2 hover:text-ink"
+              >
+                Show
+              </button>
+            </label>
+          </div>
+        )}
+        {showConversations && runIn && (
+          <ConversationsDialog
+            workspaceId={runIn.id}
+            except={null}
+            onClose={() => setShowConversations(false)}
+          />
         )}
 
         {!runIn && (

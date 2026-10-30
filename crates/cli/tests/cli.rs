@@ -135,6 +135,28 @@ fn projects_are_listed_as_a_table_and_as_json() {
 }
 
 #[test]
+fn a_reader_that_stops_reading_ends_it_quietly() {
+    let fx = Fixture::new();
+    // As `ys project list | head -1` leaves it once `head` has its line: nobody at the other end.
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .args([
+            "--data-dir",
+            &fx.data_dir.to_string_lossy(),
+            "project",
+            "list",
+        ])
+        .env("YARDSORT_NO_DAEMON", "1")
+        .stdout(writer)
+        .output()
+        .expect("ys should run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(stderr, "");
+}
+
+#[test]
 fn a_new_workspace_is_a_real_branch_and_a_real_worktree() {
     let fx = Fixture::new();
 
@@ -726,6 +748,249 @@ fn the_handoff_packet_is_printed_from_the_record_and_git_together() {
         missing.contains("No workspace called \"nope\""),
         "{missing}"
     );
+}
+
+/// Forking makes a new workspace on a new branch from the workspace's branch: its commits come
+/// along, its uncommitted files do not, and the agent's message is the user's, then the packet.
+#[test]
+fn forking_branches_from_the_workspace_and_sends_its_record_after_the_message() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "Fix the login redirect");
+    let name = made["name"].as_str().unwrap().to_owned();
+    let branch = made["branch"].as_str().unwrap().to_owned();
+    let source = PathBuf::from(made["path"].as_str().unwrap());
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&source)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    std::fs::write(source.join("login.rs"), "fn login() {}\n").unwrap();
+    git(&["add", "login.rs"]);
+    git(&["commit", "-q", "-m", "Redirect after sign-in"]);
+    std::fs::write(source.join("draft.md"), "not yet\n").unwrap();
+
+    // --print makes nothing: it is the message, the user's words first.
+    let printed = fx
+        .ys(&["workspace", "fork", &name, "add CSV export", "--print"])
+        .ok();
+    assert!(
+        printed.starts_with(&format!(
+            "add CSV export\n\n# Forked from Yardsort: workspace \"{name}\""
+        )),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("  - Redirect after sign-in\n"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("- Uncommitted in that workspace, and so **not** in yours: 1 file"),
+        "{printed}"
+    );
+    let json: serde_json::Value = serde_json::from_str(
+        &fx.ys(&[
+            "workspace",
+            "fork",
+            &name,
+            "add CSV export",
+            "--print",
+            "--json",
+        ])
+        .ok(),
+    )
+    .unwrap();
+    assert_eq!(json["branch"], branch.as_str());
+    assert_eq!(json["uncommitted"], 1);
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workspace", "list", "--json"]).ok()).unwrap();
+    assert_eq!(worktrees_in(&listed).len(), 1, "--print made nothing");
+
+    let out = fx
+        .ys(&["workspace", "fork", &name, "add CSV export", "--no-agent"])
+        .ok();
+    assert!(out.contains(&format!("  from   {name}")), "{out}");
+    assert!(
+        out.contains(&format!("1 file uncommitted in {name} stayed there")),
+        "{out}"
+    );
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workspace", "list", "--json"]).ok()).unwrap();
+    let forked = worktrees_in(&listed)
+        .into_iter()
+        .find(|w| w["name"] != name.as_str())
+        .expect("the fork")
+        .clone();
+    let path = PathBuf::from(forked["path"].as_str().unwrap());
+    assert_ne!(forked["branch"], branch.as_str(), "a branch of its own");
+    assert!(path.join("login.rs").exists(), "the commit came along");
+    assert!(
+        !path.join("draft.md").exists(),
+        "the uncommitted file did not"
+    );
+    assert!(
+        source.join("draft.md").exists(),
+        "and is still where it was"
+    );
+
+    git(&["checkout", "-q", "--detach"]);
+    let detached = fx
+        .ys(&["workspace", "fork", &name, "add CSV export", "--no-agent"])
+        .failed();
+    assert!(detached.contains("is not on a branch"), "{detached}");
+    let missing = fx.ys(&["workspace", "fork", "nope", "x"]).failed();
+    assert!(
+        missing.contains("No workspace called \"nope\""),
+        "{missing}"
+    );
+}
+
+/// An agent asks what the workspace's other conversation said: nothing while the project has
+/// turned sharing off; otherwise the user's messages and the replies, from the recorded
+/// transcript, without the tool output and without the asking agent's own conversation.
+#[test]
+fn an_agent_reads_the_other_conversations_only_while_the_project_shares_them() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "Fix the login redirect");
+    let workspace_id = made["id"].as_str().unwrap().to_owned();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspace(&workspace_id).unwrap().unwrap();
+    for (record, native) in [("rec-other", "conv-other"), ("rec-asking", "conv-asking")] {
+        store
+            .add_session(&yardsort_core::store::NewSession {
+                id: record,
+                workspace_id: &workspace_id,
+                harness_id: "claude",
+                harness_session_id: Some(native),
+                title: record,
+                pty_session_id: &format!("pty-{record}"),
+                ..Default::default()
+            })
+            .unwrap();
+    }
+    drop(store);
+    // Claude Code's config directory, holding both conversations' transcripts.
+    let claude = tempfile::tempdir().unwrap();
+    let folder = claude.path().join("projects").join("-wt");
+    std::fs::create_dir_all(&folder).unwrap();
+    let recorded = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/fixtures/claude-transcript/2.1.302");
+    std::fs::copy(
+        recorded.join("conversation.jsonl"),
+        folder.join("conv-other.jsonl"),
+    )
+    .unwrap();
+    std::fs::copy(
+        recorded.join("fork.jsonl"),
+        folder.join("conv-asking.jsonl"),
+    )
+    .unwrap();
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let as_agent = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+            .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+            .args(args)
+            .env_remove("YARDSORT_RUN_ID")
+            .env("YARDSORT_WORKSPACE_ID", &workspace_id)
+            .env("YARDSORT_SESSION_RECORD_ID", "rec-asking")
+            .env("CLAUDE_CONFIG_DIR", claude.path())
+            .env("CODEX_HOME", nowhere.path())
+            .env("YARDSORT_NO_DAEMON", "1")
+            .current_dir(&workspace.path)
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    // On by default; turned off, nothing is read.
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .set_conversations_shared(&workspace.project_id, false)
+        .unwrap();
+    drop(store);
+    let (code, _, refused) = as_agent(&["workspace", "context"]);
+    assert_eq!(code, Some(1));
+    assert!(
+        refused.contains("does not share its agents' conversations"),
+        "{refused}"
+    );
+    // The handoff packet keeps to the same switch.
+    let (code, packet, err) = as_agent(&["workspace", "handoff", &workspace_id]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!packet.contains("## What was said"), "{packet}");
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    store
+        .set_conversations_shared(&workspace.project_id, true)
+        .unwrap();
+    drop(store);
+
+    // Now it carries every conversation here, under its own part.
+    let (code, packet, err) = as_agent(&["workspace", "handoff", &workspace_id]);
+    assert_eq!(code, Some(0), "{err}");
+    let said = &packet[packet.find("## What was said").expect(&packet)..];
+    assert!(
+        said.contains("### claude · conversation rec-othe"),
+        "{packet}"
+    );
+    assert!(
+        said.contains("> Thanks. In one sentence, what is left to do?"),
+        "{packet}"
+    );
+    assert!(said.find("## What is not here").is_some(), "{packet}");
+
+    let (code, text, err) = as_agent(&["workspace", "context"]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        text.starts_with("# What was said in this workspace"),
+        "{text}"
+    );
+    assert!(
+        text.contains("## claude · conversation rec-othe · 2 turns"),
+        "{text}"
+    );
+    assert!(
+        text.contains("> Thanks. In one sentence, what is left to do?"),
+        "{text}"
+    );
+    assert!(text.contains("> Nothing is left"), "{text}");
+    assert!(!text.contains("File created successfully"), "{text}");
+    // Its own conversation — the fork's last question — is not read back to it.
+    assert!(!text.contains("say which file you created"), "{text}");
+
+    let (_, json, _) = as_agent(&["workspace", "context", "--json"]);
+    let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(json["conversations"][0]["turnCount"], 2);
+    assert_eq!(json["conversations"][0]["turns"][0]["n"], 2);
+
+    let (code, whole, err) = as_agent(&["workspace", "context", "--turn", "1"]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(whole.contains("turn 1 of 2"), "{whole}");
+    assert!(whole.matches("\nAgent:\n").count() >= 2, "{whole}");
+
+    let (code, _, err) = as_agent(&["workspace", "context", "--turn", "9"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("there is no turn 9"), "{err}");
+    let (code, _, err) = as_agent(&["workspace", "context", "--since", "yesterday"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("--since takes a time in UTC"), "{err}");
+    let (_, later, _) = as_agent(&["workspace", "context", "--since", "2099-01-01T00:00Z"]);
+    assert!(!later.contains("> Thanks."), "{later}");
 }
 
 #[test]

@@ -65,12 +65,55 @@ jobs:
       - name: Rust — clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # The server's PostgreSQL store is tested against a real one. Linux only: the macOS and
+      # Windows runners have no containers, and its tests skip the PostgreSQL half there.
+      - name: PostgreSQL for the server's tests
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        # The image creates the database itself. It does that on a temporary server that listens
+        # only on its socket and then restarts, so readiness is asked over TCP: asked over the
+        # socket, it can say yes just before the restart.
+        run: |
+          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=yardsort_test \
+            -p 127.0.0.1:55432:5432 postgres:17.10-alpine
+          until docker exec postgres pg_isready -h 127.0.0.1 -U postgres -d yardsort_test; do sleep 1; done
+          echo "YARDSORT_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/yardsort_test?sslmode=disable" >> "$GITHUB_ENV"
+          echo "YARDSORT_REQUIRE_TEST_DATABASE=1" >> "$GITHUB_ENV"
+
       - name: Rust — test
         run: cargo test --workspace
 
       - name: TypeScript bindings are up to date
         shell: bash
         run: git diff --exit-code -- src/lib/bindings.ts
+
+  # One whole sign-in against a real ZITADEL, through the server's container image, ending with the
+  # image's own `revoke-account` signing the account out (`just server-e2e`). ZITADEL's login pages
+  # are not rendered: the tool makes the two API calls they make. Linux: it needs containers.
+  server-e2e:
+    name: Server end to end
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-e2e
+
+      - name: PostgreSQL and ZITADEL, with the server's app
+        timeout-minutes: 10
+        run: bun scripts/server-dev.mjs up
+
+      - name: Build the image, run it, sign in, revoke
+        timeout-minutes: 15
+        run: bun scripts/server-dev.mjs e2e
 
   # Installers for all three platforms. Only on main (and on demand): these are the slow,
   # expensive jobs — macOS minutes are billed at 10x on private repos.

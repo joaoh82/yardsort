@@ -4,7 +4,9 @@ Thank you for being here. Bug reports, ideas, documentation fixes and code are a
 small contributions are as appreciated as large ones.
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Contributions are
-licensed under the project's [GPL-3.0 license](LICENSE).
+licensed under the project's [GPL-3.0 license](LICENSE), apart from those to the remote server,
+`crates/server`, which are under its [AGPL-3.0 license](crates/server/LICENSE)
+([why](docs/design/30-open-source-and-managed.md)).
 
 ## Ways to help
 
@@ -50,6 +52,21 @@ crates/pty-host/     Owns pseudo-terminals and the processes in them. No Tauri, 
                      Tested against real processes in real PTYs.
 crates/pty-ipc/      The wire between the app and the daemon that runs that host: framing,
                      the server loop, and a client that is itself a TerminalHost.
+crates/remote-proto/ The remote protocol: versioned request, reply and terminal-frame types,
+                     their limits and validation. Data only — no transport, no listener.
+crates/remote-client/
+                     A device's side of the server's HTTP API and relay: signing in through
+                     the browser, refreshing, devices, hosts, pairing and relay sockets. The app
+                     uses it as a host.
+crates/remote-host/  The host's outbound connector: keeps the link to the server's relay and
+                     answers each device on it from the core (remote::serve). The app runs it;
+                     a headless host will.
+crates/server/       The remote server: signing in through an OIDC provider, accounts, devices,
+  migrations/        their credentials and the relay, kept in PostgreSQL and served over HTTP. Its own
+  dev/               numbered SQL files, append-only like the core's; dev/ is the local
+  fly/               environment (see "Working on the server"); fly/ is how staging runs on
+  self-host/         Fly.io; self-host/ is the recipe for running it yourself. Dockerfile
+                     builds its image.
 crates/core/         Everything both clients share and no UI belongs in: the SQLite store,
   src/               git, projects, workspaces, settings, harnesses, workflow files, the launch
                      environment, and finding or starting the daemon. No Tauri — linking the
@@ -77,6 +94,34 @@ Two principles explain most design decisions — more in [architecture](docs/des
    Status, readiness and notifications all derive from _activity_, not content.
 3. **The app is a client.** The terminals belong to the daemon, not the window, so closing the
    window is a disconnect — never a kill.
+
+## Working on the server
+
+The remote server (`crates/server`, the `yardsort-server` binary) needs PostgreSQL and an
+identity provider to sign in with. Locally both run in Docker, so install Docker with Compose and
+make sure your user can reach it; nothing is installed on the machine itself. The server runs on
+the host, so a change rebuilds in seconds.
+
+| Command                       | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `just server-up`              | Starts PostgreSQL and a throwaway ZITADEL (`crates/server/dev/compose.yaml`), creates the server's app in ZITADEL, and writes the server's settings to `crates/server/dev/server.env.local`.                                                                                                                                                                                                                                                |
+| `just server-run`             | Runs the server against them at `http://127.0.0.1:8787`.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `just server-sign-in`         | Signs a pretend device in through your browser, as the app will, then lists devices, refreshes and revokes itself. Sign in as `developer@yardsort.test`, password `Yardsort-dev-1`.                                                                                                                                                                                                                                                         |
+| `just server-pair`            | Stands in for a phone pairing with a host (`phone [SERVER] CODE`), or for a host showing a code (`host [SERVER]`). Signs in through your browser, as `just server-sign-in` does. `--relay` then reaches the host through the relay.                                                                                                                                                                                                         |
+| `just server-test`            | The server's tests, with their PostgreSQL half against the local database. Plain `cargo test` skips that half when the containers are not up.                                                                                                                                                                                                                                                                                               |
+| `just server-image`           | Builds the server's container image, `yardsort-server:dev` (`crates/server/Dockerfile`).                                                                                                                                                                                                                                                                                                                                                    |
+| `just server-e2e`             | Runs that image against the containers, signs in through ZITADEL without a browser, revokes the account from inside the image, then pairs a pretend phone with a pretend host, which the relay tells of the phone asking, and the phone types into the host's program through the relay, then leaves its stream and resumes it, and hears of a program the host started and that ended. What CI's "Server end to end" job runs. Linux only. |
+| `just server-down` / `-reset` | Stops the containers; `reset` also forgets everything in them.                                                                                                                                                                                                                                                                                                                                                                              |
+
+ZITADEL's admin console is at `http://127.0.0.1:8080/ui/console`, with the same sign-in. Every
+password and key in the development environment is a well-known value, and everything listens
+on `127.0.0.1` only: never reuse any of it anywhere reachable. Where the real server will run, and
+the accounts behind it, is [28](docs/design/28-remote-infrastructure.md).
+
+Staging deploys by hand, from Actions → **Deploy the server**, which the owner runs. Running the
+server yourself is [crates/server/self-host/README.md](crates/server/self-host/README.md). Each
+slice of the server ends with a smoke test a person runs, locally and on staging:
+[27 §19](docs/design/27-remote-r2.md#19--smoke-tests).
 
 ## Making a change
 

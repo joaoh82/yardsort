@@ -1,0 +1,30 @@
+[package]
+name = "remote-host"
+description = "The host's outbound connector: keeps this computer's link to the Yardsort server's relay, and answers the devices that come through it from the core's records and the terminal daemon."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Apart from the app on purpose: a headless host (R5) runs this without a window.
+[dependencies]
+yardsort-core = { path = "../core" }
+pty-host = { path = "../pty-host" }
+remote-client = { path = "../remote-client" }
+remote-proto = { path = "../remote-proto" }
+# The relay's notices to the host.
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+
+[dev-dependencies]
+yardsort-core = { path = "../core", features = ["testing"] }
+# A stand-in relay, served over a real socket, for the tests.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }

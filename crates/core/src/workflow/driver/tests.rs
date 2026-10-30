@@ -523,3 +523,53 @@ fn the_workspaces_own_agent_is_told_not_a_shell_and_not_the_runs_own_reviewer() 
         "the reviewer the run started, the newest agent of all, was not told either"
     );
 }
+
+/// A workflow's message is not the person here typing: it never takes control from someone
+/// controlling the agent from elsewhere, and never types over them. It waits for the lease to
+/// end, and the lease holder notices nothing.
+#[test]
+fn a_message_due_while_someone_elsewhere_has_control_waits_for_them() {
+    let mut fx = Fixture::new();
+    let run = fx.queue();
+    fx.until("the agent starts", |fx| {
+        fx.step(&run, "start").status == "succeeded"
+    });
+    let session = fx.session_of(&run);
+    let lease = fx.host.acquire(&session, "phone", false).unwrap();
+
+    fx.until("the agent settles", |fx| {
+        fx.step(&run, "settle").status == "succeeded"
+    });
+    let due = Instant::now();
+    while due.elapsed() < Duration::from_secs(1) {
+        fx.tick();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_ne!(fx.step(&run, "nudge").status, "succeeded");
+    assert!(!fx.hands.kept.exists(), "nothing was typed under the lease");
+    assert_eq!(
+        fx.host
+            .renew(&session, &lease.reference())
+            .unwrap()
+            .generation,
+        lease.generation,
+        "the lease holder kept control"
+    );
+
+    fx.host.release(&session, &lease.reference()).unwrap();
+    fx.until("the run ends", |fx| {
+        !fx.store.workflow_run(&run).unwrap().unwrap().active()
+    });
+    assert_eq!(fx.run_status(&run), "succeeded");
+    assert_eq!(
+        std::fs::read_to_string(&fx.hands.kept).unwrap(),
+        "Now write the tests."
+    );
+    assert!(
+        matches!(
+            fx.host.controller(&session).unwrap(),
+            pty_host::Controller::Nobody
+        ),
+        "and typing it took no control"
+    );
+}

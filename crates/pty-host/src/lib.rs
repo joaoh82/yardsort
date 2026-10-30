@@ -9,38 +9,57 @@
 //! ```text
 //! spawn(LaunchPlan) -> SessionInfo        list() -> [SessionInfo]
 //! attach(id, sink)  -> AttachmentId       detach(id, attachment)
+//! attach_numbered(id, sink) -> AttachmentId   resume_numbered(id, after, sink)
 //! write(id, bytes) / paste(id, text)       resize(id, size)
 //! kill(id)                                remove(id)
+//! acquire / renew / release(id, …)         input / resize_leased(id, lease, …)
 //! events: HostEvent::{Exited, Busy, Quiet}
 //! ```
 //!
 //! [`TerminalHost`] is that API as a trait, implemented here and by the daemon's client.
 //!
+//! **One controller.** `write`, `paste` and `resize` are the person at this computer, who always
+//! has control when they type. Anyone else asks for a lease first and types under it, numbered
+//! (see [`control`]). **One responder.** Only one viewer is shown the program's terminal queries,
+//! so only one terminal answers them; the others get the output without them (see [`queries`]).
+//!
 //! Each session keeps a headless terminal (`vt100`) fed with everything the process prints. A
 //! viewer that attaches — for the first time or the tenth — first receives a snapshot that
 //! repaints scrollback and screen, then the live stream, with nothing lost or duplicated between
-//! the two.
+//! the two — wherever the cut falls, even inside an escape sequence (see [`snapshot`]). A
+//! numbered viewer is also told which item of the stream the snapshot holds, and one that lost
+//! its connection can carry on from the last item it saw while the session still keeps what came
+//! since (see [`replay`]).
 
+pub mod control;
 mod prompt;
+mod queries;
+pub mod replay;
 mod session;
 pub mod snapshot;
 mod types;
+mod unfinished;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+pub use control::{Controller, Holds, Lease, LeaseRef};
 use session::Session;
 pub use types::{
-    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, PendingPrompt, Result, SessionId,
-    SessionInfo, SessionState, TermSize,
+    AttachmentId, ExitInfo, HostError, HostEvent, LaunchPlan, Numbered, OutputSeq, PendingPrompt,
+    Result, SessionId, SessionInfo, SessionState, TermSize,
 };
 
 /// Receives a session's output: first one snapshot, then live batches. Return `false` to detach.
 ///
-/// Called on the session's pump thread while it holds the session lock, so it must be quick and
-/// must not call back into the host.
+/// Called while the session's lock is held — on its pump thread, or on the thread attaching —
+/// so it must be quick and must not call back into the host.
 pub type OutputSink = Box<dyn FnMut(&[u8]) -> bool + Send>;
+
+/// Receives a session's output with its place in the stream: see [`PtyHost::attach_numbered`].
+/// Return `false` to detach. Called under the session's lock, like an [`OutputSink`].
+pub type NumberedSink = Box<dyn FnMut(Numbered<'_>) -> bool + Send>;
 
 /// Receives host-wide events. Called from session threads.
 pub type EventSink = Arc<dyn Fn(HostEvent) + Send + Sync>;
@@ -54,6 +73,7 @@ pub struct PtyHost {
     sessions: Mutex<HashMap<SessionId, Arc<Session>>>,
     events: EventSink,
     quiet_after: Duration,
+    holds: Holds,
 }
 
 impl PtyHost {
@@ -62,6 +82,7 @@ impl PtyHost {
             sessions: Mutex::new(HashMap::new()),
             events,
             quiet_after: DEFAULT_QUIET_AFTER,
+            holds: Holds::default(),
         }
     }
 
@@ -71,10 +92,17 @@ impl PtyHost {
         self
     }
 
+    /// Hold control for other lengths of time in sessions spawned from now on: a test's, which
+    /// cannot wait half a minute for a hold to lapse.
+    pub fn with_holds(mut self, holds: Holds) -> Self {
+        self.holds = holds;
+        self
+    }
+
     /// Start `plan.program` in a new PTY.
     pub fn spawn(&self, plan: LaunchPlan) -> Result<SessionInfo> {
         let pending = plan.prompt.clone();
-        let session = Session::spawn(plan, Arc::clone(&self.events), self.quiet_after)?;
+        let session = Session::spawn(plan, Arc::clone(&self.events), self.quiet_after, self.holds)?;
         let info = session.info();
         self.lock().insert(info.id.clone(), Arc::clone(&session));
         // Delivery runs here rather than in the client, so the message still arrives if whoever
@@ -92,23 +120,97 @@ impl PtyHost {
         Ok(self.get(id)?.attach(sink))
     }
 
+    /// Watch a session's output knowing where each piece falls: a snapshot tagged with the item
+    /// it reflects, then every later item numbered from there. What a viewer across a network
+    /// needs in order to prove it lost nothing and doubled nothing.
+    ///
+    /// A numbered viewer is also told who controls the session, and when that changes
+    /// ([`Numbered::Control`]), and when the program ends ([`Numbered::Exited`]). From the first
+    /// one on, the session keeps the last stretch of its stream for viewers that resume.
+    ///
+    /// A numbered viewer watches; it is not a terminal. It is never shown the program's queries,
+    /// and it does not stop the host from answering them when no terminal is attached. Detach
+    /// with [`PtyHost::detach`].
+    pub fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
+        Ok(self.get(id)?.attach_numbered(None, sink))
+    }
+
+    /// As [`PtyHost::attach_numbered`], for a viewer that already shows everything up to item
+    /// `after`: it is sent [`Numbered::Resumed`] and the items since, when the session still
+    /// keeps them all (see [`replay`]), and a snapshot otherwise.
+    pub fn resume_numbered(
+        &self,
+        id: &SessionId,
+        after: OutputSeq,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        Ok(self.get(id)?.attach_numbered(Some(after), sink))
+    }
+
     pub fn detach(&self, id: &SessionId, attachment: AttachmentId) -> Result<()> {
         self.get(id)?.detach(attachment);
         Ok(())
     }
 
-    /// Send input to the session's process.
+    /// Type into the session from this computer. Takes control of it, from a lease holder if
+    /// one has it.
     pub fn write(&self, id: &SessionId, data: &[u8]) -> Result<()> {
-        self.get(id)?.write(data)
+        self.get(id)?.local_write(data)
     }
 
-    /// Paste text into the session, bracketed if the program enabled bracketed paste.
+    /// Paste text into the session, bracketed if the program enabled bracketed paste. Takes
+    /// control, as [`PtyHost::write`] does.
     pub fn paste(&self, id: &SessionId, text: &str) -> Result<()> {
-        self.get(id)?.paste(text)
+        self.get(id)?.local_paste(text)
     }
 
+    /// Type for the app itself rather than for the person here, such as a workflow's step.
+    /// Nobody typed it, so it takes no control; and while someone holds a lease it is refused
+    /// with [`HostError::ControlHeld`] rather than type over them.
+    pub fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        self.get(id)?.unattended(text, paste)
+    }
+
+    /// Resize to this computer's view. While a lease holder controls the session, its size
+    /// stands, and this one is put back when control returns.
     pub fn resize(&self, id: &SessionId, size: TermSize) -> Result<()> {
         self.get(id)?.resize(size)
+    }
+
+    /// Who may type into the session now.
+    pub fn controller(&self, id: &SessionId) -> Result<Controller> {
+        Ok(self.get(id)?.controller())
+    }
+
+    /// Ask for control of a session as `holder`. Refused while the person here has it, and
+    /// while another holder does unless `take_over`.
+    pub fn acquire(&self, id: &SessionId, holder: &str, take_over: bool) -> Result<Lease> {
+        self.get(id)?.acquire(holder, take_over)
+    }
+
+    pub fn renew(&self, id: &SessionId, lease: &LeaseRef) -> Result<Lease> {
+        self.get(id)?.renew(lease)
+    }
+
+    pub fn release(&self, id: &SessionId, lease: &LeaseRef) -> Result<()> {
+        self.get(id)?.release(lease)
+    }
+
+    /// Type under a lease. `seq` is 1 for the first input under it, then one more each time:
+    /// a repeat is dropped, and a gap refused.
+    pub fn input(
+        &self,
+        id: &SessionId,
+        lease: &LeaseRef,
+        seq: u64,
+        data: &str,
+        paste: bool,
+    ) -> Result<()> {
+        self.get(id)?.input(lease, seq, data, paste)
+    }
+
+    pub fn resize_leased(&self, id: &SessionId, lease: &LeaseRef, size: TermSize) -> Result<()> {
+        self.get(id)?.resize_leased(lease, size)
     }
 
     /// Ask the session's process to terminate. `Exited` follows once it has.
@@ -163,6 +265,9 @@ pub fn paste_and_submit(host: &dyn TerminalHost, id: &SessionId, text: &str) -> 
 
 /// What a client of the PTY host can ask for, whether the host is in this process or in the
 /// daemon at the other end of a socket. The app holds one of these and never knows which.
+///
+/// Numbered viewing and leases have defaults that refuse with [`HostError::ControlUnavailable`],
+/// for hosts that cannot offer them: a daemon from before they existed, or a test's stand-in.
 pub trait TerminalHost: Send + Sync {
     fn spawn(&self, plan: LaunchPlan) -> Result<SessionInfo>;
     fn attach(&self, id: &SessionId, sink: OutputSink) -> Result<AttachmentId>;
@@ -174,6 +279,59 @@ pub trait TerminalHost: Send + Sync {
     fn remove(&self, id: &SessionId) -> Result<()>;
     fn info(&self, id: &SessionId) -> Result<SessionInfo>;
     fn list(&self) -> Vec<SessionInfo>;
+
+    /// Whether numbered viewing and leases are offered: what [`TerminalHost::attach_numbered`]
+    /// and the lease operations need. A daemon from before them says no.
+    fn shares_control(&self) -> bool {
+        false
+    }
+
+    /// A host without leases has nobody to type over: it types as the person here would.
+    fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        if paste {
+            self.paste(id, text)
+        } else {
+            self.write(id, text.as_bytes())
+        }
+    }
+
+    fn attach_numbered(&self, _id: &SessionId, _sink: NumberedSink) -> Result<AttachmentId> {
+        Err(HostError::ControlUnavailable)
+    }
+    /// A host that keeps nothing to resume from sends a snapshot, which is always correct.
+    fn resume_numbered(
+        &self,
+        id: &SessionId,
+        _after: OutputSeq,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        self.attach_numbered(id, sink)
+    }
+    fn controller(&self, _id: &SessionId) -> Result<Controller> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn acquire(&self, _id: &SessionId, _holder: &str, _take_over: bool) -> Result<Lease> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn renew(&self, _id: &SessionId, _lease: &LeaseRef) -> Result<Lease> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn release(&self, _id: &SessionId, _lease: &LeaseRef) -> Result<()> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn input(
+        &self,
+        _id: &SessionId,
+        _lease: &LeaseRef,
+        _seq: u64,
+        _data: &str,
+        _paste: bool,
+    ) -> Result<()> {
+        Err(HostError::ControlUnavailable)
+    }
+    fn resize_leased(&self, _id: &SessionId, _lease: &LeaseRef, _size: TermSize) -> Result<()> {
+        Err(HostError::ControlUnavailable)
+    }
 }
 
 impl TerminalHost for PtyHost {
@@ -215,6 +373,57 @@ impl TerminalHost for PtyHost {
 
     fn list(&self) -> Vec<SessionInfo> {
         PtyHost::list(self)
+    }
+
+    fn type_unattended(&self, id: &SessionId, text: &str, paste: bool) -> Result<()> {
+        PtyHost::type_unattended(self, id, text, paste)
+    }
+
+    fn shares_control(&self) -> bool {
+        true
+    }
+
+    fn attach_numbered(&self, id: &SessionId, sink: NumberedSink) -> Result<AttachmentId> {
+        PtyHost::attach_numbered(self, id, sink)
+    }
+    fn resume_numbered(
+        &self,
+        id: &SessionId,
+        after: OutputSeq,
+        sink: NumberedSink,
+    ) -> Result<AttachmentId> {
+        PtyHost::resume_numbered(self, id, after, sink)
+    }
+
+    fn controller(&self, id: &SessionId) -> Result<Controller> {
+        PtyHost::controller(self, id)
+    }
+
+    fn acquire(&self, id: &SessionId, holder: &str, take_over: bool) -> Result<Lease> {
+        PtyHost::acquire(self, id, holder, take_over)
+    }
+
+    fn renew(&self, id: &SessionId, lease: &LeaseRef) -> Result<Lease> {
+        PtyHost::renew(self, id, lease)
+    }
+
+    fn release(&self, id: &SessionId, lease: &LeaseRef) -> Result<()> {
+        PtyHost::release(self, id, lease)
+    }
+
+    fn input(
+        &self,
+        id: &SessionId,
+        lease: &LeaseRef,
+        seq: u64,
+        data: &str,
+        paste: bool,
+    ) -> Result<()> {
+        PtyHost::input(self, id, lease, seq, data, paste)
+    }
+
+    fn resize_leased(&self, id: &SessionId, lease: &LeaseRef, size: TermSize) -> Result<()> {
+        PtyHost::resize_leased(self, id, lease, size)
     }
 }
 

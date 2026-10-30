@@ -140,6 +140,28 @@ export function MemoryDialog({ project, onClose }: { project: Project; onClose: 
               </span>
             </span>
           </label>
+          <label className="mt-3 flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={memory?.conversationsShared ?? false}
+              disabled={busy || !memory}
+              onChange={(event) =>
+                void run(() => ipc.conversationsShare(project.id, event.target.checked))
+              }
+              className="mt-0.5 accent-(--color-accent)"
+            />
+            <span>
+              Share conversations between this project&rsquo;s agents
+              <span className="block text-ink-faint">
+                An agent in a workspace can run{" "}
+                <code className="font-mono text-[11px]">ys workspace context</code> to read the
+                other conversations there: every message you typed and each turn&rsquo;s reply, from
+                the agents&rsquo; own transcripts, without tool output. What it reads goes to that
+                agent&rsquo;s provider, which may not be the one you said it to. Nothing is stored.
+                On unless you turn it off.
+              </span>
+            </span>
+          </label>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5 pt-4">

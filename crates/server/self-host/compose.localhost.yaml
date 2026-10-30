@@ -1,0 +1,28 @@
+# Trying the recipe on one machine before a real one, under names that resolve to this machine:
+#
+#   docker compose -f compose.yaml -f compose.localhost.yaml up -d proxy
+#
+# with AUTH_DOMAIN=auth.localhost and REMOTE_DOMAIN=remote.localhost in .env. Caddy signs the
+# certificates with its own authority instead of Let's Encrypt, so a browser warns about them, and
+# only this machine can reach the ports. The server trusts that authority alone: never use this
+# file on a machine others reach.
+
+services:
+  proxy:
+    environment:
+      CADDY_CERTIFICATES: local_certs
+    # `*.localhost` resolves to either loopback address.
+    ports: !override
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+      - "[::1]:80:80"
+      - "[::1]:443:443"
+
+  server:
+    # Caddy writes its authority's certificate readable by root alone.
+    user: "0"
+    environment:
+      # Caddy's authority, which it creates when it first starts.
+      SSL_CERT_FILE: /caddy/caddy/pki/authorities/local/root.crt
+    volumes:
+      - caddy-data:/caddy:ro

@@ -1,0 +1,60 @@
+[package]
+name = "yardsort-server"
+description = "The Yardsort server: signing in through an OIDC identity provider, accounts, and the credentials it issues to devices, kept in PostgreSQL and served over HTTP."
+version.workspace = true
+edition.workspace = true
+# The server alone is AGPL; the rest of the workspace is GPL (docs/design/30-open-source-and-managed.md).
+license = "AGPL-3.0-only"
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yardsort-server"
+path = "src/main.rs"
+
+[dependencies]
+remote-proto = { path = "../remote-proto" }
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "query", "tokio", "ws"] }
+base64 = "0.22"
+getrandom = "0.3"
+# Checks the identity provider's ID tokens. The algorithm is pinned to each key's own type, so a
+# token cannot choose how it is checked. Pure-Rust crypto: no C toolchain on any platform.
+jsonwebtoken = { version = "11.1", default-features = false, features = ["rust_crypto"] }
+# To the identity provider only: discovery, its keys, and the code exchange.
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# The records, in PostgreSQL. Queries are checked by the tests against a real server, not at
+# compile time, so building needs no database. (sqlx would check them at compile time, but its
+# SQLite driver's native library collides with the app's, even unused.)
+deadpool-postgres = "0.14"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tokio-postgres = "0.7"
+tokio-postgres-rustls = "0.14"
+webpki-roots = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+# The device's side, for the pairing tool (examples/pair.rs).
+remote-client = { path = "../remote-client" }
+# The host's side, for the tests of the relay with a real host behind it (tests/relay_host.rs).
+# GPL code in the AGPL server's tests only: nothing of it is in the server, and nothing depends
+# on the server (tests/license.rs).
+remote-host = { path = "../remote-host" }
+yardsort-core = { path = "../core", features = ["testing"] }
+pty-host = { path = "../pty-host" }
+tempfile = "3"
+# A stand-in identity provider, served over real HTTP, for the tests.
+axum = "0.8"
+jsonwebtoken = { version = "11.1", default-features = false, features = ["rust_crypto"] }

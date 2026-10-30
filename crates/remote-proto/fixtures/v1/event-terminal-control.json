@@ -1,0 +1,5 @@
+{
+  "event": "terminal.control",
+  "stream": 1,
+  "controller": { "kind": "device", "device": "device-1", "name": "Example phone" }
+}

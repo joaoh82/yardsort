@@ -5,6 +5,67 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A terminal open in the app and in `ys attach` at once answers a program's questions once.**
+  When a program asked where the cursor was, or which colours the terminal used, both answered,
+  and the program could read the second answer as typing — `^[[24;1R` in a prompt. Now only the
+  terminal attached last is asked.
+
+- **Updating with agents running keeps new terminals in the daemon.** This version changes how
+  the app and its terminal daemon talk, but only by adding to it, so it goes on using the daemon
+  your running agents are in instead of starting new terminals inside the app, where they would
+  stop when it quits. The daemon is replaced once nothing runs in it.
+
+- **An agent can read what was said in the workspace's other conversations.**
+  `ys workspace context` prints every message you typed and each turn's reply from the Claude Code
+  and Codex conversations beside it, read from their own transcripts, without tool output, within
+  about 8,000 tokens. Nothing is stored. On unless you untick **Share conversations between this
+  project's agents** in a project's Memory view — what an agent reads goes to its provider.
+
+- **A new agent is told when other conversations in its workspace can be read.** Claude Code and
+  Codex get a short note as background context, so one started from the tab bar knows without a
+  first message; other agents get it after the first message, and their buttons ask whether to
+  start with the handoff. The tab says so, with **Show**; **Alt-click** starts an agent without
+  it. Settings → Harnesses has a new **Context args** template.
+
+- **Hand off… says what was said, and Cursor and OpenCode conversations can be read.** In a
+  project that shares its agents' conversations, the handoff message has a _What was said_ part:
+  your messages and each turn's final reply, read from the agents' own transcripts when you press
+  it, within about 4,000 tokens. `ys workspace context` and that part now read Grok, Cursor,
+  OpenCode, OMP and pi conversations too, beside Claude Code's and Codex's, and Grok, OMP and pi
+  are told about them as background context, as Claude Code and Codex are. A resumed or forked Claude
+  Code, OMP or pi conversation is told again, about the conversations there are then — Claude
+  Code with `--system-prompt-snapshot off` on that resume, so it reads the new note. Settings →
+  Harnesses has a **Resume context args** template for it.
+
+- **`ys attach` and `ys logs` take the id `ys session list` prints.** They took only a workspace
+  name or a terminal's own id, so two agents in one workspace could not be told apart. When a name
+  matches several, each choice is listed with an id to name it by.
+
+- **A conversation nothing has been said in yet is described as one.** Agents write no transcript
+  until they are asked something, so `ys workspace context` listed a conversation started
+  without a message as one whose transcript was not found, and the agent reading it could only
+  guess. It now says that one was started without a message, so most likely nothing has been
+  said in it yet.
+
+- **`ys` stops quietly when what it is printing to stops reading.** `ys session list | head`
+  panicked with _failed printing to stdout: Broken pipe_ once `head` had its lines, and
+  `ys logs --raw` failed with _cannot write the screen_; both now exit without a word.
+
+- **A terminal you come back to while it is printing no longer shows a stray fragment.**
+  Switching to a workspace, or running `ys attach`, at the moment a program had printed half of
+  a colour code or of a character such as `é` could show the rest as text (`1m`, `38;5;208m`) or
+  leave a character or the space after it missing from the repainted screen. The repaint now
+  carries the unfinished half, so the program's next output completes it as it would have.
+
+- **Fork a workspace into a new one.** **Fork into new workspace…** in a workspace's menu starts
+  a new workspace on a new branch made from that workspace's branch, in its own worktree — for
+  building the next feature on the one in progress, where a handoff would share the worktree.
+  Your message is the new workspace's task; what Yardsort recorded about the workspace you forked
+  goes to the agent after it. Uncommitted files stay behind, and the composer says how many. See
+  [Fork into new workspace…](docs/guide/workspaces.md#fork-into-new-workspace).
+  `ys workspace fork <workspace> "<prompt>"` does the same from a terminal; `--print` shows the
+  message the agent would get.
+
 - **Smoke tests: the file format and `ys test`.** A smoke test is a YAML file in your
   repository, `.yardsort/tests/<id>.yaml`: setup, steps and teardown in order, with typed steps
   (`run`, `shell`, `start`, `wait_for`, `http`, `browser`, `manual`), expectations, and
@@ -14,6 +75,10 @@ has the downloads and the full commit lists.
   Yardsort comes in a later release. See [Smoke tests](docs/guide/smoke-tests.md).
 
 ## 0.20.2
+
+- **Homepage and README lead with what Yardsort is for.** Orchestrate agents on Linux, macOS and
+  Windows; share a worktree when you want; hand work to the next agent with recorded context so you
+  do not re-explain the branch.
 
 - **An AppImage updated from inside the app now starts the new version clean.** The old
   version used to start the new one with its own libraries still on the search path, so a

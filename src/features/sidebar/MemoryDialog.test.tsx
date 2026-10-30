@@ -9,6 +9,7 @@ const core = vi.hoisted(() => ({
   memoryEdit: vi.fn(),
   memoryDecide: vi.fn(),
   memoryShare: vi.fn(),
+  conversationsShare: vi.fn(),
   memoryWaiting: vi.fn(),
   memoryCheck: vi.fn(),
   assistStatus: vi.fn(),
@@ -35,9 +36,14 @@ const entry = (id: string, text: string, extra: Partial<MemoryEntry> = {}): Memo
   history: [],
   ...extra,
 });
-const memory = (entries: MemoryEntry[], shared = false): ProjectMemory => ({
+const memory = (
+  entries: MemoryEntry[],
+  shared = false,
+  conversationsShared = true,
+): ProjectMemory => ({
   projectId: "p-app",
   shared,
+  conversationsShared,
   preview: null,
   entries,
 });
@@ -141,6 +147,19 @@ describe("MemoryDialog", () => {
         screen.getByRole("checkbox", { name: /Give this project.s agents its memory/ }),
       ).toBeChecked(),
     );
+
+    // Sharing conversations is its own switch, on until it is turned off.
+    const conversations = screen.getByRole("checkbox", {
+      name: /Share conversations between this project.s agents/,
+    });
+    expect(conversations).toBeChecked();
+    core.conversationsShare.mockResolvedValue(memory([kept], true, false));
+    await user.click(conversations);
+    expect(core.conversationsShare).toHaveBeenCalledWith("p-app", false);
+    await waitFor(() => expect(conversations).not.toBeChecked());
+    expect(
+      screen.getByRole("checkbox", { name: /Give this project.s agents its memory/ }),
+    ).toBeChecked();
 
     core.memoryWrite.mockRejectedValue({
       code: "memory_too_long",

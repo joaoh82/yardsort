@@ -40,7 +40,8 @@ settled.
    resolved as: **one daemon per data directory**; the app starts it when nobody answers, under a
    lock file; it stops itself once no client is connected and no session is running, or when the
    app's quit dialog says to; an **update** that changes the protocol replaces an idle daemon
-   silently and leaves a busy one alone rather than kill work. "Background" on Windows is a
+   silently and leaves a busy one alone rather than kill work — still using it when the change
+   only added to the protocol (since protocol 2, [27 §8](27-remote-r2.md#8--what-the-fifth-slice-adds)). "Background" on Windows is a
    `DETACHED_PROCESS` in its own process group behind a named pipe. See
    [03-architecture](03-architecture.md#the-daemon-yardsortd).
 7. ~~**Windows harness support.**~~ **Settled 2026-09-21: the lean stands.** Native Windows
@@ -260,19 +261,81 @@ From the design pass in [24-repositories](24-repositories.md).
     not github.com. The list has no project to read a host from. Lean: github.com only until
     someone with an Enterprise host asks; a pasted URL from such a host clones already.
 
+## Remote
+
+From the fit pass in [26-remote-r0-r1](26-remote-r0-r1.md). The proposal's own table of decisions
+([§16](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md#16-decisions-to-resolve-at-the-appropriate-gate))
+still stands; these are what the code added to it.
+
+35. ~~**Where does a headless host keep its device credential?**~~ **Settled 2026-10-25, as the
+    lean said** ([27 §7](27-remote-r2.md#7--what-the-fourth-slice-adds)): a credential trait in
+    the core (`remote::host::CredentialStore`); the app puts the OS credential store behind it,
+    and a directory only its owner can read (`0700`, files `0600`) is the other, chosen with
+    `YARDSORT_CREDENTIALS_DIR`. The headless host (R5) will use the directory, from its own mount.
+36. **Should the session title cross to remote clients?** It may quote the first message. Without
+    it a phone cannot tell two conversations apart. Lean: yes, as now, marked user content that
+    clients never log; revisit if a title-only privacy mode is asked for.
+37. ~~**When an old daemon with agents running cannot enforce leases, what does a remote client
+    see?**~~ **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
+    the terminals are listed as before, and `host.describe` says why they cannot be opened yet
+    (`terminalsLater`, `earlierDaemon`) and what to wait for. The terminal operations are refused
+    with the same words. Nothing restarts the daemon.
+38. ~~**Should a spent refresh credential be accepted again for a few seconds?**~~ **Settled
+    2026-10-30, against the lean** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
+    a device signed out by a lost answer has to be paired at the computer again, which is too
+    much for a train tunnel. A spent one is answered once more within 30 seconds, and only while
+    neither credential issued in its place has been used; anything else still revokes the device.
+39. ~~**Should a device have to sign in again after some time however often it is used?**~~
+    **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
+    no maximum. The operator disables the person at the provider and runs
+    `yardsort-server revoke-account`, which closes their live connections at once.
+40. **Under what license is the phone app published?** It goes through Apple's App Store and
+    Google Play, and the Free Software Foundation's view is that the App Store's terms add
+    restrictions the GPL forbids ([30 §6](30-open-source-and-managed.md#6--the-phone-app-a-question-for-r3)).
+    The owner, as the only copyright holder, can publish it anyway; code others contribute under
+    the GPL alone would not allow it. Lean: decide at R3, before anyone else contributes to it,
+    between the GPL with an app-store exception (an additional permission under GPLv3 §7) and a
+    permissive license.
+
+## Conversation context
+
+From the design pass in [29-conversation-context](29-conversation-context.md).
+
+40. **Should an agent's own handoff note come back as a fallback?** Asking each agent to keep a
+    note through `ys` was set aside as the source because it is not deterministic. For a harness
+    with no readable transcript — Cursor today, any custom harness — a note is better than
+    nothing. Lean: only if a harness with no reader turns out to be used beside others often.
+41. ~~**How does a resumed Claude conversation see a new note?**~~ **Settled 2026-10-26:**
+    `--system-prompt-snapshot off` on every resume or fork that is told, beside the note, in
+    Claude Code's `resume_context_args` — a template that replaced the `resume_context` switch, so
+    OMP and pi have their context args there and Codex and Grok nothing. Measured live with
+    2.1.302: snapshot off builds the prompt afresh and stably, so later requests and launches read
+    it from the cache; the cost is one cache write on a told resume, not one per request. Not only
+    for a conversation that began alone, as leaned: Yardsort does not record what one began with,
+    and one that began told gains a current note for the same write. A Claude Code without the
+    option refuses it. See [29 § Claude Code on resume](29-conversation-context.md#claude-code-on-resume).
+    _Before:_ Claude Code records its system prompt on the first request and resends it on every
+    resume until a compaction; Codex 0.163.0 and Grok 1.0.70 keep theirs too, with no such option
+    found; OMP 18.11.3 and pi 1.4.0 build theirs at each launch.
+42. ~~**What is the switch's default?**~~ **Settled 2026-10-26: on**, by the user's decision; a
+    project shares until it is turned off in its Memory view. It was first settled off on
+    2026-10-25, with a question asked once per project the first time an agent started beside a
+    conversation (built in slice 2); with the default on there is nothing to ask, and the
+    question is gone.
+
 ## Smoke tests
 
-From the design pass in [25-smoke-tests](25-smoke-tests.md), 2026-10-30.
+From the design pass in [31-smoke-tests](31-smoke-tests.md), 2026-10-30.
 
-35. **Should an approval follow a rebase?** A file whose content is unchanged but whose path
+43. **Should an approval follow a rebase?** A file whose content is unchanged but whose path
     moved with a rename keeps its approval under the hash; a file that changed only in a comment
     does not. Whether to hash the parsed form instead of the text is a slice 2 finding.
-36. **Should a run tell the agent without being asked?** When `ys test run` came from an
+44. **Should a run tell the agent without being asked?** When `ys test run` came from an
     agent's terminal, the result could be typed into that agent once quiet, as `send_to_session`
     does. Version one does not: the agent asked by running `wait`, and an agent that did not is
     doing something else. Revisit after dogfooding.
-37. **How much output to keep per step.** Unbounded files with pruning by age is the proposal;
+45. **How much output to keep per step.** Unbounded files with pruning by age is the proposal;
     a dev server that logs a line per millisecond for an hour fills a disk. A per-step cap, with
     the head and the tail kept, is likely the slice 2 answer.
-38. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
+46. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
     common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.

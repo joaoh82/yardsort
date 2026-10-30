@@ -376,18 +376,64 @@ pub struct HandoffPacket {
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_handoff(app: AppHandle, workspace_id: String) -> IpcResult<HandoffPacket> {
+    use yardsort_core::activity::handoff;
+    let facts = handoff_facts(app, workspace_id).await?;
+    Ok(HandoffPacket {
+        runs: facts.runs.len() as u32,
+        events: facts.events as u32,
+        text: handoff::render(&facts),
+    })
+}
+
+/// A fork packet: what Yardsort recorded about a workspace, for an agent starting a new
+/// workspace on a new branch made from this one's. See `yardsort_core::activity::handoff`.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkPacket {
+    /// Markdown, sent after the user's own message, which is the new workspace's task.
+    pub text: String,
+    /// The branch to start the new one from: the workspace's own, as git has it now. `None`
+    /// when it is not on a branch, and there is nothing to fork.
+    pub branch: Option<String>,
+    /// Files changed and not committed there: a fork starts from the commits, so these stay.
+    pub uncommitted: u32,
+}
+
+/// Assemble the fork packet for a workspace, from the same facts as a handoff.
+#[tauri::command]
+#[specta::specta]
+pub async fn workspace_fork(app: AppHandle, workspace_id: String) -> IpcResult<ForkPacket> {
+    use yardsort_core::activity::handoff::{self, Purpose};
+    let facts = handoff_facts(app, workspace_id).await?;
+    Ok(ForkPacket {
+        text: handoff::render_for(&facts, Purpose::Fork),
+        branch: facts.branch.clone(),
+        uncommitted: facts.uncommitted.len() as u32,
+    })
+}
+
+async fn handoff_facts(
+    app: AppHandle,
+    workspace_id: String,
+) -> IpcResult<yardsort_core::activity::handoff::Facts> {
     use yardsort_core::activity::handoff::{self, Ranking};
     let (mut facts, prepared) = blocking(app.clone(), {
         let workspace_id = workspace_id.clone();
         move |state| {
             let (row, root) = crate::changes::commands::workspace(state, &workspace_id)?;
             let git = crate::git::Git::new(&state.env())?;
-            let facts = handoff::facts(
+            let mut facts = handoff::facts(
                 &state.store,
                 &git,
                 &root,
                 &workspace_id,
                 row.base_branch.as_deref(),
+            )?;
+            facts.said = yardsort_core::activity::digest::packet_section(
+                &state.store,
+                &row,
+                &crate::conversations::sources(state),
+                crate::conversations::now(),
             )?;
             // A review that cannot run is no ranking, not a failed packet.
             let prepared = crate::assist::commands::prepare_review(state, &workspace_id).ok();
@@ -424,11 +470,7 @@ pub async fn workspace_handoff(app: AppHandle, workspace_id: String) -> IpcResul
             }
         }
     }
-    Ok(HandoffPacket {
-        runs: facts.runs.len() as u32,
-        events: facts.events as u32,
-        text: handoff::render(&facts),
-    })
+    Ok(facts)
 }
 
 /// A serde-named enum value as the string its `rename_all` gives it — the same word the

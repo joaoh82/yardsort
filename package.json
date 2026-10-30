@@ -1,7 +1,7 @@
 {
   "name": "yardsort",
   "version": "0.20.2",
-  "description": "Run AI coding agents in parallel, each in its own git worktree",
+  "description": "Orchestrate coding agents on Linux, macOS and Windows — shared worktrees, handoff with context",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",

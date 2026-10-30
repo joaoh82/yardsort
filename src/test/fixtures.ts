@@ -102,6 +102,8 @@ export const harness = (id: string, extra: Partial<HarnessInfo> = {}): HarnessIn
   resumeArgs: [],
   forkArgs: [],
   writeArgs: [],
+  contextArgs: [],
+  resumeContextArgs: [],
   efforts: [],
   models: [],
   promptTransport: "argv",

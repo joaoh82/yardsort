@@ -18,6 +18,7 @@ name = "yardsort_core"
 [dependencies]
 pty-host = { path = "../pty-host", features = ["specta"] }
 pty-ipc = { path = "../pty-ipc" }
+remote-proto = { path = "../remote-proto" }
 base64 = "0.22"
 tempfile = "3"
 which = "8"

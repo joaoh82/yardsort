@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use pty_host::{HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
+use pty_host::{HostError, HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
 
 use super::engine::{self, Effect, Finish, Inputs, Move, Outputs, PrSeen, SessionFacts, World};
 use super::runs::{self, Facts, Place};
@@ -366,13 +366,33 @@ fn still_running(store: &Store, run_id: &str) -> IpcResult<bool> {
         .is_some_and(|run| run.status == "running"))
 }
 
+/// Type `text` into a session and submit it, as the first-prompt delivery does. Nobody here
+/// typed it, so it takes no control; while someone controls the session from elsewhere it
+/// waits rather than type over them.
+fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Outcome {
+    let failed =
+        |error: HostError| Outcome::Failed(format!("Could not type into the session: {error}"));
+    match host.type_unattended(id, text, true) {
+        Ok(()) => {}
+        Err(HostError::ControlHeld { .. }) => return Outcome::NotYet,
+        Err(error) => return failed(error),
+    }
+    std::thread::sleep(pty_host::SUBMIT_DELAY);
+    // Typed already: a lease taken since leaves it unsent, and it is not typed a second time.
+    match host.type_unattended(id, "\r", false) {
+        Ok(()) => Outcome::Done(Outputs::new()),
+        Err(error) => failed(error),
+    }
+}
+
 /// How carrying out one effect went.
 enum Outcome {
     Done(Outputs),
     Failed(String),
     /// It no longer made sense: the session it was for had ended.
     Skipped(String),
-    /// Not now: the session was busy when the moment came. The step waits again.
+    /// Not now: the session was busy, or controlled from elsewhere, when the moment came. The
+    /// step waits again.
     NotYet,
 }
 
@@ -429,6 +449,8 @@ fn carry_out(
                 skip_memory,
                 // Started by a workflow, not by hand: the notes, without asking for proposals.
                 quiet_memory: true,
+                skip_context: false,
+                fork_packet: None,
             };
             done(hands.start(&place.workspace.id, request).map(|session| {
                 let mut outputs = Outputs::new();
@@ -453,7 +475,7 @@ fn carry_out(
                 Ok(_) => {}
             }
             typed_to.insert(pty_id);
-            done(type_into(host, &id, &text))
+            type_into(host, &id, &text)
         }
         Effect::Notify { title, body, .. } => done(
             hands
@@ -461,13 +483,6 @@ fn carry_out(
                 .map(|()| Outputs::new()),
         ),
     }
-}
-
-/// Type `text` into a session and submit it, as the first-prompt delivery does.
-fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Result<Outputs, String> {
-    pty_host::paste_and_submit(host, id, text)
-        .map_err(|error| format!("Could not type into the session: {error}"))?;
-    Ok(Outputs::new())
 }
 
 /// The world as the engine sees it from a driver.

@@ -12,6 +12,8 @@ use yardsort_core::store::{SessionRow, WorkspaceRow};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
     pub pty: String,
+    /// The record's id — what `ys session list` prints. A shell has none.
+    pub record: Option<String>,
     pub workspace: Option<String>,
     pub label: String,
     /// The process is still there. `attach` wants only these; `logs` reads a finished one too.
@@ -59,6 +61,7 @@ pub fn candidates(
             };
             Candidate {
                 pty: s.id.0.clone(),
+                record: record.map(|r| r.id.clone()),
                 workspace,
                 label,
                 running: s.state == pty_host::SessionState::Running,
@@ -66,6 +69,15 @@ pub fn candidates(
             }
         })
         .collect()
+}
+
+impl Candidate {
+    /// How a choice is offered when a name was not enough: its label, and an id that picks it —
+    /// the record's, as `ys session list` prints it, or for a shell the session's own.
+    fn choice(&self) -> String {
+        let id = self.record.as_deref().unwrap_or(&self.pty);
+        format!("{} {}", self.label, id.get(..8).unwrap_or(id))
+    }
 }
 
 /// Just the ones with a process still in them.
@@ -76,15 +88,10 @@ pub fn running(candidates: &[Candidate]) -> Vec<Candidate> {
 /// Pick the one session `wanted` means, or say why not.
 ///
 /// `None` is "whatever is running", which is unambiguous only when one thing is. A name matches a
-/// workspace, or the start of a session id — ids are uuids, so a few characters are plenty and
-/// that is what `session list` prints.
+/// workspace, or the start of an id — the record's, which is what `session list` prints, or the
+/// terminal session's, which is all a shell has. Ids are uuids, so a few characters are plenty.
 pub fn resolve(candidates: &[Candidate], wanted: Option<&str>) -> Result<Candidate, NoMatch> {
-    let choices = || {
-        candidates
-            .iter()
-            .map(|c| c.label.clone())
-            .collect::<Vec<_>>()
-    };
+    let choices = || candidates.iter().map(Candidate::choice).collect::<Vec<_>>();
     if candidates.is_empty() {
         return Err(NoMatch::Nothing);
     }
@@ -101,6 +108,7 @@ pub fn resolve(candidates: &[Candidate], wanted: Option<&str>) -> Result<Candida
             c.workspace
                 .as_deref()
                 .is_some_and(|name| name.eq_ignore_ascii_case(wanted))
+                || c.record.as_deref().is_some_and(|id| id.starts_with(wanted))
                 || c.pty.starts_with(wanted)
         })
         .collect();
@@ -108,7 +116,7 @@ pub fn resolve(candidates: &[Candidate], wanted: Option<&str>) -> Result<Candida
         [one] => Ok((*one).clone()),
         [] => Err(NoMatch::Unknown { choices: choices() }),
         several => Err(NoMatch::Several {
-            choices: several.iter().map(|c| c.label.clone()).collect(),
+            choices: several.iter().map(|c| c.choice()).collect(),
         }),
     }
 }
@@ -120,6 +128,7 @@ mod tests {
     fn candidate(pty: &str, workspace: Option<&str>) -> Candidate {
         Candidate {
             pty: pty.to_owned(),
+            record: workspace.map(|_| format!("rec-{pty}")),
             workspace: workspace.map(str::to_owned),
             label: workspace.unwrap_or("bash").to_owned(),
             running: true,
@@ -170,7 +179,7 @@ mod tests {
         let Err(NoMatch::Several { choices }) = resolve(&both, None) else {
             panic!("should have refused to choose");
         };
-        assert_eq!(choices, ["login-bug", "flaky-test"]);
+        assert_eq!(choices, ["login-bug rec-abc1", "flaky-test rec-def4"]);
     }
 
     #[test]
@@ -200,7 +209,7 @@ mod tests {
         let Err(NoMatch::Several { choices }) = resolve(&both, Some("abc")) else {
             panic!("an ambiguous prefix must not pick one");
         };
-        assert_eq!(choices, ["one", "two"]);
+        assert_eq!(choices, ["one rec-abc1", "two rec-abc9"]);
     }
 
     #[test]
@@ -209,7 +218,7 @@ mod tests {
         assert_eq!(
             resolve(&only, Some("nope")),
             Err(NoMatch::Unknown {
-                choices: vec!["login-bug".to_owned()]
+                choices: vec!["login-bug rec-abc1".to_owned()]
             })
         );
     }
@@ -218,6 +227,27 @@ mod tests {
     fn nothing_running_is_its_own_answer() {
         assert_eq!(resolve(&[], Some("anything")), Err(NoMatch::Nothing));
         assert_eq!(resolve(&[], None), Err(NoMatch::Nothing));
+    }
+
+    /// Two agents in one workspace: the name is not enough, and the start of the id `session list`
+    /// prints for each picks one.
+    #[test]
+    fn the_start_of_a_record_id_picks_one_of_two_agents_in_a_workspace() {
+        let mut claude = candidate("pty-1", Some("tidy-calc"));
+        claude.record = Some("7c410029-3e11".into());
+        claude.label = "tidy-calc (claude)".into();
+        let mut codex = candidate("pty-2", Some("tidy-calc"));
+        codex.record = Some("aaa8f00a-7fcd".into());
+        codex.label = "tidy-calc (codex)".into();
+        let both = [claude, codex];
+        assert_eq!(resolve(&both, Some("aaa8f0")).unwrap().pty, "pty-2");
+        let Err(NoMatch::Several { choices }) = resolve(&both, Some("tidy-calc")) else {
+            panic!("the workspace name names two");
+        };
+        assert_eq!(
+            choices,
+            ["tidy-calc (claude) 7c410029", "tidy-calc (codex) aaa8f00a"]
+        );
     }
 
     /// A shell has no record and so no workspace; it can still be attached to by id.

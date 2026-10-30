@@ -4,10 +4,12 @@ use std::path::{Component, Path, PathBuf};
 
 use pty_host::TermSize;
 use serde::Serialize;
+use yardsort_core::activity::digest;
 use yardsort_core::git::normalize;
 use yardsort_core::launch::{HarnessRequest, Launch, Launcher};
 use yardsort_core::store::WorkspaceRow;
 use yardsort_core::tasks::delegate::{self, TaskRef};
+use yardsort_core::usage::logs::Sources;
 use yardsort_core::workspaces::Workspaces;
 
 use crate::{table, Failure, Output, Yardsort};
@@ -66,6 +68,59 @@ pub enum Command {
         /// The workspace, by name or id.
         workspace: String,
     },
+    /// Fork a workspace: a new workspace on a new branch made from its branch, with an agent told
+    /// what was done there.
+    ///
+    /// For building the next thing on work in progress without sharing its folder. The new
+    /// branch starts from the workspace's commits; its uncommitted files stay where they are.
+    /// The message is the new workspace's task and names it; the agent gets the workspace's
+    /// handoff record after it, worded for a fork, as the app's Fork into new workspace… sends.
+    Fork {
+        /// The workspace to fork, by name or id.
+        workspace: String,
+        /// What to do next: the agent's first message, and the new workspace's name.
+        ///
+        /// Free text, so it may start with `-`.
+        #[arg(allow_hyphen_values = true)]
+        prompt: String,
+        /// Which harness to run. Defaults to the first one installed.
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+        /// Model for the harness, if it takes one.
+        #[arg(long, value_name = "MODEL")]
+        model: Option<String>,
+        /// Effort or thinking level, if the harness takes one.
+        #[arg(long, value_name = "LEVEL")]
+        effort: Option<String>,
+        /// Only create the branch and worktree; start nothing, and send nothing.
+        #[arg(long)]
+        no_agent: bool,
+        /// Write the message an agent would be given, and stop: nothing is created or started.
+        #[arg(long, conflicts_with = "no_agent")]
+        print: bool,
+    },
+    /// What was said in the workspace's other conversations, for an agent joining the work.
+    ///
+    /// Every message the user typed and each turn's last reply, newest first, read from the
+    /// agents' own transcripts — tool calls, their output and the agents' reasoning left out —
+    /// within a budget. Only while the project shares its conversations, which is off until the
+    /// user turns it on in Yardsort. Run by an agent, its own conversation is left out.
+    Context {
+        /// The workspace, by name or id. Default: the one this is run in.
+        workspace: Option<String>,
+        /// Only this conversation, by the id the digest shows (or the start of it).
+        #[arg(long, value_name = "ID")]
+        conversation: Option<String>,
+        /// Show this turn whole — everything the agent wrote in it — still without tool output.
+        #[arg(long, value_name = "N")]
+        turn: Option<usize>,
+        /// Only turns from this time on, in UTC: `2026-10-25T13:00Z`.
+        #[arg(long, value_name = "TIME")]
+        since: Option<String>,
+        /// How many characters the digest may hold, across every conversation.
+        #[arg(long, value_name = "CHARS", default_value_t = digest::DEFAULT_BUDGET)]
+        budget: usize,
+    },
     /// Remove a workspace's folder and forget it. The branch, and its commits, are kept.
     ///
     /// Uncommitted changes and untracked files are refused unless `--force` is given: they live
@@ -110,6 +165,12 @@ struct Created {
     /// The task it was started from, when it was: its key, `#91`.
     #[serde(skip_serializing_if = "Option::is_none")]
     task: Option<String>,
+    /// The workspace it was forked from, when it was, by name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    forked_from: Option<String>,
+    /// Files changed and not committed in the forked workspace, which did not come along.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    left_uncommitted: Option<usize>,
 }
 
 pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure> {
@@ -124,11 +185,157 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             effort,
             no_agent,
         } => new(
-            ys, project, prompt, None, base, harness, model, effort, no_agent, out,
+            ys, project, prompt, None, None, base, harness, model, effort, no_agent, out,
+        ),
+        Command::Fork {
+            workspace,
+            prompt,
+            harness,
+            model,
+            effort,
+            no_agent,
+            print,
+        } => fork(
+            ys, &workspace, prompt, harness, model, effort, no_agent, print, out,
         ),
         Command::Delete { workspace, force } => delete(ys, &workspace, force, out),
         Command::Handoff { workspace } => handoff(ys, &workspace, out),
+        Command::Context {
+            workspace,
+            conversation,
+            turn,
+            since,
+            budget,
+        } => context(
+            ys,
+            workspace.as_deref(),
+            conversation,
+            turn,
+            since.as_deref(),
+            budget,
+            out,
+        ),
     }
+}
+
+/// One turn, whole, as `--json` gives it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WholeTurn {
+    conversation: String,
+    harness: String,
+    n: usize,
+    at: i64,
+    user: String,
+    said: Vec<String>,
+}
+
+fn context(
+    ys: &Yardsort,
+    wanted: Option<&str>,
+    conversation: Option<String>,
+    turn: Option<usize>,
+    since: Option<&str>,
+    budget: usize,
+    out: &Output,
+) -> Result<(), Failure> {
+    let since = since.map(parse_since).transpose()?;
+    let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let workspace = match wanted {
+        Some(wanted) => find_workspace(ys, wanted)?,
+        None => {
+            let cwd = std::env::current_dir().map_err(|e| Failure::new(format!("cwd: {e}")))?;
+            let located = yardsort_core::memory::locate(
+                &ys.store,
+                env(yardsort_core::activity::RUN_ENV).as_deref(),
+                env(yardsort_core::activity::WORKSPACE_ENV).as_deref(),
+                &cwd,
+            )?;
+            let id = located
+                .and_then(|(_, source)| source.workspace_id)
+                .ok_or_else(|| {
+                    Failure::new("Not inside a Yardsort workspace. Run this in one, or name it.")
+                })?;
+            find_workspace(ys, &id)?
+        }
+    };
+    // Reading the digest is giving it to whoever runs this, most often an agent: it follows the
+    // project's switch, as `ys memory list` does.
+    if !ys.store.conversations_shared(&workspace.project_id)? {
+        return Err(Failure::new(
+            "This project does not share its agents' conversations with each other. The user \
+             can turn that on in Yardsort (Memory… in the project's menu).",
+        ));
+    }
+    ys.drain_spool();
+    let sources = Sources::from_env(&|name| env(name).or_else(|| ys.env().vars.get(name).cloned()));
+    let asking = env(yardsort_core::activity::RECORD_ENV);
+    let conversations =
+        digest::gather(&ys.store, &workspace, asking.as_deref(), &sources, now_ms())?;
+    if let Some(n) = turn {
+        let matching: Vec<_> = conversations
+            .iter()
+            .filter(|c| conversation.as_deref().is_none_or(|p| c.id.starts_with(p)))
+            .collect();
+        let c = match matching.as_slice() {
+            [one] => *one,
+            [] => return Err(Failure::new("No other conversation here has that id.")),
+            _ => {
+                return Err(Failure::new(
+                    "There is more than one conversation here: name one with --conversation.",
+                ))
+            }
+        };
+        let text = digest::render_whole_turn(c, n).ok_or_else(|| {
+            Failure::new(format!(
+                "Conversation {} has {} turns; there is no turn {n}.",
+                yardsort_core::memory::short_id(&c.id),
+                c.turns.len()
+            ))
+        })?;
+        let whole = &c.turns[n - 1];
+        let json = WholeTurn {
+            conversation: yardsort_core::memory::short_id(&c.id).to_owned(),
+            harness: c.harness.clone(),
+            n,
+            at: whole.at,
+            user: whole.user.clone(),
+            said: whole.said.clone(),
+        };
+        return out.emit(&json, || say!("{text}"));
+    }
+    let shown = digest::select(
+        &conversations,
+        &digest::Options {
+            budget,
+            conversation,
+            since,
+        },
+    );
+    out.emit(&shown, || say!("{}", digest::render(&shown)))
+}
+
+/// A UTC time as people write it: `2026-10-25T13:00Z`, with seconds or without.
+fn parse_since(text: &str) -> Result<i64, Failure> {
+    let refused = || {
+        Failure::new(format!(
+            "--since takes a time in UTC, like 2026-10-25T13:00Z; {text:?} is not one."
+        ))
+    };
+    let body = text.strip_suffix('Z').ok_or_else(refused)?;
+    let (_, clock) = body.split_once('T').ok_or_else(refused)?;
+    let full = if clock.matches(':').count() == 1 {
+        format!("{body}:00Z")
+    } else {
+        format!("{body}Z")
+    };
+    yardsort_core::activity::iso_to_ms(&full).ok_or_else(refused)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// The packet, as text or, with `--json`, as `{ text, runs, events }`.
@@ -141,6 +348,91 @@ struct Packet {
 }
 
 fn handoff(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
+    let (_, facts) = packet_facts(ys, wanted)?;
+    let packet = Packet {
+        runs: facts.runs.len(),
+        events: facts.events,
+        text: yardsort_core::activity::handoff::render(&facts),
+    };
+    out.emit(&packet, || say!("{}", packet.text))
+}
+
+/// What a fork carries from the workspace it was made from.
+pub(super) struct Forked {
+    from: String,
+    packet: String,
+    uncommitted: usize,
+}
+
+/// `--print`: the message the agent would be given, as text or as `{ text, branch, uncommitted }`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkMessage {
+    text: String,
+    branch: String,
+    uncommitted: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fork(
+    ys: &Yardsort,
+    wanted: &str,
+    prompt: String,
+    harness: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+    no_agent: bool,
+    print: bool,
+    out: &Output,
+) -> Result<(), Failure> {
+    let (workspace, facts) = packet_facts(ys, wanted)?;
+    let branch = facts.branch.clone().ok_or_else(|| {
+        Failure::new(format!(
+            "{} is not on a branch, so there is nothing to fork from.",
+            workspace.name
+        ))
+    })?;
+    let packet = yardsort_core::activity::handoff::render_for(
+        &facts,
+        yardsort_core::activity::handoff::Purpose::Fork,
+    );
+    if print {
+        // As the launcher joins them: the message, then the packet in the memory's place.
+        let message = ForkMessage {
+            text: match prompt.trim() {
+                "" => packet,
+                prompt => format!("{prompt}\n\n{packet}"),
+            },
+            branch,
+            uncommitted: facts.uncommitted.len(),
+        };
+        return out.emit(&message, || say!("{}", message.text));
+    }
+    new(
+        ys,
+        workspace.project_id.clone(),
+        prompt,
+        None,
+        Some(Forked {
+            from: workspace.name.clone(),
+            packet,
+            uncommitted: facts.uncommitted.len(),
+        }),
+        Some(branch),
+        harness,
+        model,
+        effort,
+        no_agent,
+        out,
+    )
+}
+
+/// A workspace and everything its handoff packet is written from — the store's half, git's,
+/// and what was said in its conversations when the project shares them.
+fn packet_facts(
+    ys: &Yardsort,
+    wanted: &str,
+) -> Result<(WorkspaceRow, yardsort_core::activity::handoff::Facts), Failure> {
     ys.drain_spool();
     let workspace = find_workspace(ys, wanted)?;
     let root = PathBuf::from(&workspace.path);
@@ -151,19 +443,17 @@ fn handoff(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         )));
     }
     let git = ys.git()?;
-    let facts = yardsort_core::activity::handoff::facts(
+    let mut facts = yardsort_core::activity::handoff::facts(
         &ys.store,
         &git,
         &root,
         &workspace.id,
         workspace.base_branch.as_deref(),
     )?;
-    let packet = Packet {
-        runs: facts.runs.len(),
-        events: facts.events,
-        text: yardsort_core::activity::handoff::render(&facts),
-    };
-    out.emit(&packet, || print!("{}", packet.text))
+    let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let sources = Sources::from_env(&|name| env(name).or_else(|| ys.env().vars.get(name).cloned()));
+    facts.said = digest::packet_section(&ys.store, &workspace, &sources, now_ms())?;
+    Ok((workspace, facts))
 }
 
 fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Result<(), Failure> {
@@ -202,7 +492,7 @@ fn list(ys: &Yardsort, project: Option<String>, all: bool, out: &Output) -> Resu
 
     out.emit(&workspaces, || {
         if workspaces.is_empty() {
-            println!("No workspaces.");
+            sayln!("No workspaces.");
             return;
         }
         let mut rows = vec![vec![
@@ -236,6 +526,8 @@ pub(super) fn new(
     prompt: String,
     // The task this is started from: it names the workspace and is recorded against it.
     task: Option<TaskRef>,
+    // The workspace this is forked from: its packet goes to the agent after the message.
+    forked: Option<Forked>,
     base: Option<String>,
     harness: Option<String>,
     model: Option<String>,
@@ -279,6 +571,8 @@ pub(super) fn new(
         session: None,
         harness: harness.clone(),
         task: task.as_ref().map(|task| task.key.clone()),
+        forked_from: forked.as_ref().map(|forked| forked.from.clone()),
+        left_uncommitted: forked.as_ref().map(|forked| forked.uncommitted),
     };
 
     if let Some(harness) = harness {
@@ -318,6 +612,8 @@ pub(super) fn new(
                 handoff: false,
                 skip_memory: false,
                 quiet_memory: false,
+                skip_context: false,
+                fork_packet: forked.map(|forked| forked.packet),
             }),
             DETACHED_SIZE,
         )?;
@@ -325,20 +621,33 @@ pub(super) fn new(
     }
 
     out.emit(&created, || {
-        println!("created  {}", created.name);
+        sayln!("created  {}", created.name);
         if let Some(task) = &created.task {
-            println!("  task   {task}");
+            sayln!("  task   {task}");
+        }
+        if let Some(from) = &created.forked_from {
+            sayln!("  from   {from}");
         }
         if let Some(branch) = &created.branch {
-            println!("  branch {branch}");
+            sayln!("  branch {branch}");
         }
-        println!("  path   {}", created.path);
+        sayln!("  path   {}", created.path);
         match (&created.harness, &created.session) {
             (Some(harness), Some(session)) => {
-                println!("  agent  {harness} ({})", short(session));
-                println!("\nIt keeps working after this command returns. Open Yardsort to watch.");
+                sayln!("  agent  {harness} ({})", short(session));
+                sayln!("\nIt keeps working after this command returns. Open Yardsort to watch.");
             }
-            _ => println!("\nNothing started. Open it in Yardsort to start an agent."),
+            _ => sayln!("\nNothing started. Open it in Yardsort to start an agent."),
+        }
+        if let (Some(from), Some(left @ 1..)) = (&created.forked_from, created.left_uncommitted) {
+            sayln!(
+                "\n{} uncommitted in {from} stayed there: a fork starts from the commits.",
+                if left == 1 {
+                    "1 file".to_owned()
+                } else {
+                    format!("{left} files")
+                }
+            );
         }
     })
 }
@@ -409,11 +718,11 @@ fn delete(ys: &Yardsort, wanted: &str, force: bool, out: &Output) -> Result<(), 
         path: workspace.path,
     };
     out.emit(&deleted, || {
-        println!("deleted  {}", deleted.name);
+        sayln!("deleted  {}", deleted.name);
         if let Some(branch) = &deleted.branch {
-            println!("  branch {branch} (kept)");
+            sayln!("  branch {branch} (kept)");
         }
-        println!("  path   {}", deleted.path);
+        sayln!("  path   {}", deleted.path);
     })
 }
 

@@ -14,6 +14,7 @@ import {
   type ActivityPage,
   type ActivitySettingsDto,
   type ContextUsage,
+  type ConversationContext,
   type AgentOutcomes,
   type Attempt,
   type FileReports,
@@ -24,6 +25,7 @@ import {
   type ProjectMemory,
   type ProjectOutcomes,
   type HandoffPacket,
+  type ForkPacket,
   type ObservedMatch,
   type ObservedWrite,
   type Provenance,
@@ -120,6 +122,13 @@ import {
   type Problem,
   type Source,
   type PrFacts,
+  type RemoteAnswer,
+  type RemoteDevice,
+  type RemoteLink,
+  type RemotePairing,
+  type RemoteRequest,
+  type RemoteRequests,
+  type RemoteStatus,
   type RemoteRepository,
   type Repositories,
   type ResolvedLink,
@@ -150,6 +159,7 @@ export type {
   ActivityPage,
   ActivitySettingsDto,
   ContextUsage,
+  ConversationContext,
   AgentOutcomes,
   Attempt,
   FileReports,
@@ -160,6 +170,7 @@ export type {
   ProjectMemory,
   ProjectOutcomes,
   HandoffPacket,
+  ForkPacket,
   ObservedMatch,
   ObservedWrite,
   Provenance,
@@ -195,6 +206,13 @@ export type {
   Project,
   ProjectPullRequests,
   ProjectTasks,
+  RemoteAnswer,
+  RemoteDevice,
+  RemoteLink,
+  RemotePairing,
+  RemoteRequest,
+  RemoteRequests,
+  RemoteStatus,
   Task,
   TaskComment,
   TaskDetail,
@@ -250,6 +268,8 @@ export const WORKSPACE_LABEL = "workspace";
 export const HARNESS_LABEL = "harness";
 /** The label naming the session record (conversation) a terminal belongs to, if any. */
 export const RECORD_LABEL = "record";
+/** On an agent told about the workspace's other conversations: which, e.g. "claude's conversation". */
+export const TOLD_ABOUT_LABEL = "toldAbout";
 
 /** False in a plain browser tab and in unit tests, where there is no core to call. */
 export const hasCore = isTauri;
@@ -397,6 +417,9 @@ export const ipc = {
   activityClear: (workspaceId: string | null) => done(commands.activityClear(workspaceId)),
   /** The handoff packet for a workspace: what Yardsort recorded, as the next agent's prompt. */
   workspaceHandoff: (workspaceId: string) => unwrap(commands.workspaceHandoff(workspaceId)),
+  /** The fork packet for a workspace: the same record, for an agent in a new workspace on a
+   *  new branch made from its branch. */
+  workspaceFork: (workspaceId: string) => unwrap(commands.workspaceFork(workspaceId)),
   /**
    * Which of a workspace's files its agents reported writing, which runs could have, and for
    * each of `paths` (the change list's files) whether its last write fell inside a tool call.
@@ -608,6 +631,27 @@ export const ipc = {
   draftSaveSettings: (enabled: boolean, model: string) =>
     unwrap(commands.draftSaveSettings(enabled, model)),
 
+  /**
+   * Remote, a preview: this computer as a host on a Yardsort server. The webview never sees a
+   * credential, only whether Remote is on, a pairing code while one is shown, and the devices
+   * let in. See `src-tauri/src/remote.rs`.
+   */
+  remoteStatus: () => unwrap(commands.remoteStatus()),
+  /** Sign in through the browser and register this computer. Waits for the browser. */
+  remoteEnable: (serverUrl: string, name: string) => unwrap(commands.remoteEnable(serverUrl, name)),
+  remoteCancel: () => unwrap(commands.remoteCancel()),
+  remoteDisable: () => unwrap(commands.remoteDisable()),
+  /** A code to type and a QR code, good once for five minutes. */
+  remotePair: () => unwrap(commands.remotePair()),
+  /** Devices waiting for an answer, and the ones let in. */
+  remoteRequests: () => unwrap(commands.remoteRequests()),
+  remoteAnswer: (grantId: string, answer: RemoteAnswer) =>
+    unwrap(commands.remoteAnswer(grantId, answer)),
+  remoteRevoke: (grantId: string) => unwrap(commands.remoteRevoke(grantId)),
+  /** The relay told this host a device asks to be let in, and the server has it waiting. */
+  onRemotePairingRequested: (handler: (request: RemoteRequest) => void) =>
+    events.remotePairingRequested.listen((event) => handler(event.payload.request)),
+
   /** Assist: whether a TypeSafe key is in force and which features are on. */
   assistStatus: () => unwrap(commands.assistStatus()),
   /** Check a key with TypeSafe, then keep it in the OS credential store. Never read back. */
@@ -641,6 +685,16 @@ export const ipc = {
   /** Whether a project's approved entries go into its agents' first messages. */
   memoryShare: (projectId: string, shared: boolean) =>
     unwrap(commands.memoryShare(projectId, shared)),
+  /** Let a project's agents read each other's conversations with `ys workspace context`, or not. */
+  conversationsShare: (projectId: string, shared: boolean) =>
+    unwrap(commands.conversationsShare(projectId, shared)),
+  /**
+   * The note an agent started in this workspace now would be given about its other
+   * conversations, and the digest it would read — `except` the conversation it is, for one
+   * already running. `null` when the project does not share them or none has said anything.
+   */
+  conversationContext: (workspaceId: string, except: string | null) =>
+    unwrap(commands.conversationContext(workspaceId, except)),
   /** How many proposals wait, per project that has any. */
   memoryWaiting: () => unwrap(commands.memoryWaiting()),
   /** Jev's word on each waiting proposal: repeats or contradicts an approved entry. */

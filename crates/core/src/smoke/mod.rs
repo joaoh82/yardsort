@@ -6,7 +6,7 @@
 //! branch. This module is the file: its types, the parser and validator that turn text into them
 //! with a line and column on every mistake, and the catalog of a worktree's tests. Running one is
 //! the runner's business, and a file from a repository never runs without the user having seen
-//! it. See `docs/design/25-smoke-tests.md`.
+//! it. See `docs/design/31-smoke-tests.md`.
 
 mod parse;
 

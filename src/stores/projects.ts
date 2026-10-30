@@ -43,6 +43,18 @@ const KEYS = {
   lastParent: "projects.lastParentDir",
 } as const;
 
+/** What the composer needs of the workspace it forks. */
+export type ComposingFork = {
+  workspaceId: string;
+  name: string;
+  /** The branch the new one starts from. */
+  branch: string;
+  /** Sent to the agent after the message. */
+  packet: string;
+  /** Files changed there and not committed, which do not come along. */
+  uncommitted: number;
+};
+
 /** Outcome of trying to add a folder that may not be a repository yet. */
 export type OpenResult = { status: "added" } | { status: "needs-git" } | { status: "failed" };
 
@@ -73,6 +85,12 @@ interface ProjectsState {
   /** The task the composer's workspace is being started from: it is recorded against the
    *  workspace, and names it. Cleared with the composer. */
   composingTask: TaskRef | null;
+  /** The agent the composer should have picked, when composing inside a workspace was asked for
+   *  by one agent's button. Cleared with the composer. */
+  composingHarness: string | null;
+  /** The workspace the composer's new one is forked from: a new branch from its branch, with
+   *  its packet sent after the message. Cleared with the composer. */
+  composingFork: ComposingFork | null;
   /** Raw persisted UI state, for features that remember small things (see `remember`). */
   ui: Record<string, string>;
   /** Projects are expanded unless listed here, so new ones start open. */
@@ -134,7 +152,10 @@ interface ProjectsState {
   /** Show the Tasks view in the center panel, or close it. */
   openTasks: (open: boolean) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
-  composeIn: (workspace: Workspace, prompt?: string) => void;
+  composeIn: (workspace: Workspace, prompt?: string, harness?: string) => void;
+  /** Compose a new workspace forked from `workspace`: a new branch from its branch, in a new
+   *  worktree. Resolves to `false` with the reason in `error` when there is nothing to fork. */
+  fork: (workspace: Workspace) => Promise<boolean>;
   /**
    * Create a worktree workspace and start its harness. Resolves to the new session, or to an
    * error message — returned rather than stored, because the composer shows it inline.
@@ -215,6 +236,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     composingPrompt: null,
     composingBranch: null,
     composingTask: null,
+    composingHarness: null,
+    composingFork: null,
     workflowId: null,
     usageOpen: false,
     pullRequestsOpen: false,
@@ -395,6 +418,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           composingPrompt: null,
           composingBranch: null,
           composingTask: null,
+          composingHarness: null,
+          composingFork: null,
           workflowId: null,
           usageOpen: false,
           pullRequestsOpen: false,
@@ -408,6 +433,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
+        composingFork: null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
@@ -423,6 +450,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: (projectId && prompt) || null,
         composingBranch: (projectId && branch) || null,
         composingTask: (projectId && task) || null,
+        composingHarness: null,
+        composingFork: null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
@@ -443,6 +472,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
+        composingFork: null,
       });
     },
 
@@ -457,6 +488,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
+        composingFork: null,
       });
     },
 
@@ -471,6 +504,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
+        composingFork: null,
       });
     },
 
@@ -485,10 +520,12 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: null,
+        composingFork: null,
       });
     },
 
-    composeIn(workspace, prompt) {
+    composeIn(workspace, prompt, harness) {
       set({
         selectedWorkspaceId: workspace.id,
         composingProjectId: null,
@@ -496,12 +533,51 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         composingPrompt: prompt ?? null,
         composingBranch: null,
         composingTask: null,
+        composingHarness: harness ?? null,
+        composingFork: null,
         workflowId: null,
         usageOpen: false,
         pullRequestsOpen: false,
         tasksOpen: false,
       });
       save(KEYS.selected, workspace.id);
+    },
+
+    async fork(workspace) {
+      let packet;
+      try {
+        packet = await ipc.workspaceFork(workspace.id);
+      } catch (error) {
+        set({ error: errorMessage(error) });
+        return false;
+      }
+      const branch = packet.branch;
+      if (!branch) {
+        set({ error: `${workspace.name} is not on a branch, so there is nothing to fork from.` });
+        return false;
+      }
+      // As `compose` does, in one step, so the composer mounts with the fork already there.
+      set((state) => ({
+        composingProjectId: workspace.projectId,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+        composingTask: null,
+        composingHarness: null,
+        composingFork: {
+          workspaceId: workspace.id,
+          name: workspace.name,
+          branch,
+          packet: packet.text,
+          uncommitted: packet.uncommitted,
+        },
+        workflowId: null,
+        usageOpen: false,
+        pullRequestsOpen: false,
+        tasksOpen: false,
+        collapsed: state.collapsed.filter((id) => id !== workspace.projectId),
+      }));
+      return true;
     },
 
     async createWorkspace(request) {

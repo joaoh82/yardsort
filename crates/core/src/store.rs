@@ -1,6 +1,6 @@
 //! Persistent app state in SQLite. Pure storage: no git, no filesystem, no policy.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,6 +25,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0013_workflow_run_context.sql"),
     include_str!("../migrations/0014_workspace_tasks.sql"),
     include_str!("../migrations/0015_outcome_began.sql"),
+    include_str!("../migrations/0016_project_conversations.sql"),
+    include_str!("../migrations/0017_session_began.sql"),
+    include_str!("../migrations/0018_remote_host.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +47,28 @@ pub struct ProjectRow {
     pub id: String,
     pub name: String,
     pub root_path: String,
+}
+
+/// This machine as a host on a Yardsort server. See `migrations/0018_remote_host.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteHostRow {
+    pub server_url: String,
+    pub server_id: String,
+    pub host_id: String,
+    pub device_id: String,
+    pub name: String,
+    pub enabled_at: i64,
+}
+
+/// A device this host's person let in. `scopes` and `projects` are JSON, as on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteGrantRow {
+    pub id: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub scopes: String,
+    pub projects: String,
+    pub approved_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,8 +118,10 @@ pub struct SessionRow {
     pub running: bool,
     pub exit_code: Option<i64>,
     pub pty_session_id: Option<String>,
-    /// Milliseconds since the Unix epoch.
+    /// Milliseconds since the Unix epoch. The latest start: a resume moves it.
     pub started_at: i64,
+    /// When the conversation first began, which a resume leaves alone.
+    pub began_at: i64,
     pub ended_at: Option<i64>,
 }
 
@@ -264,6 +291,27 @@ pub struct EventRow {
     pub privacy_class: String,
     /// JSON, whose shape depends on `kind` and `schema_version`.
     pub payload: String,
+}
+
+/// Which events [`Store::events_window`] reads.
+#[derive(Debug, Clone, Copy)]
+pub struct EventFilter<'a> {
+    /// Any of these workspaces'. None is none at all.
+    pub workspace_ids: &'a [String],
+    pub privacy_class: &'a str,
+    /// Only this session's, when given.
+    pub session_id: Option<&'a str>,
+}
+
+/// Where [`Store::events_window`] starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventBound {
+    /// The newest.
+    Newest,
+    /// The newest of those with a smaller sequence number.
+    Before(i64),
+    /// The oldest of those with a larger sequence number.
+    After(i64),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -836,10 +884,12 @@ impl Store {
     // --- sessions -----------------------------------------------------------------------------
 
     pub fn add_session(&self, new: &NewSession<'_>) -> StoreResult<()> {
+        let now = now_ms();
         self.conn().execute(
             "INSERT INTO sessions (id, workspace_id, harness_id, model, effort, harness_session_id,
-                                   title, forked_from, state, pty_session_id, started_at, prompt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)",
+                                   title, forked_from, state, pty_session_id, started_at, began_at,
+                                   prompt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)",
             params![
                 new.id,
                 new.workspace_id,
@@ -850,7 +900,8 @@ impl Store {
                 new.title,
                 new.forked_from,
                 new.pty_session_id,
-                now_ms(),
+                now,
+                now,
                 new.prompt
             ],
         )?;
@@ -900,6 +951,15 @@ impl Store {
             "SELECT prompt FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL
              ORDER BY rowid",
         )?;
+        let rows = stmt.query_map([workspace_id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The conversations in a workspace that were started with a first message, by record id.
+    pub fn prompted_sessions(&self, workspace_id: &str) -> StoreResult<HashSet<String>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT id FROM sessions WHERE workspace_id = ? AND prompt IS NOT NULL")?;
         let rows = stmt.query_map([workspace_id], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
@@ -1356,6 +1416,30 @@ impl Store {
         Ok(())
     }
 
+    /// Whether a project's agents may read each other's conversations: yes unless the user has
+    /// turned it off. A project with no row here shares — the default since 2026-10-26; migration
+    /// 0016 describes the first one, off.
+    pub fn conversations_shared(&self, project_id: &str) -> StoreResult<bool> {
+        let conn = self.conn();
+        Ok(conn
+            .query_row(
+                "SELECT share FROM project_conversations WHERE project_id = ?",
+                [project_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_none_or(|share| share != 0))
+    }
+
+    pub fn set_conversations_shared(&self, project_id: &str, share: bool) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO project_conversations (project_id, share) VALUES (?, ?)
+             ON CONFLICT(project_id) DO UPDATE SET share = excluded.share",
+            params![project_id, i64::from(share)],
+        )?;
+        Ok(())
+    }
+
     /// How many candidates wait in each project, for the counts on the project rows.
     pub fn memory_waiting(&self) -> StoreResult<BTreeMap<String, u32>> {
         let conn = self.conn();
@@ -1449,6 +1533,24 @@ impl Store {
              ORDER BY started_at DESC, rowid DESC"
         ))?;
         let rows = stmt.query_map([workspace_id], run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The ids an agent reported for a conversation in its events' `field` — Codex's
+    /// `threadId`, the `sessionId` of Cursor and OpenCode — first reported first: what names its
+    /// transcript. Only a conversation that was reporting has any.
+    pub fn reported_ids(&self, session_id: &str, field: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT json_extract(payload, ?2) AS reported FROM agent_events
+             WHERE (session_id = ?1
+                    OR run_id IN (SELECT id FROM agent_runs WHERE session_id = ?1))
+               AND reported IS NOT NULL
+             GROUP BY reported ORDER BY MIN(seq)",
+        )?;
+        let rows = stmt.query_map(params![session_id, format!("$.{field}")], |r| {
+            r.get::<_, String>(0)
+        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -1609,6 +1711,71 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Up to `limit` of a workspace's events of one privacy class, optionally one session's, on
+    /// one side of a sequence number — oldest first whichever side. For readers that page in
+    /// both directions; the timeline uses [`Store::events`].
+    pub fn events_window(
+        &self,
+        filter: &EventFilter<'_>,
+        bound: EventBound,
+        limit: usize,
+    ) -> StoreResult<Vec<EventRow>> {
+        let (condition, order, seq) = match bound {
+            EventBound::Newest => ("seq < ?4", "DESC", i64::MAX),
+            EventBound::Before(seq) => ("seq < ?4", "DESC", seq),
+            EventBound::After(seq) => ("seq > ?4", "ASC", seq),
+        };
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM agent_events
+             WHERE workspace_id IN (SELECT value FROM json_each(?1)) AND privacy_class = ?2
+               AND (?3 IS NULL OR session_id = ?3) AND {condition}
+             ORDER BY seq {order} LIMIT ?5"
+        ))?;
+        let rows = stmt.query_map(
+            params![
+                id_list(filter.workspace_ids),
+                filter.privacy_class,
+                filter.session_id,
+                seq,
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            event_from_row,
+        )?;
+        let mut rows: Vec<EventRow> = rows.collect::<Result<_, _>>()?;
+        if order == "DESC" {
+            rows.reverse();
+        }
+        Ok(rows)
+    }
+
+    /// The sequence number of the newest event kept, of any workspace or class.
+    pub fn newest_event_seq(&self) -> StoreResult<Option<i64>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT MAX(seq) FROM agent_events", [], |row| row.get(0))?)
+    }
+
+    /// Whether the event at `seq` is still kept and matches `filter`.
+    pub fn event_matches(&self, filter: &EventFilter<'_>, seq: i64) -> StoreResult<bool> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT 1 FROM agent_events
+                 WHERE seq = ?1 AND workspace_id IN (SELECT value FROM json_each(?2))
+                   AND privacy_class = ?3 AND (?4 IS NULL OR session_id = ?4)",
+                params![
+                    seq,
+                    id_list(filter.workspace_ids),
+                    filter.privacy_class,
+                    filter.session_id
+                ],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
     /// A workspace's events of the given kinds, oldest first. For a join that reads one or
     /// two kinds out of everything a busy workspace recorded, without paging through the rest.
     pub fn events_of_kinds(
@@ -1756,6 +1923,17 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Move a session's start, first and latest, for tests of what is read by time.
+    #[cfg(test)]
+    pub fn set_session_started(&self, id: &str, at: i64) {
+        self.conn()
+            .execute(
+                "UPDATE sessions SET started_at = ?1, began_at = ?1 WHERE id = ?2",
+                params![at, id],
+            )
+            .unwrap();
     }
 
     /// Make every activity write fail from here on, for tests of what happens then. The
@@ -1989,6 +2167,148 @@ impl Store {
         Ok(changed)
     }
 
+    /// This machine as a host, when Remote is on.
+    pub fn remote_host(&self) -> StoreResult<Option<RemoteHostRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT server_url, server_id, host_id, device_id, name, enabled_at
+                 FROM remote_host",
+                [],
+                |r| {
+                    Ok(RemoteHostRow {
+                        server_url: r.get(0)?,
+                        server_id: r.get(1)?,
+                        host_id: r.get(2)?,
+                        device_id: r.get(3)?,
+                        name: r.get(4)?,
+                        enabled_at: r.get(5)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Turn Remote on, or move it to another server. Grants from an earlier server are dropped
+    /// in the same step: they were that server's devices.
+    pub fn set_remote_host(&self, host: &RemoteHostRow) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let same_server = tx
+            .query_row(
+                "SELECT server_id = ? AND host_id = ? FROM remote_host",
+                params![host.server_id, host.host_id],
+                |r| r.get::<_, bool>(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !same_server {
+            tx.execute("DELETE FROM remote_grants", [])?;
+        }
+        tx.execute(
+            "INSERT INTO remote_host
+                 (singleton, server_url, server_id, host_id, device_id, name, enabled_at)
+             VALUES (1, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(singleton) DO UPDATE SET
+                 server_url = excluded.server_url, server_id = excluded.server_id,
+                 host_id = excluded.host_id, device_id = excluded.device_id,
+                 name = excluded.name, enabled_at = excluded.enabled_at",
+            params![
+                host.server_url,
+                host.server_id,
+                host.host_id,
+                host.device_id,
+                host.name,
+                host.enabled_at
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Turn Remote off: the host and every grant go, in one step.
+    pub fn forget_remote_host(&self) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM remote_grants", [])?;
+        tx.execute("DELETE FROM remote_host", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The devices this host's person let in, oldest first.
+    pub fn remote_grants(&self) -> StoreResult<Vec<RemoteGrantRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, device_id, device_name, scopes, projects, approved_at
+             FROM remote_grants ORDER BY approved_at, id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(RemoteGrantRow {
+                    id: r.get(0)?,
+                    device_id: r.get(1)?,
+                    device_name: r.get(2)?,
+                    scopes: r.get(3)?,
+                    projects: r.get(4)?,
+                    approved_at: r.get(5)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Keep a grant this host's person just approved, in place of any the device had.
+    pub fn keep_remote_grant(&self, grant: &RemoteGrantRow) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM remote_grants WHERE device_id = ? OR id = ?",
+            params![grant.device_id, grant.id],
+        )?;
+        tx.execute(
+            "INSERT INTO remote_grants
+                 (id, device_id, device_name, scopes, projects, approved_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                grant.id,
+                grant.device_id,
+                grant.device_name,
+                grant.scopes,
+                grant.projects,
+                grant.approved_at
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Drop every grant but these: what the server still has in force. Only ever drops, so the
+    /// server can take a grant away but never add one. Returns how many went.
+    pub fn retain_remote_grants(&self, in_force: &[String]) -> StoreResult<usize> {
+        let kept: std::collections::HashSet<&str> = in_force.iter().map(String::as_str).collect();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let ids: Vec<String> = tx
+            .prepare("SELECT id FROM remote_grants")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let mut dropped = 0;
+        for id in ids.iter().filter(|id| !kept.contains(id.as_str())) {
+            dropped += tx.execute("DELETE FROM remote_grants WHERE id = ?", [id])?;
+        }
+        tx.commit()?;
+        Ok(dropped)
+    }
+
+    /// Drop one grant, revoked here.
+    pub fn drop_remote_grant(&self, id: &str) -> StoreResult<bool> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM remote_grants WHERE id = ?", [id])?
+            > 0)
+    }
+
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -2090,6 +2410,12 @@ fn memory_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRow> {
 const EVENT_COLUMNS: &str = "seq, id, schema_version, workspace_id, session_id, run_id, \
      occurred_at, received_at, kind, producer, method, fidelity, source_key, privacy_class, payload";
 
+/// Ids as one JSON array, for `IN (SELECT value FROM json_each(?))`: one parameter however many
+/// there are.
+fn id_list(ids: &[String]) -> String {
+    serde_json::to_string(ids).expect("strings serialise")
+}
+
 fn event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
     Ok(EventRow {
         seq: row.get(0)?,
@@ -2136,7 +2462,8 @@ fn workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRow>
 }
 
 const SESSION_COLUMNS: &str = "id, workspace_id, harness_id, model, effort, harness_session_id, \
-     title, forked_from, state, exit_code, pty_session_id, started_at, ended_at";
+     title, forked_from, state, exit_code, pty_session_id, started_at, ended_at, \
+     COALESCE(began_at, started_at)";
 
 fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
     Ok(SessionRow {
@@ -2153,6 +2480,7 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         pty_session_id: row.get(10)?,
         started_at: row.get(11)?,
         ended_at: row.get(12)?,
+        began_at: row.get(13)?,
     })
 }
 
@@ -2845,5 +3173,19 @@ mod tests {
         });
 
         assert_eq!(app.projects().unwrap().len(), EACH * 2);
+    }
+
+    #[test]
+    fn a_project_shares_its_agents_conversations_until_turned_off() {
+        let store = Store::in_memory();
+        let project = store.add_project("app", "/code/app").unwrap();
+        assert!(
+            store.conversations_shared(&project.id).unwrap(),
+            "on by default"
+        );
+        store.set_conversations_shared(&project.id, false).unwrap();
+        assert!(!store.conversations_shared(&project.id).unwrap());
+        store.set_conversations_shared(&project.id, true).unwrap();
+        assert!(store.conversations_shared(&project.id).unwrap());
     }
 }

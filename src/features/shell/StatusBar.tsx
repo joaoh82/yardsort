@@ -2,6 +2,7 @@ import { useShortcutLabel } from "@/stores/preferences";
 import { useAppStore } from "@/stores/app";
 import { useLayoutStore } from "@/stores/layout";
 import { usePreflightStore } from "@/stores/preflight";
+import { useRemoteStore } from "@/stores/remote";
 import { useTerminalStore } from "@/stores/terminals";
 
 export function StatusBar() {
@@ -15,6 +16,7 @@ export function StatusBar() {
   const checking = usePreflightStore((s) => s.checking);
   const collapsed = useLayoutStore((s) => s.collapsed);
   const toggle = useLayoutStore((s) => s.toggle);
+  const asking = useRemoteStore((s) => s.asking);
 
   return (
     <footer className="flex h-6 shrink-0 items-center justify-between border-t border-line bg-surface px-2 text-[11px] text-ink-faint">
@@ -57,6 +59,18 @@ export function StatusBar() {
         </button>
       </div>
       <div className="flex items-center gap-3 font-mono">
+        {asking.length > 0 && (
+          <button
+            type="button"
+            onClick={() => useLayoutStore.getState().openSettings("remote")}
+            title="Answer in Settings → Remote"
+            className="rounded px-1 text-amber-400 hover:bg-raised"
+          >
+            {asking.length === 1
+              ? `${asking[0]?.deviceName} asks to pair`
+              : `${asking.length} devices ask to pair`}
+          </button>
+        )}
         {daemon && !daemon.running && (
           <span
             className={daemon.strandedSessions ? "text-amber-400" : "text-ink-faint"}

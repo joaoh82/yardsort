@@ -301,6 +301,13 @@ function WorkspaceNode({
             onSelect: () => setRunWorkflow("code-review"),
           },
           { label: "Run workflow…", disabled, onSelect: () => setRunWorkflow(null) },
+          {
+            // A new workspace on a new branch from this one's, its record going along: a handoff
+            // that does not share the worktree.
+            label: "Fork into new workspace…",
+            disabled: disabled || !head || head.detached || head.unborn,
+            onSelect: () => void useProjectsStore.getState().fork(workspace),
+          },
         ]),
     ...(isWorktree
       ? [

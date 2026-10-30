@@ -1,6 +1,6 @@
 [package]
 name = "yardsort"
-description = "Run AI coding agents in parallel, each on its own track"
+description = "Orchestrate coding agents on Linux, macOS and Windows — shared worktrees, handoff with context"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -26,6 +26,13 @@ tauri-plugin-opener = "2"
 yardsort-core = { path = "../crates/core" }
 pty-host = { path = "../crates/pty-host", features = ["specta"] }
 pty-ipc = { path = "../crates/pty-ipc" }
+# Remote: this computer as a host on a Yardsort server (src/remote.rs).
+remote-client = { path = "../crates/remote-client" }
+remote-host = { path = "../crates/remote-host" }
+remote-proto = { path = "../crates/remote-proto" }
+# The pairing QR code, drawn as SVG.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+url = "2"
 which = "8"
 rusqlite = { version = "0.40", features = ["bundled"] }
 dunce = "1"
@@ -41,7 +48,7 @@ tauri-plugin-updater = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "system-proxy"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Backoff between retries, and a few files reviewed at once.
-tokio = { version = "1", features = ["time", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 # The Assist API key lives in the OS credential store, never in settings.toml.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 serde = { version = "1", features = ["derive"] }

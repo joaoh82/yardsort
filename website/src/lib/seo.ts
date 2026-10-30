@@ -2,16 +2,16 @@ import type { Metadata } from "next";
 
 // Match the production redirect: yardsort.sh redirects to www.yardsort.sh.
 export const SITE_ORIGIN = "https://www.yardsort.sh";
-export const HOME_TITLE = "Yardsort — run AI coding agents in parallel";
+export const HOME_TITLE = "Yardsort — orchestrate coding agents on any OS";
 export const HOME_DESCRIPTION =
-  "Yardsort is an open-source desktop app for running Claude Code, Codex and other AI coding agents in parallel git worktrees on Linux, macOS and Windows.";
+  "Open-source desktop for Linux, macOS and Windows. Orchestrate Claude Code, Codex and any CLI agent in parallel — shared worktrees when you want, handoff with context so you do not re-explain the branch.";
 
 export const SOCIAL_IMAGE = {
   url: `${SITE_ORIGIN}/social/yardsort-v1.png`,
   width: 1200,
   height: 630,
   type: "image/png",
-  alt: "Yardsort — run AI coding agents in parallel. An app preview shows workspaces, an agent terminal and a code diff.",
+  alt: "Yardsort — orchestrate coding agents on any OS. An app preview shows workspaces, an agent terminal and a code diff.",
 };
 
 // Page URLs follow next.config.ts's trailingSlash policy. Asset URLs do not use this helper.

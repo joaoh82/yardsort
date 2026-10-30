@@ -1,0 +1,160 @@
+# Running the Yardsort server yourself: the server, its own ZITADEL to sign in with, PostgreSQL
+# for both, and Caddy in front with certificates from Let's Encrypt. Nothing here calls Yardsort's
+# own infrastructure. README.md, beside this file, walks through it.
+#
+#   cp .env.example .env     and fill it in
+#   docker compose up -d proxy
+#   (create the server's application in ZITADEL, and put its client id and secret in .env)
+#   docker compose up -d
+#
+# Versions are pinned. Moving to newer ones is in README.md, "Upgrading".
+
+name: yardsort
+
+services:
+  postgres:
+    image: postgres:17.10-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: postgres
+      YARDSORT_DB_PASSWORD: ${YARDSORT_DB_PASSWORD:?set YARDSORT_DB_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/yardsort.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d yardsort"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  zitadel-api:
+    image: ghcr.io/zitadel/zitadel:v4.19.5
+    restart: unless-stopped
+    # Root inside the container, to write the login client's token to the shared volume, as in
+    # ZITADEL's own Compose example.
+    user: "0"
+    command: start-from-init --masterkeyFromEnv
+    environment:
+      ZITADEL_MASTERKEY: ${ZITADEL_MASTERKEY:?set ZITADEL_MASTERKEY in .env}
+      ZITADEL_PORT: 8080
+      ZITADEL_EXTERNALDOMAIN: ${AUTH_DOMAIN:?set AUTH_DOMAIN in .env}
+      ZITADEL_EXTERNALPORT: 443
+      # Plain HTTP behind Caddy, which terminates TLS, and HTTPS in every address ZITADEL hands
+      # out. As settings rather than `--tlsMode external`, which only `start` reads: the health
+      # check's `zitadel ready` would probe with TLS.
+      ZITADEL_EXTERNALSECURE: "true"
+      ZITADEL_TLS_ENABLED: "false"
+      ZITADEL_DATABASE_POSTGRES_DSN: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/zitadel?sslmode=disable
+
+      ZITADEL_FIRSTINSTANCE_INSTANCENAME: Yardsort
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: Yardsort
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${ZITADEL_ADMIN_EMAIL:?set ZITADEL_ADMIN_EMAIL in .env}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_ADDRESS: ${ZITADEL_ADMIN_EMAIL}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_VERIFIED: "true"
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD:?set ZITADEL_ADMIN_PASSWORD in .env}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "true"
+      # The login container's own account.
+      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Login client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "true"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: https://${AUTH_DOMAIN}/ui/v2/login/
+      ZITADEL_OIDC_DEFAULTLOGINURLV2: https://${AUTH_DOMAIN}/ui/v2/login/login?authRequest=
+      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: https://${AUTH_DOMAIN}/ui/v2/login/logout?post_logout_redirect=
+      ZITADEL_SAML_DEFAULTLOGINURLV2: https://${AUTH_DOMAIN}/ui/v2/login/login?samlRequest=
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 5s
+      timeout: 30s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  zitadel-login:
+    image: ghcr.io/zitadel/zitadel-login:v4.19.5
+    restart: unless-stopped
+    user: "0"
+    environment:
+      ZITADEL_API_URL: http://zitadel-api:8080
+      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
+      ZITADEL_SESSION_COOKIE_SECRET: ${ZITADEL_LOGIN_COOKIE_SECRET:?set ZITADEL_LOGIN_COOKIE_SECRET in .env}
+      CUSTOM_REQUEST_HEADERS: Host:${AUTH_DOMAIN},X-Forwarded-Proto:https
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/bin/sh",
+          "-c",
+          "node /app/healthcheck.mjs http://localhost:3000/ui/v2/login/healthy",
+        ]
+      interval: 5s
+      timeout: 30s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap:ro
+    depends_on:
+      zitadel-api:
+        condition: service_healthy
+
+  server:
+    build:
+      # The repository's root, which holds the Cargo workspace.
+      context: ../../..
+      dockerfile: crates/server/Dockerfile
+    image: yardsort-server:self-host
+    restart: unless-stopped
+    environment:
+      YARDSORT_PUBLIC_URL: https://${REMOTE_DOMAIN:?set REMOTE_DOMAIN in .env}
+      YARDSORT_OIDC_ISSUER: https://${AUTH_DOMAIN}
+      YARDSORT_OIDC_CLIENT_ID: ${YARDSORT_OIDC_CLIENT_ID:-}
+      YARDSORT_OIDC_CLIENT_SECRET: ${YARDSORT_OIDC_CLIENT_SECRET:-}
+      DATABASE_URL: postgres://yardsort:${YARDSORT_DB_PASSWORD}@postgres:5432/yardsort?sslmode=disable
+      # Set by Caddy (Caddyfile).
+      YARDSORT_CLIENT_IP_HEADER: X-Real-IP
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  proxy:
+    image: caddy:2.11.2-alpine
+    restart: unless-stopped
+    environment:
+      AUTH_DOMAIN: ${AUTH_DOMAIN}
+      REMOTE_DOMAIN: ${REMOTE_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      CADDY_CERTIFICATES: ${CADDY_CERTIFICATES:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      default:
+        # The server reaches ZITADEL by its public name, at Caddy, without leaving this machine:
+        # many hosts cannot reach their own public address from inside.
+        aliases:
+          - ${AUTH_DOMAIN}
+    depends_on:
+      zitadel-api:
+        condition: service_healthy
+      zitadel-login:
+        condition: service_healthy
+
+volumes:
+  postgres:
+  zitadel-bootstrap:
+  caddy-data:
+  caddy-config:

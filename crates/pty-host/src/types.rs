@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::control::Controller;
+
 /// Opaque, globally unique session identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -26,6 +28,40 @@ impl std::fmt::Display for SessionId {
 
 /// Identifies one attachment (one viewer) of a session.
 pub type AttachmentId = u32;
+
+/// A place in a session's output stream: how many items (batches of output, and resizes) it
+/// holds up to there. 0 is before anything. Counted per session, from its start, in memory: it
+/// means nothing for another session or after the host restarts.
+pub type OutputSeq = u64;
+
+/// What a numbered viewer is sent: see [`crate::PtyHost::attach_numbered`]. It begins with a
+/// [`Numbered::Snapshot`], or a [`Numbered::Resumed`], then [`Numbered::Control`]; every
+/// numbered item after that carries the next number, with no gaps.
+///
+/// `Control` and `Exited` carry no number. They change nothing on the screen, so a viewer that
+/// resumes is not sent the ones it missed: it is sent who controls the session now, and whether
+/// it has exited.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Numbered<'a> {
+    /// First, once: the terminal exactly as it stood after item `seq`, at `size`.
+    Snapshot {
+        seq: OutputSeq,
+        size: TermSize,
+        bytes: &'a [u8],
+    },
+    /// First, once, instead of a snapshot: the viewer's screen already shows everything up to
+    /// item `seq`, which left the terminal at `size`. The items after it follow, from `seq + 1`.
+    Resumed { seq: OutputSeq, size: TermSize },
+    /// A batch of the program's output, as it printed it.
+    Output { seq: OutputSeq, bytes: &'a [u8] },
+    /// The terminal was resized: output after this is drawn at `size`.
+    Resized { seq: OutputSeq, size: TermSize },
+    /// Who controls the session: once after the first item, then whenever it changes hands,
+    /// including when a hold lapses.
+    Control(Controller),
+    /// The program has ended, and everything it printed has been sent. Nothing follows.
+    Exited(ExitInfo),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -163,6 +199,28 @@ pub enum HostError {
     OpenPty(String),
     #[error("could not start `{program}`: {reason}")]
     Spawn { program: String, reason: String },
+    /// The lease named is not the one in force: control changed hands, or it lapsed.
+    #[error("control of session {0} has passed to someone else")]
+    LeaseLost(SessionId),
+    #[error("someone else controls session {id}")]
+    ControlHeld {
+        id: SessionId,
+        by: crate::Controller,
+    },
+    /// Input skipped a number under its lease, so nothing more is written until the gap is
+    /// filled or a new lease starts afresh.
+    #[error("input to session {id} out of order: expected {expected}, got {got}")]
+    InputOutOfOrder {
+        id: SessionId,
+        expected: u64,
+        got: u64,
+    },
+    #[error("a lease holder's name must be 1 to 128 printable characters")]
+    InvalidHolder,
+    /// This host cannot hand out control or number its output: a daemon from before either
+    /// existed.
+    #[error("this terminal host cannot share control of its terminals")]
+    ControlUnavailable,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

@@ -33,6 +33,8 @@ efforts     = ["low", "medium", "high", "xhigh", "max"]
 models      = ["fable", "opus", "sonnet"]          # suggestions only; free text allowed
 
 session_args = ["--session-id", "{session_id}"]    # omitted unless session_id_mode = "assigned"
+context_args = ["--append-system-prompt", "{context}"]  # background context; see doc 29
+resume_context_args = ["--system-prompt-snapshot", "off", "--append-system-prompt", "{context}"]
 prompt_args = ["{prompt}"]                         # omitted when there is no opening message
 resume_args = ["--resume", "{session_id}"]
 fork_args   = ["--resume", "{session_id}", "--fork-session", "--session-id", "{new_session_id}"]
@@ -55,8 +57,8 @@ every harness needing hand-written templates.
   argument. No shell is involved.
 - The settings form may show/edit args as a single shell-like line for convenience, parsed with
   shlex rules into the array — but the array is what is stored and executed.
-- Placeholders: `{prompt}` `{model}` `{effort}` `{session_id}` `{new_session_id}` `{workspace}`
-  `{worktree}` `{branch}`.
+- Placeholders: `{prompt}` `{model}` `{effort}` `{session_id}` `{new_session_id}` `{context}`
+  `{workspace}` `{worktree}` `{branch}`.
 - An arg group whose placeholder has no value is dropped whole (no model chosen → no `--model`).
 - Final argv to start = `command` + `base_args` + `model_args` + `effort_args` + `session_args` +
   `prompt_args`; to resume or fork, `resume_args` / `fork_args` take the place of the last two.
@@ -64,6 +66,12 @@ every harness needing hand-written templates.
   resuming or forking, because Codex resumes with a subcommand that reads its own options.
   `write_args` one-shots (drafting a commit message) never get them: they run no tools.
   The session id has a group of its own so that an empty prompt drops only the prompt.
+  `context_args` sit between `session_args` and `prompt_args` when starting. They carry the note
+  about the workspace's other conversations ([29](29-conversation-context.md#slice-2-what-shipped)).
+  On a resume or fork, `resume_context_args` come after the resume or fork args: the same as
+  `context_args` for an agent that builds its system prompt at each launch (OMP, pi); for Claude
+  Code, `--system-prompt-snapshot off` first, since it otherwise sends the prompt a conversation
+  began with. Empty for Codex and Grok, which keep that prompt whatever they are passed.
 - Braces that are not one of our placeholders are literal, so JSON can be passed in an argument.
 - Built-in definitions are compiled in. User edits are stored as overrides, so **Restore defaults**
   is just "delete the override", and new app versions can ship corrected defaults.

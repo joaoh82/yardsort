@@ -27,6 +27,8 @@ pub struct Settings {
     pub activity: ActivitySettings,
     #[serde(skip_serializing_if = "UsageSettings::is_default")]
     pub usage: UsageSettings,
+    #[serde(skip_serializing_if = "RemoteSettings::is_default")]
+    pub remote: RemoteSettings,
     /// Overrides of built-in harnesses, and whole custom ones. See [`HarnessOverride`].
     #[serde(rename = "harness", skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<HarnessOverride>,
@@ -80,6 +82,24 @@ impl Default for UsageSettings {
 }
 
 impl UsageSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Remote: the server and the name this computer was last turned on with, offered again the next
+/// time. Kept when Remote is turned off. Whether it is on, and its credential, are not here: see
+/// [`crate::remote::host`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemoteSettings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl RemoteSettings {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -531,6 +551,30 @@ mod tests {
         assert!(!std::fs::read_to_string(path)
             .unwrap()
             .contains("workflow_harness_id"));
+    }
+
+    #[test]
+    fn the_remote_server_last_used_is_kept_under_its_own_heading() {
+        let (_dir, path) = file();
+        let file = SettingsFile::load(path.clone());
+        assert!(!std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .contains("[remote]"));
+        file.update(|s| {
+            s.remote = RemoteSettings {
+                server_url: Some("https://remote.example.com".into()),
+                name: Some("Workstation".into()),
+            }
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(
+            "[remote]\nserver_url = \"https://remote.example.com\"\nname = \"Workstation\""
+        ));
+        assert_eq!(
+            SettingsFile::load(path).get().remote.name.as_deref(),
+            Some("Workstation")
+        );
     }
 
     #[test]

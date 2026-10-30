@@ -617,6 +617,12 @@ The user story the design opened with, recorded in
   and, from the review Assist already runs, the changed files come in the order Assist would
   look at them with its word on each — a judgment, the packet says, not a fact. Nothing new is
   sent, and no new switch.
+- Forking (2026-10-28): **Fork into new workspace…** in the workspace menu opens the composer
+  on a new branch from the workspace's branch; the user's message is the task and the packet,
+  worded for a fork, goes after it as `HarnessRequest.fork_packet`, in place of the memory it
+  carries. Uncommitted files stay behind, counted in the composer. See
+  [18 §7](18-agent-events-stage-4-handoff.md#7--forking-a-workspace). Not yet run by hand in the
+  window.
 
 _Exit:_ the packet renders every part from a recorded run and leaks nothing; **Hand off…**
 opens the composer here with it; an edited packet spawns with `handoff: true` and creates no
@@ -843,9 +849,115 @@ being chosen; one already added is selected instead; a GitLab URL clones; a past
 ends in that issue's **Delegate**; and without `gh`, logged out, or offline, the clone step still
 takes a URL and says why there is no list.
 
-## M26 — Smoke tests
+## M26 — Remote access
 
-Proposed in [25-smoke-tests](25-smoke-tests.md), after a six-question design pass on
+Proposed in [the remote, mobile and sync proposal](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
+on 2026-10-21. It covers your agents from a phone or another computer, on a server you choose or
+host yourself; local use stays account-free. Its phases R0–R7 are tracked in the ledger of
+[26-remote-r0-r1](26-remote-r0-r1.md#8--progress-ledger), not repeated here.
+
+- [x] R0: the fit report against the live tree. Two things the proposal assumed are not there
+      yet. Terminal queries have one responder only while at most one viewer is attached. Input
+      and resize have no controller at all. Both belong in the daemon.
+- [x] R1: contracts and a host facade, in three slices. `crates/remote-proto` (versioned
+      envelope, errors, limits, read model, terminal attach/control schema, output frames) and a
+      read-only `HostFacade` in the core, tested against real stores, worktrees and PTYs. It
+      answers activity reads (paged both ways on `agent_events.seq`, metadata only, through a
+      field allowlist) and lists shells and the run command beside conversations. `pty-host`
+      numbers each session's output and resizes (`attach_numbered`). Not wired to anything.
+      Found on the way and fixed: a snapshot taken between two halves of an escape sequence or
+      a character showed the rest as text, or lost a byte (`vt100` 0.16 drops one after a split
+      character).
+- [x] R2: identity and relay, done on 2026-10-30, once staging had run its smoke tests
+      ([27](27-remote-r2.md); exit review in
+      [27 §20](27-remote-r2.md#20--r2s-exit-review)). The self-host recipe's
+      identity provider is ZITADEL; the server takes any OIDC issuer. Twelve slices built: a person
+      signs in at the provider once per device, and the device then holds the server's own
+      credentials (15-minute access, single-use refresh), so the provider is never asked again
+      and revocation is immediate; the `yardsort-server` binary on PostgreSQL; its image, staging
+      on Fly.io (live, smoke-tested), the self-host recipe, and a sign-in against a real
+      ZITADEL in CI; pairing, approved only at the host, with the app's Remote settings behind a
+      preview switch until the relay can connect a paired device; and the daemon's protocol 2,
+      with one controller (typing here, or a lease) and one terminal answering queries per
+      session, and numbered output over its socket; and the relay, with the host's outbound
+      connector, so a paired device reaches its host's workspaces and terminals through the
+      server with neither listening; and a device that reconnects resumes from the last item it
+      drew, while the daemon keeps the last 256 KiB of a watched terminal, and is told when
+      control changes hands and when the program ends; and a device follows the host's
+      activity as it is recorded (`activity.subscribe`), from the store, through the same
+      allowlist as the list; and the relay on several instances of the server, a device's
+      requests sent to the one holding its host's link with Fly.io's `fly-replay`; and a host
+      told over its link when a device asks to pair, shown wherever the window is; and signals
+      between instances through PostgreSQL, so a revocation anywhere, the operator's included,
+      reaches every live socket at once; and rate limits counted across every instance. The gate's
+      three checks have tests: another account reaches nothing, a revoked device's live socket
+      closes within seconds, and the relay failing leaves the program running with the person
+      here in control. Found on the way and fixed: a session
+      open in the app and `ys attach` answered a program's questions twice; and, on staging,
+      Settings → Remote went on showing a computer signed out at the server as connected, with
+      its devices. The three questions R2 left open were settled after it
+      ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)): a refresh whose
+      answer was lost is answered once more, a device hears why terminals under an earlier daemon
+      wait, and there is no maximum session.
+- [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch. The server is
+      AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
+      only it has in a private repository behind a documented interface
+      ([30](30-open-source-and-managed.md)).
+
+_Exit (R1):_ an incompatible client is refused with the majors this host speaks; a device's grant
+reaches only its projects and scopes; nothing private crosses; existing app and CLI behaviour is
+unchanged.
+
+## M27 — Conversation context
+
+Proposed in [29-conversation-context](29-conversation-context.md) on 2026-10-25. A second agent in
+a workspace sees the same files as the first and nothing of its conversation; the handoff packet
+says so, because the record is metadata. Slices 1–3 are built.
+
+- A **conversation digest** — every message the user typed and the agent's final reply per turn,
+  from the harness's own transcript, within a budget, with no model — read live by
+  `ys workspace context` and never stored, so it ends with the workspace.
+- Every launch is told it is there: a short note as background context through a new
+  `context_args` harness template (no first message, so no turn) from the tab bar; a section after
+  the memory from the composer; the digest itself in **Hand off…**'s packet.
+- A per-project switch, since the digest goes to another agent's provider.
+- [x] Slice 1: the digest and `ys workspace context`, for Claude Code and Codex, and the switch,
+      off by default. Found: a Claude Code fork repeats its parent's turns with their times; a
+      Codex session file can be 2.4 GB, so transcripts stream; recorded transcripts carry the
+      account's own setup and the fixtures keep only the conversation. Recorded in
+      [29 § slice 1](29-conversation-context.md#slice-1-what-shipped).
+- [x] Slice 2: `context_args`, the note, the tab bar and composer, and asking once per project.
+      Found: Claude Code and Codex both keep the system prompt a conversation began with, so a
+      note on resume is ignored and none is given; Grok, OMP and Pi could not be checked live and
+      ship without `context_args`. Recorded in
+      [29 § slice 2](29-conversation-context.md#slice-2-what-shipped).
+- [x] Slice 3: _What was said_ in the packet, and readers for Cursor, OpenCode, OMP and pi. Found:
+      Cursor writes no tool output to its transcript and only minute-long times; OpenCode 2 keeps
+      conversations in a SQLite database, and a subagent's session reports its own id. Recorded in
+      [29 § slice 3](29-conversation-context.md#slice-3-what-shipped).
+      OMP and pi followed once they were signed in: readers for both (one format, a tree of
+      entries) and their `context_args`, checked live; both take a new note on resume.
+- [x] A reader for Grok, once an account here could record a fixture (1.0.70, 2026-10-26), and its
+      `--rules` template; and the note on resume for OMP and pi (`resume_context`, from
+      [open question 41](06-open-questions.md#conversation-context)). Grok keeps its rules across
+      a resume, so it is not given one. Recorded in
+      [29 § after slice 3](29-conversation-context.md#after-slice-3-grok-and-resume).
+- [x] The note on resume for Claude Code: `--system-prompt-snapshot off` on a told resume, in a
+      `resume_context_args` template that replaced the switch, settling
+      [open question 41](06-open-questions.md#conversation-context). Found: the snapshot-off build
+      is stable, so it costs one cache write per told resume, not one per request. Recorded in
+      [29 § Claude Code on resume](29-conversation-context.md#claude-code-on-resume).
+- [x] Checklist § 26 in the app on Linux, 2026-10-26: every row passes. Found: two of its rows had
+      been filed under § 21, and `ys attach` / `ys logs` did not take the id `ys session list`
+      prints. Recorded in [29 § checked in the app](29-conversation-context.md#checked-in-the-app).
+
+_Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
+beside it, and before its first answer Codex reads Claude's conversation and uses it; with the
+switch off, or Alt-clicked, it gets nothing.
+
+## M28 — Smoke tests
+
+Proposed in [31-smoke-tests](31-smoke-tests.md), after a six-question design pass on
 2026-10-30.
 
 - A smoke test is a file in the repository, `.yardsort/tests/<id>.yaml`: setup, steps and
@@ -867,7 +979,7 @@ Proposed in [25-smoke-tests](25-smoke-tests.md), after a six-question design pas
       `yaml.rs` and `template.rs` in the core), the validator with a line and column on every
       problem, the catalog of a worktree's `.yardsort/tests`, the five reading commands of
       `ys test` (list, show, validate, example, guide), and the guide. Recorded in
-      [25 § slice 1](25-smoke-tests.md#slice-1-what-shipped).
+      [31 § slice 1](31-smoke-tests.md#slice-1-what-shipped).
 
 _Exit:_ on all three platforms, an agent in a workspace writes a test with `run`, `http`,
 `browser` and `manual` steps, runs it, and is told in its own terminal which step failed and

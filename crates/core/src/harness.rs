@@ -55,6 +55,19 @@ pub struct HarnessDef {
     /// is the honest default for one we know nothing about.
     #[serde(default)]
     pub write_args: Vec<String>,
+    /// What gives the agent background context — its system-prompt option — with `{context}`
+    /// for the text. Yardsort uses it on a new conversation for a short note that the
+    /// workspace's other conversations can be read (`docs/design/29-conversation-context.md`).
+    /// Empty means the harness has no such option, or it is not known to work.
+    #[serde(default)]
+    pub context_args: Vec<String>,
+    /// The same for a resume or fork, after its args: what makes a continued conversation read a
+    /// new note. [`Self::context_args`] for a harness that builds its system prompt at each
+    /// launch (OMP, pi); for Claude Code, which keeps the prompt a conversation began with, those
+    /// plus `--system-prompt-snapshot off`. Empty for one that keeps it whatever it is passed
+    /// (Codex, Grok), where a note would be passed and never seen.
+    #[serde(default)]
+    pub resume_context_args: Vec<String>,
     pub resume_args: Vec<String>,
     pub fork_args: Vec<String>,
     /// Effort levels to offer. Empty hides the picker.
@@ -95,6 +108,8 @@ pub struct LaunchValues {
     pub session_id: Option<String>,
     /// When forking: the id the *new* conversation should get, so it can be resumed later too.
     pub new_session_id: Option<String>,
+    /// Background context for a new conversation, through [`HarnessDef::context_args`].
+    pub context: Option<String>,
 }
 
 impl HarnessDef {
@@ -107,6 +122,7 @@ impl HarnessDef {
             &self.model_args,
             &self.effort_args,
             &self.session_args,
+            &self.context_args,
         ];
         if self.prompt_transport == PromptTransport::Argv {
             groups.push(&self.prompt_args);
@@ -127,7 +143,8 @@ impl HarnessDef {
                 .any(|arg| arg.contains("{new_session_id}"))
     }
 
-    /// The argv for resuming (`fork = false`) or forking a previous session.
+    /// The argv for resuming (`fork = false`) or forking a previous session, with
+    /// [`Self::resume_context_args`] when there is a note.
     pub fn continue_args(&self, values: &LaunchValues, fork: bool) -> Vec<String> {
         let last = if fork {
             &self.fork_args
@@ -141,6 +158,7 @@ impl HarnessDef {
             &self.model_args,
             &self.effort_args,
             last,
+            &self.resume_context_args,
             self.auto(),
         ]
         .into_iter()
@@ -172,6 +190,8 @@ impl HarnessDef {
             session_args: vec![],
             prompt_args: strings(&["--", "{prompt}"]),
             write_args: vec![],
+            context_args: vec![],
+            resume_context_args: vec![],
             resume_args: vec![],
             fork_args: vec![],
             efforts: vec![],
@@ -197,6 +217,7 @@ fn expand(group: &[String], values: &LaunchValues) -> Vec<String> {
         "effort" => values.effort.as_deref(),
         "session_id" => values.session_id.as_deref(),
         "new_session_id" => values.new_session_id.as_deref(),
+        "context" => values.context.as_deref(),
         _ => None,
     };
     let mut out = Vec::with_capacity(group.len());
@@ -228,7 +249,7 @@ fn expand(group: &[String], values: &LaunchValues) -> Vec<String> {
 fn is_placeholder(name: &str) -> bool {
     matches!(
         name,
-        "prompt" | "model" | "effort" | "session_id" | "new_session_id"
+        "prompt" | "model" | "effort" | "session_id" | "new_session_id" | "context"
     )
 }
 
@@ -252,6 +273,13 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: strings(&["--session-id", "{session_id}"]),
             prompt_args: strings(&["--", "{prompt}"]),
             write_args: strings(&["--print", "{prompt}"]),
+            context_args: strings(&["--append-system-prompt", "{context}"]),
+            resume_context_args: strings(&[
+                "--system-prompt-snapshot",
+                "off",
+                "--append-system-prompt",
+                "{context}",
+            ]),
             resume_args: strings(&["--resume", "{session_id}"]),
             fork_args: strings(&[
                 "--resume",
@@ -281,6 +309,10 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: vec![],
             prompt_args: strings(&["--", "{prompt}"]),
             write_args: strings(&["exec", "{prompt}"]),
+            // Not in `--help`, but read from config: verified with 0.163.0, the text arriving
+            // as a developer message. A value that is not TOML is taken as the string itself.
+            context_args: strings(&["-c", "developer_instructions={context}"]),
+            resume_context_args: vec![],
             resume_args: strings(&["resume", "--last"]),
             fork_args: strings(&["fork", "--last"]),
             efforts: strings(&["low", "medium", "high"]),
@@ -304,6 +336,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: strings(&["--session-id", "{session_id}"]),
             prompt_args: strings(&["--", "{prompt}"]),
             write_args: strings(&["--single", "{prompt}"]),
+            context_args: strings(&["--rules", "{context}"]),
+            resume_context_args: vec![],
             resume_args: strings(&["--resume", "{session_id}"]),
             fork_args: strings(&[
                 "--resume",
@@ -333,6 +367,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: vec![],
             prompt_args: strings(&["--prompt", "{prompt}"]),
             write_args: strings(&["run", "{prompt}"]),
+            context_args: vec![],
+            resume_context_args: vec![],
             resume_args: strings(&["--continue"]),
             fork_args: strings(&["--continue", "--fork"]),
             efforts: vec![],
@@ -356,6 +392,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: vec![],
             prompt_args: strings(&["--", " {prompt}"]),
             write_args: strings(&["--print", "--no-session", "--", " {prompt}"]),
+            context_args: strings(&["--append-system-prompt={context}"]),
+            resume_context_args: strings(&["--append-system-prompt={context}"]),
             resume_args: strings(&["--continue"]),
             fork_args: vec![],
             efforts: strings(&[
@@ -382,6 +420,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             prompt_args: strings(&["--", "{prompt}"]),
             // No verified ephemeral print mode: protect the interactive --continue target.
             write_args: vec![],
+            context_args: vec![],
+            resume_context_args: vec![],
             resume_args: strings(&["--continue"]),
             fork_args: vec![],
             efforts: vec![],
@@ -406,6 +446,8 @@ pub fn builtin() -> Vec<HarnessDef> {
             session_args: strings(&["--session-id", "{session_id}"]),
             prompt_args: strings(&["--", " {prompt}"]),
             write_args: strings(&["--print", "--no-session", "--", " {prompt}"]),
+            context_args: strings(&["--append-system-prompt", "{context}"]),
+            resume_context_args: strings(&["--append-system-prompt", "{context}"]),
             resume_args: strings(&["--session", "{session_id}"]),
             fork_args: strings(&["--fork", "{session_id}", "--session-id", "{new_session_id}"]),
             efforts: strings(&["off", "minimal", "low", "medium", "high", "xhigh", "max"]),
@@ -450,6 +492,10 @@ pub struct HarnessOverride {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_args: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_args: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_context_args: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_args: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fork_args: Option<Vec<String>>,
@@ -481,6 +527,8 @@ macro_rules! each_field {
             effort_args,
             session_args,
             prompt_args,
+            context_args,
+            resume_context_args,
             resume_args,
             fork_args,
             efforts,
@@ -636,6 +684,16 @@ pub fn validate(def: &HarnessDef) -> Result<(), String> {
     {
         return Err("With the argv transport, the prompt args must use {prompt}.".into());
     }
+    for (args, name) in [
+        (&def.context_args, "context"),
+        (&def.resume_context_args, "resume context"),
+    ] {
+        if !args.is_empty() && !args.iter().any(|a| a.contains("{context}")) {
+            return Err(format!(
+                "The {name} args must use {{context}}, or be left empty."
+            ));
+        }
+    }
     if def.auto_mode && def.auto_args.is_empty() {
         return Err("To start in auto mode, give the auto args that turn it on.".into());
     }
@@ -659,7 +717,115 @@ mod tests {
             effort: some(effort),
             session_id: Some("11111111-2222-3333-4444-555555555555".into()),
             new_session_id: Some("99999999-8888-7777-6666-555555555555".into()),
+            context: None,
         }
+    }
+
+    #[test]
+    fn background_context_goes_to_a_new_conversation_and_never_a_resumed_one() {
+        let note = "Other agents have worked in this workspace: \"quoted\"\nand on two lines.";
+        let with = |id: &str| {
+            let mut v = values("fix it", "", "");
+            v.context = Some(note.into());
+            find(id, &[]).unwrap().start_args(&v)
+        };
+        assert_eq!(
+            with("claude")[2..],
+            ["--append-system-prompt", note, "--", "fix it"]
+        );
+        assert_eq!(
+            with("codex"),
+            [
+                "-c",
+                &format!("developer_instructions={note}"),
+                "--",
+                "fix it"
+            ]
+        );
+        // OMP takes it as one argument, pi as two; checked live like the others.
+        let omp = find("omp", &[]).unwrap();
+        let mut told = values("fix it", "", "");
+        told.context = Some(note.into());
+        assert!(omp
+            .start_args(&told)
+            .contains(&format!("--append-system-prompt={note}")));
+        let pi = find("pi", &[]).unwrap().start_args(&told);
+        let at = pi
+            .iter()
+            .position(|a| a == "--append-system-prompt")
+            .unwrap();
+        assert_eq!(pi[at + 1], note);
+        let grok = find("grok", &[]).unwrap().start_args(&told);
+        let at = grok.iter().position(|a| a == "--rules").unwrap();
+        assert_eq!(grok[at + 1], note);
+        // Not verified live yet, so not given that way: they are told after the first message.
+        for id in ["opencode", "cursor"] {
+            assert!(find(id, &[]).unwrap().context_args.is_empty(), "{id}");
+        }
+        // Without a note the group is dropped whole.
+        assert!(!find("claude", &[])
+            .unwrap()
+            .start_args(&values("fix it", "", ""))
+            .contains(&"--append-system-prompt".to_owned()));
+        // A resume or fork carries it only for an agent that reads it then: OMP and pi build their
+        // system prompt at each launch, and Claude Code does with its snapshot off; Codex and Grok
+        // keep the one they began with.
+        let mut resumed = values("", "", "");
+        resumed.context = Some(note.into());
+        resumed.session_id = Some("s-1".into());
+        resumed.new_session_id = Some("s-2".into());
+        let told_on = |id: &str, fork: bool| {
+            find(id, &[])
+                .unwrap()
+                .continue_args(&resumed, fork)
+                .iter()
+                .any(|a| a.contains("Other agents"))
+        };
+        for id in ["codex", "grok"] {
+            assert!(!told_on(id, false), "{id}");
+        }
+        assert!(told_on("omp", false));
+        assert!(told_on("pi", false) && told_on("pi", true));
+        assert!(told_on("claude", false) && told_on("claude", true));
+        assert_eq!(
+            find("pi", &[]).unwrap().continue_args(&resumed, false),
+            ["--session", "s-1", "--append-system-prompt", note]
+        );
+        assert_eq!(
+            find("claude", &[]).unwrap().continue_args(&resumed, false),
+            [
+                "--resume",
+                "s-1",
+                "--system-prompt-snapshot",
+                "off",
+                "--append-system-prompt",
+                note
+            ]
+        );
+        // Without a note a resume is as it was: Claude Code keeps its snapshot.
+        resumed.context = None;
+        assert_eq!(
+            find("claude", &[]).unwrap().continue_args(&resumed, false),
+            ["--resume", "s-1"]
+        );
+        // An override keeps it, and a template without the placeholder is refused.
+        let mut def = find("grok", &[]).unwrap();
+        def.context_args = strings(&["--rules", "{context}"]);
+        def.resume_context_args = def.context_args.clone();
+        let mut overrides = vec![];
+        save_override(&mut overrides, &def);
+        assert_eq!(
+            find("grok", &overrides).unwrap().context_args,
+            def.context_args
+        );
+        assert_eq!(
+            find("grok", &overrides).unwrap().resume_context_args,
+            def.context_args
+        );
+        def.resume_context_args = strings(&["--rules"]);
+        assert!(validate(&def).unwrap_err().contains("resume context"));
+        def.context_args = strings(&["--rules"]);
+        assert!(validate(&def).unwrap_err().contains("{context}"));
     }
 
     #[test]

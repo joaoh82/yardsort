@@ -1,0 +1,5 @@
+{
+  "event": "terminal.exited",
+  "stream": 1,
+  "exit": { "code": 0, "success": true }
+}

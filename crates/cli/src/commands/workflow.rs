@@ -151,8 +151,8 @@ fn list(data_dir: &Path, out: &Output) -> Result<(), Failure> {
                 .map(|e| vec![e.id.clone(), e.name.clone(), status(e), from(&e.source)]),
         );
         table(&rows);
-        println!();
-        println!(
+        sayln!();
+        sayln!(
             "Your workflows go in {}",
             workflow::user_dir(data_dir).display()
         );
@@ -171,9 +171,9 @@ fn show(data_dir: &Path, id: &str, out: &Output) -> Result<(), Failure> {
         )));
     };
     out.emit(&entry, || {
-        print!("{}", entry.text);
+        say!("{}", entry.text);
         if !entry.text.ends_with('\n') {
-            println!();
+            sayln!();
         }
         if !entry.problems.is_empty() {
             let name = match &entry.source {
@@ -257,11 +257,11 @@ fn start_run(
     };
     out.emit(&queued, || {
         let short = memory::short_id(&run_id);
-        println!("Queued `{id}` in {} as run {short}.", workspace.name);
+        sayln!("Queued `{id}` in {} as run {short}.", workspace.name);
         for line in &empty {
-            println!("Note: {line}");
+            sayln!("Note: {line}");
         }
-        println!("Follow it with: ys workflow runs --run {short}");
+        sayln!("Follow it with: ys workflow runs --run {short}");
     })
 }
 
@@ -344,7 +344,7 @@ fn runs(ys: &Yardsort, workspace: Option<&str>, limit: usize, out: &Output) -> R
     let listed: Vec<RunListed> = rows.iter().map(RunListed::from).collect();
     out.emit(&listed, || {
         if listed.is_empty() {
-            println!("No workflow runs yet.");
+            sayln!("No workflow runs yet.");
             return;
         }
         let mut lines = vec![vec![
@@ -407,7 +407,7 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
             .collect(),
     };
     out.emit(&shown, || {
-        println!(
+        sayln!(
             "Run {} of `{}` in {}: {}",
             memory::short_id(&run.id),
             run.workflow_id,
@@ -415,9 +415,9 @@ fn show_run(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
             run.status
         );
         if let Some(error) = &run.error {
-            println!("{error}");
+            sayln!("{error}");
         }
-        println!();
+        sayln!();
         let mut lines = vec![vec![
             "STEP".to_owned(),
             "ACTION".to_owned(),
@@ -453,7 +453,7 @@ fn cancel(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
         run: &'a str,
     }
     out.emit(&Cancelled { run: &run.id }, || {
-        println!(
+        sayln!(
             "Cancelled run {}. Agents it started keep running.",
             memory::short_id(&run.id)
         );
@@ -493,11 +493,11 @@ fn copy(data_dir: &Path, id: &str, as_id: Option<&str>, out: &Output) -> Result<
         path: path.display().to_string(),
     };
     out.emit(&copied, || {
-        println!("Copied to {}", copied.path);
+        sayln!("Copied to {}", copied.path);
         if as_id.is_none() {
-            println!("It is used instead of the built-in. Delete it to go back.");
+            sayln!("It is used instead of the built-in. Delete it to go back.");
         }
-        println!(
+        sayln!(
             "Check it after editing: ys workflow validate {}",
             copied.path
         );
@@ -539,7 +539,7 @@ fn validate(file: &Path, out: &Output) -> Result<(), Failure> {
     };
     if checked.valid {
         return out.emit(&checked, || {
-            println!(
+            sayln!(
                 "{name}: a valid workflow, `{}`.",
                 checked.id.unwrap_or_default()
             );

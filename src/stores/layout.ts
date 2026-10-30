@@ -2,7 +2,8 @@ import { create } from "zustand";
 
 export type SidePanel = "left" | "right";
 
-export type SettingsSection = "harnesses" | "workspaces" | "assist" | "general" | "keyboard";
+export type SettingsSection =
+  "harnesses" | "workspaces" | "assist" | "general" | "keyboard" | "remote";
 
 interface LayoutState {
   settingsSection: SettingsSection;

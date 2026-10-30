@@ -6,19 +6,19 @@
 
 use std::collections::HashMap;
 use std::io::{BufReader, BufWriter, Write};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use interprocess::local_socket::traits::ListenerExt as _;
 use interprocess::local_socket::{ListenerOptions, Stream};
-use pty_host::{AttachmentId, HostEvent, PtyHost, SessionState};
+use pty_host::{AttachmentId, HostEvent, Numbered, PtyHost, SessionState};
 
 use crate::endpoint::Endpoint;
 use crate::proto::{
     event_frame, DaemonInfo, Frame, Op, OpResult, Request, Response, StreamId, WireError,
-    KIND_REQUEST, KIND_RESPONSE, PROTOCOL,
+    KIND_REQUEST, KIND_RESPONSE, OLDEST_PROTOCOL, PROTOCOL, RESUME_PROTOCOL,
 };
 use crate::spool::{Spool, SpoolEntry, SPOOL_VERSION};
 
@@ -240,7 +240,10 @@ impl Daemon {
     fn handle(&self, conn: &Arc<Conn>, op: Op) -> OpResult {
         match op {
             Op::Hello { protocol, client } => {
-                if protocol != PROTOCOL {
+                // A client of an older protocol is fine: everything it can ask for is still
+                // here, in the same shape, and it is sent nothing newer than it speaks.
+                conn.protocol.store(protocol, Ordering::Relaxed);
+                if protocol > PROTOCOL {
                     eprintln!(
                         "client {client} speaks protocol {protocol}, this daemon speaks {PROTOCOL}"
                     );
@@ -268,6 +271,25 @@ impl Daemon {
                     Err(error) => failed(error),
                 }
             }
+            Op::Watch {
+                session,
+                stream,
+                after,
+            } => {
+                let out = Arc::clone(conn);
+                let sink = Box::new(move |item: Numbered<'_>| out.send_numbered(stream, &item));
+                let watched = match after {
+                    Some(after) => self.host.resume_numbered(&session, after, sink),
+                    None => self.host.attach_numbered(&session, sink),
+                };
+                match watched {
+                    Ok(attachment) => {
+                        conn.remember_attachment(session, stream, attachment);
+                        OpResult::Done
+                    }
+                    Err(error) => failed(error),
+                }
+            }
             Op::Detach { session, stream } => {
                 if let Some(attachment) = conn.forget_attachment(stream) {
                     let _ = self.host.detach(&session, attachment);
@@ -288,6 +310,34 @@ impl Daemon {
             Op::List => OpResult::Sessions {
                 sessions: self.host.list(),
             },
+            Op::Controller { session } => match self.host.controller(&session) {
+                Ok(controller) => OpResult::Controller { controller },
+                Err(error) => failed(error),
+            },
+            Op::Acquire {
+                session,
+                holder,
+                take_over,
+            } => leased(self.host.acquire(&session, &holder, take_over)),
+            Op::Renew { session, lease } => leased(self.host.renew(&session, &lease)),
+            Op::Release { session, lease } => done(self.host.release(&session, &lease)),
+            Op::Input {
+                session,
+                lease,
+                seq,
+                data,
+                paste,
+            } => done(self.host.input(&session, &lease, seq, &data, paste)),
+            Op::TypeUnattended {
+                session,
+                text,
+                paste,
+            } => done(self.host.type_unattended(&session, &text, paste)),
+            Op::ResizeLeased {
+                session,
+                lease,
+                size,
+            } => done(self.host.resize_leased(&session, &lease, size)),
             // Handled before it gets here: the connection simply ends.
             Op::Goodbye => OpResult::Done,
             Op::Shutdown { stop_sessions } => {
@@ -329,6 +379,13 @@ fn done(result: pty_host::Result<()>) -> OpResult {
     }
 }
 
+fn leased(result: pty_host::Result<pty_host::Lease>) -> OpResult {
+    match result {
+        Ok(lease) => OpResult::Leased { lease },
+        Err(error) => failed(error),
+    }
+}
+
 fn failed(error: pty_host::HostError) -> OpResult {
     OpResult::Failed {
         error: WireError::from(error),
@@ -363,6 +420,8 @@ struct Conn {
     gone: Arc<AtomicBool>,
     /// What this client is watching: its stream id → the host's attachment.
     attachments: Mutex<HashMap<StreamId, (pty_host::SessionId, AttachmentId)>>,
+    /// The protocol the client said it speaks, which decides what it is sent.
+    protocol: AtomicU32,
 }
 
 impl Conn {
@@ -394,6 +453,7 @@ impl Conn {
             queued,
             gone,
             attachments: Mutex::new(HashMap::new()),
+            protocol: AtomicU32::new(OLDEST_PROTOCOL),
         })
     }
 
@@ -416,6 +476,18 @@ impl Conn {
     /// Returns false when this viewer is gone, which is how the host detaches it.
     fn send_output(&self, stream: StreamId, bytes: &[u8]) -> bool {
         self.send(Frame::output(stream, bytes));
+        !self.gone.load(Ordering::Relaxed)
+    }
+
+    /// As [`Conn::send_output`], for a numbered viewer.
+    ///
+    /// A client from before protocol 3 is not sent what it cannot read: who controls the
+    /// session, and that it exited. It never asks to resume, so it is never sent a resume.
+    fn send_numbered(&self, stream: StreamId, item: &Numbered<'_>) -> bool {
+        let new = matches!(item, Numbered::Control(_) | Numbered::Exited(_));
+        if !new || self.protocol.load(Ordering::Relaxed) >= RESUME_PROTOCOL {
+            self.send(Frame::numbered(stream, item));
+        }
         !self.gone.load(Ordering::Relaxed)
     }
 
@@ -490,4 +562,133 @@ fn private_dir(_dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn private_socket(_path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::BufReader;
+
+    use interprocess::local_socket::traits::Stream as _;
+    use pty_host::{LaunchPlan, SessionInfo};
+
+    use super::*;
+    use crate::proto::{CONTROL_PROTOCOL, KIND_EVENT, KIND_NUMBERED};
+
+    /// What a client of `protocol` is sent while it watches a program that prints and ends:
+    /// the kind of each numbered item, in order, until the exit is announced.
+    fn watched_as(protocol: u32) -> Vec<&'static str> {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = if cfg!(windows) {
+            Endpoint::for_data_dir(dir.path())
+        } else {
+            Endpoint::Path(dir.path().join("d.sock"))
+        };
+        let serving = endpoint.clone();
+        std::thread::spawn(move || {
+            serve_with(
+                &serving,
+                "test",
+                Duration::from_secs(60),
+                ServeOptions::default(),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let stream = loop {
+            match Stream::connect(endpoint.to_name().unwrap()) {
+                Ok(stream) => break stream,
+                Err(_) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("the daemon never listened: {error}"),
+            }
+        };
+        let mut reader = BufReader::new(&stream);
+        let send = |id, op| {
+            let frame = Frame::json(KIND_REQUEST, &Request { id, op }).unwrap();
+            (&stream).write_all(&frame.encode()).unwrap();
+        };
+        send(
+            1,
+            Op::Hello {
+                protocol,
+                client: "test".into(),
+            },
+        );
+        let (program, flag, script) = if cfg!(windows) {
+            ("cmd.exe", "/C", "ping -n 2 127.0.0.1 >NUL&& echo done")
+        } else {
+            ("/bin/sh", "-c", "sleep 1; echo done")
+        };
+        send(
+            2,
+            Op::Spawn {
+                plan: Box::new(LaunchPlan {
+                    program: program.into(),
+                    args: vec![flag.into(), script.into()],
+                    cwd: None,
+                    env: vec![],
+                    clear_env: false,
+                    size: pty_host::TermSize { cols: 80, rows: 24 },
+                    labels: Default::default(),
+                    prompt: None,
+                }),
+            },
+        );
+        let mut kinds = Vec::new();
+        loop {
+            let frame = Frame::read_from(&mut reader).unwrap();
+            match frame.kind {
+                KIND_RESPONSE => {
+                    let response: Response = frame.parse().unwrap();
+                    if let OpResult::Session { session } = response.result {
+                        let SessionInfo { id, .. } = *session;
+                        send(
+                            3,
+                            Op::Watch {
+                                session: id,
+                                stream: 1,
+                                after: None,
+                            },
+                        );
+                    }
+                }
+                KIND_NUMBERED => kinds.push(match frame.as_numbered().unwrap().1 {
+                    Numbered::Snapshot { .. } => "snapshot",
+                    Numbered::Resumed { .. } => "resumed",
+                    Numbered::Output { .. } => "output",
+                    Numbered::Resized { .. } => "resized",
+                    Numbered::Control(_) => "control",
+                    Numbered::Exited(_) => "exited",
+                }),
+                KIND_EVENT => {
+                    if matches!(frame.parse(), Ok(HostEvent::Exited { .. })) {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        send(
+            4,
+            Op::Shutdown {
+                stop_sessions: true,
+            },
+        );
+        kinds
+    }
+
+    #[test]
+    fn a_client_of_protocol_3_hears_of_control_and_the_exit_and_an_older_one_does_not() {
+        let new = watched_as(PROTOCOL);
+        assert_eq!(new[..2], ["snapshot", "control"], "{new:?}");
+        assert_eq!(new.last(), Some(&"exited"), "{new:?}");
+
+        let old = watched_as(CONTROL_PROTOCOL);
+        assert_eq!(old[0], "snapshot", "{old:?}");
+        assert!(
+            old.iter()
+                .all(|kind| ["snapshot", "output", "resized"].contains(kind)),
+            "{old:?}"
+        );
+    }
 }

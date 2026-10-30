@@ -540,19 +540,19 @@ above, and why:
 
 ## Open questions
 
-[35–38 in open questions](06-open-questions.md#smoke-tests), recorded there on 2026-10-30:
+[43–46 in open questions](06-open-questions.md#smoke-tests), recorded there on 2026-10-30:
 
-35. **Should an approval follow a rebase?** A file whose content is unchanged but whose path moved
+43. **Should an approval follow a rebase?** A file whose content is unchanged but whose path moved
     with a rename keeps its approval under the hash; a file that changed only in a comment does
     not. Whether to hash the parsed form instead of the text is a slice 2 finding.
-36. **Should a run tell the agent without being asked?** When `ys test run` came from an agent's
+44. **Should a run tell the agent without being asked?** When `ys test run` came from an agent's
     terminal, the result could be typed into that agent once quiet, as `send_to_session` does.
     Version one does not: the agent asked by running `wait`, and an agent that did not is doing
     something else. Revisit after dogfooding.
-37. **How much output to keep per step.** Unbounded files with pruning by age is the proposal; a
+45. **How much output to keep per step.** Unbounded files with pruning by age is the proposal; a
     dev server that logs a line per millisecond for an hour fills a disk. A per-step cap, with
     the head and the tail kept, is likely the slice 2 answer.
-38. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
+46. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
     common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.
 
 ## Documentation this touches
@@ -563,5 +563,5 @@ above, and why:
 `docs/guide/workspaces.md` (**Run smoke test…**), `docs/README.md`, `docs/quick-start.md`,
 `website/src/lib/docs.ts`, the landing page's copy, `README.md`, `CHANGELOG.md`,
 [02-ux](02-ux.md) (the sidebar row, the card, the tab), [03-architecture](03-architecture.md)
-(the runner and the trust line), [05-roadmap](05-roadmap.md) (M26),
-[06-open-questions](06-open-questions.md) (35–38), [08](08-manual-checklist.md) (§26).
+(the runner and the trust line), [05-roadmap](05-roadmap.md) (M28),
+[06-open-questions](06-open-questions.md) (43–46), [08](08-manual-checklist.md) (§26).

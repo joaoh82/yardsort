@@ -53,6 +53,9 @@ pub struct ProjectMemory {
     pub project_id: String,
     /// Whether approved entries go into this project's agents' first messages.
     pub shared: bool,
+    /// Whether this project's agents may read each other's conversations in a workspace, with
+    /// `ys workspace context`. Off until the user turns it on.
+    pub conversations_shared: bool,
     /// Oldest first.
     pub entries: Vec<MemoryEntry>,
     /// The section a first message would get now, or `None` when nothing would be added.
@@ -111,6 +114,7 @@ fn project_memory(state: &AppState, project_id: &str) -> IpcResult<ProjectMemory
     Ok(ProjectMemory {
         project_id: project_id.to_owned(),
         shared: state.store.memory_shared(project_id)?,
+        conversations_shared: state.store.conversations_shared(project_id)?,
         preview: memory::prompt_section(&state.store, project_id)?,
         entries,
     })
@@ -188,6 +192,21 @@ pub async fn memory_share(
 ) -> IpcResult<ProjectMemory> {
     blocking(app, move |state| {
         state.store.set_memory_shared(&project_id, shared)?;
+        project_memory(state, &project_id)
+    })
+    .await
+}
+
+/// Turn letting a project's agents read each other's conversations on or off.
+#[tauri::command]
+#[specta::specta]
+pub async fn conversations_share(
+    app: AppHandle,
+    project_id: String,
+    shared: bool,
+) -> IpcResult<ProjectMemory> {
+    blocking(app, move |state| {
+        state.store.set_conversations_shared(&project_id, shared)?;
         project_memory(state, &project_id)
     })
     .await

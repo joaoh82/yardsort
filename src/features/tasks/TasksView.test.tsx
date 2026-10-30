@@ -444,8 +444,12 @@ describe("one task in full", () => {
     expect(region).toHaveTextContent("Closed by#14, when it merges");
 
     const description = within(region).getByRole("region", { name: "Description" });
-    await waitFor(() =>
-      expect(within(description).getByText("fails").tagName, "Markdown, rendered").toBe("STRONG"),
+    // The renderer is loaded when first needed, and this is the first test to need it: on a slow
+    // runner, loading it takes longer than waitFor's default second.
+    await waitFor(
+      () =>
+        expect(within(description).getByText("fails").tagName, "Markdown, rendered").toBe("STRONG"),
+      { timeout: 5_000 },
     );
     const comments = within(within(region).getByRole("region", { name: "Conversation" }))
       .getAllByRole("listitem")

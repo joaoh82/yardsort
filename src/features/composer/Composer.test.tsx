@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistStatus } from "@/lib/ipc";
@@ -28,6 +28,7 @@ const core = vi.hoisted(() => ({
   workspacesImport: vi.fn(),
   ptySpawn: vi.fn(),
   memoryGet: vi.fn(),
+  conversationContext: vi.fn(),
   outcomesAgents: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -87,6 +88,7 @@ describe("Composer", () => {
     vi.clearAllMocks();
     drag.handler = null;
     core.uiStateSave.mockResolvedValue(undefined);
+    core.conversationContext.mockResolvedValue(null);
     core.projectBranches.mockResolvedValue({
       branches: ["develop", "main", "ys/kept-earlier", "ys/in-use"],
       default: "main",
@@ -113,6 +115,8 @@ describe("Composer", () => {
       composingBranch: null,
       composingPrompt: null,
       composingTask: null,
+      composingHarness: null,
+      composingFork: null,
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
@@ -138,6 +142,112 @@ describe("Composer", () => {
     expect(projects.selectedWorkspaceId).toBe(created.id);
     expect(projects.composingProjectId).toBeNull();
     expect(useTerminalStore.getState().active[created.id]).toBe("s1");
+  });
+
+  it("forks: a new branch from the workspace's, the message as the task, the packet after it", async () => {
+    // Memory is shared, but the packet carries it already: nothing is offered beside it.
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-app",
+      shared: true,
+      preview: "## Project memory",
+      entries: [],
+    });
+    useProjectsStore.setState({
+      composingFork: {
+        workspaceId: "w-app-kept-earlier",
+        name: "kept-earlier",
+        branch: "ys/kept-earlier",
+        packet: '# Forked from Yardsort: workspace "kept-earlier" in app',
+        uncommitted: 2,
+      },
+    });
+    const created = worktree("app", "add-export");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const user = await renderComposer();
+
+    expect(screen.getByRole("heading")).toHaveTextContent(
+      "Fork kept-earlier into a new workspace in app",
+    );
+    expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("new:ys/kept-earlier");
+    expect(screen.getByText(/2 uncommitted files stay behind/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /work on/ })).toHaveValue("");
+    expect(screen.queryByText(/project.s memory/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show what goes with it" }));
+    expect(screen.getByLabelText("Sent after your message")).toHaveTextContent("# Forked from");
+
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Add CSV export{Enter}");
+
+    expect(core.workspaceCreate).toHaveBeenCalledWith({
+      projectId: "p-app",
+      baseBranch: "ys/kept-earlier",
+      existingBranch: null,
+      harness: {
+        id: "claude",
+        model: null,
+        effort: null,
+        prompt: "Add CSV export",
+        forkPacket: '# Forked from Yardsort: workspace "kept-earlier" in app',
+      },
+      size: { cols: 100, rows: 30 },
+      task: null,
+    });
+  });
+
+  it("leaves the fork's packet out when the new branch does not start from the forked one", async () => {
+    core.memoryGet.mockResolvedValue({
+      projectId: "p-app",
+      shared: true,
+      preview: "## Project memory",
+      entries: [],
+    });
+    useProjectsStore.setState({
+      composingFork: {
+        workspaceId: "w-app-kept-earlier",
+        name: "kept-earlier",
+        branch: "ys/kept-earlier",
+        packet: "# Forked from Yardsort",
+        uncommitted: 0,
+      },
+    });
+    const created = worktree("app", "add-export");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const user = await renderComposer();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Branch" }), "new:main");
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "Not starting from ys/kept-earlier, so its commits will not be in the new branch",
+    );
+    expect(screen.queryByRole("button", { name: "Show what goes with it" })).toBeNull();
+    // An ordinary new workspace again: the project's memory is offered as for any other.
+    expect(await screen.findByText(/project.s memory/)).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Add CSV export{Enter}");
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseBranch: "main",
+        harness: { id: "claude", model: null, effort: null, prompt: "Add CSV export" },
+      }),
+    );
+  });
+
+  it("does not fork from a branch the list does not offer", async () => {
+    useProjectsStore.setState({
+      composingFork: {
+        workspaceId: "w-app-gone",
+        name: "gone",
+        branch: "ys/gone",
+        packet: "# Forked from Yardsort",
+        uncommitted: 0,
+      },
+    });
+    const created = worktree("app", "x");
+    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    const user = await renderComposer();
+
+    expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("new:main");
+    expect(screen.getByRole("note")).toHaveTextContent("Not starting from ys/gone");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(core.workspaceCreate.mock.calls[0]![0].harness).not.toHaveProperty("forkPacket");
   });
 
   it("passes the chosen harness, model, effort and base branch", async () => {
@@ -453,6 +563,7 @@ describe("Composer with Assist", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     core.uiStateSave.mockResolvedValue(undefined);
+    core.conversationContext.mockResolvedValue(null);
     core.projectBranches.mockResolvedValue({ branches: ["main"], default: "main", checkedOut: [] });
     core.harnessesList.mockResolvedValue([
       harness("claude", { efforts: ["low", "medium", "high"] }),
@@ -557,7 +668,7 @@ describe("Composer with Assist", () => {
     render(<Composer project={app} runIn={app.workspaces[0]} />);
     await screen.findByRole("form", { name: "Run in local" });
     expect(screen.getByRole("heading")).toHaveTextContent("Hand off in app");
-    expect(screen.getByText(/never the last agent.s words/)).toBeInTheDocument();
+    expect(screen.getByText(/what was said in them/)).toBeInTheDocument();
     const box = screen.getByRole("textbox", { name: /work on/ });
     expect(box).toHaveValue(packet);
 
@@ -629,6 +740,77 @@ describe("Composer with Assist", () => {
       prompt: "Fix it",
       skipMemory: true,
     });
+  });
+
+  it("tells the agent about the workspace's other conversations unless told not to", async () => {
+    core.conversationContext.mockResolvedValue({
+      about: "codex's conversation",
+      note: "Other agents have worked in this workspace: codex (2 turns, last …).",
+      digest: "## codex · conversation 3f2a · 2 turns",
+    });
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    const tell = await screen.findByRole("checkbox", {
+      name: /Tell the agent it can read codex.s conversation here/,
+    });
+    expect(tell).toBeChecked();
+    expect(core.conversationContext).toHaveBeenCalledWith("w-app", null);
+    expect(screen.getByText(/with none it is not told/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show the other conversations" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/codex \(2 turns/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix it");
+    expect(tell.closest("label")).toHaveTextContent(/here, after the message\. Your message stays/);
+    await user.click(tell);
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "{Enter}");
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(core.ptySpawn.mock.calls[0]![0].harness).toMatchObject({
+      prompt: "Fix it",
+      skipContext: true,
+    });
+  });
+
+  it("starts once however often Start is pressed while it is still starting", async () => {
+    let spawned: (info: ReturnType<typeof session>) => void = () => {};
+    core.ptySpawn.mockReturnValue(new Promise((resolve) => (spawned = resolve)));
+    useProjectsStore.setState({ composingProjectId: null, composingWorkspaceId: "w-app" });
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    await user.type(await screen.findByRole("textbox", { name: /work on/ }), "Fix it{Enter}");
+    await user.keyboard("{Enter}");
+    fireEvent.submit(screen.getByRole("form", { name: "Run in local" }));
+    spawned(session("w-app"));
+    await waitFor(() => expect(useTerminalStore.getState().tabs).toHaveLength(1));
+    expect(core.ptySpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens on the agent whose button asked for it, without the last picks for another", async () => {
+    useProjectsStore.setState({
+      composingProjectId: null,
+      composingWorkspaceId: "w-app",
+      composingPrompt: "# Handoff from Yardsort\n",
+      composingHarness: "codex",
+      ui: {
+        "composer.last.p-app": JSON.stringify({ harness: "claude", model: "opus", effort: "low" }),
+      },
+    });
+    core.ptySpawn.mockResolvedValue(session("w-app"));
+    const user = userEvent.setup();
+    render(<Composer project={app} runIn={app.workspaces[0]} />);
+    const picker = await screen.findByRole("combobox", { name: "Harness" });
+    await waitFor(() => expect(picker).toHaveValue("codex"));
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Go{Enter}");
+    await waitFor(() => expect(core.ptySpawn).toHaveBeenCalled());
+    expect(core.ptySpawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness: expect.objectContaining({ id: "codex", model: null, effort: null }),
+      }),
+    );
   });
 
   it("says an empty shared memory only asks the agent to propose", async () => {

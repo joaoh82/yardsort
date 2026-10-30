@@ -284,6 +284,36 @@ export const commands = {
 	 *  key, or fails leaves the packet without a ranking, and the packet reads the same.
 	 */
 	workspaceHandoff: (workspaceId: string) => typedError<HandoffPacket, IpcError>(__TAURI_INVOKE("workspace_handoff", { workspaceId })),
+	remoteStatus: () => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_status")),
+	/**
+	 *  Turn Remote on with the server at `server_url`, as `name`: sign in through the browser, then
+	 *  register this computer as a host. Waits for the browser, for up to ten minutes, unless
+	 *  [`remote_cancel`] is called.
+	 */
+	remoteEnable: (serverUrl: string, name: string) => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_enable", { serverUrl, name })),
+	/**  Stop waiting for the browser. */
+	remoteCancel: () => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_cancel")),
+	/**
+	 *  Turn Remote off: remove this host at the server and sign its device out there, then forget
+	 *  both here. Done here even when the server cannot be reached, which the error then says.
+	 */
+	remoteDisable: () => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_disable")),
+	/**  Make a pairing offer: a code to type, and a QR code, good once for five minutes. */
+	remotePair: () => typedError<RemotePairing, IpcError>(__TAURI_INVOKE("remote_pair")),
+	/**
+	 *  Devices waiting for an answer, and the devices let in here once the server has said which
+	 *  are still in force. The server can take a device off this list, never put one on it.
+	 */
+	remoteRequests: () => typedError<RemoteRequests, IpcError>(__TAURI_INVOKE("remote_requests")),
+	/**
+	 *  Answer a device that asked to be let in. Allowing gives it what it asked for that viewing
+	 *  (and, with `control`, typing) covers, on the projects chosen; never more than it asked for.
+	 */
+	remoteAnswer: (grantId: string, answer: RemoteAnswer) => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_answer", { grantId, answer })),
+	/**  Take a device's grant away. Refused here at once; the server is told too. */
+	remoteRevoke: (grantId: string) => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_revoke", { grantId })),
+	/**  Assemble the fork packet for a workspace, from the same facts as a handoff. */
+	workspaceFork: (workspaceId: string) => typedError<ForkPacket, IpcError>(__TAURI_INVOKE("workspace_fork", { workspaceId })),
 	memoryGet: (projectId: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_get", { projectId })),
 	/**  The user writes an entry: approved as written. */
 	memoryWrite: (projectId: string, text: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_write", { projectId, text })),
@@ -291,6 +321,16 @@ export const commands = {
 	memoryDecide: (id: string, decision: MemoryDecision) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_decide", { id, decision })),
 	/**  Turn sharing a project's approved entries with its agents on or off. */
 	memoryShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_share", { projectId, shared })),
+	/**  Turn letting a project's agents read each other's conversations on or off. */
+	conversationsShare: (projectId: string, shared: boolean) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("conversations_share", { projectId, shared })),
+	conversationContext: (workspaceId: string, except: string | null) => typedError<{
+	/**  What the note is about, as a tab says it: "claude's conversation". */
+	about: string,
+	/**  The note, as an agent started now would read it. */
+	note: string,
+	/**  What `ys workspace context` gives now. */
+	digest: string,
+} | null, IpcError>(__TAURI_INVOKE("conversation_context", { workspaceId, except })),
 	/**
 	 *  How many proposals wait, per project that has any. Agents propose through `ys`, which writes
 	 *  the database directly, so the window asks again when it regains focus and when activity lands.
@@ -450,6 +490,7 @@ export const events = {
 	activityChanged: makeEvent<ActivityChanged>("activity-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
+	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
 	workflowRunsChanged: makeEvent<WorkflowRunsChanged>("workflow-runs-changed"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
@@ -757,6 +798,15 @@ export type ContextUsage = {
 	compactCommand: string | null,
 };
 
+export type ConversationContext = {
+	/**  What the note is about, as a tab says it: "claude's conversation". */
+	about: string,
+	/**  The note, as an agent started now would read it. */
+	note: string,
+	/**  What `ys workspace context` gives now. */
+	digest: string,
+};
+
 /**  A task that was just made: what its source now calls it. */
 export type CreatedTask = {
 	key: string,
@@ -980,6 +1030,22 @@ export type ForgeKind = "github" | "gitlab" | "bitbucket" |
  */
 "unknown";
 
+/**
+ *  A fork packet: what Yardsort recorded about a workspace, for an agent starting a new
+ *  workspace on a new branch made from this one's. See `yardsort_core::activity::handoff`.
+ */
+export type ForkPacket = {
+	/**  Markdown, sent after the user's own message, which is the new workspace's task. */
+	text: string,
+	/**
+	 *  The branch to start the new one from: the workspace's own, as git has it now. `None`
+	 *  when it is not on a branch, and there is nothing to fork.
+	 */
+	branch: string | null,
+	/**  Files changed and not committed there: a fork starts from the commits, so these stay. */
+	uncommitted: number,
+};
+
 export type GitStatus = {
 	path: string | null,
 	/**  As `git --version` prints it, e.g. `git version 2.55.0`. */
@@ -1027,6 +1093,21 @@ export type HarnessDef = {
 	 *  is the honest default for one we know nothing about.
 	 */
 	writeArgs?: string[],
+	/**
+	 *  What gives the agent background context — its system-prompt option — with `{context}`
+	 *  for the text. Yardsort uses it on a new conversation for a short note that the
+	 *  workspace's other conversations can be read (`docs/design/29-conversation-context.md`).
+	 *  Empty means the harness has no such option, or it is not known to work.
+	 */
+	contextArgs?: string[],
+	/**
+	 *  The same for a resume or fork, after its args: what makes a continued conversation read a
+	 *  new note. [`Self::context_args`] for a harness that builds its system prompt at each
+	 *  launch (OMP, pi); for Claude Code, which keeps the prompt a conversation began with, those
+	 *  plus `--system-prompt-snapshot off`. Empty for one that keeps it whatever it is passed
+	 *  (Codex, Grok), where a note would be passed and never seen.
+	 */
+	resumeContextArgs?: string[],
 	resumeArgs: string[],
 	forkArgs: string[],
 	/**  Effort levels to offer. Empty hides the picker. */
@@ -1103,6 +1184,18 @@ export type HarnessRequest = {
 	 *  starts five reviewers must not leave five proposals about that one review.
 	 */
 	quietMemory?: boolean,
+	/**
+	 *  Do not tell this agent about the workspace's other conversations, though the project
+	 *  shares them: Alt-click on an agent button, or the composer's box. See
+	 *  `docs/design/29-conversation-context.md`.
+	 */
+	skipContext?: boolean,
+	/**
+	 *  Sent to the agent after the first message, and only to the agent: the record keeps the
+	 *  message alone as the task. A fork's packet (see `activity::handoff`), which carries the
+	 *  project's memory already, so it goes in the memory's place.
+	 */
+	forkPacket?: string | null,
 };
 
 export type HarnessStatus = {
@@ -1453,6 +1546,11 @@ export type ProjectMemory = {
 	projectId: string,
 	/**  Whether approved entries go into this project's agents' first messages. */
 	shared: boolean,
+	/**
+	 *  Whether this project's agents may read each other's conversations in a workspace, with
+	 *  `ys workspace context`. Off until the user turns it on.
+	 */
+	conversationsShared: boolean,
 	/**  Oldest first. */
 	entries: MemoryEntry[],
 	/**  The section a first message would get now, or `None` when nothing would be added. */
@@ -1775,6 +1873,55 @@ export type Relevance =
 /**  The model had no clear read. */
 "unsure";
 
+/**  The host's person's answer. */
+export type RemoteAnswer = { kind: "deny" } | { kind: "allow"; 
+/**  Typing into terminals too, if the device asked for it. */
+control: boolean; 
+/**  Only these projects; all of them when absent. */
+projects: string[] | null };
+
+export type RemoteDevice = {
+	grantId: string,
+	name: string,
+	/**  It may type into terminals, not only watch them. */
+	control: boolean,
+	/**  The projects it reaches; `None` for all of them. */
+	projects: string[] | null,
+	approvedAt: number | null,
+};
+
+export type RemoteHost = {
+	serverUrl: string,
+	name: string,
+	since: number | null,
+	/**  The link to the server's relay. */
+	link: RemoteLink,
+};
+
+/**  Where this computer's link to the relay stands. */
+export type RemoteLink = 
+/**  Not kept: the app has not started it. */
+{ kind: "off" } | { kind: "connecting" } | { kind: "connected"; 
+/**  Devices connected through it now. */
+devices: number } | 
+/**  Not connected; trying again soon. */
+{ kind: "waiting"; why: string; retryInMs: number } | 
+/**  Given up: signed out at the server, or this host was removed there. */
+{ kind: "stopped"; why: string };
+
+/**  What to show for a device to pair: the code to type, and a QR code holding the secret. */
+export type RemotePairing = {
+	code: string,
+	/**  An SVG image of the QR code: the server's address and the offer's secret. */
+	qrSvg: string,
+	expiresInMs: number,
+};
+
+/**  A device asks to be let in: shown in the window wherever it is, until answered or lapsed. */
+export type RemotePairingRequested = {
+	request: RemoteRequest,
+};
+
 export type RemoteParent = {
 	nameWithOwner: string,
 	cloneUrl: string,
@@ -1797,6 +1944,37 @@ export type RemoteRepository = {
 	pushedAt: string | null,
 	/**  The project that is a clone of it, when one of yours is. */
 	projectId: string | null,
+};
+
+/**  A device that redeemed this host's code and waits for an answer. */
+export type RemoteRequest = {
+	grantId: string,
+	deviceName: string,
+	/**  It asked to type into terminals, not only watch. */
+	wantsControl: boolean,
+	expiresInMs: number,
+};
+
+export type RemoteRequests = {
+	requests: RemoteRequest[],
+	/**  The devices let in here, after the server's word on which are still in force. */
+	status: RemoteStatus,
+};
+
+export type RemoteStatus = {
+	/**  Whether this build shows Remote at all (the preview switch). */
+	available: boolean,
+	/**  This computer as a host, when Remote is on. */
+	host: RemoteHost | null,
+	/**  The devices let in here. */
+	devices: RemoteDevice[],
+	/**  A sign-in is waiting for the browser. */
+	signingIn: boolean,
+	/**  Where the host's credential is kept: the OS credential store, or a directory. */
+	credentials: string,
+	/**  The server and name Remote was last turned on with, to offer again once it is off. */
+	lastServerUrl: string | null,
+	lastName: string | null,
 };
 
 /**  A repository on a forge, as read out of a remote URL. */

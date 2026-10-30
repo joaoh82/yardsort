@@ -32,7 +32,7 @@
     "licenseFile": "../LICENSE",
     "homepage": "https://github.com/joaoh82/yardsort",
     "publisher": "Yardsort contributors",
-    "shortDescription": "Run AI coding agents in parallel",
+    "shortDescription": "Orchestrate coding agents on Linux, macOS and Windows",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

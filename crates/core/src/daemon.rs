@@ -124,17 +124,29 @@ pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
     };
 
     let info = client.daemon_info().clone();
-    if !client.speaks_our_protocol() {
+    let verdict = verdict(info.protocol, info.running_sessions);
+    if verdict != Verdict::Use {
         // An update landed under a daemon started by the previous version.
         eprintln!(
             "the running daemon speaks protocol {} and this build speaks {}",
             info.protocol,
             pty_ipc::PROTOCOL
         );
-        if info.running_sessions > 0 {
-            // It has agents in it. Replacing it would kill work nobody agreed to lose, and
-            // using it would fail in ways nothing here can predict — so leave it alone, say so,
-            // and run terminals in-process until those agents are done and the app is restarted.
+    }
+    match verdict {
+        Verdict::Use => {}
+        Verdict::KeepOlder => {
+            // Everything its agents need, it still does. Only sharing their terminals beyond
+            // this computer waits for it to be replaced, which happens once it is idle.
+            eprintln!(
+                "keeping it for its {} running session(s); sharing terminals waits until it is \
+                 replaced",
+                info.running_sessions
+            );
+        }
+        Verdict::Strand => {
+            // Leave it alone, say so, and run terminals in-process until those agents are done
+            // and the app is restarted.
             let mut fallback = in_process(Some(format!(
                 "{} agent(s) are still running under Yardsort {}, which this version cannot \
                  talk to. Finish or stop them, then restart Yardsort",
@@ -143,15 +155,43 @@ pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
             fallback.status.stranded_sessions = Some(info.running_sessions);
             return fallback;
         }
-        // Nothing at stake: replace it.
-        let _ = client.shutdown(false);
-        drop(client);
-        return match replace_daemon(&endpoint, &log_path, &spool_dir, &events) {
-            Ok(client) => connected_to(client, endpoint, log_path),
-            Err(error) => in_process(Some(error.to_string())),
-        };
+        Verdict::Replace => {
+            let _ = client.shutdown(false);
+            drop(client);
+            return match replace_daemon(&endpoint, &log_path, &spool_dir, &events) {
+                Ok(client) => connected_to(client, endpoint, log_path),
+                Err(error) => in_process(Some(error.to_string())),
+            };
+        }
     }
     connected_to(client, endpoint, log_path)
+}
+
+/// What to do with the daemon that answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// It is this build's own kind: use it.
+    Use,
+    /// Older, with agents running in it, but still understood: use it for local terminals, and
+    /// leave numbered output and control leases until it is replaced.
+    KeepOlder,
+    /// Nothing is running in it: replace it with one of this build.
+    Replace,
+    /// It has agents in it and speaks a protocol this build does not know. Replacing it would
+    /// kill work nobody agreed to lose, and using it would fail in ways nothing can predict.
+    Strand,
+}
+
+fn verdict(protocol: u32, running_sessions: u32) -> Verdict {
+    if protocol == pty_ipc::PROTOCOL {
+        Verdict::Use
+    } else if running_sessions == 0 {
+        Verdict::Replace
+    } else if (pty_ipc::OLDEST_PROTOCOL..pty_ipc::PROTOCOL).contains(&protocol) {
+        Verdict::KeepOlder
+    } else {
+        Verdict::Strand
+    }
 }
 
 /// Where this profile's daemon listens, as text. For diagnostics — `ys doctor` and bug reports.
@@ -386,6 +426,20 @@ fn wait_for_it(_file: &std::fs::File) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_older_daemon_with_agents_is_kept_and_only_an_unknown_one_strands_them() {
+        let ours = pty_ipc::PROTOCOL;
+        assert_eq!(verdict(ours, 0), Verdict::Use);
+        assert_eq!(verdict(ours, 3), Verdict::Use);
+        // The version before numbered output and leases: idle, it makes way; busy, it stays.
+        assert_eq!(verdict(1, 0), Verdict::Replace);
+        assert_eq!(verdict(1, 3), Verdict::KeepOlder);
+        // One from a newer build, or from nothing we know: its agents are not ours to touch.
+        assert_eq!(verdict(ours + 1, 3), Verdict::Strand);
+        assert_eq!(verdict(ours + 1, 0), Verdict::Replace);
+        assert_eq!(verdict(0, 1), Verdict::Strand);
+    }
 
     #[test]
     fn the_daemon_flag_is_the_first_argument_or_nothing_happens() {

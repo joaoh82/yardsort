@@ -96,6 +96,7 @@ mod tests {
             exit_code: Some(0),
             pty_session_id: None,
             started_at,
+            began_at: started_at,
             ended_at: None,
         }
     }

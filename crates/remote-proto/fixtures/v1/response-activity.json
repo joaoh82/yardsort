@@ -1,0 +1,30 @@
+{
+  "requestId": "r-5",
+  "result": {
+    "kind": "activity",
+    "events": [
+      {
+        "id": "3f1e2d3c-4b5a-4968-8776-655443322110",
+        "workspace": "0b6c1f0e-8f8e-4a57-9a43-5c1d2a0e9f11",
+        "session": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        "run": "5d4c3b2a-1908-4f7e-8d6c-5b4a39281706",
+        "occurredAt": 1790000004000,
+        "kind": "tool.completed",
+        "source": { "producer": "claude", "method": "hook", "fidelity": "reported" },
+        "detail": { "tool": "Edit", "path": "src/login.rs", "durationMs": 12 }
+      },
+      {
+        "id": "4a2f3e4d-5c6b-4a79-9887-766554433221",
+        "workspace": "0b6c1f0e-8f8e-4a57-9a43-5c1d2a0e9f11",
+        "session": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        "run": "5d4c3b2a-1908-4f7e-8d6c-5b4a39281706",
+        "occurredAt": 1790000009000,
+        "kind": "turn.completed",
+        "source": { "producer": "claude", "method": "hook", "fidelity": "reported" },
+        "detail": { "contextTokens": 154003 }
+      }
+    ],
+    "older": "a1.o4212",
+    "newer": "a1.n4219"
+  }
+}

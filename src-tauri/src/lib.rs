@@ -7,6 +7,7 @@ mod activity;
 mod assist;
 mod changes;
 mod commands;
+mod conversations;
 #[cfg(target_os = "linux")]
 mod display;
 mod draft;
@@ -15,6 +16,7 @@ mod outcomes;
 mod preflight;
 mod publish;
 mod quit;
+mod remote;
 mod sessions;
 mod state;
 mod terminal;
@@ -140,11 +142,22 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::activity_clear,
             activity::workspace_provenance,
             activity::workspace_handoff,
+            remote::remote_status,
+            remote::remote_enable,
+            remote::remote_cancel,
+            remote::remote_disable,
+            remote::remote_pair,
+            remote::remote_requests,
+            remote::remote_answer,
+            remote::remote_revoke,
+            activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,
             memory::memory_edit,
             memory::memory_decide,
             memory::memory_share,
+            memory::conversations_share,
+            conversations::conversation_context,
             memory::memory_waiting,
             memory::memory_check,
             outcomes::outcomes_get,
@@ -200,7 +213,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             activity::ActivityChanged,
             quit::QuitRequested,
             workflows::SessionStarted,
-            workflows::commands::WorkflowRunsChanged
+            workflows::commands::WorkflowRunsChanged,
+            remote::RemotePairingRequested
         ])
 }
 
@@ -427,6 +441,10 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Workflow runs, queued here or by `ys`, are moved on by a thread of their own.
     workflows::start(app.handle(), &data_dir);
+
+    // Remote, when it is on: the link to the server's relay.
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move { remote::connect(&handle) });
 
     // Warm the login-shell environment now, so the first terminal doesn't wait for it.
     // Then bring a `ys` an older version installed up to this one. Not from a development

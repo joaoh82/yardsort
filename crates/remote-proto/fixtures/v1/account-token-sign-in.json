@@ -1,0 +1,6 @@
+{
+  "grant": "signIn",
+  "code": "ys1.hc.Zm9yLXRoZS1maXh0dXJlLW9ubHktbm90LWEtcmVhbC1jb2Rl",
+  "verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+  "device": { "name": "Example phone", "kind": "phone", "platform": "ios" }
+}

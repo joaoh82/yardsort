@@ -125,12 +125,43 @@ of history) and can emit a **snapshot** — a byte sequence that repaints the
 current screen — followed by the live stream. This pays off immediately in v1 (clean switching
 between workspaces without keeping every xterm instance mounted) and is mandatory for the daemon.
 
-**The host is the terminal when nobody is watching.** Programs can query the terminal and wait for
-an answer — above all "where is the cursor?" (`ESC [ 6 n`). With a viewer attached, xterm.js
-replies. With none, the host replies from its headless terminal; the decision is made under the
-same lock that delivers output, so exactly one reply is ever sent. This is load-bearing on Windows:
-`portable-pty` creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY
-ask that question at startup and run nothing until it is answered.
+A snapshot can be cut between any two bytes, even inside an escape sequence or a character,
+because batches end wherever a read ended. `snapshot::Headless` makes that safe: it follows the
+parser's state machine (`unfinished.rs`) and ends every snapshot with the open sequence's raw
+bytes, so the next batch completes it in the viewer. A control such as LF or BS inside a
+sequence is carried out at once and the sequence goes on; the snapshot already shows its effect,
+so it is not among those bytes. It also gives the parser a split character
+whole, with the next batch, because `vt100` 0.16 drops the byte after a character split across
+two `process` calls. Viewers' own streams are never held back.
+
+`PtyHost::attach_numbered` is the same attach with positions: the snapshot says which item of
+the session's output it holds, and each later batch, and each resize, carries the next number.
+It is what a remote viewer needs to prove it lost and doubled nothing, and the daemon carries it
+since its protocol 2 ([27 §8](27-remote-r2.md#8--what-the-fifth-slice-adds)). A numbered viewer
+is also told who controls the session, and when that changes or a hold lapses, and when the
+program ends. From the first numbered viewer on, a session keeps the last 256 KiB of the stream,
+so a viewer that lost its connection resumes after the last item it drew
+(`PtyHost::resume_numbered`) instead of being sent the screen again; past that, it gets a
+snapshot. The daemon carries both since its protocol 3
+([27 §10](27-remote-r2.md#10--what-the-seventh-slice-adds)).
+
+**One terminal answers.** Programs can query the terminal and wait for an answer — above all
+"where is the cursor?" (`ESC [ 6 n`), but also what the terminal is, its colours and its modes.
+Only one viewer, the _responder_, is shown those questions: the terminal attached most recently.
+Every other viewer, numbered ones included, gets the output with them taken out
+(`pty_host::queries`), so the app and `ys attach` open on one terminal answer once. With no
+terminal attached, or while a lease holder controls the terminal, the host answers the cursor
+question from its headless terminal. The choice is made under the same lock that delivers
+output, so exactly one reply is ever sent. This is load-bearing on Windows: `portable-pty`
+creates the pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY ask that
+question at startup and run nothing until it is answered.
+
+**One controller.** Typing or pasting from this computer gives it control of the terminal at
+once. Anyone else — a device through the relay — asks for a lease, renews it, and numbers its
+input under it; typing here ends the lease (`pty_host::control`). A lease holder's size stands
+while it holds control, and the size asked for here comes back after. What the app types on its
+own, a workflow's message, takes no control and waits while a lease is held
+(`type_unattended`).
 
 - **Re-attach**: switching workspaces detaches the view; the session keeps running in the host.
   On re-mount: `attach` → write snapshot → stream live.
@@ -146,18 +177,18 @@ notarize on three platforms, and the daemon can never be a different build from 
 started it. The flag is handled in `main` before Tauri is touched, so a daemon never creates a
 window or a webview.
 
-| Concern         | Decision                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Transport       | `interprocess` local sockets: a **socket file** on Unix, a **named pipe** on Windows.                                                                                                                                                                                                                                                                                                                               |
-| Who may connect | The socket file is `0600` — Linux checks write permission on it, so that is the lock; its directory is tightened to `0700` too where we own it, which the last fallback (`/tmp`) is not. A named pipe's default descriptor is already limited to the user's session. Linux abstract sockets are deliberately _not_ used: they have no filesystem permissions, and anything that can connect can type into an agent. |
-| How many        | **One per data directory**, addressed by an FNV-1a tag of its path. `YARDSORT_DATA_DIR` therefore isolates a throwaway profile's agents as well as its database.                                                                                                                                                                                                                                                    |
-| Who starts it   | Whichever app finds nobody listening, under a lock file so two starting at once produce one daemon. A socket left by a killed daemon is cleared first.                                                                                                                                                                                                                                                              |
-| Who stops it    | `Shutdown` from the app (the quit dialog's "Stop them"), or itself once no client is connected **and** no session is running, after a 10 s grace so a restarting app does not take it down.                                                                                                                                                                                                                         |
-| Upgrades        | A protocol number, separate from the app version. Same number → just talk. Different, and the daemon is idle → replace it silently. Different, with agents running → leave it alone, run terminals in-process, and tell the user. Killing work nobody agreed to lose is never the answer.                                                                                                                           |
-| Wire format     | `[u32 len][u8 kind][payload]`. Requests, responses and events are JSON, reusing the host types' `serde` impls; **output has a frame kind of its own and stays raw bytes**, so a repainting TUI never pays for JSON.                                                                                                                                                                                                 |
-| Back-pressure   | Each connection has a writer thread and a queue; a client that stops reading is dropped at 32 MiB rather than allowed to block the session's pump thread. Dropping it is safe — reattaching starts from a snapshot.                                                                                                                                                                                                 |
-| Logs            | The app hands the child `daemon.log` in the data directory, replaced on each start. Started by hand, it keeps its terminal.                                                                                                                                                                                                                                                                                         |
-| Exit spool      | A third argument, `<data-dir>/activity/spool`, where the daemon keeps one JSON file per `Exited` (atomic rename, capped at 2 000, drops counted) for clients that were not connected to hear it. Whichever client connects next drains it into SQLite. No protocol change; a daemon without the argument simply never spools.                                                                                       |
+| Concern         | Decision                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport       | `interprocess` local sockets: a **socket file** on Unix, a **named pipe** on Windows.                                                                                                                                                                                                                                                                                                                                 |
+| Who may connect | The socket file is `0600` — Linux checks write permission on it, so that is the lock; its directory is tightened to `0700` too where we own it, which the last fallback (`/tmp`) is not. A named pipe's default descriptor is already limited to the user's session. Linux abstract sockets are deliberately _not_ used: they have no filesystem permissions, and anything that can connect can type into an agent.   |
+| How many        | **One per data directory**, addressed by an FNV-1a tag of its path. `YARDSORT_DATA_DIR` therefore isolates a throwaway profile's agents as well as its database.                                                                                                                                                                                                                                                      |
+| Who starts it   | Whichever app finds nobody listening, under a lock file so two starting at once produce one daemon. A socket left by a killed daemon is cleared first.                                                                                                                                                                                                                                                                |
+| Who stops it    | `Shutdown` from the app (the quit dialog's "Stop them"), or itself once no client is connected **and** no session is running, after a 10 s grace so a restarting app does not take it down.                                                                                                                                                                                                                           |
+| Upgrades        | A protocol number, separate from the app version. Same number → just talk. Older, and the daemon is idle → replace it silently. Older, with agents running, and only added to since (1 → 2 → 3) → keep using it; what came later waits until it is replaced. Anything else with agents running → leave it alone, run terminals in-process, and tell the user. Killing work nobody agreed to lose is never the answer. |
+| Wire format     | `[u32 len][u8 kind][payload]`. Requests, responses and events are JSON, reusing the host types' `serde` impls; **output has a frame kind of its own and stays raw bytes**, so a repainting TUI never pays for JSON. Numbered output (protocol 2) has another, with the item's number in front; protocol 3 adds a resume, who controls the session and its exit to it, sent only to clients of 3.                      |
+| Back-pressure   | Each connection has a writer thread and a queue; a client that stops reading is dropped at 32 MiB rather than allowed to block the session's pump thread. Dropping it is safe — reattaching starts from a snapshot.                                                                                                                                                                                                   |
+| Logs            | The app hands the child `daemon.log` in the data directory, replaced on each start. Started by hand, it keeps its terminal.                                                                                                                                                                                                                                                                                           |
+| Exit spool      | A third argument, `<data-dir>/activity/spool`, where the daemon keeps one JSON file per `Exited` (atomic rename, capped at 2 000, drops counted) for clients that were not connected to hear it. Whichever client connects next drains it into SQLite. No protocol change; a daemon without the argument simply never spools.                                                                                         |
 
 `attach` needed one adjustment to cross a socket. In-process, the snapshot is handed to the sink
 _before_ `attach` returns, under the lock that delivers output, so no byte is lost or doubled.
@@ -530,7 +561,7 @@ name, key, expectation, browser action and `{{ variable }}` checked and reported
 column. What the two parsers share — the problem type, serde's errors tidied, the lenient read of
 a file's heading, positions in the source, durations and "did you mean" — is `yaml.rs`, and the
 template language is `template.rs`, both at the crate root. Nothing runs a test yet; see
-[25-smoke-tests](25-smoke-tests.md).
+[31-smoke-tests](31-smoke-tests.md).
 
 ### Workflow runs
 
@@ -558,6 +589,75 @@ applies them, on a thread of the app's own (`src-tauri/src/workflows.rs`) that t
 and wakes when the host reports a session quiet or exited. The app holds `app.lock` in the data
 directory for as long as it runs (`presence`), which is how `ys` knows it is there and why only
 one app drives a profile's runs.
+
+## Remote access (preview: sign-in, pairing and the relay built; no phone app yet)
+
+Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the records are
+[26](26-remote-r0-r1.md) and [27](27-remote-r2.md). The daemon's socket stays local and file-permission protected. Nothing
+remote ever talks to it directly. Instead:
+
+- `crates/remote-proto` defines the remote protocol. It is versioned on its own (major 1), with
+  JSON requests and replies, binary terminal-output frames, size limits checked before parsing,
+  and one id type per kind of thing. It does no I/O.
+- `crates/server` is the server: the `yardsort-server` binary, on PostgreSQL, over HTTP
+  ([27](27-remote-r2.md)). A person signs in at the server's OIDC provider once per device; the
+  server checks the ID token, keeps the account as issuer and subject, and from then on issues
+  its own credentials (a 15-minute access, a single-use refresh, retried once if its answer was
+  lost), kept only as hashes. The
+  provider is never asked again for that device, and revoking it takes effect on its next
+  request. It serves sign-in, the device routes, and pairing: a host registers on its account and
+  offers a code, a device of the same account redeems it and asks, and the host's person approves
+  it at the host. And it is the **relay** (`relay.rs`): host and device each connect out to it over
+  a WebSocket with a single-use ticket, and it carries each device's traffic to its host in a
+  channel of the host's link, bounded per socket, closing a socket within seconds of its grant,
+  device or host being revoked. It keeps nothing but which instance of the server holds which
+  host's link: behind Fly.io's proxy, an instance answers a device's request for another's link
+  with `fly-replay`, so the server can run as several
+  ([27 §12](27-remote-r2.md#12--what-the-ninth-slice-adds)). It tells a host on its link's own
+  channel when a device asks to pair, a hint the app follows by asking the server
+  ([27 §13](27-remote-r2.md#13--what-the-tenth-slice-adds)). Instances signal each other through
+  PostgreSQL's notifications, so a revocation anywhere reaches every live socket at once
+  ([27 §14](27-remote-r2.md#14--what-the-eleventh-slice-adds)), and a host link replaced on
+  another instance closes at once; rate limits are counted across every instance in the records
+  ([27 §15](27-remote-r2.md#15--what-the-twelfth-slice-adds)). It ships as a container image,
+  which staging on Fly.io and the self-host recipe
+  (`crates/server/self-host/`) both run; staging has run on Fly.io since 2026-10-24
+  ([28](28-remote-infrastructure.md)).
+- `crates/remote-client` is a device's side of the server's API: signing in through the system
+  browser to a loopback listener, refreshing, the device, host and pairing calls, and relay
+  sockets. The app uses it as a host (`src-tauri/src/remote.rs`, Settings → Remote, behind
+  `YARDSORT_REMOTE_PREVIEW=1`); `ys` never does.
+- `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
+  Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of
+  its own with `yardsort_core::remote::serve`. When the link fails, every channel lets go of what
+  its device watched and controlled; the terminals are the daemon's and run on. Why the link
+  closed or could not open goes to standard error. It gives up only when the server refuses this
+  computer (signed out there, or no longer a host), and Settings → Remote then offers only
+  **Turn off**.
+- `yardsort_core::remote::host` is this machine as a host: its server, the devices its person
+  approved here (kept only when they approve, and only ever removed by what the server says), and
+  `CredentialStore`, behind which the app puts the OS credential store and a headless host a
+  directory only its owner can read. Credentials never go in the database, settings or a
+  terminal's environment.
+- `yardsort_core::remote::HostFacade` answers that protocol's reads for one host, checking
+  each request against a device's `Grant` (scopes plus projects), which only
+  `remote::host::grant_for` hands it. It is built field by field
+  from what the app already shows, so paths, argv, environment, labels and command lines have
+  nowhere to go. It answers host, workspace, session, activity and approved-memory reads.
+  Activity is read only from the `metadata` class, through an allowlist of fields each checked
+  again on the way out (`remote/activity.rs`).
+- `yardsort_core::remote::serve::Visitor` is one device's channel: its greeting, the grant
+  looked up again for every request, and the terminal operations, which outlive a request. A
+  device watches a terminal as a numbered viewer of the daemon, resuming where it left off when
+  the daemon still keeps what came since, is told who controls it and when its program ends,
+  and types under the daemon's lease, held as `device:<id>` and usable only on the channel that
+  took it. Terminal control
+  goes through the daemon's leases and its single query responder, which are **in the daemon**
+  because a lease the app and `ys attach` could bypass would be no lease. A device can also
+  follow activity (`activity.subscribe`): the channel keeps only each subscription's position,
+  looks in the store for more about every second, and sends it through the facade's allowlist,
+  holding back while the device has much waiting
+  ([27 §11](27-remote-r2.md#11--what-the-eighth-slice-adds)).
 
 ## Assist (optional, off by default)
 
@@ -691,7 +791,11 @@ yardsort/
 │  │  │                      # launching, the daemon client — no Tauri (M10)
 │  │  └─ migrations/
 │  ├─ pty-host/              # owns the sessions; no Tauri deps (M1)
-│  └─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
+│  ├─ pty-ipc/               # the wire: framing, the daemon loop, the client (M9)
+│  ├─ remote-proto/          # the remote protocol's types and limits; no I/O (M26)
+│  ├─ remote-client/         # a device's side of the server: HTTP and relay sockets (M26)
+│  ├─ remote-host/           # the host's connector to the relay (M26)
+│  └─ server/                # the remote server: sign-in, devices, pairing, relay (M26)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 

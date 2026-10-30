@@ -24,6 +24,7 @@ const core = vi.hoisted(() => ({
   assistReview: vi.fn(),
   ptyClose: vi.fn(),
   ysInstall: vi.fn(),
+  remoteStatus: vi.fn().mockResolvedValue({ available: false }),
 }));
 const native = vi.hoisted(() => ({ pickFolder: vi.fn() }));
 vi.mock("@/lib/ipc", async (original) => ({
@@ -55,6 +56,8 @@ const claude: HarnessInfo = {
   resumeArgs: ["--resume", "{session_id}"],
   forkArgs: ["--resume", "{session_id}", "--fork-session"],
   writeArgs: ["--print", "{prompt}"],
+  contextArgs: ["--append-system-prompt", "{context}"],
+  resumeContextArgs: [],
   efforts: ["low", "high"],
   models: ["opus"],
   promptTransport: "argv",
@@ -228,6 +231,23 @@ describe("Settings", () => {
       expect(none).toBeDisabled();
       await user.type(screen.getByLabelText("Auto args"), "--approve-for-me");
       expect(none).toBeEnabled();
+    });
+
+    it("saves the resume context args as words, after the resume and fork args", async () => {
+      core.harnessSave.mockResolvedValue([{ ...claude, modified: true }, codex]);
+      const { user } = await openSettings();
+      const resumed = screen.getByLabelText("Resume context args");
+      expect(resumed).toHaveValue("");
+      await user.type(resumed, "--system-prompt-snapshot off --append-system-prompt {{context}");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect(core.harnessSave.mock.calls[0]![0]).toMatchObject({
+        resumeContextArgs: [
+          "--system-prompt-snapshot",
+          "off",
+          "--append-system-prompt",
+          "{context}",
+        ],
+      });
     });
 
     it("warns on the switch when an agent's auto mode approves everything not denied", async () => {
@@ -676,5 +696,14 @@ describe("Settings", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Done" }));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+  it("shows Remote only with the preview switch on", async () => {
+    await openSettings();
+    await waitFor(() => expect(core.remoteStatus).toHaveBeenCalled());
+    expect(screen.queryByRole("tab", { name: "Remote" })).toBeNull();
+    cleanup();
+    core.remoteStatus.mockResolvedValueOnce({ available: true });
+    await openSettings();
+    expect(await screen.findByRole("tab", { name: "Remote" })).toBeInTheDocument();
   });
 });

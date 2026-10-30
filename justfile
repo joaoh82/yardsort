@@ -83,6 +83,46 @@ bindings:
 bindings-check: bindings
     git diff --exit-code -- src/lib/bindings.ts
 
+# --- server ---------------------------------------------------------------------------------
+# The Yardsort server's local environment: PostgreSQL and a throwaway ZITADEL in Docker, the
+# server on this machine. See crates/server/dev/compose.yaml.
+
+# Start PostgreSQL and ZITADEL, and give ZITADEL the server's app (writes crates/server/dev/server.env.local)
+server-up:
+    bun scripts/server-dev.mjs up
+
+# Run the server against them, at http://127.0.0.1:8787
+server-run:
+    bun scripts/server-dev.mjs run
+
+# Sign a pretend device in to a server through the browser: developer@yardsort.test / Yardsort-dev-1 locally
+server-sign-in *args:
+    cargo run -q -p yardsort-server --example sign-in -- {{ args }}
+
+# Pair a pretend phone with a host (`phone [SERVER] CODE`), or be a pretend host (`host [SERVER]`)
+server-pair *args:
+    cargo run -q -p yardsort-server --example pair -- {{ args }}
+
+# The server's tests, with its PostgreSQL half against the local database
+server-test *args:
+    bun scripts/server-dev.mjs test {{ args }}
+
+# Build the server's container image, yardsort-server:dev (crates/server/Dockerfile)
+server-image:
+    bun scripts/server-dev.mjs image
+
+# Run that image against the containers and sign in through ZITADEL with no browser, then revoke the account from inside the image (Linux)
+server-e2e:
+    bun scripts/server-dev.mjs e2e
+
+# Stop the containers, keeping what is in them
+server-down:
+    bun scripts/server-dev.mjs down
+
+# Stop the containers and forget everything in them: accounts, devices, ZITADEL's setup
+server-reset:
+    bun scripts/server-dev.mjs reset
+
 # --- build ----------------------------------------------------------------------------------
 
 # Build installers for this OS (target/release/bundle/), with `ys` inside

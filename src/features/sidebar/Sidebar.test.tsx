@@ -46,6 +46,7 @@ const core = vi.hoisted(() => ({
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
   harnessesList: vi.fn(),
+  workspaceFork: vi.fn(),
 }));
 const native = vi.hoisted(() => ({
   pickFolder: vi.fn(),
@@ -154,6 +155,7 @@ describe("Sidebar", () => {
       loaded: false,
       selectedWorkspaceId: null,
       composingProjectId: null,
+      composingFork: null,
       pullRequestsOpen: false,
       tasksOpen: false,
       usageOpen: false,
@@ -670,6 +672,39 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("forks a workspace into the composer, on a new branch from its branch", async () => {
+    core.workspaceFork.mockResolvedValue({
+      text: "# Forked from Yardsort",
+      branch: "ys/feature",
+      uncommitted: 2,
+    });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork into new workspace…" }));
+
+    await waitFor(() => expect(useProjectsStore.getState().composingProjectId).toBe("p-alpha"));
+    expect(core.workspaceFork).toHaveBeenCalledWith("w-alpha-feature");
+    expect(useProjectsStore.getState().composingFork).toEqual({
+      workspaceId: "w-alpha-feature",
+      name: "feature",
+      branch: "ys/feature",
+      packet: "# Forked from Yardsort",
+      uncommitted: 2,
+    });
+  });
+
+  it("does not fork a workspace that is not on a branch", async () => {
+    core.workspaceFork.mockResolvedValue({ text: "", branch: null, uncommitted: 0 });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fork into new workspace…" }));
+
+    await waitFor(() => expect(useProjectsStore.getState().error).toMatch(/not on a branch/));
+    expect(useProjectsStore.getState().composingProjectId).toBeNull();
+  });
+
   it("does not reopen the workspace preview over its action menu", async () => {
     await renderWithWorktree();
     const user = userEvent.setup();
@@ -735,6 +770,8 @@ describe("Sidebar", () => {
             exit: null,
             busy: true,
             attention: false,
+            toldAbout: null,
+            toldAt: null,
           },
           {
             id: "t2",
@@ -744,6 +781,8 @@ describe("Sidebar", () => {
             exit: null,
             busy: false,
             attention: true,
+            toldAbout: null,
+            toldAt: null,
           },
           {
             id: "t3",
@@ -753,6 +792,8 @@ describe("Sidebar", () => {
             exit: null,
             busy: false,
             attention: false,
+            toldAbout: null,
+            toldAt: null,
           },
         ],
       });
@@ -826,6 +867,8 @@ describe("Sidebar", () => {
       recordId: "r1",
       busy: false,
       attention: false,
+      toldAbout: null,
+      toldAt: null,
     };
     const row = () => within(screen.getByRole("treeitem", { name: "feature" }));
     const badge = (name: string) => row().queryByRole("img", { name });
@@ -1439,6 +1482,8 @@ describe("Sidebar", () => {
           recordId: null,
           busy: false,
           attention: false,
+          toldAbout: null,
+          toldAt: null,
         },
       ],
       active: { "w-alpha": "s-w-alpha" },
