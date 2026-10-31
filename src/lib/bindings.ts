@@ -474,6 +474,29 @@ export const commands = {
 	 *  their work. A repository, not a bare folder, because Codex refuses to run outside one.
 	 */
 	workflowDescribe: (description: string) => typedError<Described, IpcError>(__TAURI_INVOKE("workflow_describe", { description })),
+	/**  A workspace's smoke tests: every file in its worktree's `.yardsort/tests`. */
+	testList: (workspaceId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list", { workspaceId })),
+	/**  Runs, newest first: of one workspace, or of all. */
+	testRuns: (workspaceId: string | null, limit: number) => typedError<TestRun[], IpcError>(__TAURI_INVOKE("test_runs", { workspaceId, limit })),
+	/**  One run, with its steps in the order they run. */
+	testRunSteps: (runId: string) => typedError<TestStepRun[], IpcError>(__TAURI_INVOKE("test_run_steps", { runId })),
+	/**  Start a run. The same checks as `ys test run`; a file not yet approved waits. */
+	testRunStart: (testId: string, workspaceId: string, inputs: { [key in string]: string }) => typedError<TestStarted, IpcError>(__TAURI_INVOKE("test_run_start", { testId, workspaceId, inputs })),
+	/**
+	 *  The user, having seen the run's file, lets it go: the file at this hash is approved for the
+	 *  project, and the run is queued. False when the run was not waiting.
+	 */
+	testRunApprove: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("test_run_approve", { runId })),
+	/**  The user chose not to run the file. Nothing is recorded against it. */
+	testRunRefuse: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("test_run_refuse", { runId })),
+	/**  Stop a run: at once when it has not started, after its teardown when it is running. */
+	testRunCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("test_run_cancel", { runId })),
+	/**  Pass or fail a `manual` step the run is waiting on, with a note. */
+	testStepAnswer: (runId: string, stepId: string, passed: boolean, note: string | null) => typedError<boolean, IpcError>(__TAURI_INVOKE("test_step_answer", { runId, stepId, passed, note })),
+	/**  A project's test environment: what `{{ env.NAME }}` means in its tests. */
+	testEnvGet: (projectId: string) => typedError<TestEnvEntry[], IpcError>(__TAURI_INVOKE("test_env_get", { projectId })),
+	/**  Replace a project's test environment. Names are environment variable names. */
+	testEnvSave: (projectId: string, entries: TestEnvEntry[]) => typedError<null, IpcError>(__TAURI_INVOKE("test_env_save", { projectId, entries })),
 	/**  What Yardsort and its agents use of this machine right now, with the last five minutes. */
 	usageMachine: () => typedError<MachineReport, IpcError>(__TAURI_INVOKE("usage_machine")),
 	/**
@@ -492,6 +515,8 @@ export const events = {
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
+	testRunOutput: makeEvent<TestRunOutput>("test-run-output"),
+	testRunsChanged: makeEvent<TestRunsChanged>("test-runs-changed"),
 	workflowRunsChanged: makeEvent<WorkflowRunsChanged>("workflow-runs-changed"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
 };
@@ -2342,6 +2367,112 @@ export type TerminalLoad = {
 	/**  Set for a project's run command. */
 	run: boolean,
 	load: Load,
+};
+
+/**  One entry of a project's test environment. */
+export type TestEnvEntry = {
+	name: string,
+	value: string,
+};
+
+/**  An input of a test, for the Run dialog. */
+export type TestInput = {
+	id: string,
+	/**  `text` or `choice`. */
+	kind: string,
+	label: string,
+	required: boolean,
+	default: string | null,
+	options: string[],
+};
+
+/**
+ *  One test of a workspace, as the window lists it: enough to show, run and approve it. The
+ *  parsed steps stay in the core; the file's text is what the approval card shows.
+ */
+export type TestItem = {
+	id: string,
+	name: string,
+	description: string | null,
+	/**  The file, as an absolute path. */
+	path: string,
+	/**  The file exactly as written. */
+	text: string,
+	/**  Empty when the test can run. */
+	problems: Problem[],
+	runnable: boolean,
+	usesBrowser: boolean,
+	/**  What a run asks for first. */
+	inputs: TestInput[],
+};
+
+/**  One run, as the window lists it. */
+export type TestRun = {
+	id: string,
+	projectId: string | null,
+	workspaceId: string | null,
+	workspaceName: string,
+	testId: string,
+	testName: string,
+	/**  The file as it was when the run was asked for: what an approval is of. */
+	definition: string,
+	contentHash: string,
+	inputs: { [key in string]: string },
+	/**
+	 *  `awaiting_approval`, `queued`, `running`, `passed`, `failed`, `refused`, `cancelled` or
+	 *  `errored`.
+	 */
+	status: string,
+	/**  `app`, `cli` or `workflow`. */
+	requestedBy: string,
+	sessionRecordId: string | null,
+	port: number | null,
+	error: string | null,
+	outputDir: string | null,
+	/**  A cancel was asked for while it ran; the teardown is running. */
+	stopping: boolean,
+	createdAt: number | null,
+	startedAt: number | null,
+	endedAt: number | null,
+};
+
+/**  A step's output file grew. The tab tailing it reads on. */
+export type TestRunOutput = {
+	runId: string,
+	stepId: string,
+};
+
+/**
+ *  Runs changed: one was queued, approved, moved on, finished or cancelled, or a step changed.
+ *  The window reloads what it shows of them.
+ */
+export type TestRunsChanged = Record<string, never>;
+
+/**  What starting a run came to. */
+export type TestStarted = {
+	runId: string,
+	/**  The file at this hash has not been approved: the run waits for the user. */
+	awaitingApproval: boolean,
+};
+
+/**  One step of a run. */
+export type TestStepRun = {
+	stepId: string,
+	/**  `setup`, `steps` or `teardown`. */
+	phase: string,
+	action: string,
+	/**  `pending`, `running`, `waiting`, `passed`, `failed`, `skipped` or `cancelled`. */
+	status: string,
+	startedAt: number | null,
+	endedAt: number | null,
+	exit: number | null,
+	/**
+	 *  What the step left. `stdout` and `stderr` are paths; `prompt` is a `manual` step's
+	 *  question, rendered.
+	 */
+	outputs: { [key in string]: string },
+	note: string | null,
+	screenshots: string[],
 };
 
 /**

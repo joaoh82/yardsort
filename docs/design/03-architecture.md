@@ -560,7 +560,20 @@ A smoke test is a YAML file in a repository's `.yardsort/tests`, read and checke
 name, key, expectation, browser action and `{{ variable }}` checked and reported with a line and
 column. What the two parsers share — the problem type, serde's errors tidied, the lenient read of
 a file's heading, positions in the source, durations and "did you mean" — is `yaml.rs`, and the
-template language is `template.rs`, both at the crate root. Nothing runs a test yet; see
+template language is `template.rs`, both at the crate root.
+
+Migration 0019 adds runs: `test_runs` and `test_step_runs` as rows, `test_approvals` by content
+hash, and `project_test_env`. `smoke::runs::queue` is the one door, whoever asks; a file whose
+hash nobody approved is queued as `awaiting_approval`, and only the app moves it on.
+`smoke::runner` is a thread per run in the app, started by a driver the workflow driver's thread
+ticks under the same profile lock: it picks a free port, carries out setup, steps and teardown
+through `smoke::exec` (a process, a shell line, a server kept until the end, a wait, a request),
+writes each process's output to `test-runs/<run>/` under the data directory, and moves every
+step by a conditional row update so a cancel from `ys` is seen between steps and, while a step
+runs, every quarter second. `process.rs` is a child in a process group (Unix) or a job object
+(Windows), ended whole; the project setup command uses it too. A restart ends runs found running
+and kills the servers they left by pid and start time. `smoke::report` is the verdict in words,
+for `ys test wait` and, later, a workflow step. Browser steps are not run yet; see
 [32-smoke-tests](32-smoke-tests.md).
 
 ### Workflow runs

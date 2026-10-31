@@ -152,10 +152,10 @@ mod tests {
         let gone = write_raw(&mut Refusing(std::io::ErrorKind::BrokenPipe), b"hi");
         assert!(gone.is_ok());
 
-        let Err(Failure(full)) = write_raw(&mut Refusing(std::io::ErrorKind::StorageFull), b"hi")
-        else {
+        let Err(failure) = write_raw(&mut Refusing(std::io::ErrorKind::StorageFull), b"hi") else {
             panic!("a write that fails for another reason is still an error");
         };
+        let full = failure.into_message();
         assert!(full.starts_with("cannot write the screen"), "{full}");
     }
 }

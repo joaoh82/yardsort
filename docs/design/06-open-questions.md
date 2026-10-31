@@ -340,8 +340,10 @@ From the design pass in [32-smoke-tests](32-smoke-tests.md), 2026-10-30.
     agent's terminal, the result could be typed into that agent once quiet, as `send_to_session`
     does. Version one does not: the agent asked by running `wait`, and an agent that did not is
     doing something else. Revisit after dogfooding.
-46. **How much output to keep per step.** Unbounded files with pruning by age is the proposal;
-    a dev server that logs a line per millisecond for an hour fills a disk. A per-step cap, with
-    the head and the tail kept, is likely the slice 2 answer.
+46. ~~**How much output to keep per step.**~~ **Settled 2026-10-31: a cap.** Each of a step's
+    two streams may grow to 16 MiB; past that the step's process is stopped and the step fails,
+    saying so. Keeping the head and the tail was not needed: a step that writes that much is
+    broken, and the first 16 MiB say why. _Before:_ unbounded files with pruning by age was the
+    proposal; a dev server that logs a line per millisecond for an hour fills a disk.
 47. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
     common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.

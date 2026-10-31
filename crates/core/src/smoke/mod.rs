@@ -10,6 +10,11 @@
 
 mod parse;
 
+pub mod exec;
+pub mod report;
+pub mod runner;
+pub mod runs;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -17,7 +22,7 @@ use serde::Serialize;
 use specta::Type;
 
 pub use crate::yaml::{Invalid, Problem};
-pub use parse::parse;
+pub use parse::{is_env_name, parse};
 
 /// The schema version this build reads. A file asking for a later one is listed, not run.
 pub const SCHEMA_VERSION: u32 = 1;

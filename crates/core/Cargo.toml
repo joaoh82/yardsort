@@ -35,14 +35,22 @@ specta = "=2.0.0-rc.25"
 serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
 # A smoke test's `stdout_matches` and `body_matches` are checked to compile when the file is read.
 regex = "1"
+# A smoke test's `http` and `wait_for url` steps, from the runner's own thread. The TLS stack is
+# the one the app's updater and Assist already bring; the provider is installed on first use.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# A smoke test file is approved by its content hash.
+sha2 = "0.10"
 
 # `setsid` and `flock`, for putting the daemon out of reach of signals meant for the app.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 # Reading `PATH` back from where an installer wrote it. A running process cannot see it change.
+# Job objects, so a smoke test's dev server and everything it started end together.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [features]
 # Test fixtures (real git repositories in temp dirs) shared with the app's own tests.
