@@ -1,0 +1,10 @@
+{
+  "about": "Binary messages that are not terminal output frames, and why each is refused. With padding, that many zero bytes follow the hex.",
+  "frames": [
+    { "hex": "010100", "error": "truncated" },
+    { "hex": "01010000010000000000000000000000000000", "error": "truncated" },
+    { "hex": "0901000001000000000000000000000000000000", "error": "wrongKind" },
+    { "hex": "0102000001000000000000000000000000000000", "error": "unknownVersion" },
+    { "hex": "0101000001000000000000000000000000000000", "padding": 65537, "error": "tooLarge" }
+  ]
+}

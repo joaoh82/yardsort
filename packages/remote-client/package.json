@@ -1,0 +1,26 @@
+{
+  "name": "@yardsort/remote-client",
+  "version": "0.1.0",
+  "description": "A device's side of the Yardsort server and remote protocol, in TypeScript: signing in, pairing, and reaching a computer's workspaces and terminals through the relay.",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joaoh82/yardsort.git",
+    "directory": "packages/remote-client"
+  },
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "pair": "bun tools/pair.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "6.0.3"
+  },
+  "packageManager": "bun@1.4.2"
+}

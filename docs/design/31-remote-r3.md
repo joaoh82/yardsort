@@ -1,9 +1,10 @@
 # Remote, R3: the phone app
 
-**Status:** planned on 2026-10-30. Nothing is built. This is R3's plan: what it has to show, what
-it starts from, the decisions taken before any app code exists, the slices, and what each
-slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
-[27](27-remote-r2.md), it will become the record of the slices as they are built. The proposal is
+**Status:** planned on 2026-10-30. The first slice, the TypeScript protocol client, was built on
+2026-10-31 (§9); there is no app yet. This is R3's plan: what it has to show, what it starts
+from, the decisions taken before any app code exists, the slices, and what each slice's smoke
+test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
+[27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are in [26](26-remote-r0-r1.md),
 R2 in [27](27-remote-r2.md).
 
@@ -351,7 +352,103 @@ seconds of coming back to the foreground.
 - **Expo's pace.** A new SDK every few months, each supported for about a year. R3 stays on the
   SDK it starts on, and moving up is a slice of its own.
 
-## 9 · Open after this plan
+## 9 · What the first slice adds
+
+Built on 2026-10-31, on Linux.
+
+- **`packages/remote-client`**, its own Bun project like `website/`: `LICENSE` with the MPL-2.0
+  text, `"license": "MPL-2.0"` in `package.json`, and the MPL's short notice at the top of each
+  file. No dependencies. Its only development tools are TypeScript 6.0.3, which the desktop
+  already uses, and `@types/bun` 1.4.2, for the Bun that CI runs, both pinned exactly. It is new
+  TypeScript, written after `remote-proto` and `remote-client`, and follows their documentation
+  closely. All of that is the owner's, so the MPL here is the owner's choice for their own work
+  (§6). Its README says what each file holds.
+- **What it decides beyond §4:**
+  - A decoded value writes back as Rust writes it: fields Rust always writes are there, `null`
+    when empty, and fields it leaves out when empty are left out. That is what lets the fixtures
+    pin both sides.
+  - The bounds held to a computer's replies are the ones `remote-proto` publishes: ids,
+    cursors, `MAX_TEXT`, `MAX_LABEL`, `MAX_NOTE`, `MAX_LINK`, `MAX_TASKS`, `MAX_TERMINALS` and
+    `MAX_PAGE`, with characters counted as Rust counts them. Strings the protocol does not bound,
+    such as an activity event's details or an error's message, are held only to the message's
+    own 64 KiB. Secrets are at most 256 bytes.
+  - **A bound only this side has:** numbers past 2^53 − 1 are refused rather than rounded, since
+    a JavaScript number cannot hold them exactly. That covers sequence numbers, times and
+    counts, and a frame whose sequence is past it fails as `seqTooLarge`. A terminal would have
+    to print for longer than anything runs to get there.
+  - What a newer peer adds is passed over: unknown fields, an event this build does not know, a
+    frame of another kind or version. The enums that read an unknown value as `other` or
+    `unknown` in Rust do the same here. Anything else that does not read closes the channel as
+    `invalid`, rather than drawing a terminal wrong.
+  - **An attachment checks every number.** A snapshot's frames carry the reply's position. A
+    resumed stream goes on after it. A piece split over several frames shares one number. An
+    item out of that order ends the attachment as `gap`, and the computer is told to detach it.
+    `drawn` is the last position drawn, for resuming on another channel.
+  - **Control** renews its lease every `renewEveryMs`, numbers input from 1, and never sends
+    input again. Input in flight when the channel closes rejects with `ChannelClosed`: whether
+    it arrived is not known.
+  - **Liveness is as §4,** but a dead channel is only closed, as `silent`, never reopened by the
+    client itself. Opening a new channel, and attaching again from `drawn`, belongs to the screens
+    that know what was open (slice 5).
+  - **`Session`:** one refresh in flight at a time, and `keep` finishes before the new access
+    is handed out. When `keep` fails, the `NotKept` error carries the session, since by then
+    the session holds the only copy of the new credential. A refresh that never got through is
+    retried on the next call, inside the server's 30 seconds if the phone is still online
+    (27 §21).
+  - **`explainRevoked`** asks with the phone's own credential. A grant revoked, denied, expired
+    or not found, or a computer missing from `GET /v1/hosts`, is `unpaired`. A refused credential
+    is `signedOut`. Anything else is `undetermined`.
+  - **Sign-in** is `beginSignIn(redirect)` and `codeFromRedirect`. The client never runs a
+    listener; the app's redirect is the app's own scheme.
+- **Fixtures.** `frame-output.json` and `frame-refused.json` pin binary frames on both sides:
+  41 fixtures in all. Each side now fails on a fixture it does not read. In Rust,
+  `every_fixture_is_read_here` looks for each file's name in the tests. In TypeScript, the
+  conformance table has to list exactly the directory.
+- **`crates/server/examples/stand-in.rs`**, AGPL like the server. It runs the server with its
+  records in memory, the identity provider the server's tests use (it gains an `/authorize` that
+  signs a chosen subject in at once), and a real host: the app's connector, the core and a
+  program in a real terminal. It is controlled by a line of JSON at a time on stdin. Every
+  client of it comes from one address, so its limits per address are raised. The server's own
+  tests hold it to the real limits.
+- **The pairing tool's twin,** `tools/pair.ts` (`just client-pair`), as listed in CONTRIBUTING.
+  It never prints a credential, a ticket, the link's secret or a conversation's title.
+- **Tests: 106 under `bun test`**:
+  - the conformance run (45);
+  - decoding bounds;
+  - the HTTP client and the session against small Bun servers;
+  - the channel against a computer that misbehaves on purpose, over a real WebSocket;
+  - 13 against the stand-in, covering sign-in through `yardsort://signed-in`, pairing by code
+    and by link, a denial, another account's code, typing and resuming, following activity, a
+    viewer refused control, and each of §5's answers to a 4003 (a grant taken back, a computer
+    removed, the phone revoked, a server that cannot be asked);
+  - the twin, run whole.
+
+  `just check` runs them (`test-client`, and `typecheck` now covers the package), and CI runs
+  them on all three systems after the Rust tests, which build the stand-in. Mutating the
+  decoders, the numbering check and the probe each made a test fail.
+
+- **Not shown yet.** Nothing has run on a phone. The package has not run under React Native's
+  Hermes: injecting `crypto` and avoiding `URL` are meant for it, and slice 2 shows whether
+  they were enough.
+
+**Its smoke test, on this machine:**
+
+1. `just server-up`, then `just server-run`.
+2. The app, from this branch, with a throwaway profile:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
+   Settings → Remote: server `http://127.0.0.1:8787`, **Turn on and sign in** as
+   `developer@yardsort.test` with `Yardsort-dev-1`. Add a project and open a shell in a workspace.
+3. **Pair a device**. In another terminal, in `packages/remote-client` (through `just`, `--type`
+   takes one word), `bun tools/pair.ts <code> --type "echo hello-from-typescript" --wait-for-revoke`,
+   and sign in again in the browser. **Let it watch and type.** The tool says it watches the
+   shell, and types. The shell in the app shows `hello-from-typescript`. The tool says it resumed
+   from where it left off, and that the items came numbered without a gap.
+4. **Revoke** it in the app. The tool says the computer took back its grant and it is still
+   signed in, then signs out.
+5. `just client-pair devices`, signing in once more, lists the first run's device as revoked,
+   the app's computer as signed in, and itself as this one.
+
+## 10 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

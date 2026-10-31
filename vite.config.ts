@@ -1,8 +1,8 @@
-/// <reference types="vitest/config" />
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -27,6 +27,8 @@ export default defineConfig({
   },
 
   test: {
+    // The protocol client is its own project, tested with `bun test` (`just test-client`).
+    exclude: [...configDefaults.exclude, "packages/**"],
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     css: false,

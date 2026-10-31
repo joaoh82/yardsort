@@ -617,6 +617,12 @@ remote ever talks to it directly. Instead:
   browser to a loopback listener, refreshing, the device, host and pairing calls, and relay
   sockets. The app uses it as a host (`src-tauri/src/remote.rs`, Settings → Remote, behind
   `YARDSORT_REMOTE_PREVIEW=1`); `ys` never does.
+- `packages/remote-client` is the same device's side in TypeScript, for the phone app (R3,
+  [31](31-remote-r3.md)): the protocol's types with the bounds `remote-proto` sets, signing in,
+  the session and its refresh, pairing, and relay channels that check every terminal item's
+  number and notice a silent link. It is its own Bun project, with no dependencies, under
+  MPL-2.0. The fixtures in `remote-proto/fixtures/v1/` pin both sides, and its tests run against
+  the real server and host through `crates/server/examples/stand-in.rs`.
 - `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
   Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of
   its own with `yardsort_core::remote::serve`. When the link fails, every channel lets go of what
@@ -786,6 +792,8 @@ yardsort/
 │  ├─ remote-client/         # a device's side of the server: HTTP and relay sockets (M26)
 │  ├─ remote-host/           # the host's connector to the relay (M26)
 │  └─ server/                # the remote server: sign-in, devices, pairing, relay (M26)
+├─ packages/
+│  └─ remote-client/         # a device's side in TypeScript, for the phone app; MPL-2.0 (R3)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 

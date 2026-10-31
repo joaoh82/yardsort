@@ -83,6 +83,14 @@ jobs:
       - name: Rust — test
         run: cargo test --workspace
 
+      # After the Rust tests, which build the server's stand-in example that these run against.
+      - name: Protocol client — typecheck, test
+        working-directory: packages/remote-client
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
+
       - name: TypeScript bindings are up to date
         shell: bash
         run: git diff --exit-code -- src/lib/bindings.ts

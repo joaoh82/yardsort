@@ -438,3 +438,74 @@ fn only_transient_failures_are_retryable() {
         assert!(!RemoteError::new(code, "m").retryable, "{code:?}");
     }
 }
+
+fn hex(text: &str) -> Vec<u8> {
+    assert!(text.len().is_multiple_of(2), "{text}");
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).unwrap())
+        .collect()
+}
+
+#[test]
+fn output_frames_match_their_fixtures() {
+    let json = fixture("frame-output.json");
+    let frames = json["frames"].as_array().unwrap();
+    assert!(!frames.is_empty());
+    for case in frames {
+        let wire = hex(case["hex"].as_str().unwrap());
+        let frame = OutputFrame::decode(&wire).unwrap_or_else(|e| panic!("{case}: {e}"));
+        assert_eq!(u64::from(frame.stream), case["stream"].as_u64().unwrap());
+        assert_eq!(
+            u64::from(frame.position.epoch),
+            case["epoch"].as_u64().unwrap()
+        );
+        assert_eq!(frame.position.seq, case["seq"].as_u64().unwrap());
+        assert_eq!(frame.bytes, hex(case["bytes"].as_str().unwrap()));
+        let mut written = Vec::new();
+        frame.encode(&mut written).unwrap();
+        let expected = case.get("reencoded").unwrap_or(&case["hex"]);
+        assert_eq!(written, hex(expected.as_str().unwrap()), "{case}");
+    }
+}
+
+#[test]
+fn refused_frames_match_their_fixtures() {
+    use crate::terminal::FrameError;
+    let json = fixture("frame-refused.json");
+    for case in json["frames"].as_array().unwrap() {
+        let mut wire = hex(case["hex"].as_str().unwrap());
+        let padding = case["padding"].as_u64().unwrap_or(0);
+        wire.resize(wire.len() + padding as usize, 0);
+        let error = OutputFrame::decode(&wire).expect_err(&case.to_string());
+        let named = match error {
+            FrameError::Truncated => "truncated",
+            FrameError::WrongKind => "wrongKind",
+            FrameError::UnknownVersion(_) => "unknownVersion",
+            FrameError::TooLarge(_) => "tooLarge",
+        };
+        assert_eq!(named, case["error"], "{case}");
+    }
+}
+
+/// Every fixture is read by a test here, as every one is by the TypeScript client's
+/// (`packages/remote-client/test/fixtures.test.ts`): a file only one side reads is a wire format
+/// only one side is held to.
+#[test]
+fn every_fixture_is_read_here() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/v1/");
+    let here = include_str!("tests.rs");
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert!(names.len() >= 41, "{names:?}");
+    for name in names {
+        assert!(name.ends_with(".json"), "{name} is not a fixture");
+        assert!(
+            here.contains(&format!("\"{name}\"")),
+            "no test reads {name}"
+        );
+    }
+}

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Form, State};
+use axum::extract::{Form, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -90,6 +90,8 @@ pub struct IdpState {
     pub grants: HashMap<String, Grant>,
     pub token_calls: usize,
     pub jwks_calls: usize,
+    /// Who signs in at `/authorize`, where the browser comes when nothing calls [`Idp::approve`].
+    pub subject: String,
 }
 
 pub type Shared = Arc<Mutex<IdpState>>;
@@ -116,10 +118,12 @@ impl Idp {
             grants: HashMap::new(),
             token_calls: 0,
             jwks_calls: 0,
+            subject: "someone".into(),
         }));
         let app = Router::new()
             .route("/.well-known/openid-configuration", get(discovery))
             .route("/jwks", get(jwks))
+            .route("/authorize", get(authorize))
             .route("/token", post(token))
             .with_state(state.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -178,6 +182,38 @@ pub async fn discovery(State(state): State<Shared>) -> Json<Value> {
         "jwks_uri": format!("{base}/jwks"),
         "code_challenge_methods_supported": ["S256"],
     }))
+}
+
+/// A browser at the provider with [`IdpState::subject`] already signed in: sent straight back to
+/// the server with a code, as [`Idp::approve`] does for tests that drive each step themselves.
+pub async fn authorize(
+    State(state): State<Shared>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let field = |name: &str| q.get(name).cloned().unwrap_or_default();
+    if field("response_type") != "code" || field("client_id") != CLIENT_ID {
+        return (StatusCode::BAD_REQUEST, "not this provider's client").into_response();
+    }
+    let code = tokens::random();
+    let mut back = match Url::parse(&field("redirect_uri")) {
+        Ok(url) => url,
+        Err(_) => return (StatusCode::BAD_REQUEST, "no redirect").into_response(),
+    };
+    back.query_pairs_mut()
+        .append_pair("code", &code)
+        .append_pair("state", &field("state"));
+    let mut s = state.lock().unwrap();
+    let subject = s.subject.clone();
+    s.grants.insert(
+        code,
+        Grant {
+            challenge: field("code_challenge"),
+            redirect_uri: field("redirect_uri"),
+            nonce: field("nonce"),
+            subject,
+        },
+    );
+    (StatusCode::SEE_OTHER, [("location", back.to_string())]).into_response()
 }
 
 pub async fn jwks(State(state): State<Shared>) -> Json<Value> {

@@ -42,6 +42,16 @@ impl Served {
         options: http::Options,
         relay: Relay,
     ) -> Self {
+        Self::start_allowing(records, options, relay, vec![APP.into()]).await
+    }
+
+    /// With `redirects` as the device redirects the server allows.
+    pub async fn start_allowing(
+        records: impl Records + 'static,
+        options: http::Options,
+        relay: Relay,
+        redirects: Vec<String>,
+    ) -> Self {
         let idp = Idp::start(Some(SECRET)).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
@@ -56,7 +66,7 @@ impl Served {
                     client_id: CLIENT_ID.into(),
                     client_secret: Some(Secret::new(SECRET)),
                 },
-                device_redirects: vec![APP.into()],
+                device_redirects: redirects,
             },
             records,
             client.clone(),
