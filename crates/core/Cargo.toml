@@ -50,7 +50,7 @@ libc = "0.2"
 # Job objects, so a smoke test's dev server and everything it started end together.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [features]
 # Test fixtures (real git repositories in temp dirs) shared with the app's own tests.

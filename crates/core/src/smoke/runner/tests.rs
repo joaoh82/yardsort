@@ -147,6 +147,12 @@ impl Fx {
         }
     }
 
+    /// Cancel the run from another connection, as `ys test cancel` is.
+    fn cancel_elsewhere(&self, id: &str) {
+        let elsewhere = Store::open(&self.data_dir.join("yardsort.db")).unwrap();
+        assert!(elsewhere.cancel_test_run(id, "Cancelled from ys.").unwrap());
+    }
+
     fn has_bun(&self) -> bool {
         if self.env.find_program("bun", &self.worktree()).is_some() {
             return true;
@@ -400,11 +406,7 @@ teardown:
             .iter()
             .any(|s| s.step_id == "wait" && s.status == "running")
     });
-    // From another connection, as `ys test cancel` is.
-    let elsewhere = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
-    assert!(elsewhere
-        .cancel_test_run(&id, "Cancelled from ys.")
-        .unwrap());
+    fx.cancel_elsewhere(&id);
     let asked = Instant::now();
     fx.driver.join();
     assert!(
@@ -706,4 +708,324 @@ steps:
     assert!(!stray.exists(), "a folder with no run was removed");
     assert!(out.exists(), "a folder with a run was kept");
     assert!(!fx.tick(), "nothing more to do");
+}
+
+#[test]
+fn a_cancel_while_a_manual_step_waits_is_still_a_cancel() {
+    let fx = Fx::new();
+    fx.write(
+        "look",
+        r#"id: look
+name: Have a look
+version: 1
+steps:
+  - id: look
+    action: manual
+    prompt: "Does it look right?"
+  - id: after
+    action: manual
+    prompt: "And now?"
+"#,
+    );
+    let id = fx.queue("look", &[]);
+    assert!(fx.tick());
+    fx.until(&id, |steps| steps[0].status == "waiting");
+    fx.cancel_elsewhere(&id);
+    fx.driver.join();
+    let run = fx.run(&id);
+    assert_eq!(run.status, "cancelled", "{}", fx.summary(&id));
+    assert_eq!(
+        run.error.as_deref(),
+        Some("Cancelled from ys."),
+        "the reason the cancel gave is kept"
+    );
+    let steps = fx.steps(&id);
+    let look = fx.step(&steps, "look");
+    assert_eq!(look.status, "cancelled");
+    assert_eq!(
+        look.note.as_deref(),
+        Some("The run was cancelled while this waited.")
+    );
+    assert_eq!(fx.step(&steps, "after").status, "cancelled");
+    assert_eq!(report::exit_code(&run.status), 2);
+}
+
+#[test]
+fn input_a_program_never_reads_does_not_hold_the_step_past_its_limit() {
+    let fx = Fx::new();
+    if !fx.has_bun() {
+        return;
+    }
+    // More than any pipe holds, for a program that reads none of it and exits later than the
+    // step allows. Fed in the step's thread, the write would block until the program exited.
+    let input = "x".repeat(200 * 1024);
+    fx.write(
+        "deaf",
+        &format!(
+            r#"id: deaf
+name: Does not listen
+version: 1
+steps:
+  - id: deaf
+    action: run
+    {deaf}
+    stdin: {input}
+    timeout: 1s
+"#,
+            deaf = bun("setTimeout(() => process.exit(0), 4000)"),
+            input = yaml_string(&input),
+        ),
+    );
+    let id = fx.queue("deaf", &[]);
+    let started = Instant::now();
+    fx.drive();
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the step was stopped at its limit, not when the program chose to exit"
+    );
+    let run = fx.run(&id);
+    assert_eq!(run.status, "failed", "{}", fx.summary(&id));
+    let deaf = &fx.steps(&id)[0];
+    assert_eq!(deaf.status, "failed");
+    assert_eq!(
+        deaf.note.as_deref(),
+        Some("Still running after 1s, so it was stopped.")
+    );
+}
+
+/// A server that answers every request late.
+const SLOW_SERVER: &str = r#"const port = Number(process.env.YS_RUN_PORT);
+Bun.serve({ port, fetch() {
+  return new Promise(resolve => setTimeout(() => resolve(new Response('late')), 3500));
+}});"#;
+
+#[test]
+fn the_runs_time_limit_ends_an_http_step_waiting_on_a_slow_server() {
+    let fx = Fx::new();
+    if !fx.has_bun() {
+        return;
+    }
+    fx.write(
+        "late",
+        &format!(
+            r#"id: late
+name: The server is slow
+version: 1
+timeout: 2s
+setup:
+  - id: server
+    action: start
+    {server}
+  - id: ready
+    action: wait_for
+    port: "{{{{ run.port }}}}"
+    timeout: 20s
+steps:
+  - id: late
+    action: http
+    get: "http://127.0.0.1:{{{{ run.port }}}}/"
+    timeout: 10s
+"#,
+            server = bun(SLOW_SERVER),
+        ),
+    );
+    let id = fx.queue("late", &[]);
+    let started = Instant::now();
+    fx.drive();
+    assert!(
+        started.elapsed() < Duration::from_secs(6),
+        "the run ended at its limit, not when the server answered"
+    );
+    let run = fx.run(&id);
+    assert_eq!(run.status, "failed", "{}", fx.summary(&id));
+    assert_eq!(run.error.as_deref(), Some("Timed out after 2s."));
+    let late = fx.step(&fx.steps(&id), "late").clone();
+    assert_eq!(late.status, "failed");
+    assert_eq!(
+        late.note.as_deref(),
+        Some("The run's time limit passed while this ran.")
+    );
+}
+
+#[test]
+fn a_cancel_ends_an_http_step_waiting_on_a_slow_server() {
+    let fx = Fx::new();
+    if !fx.has_bun() {
+        return;
+    }
+    fx.write(
+        "late",
+        &format!(
+            r#"id: late
+name: The server is slow
+version: 1
+setup:
+  - id: server
+    action: start
+    {server}
+  - id: ready
+    action: wait_for
+    port: "{{{{ run.port }}}}"
+    timeout: 20s
+steps:
+  - id: late
+    action: http
+    get: "http://127.0.0.1:{{{{ run.port }}}}/"
+    timeout: 10s
+"#,
+            server = bun(SLOW_SERVER),
+        ),
+    );
+    let id = fx.queue("late", &[]);
+    assert!(fx.tick());
+    fx.until(&id, |steps| {
+        steps
+            .iter()
+            .any(|s| s.step_id == "late" && s.status == "running")
+    });
+    fx.cancel_elsewhere(&id);
+    let asked = Instant::now();
+    fx.driver.join();
+    assert!(
+        asked.elapsed() < Duration::from_secs(3),
+        "the cancel was seen while the request waited"
+    );
+    let run = fx.run(&id);
+    assert_eq!(run.status, "cancelled", "{}", fx.summary(&id));
+    let late = fx.step(&fx.steps(&id), "late").clone();
+    assert_eq!(late.status, "cancelled");
+    assert_eq!(late.note.as_deref(), Some("Cancelled while this ran."));
+}
+
+#[test]
+fn a_server_that_writes_past_the_cap_is_stopped_and_fails_the_run() {
+    let fx = Fx::new();
+    if !fx.has_bun() {
+        return;
+    }
+    fx.write(
+        "loud",
+        &format!(
+            r#"id: loud
+name: The server will not stop talking
+version: 1
+setup:
+  - id: server
+    action: start
+    {server}
+steps:
+  - id: meanwhile
+    action: run
+    {meanwhile}
+    timeout: 20s
+"#,
+            // 17 MiB at once, then it stays up.
+            server = bun(
+                "process.stdout.write(Buffer.alloc(17 * 1024 * 1024, 120)); setTimeout(() => {}, 60000)"
+            ),
+            meanwhile = bun("setTimeout(() => {}, 15000)"),
+        ),
+    );
+    let id = fx.queue("loud", &[]);
+    let started = Instant::now();
+    fx.drive();
+    assert!(
+        started.elapsed() < Duration::from_secs(12),
+        "the run ended when the server was stopped, not when the step ended"
+    );
+    let run = fx.run(&id);
+    assert_eq!(run.status, "failed", "{}", fx.summary(&id));
+    assert_eq!(
+        run.error.as_deref(),
+        Some("`server` wrote more than 16 MiB of output, so it was stopped.")
+    );
+    let steps = fx.steps(&id);
+    let server = fx.step(&steps, "server");
+    assert_eq!(server.status, "failed");
+    assert_eq!(
+        server.note.as_deref(),
+        Some("Wrote more than 16 MiB of output, so it was stopped.")
+    );
+    assert!(gone(&server.outputs()), "the server was stopped");
+    let meanwhile = fx.step(&steps, "meanwhile");
+    assert_eq!(meanwhile.status, "failed");
+    assert_eq!(
+        meanwhile.note.as_deref(),
+        Some("`server` wrote more than 16 MiB of output while this ran, so it was stopped.")
+    );
+}
+
+#[test]
+fn a_store_error_mid_run_still_stops_the_server_and_ends_the_run() {
+    let fx = Fx::new();
+    if !fx.has_bun() {
+        return;
+    }
+    fx.write(
+        "held",
+        &format!(
+            r#"id: held
+name: The store goes away
+version: 1
+setup:
+  - id: server
+    action: start
+    {server}
+steps:
+  - id: hold
+    action: run
+    {hold}
+  - id: after
+    action: run
+    {after}
+teardown:
+  - id: reset
+    action: run
+    {after}
+"#,
+            server = bun("setTimeout(() => {}, 60000)"),
+            hold = bun("setTimeout(() => {}, 1000)"),
+            after = bun("console.log('never')"),
+        ),
+    );
+    let id = fx.queue("held", &[]);
+    assert!(fx.tick());
+    fx.until(&id, |steps| {
+        steps
+            .iter()
+            .any(|s| s.step_id == "hold" && s.status == "running")
+    });
+    let server = fx.step(&fx.steps(&id), "server").outputs();
+    // Another connection takes the write lock and keeps it longer than the store waits for
+    // one: the runner's next move errors. It is let go once that has happened, so the ending
+    // the runner owes the run can be written.
+    let elsewhere = rusqlite::Connection::open(fx.data_dir.join("yardsort.db")).unwrap();
+    elsewhere.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let held = Instant::now();
+    while held.elapsed() < Duration::from_millis(6500) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    elsewhere.execute_batch("ROLLBACK").unwrap();
+    fx.driver.join();
+
+    assert!(
+        gone(&server),
+        "the server was stopped although the run errored"
+    );
+    let run = fx.run(&id);
+    assert_eq!(run.status, "errored", "{}", fx.summary(&id));
+    let error = run.error.as_deref().unwrap();
+    assert!(
+        error.starts_with("Yardsort could not see the run through: "),
+        "{error}"
+    );
+    let steps = fx.steps(&id);
+    assert_eq!(fx.step(&steps, "hold").status, "failed");
+    assert_eq!(fx.step(&steps, "hold").note.as_deref(), Some(error));
+    assert_eq!(fx.step(&steps, "after").status, "skipped");
+    assert_eq!(fx.step(&steps, "reset").status, "skipped");
+    assert!(
+        fx.store.active_test_runs().unwrap().is_empty(),
+        "the test can be run again without a restart"
+    );
 }

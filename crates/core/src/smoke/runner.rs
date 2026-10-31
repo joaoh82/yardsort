@@ -248,6 +248,9 @@ struct Sizes {
 impl Watch for Watching<'_> {
     fn stop(&self) -> Option<Stop> {
         if self.teardown {
+            // A server that writes past the cap is stopped in the teardown too; nothing else
+            // stops a teardown.
+            let _ = self.police_servers();
             return None;
         }
         if self.cancelled.load(Ordering::Relaxed) {
@@ -273,6 +276,22 @@ impl Watch for Watching<'_> {
         if Instant::now() >= self.deadline {
             return Some(Stop::RunTimedOut);
         }
+        self.police_servers()
+    }
+
+    fn output_grew(&self, step_id: &str) {
+        (self.notify)(Notice::Output {
+            run_id: self.run_id.to_owned(),
+            step_id: step_id.to_owned(),
+        });
+    }
+}
+
+impl Watching<'_> {
+    /// Look at every server still going: one that ended is the run's end, and one that wrote
+    /// past the output cap is stopped and is the run's end too. The cap holds while another
+    /// step runs and while a `manual` step waits, which may be a long time.
+    fn police_servers(&self) -> Option<Stop> {
         let mut servers = self.servers.lock().unwrap_or_else(PoisonError::into_inner);
         self.servers_wrote(&servers);
         for server in servers.iter_mut() {
@@ -290,19 +309,20 @@ impl Watch for Watching<'_> {
                     exit,
                 });
             }
+            let size = |path: &Path| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            if size(&server.started.stdout) > exec::MAX_OUTPUT_BYTES
+                || size(&server.started.stderr) > exec::MAX_OUTPUT_BYTES
+            {
+                server.started.group.kill_tree();
+                server.ended = Some("too much output".to_owned());
+                return Some(Stop::ServerOutputCapped {
+                    step_id: server.started.step_id.clone(),
+                });
+            }
         }
         None
     }
 
-    fn output_grew(&self, step_id: &str) {
-        (self.notify)(Notice::Output {
-            run_id: self.run_id.to_owned(),
-            step_id: step_id.to_owned(),
-        });
-    }
-}
-
-impl Watching<'_> {
     /// A server's log grows while other steps run; the window is told every half second, so
     /// the tab tailing it reads on.
     fn servers_wrote(&self, servers: &[Server]) {
@@ -351,6 +371,76 @@ fn carry_out(job: Job) {
     (job.notify)(Notice::Runs);
 }
 
+/// What a run leaves until it is over, and what happens to it however the run ends: the
+/// servers are stopped and the scratch folder removed, and a run the thread could not see to
+/// the end of — a store error, a panic — is ended as errored rather than left `running`,
+/// which nothing else would end before the next app start.
+struct Leftovers<'a> {
+    store: &'a Store,
+    run_id: &'a str,
+    servers: Mutex<Vec<Server>>,
+    scratch: PathBuf,
+    /// What to say if the run is still running at the end.
+    unfinished: Option<String>,
+}
+
+impl Leftovers<'_> {
+    /// Stop every server and remove the scratch folder. Done once; the guard does it if the
+    /// run did not get here.
+    fn clear(&mut self) {
+        for server in self
+            .servers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+        {
+            let mut server = server;
+            server.started.group.kill_tree();
+        }
+        let _ = std::fs::remove_dir_all(&self.scratch);
+    }
+}
+
+impl Drop for Leftovers<'_> {
+    fn drop(&mut self) {
+        self.clear();
+        let why = self
+            .unfinished
+            .clone()
+            .unwrap_or_else(|| "Yardsort could not see the run through.".to_owned());
+        let running = self
+            .store
+            .test_run(self.run_id)
+            .ok()
+            .flatten()
+            .is_some_and(|run| run.status == "running");
+        if running {
+            // The step the thread was on, if any, is failed with the reason; the rest is
+            // skipped, the teardown's too, as nothing will run it.
+            if let Ok(steps) = self.store.test_steps(self.run_id) {
+                for step in steps {
+                    if matches!(step.status.as_str(), "running" | "waiting") {
+                        let _ = mark(
+                            self.store,
+                            self.run_id,
+                            &step.step_id,
+                            &["running", "waiting"],
+                            "failed",
+                            None,
+                            None,
+                            Some(&why),
+                        );
+                    }
+                }
+            }
+            let _ = skip_rest(self.store, self.run_id, "skipped", &why, true);
+            let _ = self
+                .store
+                .finish_test_run(self.run_id, "errored", Some(&why));
+        }
+    }
+}
+
 fn run(store: &Store, job: &Job) -> IpcResult<()> {
     let Some(row) = store.test_run(&job.run_id)? else {
         return Ok(());
@@ -391,96 +481,52 @@ fn run(store: &Store, job: &Job) -> IpcResult<()> {
         return Ok(()); // Cancelled between the tick and now.
     }
     (job.notify)(Notice::Runs);
-
-    let env: BTreeMap<String, String> = match &row.project_id {
-        Some(project_id) => store.project_test_env(project_id)?.into_iter().collect(),
-        None => BTreeMap::new(),
-    };
-    let mut vars = Vars {
-        place,
-        run_id: row.id.clone(),
-        port,
-        dir: scratch.clone(),
-        inputs: serde_json::from_str(&row.inputs).unwrap_or_default(),
-        env,
-        steps: BTreeMap::new(),
+    // From here the run is running, and whatever happens it must stop being so.
+    let mut left = Leftovers {
+        store,
+        run_id: &row.id,
+        servers: Mutex::new(Vec::new()),
+        scratch: scratch.clone(),
+        unfinished: None,
     };
     let deadline = Instant::now() + Duration::from_secs(u64::from(test.timeout_secs));
-    let servers = Mutex::new(Vec::new());
-
-    let mut outcome = phase(
-        store,
-        job,
-        &row,
-        &test,
-        Phase::Setup,
-        &worktree,
-        &output_dir,
-        &mut vars,
-        deadline,
-        &servers,
-    )?;
-    if outcome == PhaseEnd::Passed {
-        outcome = phase(
-            store,
-            job,
-            &row,
-            &test,
-            Phase::Steps,
-            &worktree,
-            &output_dir,
-            &mut vars,
-            deadline,
-            &servers,
-        )?;
-    }
-    if outcome != PhaseEnd::Gone {
-        // What setup or steps did not reach is skipped, with the reason, before the teardown.
-        let why = match &outcome {
-            PhaseEnd::Passed | PhaseEnd::Gone => None,
-            PhaseEnd::Failed => Some("An earlier step failed.".to_owned()),
-            PhaseEnd::Stopped(Stop::Cancelled) => Some("The run was cancelled.".to_owned()),
-            PhaseEnd::Stopped(Stop::RunTimedOut) => Some("The run's time limit passed.".to_owned()),
-            PhaseEnd::Stopped(Stop::ServerExited { step_id, exit }) => Some(format!(
-                "`{step_id}` exited with {exit} before the run ended."
-            )),
+    let carried = (|| -> IpcResult<PhaseEnd> {
+        let env: BTreeMap<String, String> = match &row.project_id {
+            Some(project_id) => store.project_test_env(project_id)?.into_iter().collect(),
+            None => BTreeMap::new(),
         };
-        if let Some(why) = why {
-            let to = if outcome == PhaseEnd::Stopped(Stop::Cancelled) {
-                "cancelled"
-            } else {
-                "skipped"
-            };
-            if !skip_rest(store, &row.id, to, &why, false)? {
-                outcome = PhaseEnd::Gone;
-            }
-        }
-    }
-    if outcome != PhaseEnd::Gone {
-        let teardown = phase(
+        let mut vars = Vars {
+            place,
+            run_id: row.id.clone(),
+            port,
+            dir: scratch.clone(),
+            inputs: serde_json::from_str(&row.inputs).unwrap_or_default(),
+            env,
+            steps: BTreeMap::new(),
+        };
+        phases(
             store,
             job,
             &row,
             &test,
-            Phase::Teardown,
             &worktree,
             &output_dir,
             &mut vars,
             deadline,
-            &servers,
-        )?;
-        if teardown == PhaseEnd::Gone {
-            outcome = PhaseEnd::Gone;
+            &left.servers,
+        )
+    })();
+    let outcome = match carried {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            left.unfinished = Some(format!(
+                "Yardsort could not see the run through: {}",
+                error.message
+            ));
+            return Err(error);
         }
-    }
-    for server in servers
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .iter_mut()
-    {
-        server.started.group.kill_tree();
-    }
-    let _ = std::fs::remove_dir_all(&scratch);
+    };
+    left.clear();
 
     let (status, error) = match outcome {
         PhaseEnd::Passed => ("passed", None),
@@ -501,10 +547,110 @@ fn run(store: &Store, job: &Job) -> IpcResult<()> {
                 "`{step_id}` exited with {exit} before the run ended."
             )),
         ),
+        PhaseEnd::Stopped(Stop::ServerOutputCapped { step_id }) => (
+            "failed",
+            Some(format!(
+                "`{step_id}` wrote more than {} of output, so it was stopped.",
+                exec::output_cap_words()
+            )),
+        ),
         PhaseEnd::Gone => return Ok(()),
     };
     store.finish_test_run(&row.id, status, error.as_deref())?;
     Ok(())
+}
+
+/// Setup, steps and teardown, in order: setup and steps until the first failure or stop, the
+/// teardown whatever happened, as long as the run is still the runner's.
+#[allow(clippy::too_many_arguments)]
+fn phases(
+    store: &Store,
+    job: &Job,
+    row: &TestRunRow,
+    test: &Test,
+    worktree: &Path,
+    output_dir: &Path,
+    vars: &mut Vars,
+    deadline: Instant,
+    servers: &Mutex<Vec<Server>>,
+) -> IpcResult<PhaseEnd> {
+    let mut outcome = phase(
+        store,
+        job,
+        row,
+        test,
+        Phase::Setup,
+        worktree,
+        output_dir,
+        vars,
+        deadline,
+        servers,
+    )?;
+    if outcome == PhaseEnd::Passed {
+        outcome = phase(
+            store,
+            job,
+            row,
+            test,
+            Phase::Steps,
+            worktree,
+            output_dir,
+            vars,
+            deadline,
+            servers,
+        )?;
+    }
+    if outcome != PhaseEnd::Gone {
+        // What setup or steps did not reach is skipped, with the reason, before the teardown.
+        let why = match &outcome {
+            PhaseEnd::Passed | PhaseEnd::Gone => None,
+            PhaseEnd::Failed => Some("An earlier step failed.".to_owned()),
+            PhaseEnd::Stopped(stop) => Some(skip_reason(stop)),
+        };
+        if let Some(why) = why {
+            let to = if outcome == PhaseEnd::Stopped(Stop::Cancelled) {
+                "cancelled"
+            } else {
+                "skipped"
+            };
+            if !skip_rest(store, &row.id, to, &why, false)? {
+                outcome = PhaseEnd::Gone;
+            }
+        }
+    }
+    if outcome != PhaseEnd::Gone {
+        let teardown = phase(
+            store,
+            job,
+            row,
+            test,
+            Phase::Teardown,
+            worktree,
+            output_dir,
+            vars,
+            deadline,
+            servers,
+        )?;
+        if teardown == PhaseEnd::Gone {
+            outcome = PhaseEnd::Gone;
+        }
+    }
+    Ok(outcome)
+}
+
+/// Why the steps after a stop did not run.
+fn skip_reason(stop: &Stop) -> String {
+    match stop {
+        Stop::Cancelled => "The run was cancelled.".to_owned(),
+        Stop::RunTimedOut => "The run's time limit passed.".to_owned(),
+        Stop::ServerExited { step_id, exit } => {
+            format!("`{step_id}` exited with {exit} before the run ended.")
+        }
+        Stop::ServerOutputCapped { step_id } => format!(
+            "`{step_id}` wrote more than {} of output, so it was stopped.",
+            exec::output_cap_words()
+        ),
+    }
 }
 
 /// Run one phase's steps in order. Setup and steps stop at the first failure; teardown runs
@@ -547,11 +693,7 @@ fn phase(
             // Everything after a failure or a stop is skipped, with the reason.
             let why = match &end {
                 PhaseEnd::Failed => format!("An earlier step failed (`{}`).", steps[index - 1].id),
-                PhaseEnd::Stopped(Stop::Cancelled) => "The run was cancelled.".to_owned(),
-                PhaseEnd::Stopped(Stop::RunTimedOut) => "The run's time limit passed.".to_owned(),
-                PhaseEnd::Stopped(Stop::ServerExited { step_id, .. }) => {
-                    format!("`{step_id}` exited before the run ended.")
-                }
+                PhaseEnd::Stopped(stop) => skip_reason(stop),
                 PhaseEnd::Passed | PhaseEnd::Gone => unreachable!(),
             };
             let to = if end == PhaseEnd::Stopped(Stop::Cancelled) {
@@ -575,23 +717,14 @@ fn phase(
         }
         if let Some(stop) = watching.stop() {
             // Between steps: the stop is seen before the next one starts.
-            end = PhaseEnd::Stopped(stop);
-            let (to, why) = match &end {
-                PhaseEnd::Stopped(Stop::Cancelled) => {
-                    ("cancelled", "The run was cancelled.".to_owned())
-                }
-                PhaseEnd::Stopped(Stop::RunTimedOut) => {
-                    ("skipped", "The run's time limit passed.".to_owned())
-                }
-                PhaseEnd::Stopped(Stop::ServerExited { step_id, exit }) => {
-                    note_server_exit(store, &row.id, step_id, exit, servers)?;
-                    (
-                        "skipped",
-                        format!("`{step_id}` exited with {exit} before the run ended."),
-                    )
-                }
-                _ => unreachable!(),
+            note_server_stop(store, &row.id, &stop, servers)?;
+            let to = if stop == Stop::Cancelled {
+                "cancelled"
+            } else {
+                "skipped"
             };
+            let why = skip_reason(&stop);
+            end = PhaseEnd::Stopped(stop);
             if !mark(
                 store,
                 &row.id,
@@ -623,15 +756,17 @@ fn phase(
             }
             (job.notify)(Notice::Runs);
             match wait_for_answer(store, &row.id, &step.id, &watching)? {
-                Some(answered) => {
-                    if let Some(outputs) = answered.1 {
-                        vars.steps.insert(step.id.clone(), outputs);
-                    }
-                    if !answered.0 && which != Phase::Teardown {
+                Answer::Given { passed, outputs } => {
+                    vars.steps.insert(step.id.clone(), outputs);
+                    if !passed && which != Phase::Teardown {
                         end = PhaseEnd::Failed;
                     }
                 }
-                None => return Ok(PhaseEnd::Gone),
+                Answer::Stopped(stop) => {
+                    note_server_stop(store, &row.id, &stop, servers)?;
+                    end = PhaseEnd::Stopped(stop);
+                }
+                Answer::Gone => return Ok(PhaseEnd::Gone),
             }
             (job.notify)(Notice::Runs);
             continue;
@@ -681,8 +816,8 @@ fn phase(
         }
         (job.notify)(Notice::Runs);
         vars.steps.insert(step.id.clone(), done.outputs);
-        if let Some(Stop::ServerExited { step_id, exit }) = &done.stopped {
-            note_server_exit(store, &row.id, step_id, exit, servers)?;
+        if let Some(stop) = &done.stopped {
+            note_server_stop(store, &row.id, stop, servers)?;
         }
         if which == Phase::Teardown {
             continue;
@@ -696,20 +831,35 @@ fn phase(
     Ok(end)
 }
 
-/// A `start` step whose process ended before the run did is marked failed, with the last
-/// lines it wrote.
-fn note_server_exit(
+/// A `start` step whose process ended before the run did, or wrote past the cap and was
+/// stopped, is marked failed, with the last lines it wrote. Other stops are not a server's.
+fn note_server_stop(
     store: &Store,
     run_id: &str,
-    step_id: &str,
-    exit: &str,
+    stop: &Stop,
     servers: &Mutex<Vec<Server>>,
 ) -> IpcResult<()> {
-    let tail = {
+    let (step_id, mut note) = match stop {
+        Stop::ServerExited { step_id, exit } => {
+            (step_id, format!("Exited with {exit} before the run ended."))
+        }
+        Stop::ServerOutputCapped { step_id } => (
+            step_id,
+            format!(
+                "Wrote more than {} of output, so it was stopped.",
+                exec::output_cap_words()
+            ),
+        ),
+        Stop::Cancelled | Stop::RunTimedOut => return Ok(()),
+    };
+    // What a server wrote past the cap is not worth quoting; what one wrote before dying is.
+    let tail = if matches!(stop, Stop::ServerOutputCapped { .. }) {
+        String::new()
+    } else {
         let servers = servers.lock().unwrap_or_else(PoisonError::into_inner);
         servers
             .iter()
-            .find(|s| s.started.step_id == step_id)
+            .find(|s| s.started.step_id == *step_id)
             .map(|s| {
                 let stderr = exec::read_capped(&s.started.stderr, exec::MAX_VARIABLE_BYTES);
                 let text = if stderr.trim().is_empty() {
@@ -721,7 +871,6 @@ fn note_server_exit(
             })
             .unwrap_or_default()
     };
-    let mut note = format!("Exited with {exit} before the run ended.");
     if !tail.is_empty() {
         note.push_str("\nlast lines:\n");
         note.push_str(&exec::indent(&tail, "  "));
@@ -739,27 +888,46 @@ fn note_server_exit(
     Ok(())
 }
 
-/// How a `manual` step was answered: whether it passed, and what the step left, when the
-/// answer came from a person rather than from the run stopping.
-type Answered = (bool, Option<BTreeMap<String, String>>);
+/// How a `manual` step's wait ended.
+enum Answer {
+    /// A person answered, and the step left its note.
+    Given {
+        passed: bool,
+        outputs: BTreeMap<String, String>,
+    },
+    /// The run stopped while it waited: a cancel is still a cancel, not a failed answer.
+    Stopped(Stop),
+    /// The run ended from outside.
+    Gone,
+}
 
-/// Wait for a `manual` step to be answered in the app. `Some((passed, outputs))` once it is;
-/// `None` when the run ended from outside. A cancel or the run's limit ends the wait.
+/// Wait for a `manual` step to be answered in the app. A cancel, the run's limit or a server
+/// going ends the wait with that reason.
 fn wait_for_answer(
     store: &Store,
     run_id: &str,
     step_id: &str,
     watching: &Watching<'_>,
-) -> IpcResult<Option<Answered>> {
+) -> IpcResult<Answer> {
     loop {
         let Some(step) = store.test_step(run_id, step_id)? else {
-            return Ok(None);
+            return Ok(Answer::Gone);
         };
         match step.status.as_str() {
-            "passed" => return Ok(Some((true, Some(step.outputs())))),
-            "failed" => return Ok(Some((false, Some(step.outputs())))),
+            "passed" => {
+                return Ok(Answer::Given {
+                    passed: true,
+                    outputs: step.outputs(),
+                })
+            }
+            "failed" => {
+                return Ok(Answer::Given {
+                    passed: false,
+                    outputs: step.outputs(),
+                })
+            }
             "waiting" => {}
-            _ => return Ok(None),
+            _ => return Ok(Answer::Gone),
         }
         if let Some(stop) = watching.stop() {
             let (to, note) = match &stop {
@@ -775,6 +943,13 @@ fn wait_for_answer(
                     "failed",
                     format!("`{step_id}` exited with {exit} while this waited."),
                 ),
+                Stop::ServerOutputCapped { step_id } => (
+                    "failed",
+                    format!(
+                        "`{step_id}` wrote more than {} of output while this waited, so it was stopped.",
+                        exec::output_cap_words()
+                    ),
+                ),
             };
             if !mark(
                 store,
@@ -786,9 +961,9 @@ fn wait_for_answer(
                 None,
                 Some(&note),
             )? {
-                return Ok(None);
+                return Ok(Answer::Gone);
             }
-            return Ok(Some((false, None)));
+            return Ok(Answer::Stopped(stop));
         }
         std::thread::sleep(Duration::from_millis(500));
     }

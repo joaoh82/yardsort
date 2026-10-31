@@ -140,7 +140,8 @@ A key that belongs to another action is reported as misplaced. `prompt` on a `ru
 example.
 
 **`cwd`** is a folder inside the workspace, relative to it, like `web` or `packages/api`. No
-`..`, no absolute path, no variables.
+`..`, no absolute path, no variables, and no symbolic link that leads outside the workspace: the
+step fails and says where the link went.
 
 **`env`** is a mapping of names to values. A name is letters, digits and `_`, not starting with a
 digit. Values may use variables.
@@ -270,15 +271,18 @@ environment as `YS_ENV_<NAME>`. A `start` process is kept running until the run 
 is stopped with everything it started; if it exits before that, the run fails there and the
 step's note has its exit code and last lines. A `manual` step waits for your **Pass** or
 **Fail** in the app. Each step has five minutes unless its `timeout` says, the whole run thirty
-unless the file's `timeout` says; a step that writes more than 16 MiB to stdout or stderr is
-stopped and fails. Each process's output goes to files under Yardsort's data directory,
-`test-runs/<run id>/<step>.stdout` and `.stderr`, kept for thirty days.
+unless the file's `timeout` says; a process that writes more than 16 MiB to stdout or stderr is
+stopped and fails, a `start` process too, whatever step the run is on by then. Each process's
+output goes to files under Yardsort's data directory, `test-runs/<run id>/<step>.stdout` and
+`.stderr`, kept for thirty days.
 
 **Cancelling.** `ys test cancel <run>` ends a run that is waiting or queued at once. A running
 run is asked to stop: the step it is on is ended, with its process and everything that process
-started, the steps not reached are marked cancelled, the teardown runs, and the run ends as
-cancelled. If Yardsort stops during a run, the next start ends the run as _errored_ and stops
-any server it left behind.
+started, or the request or question it was waiting on, the steps not reached are marked
+cancelled, the teardown runs, and the run ends as cancelled. If Yardsort stops during a run, the
+next start ends the run as _errored_ and stops any server it left behind. A run Yardsort could
+not see through for a reason of its own, its database locked for too long for one, ends as
+_errored_ with that reason, its servers stopped.
 
 **The verdict.** `ys test wait <run>` blocks until the run ends and prints it the way an agent
 can act on it:

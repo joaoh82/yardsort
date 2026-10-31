@@ -113,8 +113,9 @@ the action's keys. Each step may have `timeout` (`5m` unless said), except `star
 | `browser`  | `do` (a list of actions, below), `screenshots` (`on_failure`, `every_step`, `never`), `viewport` (`1280x800`), `headed`. |
 | `manual`   | `prompt`: the question the person answers with Pass or Fail.                                                             |
 
-`cwd` is relative to the workspace and inside it: no `..`, no absolute path, no variables. `env`
-is a mapping of names to values; values may use variables.
+`cwd` is relative to the workspace and inside it: no `..`, no absolute path, no variables, no
+symbolic link that leads out of it. `env` is a mapping of names to values; values may use
+variables.
 
 A `shell` line cannot hold `{{ … }}`: a value pasted into a shell line could become a command.
 The run's variables are in the environment instead — `$YS_RUN_ID`, `$YS_RUN_PORT`,

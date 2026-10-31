@@ -10,7 +10,9 @@
 
 use std::io;
 use std::process::{Child, Command, ExitStatus};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 /// How long a process gets to end on its own after being asked, before it is killed.
 const GRACE: Duration = Duration::from_secs(2);
@@ -153,6 +155,11 @@ pub fn fingerprint(pid: u32) -> Option<String> {
 /// its start time is still `expected` — and whatever it started with it. For `start`
 /// processes of a run the app stopped during. Does nothing on Windows: the job object ended
 /// them when the app's handle closed.
+///
+/// The leader going is not the group going: `npm run dev` may exit on TERM while the node it
+/// started ignores the signal. So the group is given the grace period as a whole, and what is
+/// left of it is killed, whether the leader is still in it or not. The group's id cannot be
+/// handed to a new process while any member remains, so the kill reaches no stranger.
 pub fn kill_orphan(pid: u32, expected: &str) -> bool {
     if fingerprint(pid).as_deref() != Some(expected) {
         return false;
@@ -167,7 +174,7 @@ pub fn kill_orphan(pid: u32, expected: &str) -> bool {
         }
         let asked = Instant::now();
         while asked.elapsed() < GRACE {
-            if fingerprint(pid).as_deref() != Some(expected) {
+            if group_is_empty(pgid) {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -181,6 +188,14 @@ pub fn kill_orphan(pid: u32, expected: &str) -> bool {
     {
         false
     }
+}
+
+/// Whether no process is left in the group `pgid`: signal 0 is delivered to nobody.
+#[cfg(unix)]
+fn group_is_empty(pgid: libc::pid_t) -> bool {
+    // Safety: signal 0 checks, and sends nothing.
+    let answer = unsafe { libc::kill(-pgid, 0) };
+    answer == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
 }
 
 #[cfg(windows)]
@@ -260,6 +275,8 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
 
     /// A process that starts a child of its own, both sleeping: the shape of a dev server.
@@ -315,5 +332,54 @@ mod tests {
                 "a pid that is gone, or reused, is not the process that was started"
             );
         }
+    }
+
+    /// A leader that exits on TERM while its child ignores the signal: the shape of a package
+    /// script around a server. The orphan kill must reach the child.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn an_orphans_survivors_go_when_its_leader_went_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        // The child is started with TERM ignored, which it keeps; the shell then takes TERM
+        // again, so it exits on the first signal and the child does not.
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            &format!(
+                "trap '' TERM; sleep 60 & echo $! > '{}'; trap - TERM; wait",
+                pidfile.display()
+            ),
+        ]);
+        command.stdin(std::process::Stdio::null());
+        let mut group = Group::spawn(&mut command).unwrap();
+        let pid = group.id();
+        let print = group.fingerprint().expect("a start time while it runs");
+        let asked = Instant::now();
+        let child: u32 = loop {
+            if let Ok(text) = std::fs::read_to_string(&pidfile) {
+                if let Ok(child) = text.trim().parse() {
+                    break child;
+                }
+            }
+            assert!(
+                asked.elapsed() < Duration::from_secs(5),
+                "the child's pid is written"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(fingerprint(child).is_some(), "the child runs");
+
+        assert!(kill_orphan(pid, &print), "the group was the one started");
+        // The test is the leader's parent, so it reaps the leader; init reaps the child.
+        let _ = group.wait();
+        let asked = Instant::now();
+        while fingerprint(child).is_some() && asked.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            fingerprint(child).is_none(),
+            "the child that ignored TERM was killed with the rest of the group"
+        );
     }
 }

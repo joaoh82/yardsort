@@ -46,6 +46,13 @@ pub enum Stop {
     RunTimedOut,
     /// A `start` process ended before the run did.
     ServerExited { step_id: String, exit: String },
+    /// A `start` process wrote more than [`MAX_OUTPUT_BYTES`] to a stream, and was stopped.
+    ServerOutputCapped { step_id: String },
+}
+
+/// `16 MiB`.
+pub fn output_cap_words() -> String {
+    format!("{} MiB", MAX_OUTPUT_BYTES / (1024 * 1024))
 }
 
 /// What the runner tells a step while it runs.
@@ -100,6 +107,13 @@ impl StepEnd {
             Stop::ServerExited { step_id, exit } => (
                 "failed",
                 format!("`{step_id}` exited with {exit} while this ran."),
+            ),
+            Stop::ServerOutputCapped { step_id } => (
+                "failed",
+                format!(
+                    "`{step_id}` wrote more than {} of output while this ran, so it was stopped.",
+                    output_cap_words()
+                ),
             ),
         };
         Self {
@@ -214,14 +228,7 @@ pub struct Context<'a> {
 impl Context<'_> {
     /// The folder a step runs in: the workspace, or `cwd` under it.
     fn cwd(&self, cwd: Option<&str>) -> Result<PathBuf, String> {
-        let Some(cwd) = cwd else {
-            return Ok(self.worktree.to_path_buf());
-        };
-        let path = self.worktree.join(cwd);
-        if !path.is_dir() {
-            return Err(format!("`cwd: {cwd}` is not a folder in the workspace."));
-        }
-        Ok(path)
+        step_dir(self.worktree, cwd)
     }
 
     /// A program by name, as the user's shell would find it.
@@ -292,6 +299,30 @@ impl Context<'_> {
             ))
         }
     }
+}
+
+/// The folder a step runs in: `worktree`, or `cwd` under it. The parser keeps `..` and
+/// absolute paths out of `cwd`; this keeps symlinks out. A link inside the workspace that
+/// points outside it would run the step there, under a `cwd` the approved file shows as a
+/// plain folder, so both sides are resolved and the one must be under the other.
+fn step_dir(worktree: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
+    let Some(cwd) = cwd else {
+        return Ok(worktree.to_path_buf());
+    };
+    let path = worktree.join(cwd);
+    if !path.is_dir() {
+        return Err(format!("`cwd: {cwd}` is not a folder in the workspace."));
+    }
+    let (Ok(root), Ok(real)) = (worktree.canonicalize(), path.canonicalize()) else {
+        return Err(format!("`cwd: {cwd}` cannot be resolved."));
+    };
+    if !real.starts_with(&root) {
+        return Err(format!(
+            "`cwd: {cwd}` leads outside the workspace, to {}.",
+            real.display()
+        ));
+    }
+    Ok(path)
 }
 
 /// A step's output files.
@@ -517,6 +548,7 @@ pub fn carry_out(
             timeout_secs,
         } => http(
             ctx,
+            watch,
             *method,
             url,
             headers,
@@ -579,8 +611,14 @@ fn run_process(
     };
     if let Some(text) = stdin {
         if let Some(mut pipe) = group.stdin() {
-            // A program that never reads its input is not a failure of the test.
-            let _ = pipe.write_all(text.as_bytes());
+            // Written from a thread of its own: a program that never reads its input fills
+            // the pipe, and the step must still see its deadline and a cancel meanwhile. The
+            // write ends when the program reads it all, or when the program ends, and either
+            // way the pipe closes behind it. Not reading is not a failure of the test.
+            let bytes = text.as_bytes().to_vec();
+            std::thread::spawn(move || {
+                let _ = pipe.write_all(&bytes);
+            });
         }
     }
     let outputs = files.outputs();
@@ -696,8 +734,15 @@ fn check_json(json: &JsonExpect, text: &str, what: &str) -> Option<String> {
         Ok(value) => value,
         Err(error) => return Some(format!("stdout_json: {what} is not JSON ({error}).")),
     };
-    let wanted: serde_json::Value =
-        serde_json::from_str(&json.equals).unwrap_or(serde_json::Value::Null);
+    let wanted: serde_json::Value = match serde_json::from_str(&json.equals) {
+        Ok(wanted) => wanted,
+        Err(error) => {
+            return Some(format!(
+                "stdout_json {}: `equals` is not JSON once its variables are filled in ({:?}: {error}).",
+                json.path, json.equals
+            ))
+        }
+    };
     match at_path(&value, &json.path) {
         Some(found) if *found == wanted => None,
         Some(found) => Some(format!(
@@ -755,13 +800,18 @@ fn wait_for(
             WaitTarget::Url { url } => {
                 let url = ctx.vars.render(url);
                 what = url.clone();
-                match client(Duration::from_secs(5)) {
-                    Ok(client) => match client.get(&url).send() {
-                        Ok(response) if response.status().is_success() => Ok(()),
-                        Ok(response) => Err(format!("it answered {}", response.status())),
-                        Err(error) => Err(plain_error(&error)),
-                    },
+                let client = match client(Duration::from_secs(5)) {
+                    Ok(client) => client,
                     Err(why) => return StepEnd::failed(why),
+                };
+                let asked = url.clone();
+                match watched(watch, move || {
+                    client.get(&asked).send().map_err(|e| plain_error(&e))
+                }) {
+                    Ok(Ok(response)) if response.status().is_success() => Ok(()),
+                    Ok(Ok(response)) => Err(format!("it answered {}", response.status())),
+                    Ok(Err(why)) => Err(why),
+                    Err(stop) => return StepEnd::stopped(stop, BTreeMap::new()),
                 }
             }
             WaitTarget::File { file } => {
@@ -860,6 +910,7 @@ fn command_once(
 #[allow(clippy::too_many_arguments)]
 fn http(
     ctx: &Context<'_>,
+    watch: &dyn Watch,
     method: HttpMethod,
     url: &str,
     headers: &BTreeMap<String, String>,
@@ -893,29 +944,37 @@ fn http(
             .body(ctx.vars.render(json));
     }
     let described = format!("{} {url}", method.name().to_uppercase());
-    let response = match request.send() {
-        Ok(response) => response,
-        Err(error) => return StepEnd::failed(format!("{described}: {}.", plain_error(&error))),
-    };
-    let status = response.status();
-    let mut header_map: BTreeMap<String, String> = BTreeMap::new();
-    for (name, value) in response.headers() {
-        let entry = header_map.entry(name.as_str().to_lowercase()).or_default();
-        if !entry.is_empty() {
-            entry.push_str(", ");
+    // The request and the body are waited for on a thread of their own, so the run's limit, a
+    // cancel and a server dying are seen while a slow server keeps the step waiting.
+    let answer = watched(watch, move || {
+        let response = request.send().map_err(|error| plain_error(&error))?;
+        let status = response.status();
+        let mut headers: BTreeMap<String, String> = BTreeMap::new();
+        for (name, value) in response.headers() {
+            let entry = headers.entry(name.as_str().to_lowercase()).or_default();
+            if !entry.is_empty() {
+                entry.push_str(", ");
+            }
+            entry.push_str(&String::from_utf8_lossy(value.as_bytes()));
         }
-        entry.push_str(&String::from_utf8_lossy(value.as_bytes()));
-    }
-    let bytes = match response.bytes() {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return StepEnd::failed(format!(
-                "{described}: reading the response: {}.",
-                plain_error(&error)
-            ))
-        }
+        let bytes = response
+            .bytes()
+            .map_err(|error| format!("reading the response: {}", plain_error(&error)))?;
+        Ok(Answer {
+            status,
+            headers,
+            body: String::from_utf8_lossy(&bytes).into_owned(),
+        })
+    });
+    let Answer {
+        status,
+        headers: header_map,
+        body: body_text,
+    } = match answer {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(why)) => return StepEnd::failed(format!("{described}: {why}.")),
+        Err(stop) => return StepEnd::stopped(stop, BTreeMap::new()),
     };
-    let body_text = String::from_utf8_lossy(&bytes).into_owned();
     let mut notes = check_http(expect, status, &header_map, &body_text, ctx);
     let mut kept = body_text;
     if kept.len() > MAX_BODY_BYTES {
@@ -945,6 +1004,38 @@ fn http(
         outputs: http_outputs(status, &header_map, kept),
         note: (!notes.is_empty()).then(|| notes.join("\n")),
         stopped: None,
+    }
+}
+
+/// What an `http` step's request came back with.
+struct Answer {
+    status: reqwest::StatusCode,
+    headers: BTreeMap<String, String>,
+    body: String,
+}
+
+/// Do `work` on a thread, and look at the stop signal every [`POLL`] until it is done. On a
+/// stop the work is left to end on its own — a request ends at its timeout — and its result
+/// is dropped.
+fn watched<T: Send + 'static>(
+    watch: &dyn Watch,
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<Result<T, String>, Stop> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(work());
+    });
+    loop {
+        match rx.recv_timeout(POLL) {
+            Ok(done) => return Ok(done),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Ok(Err("the request ended without an answer".to_owned()))
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if let Some(stop) = watch.stop() {
+            return Err(stop);
+        }
     }
 }
 
@@ -1207,6 +1298,58 @@ mod tests {
         )
         .unwrap()
         .contains("is not JSON"));
+        // An `equals` that is not JSON — an input with a quote in it, rendered into one —
+        // fails rather than becoming null, which a null field would satisfy.
+        let note = check_json(
+            &JsonExpect {
+                path: "gone".into(),
+                equals: "\"a\"b\"".into(),
+            },
+            r#"{"gone":null}"#,
+            "stdout",
+        )
+        .unwrap();
+        assert!(
+            note.starts_with(
+                "stdout_json gone: `equals` is not JSON once its variables are filled in"
+            ),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn a_step_runs_in_the_workspace_or_a_real_folder_under_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let worktree = dir.path().join("wt");
+        std::fs::create_dir_all(worktree.join("web")).unwrap();
+        assert_eq!(step_dir(&worktree, None).unwrap(), worktree);
+        assert_eq!(
+            step_dir(&worktree, Some("web")).unwrap(),
+            worktree.join("web")
+        );
+        assert_eq!(
+            step_dir(&worktree, Some("api")).unwrap_err(),
+            "`cwd: api` is not a folder in the workspace."
+        );
+        #[cfg(unix)]
+        {
+            // A link inside the workspace to a folder outside it: the approved file says
+            // `cwd: elsewhere`, a plain folder by the look of it.
+            let outside = dir.path().join("outside");
+            std::fs::create_dir_all(&outside).unwrap();
+            std::os::unix::fs::symlink(&outside, worktree.join("elsewhere")).unwrap();
+            let why = step_dir(&worktree, Some("elsewhere")).unwrap_err();
+            assert!(
+                why.starts_with("`cwd: elsewhere` leads outside the workspace, to "),
+                "{why}"
+            );
+            // A link that stays inside is fine.
+            std::os::unix::fs::symlink(worktree.join("web"), worktree.join("www")).unwrap();
+            assert_eq!(
+                step_dir(&worktree, Some("www")).unwrap(),
+                worktree.join("www")
+            );
+        }
     }
 
     #[test]

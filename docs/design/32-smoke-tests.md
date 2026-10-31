@@ -537,8 +537,25 @@ why:
   or between steps, with its exit code and its last lines on the `start` step; the proposal had
   not said. A server that died is the usual reason the next step fails, and the note says so
   instead of leaving a connection refused.
-- **A step's stream is capped at 16 MiB** and the step fails past it (06 #46). A server that
-  logs that much is stopped with the run.
+- **A step's stream is capped at 16 MiB** and the step fails past it (06 #46). A `start`
+  process is held to the same cap for as long as it runs, by the watch every step and every
+  `manual` wait asks: past it the server is stopped, its step fails and so does the run, the way
+  a server that died does.
+- **`cwd` is resolved before use.** The parser keeps `..` and absolute paths out of it; the
+  runner canonicalises the workspace and the folder and refuses one that leads outside, which
+  a symbolic link an agent added would, under a `cwd` the approved file shows as a plain folder.
+- **Nothing a step waits on is deaf to the run.** A `run` step's `stdin` is written from a
+  thread of its own, so a program that never reads it cannot hold the step past its deadline;
+  an `http` request, and a `wait_for url` probe, are waited for the same way, with the stop
+  signal looked at every tenth of a second meanwhile. A cancel that lands while a `manual` step
+  waits keeps its reason: the step and the run are `cancelled`, not failed.
+- **Every way out of a run is the same way out.** The run's servers, its scratch folder and
+  its row are held by a guard: a store error on the way — the database locked longer than the
+  store waits — or a panic still stops the servers, fails the step it was on, skips the rest
+  and ends the run as `errored` with the reason, so the next run of that test is not refused
+  as one already going. `kill_orphan` likewise kills what is left of the group after its grace
+  period whether or not the leader is still in it: `npm run dev` exits on TERM, the node it
+  started may not.
 - **Orphans are found by start time.** A `start` step records its pid and, on Linux and macOS,
   the process's start time; a restart kills the group only when both still match. Windows
   needs none of it: the job object ends its processes when the app's handle closes.
