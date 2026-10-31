@@ -899,7 +899,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)): a refresh whose
       answer was lost is answered once more, a device hears why terminals under an earlier daemon
       wait, and there is no maximum session.
-- [ ] R3–R7: the mobile app, hardening, headless hosts, sync, managed launch. The server is
+- [ ] R3: the phone app. Planned on 2026-10-30 in [31](31-remote-r3.md): a TypeScript protocol
+      client tested against the same fixtures as the Rust side, then an Expo app signed in,
+      paired, showing computers, workspaces and activity, watching and controlling a terminal,
+      and the states a phone can be left in. Seven slices, then a run on a physical iPhone and
+      Android phone, which is the gate. Nothing is built. The app and its client are MPL-2.0
+      (06 #43). There is no Android phone to test on yet, and R3 cannot close without one.
+- [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
       ([30](30-open-source-and-managed.md)).
@@ -957,7 +963,7 @@ switch off, or Alt-clicked, it gets nothing.
 
 ## M28 — Smoke tests
 
-Proposed in [31-smoke-tests](31-smoke-tests.md), after a six-question design pass on
+Proposed in [32-smoke-tests](32-smoke-tests.md), after a six-question design pass on
 2026-10-30.
 
 - A smoke test is a file in the repository, `.yardsort/tests/<id>.yaml`: setup, steps and
@@ -979,7 +985,7 @@ Proposed in [31-smoke-tests](31-smoke-tests.md), after a six-question design pas
       `yaml.rs` and `template.rs` in the core), the validator with a line and column on every
       problem, the catalog of a worktree's `.yardsort/tests`, the five reading commands of
       `ys test` (list, show, validate, example, guide), and the guide. Recorded in
-      [31 § slice 1](31-smoke-tests.md#slice-1-what-shipped).
+      [31 § slice 1](32-smoke-tests.md#slice-1-what-shipped).
 
 _Exit:_ on all three platforms, an agent in a workspace writes a test with `run`, `http`,
 `browser` and `manual` steps, runs it, and is told in its own terminal which step failed and

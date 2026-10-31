@@ -6,7 +6,7 @@
 //! branch. This module is the file: its types, the parser and validator that turn text into them
 //! with a line and column on every mistake, and the catalog of a worktree's tests. Running one is
 //! the runner's business, and a file from a repository never runs without the user having seen
-//! it. See `docs/design/31-smoke-tests.md`.
+//! it. See `docs/design/32-smoke-tests.md`.
 
 mod parse;
 
@@ -22,7 +22,8 @@ pub use parse::parse;
 /// The schema version this build reads. A file asking for a later one is listed, not run.
 pub const SCHEMA_VERSION: u32 = 1;
 
-/// Where a repository keeps its smoke tests, relative to the worktree.
+/// Where a repository keeps its smoke tests, relative to the worktree, as the docs name it.
+/// Paths are built with [`dir`], which joins the two folders the way the platform does.
 pub const DIR: &str = ".yardsort/tests";
 
 /// Files bigger than this are not read. A smoke test is a page of text, not a data set.
@@ -446,7 +447,7 @@ impl Entry {
 
 /// Where a worktree keeps its smoke tests.
 pub fn dir(worktree: &Path) -> PathBuf {
-    worktree.join(DIR)
+    worktree.join(".yardsort").join("tests")
 }
 
 /// Every test in a worktree's `.yardsort/tests`, sorted by name. A missing folder has none.

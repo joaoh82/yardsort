@@ -272,9 +272,10 @@ still stands; these are what the code added to it.
     the core (`remote::host::CredentialStore`); the app puts the OS credential store behind it,
     and a directory only its owner can read (`0700`, files `0600`) is the other, chosen with
     `YARDSORT_CREDENTIALS_DIR`. The headless host (R5) will use the directory, from its own mount.
-36. **Should the session title cross to remote clients?** It may quote the first message. Without
-    it a phone cannot tell two conversations apart. Lean: yes, as now, marked user content that
-    clients never log; revisit if a title-only privacy mode is asked for.
+36. ~~**Should the session title cross to remote clients?**~~ **Settled 2026-10-30, as the lean
+    said** ([31 §5](31-remote-r3.md#5--decisions)): yes, as now. The phone app treats it as the
+    person's content: shown, never logged, never written to its cache. A mode that hides titles
+    can come if one is asked for.
 37. ~~**When an old daemon with agents running cannot enforce leases, what does a remote client
     see?**~~ **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
     the terminals are listed as before, and `host.describe` says why they cannot be opened yet
@@ -289,13 +290,18 @@ still stands; these are what the code added to it.
     **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
     no maximum. The operator disables the person at the provider and runs
     `yardsort-server revoke-account`, which closes their live connections at once.
-40. **Under what license is the phone app published?** It goes through Apple's App Store and
-    Google Play, and the Free Software Foundation's view is that the App Store's terms add
-    restrictions the GPL forbids ([30 §6](30-open-source-and-managed.md#6--the-phone-app-a-question-for-r3)).
-    The owner, as the only copyright holder, can publish it anyway; code others contribute under
-    the GPL alone would not allow it. Lean: decide at R3, before anyone else contributes to it,
-    between the GPL with an app-store exception (an additional permission under GPLv3 §7) and a
-    permissive license.
+
+From [30](30-open-source-and-managed.md), the open-source line drawn for the managed service:
+
+43. ~~**Under what license is the phone app published?**~~ **Settled 2026-10-30: MPL-2.0**, by
+    the owner's decision, as the lean said ([31 §6](31-remote-r3.md#6--the-license-43)), for the
+    app and its TypeScript protocol client. The Free Software Foundation's view is that the App
+    Store's terms add restrictions the GPL forbids
+    ([30 §6](30-open-source-and-managed.md#6--the-phone-app-a-question-for-r3)); the MPL's own
+    text allows distributing the built app under other terms while its source stays open, as
+    VLC for iOS has done since 2013. Decided before any app code, while every line is the
+    owner's. (Numbered 40 until 2026-10-30, which the conversation-context questions already
+    used.)
 
 ## Conversation context
 
@@ -325,17 +331,17 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
 
 ## Smoke tests
 
-From the design pass in [31-smoke-tests](31-smoke-tests.md), 2026-10-30.
+From the design pass in [32-smoke-tests](32-smoke-tests.md), 2026-10-30.
 
-43. **Should an approval follow a rebase?** A file whose content is unchanged but whose path
+44. **Should an approval follow a rebase?** A file whose content is unchanged but whose path
     moved with a rename keeps its approval under the hash; a file that changed only in a comment
     does not. Whether to hash the parsed form instead of the text is a slice 2 finding.
-44. **Should a run tell the agent without being asked?** When `ys test run` came from an
+45. **Should a run tell the agent without being asked?** When `ys test run` came from an
     agent's terminal, the result could be typed into that agent once quiet, as `send_to_session`
     does. Version one does not: the agent asked by running `wait`, and an agent that did not is
     doing something else. Revisit after dogfooding.
-45. **How much output to keep per step.** Unbounded files with pruning by age is the proposal;
+46. **How much output to keep per step.** Unbounded files with pruning by age is the proposal;
     a dev server that logs a line per millisecond for an hour fills a disk. A per-step cap, with
     the head and the tail kept, is likely the slice 2 answer.
-46. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
+47. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
     common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.

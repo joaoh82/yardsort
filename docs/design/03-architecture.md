@@ -561,7 +561,7 @@ name, key, expectation, browser action and `{{ variable }}` checked and reported
 column. What the two parsers share — the problem type, serde's errors tidied, the lenient read of
 a file's heading, positions in the source, durations and "did you mean" — is `yaml.rs`, and the
 template language is `template.rs`, both at the crate root. Nothing runs a test yet; see
-[31-smoke-tests](31-smoke-tests.md).
+[32-smoke-tests](32-smoke-tests.md).
 
 ### Workflow runs
 
