@@ -92,6 +92,8 @@ pub fn start(app: &AppHandle, data_dir: &Path) {
         driver: driver::Driver::default(),
         _lock: lock,
     });
+    // Smoke test runs are carried out under the same lock, from the same thread's ticks.
+    crate::smoke::start(app);
     let handle = app.clone();
     let spawned = std::thread::Builder::new()
         .name("workflows".into())
@@ -137,6 +139,7 @@ fn drive(handle: &AppHandle, woken: &Receiver<()>) {
             Ok(false) => {}
             Err(error) => eprintln!("workflows: cannot read runs: {}", error.message),
         }
+        crate::smoke::tick(handle, &state);
     }
 }
 

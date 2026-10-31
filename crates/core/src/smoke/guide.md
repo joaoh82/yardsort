@@ -117,9 +117,10 @@ the action's keys. Each step may have `timeout` (`5m` unless said), except `star
 is a mapping of names to values; values may use variables.
 
 A `shell` line cannot hold `{{ … }}`: a value pasted into a shell line could become a command.
-The run's variables are in the environment instead — `$YS_RUN_PORT`, `$YS_RUN_DIR`,
-`$YS_WORKSPACE_PATH`, `$YS_INPUT_<ID>`, `$YS_ENV_<NAME>` — and every `run` and `start` process
-gets them too. Prefer `run` where there is no pipe; it works the same on every platform.
+The run's variables are in the environment instead — `$YS_RUN_ID`, `$YS_RUN_PORT`,
+`$YS_RUN_DIR`, `$YS_WORKSPACE_PATH`, `$YS_INPUT_<ID>`, `$YS_ENV_<NAME>` — and every `run` and
+`start` process gets them too. Prefer `run` where there is no pipe; it works the same on every
+platform.
 
 ```yaml
 id: api-smoke
@@ -217,7 +218,13 @@ ys test validate .yardsort/tests/login.yaml   # each problem as file:line:column
 ys test example                               # a complete file to start from
 ys test list                                  # the tests in this workspace, and whether each is ready
 ys test show login                            # one file as Yardsort reads it
+ys test run login                             # queue a run here; prints the run's id
+ys test wait <run>                            # block until it ends; the verdict, step by step
+ys test log <run> --step server --stderr      # what a step's process wrote
 ```
 
 `validate` needs no Yardsort profile and exits 1 when anything is wrong. Fix every line it names
-before telling the user the test is ready.
+before telling the user the test is ready. `run` needs Yardsort open, and a file the user has not
+approved there waits: `wait` waits through that. `wait` exits 0 when the run passed, 1 when it
+failed, 2 for anything else, and prints which step failed and why, with the last lines of any
+server the test started; act on that before asking the user to look.

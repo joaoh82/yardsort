@@ -28,6 +28,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0016_project_conversations.sql"),
     include_str!("../migrations/0017_session_began.sql"),
     include_str!("../migrations/0018_remote_host.sql"),
+    include_str!("../migrations/0019_smoke_tests.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -462,6 +463,9 @@ impl StepStatus {
         )
     }
 }
+
+mod smoke;
+pub use smoke::*;
 
 pub struct Store {
     conn: Mutex<Connection>,

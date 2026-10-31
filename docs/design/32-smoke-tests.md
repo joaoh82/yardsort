@@ -257,7 +257,7 @@ test calls can find them too.
 
 The rule from project automation stands: a file in a repository never enables a command. What
 enables a test run is an **approval**: the user, in the app, looking at the steps of this exact
-file and pressing **Run**. Migration `0016` adds `test_approvals (project_id, test_id,
+file and pressing **Run**. Migration `0019` adds `test_approvals (project_id, test_id,
 content_hash, approved_at)`. A run is queued as `awaiting_approval` when no approval matches the
 file's hash; the app shows it — a card in the workspace and the sidebar's count — with every
 step rendered as words (_run `bun run seed --user demo@example.test`_, _GET
@@ -280,7 +280,7 @@ sandbox, and the words in it are written to be read.
 
 ## The run
 
-Migration `0016_smoke_tests.sql`:
+Migration `0019_smoke_tests.sql` (numbered 0016 in the proposal, before main took three):
 
 - `test_runs`: id, project id, workspace id and a copy of its name, test id and name, the **file
   as it was** when the run was asked for and its hash, inputs as JSON, `status` (`awaiting_approval`,
@@ -459,7 +459,7 @@ Each is one pull request with its docs, tests and changelog line, each standing 
    rule, the catalog of a worktree's `.yardsort/tests`, `ys test list | show | validate |
 example | guide`, and `docs/guide/smoke-tests.md` with the format. Fixtures: one file per
    validation error.
-2. **The runner.** Migration 0016; the run store and the queue with the approval state; the
+2. **The runner.** ✅ Migration 0019; the run store and the queue with the approval state; the
    runner thread with `run`, `shell`, `start`, `wait_for` and `http` (`reqwest`, blocking, moved
    from the app's dependencies to the core's); setup, steps, teardown; the port; output files;
    cancellation and the process-tree kill on all three platforms; a restart mid-run; pruning.
@@ -517,6 +517,50 @@ above, and why:
 - **Not here:** readiness beyond "ready" or "N problems". Whether a `browser` test has a browser
   on the machine is the finder's answer, which is slice 4; `--json` says `usesBrowser` so a
   caller can tell.
+
+## Slice 2: what shipped
+
+`yardsort_core::smoke::{runs, runner, exec, report}`, `store/smoke.rs`, `process.rs`, migration
+0019, and `ys test run | wait | runs | log | cancel`. What changed from the proposal above, and
+why:
+
+- **A cancel of a running run is a request, not a state.** `cancel_test_run` ends a run that
+  has not started; one that is running gets `cancel_requested_at`, and the runner, which looks
+  at the store every quarter second while a step runs, stops the step, marks what was not
+  reached `cancelled`, runs the teardown and ends the run as `cancelled`. A status that changed
+  under the runner would have refused the teardown's own moves, which is the one thing a cancel
+  must not skip. `ys test cancel` says which of the two happened.
+- **One thread per run, started by a driver the workflow driver's thread ticks,** under the
+  same profile lock; the runner has no thread of its own to wake. Each thread opens its own
+  store connection, as `ys` would.
+- **A `start` process that ends before the run does fails the run**, at the step then running
+  or between steps, with its exit code and its last lines on the `start` step; the proposal had
+  not said. A server that died is the usual reason the next step fails, and the note says so
+  instead of leaving a connection refused.
+- **A step's stream is capped at 16 MiB** and the step fails past it (06 #46). A server that
+  logs that much is stopped with the run.
+- **Orphans are found by start time.** A `start` step records its pid and, on Linux and macOS,
+  the process's start time; a restart kills the group only when both still match. Windows
+  needs none of it: the job object ends its processes when the app's handle closes.
+- **The runner sees `manual` steps through the store:** `waiting` until `answer_test_step`
+  moves it, which the app's command does. Nothing in `ys` can.
+- **Expectations are rendered.** `stdout_contains` and `stdout_json.equals` may name
+  `{{ run.port }}` or what an earlier step left; the proposal only said texts in steps could.
+- **`{{ steps.<id>.stdout }}` is the text,** the first 64 KiB of it with trailing newlines
+  dropped, while the row keeps the path. A test reads a command's answer into the next step the
+  way a shell's `$(…)` would.
+- **The run's id is in the environment too,** as `YS_RUN_ID`, beside the five the proposal
+  named.
+- **`project_automation`'s setup command uses the same process group,** so a setup stopped for
+  taking ten minutes takes what it started with it, which the old kill did not.
+- **The app has the IPC for slice 3 already:** `test_list`, `test_runs`, `test_run_steps`,
+  `test_run_start`, `test_run_approve`, `test_run_refuse`, `test_run_cancel`,
+  `test_step_answer`, `test_env_get` and `test_env_save`, with `TestRunsChanged` and
+  `TestRunOutput` events. The approval card, the tab and the Tests view are the pixels on top.
+- **Not here:** browser steps, which `run` refuses with the step's name; the `requested_by:
+workflow` path, which is slice 5; and the **Ask every time** switch, which is a setting the
+  slice 3 dialog needs before anything reads it. Until slice 3 there is nothing in the window
+  that approves, so a run started from `ys` waits; the changelog says so.
 
 ## Not in version one, on purpose
 

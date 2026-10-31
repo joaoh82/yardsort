@@ -985,7 +985,13 @@ Proposed in [32-smoke-tests](32-smoke-tests.md), after a six-question design pas
       `yaml.rs` and `template.rs` in the core), the validator with a line and column on every
       problem, the catalog of a worktree's `.yardsort/tests`, the five reading commands of
       `ys test` (list, show, validate, example, guide), and the guide. Recorded in
-      [31 § slice 1](32-smoke-tests.md#slice-1-what-shipped).
+      [32 § slice 1](32-smoke-tests.md#slice-1-what-shipped).
+- [x] Slice 2: migration 0019, the run store with the approval state, the runner thread for
+      `run`, `shell`, `start`, `wait_for`, `http` and `manual`, the free port, output files,
+      cancellation with the process tree killed on all three platforms, a restart mid-run,
+      pruning, and `ys test run | wait | runs | log | cancel`. Tested with real processes and
+      a real server on the run's port. Recorded in
+      [32 § slice 2](32-smoke-tests.md#slice-2-what-shipped).
 
 _Exit:_ on all three platforms, an agent in a workspace writes a test with `run`, `http`,
 `browser` and `manual` steps, runs it, and is told in its own terminal which step failed and

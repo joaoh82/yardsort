@@ -489,13 +489,31 @@ ys test validate health.yaml      # each problem as file:line:column: message; e
 ys test validate -                # the same, reading the file from standard input
 ys test example                   # a complete, valid test to start from
 ys test guide                     # the file format, written for an agent
+ys test run health                # queue a run in this workspace; Yardsort must be open
+ys test run health --workspace fix-login --input user=demo@example.test
+ys test wait 8c1d                 # block until the run ends, print the verdict; exit 0, 1 or 2
+ys test wait 8c1d --timeout 5m
+ys test runs                      # runs, newest first; --workspace narrows, --run 8c1d shows one
+ys test log 8c1d                  # the first failed step's output, or the last step's
+ys test log 8c1d --step server --stderr
+ys test cancel 8c1d               # stop a run; a running one tears down first
 ```
 
-`list` and `show` read the worktree of the workspace this is run in, or in an agent's terminal
-there, so `--workspace` can be left out inside one; outside, name it. `validate`, `example` and
-`guide` need no profile, so they work on any machine, in CI, or on a file an agent has just
-written. `--json` works as everywhere; `list --json` says for each test whether it is `runnable`
-and whether it `usesBrowser`. Running a test is not in this release.
+`list`, `show` and `run` read the worktree of the workspace this is run in, or in an agent's
+terminal there, so `--workspace` can be left out inside one; outside, name it. `validate`,
+`example` and `guide` need no profile, so they work on any machine, in CI, or on a file an agent
+has just written. `--json` works as everywhere; `list --json` says for each test whether it is
+`runnable` and whether it `usesBrowser`.
+
+`run` queues the run and returns at once with its id. Yardsort must be open: the app carries runs
+out, and a run of a file you have not approved in the app waits there first — `run` says so, and
+there is no way to approve from here. `wait` blocks until the run ends and prints the verdict
+the way an agent can act on it: the status, the step that failed and why, and the last lines of
+any server the test started. It exits 0 when the run passed, 1 when it failed and 2 for anything
+else — cancelled, refused, errored, or still going when `--timeout` (20 minutes unless said)
+passed. `log` prints what a step's process wrote, or the body an `http` step got; `--json` gives
+the file's path and the step's outputs instead. A run can be named by the start of its id, as
+`runs` prints it. See [Smoke tests](smoke-tests.md#running-a-test).
 
 ### `ys activity export`
 

@@ -18,6 +18,7 @@ mod publish;
 mod quit;
 mod remote;
 mod sessions;
+mod smoke;
 mod state;
 mod terminal;
 mod updates;
@@ -203,6 +204,16 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::workflow_start,
             workflows::commands::workflow_cancel,
             workflows::commands::workflow_describe,
+            smoke::commands::test_list,
+            smoke::commands::test_runs,
+            smoke::commands::test_run_steps,
+            smoke::commands::test_run_start,
+            smoke::commands::test_run_approve,
+            smoke::commands::test_run_refuse,
+            smoke::commands::test_run_cancel,
+            smoke::commands::test_step_answer,
+            smoke::commands::test_env_get,
+            smoke::commands::test_env_save,
             usage::usage_machine,
             usage::usage_tokens,
             usage::settings_save_usage,
@@ -214,6 +225,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             quit::QuitRequested,
             workflows::SessionStarted,
             workflows::commands::WorkflowRunsChanged,
+            smoke::TestRunsChanged,
+            smoke::TestRunOutput,
             remote::RemotePairingRequested
         ])
 }

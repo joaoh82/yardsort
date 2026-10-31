@@ -2923,3 +2923,165 @@ fn a_smoke_test_file_is_checked_without_a_profile() {
     assert!(guide.status.success());
     assert!(String::from_utf8_lossy(&guide.stdout).contains("ys test validate"));
 }
+
+/// A smoke test that needs nothing but git, which these tests already need.
+const SMOKE_TEST_WITH_GIT: &str = "id: demo
+name: Git is there
+version: 1
+steps:
+  - id: version
+    action: run
+    program: git
+    args: [--version]
+    expect:
+      stdout_contains: git version
+";
+
+/// Carry out what is queued, as the app's thread would, and wait for it.
+fn carry_out_test_runs(fx: &Fixture) {
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let env = std::sync::Arc::new(ShellEnv {
+        vars: std::env::vars().collect(),
+        source: EnvSource::Process,
+        warning: None,
+    });
+    let driver = yardsort_core::smoke::runner::Driver::new(std::sync::Arc::new(|_| {}));
+    driver.tick(&store, &fx.data_dir, &env).unwrap();
+    driver.join();
+}
+
+#[test]
+fn a_smoke_test_run_waits_for_approval_which_ys_cannot_give_then_is_carried_out() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "add a health check");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+    write_smoke_test(&path, "demo.yaml", SMOKE_TEST_WITH_GIT);
+
+    // With the app closed nothing would carry a run out, so nothing is queued.
+    let closed = fx.ys_from(Some(&path), &["test", "run", "demo"]).failed();
+    assert!(closed.contains("Yardsort is not running"), "{closed}");
+    assert_eq!(fx.ys(&["test", "runs", "--json"]).ok().trim(), "[]");
+
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .unwrap();
+    let bad_input = fx
+        .ys_from(
+            Some(&path),
+            &["test", "run", "demo", "--input", "colour=red"],
+        )
+        .failed();
+    assert!(bad_input.contains("has no input `colour`"), "{bad_input}");
+    let missing = fx
+        .ys(&["test", "run", "nope", "--workspace", name])
+        .failed();
+    assert!(
+        missing.contains("There is no smoke test `nope`"),
+        "{missing}"
+    );
+
+    // A file nobody has seen waits, and says so; the run's id is how to follow it.
+    let queued = fx.ys_from(Some(&path), &["test", "run", "demo"]).ok();
+    assert!(
+        queued.contains("waiting for you to approve it in Yardsort"),
+        "{queued}"
+    );
+    let json = fx.ys(&["test", "runs", "--json"]).ok();
+    let runs: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = &runs[0];
+    assert_eq!(run["status"], "awaiting_approval");
+    assert_eq!(run["test"], "demo");
+    let id = run["id"].as_str().unwrap().to_owned();
+    let short = &id[..8];
+    assert!(
+        queued.contains(&format!("ys test wait {short}")),
+        "{queued}"
+    );
+    let listed = fx.ys(&["test", "runs"]).ok();
+    assert!(listed.contains("awaiting approval"), "{listed}");
+
+    // Waiting for a run nobody approved ends with the limit, and exit 2: not a verdict.
+    let waited = fx.ys(&["test", "wait", short, "--timeout", "1s"]);
+    assert_eq!(waited.code, Some(2), "{}", waited.stderr);
+    assert!(
+        waited
+            .stdout
+            .contains("waiting for you to approve it in Yardsort"),
+        "{}",
+        waited.stdout
+    );
+    assert!(
+        waited.stdout.contains("still awaiting approval after 1s"),
+        "{}",
+        waited.stdout
+    );
+    let nothing = fx.ys(&["test", "log", short]).failed();
+    assert!(nothing.contains("has not run any step yet"), "{nothing}");
+    // A second ask while one waits is refused, not queued twice.
+    let twice = fx.ys_from(Some(&path), &["test", "run", "demo"]).failed();
+    assert!(twice.contains("is already going"), "{twice}");
+
+    // The user approves in the app — here, the store — and the app's runner carries it out.
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    assert!(store.approve_test_run(&id).unwrap());
+    carry_out_test_runs(&fx);
+
+    let passed = fx.ys(&["test", "wait", short]);
+    assert_eq!(passed.code, Some(0), "{}", passed.stderr);
+    assert!(
+        passed
+            .stdout
+            .starts_with("passed  demo  (1 of 1 steps passed, "),
+        "{}",
+        passed.stdout
+    );
+    let log = fx.ys(&["test", "log", short]).ok();
+    assert!(log.contains("git version"), "{log}");
+    let log_json: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["test", "log", short, "--json"]).ok()).unwrap();
+    assert_eq!(log_json["step"], "version");
+    assert!(log_json["path"]
+        .as_str()
+        .unwrap()
+        .ends_with("version.stdout"));
+    assert_eq!(log_json["outputs"]["exit"], "0");
+    let no_such = fx.ys(&["test", "log", short, "--step", "nope"]).failed();
+    assert!(no_such.contains("has no step `nope`"), "{no_such}");
+    let shown = fx.ys(&["test", "runs", "--run", short]).ok();
+    assert!(shown.contains("passed  demo"), "{shown}");
+    let row = shown
+        .lines()
+        .find(|l| l.starts_with("version"))
+        .unwrap_or_default();
+    let cells: Vec<&str> = row.split_whitespace().collect();
+    assert_eq!(cells, ["version", "steps", "run", "passed"], "{shown}");
+    let ended = fx.ys(&["test", "cancel", short]).failed();
+    assert!(ended.contains("has already ended: passed"), "{ended}");
+
+    // The same file is approved now: the next run goes straight to the queue.
+    let again = fx.ys_from(Some(&path), &["test", "run", "demo"]).ok();
+    assert!(!again.contains("approve"), "{again}");
+    let json = fx.ys(&["test", "runs", "--json"]).ok();
+    let runs: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(runs[0]["status"], "queued");
+    let second = runs[0]["id"].as_str().unwrap().to_owned();
+    let cancelled = fx.ys(&["test", "cancel", &second[..8]]).ok();
+    assert!(cancelled.contains("Cancelled run"), "{cancelled}");
+    let waited = fx.ys(&["test", "wait", &second[..8]]);
+    assert_eq!(waited.code, Some(2));
+    assert!(
+        waited.stdout.contains("Cancelled from ys."),
+        "{}",
+        waited.stdout
+    );
+
+    // A changed file is a new file: it waits again.
+    write_smoke_test(
+        &path,
+        "demo.yaml",
+        &SMOKE_TEST_WITH_GIT.replace("Git is there", "Git is still there"),
+    );
+    let changed = fx.ys_from(Some(&path), &["test", "run", "demo"]).ok();
+    assert!(changed.contains("waiting for you to approve"), "{changed}");
+}
