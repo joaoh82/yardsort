@@ -476,6 +476,27 @@ characters, as `runs` prints it. `--json` works as everywhere. See
 [Running a workflow](workflows.md#running-a-workflow) and
 [Requesting a code review](workflows.md#requesting-a-code-review).
 
+### `ys test`
+
+A workspace's [smoke tests](smoke-tests.md): the `.yaml` files in its worktree's
+`.yardsort/tests` folder.
+
+```sh
+ys test list                      # the tests in this workspace, whether each is ready, and where they are
+ys test list --workspace fix-login
+ys test show health               # the file that would be used, then any problems on stderr
+ys test validate health.yaml      # each problem as file:line:column: message; exit 1 if any
+ys test validate -                # the same, reading the file from standard input
+ys test example                   # a complete, valid test to start from
+ys test guide                     # the file format, written for an agent
+```
+
+`list` and `show` read the worktree of the workspace this is run in, or in an agent's terminal
+there, so `--workspace` can be left out inside one; outside, name it. `validate`, `example` and
+`guide` need no profile, so they work on any machine, in CI, or on a file an agent has just
+written. `--json` works as everywhere; `list --json` says for each test whether it is `runnable`
+and whether it `usesBrowser`. Running a test is not in this release.
+
 ### `ys activity export`
 
 Every recorded event as **NDJSON** on stdout — one JSON object per line, oldest first, with the

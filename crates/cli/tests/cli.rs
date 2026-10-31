@@ -2773,3 +2773,153 @@ fn nothing_is_written_through_a_link_to_another_repositorys_issue() {
     }
     assert!(tasks.written().is_empty(), "{:?}", tasks.written());
 }
+
+/// A smoke test file with one mistake: a variable naming a field the workspace does not have.
+const SMOKE_TEST_WITH_A_TYPO: &str = "id: ping
+name: Ping
+version: 1
+steps:
+  - id: ping
+    action: run
+    program: echo
+    args: [\"{{ workspace.brnch }}\"]
+";
+
+fn write_smoke_test(worktree: &std::path::Path, name: &str, text: &str) -> PathBuf {
+    let folder = worktree.join(".yardsort").join("tests");
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join(name);
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+#[test]
+fn smoke_tests_are_listed_from_the_workspace_s_own_folder() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "add a health check");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+
+    // Nothing yet: say where they would go, and how to start one.
+    let empty = fx.ys(&["test", "list", "--workspace", name]).ok();
+    assert!(empty.contains("No smoke tests in"), "{empty}");
+    assert!(empty.contains("ys test example"), "{empty}");
+
+    let example = fx.ys(&["test", "example"]).ok();
+    write_smoke_test(&path, "health.yaml", &example);
+    write_smoke_test(&path, "ping.yaml", SMOKE_TEST_WITH_A_TYPO);
+    let table = fx.ys(&["test", "list", "--workspace", name]).ok();
+    assert!(table.contains("health"), "{table}");
+    assert!(table.contains("ready"), "{table}");
+    assert!(table.contains("1 problem"), "{table}");
+    assert!(
+        table.contains(&path.join(".yardsort").join("tests").display().to_string()),
+        "the folder should be named: {table}"
+    );
+
+    // From inside the worktree, the workspace needs no naming.
+    let json = fx.ys_from(Some(&path), &["test", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let ping = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "ping")
+        .expect("the broken file is listed");
+    assert_eq!(ping["runnable"], false);
+    assert_eq!(ping["problems"][0]["line"], 8);
+    let health = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "health")
+        .unwrap();
+    assert_eq!(health["runnable"], true);
+    assert_eq!(health["usesBrowser"], true);
+
+    // Outside any workspace, with none named, it says so.
+    let error = fx.ys(&["test", "list"]).failed();
+    assert!(error.contains("--workspace"), "{error}");
+}
+
+#[test]
+fn a_smoke_test_is_shown_with_its_problems_on_stderr() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "add a health check");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+    let file = write_smoke_test(&path, "ping.yaml", SMOKE_TEST_WITH_A_TYPO);
+
+    let run = fx.ys(&["test", "show", "ping", "--workspace", name]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert!(run.stdout.contains("id: ping"), "{}", run.stdout);
+    assert!(
+        run.stderr.contains(&format!("{}:8:13:", file.display())),
+        "{}",
+        run.stderr
+    );
+    assert!(run.stderr.contains("has no `brnch`"), "{}", run.stderr);
+
+    let error = fx
+        .ys(&["test", "show", "nope", "--workspace", name])
+        .failed();
+    assert!(
+        error.contains("There is no smoke test `nope`. There are: ping."),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_smoke_test_file_is_checked_without_a_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("ping.yaml");
+    std::fs::write(&file, SMOKE_TEST_WITH_A_TYPO).unwrap();
+    let nowhere = dir.path().join("no-profile");
+    let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .args(["--data-dir", &nowhere.to_string_lossy()])
+        .args(["test", "validate", &file.to_string_lossy()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "{}:8:13: `{{{{ workspace.brnch }}}}`",
+            file.display()
+        )),
+        "{stderr}"
+    );
+
+    // The example validates, read from standard input, and the guide's own commands exist.
+    let example = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .args(["--data-dir", &nowhere.to_string_lossy(), "test", "example"])
+        .output()
+        .unwrap();
+    assert!(example.status.success());
+    let mut validate = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .args([
+            "--data-dir",
+            &nowhere.to_string_lossy(),
+            "test",
+            "validate",
+            "-",
+            "--json",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(validate.stdin.as_mut().unwrap(), &example.stdout).unwrap();
+    let checked = validate.wait_with_output().unwrap();
+    assert!(checked.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["id"], "health");
+
+    let guide = Command::new(env!("CARGO_BIN_EXE_ys"))
+        .args(["--data-dir", &nowhere.to_string_lossy(), "test", "guide"])
+        .output()
+        .unwrap();
+    assert!(guide.status.success());
+    assert!(String::from_utf8_lossy(&guide.stdout).contains("ys test validate"));
+}

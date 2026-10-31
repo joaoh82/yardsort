@@ -553,6 +553,16 @@ string, the one place in the tree, because that is the only form Cursor takes; t
 are single-quoted. Passive events only. Producer `cursor`, method `hook`. Built from the
 documentation and owed a recording. See [16-agent-events-stage-2-cursor](16-agent-events-stage-2-cursor.md).
 
+### Smoke tests (`crates/core/src/smoke/`)
+
+A smoke test is a YAML file in a repository's `.yardsort/tests`, read and checked by
+`smoke::parse` the way a workflow file is: serde's pass over spanned raw structs, then every
+name, key, expectation, browser action and `{{ variable }}` checked and reported with a line and
+column. What the two parsers share — the problem type, serde's errors tidied, the lenient read of
+a file's heading, positions in the source, durations and "did you mean" — is `yaml.rs`, and the
+template language is `template.rs`, both at the crate root. Nothing runs a test yet; see
+[32-smoke-tests](32-smoke-tests.md).
+
 ### Workflow runs
 
 Migrations 0012 and 0013 add the runs of [workflows](21-workflows.md): named sequences of agent work,

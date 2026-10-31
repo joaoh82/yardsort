@@ -1,7 +1,9 @@
-//! `{{ variables }}` in a workflow's text: finding them, and saying what is wrong with one.
+//! `{{ variables }}` in a workflow's or a smoke test's text: finding them, and saying what is
+//! wrong with one.
 //!
 //! Deliberately small. A placeholder is a dotted name and nothing else — no filters, no
 //! conditions, no expressions — so a file reads the same to a person as it does to the engine.
+//! Workflows and smoke tests share it, so a variable is written the same way in both.
 //! `\{{` is a literal `{{`, for a prompt that has to show one.
 
 /// One `{{ … }}` found in a piece of text.

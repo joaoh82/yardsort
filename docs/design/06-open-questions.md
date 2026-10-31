@@ -328,3 +328,20 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     2026-10-25, with a question asked once per project the first time an agent started beside a
     conversation (built in slice 2); with the default on there is nothing to ask, and the
     question is gone.
+
+## Smoke tests
+
+From the design pass in [32-smoke-tests](32-smoke-tests.md), 2026-10-30.
+
+44. **Should an approval follow a rebase?** A file whose content is unchanged but whose path
+    moved with a rename keeps its approval under the hash; a file that changed only in a comment
+    does not. Whether to hash the parsed form instead of the text is a slice 2 finding.
+45. **Should a run tell the agent without being asked?** When `ys test run` came from an
+    agent's terminal, the result could be typed into that agent once quiet, as `send_to_session`
+    does. Version one does not: the agent asked by running `wait`, and an agent that did not is
+    doing something else. Revisit after dogfooding.
+46. **How much output to keep per step.** Unbounded files with pruning by age is the proposal;
+    a dev server that logs a line per millisecond for an hour fills a disk. A per-step cap, with
+    the head and the tail kept, is likely the slice 2 answer.
+47. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
+    common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.
