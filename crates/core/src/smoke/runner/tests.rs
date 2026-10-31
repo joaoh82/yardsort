@@ -996,13 +996,23 @@ teardown:
             .any(|s| s.step_id == "hold" && s.status == "running")
     });
     let server = fx.step(&fx.steps(&id), "server").outputs();
-    // Another connection takes the write lock and keeps it longer than the store waits for
-    // one: the runner's next move errors. It is let go once that has happened, so the ending
-    // the runner owes the run can be written.
+    // Another connection takes the write lock and keeps it until the runner has given the
+    // store up: its next move errors once it has waited its while, and the first thing it
+    // does then is clear what the run left — the server, and the scratch folder, which is
+    // the sign to let the lock go, so the ending the runner owes the run can be written.
     let elsewhere = rusqlite::Connection::open(fx.data_dir.join("yardsort.db")).unwrap();
     elsewhere.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let scratch = runs_dir(&fx.data_dir).join(&id).join("scratch");
+    assert!(
+        scratch.exists(),
+        "the run has its scratch folder while it runs"
+    );
     let held = Instant::now();
-    while held.elapsed() < Duration::from_millis(6500) {
+    while scratch.exists() {
+        assert!(
+            held.elapsed() < Duration::from_secs(30),
+            "the runner gave the store up and cleared what the run left"
+        );
         std::thread::sleep(Duration::from_millis(100));
     }
     elsewhere.execute_batch("ROLLBACK").unwrap();

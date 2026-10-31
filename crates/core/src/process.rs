@@ -10,11 +10,12 @@
 
 use std::io;
 use std::process::{Child, Command, ExitStatus};
-use std::time::Duration;
 #[cfg(unix)]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-/// How long a process gets to end on its own after being asked, before it is killed.
+/// How long a process gets to end on its own after being asked, before it is killed. Windows
+/// has no asking: the job is terminated.
+#[cfg(unix)]
 const GRACE: Duration = Duration::from_secs(2);
 
 /// A child process in a group of its own.
