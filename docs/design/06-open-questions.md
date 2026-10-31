@@ -272,9 +272,10 @@ still stands; these are what the code added to it.
     the core (`remote::host::CredentialStore`); the app puts the OS credential store behind it,
     and a directory only its owner can read (`0700`, files `0600`) is the other, chosen with
     `YARDSORT_CREDENTIALS_DIR`. The headless host (R5) will use the directory, from its own mount.
-36. **Should the session title cross to remote clients?** It may quote the first message. Without
-    it a phone cannot tell two conversations apart. Lean: yes, as now, marked user content that
-    clients never log; revisit if a title-only privacy mode is asked for.
+36. ~~**Should the session title cross to remote clients?**~~ **Settled 2026-10-30, as the lean
+    said** ([31 §5](31-remote-r3.md#5--decisions)): yes, as now. The phone app treats it as the
+    person's content: shown, never logged, never written to its cache. A mode that hides titles
+    can come if one is asked for.
 37. ~~**When an old daemon with agents running cannot enforce leases, what does a remote client
     see?**~~ **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
     the terminals are listed as before, and `host.describe` says why they cannot be opened yet
@@ -289,13 +290,18 @@ still stands; these are what the code added to it.
     **Settled 2026-10-30, as the lean said** ([27 §21](27-remote-r2.md#21--after-the-exit-review-what-r2-left-open)):
     no maximum. The operator disables the person at the provider and runs
     `yardsort-server revoke-account`, which closes their live connections at once.
-40. **Under what license is the phone app published?** It goes through Apple's App Store and
-    Google Play, and the Free Software Foundation's view is that the App Store's terms add
-    restrictions the GPL forbids ([30 §6](30-open-source-and-managed.md#6--the-phone-app-a-question-for-r3)).
-    The owner, as the only copyright holder, can publish it anyway; code others contribute under
-    the GPL alone would not allow it. Lean: decide at R3, before anyone else contributes to it,
-    between the GPL with an app-store exception (an additional permission under GPLv3 §7) and a
-    permissive license.
+
+From [30](30-open-source-and-managed.md), the open-source line drawn for the managed service:
+
+43. ~~**Under what license is the phone app published?**~~ **Settled 2026-10-30: MPL-2.0**, by
+    the owner's decision, as the lean said ([31 §6](31-remote-r3.md#6--the-license-43)), for the
+    app and its TypeScript protocol client. The Free Software Foundation's view is that the App
+    Store's terms add restrictions the GPL forbids
+    ([30 §6](30-open-source-and-managed.md#6--the-phone-app-a-question-for-r3)); the MPL's own
+    text allows distributing the built app under other terms while its source stays open, as
+    VLC for iOS has done since 2013. Decided before any app code, while every line is the
+    owner's. (Numbered 40 until 2026-10-30, which the conversation-context questions already
+    used.)
 
 ## Conversation context
 
