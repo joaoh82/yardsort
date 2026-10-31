@@ -11,6 +11,7 @@ default:
 # Install dependencies (JS packages + Rust crates)
 setup:
     bun install
+    cd packages/remote-client && bun install
     cargo fetch
 
 # Run the app with hot reload. `ys` is built first: the app finds it next to its own binary.
@@ -36,8 +37,8 @@ cli *args:
 # Formatting, lints, types and all tests. (CI additionally runs `bindings-check`.)
 check: fmt-check lint typecheck test
 
-# All tests, Rust and frontend
-test: test-rust test-web
+# All tests, Rust, frontend and the protocol client
+test: test-rust test-web test-client
 
 # Rust tests (also regenerates src/lib/bindings.ts)
 test-rust *args:
@@ -46,6 +47,10 @@ test-rust *args:
 # Frontend tests
 test-web *args:
     bun run test {{ args }}
+
+# The TypeScript protocol client's tests (packages/remote-client), against a real server and host it starts with Cargo
+test-client *args:
+    cd packages/remote-client && bun install --frozen-lockfile && bun test {{ args }}
 
 # Frontend tests in watch mode
 test-watch:
@@ -61,9 +66,10 @@ lint:
 lint-windows:
     bun run lint:windows
 
-# Typecheck the frontend
+# Typecheck the frontend and the protocol client
 typecheck:
     bun run typecheck
+    cd packages/remote-client && bun install --frozen-lockfile && bun run typecheck
 
 # Format everything
 fmt:
@@ -102,6 +108,10 @@ server-sign-in *args:
 # Pair a pretend phone with a host (`phone [SERVER] CODE`), or be a pretend host (`host [SERVER]`)
 server-pair *args:
     cargo run -q -p yardsort-server --example pair -- {{ args }}
+
+# The same pretend phone in TypeScript, through packages/remote-client: `[SERVER] CODE`, or `devices [SERVER]`
+client-pair *args:
+    cd packages/remote-client && bun install --frozen-lockfile && bun tools/pair.ts {{ args }}
 
 # The server's tests, with its PostgreSQL half against the local database
 server-test *args:

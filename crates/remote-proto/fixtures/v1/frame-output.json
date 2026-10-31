@@ -1,0 +1,34 @@
+{
+  "about": "Terminal output frames as they cross the wire (hex), and what each reads as. Each writes back as its hex, or as reencoded when that is given: the reserved bytes are read past and written as zero.",
+  "frames": [
+    {
+      "hex": "010100000403020105000000060000000000000078",
+      "stream": 16909060,
+      "epoch": 5,
+      "seq": 6,
+      "bytes": "78"
+    },
+    {
+      "hex": "010100000700000003000000ffffffffffff1f001b5b324a1b5b3f3130343968fffe6f6b",
+      "stream": 7,
+      "epoch": 3,
+      "seq": 9007199254740991,
+      "bytes": "1b5b324a1b5b3f3130343968fffe6f6b"
+    },
+    {
+      "hex": "0101000001000000000000000000000000000000",
+      "stream": 1,
+      "epoch": 0,
+      "seq": 0,
+      "bytes": ""
+    },
+    {
+      "hex": "0101abcdffffffffffffffff0c00000000000000c3a9",
+      "stream": 4294967295,
+      "epoch": 4294967295,
+      "seq": 12,
+      "bytes": "c3a9",
+      "reencoded": "01010000ffffffffffffffff0c00000000000000c3a9"
+    }
+  ]
+}

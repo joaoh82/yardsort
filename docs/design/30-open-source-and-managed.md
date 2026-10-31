@@ -18,7 +18,7 @@ sold is running it. What must stay private is a short, specific list, and none o
 | ---------------------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------- |
 | The server: `crates/server` (`yardsort-server`), its image, its Fly configs and the self-host recipe             | AGPL-3.0-only | `crates/server/LICENSE`, its Cargo.toml                                                                               |
 | Everything else: the app, the core, `ys`, the PTY crates, `remote-proto`, `remote-client`, the website, the docs | GPL-3.0-only  | `LICENSE`, the workspace's Cargo.toml                                                                                 |
-| The phone app and its TypeScript protocol client: `apps/mobile`, `packages/remote-client` (R3; not created yet)  | MPL-2.0       | Their own `LICENSE` and `package.json`, from the slice that creates each ([31 §6](31-remote-r3.md#6--the-license-43)) |
+| The phone app and its TypeScript protocol client: `apps/mobile` (R3; not created yet), `packages/remote-client`  | MPL-2.0       | Their own `LICENSE` and `package.json`, from the slice that creates each ([31 §6](31-remote-r3.md#6--the-license-43)) |
 
 **Why the server is AGPL.** The GPL's obligations follow distribution: whoever gives someone a
 copy must give them the source too. A hosted service gives nobody a copy, so under the GPL anyone

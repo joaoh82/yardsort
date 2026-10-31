@@ -903,8 +903,14 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       client tested against the same fixtures as the Rust side, then an Expo app signed in,
       paired, showing computers, workspaces and activity, watching and controlling a terminal,
       and the states a phone can be left in. Seven slices, then a run on a physical iPhone and
-      Android phone, which is the gate. Nothing is built. The app and its client are MPL-2.0
-      (06 #43). There is no Android phone to test on yet, and R3 cannot close without one.
+      Android phone, which is the gate. The app and its client are MPL-2.0 (06 #43). There is no
+      Android phone to test on yet, and R3 cannot close without one. Slice 1 was built on
+      2026-10-31: `packages/remote-client`, the protocol client in TypeScript, with no
+      dependencies. The Rust side's fixtures pin it, and they now include binary frames. It is
+      tested against the real server and a real host through a stand-in
+      (`crates/server/examples/stand-in.rs`). The pairing tool has a TypeScript twin,
+      `just client-pair` ([31 §9](31-remote-r3.md#9--what-the-first-slice-adds)). Nothing has
+      run on a phone.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

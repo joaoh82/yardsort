@@ -25,9 +25,10 @@
 //! - **How the numbers run.** After the [`Attached`] reply, the snapshot comes as output frames
 //!   numbered `position.seq`, then each later piece of output and each resize takes the next
 //!   number: output as frames, a resize as an [`Event`](crate::Event). A piece larger than
-//!   [`crate::MAX_OUTPUT_CHUNK`] comes as several frames with the same number, in order. So the
-//!   numbers a client sees never go down and never skip one; if they do, something was lost, and
-//!   it attaches again.
+//!   [`crate::MAX_OUTPUT_CHUNK`] comes as several frames with the same number, in order, each
+//!   but the last exactly that large; so a piece is whole once a shorter frame or the next number
+//!   comes. The numbers a client sees never go down and never skip one; if they do, something
+//!   was lost, and it attaches again. A client resumes only after a piece it knows is whole.
 //! - **Resuming is the host's call.** A client that lost its connection asks to attach again
 //!   with the last position it drew. The host resumes when it still keeps everything since: the
 //!   reply says `resumed`, and the items after that position follow, as they would have. When it

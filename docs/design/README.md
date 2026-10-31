@@ -35,7 +35,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 28  | [Remote infrastructure](28-remote-infrastructure.md)                    | Local, staging and production; Fly.io, ZITADEL Cloud, PostgreSQL. Staging live                                          |
 | 29  | [Conversation context](29-conversation-context.md)                      | Proposal: every agent in a workspace can read the others' conversations, as a digest from their transcripts; no model   |
 | 30  | [Open source and the managed service](30-open-source-and-managed.md)    | The server is AGPL, the phone app MPL, the rest GPL; production runs the public server unmodified; what stays private   |
-| 31  | [Remote, R3](31-remote-r3.md)                                           | The phone app. Planned: a TypeScript client, an Expo app, seven slices and a device run                                 |
+| 31  | [Remote, R3](31-remote-r3.md)                                           | The phone app. Slice 1 built: the TypeScript protocol client. Then an Expo app, six slices and a device run             |
 | 32  | [Smoke tests](32-smoke-tests.md)                                        | Proposal, and slice 1 built: a test file in the repository an agent writes and Yardsort checks, approved before it runs |
 
 ## Vocabulary
