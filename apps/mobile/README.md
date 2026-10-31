@@ -46,7 +46,9 @@ file dependency: after changing `packages/remote-client`, run `bun install` here
 
 You need macOS with Xcode, signed in to your Apple account (Xcode → Settings → Accounts), and the
 iPhone plugged in, unlocked and trusting the Mac. On the iPhone, turn on Developer Mode (Settings
-→ Privacy & Security → Developer Mode) when iOS asks.
+→ Privacy & Security → Developer Mode) when iOS asks. Besides Xcode, the Mac needs Bun, Node.js
+(Expo's command line runs on it) and CocoaPods; with Homebrew,
+`brew install oven-sh/bun/bun node cocoapods watchman`. Rust is not needed for the app.
 
 ```sh
 just mobile-ios      # or, here: bun install && bun run ios
