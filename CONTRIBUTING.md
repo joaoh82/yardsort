@@ -6,8 +6,8 @@ small contributions are as appreciated as large ones.
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Contributions are
 licensed under the project's [GPL-3.0 license](LICENSE), apart from those to the remote server,
 `crates/server`, which are under its [AGPL-3.0 license](crates/server/LICENSE), and those to the
-TypeScript protocol client, `packages/remote-client`, which are under its
-[MPL-2.0 license](packages/remote-client/LICENSE)
+phone app, `apps/mobile`, and its TypeScript protocol client, `packages/remote-client`, which
+are under their [MPL-2.0 license](apps/mobile/LICENSE)
 ([why](docs/design/30-open-source-and-managed.md)).
 
 ## Ways to help
@@ -43,6 +43,8 @@ Useful while developing:
 | `just check`                         | Everything CI checks except the bindings: formatting, lints, types, all tests.                                                                                 |
 | `just test-rust` / `just test-web`   | One side's tests; both take extra arguments.                                                                                                                   |
 | `just test-client`                   | The TypeScript protocol client's tests (`packages/remote-client`), against a real server and host it starts with Cargo.                                        |
+| `just test-mobile`                   | The phone app's tests (`apps/mobile`): its logic against that same server, its screens under Jest.                                                             |
+| `just mobile-ios`                    | Build the phone app's development build onto an iPhone plugged into a Mac, and serve its code. See `apps/mobile/README.md`.                                    |
 | `just fmt`                           | Format Rust and TypeScript.                                                                                                                                    |
 | `just bindings-check`                | Fail if the generated TypeScript bindings are stale. Run before pushing.                                                                                       |
 | `just lint-windows`                  | Clippy the PTY crates for Windows from any OS.                                                                                                                 |
@@ -69,6 +71,8 @@ packages/remote-client/
                      types and their limits, signing in, pairing and relay channels. Its own Bun
                      project, with no dependencies, under MPL-2.0. Tested against the Rust side's
                      fixtures and a real server (crates/server/examples/stand-in.rs).
+apps/mobile/         The phone app: Expo, Expo Router, its screens in src/app/ and what they
+                     call in src/lib/. Its own Bun project, under MPL-2.0. See its README.
 crates/server/       The remote server: signing in through an OIDC provider, accounts, devices,
   migrations/        their credentials and the relay, kept in PostgreSQL and served over HTTP. Its own
   dev/               numbered SQL files, append-only like the core's; dev/ is the local

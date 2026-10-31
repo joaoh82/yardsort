@@ -633,6 +633,12 @@ remote ever talks to it directly. Instead:
   number and notice a silent link. It is its own Bun project, with no dependencies, under
   MPL-2.0. The fixtures in `remote-proto/fixtures/v1/` pin both sides, and its tests run against
   the real server and host through `crates/server/examples/stand-in.rs`.
+- `apps/mobile` is the phone app (R3, [31](31-remote-r3.md)), an Expo app (SDK 58, Expo Router)
+  and its own Bun project, MPL-2.0. It reaches servers only through `packages/remote-client`.
+  Its screens read a snapshot from `src/lib/accounts.ts`, which signs in through the system
+  browser to `yardsort://signed-in` and keeps a profile per server in SecureStore: the server's
+  address, the id it gave, this phone's device there and its refresh credential. Its native
+  projects are generated, never committed.
 - `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
   Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of
   its own with `yardsort_core::remote::serve`. When the link fails, every channel lets go of what
@@ -804,6 +810,8 @@ yardsort/
 │  └─ server/                # the remote server: sign-in, devices, pairing, relay (M26)
 ├─ packages/
 │  └─ remote-client/         # a device's side in TypeScript, for the phone app; MPL-2.0 (R3)
+├─ apps/
+│  └─ mobile/                # the phone app, Expo; MPL-2.0 (R3)
 └─ .github/workflows/        # check + bundle matrix: ubuntu, macos, windows
 ```
 

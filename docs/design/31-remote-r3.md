@@ -1,7 +1,8 @@
 # Remote, R3: the phone app
 
 **Status:** planned on 2026-10-30. The first slice, the TypeScript protocol client, was built on
-2026-10-31 (§9); there is no app yet. This is R3's plan: what it has to show, what it starts
+2026-10-31 (§9). The second, the app signed in, was built the same day (§10), and has not yet run
+on a phone. This is R3's plan: what it has to show, what it starts
 from, the decisions taken before any app code exists, the slices, and what each slice's smoke
 test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -462,7 +463,89 @@ Built on 2026-10-31, on Linux.
 5. `just client-pair devices`, signing in once more, lists the first run's device as revoked,
    the app's computer as signed in, and itself as this one.
 
-## 10 · Open after this plan
+## 10 · What the second slice adds
+
+Built on 2026-10-31, on Linux. Nothing of it has run on a phone yet: its smoke test, below, is the
+first time.
+
+- **`apps/mobile`**, its own Bun project (§3): `LICENSE` with the MPL-2.0 text, `"license":
+"MPL-2.0"`, the MPL's short notice in each file, and a README on running it. Expo SDK 58, every
+  package pinned exactly as Expo's installer chose it: `expo` 58.0.22, `expo-router` 58.0.29,
+  `react` 19.3.0, `react-native` 0.88.1, `expo-secure-store` 58.0.2, `expo-web-browser`
+  58.0.7, `expo-crypto` 58.0.7, `expo-dev-client` 58.0.18, `expo-device` 58.0.5,
+  `react-native-safe-area-context` 5.10.1 and `react-native-screens` 4.30.1, among others in its
+  `package.json`. `ios/` and `android/` are generated when a build needs them, never committed.
+  The development build is `Yardsort Dev`, `dev.yardsort.mobile.development`; a release build
+  would be `dev.yardsort.mobile`, and nothing in R3 makes one.
+- **The screens:** Connect, the account (its devices, with this phone marked, and signing out),
+  and the servers on the phone (one in use, another added through Connect). Native components
+  only; text follows the system's size, and every control has a label for screen readers.
+- **Connect takes a server's address.** It does not offer the managed service, since production
+  is not set up (28), as the desktop's Remote settings do not. Looking a server up sends only
+  `GET /v1/server`. It shows the server's name, its address, who it signs in with, that the
+  account there is that server's own, and that whoever runs it can see what passes through, not
+  end to end (proposal §9). Signing in names the phone; iOS tells an app only "iPhone", so the
+  field starts with that.
+- **What it decides beyond §5:**
+  - **A profile is a server's address and the id it gave.** Before a refresh credential goes to
+    an address, the app asks the address who it is. If it now answers as another server, nothing
+    is sent; the app says so, and the person can remove the profile. A server's id is what the
+    server says, so this alone is no defence against a server that lies; it keeps a credential
+    from going to a server set up again, or moved, at the same address.
+  - Signing in where the phone is signed in already opens that profile instead.
+  - A sign-in whose credential cannot be kept is revoked at once, with the access that came with
+    it, so no device is left at the server that nothing holds.
+  - A credential the server refuses, on opening or on any request, means this phone was signed
+    out there: the profile is deleted and the phone says so. A server out of reach deletes
+    nothing, and is tried again.
+  - Signing out revokes the phone at the server. When the server is out of reach, the phone
+    stays signed in unless the person removes it from this phone only, and is told the server
+    still counts it until another device revokes it.
+  - Opening a profile is one at a time, since it spends the refresh credential: a second caller
+    waits for the first.
+  - Switching back to a profile opened since the app started reuses its session.
+- **Tests: 26.** The logic, 17 under `bun test`, against the real server and its sign-in through
+  the stand-in (two of them at once, for two servers): signing in, a closed browser, a sign-in
+  that cannot be kept, opening after a restart, opening twice at once, an address that answers
+  as another server, a server out of reach, signed out from another device on opening and while
+  open, signing out, and two servers. The screens, 9 under Jest with `jest-expo` and Expo
+  Router's in-memory router, against a small fake server whose answers the real client decodes:
+  Connect's lookup and what it says, a bad address, signing in, a closed sign-in, a server
+  signed in to already, signing out with a no respected, signing out out of reach, signed out at
+  the server, and out of reach on opening. Breaking the address check, the one-at-a-time
+  opening, the order credential-then-list, or the question before signing out each failed a
+  test. Two runners, because the screens need React Native's transforms and the logic needs the
+  server, which Bun starts as the client's tests do.
+- **Lint is Expo's** (`eslint-config-expo`), on ESLint 9.39.5: its React plugin fails to load
+  under the ESLint 10 the desktop uses. The desktop's lint skips `apps/mobile`, and Vitest
+  skips it too.
+- `just check` runs the app's typecheck, lint and tests (`test-mobile`); CI runs them on all three
+  systems after the client's. `just mobile-ios` builds and installs the development app on an
+  iPhone from a Mac, and `just mobile-start` serves its code to one already installed.
+- **What was shown without a phone:** Metro bundles the app for iOS and Android, and Hermes
+  compiles both bundles. `expo-doctor` passes its 20 checks. `expo prebuild` generates both
+  native projects with the `yardsort` scheme and the development identifier. None of that runs
+  the app: whether the client works under Hermes, SecureStore keeps what it is given, and the
+  sign-in session comes back through `yardsort://signed-in` is what the smoke test shows.
+- **Not built here:** iOS needs macOS and Xcode, and this machine had no Android SDK, so neither
+  app was built. Android stays untried until it is, in an emulator first (§7).
+
+**Its smoke test, on the iPhone against staging:**
+
+1. On the Mac, from this branch, with the iPhone plugged in and unlocked: `just mobile-ios`.
+   Choose the iPhone, and the paid team. `Yardsort Dev` opens on the phone.
+2. **Connect:** `https://remote-staging.yardsort.sh`, **Look up**. It shows staging's name, its
+   address, the ZITADEL host it signs in with, and that whoever runs it can see what passes
+   through.
+3. Name the phone and **Sign in**. iOS asks to let the app sign in with the website; continue,
+   and sign in with your staging account. Back in the app: "Signed in to … as …", and the
+   account's devices with this one marked **This phone**.
+4. Close the app from the app switcher and open it again: it is still signed in, with no browser.
+5. **Sign out**, then **Cancel**: still signed in. **Sign out** again, and confirm: Connect.
+6. `just client-pair devices https://remote-staging.yardsort.sh`, signing in in the browser,
+   lists the phone as revoked.
+
+## 11 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

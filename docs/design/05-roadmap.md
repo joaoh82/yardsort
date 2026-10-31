@@ -909,8 +909,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       dependencies. The Rust side's fixtures pin it, and they now include binary frames. It is
       tested against the real server and a real host through a stand-in
       (`crates/server/examples/stand-in.rs`). The pairing tool has a TypeScript twin,
-      `just client-pair` ([31 §9](31-remote-r3.md#9--what-the-first-slice-adds)). Nothing has
-      run on a phone.
+      `just client-pair` ([31 §9](31-remote-r3.md#9--what-the-first-slice-adds)). Slice 2 was
+      built the same day: `apps/mobile`, an Expo SDK 58 app that connects to a server, signs in
+      through the system browser, lists the account's devices and signs out, with a profile per
+      server ([31 §10](31-remote-r3.md#10--what-the-second-slice-adds)). Nothing has run on a
+      phone yet; slice 2's smoke test, on the iPhone against staging, is the first time.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

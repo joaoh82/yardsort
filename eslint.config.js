@@ -5,7 +5,18 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "target", "src-tauri", "src/lib/bindings.ts", "website", "crates"] },
+  {
+    ignores: [
+      "dist",
+      "target",
+      "src-tauri",
+      "src/lib/bindings.ts",
+      "website",
+      "crates",
+      // The phone app lints itself, with Expo's rules (`apps/mobile/eslint.config.js`).
+      "apps/mobile",
+    ],
+  },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

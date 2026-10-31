@@ -1,0 +1,8 @@
+# Made by `expo prebuild` and `expo run`: the native projects are generated, never committed.
+/ios/
+/android/
+.expo/
+expo-env.d.ts
+*.jks
+*.keystore
+*.mobileprovision

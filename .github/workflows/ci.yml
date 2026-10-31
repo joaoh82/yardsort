@@ -91,6 +91,15 @@ jobs:
           bun run typecheck
           bun test
 
+      # Its logic runs against the same stand-in; its screens run under Jest. No phone is involved.
+      - name: Phone app — typecheck, lint, test
+        working-directory: apps/mobile
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run lint
+          bun run test
+
       - name: TypeScript bindings are up to date
         shell: bash
         run: git diff --exit-code -- src/lib/bindings.ts

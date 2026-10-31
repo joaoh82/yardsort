@@ -10,3 +10,6 @@ website/out
 website/next-env.d.ts
 website/public/docs-images
 website/bun.lock
+apps/mobile/.expo
+apps/mobile/ios
+apps/mobile/android
