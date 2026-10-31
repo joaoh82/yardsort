@@ -18,6 +18,7 @@ import {
   type ControlLoss,
   encodeFrame,
   type HostId,
+  MAX_OUTPUT_CHUNK,
   openChannel,
   Secret,
   type TerminalId,
@@ -91,6 +92,14 @@ function relay(host: Host, greeting: unknown = { connected: { host: "h" } }) {
 const answer = (socket: ServerWebSocket<Stage>, request: Request, result: unknown) =>
   socket.send(JSON.stringify({ requestId: request.requestId, result }));
 
+/** Wait, briefly, for `done`. */
+async function until(done: () => boolean): Promise<void> {
+  for (let tries = 0; !done(); tries++) {
+    if (tries > 200) throw new Error("it did not happen in time");
+    await Bun.sleep(5);
+  }
+}
+
 const HOST = "h" as HostId;
 const TERMINAL = "t" as TerminalId;
 const access = new Secret("access");
@@ -144,6 +153,35 @@ describe("liveness", () => {
     expect(asked.filter((r) => r.op === "host.describe").length).toBeGreaterThanOrEqual(3);
     channel.close();
     expect((await channel.ended).reason).toBe("closedHere");
+  });
+
+  test("a lease's renewals going unanswered do not keep a dead channel open", async () => {
+    // The computer grants the lease and then hears nothing more: renewals go out, nothing comes.
+    const { client, asked } = relay((request, socket) => {
+      if (request.op === "terminal.acquire") {
+        answer(socket, request, {
+          kind: "lease",
+          id: "l",
+          generation: 1,
+          ttlMs: 30_000,
+          renewEveryMs: 30,
+        });
+      }
+    });
+    const channel = await openChannel(client, access, HOST, {
+      client: "test/1",
+      probeAfterMs: 150,
+      probeTimeoutMs: 100,
+    });
+    const losses: ControlLoss[] = [];
+    const control = await channel.acquire(TERMINAL, { lost: (why) => losses.push(why) });
+    const typed = control.input("ls\r").catch((e: unknown) => e);
+    expect((await channel.ended).reason).toBe("silent");
+    expect(asked.filter((r) => r.op === "terminal.renew").length).toBeGreaterThanOrEqual(3);
+    expect(asked.some((r) => r.op === "host.describe")).toBe(true);
+    expect(control.held).toBe(false);
+    expect(losses.map((l) => l.kind)).toEqual(["closed"]);
+    expect(await typed).toBeInstanceOf(ChannelClosed);
   });
 });
 
@@ -284,6 +322,75 @@ describe("a terminal's stream", () => {
     expect(attachment.drawn).toEqual({ epoch: 2, seq: 42 });
     channel.close();
   });
+
+  const SNAPSHOT_AT_5 = {
+    kind: "attached",
+    stream: 5,
+    start: "snapshot",
+    position: { epoch: 0, seq: 5 },
+    size: { cols: 80, rows: 24 },
+    controller: { kind: "nobody" },
+  };
+  const piece = (length: number) =>
+    encodeFrame({ stream: 5, position: { epoch: 0, seq: 5 }, bytes: new Uint8Array(length) });
+
+  test("a piece cut short by a dropped connection is not offered to resume from", async () => {
+    const { client } = relay((request, socket) => {
+      answer(socket, request, SNAPSHOT_AT_5);
+      // The first of a large snapshot's frames, and then the connection goes.
+      socket.send(piece(MAX_OUTPUT_CHUNK));
+      setTimeout(() => socket.close(4004, "gone"), 50);
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    let bytes = 0;
+    const attachment = await channel.attach(TERMINAL, { output: (b) => (bytes += b.length) });
+    await channel.ended;
+    expect(bytes).toBe(MAX_OUTPUT_CHUNK);
+    // Attaching again from nothing asks for a snapshot, rather than skipping the rest.
+    expect(attachment.drawn).toBeNull();
+  });
+
+  test("a piece is whole once a shorter frame or the next item comes", async () => {
+    const { client } = relay((request, socket) => {
+      answer(socket, request, SNAPSHOT_AT_5);
+      socket.send(piece(MAX_OUTPUT_CHUNK));
+      socket.send(piece(3));
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const attachment = await channel.attach(TERMINAL, { output: () => {} });
+    await Bun.sleep(50);
+    expect(attachment.drawn).toEqual({ epoch: 0, seq: 5 });
+    channel.close();
+
+    const exact = relay((request, socket) => {
+      answer(socket, request, SNAPSHOT_AT_5);
+      // Exactly one full frame, so only the next item says the piece was whole.
+      socket.send(piece(MAX_OUTPUT_CHUNK));
+      setTimeout(() => {
+        socket.send(
+          JSON.stringify({
+            event: "terminal.resized",
+            stream: 5,
+            position: { epoch: 0, seq: 6 },
+            size: { cols: 100, rows: 30 },
+          }),
+        );
+      }, 50);
+    });
+    const second = await openChannel(exact.client, access, HOST, { client: "test/1" });
+    let resize!: () => void;
+    const resized = new Promise<void>((resolve) => (resize = resolve));
+    let bytes = 0;
+    const again = await second.attach(TERMINAL, {
+      output: (b) => (bytes += b.length),
+      resized: () => resize(),
+    });
+    await until(() => bytes === MAX_OUTPUT_CHUNK);
+    expect(again.drawn).toBeNull();
+    await resized;
+    expect(again.drawn).toEqual({ epoch: 0, seq: 6 });
+    second.close();
+  });
 });
 
 describe("control", () => {
@@ -315,6 +422,38 @@ describe("control", () => {
     expect(losses.map((l) => l.kind)).toEqual(["closed"]);
     // Nothing is sent again by itself: there is no channel to send it on, and no lease.
     expect(control.held).toBe(false);
+  });
+
+  test("input refused here takes no number, so what is typed next is still taken", async () => {
+    const { client, asked } = relay((request, socket) => {
+      if (request.op === "terminal.acquire") {
+        return answer(socket, request, {
+          kind: "lease",
+          id: "l",
+          generation: 1,
+          ttlMs: 30_000,
+          renewEveryMs: 10_000,
+        });
+      }
+      answer(socket, request, { kind: "done" });
+    });
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const control = await channel.acquire(TERMINAL);
+    // Over the input limit, and under it but larger than a request once escaped as JSON.
+    for (const data of ["a".repeat(32 * 1024 + 1), "\u0001".repeat(16 * 1024)]) {
+      const refused = await control.input(data, { paste: true }).catch((e: unknown) => e);
+      expect((refused as ClientError).kind).toBe("invalid");
+    }
+    await control.input("x");
+    await control.input("y");
+    expect(
+      asked.filter((r) => r.op === "terminal.input").map((r) => [r.params?.seq, r.params?.data]),
+    ).toEqual([
+      [1, "x"],
+      [2, "y"],
+    ]);
+    expect(control.held).toBe(true);
+    channel.close();
   });
 
   test("a lease is renewed while held, and lost when the computer says so", async () => {

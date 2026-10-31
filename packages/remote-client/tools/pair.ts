@@ -241,14 +241,13 @@ async function pairAndWatch(session: Session, request: PairingRequest): Promise<
   const left = attachment.drawn;
   await attachment.detach();
   attachment = await channel.attach(terminal, watcher, left ?? undefined);
+  const after = left ? `after item ${left.seq}` : "with no item known whole";
   if (attachment.start === "resumed") {
     say(
-      `Came back after item ${left?.seq}: resumed from there; controlled by ${described(attachment.controller)}.`,
+      `Came back ${after}: resumed from there; controlled by ${described(attachment.controller)}.`,
     );
   } else {
-    say(
-      `Came back after item ${left?.seq}: sent a snapshot at item ${attachment.position.seq} instead.`,
-    );
+    say(`Came back ${after}: sent a snapshot at item ${attachment.position.seq} instead.`);
     seqs.length = 0;
     snapshot = null;
   }

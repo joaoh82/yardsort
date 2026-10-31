@@ -148,9 +148,12 @@ talks to the server. Screens never build a request themselves. It runs anywhere 
   grant, when the computer itself was removed or signed out, and when the phone was revoked
   (`relay.rs`, `recheck`). The client asks the server which it was before anything acts on it
   (§5).
-- **Liveness without pings.** While the app is in the foreground, a channel with nothing sent for
-  20 seconds sends `host.describe`. One that gets no answer within 10 seconds is treated as dead,
-  closed, and opened again. A lease's renewals every 10 seconds count as traffic.
+- **Liveness without pings.** While the app is in the foreground, a channel that has heard
+  nothing for 20 seconds sends `host.describe`. One that still hears nothing within 10 seconds is
+  treated as dead, closed, and opened again. Anything that arrives counts: a reply, an event,
+  output. What is sent does not, so a lease's renewals going unanswered end the channel too.
+  (Planned first as "nothing sent", with renewals as traffic; review of #150 found that
+  unanswered renewals then kept a dead channel open forever.)
 
 ## 5 · Decisions
 
@@ -383,10 +386,15 @@ Built on 2026-10-31, on Linux.
   - **An attachment checks every number.** A snapshot's frames carry the reply's position. A
     resumed stream goes on after it. A piece split over several frames shares one number. An
     item out of that order ends the attachment as `gap`, and the computer is told to detach it.
-    `drawn` is the last position drawn, for resuming on another channel.
+    `drawn` is the last position drawn whole, for resuming on another channel. Every frame of a
+    split piece but its last is full (`remote_proto::terminal` now says so), so a piece is whole
+    once a shorter frame or the next item comes. While the last piece may have more to come,
+    `drawn` is `null` and the next attachment starts from a snapshot: resuming after a piece cut
+    short would lose its end.
   - **Control** renews its lease every `renewEveryMs`, numbers input from 1, and never sends
     input again. Input in flight when the channel closes rejects with `ChannelClosed`: whether
-    it arrived is not known.
+    it arrived is not known. Input refused before it is sent, too large or not a request a host
+    would take, takes no number, since the host takes only the next one.
   - **Liveness is as §4,** but a dead channel is only closed, as `silent`, never reopened by the
     client itself. Opening a new channel, and attaching again from `drawn`, belongs to the screens
     that know what was open (slice 5).
@@ -412,7 +420,7 @@ Built on 2026-10-31, on Linux.
   tests hold it to the real limits.
 - **The pairing tool's twin,** `tools/pair.ts` (`just client-pair`), as listed in CONTRIBUTING.
   It never prints a credential, a ticket, the link's secret or a conversation's title.
-- **Tests: 106 under `bun test`**:
+- **Tests: 110 under `bun test`**:
   - the conformance run (45);
   - decoding bounds;
   - the HTTP client and the session against small Bun servers;
@@ -426,6 +434,12 @@ Built on 2026-10-31, on Linux.
   `just check` runs them (`test-client`, and `typecheck` now covers the package), and CI runs
   them on all three systems after the Rust tests, which build the stand-in. Mutating the
   decoders, the numbering check and the probe each made a test fail.
+
+- **What review of #150 found, and fixed:** unanswered renewals counted as traffic and kept a
+  dead channel open; input refused here still used up a number, so the host refused everything
+  typed after it; and `drawn` named a piece whose later frames never came, so resuming lost the
+  rest of it. Each has a test that fails without the fix, and the host now has one for how it
+  splits a piece.
 
 - **Not shown yet.** Nothing has run on a phone. The package has not run under React Native's
   Hermes: injecting `crypto` and avoiding `URL` are meant for it, and slice 2 shows whether

@@ -713,6 +713,42 @@ fn a_device_that_falls_behind_is_detached_and_told_and_the_program_never_waits()
     assert_eq!(out.sent().len(), frames);
 }
 
+#[test]
+fn a_large_piece_comes_as_full_frames_and_a_last_shorter_one_with_one_number() {
+    // A client takes a piece to be whole once a frame shorter than a full one comes, so every
+    // frame but the last must be full (remote_proto::terminal).
+    let out = Recorded::new(usize::MAX);
+    let mut flow = Flow {
+        stream: 3,
+        out: Arc::clone(&out) as Arc<dyn Outbound>,
+        names: Names::default(),
+        held: None,
+        start: None,
+        controller: None,
+        over: false,
+    };
+    for (seq, len) in [
+        (7, 2 * MAX_OUTPUT_CHUNK + 5),
+        (8, 2 * MAX_OUTPUT_CHUNK),
+        (9, 0),
+    ] {
+        assert!(flow.send(&Item::Bytes(seq, vec![b'x'; len])));
+    }
+    let frames: Vec<(u64, usize)> = out
+        .sent()
+        .into_iter()
+        .map(|s| match s {
+            Sent::Output(3, seq, bytes) => (seq, bytes.len()),
+            other => panic!("not a frame of the stream: {other:?}"),
+        })
+        .collect();
+    let full = MAX_OUTPUT_CHUNK;
+    assert_eq!(
+        frames,
+        [(7, full), (7, full), (7, 5), (8, full), (8, full), (9, 0)]
+    );
+}
+
 /// The last number a stream has sent, output or resize.
 fn last_seq(out: &Recorded, stream: u32) -> u64 {
     out.sent()

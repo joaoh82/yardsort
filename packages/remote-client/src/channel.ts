@@ -11,11 +11,13 @@
  * from the relay's close code; `revoked` needs {@link explainRevoked} before anything acts on it.
  *
  * **Liveness.** A browser or React Native WebSocket never shows the relay's pings, so silence
- * cannot be timed from them. Instead a channel that has sent nothing for
- * {@link ChannelOptions.probeAfterMs} asks `host.describe`, and one that hears no answer within
- * {@link ChannelOptions.probeTimeoutMs} is taken to be dead and closed (`silent`). A held lease's
- * renewals count as sending. Opening a channel again is the caller's: it attaches again with the
- * position it drew, and never sends again what it typed (see {@link Control.input}).
+ * cannot be timed from them. Instead a channel that has heard nothing for
+ * {@link ChannelOptions.probeAfterMs} asks `host.describe`, and one that hears nothing within
+ * {@link ChannelOptions.probeTimeoutMs} after that is taken to be dead and closed (`silent`).
+ * Anything that arrives counts, a reply, an event or output; what is sent does not, so a held
+ * lease's renewals going unanswered end the channel as surely as a quiet one. Opening a channel
+ * again is the caller's: it attaches again from {@link Attachment.drawn}, and never sends again
+ * what it typed (see {@link Control.input}).
  */
 
 import { ClientError, type Client } from "./client.ts";
@@ -88,9 +90,9 @@ export interface ChannelOptions {
   socket?: SocketFactory;
   /** Opening, through the welcome, may take this long. 30 seconds unless given. */
   openTimeoutMs?: number;
-  /** Ask after this long without sending anything. 20 seconds unless given. */
+  /** Ask after this long without hearing anything. 20 seconds unless given. */
   probeAfterMs?: number;
-  /** Give up on an answer to that after this long. 10 seconds unless given. */
+  /** Give up after this long more without hearing anything. 10 seconds unless given. */
   probeTimeoutMs?: number;
 }
 
@@ -163,6 +165,7 @@ export class Channel {
   #subscriptions = new Map<SubscriptionId, Subscription>();
   #controls = new Set<Control>();
   #probeTimer: ReturnType<typeof setTimeout> | undefined;
+  #silentTimer: ReturnType<typeof setTimeout> | undefined;
   #openTimer: ReturnType<typeof setTimeout> | undefined;
   #settleReady!: { resolve(): void; reject(error: Error): void };
   #settleEnded!: (end: ChannelEnd) => void;
@@ -210,15 +213,24 @@ export class Channel {
 
   /** Send one request and wait for its reply. A refusal rejects with a {@link ClientError} of kind `remote`. */
   ask(operation: Operation, onReply?: (reply: Reply) => void): Promise<Reply> {
-    if (this.#phase !== "open") {
-      return Promise.reject(
-        this.#end
-          ? new ChannelClosed(this.#end)
-          : new ClientError("invalid", "The channel is not open yet."),
-      );
+    try {
+      return this.send(operation, onReply);
+    } catch (error) {
+      return Promise.reject(error as Error);
     }
-    this.#asked += 1;
-    const requestId = `r${this.#asked}` as RequestId;
+  }
+
+  /**
+   * @internal {@link ask}, except that a request that cannot be sent throws here, before
+   * anything is sent: so a caller can tell a request refused here from one that went.
+   */
+  send(operation: Operation, onReply?: (reply: Reply) => void): Promise<Reply> {
+    if (this.#phase !== "open") {
+      throw this.#end
+        ? new ChannelClosed(this.#end)
+        : new ClientError("invalid", "The channel is not open yet.");
+    }
+    const requestId = `r${this.#asked + 1}` as RequestId;
     let wire: string;
     try {
       // Read back as a host would, so nothing malformed is ever sent.
@@ -226,17 +238,17 @@ export class Channel {
       wire = JSON.stringify(checked);
     } catch (error) {
       const why = error instanceof DecodeError ? error.message : String(error);
-      return Promise.reject(new ClientError("invalid", `Not a request a host would take: ${why}`));
+      throw new ClientError("invalid", `Not a request a host would take: ${why}`);
     }
     if (utf8Length(wire) > MAX_CONTROL_FRAME) {
-      return Promise.reject(
-        new ClientError("invalid", "That request is larger than any request may be."),
-      );
+      throw new ClientError("invalid", "That request is larger than any request may be.");
     }
-    return new Promise<Reply>((resolve, reject) => {
+    this.#asked += 1;
+    const reply = new Promise<Reply>((resolve, reject) => {
       this.#pending.set(requestId, { resolve, reject, ...(onReply ? { onReply } : {}) });
-      this.#send(wire);
     });
+    this.#socket.send(wire);
+    return reply;
   }
 
   async describe(): Promise<HostDescription> {
@@ -354,32 +366,27 @@ export class Channel {
     else this.#controls.delete(what);
   }
 
-  #send(wire: string): void {
-    this.#socket.send(wire);
-    this.#arm();
-  }
-
-  /** Probe once nothing has been sent for a while. */
-  #arm(): void {
+  /** Something arrived: the link is alive. Probe once nothing has for a while. */
+  #heard(): void {
     clearTimeout(this.#probeTimer);
+    clearTimeout(this.#silentTimer);
     if (this.#phase !== "open") return;
     this.#probeTimer = setTimeout(() => this.#probe(), this.#probeAfterMs);
   }
 
   #probe(): void {
     if (this.#phase !== "open") return;
-    const silent = setTimeout(() => {
+    // Anything heard first clears this, the answer or not.
+    this.#silentTimer = setTimeout(() => {
       this.#end ??= { reason: "silent", code: null, text: "the computer stopped answering" };
       this.#shut(4000);
     }, this.#probeTimeoutMs);
-    this.ask({ op: "host.describe" }).then(
-      () => clearTimeout(silent),
-      () => clearTimeout(silent),
-    );
+    this.ask({ op: "host.describe" }).catch(() => {});
   }
 
   #message(data: unknown, expected: HostId, client: string): void {
     if (this.#phase === "ended") return;
+    this.#heard();
     if (typeof data !== "string") {
       this.#binary(data);
       return;
@@ -451,7 +458,7 @@ export class Channel {
     this.protocol = reply.welcome.protocol;
     this.#phase = "open";
     clearTimeout(this.#openTimer);
-    this.#arm();
+    this.#heard();
     this.#settleReady.resolve();
   }
 
@@ -583,6 +590,7 @@ export class Channel {
     this.#phase = "ended";
     const end = this.#end ?? { reason: "gone", code: null, text: closeText("gone") };
     clearTimeout(this.#probeTimer);
+    clearTimeout(this.#silentTimer);
     clearTimeout(this.#openTimer);
     this.#socket.onmessage = null;
     for (const pending of this.#pending.values()) pending.reject(new ChannelClosed(end));
@@ -645,6 +653,11 @@ export class Attachment {
   #last: number;
   /** Whether the last item was output, which a frame with the same number continues. */
   #inOutput = false;
+  /**
+   * Whether that output may have more to come: its last frame was a full one. Every frame of a
+   * split piece but its last is full, so a shorter frame, or the next item, says it is whole.
+   */
+  #mayContinue = false;
   #drewAny: boolean;
 
   constructor(
@@ -664,9 +677,15 @@ export class Attachment {
     this.#drewAny = attached.start === "resumed";
   }
 
-  /** The last position drawn, to resume from on another channel. `null` before the snapshot has come. */
+  /**
+   * The last position drawn whole, to resume from on another channel. `null` when there is none
+   * to resume from, and the next attachment starts from a snapshot: before the snapshot has come,
+   * or while the last piece of output may have more frames to come. Resuming after a piece cut
+   * short would lose its end; resuming before it would draw its start twice.
+   */
   get drawn(): StreamPosition | null {
-    return this.#drewAny ? { epoch: this.#epoch, seq: this.#last } : null;
+    if (!this.#drewAny || this.#mayContinue) return null;
+    return { epoch: this.#epoch, seq: this.#last };
   }
 
   get ended(): boolean {
@@ -692,6 +711,7 @@ export class Attachment {
       return this.#gap(frame.position);
     this.#last = seq;
     this.#inOutput = true;
+    this.#mayContinue = frame.bytes.length === MAX_OUTPUT_CHUNK;
     this.#drewAny = true;
     this.watcher.output(frame.bytes, frame.position);
   }
@@ -703,6 +723,7 @@ export class Attachment {
       return this.#gap(position);
     this.#last = position.seq;
     this.#inOutput = false;
+    this.#mayContinue = false;
     this.size = size;
     this.watcher.resized?.(size, position);
   }
@@ -778,19 +799,27 @@ export class Control {
     return this.#held;
   }
 
-  /** Type `data`: keystrokes as the renderer made them, or text to paste. */
+  /**
+   * Type `data`: keystrokes as the renderer made them, or text to paste. Input refused here, too
+   * large or not a request a host would take, is never sent and takes no number, so what is typed
+   * next is still the next one the computer expects.
+   */
   async input(data: string, options: { paste?: boolean } = {}): Promise<void> {
     if (!this.#held) throw new ClientError("invalid", "Control is no longer held.");
-    this.#seq += 1;
-    await this.#leased({
+    const seq = this.#seq + 1;
+    const reply = this.channel.send({
       op: "terminal.input",
-      params: { ...this.#ref(), seq: this.#seq, data, paste: options.paste ?? false },
+      params: { ...this.#ref(), seq, data, paste: options.paste ?? false },
     });
+    this.#seq = seq;
+    await this.#leased(reply);
   }
 
   /** Resize the terminal to fit this device. The size stands while control is held. */
   async resize(size: TermSize): Promise<void> {
-    await this.#leased({ op: "terminal.resize", params: { ...this.#ref(), size } });
+    await this.#leased(
+      this.channel.ask({ op: "terminal.resize", params: { ...this.#ref(), size } }),
+    );
   }
 
   /** Hand control back. */
@@ -817,7 +846,9 @@ export class Control {
   async #renew(): Promise<void> {
     if (!this.#held) return;
     try {
-      const reply = await this.#leased({ op: "terminal.renew", params: this.#ref() });
+      const reply = await this.#leased(
+        this.channel.ask({ op: "terminal.renew", params: this.#ref() }),
+      );
       if (reply.kind === "lease") {
         const { kind: _, ...lease } = reply;
         this.#lease = lease;
@@ -827,9 +858,10 @@ export class Control {
     }
   }
 
-  async #leased(operation: Operation): Promise<Reply> {
+  /** A lease's reply: one that says the lease is no longer current loses control. */
+  async #leased(reply: Promise<Reply>): Promise<Reply> {
     try {
-      return await this.channel.ask(operation);
+      return await reply;
     } catch (error) {
       if (error instanceof ClientError && error.code === "lease_lost") {
         this.lose({ kind: "lost", error: error.remote as RemoteError });
