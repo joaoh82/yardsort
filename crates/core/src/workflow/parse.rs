@@ -16,9 +16,7 @@ use super::{
     Action, Input, InputKind, Invalid, PrActivity, Problem, RunContext, SessionRef, Step, Trigger,
     TriggerKind, Until, Workflow, SCHEMA_VERSION,
 };
-
-/// The longest a timeout may be. A run waiting a week is a run somebody forgot.
-const MAX_TIMEOUT_SECS: u64 = 7 * 24 * 60 * 60;
+use crate::yaml::{self, at, is_id, is_name, list, suggestion};
 
 /// What a `{{ … }}` may name, besides `inputs.*` and `steps.*`.
 const FIELDS: &[(&str, &[&str])] = &[
@@ -50,38 +48,6 @@ fn allowed(action: &str) -> &'static [&'static str] {
         "wait_pr_activity" => &["kind", "timeout"],
         "notify" => &["title", "body"],
         _ => &[],
-    }
-}
-
-/// Just enough to name a file that does not parse, and to see that it is from a later version
-/// before its unknown keys are blamed on it.
-#[derive(Deserialize)]
-struct Head {
-    #[serde(default)]
-    id: Option<serde_saphyr::Spanned<HeadValue>>,
-    #[serde(default)]
-    name: Option<serde_saphyr::Spanned<HeadValue>>,
-    #[serde(default)]
-    version: Option<serde_saphyr::Spanned<HeadValue>>,
-}
-
-/// Anything at all; only a string or a number is kept.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum HeadValue {
-    Number(u64),
-    Text(String),
-    #[allow(dead_code)]
-    Other(serde::de::IgnoredAny),
-}
-
-impl HeadValue {
-    fn text(&self) -> Option<String> {
-        match self {
-            HeadValue::Text(text) => Some(text.clone()),
-            HeadValue::Number(n) => Some(n.to_string()),
-            HeadValue::Other(_) => None,
-        }
     }
 }
 
@@ -214,36 +180,18 @@ pub fn step_lines(text: &str) -> BTreeMap<String, u32> {
 
 /// Check `text` and build the workflow it describes, or say everything that is wrong with it.
 pub fn parse(text: &str) -> Result<Workflow, Invalid> {
-    let head = serde_saphyr::from_str::<Head>(text).ok();
-    let head_id = head
-        .as_ref()
-        .and_then(|h| h.id.as_ref())
-        .and_then(|v| v.value.text());
-    let head_name = head
-        .as_ref()
-        .and_then(|h| h.name.as_ref())
-        .and_then(|v| v.value.text());
+    let heading = yaml::heading(text, "workflow", SCHEMA_VERSION);
     let invalid = |problems| Invalid {
-        id: head_id.clone(),
-        name: head_name.clone(),
+        id: heading.id.clone(),
+        name: heading.name.clone(),
         problems,
     };
-    if let Some(version) = head.as_ref().and_then(|h| h.version.as_ref()) {
-        if let HeadValue::Number(n) = version.value {
-            if n > u64::from(SCHEMA_VERSION) {
-                return Err(invalid(vec![at(
-                    &version.referenced,
-                    format!(
-                        "This file is for a later Yardsort (workflow version {n}); this one reads \
-                         version {SCHEMA_VERSION}. Update Yardsort to run it."
-                    ),
-                )]));
-            }
-        }
+    if let Some(later) = heading.later_version.clone() {
+        return Err(invalid(vec![later]));
     }
     let raw: RawWorkflow = match serde_saphyr::from_str(text) {
         Ok(raw) => raw,
-        Err(error) => return Err(invalid(vec![from_serde(&error)])),
+        Err(error) => return Err(invalid(vec![yaml::from_serde(&error)])),
     };
     let mut check = Checker {
         source: text,
@@ -262,85 +210,6 @@ pub fn parse(text: &str) -> Result<Workflow, Invalid> {
             problems,
         })
     }
-}
-
-/// serde's message, without its trailing "at line N, column M" — the position is ours to show.
-fn from_serde(error: &serde_saphyr::Error) -> Problem {
-    let plain = error.without_snippet().to_string();
-    let message = match plain.rfind(" at line ") {
-        Some(cut) => plain[..cut].to_owned(),
-        None => plain,
-    };
-    let message = match message.strip_prefix("duplicate mapping key: ") {
-        Some(rest) => {
-            let key = rest.split(',').next().unwrap_or(rest).trim();
-            format!("`{key}` is given twice.")
-        }
-        None => capitalise(&message),
-    };
-    match error.location() {
-        Some(location) => at(&location, message),
-        None => Problem::whole(message),
-    }
-}
-
-fn capitalise(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => String::new(),
-    }
-}
-
-fn at(location: &Location, message: impl Into<String>) -> Problem {
-    Problem::at(
-        location.line() as usize,
-        location.column() as usize,
-        message,
-    )
-}
-
-/// A name for an input or a step: what a `{{ … }}` path segment can hold, starting with a letter.
-fn is_name(text: &str) -> bool {
-    text.starts_with(|c: char| c.is_ascii_lowercase())
-        && text
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-}
-
-/// A workflow's id: what its file is called.
-pub(super) fn is_id(text: &str) -> bool {
-    text.len() <= 64
-        && text.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
-        && text
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-/// `45m`, `30s`, `2h`: a whole number and one unit.
-fn duration(text: &str) -> Result<u64, String> {
-    let text = text.trim();
-    let usage = "Write a timeout as a whole number and s, m or h, like `45m`.";
-    let not_a_timeout = || format!("`{text}` is not a timeout. {usage}");
-    // Matched as suffixes, never sliced by byte count: the last character of a file's text can be
-    // any width, and a slice through the middle of one panics.
-    let (number, scale) = [("s", 1), ("m", 60), ("h", 60 * 60)]
-        .into_iter()
-        .find_map(|(unit, scale)| text.strip_suffix(unit).map(|number| (number, scale)))
-        .ok_or_else(not_a_timeout)?;
-    // Digits only: `u64::from_str` would also take a leading `+`.
-    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(not_a_timeout());
-    }
-    let count: u64 = number.parse().map_err(|_| not_a_timeout())?;
-    let secs = count.saturating_mul(scale);
-    if secs == 0 {
-        return Err("A timeout of zero would fail the step at once.".into());
-    }
-    if secs > MAX_TIMEOUT_SECS {
-        return Err("A timeout may be at most a week (`168h`).".into());
-    }
-    Ok(secs)
 }
 
 /// What the variable check needs to know about the file around one field.
@@ -844,7 +713,7 @@ impl Checker<'_> {
     fn timeout(&mut self, step: &RawStep) -> Option<u32> {
         let field = step.timeout.as_ref()?;
         // At most a week, so it always fits.
-        match duration(&field.value) {
+        match yaml::duration(&field.value, "a timeout") {
             Ok(secs) => u32::try_from(secs).ok(),
             Err(message) => {
                 self.problem(&field.referenced, message);
@@ -883,30 +752,9 @@ impl Checker<'_> {
     }
 
     /// Where in the file the placeholder `raw`, at byte `start` of `value`, is written.
-    ///
-    /// YAML may fold, indent or unescape a value, so an offset in the value is not an offset in
-    /// the file; the placeholder's own text is the same in both. The same text can appear more
-    /// than once, so this finds the same *occurrence*: the second `{{ pr.nubmer }}` in the value
-    /// is the second in the file. Escaped ones, `\{{`, are literals and are counted in neither.
     fn find(&self, field: &Location, value: &str, raw: &str, start: usize) -> (usize, usize) {
-        let fallback = (field.line() as usize, field.column() as usize);
-        let Some(from) = offset_of(self.source, field.line() as usize, field.column() as usize)
-        else {
-            return fallback;
-        };
-        let nth = unescaped(value, raw).take_while(|&at| at < start).count();
-        match unescaped(&self.source[from..], raw).nth(nth) {
-            Some(found) => position_of(self.source, from + found),
-            None => fallback,
-        }
+        yaml::find(self.source, field, value, raw, start)
     }
-}
-
-/// Where `needle` occurs in `hay`, leaving out occurrences escaped with a backslash.
-fn unescaped<'a>(hay: &'a str, needle: &'a str) -> impl Iterator<Item = usize> + 'a {
-    hay.match_indices(needle)
-        .map(|(at, _)| at)
-        .filter(move |&at| !hay[..at].ends_with('\\'))
 }
 
 /// What is wrong with `var` in this scope, if anything.
@@ -999,45 +847,6 @@ fn resolve(var: &Placeholder, scope: &Scope) -> Result<(), String> {
     }
 }
 
-fn list<T: std::fmt::Display>(items: impl IntoIterator<Item = T>) -> String {
-    items
-        .into_iter()
-        .map(|item| format!("`{item}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// ". Did you mean `x`?" when one name is close, else ".".
-fn suggestion<'a>(name: &str, known: impl Iterator<Item = &'a String>) -> String {
-    let close = known
-        .filter(|k| distance(name, k) <= 2)
-        .min_by_key(|k| distance(name, k));
-    match close {
-        Some(k) => format!(". Did you mean `{k}`?"),
-        None => ".".to_owned(),
-    }
-}
-
-/// Edit distance, for "did you mean". Names are short.
-fn distance(a: &str, b: &str) -> usize {
-    let b: Vec<char> = b.chars().collect();
-    let mut row: Vec<usize> = (0..=b.len()).collect();
-    for (i, ca) in a.chars().enumerate() {
-        let mut prev = row[0];
-        row[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let here = row[j + 1];
-            row[j + 1] = if ca == *cb {
-                prev
-            } else {
-                1 + prev.min(row[j]).min(here)
-            };
-            prev = here;
-        }
-    }
-    row[b.len()]
-}
-
 /// One circle in the graph, as step ids in order with the first repeated at the end.
 fn circle(steps: &[RawStep], edges: &BTreeMap<&str, Vec<&str>>) -> Option<Vec<String>> {
     #[derive(Clone, Copy, PartialEq)]
@@ -1085,65 +894,4 @@ fn circle(steps: &[RawStep], edges: &BTreeMap<&str, Vec<&str>>) -> Option<Vec<St
         }
     }
     None
-}
-
-/// The byte offset of a 1-based line and character column.
-fn offset_of(source: &str, line: usize, column: usize) -> Option<usize> {
-    let mut start = 0;
-    for _ in 1..line {
-        start += source[start..].find('\n')? + 1;
-    }
-    let text = &source[start..];
-    let within = text
-        .char_indices()
-        .nth(column.saturating_sub(1))
-        .map(|(i, _)| i)
-        .unwrap_or(text.len());
-    Some(start + within)
-}
-
-/// The 1-based line and character column of a byte offset.
-fn position_of(source: &str, offset: usize) -> (usize, usize) {
-    let before = &source[..offset];
-    let line = before.matches('\n').count() + 1;
-    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    (line, source[line_start..offset].chars().count() + 1)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn durations_take_one_unit() {
-        assert_eq!(duration("45m"), Ok(45 * 60));
-        assert_eq!(duration("30s"), Ok(30));
-        assert_eq!(duration(" 2h "), Ok(7200));
-        for bad in [
-            "45", "m", "1h30m", "-5m", "+5m", "4.5h", "10d", "", "1秒", "秒", "5 m",
-        ] {
-            assert!(duration(bad).is_err(), "{bad}");
-        }
-        assert!(duration("0m").unwrap_err().contains("zero"));
-        assert!(duration("169h").unwrap_err().contains("week"));
-    }
-
-    #[test]
-    fn positions_count_characters_not_bytes() {
-        let source = "a: é\nb: {{ x }}\n";
-        let offset = offset_of(source, 2, 4).unwrap();
-        assert_eq!(&source[offset..offset + 2], "{{");
-        assert_eq!(position_of(source, offset), (2, 4));
-        assert_eq!(offset_of("é{{", 1, 2), Some(2));
-    }
-
-    #[test]
-    fn close_names_are_suggested() {
-        let known = ["review".to_owned(), "notify".to_owned()];
-        assert_eq!(
-            suggestion("reveiw", known.iter()),
-            ". Did you mean `review`?"
-        );
-        assert_eq!(suggestion("zzz", known.iter()), ".");
-    }
 }

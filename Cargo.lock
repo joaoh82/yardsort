@@ -7979,6 +7979,7 @@ dependencies = [
  "libc",
  "pty-host",
  "pty-ipc",
+ "regex",
  "remote-proto",
  "rusqlite",
  "serde",

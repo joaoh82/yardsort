@@ -1,0 +1,48 @@
+# A smoke test for Yardsort: `ys test guide` explains the format. Put it in `.yardsort/tests/`
+# and check it with `ys test validate <file>`.
+id: health
+name: The server starts and answers
+description: Starts the dev server on a free port, waits for it, and checks its health endpoint.
+version: 1
+
+inputs:
+  - id: greeting
+    kind: text
+    label: What the home page should say
+    default: Welcome
+
+setup:
+  - id: server
+    action: start
+    program: npm
+    args: [run, dev, --, --port, "{{ run.port }}"]
+  - id: ready
+    action: wait_for
+    url: "http://localhost:{{ run.port }}/health"
+    timeout: 60s
+
+steps:
+  - id: health
+    action: http
+    get: "http://localhost:{{ run.port }}/health"
+    expect:
+      status: 200
+      json: { status: ok }
+
+  - id: version
+    action: run
+    program: node
+    args: [--version]
+    expect:
+      stdout_matches: '^v\d+\.'
+
+  - id: home
+    action: browser
+    do:
+      - goto: "http://localhost:{{ run.port }}/"
+      - expect_text: "{{ inputs.greeting }}"
+      - screenshot: home
+
+  - id: looks_right
+    action: manual
+    prompt: Does the home page load without a flash of unstyled content?
