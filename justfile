@@ -12,6 +12,7 @@ default:
 setup:
     bun install
     cd packages/remote-client && bun install
+    cd apps/mobile && bun install
     cargo fetch
 
 # Run the app with hot reload. `ys` is built first: the app finds it next to its own binary.
@@ -37,8 +38,8 @@ cli *args:
 # Formatting, lints, types and all tests. (CI additionally runs `bindings-check`.)
 check: fmt-check lint typecheck test
 
-# All tests, Rust, frontend and the protocol client
-test: test-rust test-web test-client
+# All tests, Rust, frontend, the protocol client and the phone app
+test: test-rust test-web test-client test-mobile
 
 # Rust tests (also regenerates src/lib/bindings.ts)
 test-rust *args:
@@ -52,24 +53,30 @@ test-web *args:
 test-client *args:
     cd packages/remote-client && bun install --frozen-lockfile && bun test {{ args }}
 
+# The phone app's tests (apps/mobile): its logic against a real server with Bun, its screens with Jest
+test-mobile:
+    cd apps/mobile && bun install --frozen-lockfile && bun run test
+
 # Frontend tests in watch mode
 test-watch:
     bun run test:watch
 
-# Lint Rust (clippy, warnings are errors) and the frontend (eslint)
+# Lint Rust (clippy, warnings are errors), the frontend and the phone app (eslint)
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     bun run lint
+    cd apps/mobile && bun install --frozen-lockfile && bun run lint
 
 # Clippy the PTY crates for Windows from any OS (`yardsort-core` and the app bundle SQLite, which
 # needs the MSVC toolchain to compile; CI covers those on real Windows)
 lint-windows:
     bun run lint:windows
 
-# Typecheck the frontend and the protocol client
+# Typecheck the frontend, the protocol client and the phone app
 typecheck:
     bun run typecheck
     cd packages/remote-client && bun install --frozen-lockfile && bun run typecheck
+    cd apps/mobile && bun install --frozen-lockfile && bun run typecheck
 
 # Format everything
 fmt:
@@ -112,6 +119,17 @@ server-pair *args:
 # The same pretend phone in TypeScript, through packages/remote-client: `[SERVER] CODE`, or `devices [SERVER]`
 client-pair *args:
     cd packages/remote-client && bun install --frozen-lockfile && bun tools/pair.ts {{ args }}
+
+# --- phone app ------------------------------------------------------------------------------
+# apps/mobile, an Expo app. iOS builds need macOS with Xcode; see apps/mobile/README.md.
+
+# Build the development app, install it on a phone plugged into this Mac, and serve its code
+mobile-ios:
+    cd apps/mobile && bun install --frozen-lockfile && bun run ios
+
+# Serve the app's code to a development build already installed on the phone
+mobile-start:
+    cd apps/mobile && bun install --frozen-lockfile && bun run start
 
 # The server's tests, with its PostgreSQL half against the local database
 server-test *args:

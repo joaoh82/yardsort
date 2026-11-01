@@ -28,7 +28,7 @@ export default defineConfig({
 
   test: {
     // The protocol client is its own project, tested with `bun test` (`just test-client`).
-    exclude: [...configDefaults.exclude, "packages/**"],
+    exclude: [...configDefaults.exclude, "packages/**", "apps/**"],
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     css: false,

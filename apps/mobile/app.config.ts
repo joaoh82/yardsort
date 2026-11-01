@@ -1,0 +1,31 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy
+// of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+/**
+ * The app's identity. A development build is its own app on the phone, beside a release one:
+ * its own name and bundle identifier, the same `yardsort` scheme (31 §5). The system's sign-in
+ * session hands its answer to the app that opened it, so two apps with one scheme do not mix.
+ * `APP_VARIANT=release` builds the release identity; nothing in R3 does.
+ */
+
+import type { ConfigContext, ExpoConfig } from "expo/config";
+
+const release = process.env.APP_VARIANT === "release";
+const identifier = release ? "dev.yardsort.mobile" : "dev.yardsort.mobile.development";
+
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
+  name: release ? "Yardsort" : "Yardsort Dev",
+  slug: "yardsort",
+  version: "0.1.0",
+  scheme: "yardsort",
+  orientation: "default",
+  userInterfaceStyle: "automatic",
+  ios: {
+    bundleIdentifier: identifier,
+    supportsTablet: true,
+    config: { usesNonExemptEncryption: false },
+  },
+  android: { package: identifier },
+  plugins: ["expo-router", "expo-secure-store", "expo-web-browser", "expo-status-bar"],
+});

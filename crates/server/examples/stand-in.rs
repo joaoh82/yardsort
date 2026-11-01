@@ -1,5 +1,6 @@
 //! A server, an identity provider and a host on this machine, for clients written in other
-//! languages to test against: the TypeScript protocol client (`packages/remote-client`) runs it.
+//! languages to test against: the TypeScript protocol client (`packages/remote-client`) and the
+//! phone app's logic (`apps/mobile/test/lib`) run it.
 //!
 //! ```text
 //! cargo run -q -p yardsort-server --example stand-in
