@@ -998,6 +998,11 @@ Proposed in [32-smoke-tests](32-smoke-tests.md), after a six-question design pas
       pruning, and `ys test run | wait | runs | log | cancel`. Tested with real processes and
       a real server on the run's port. Recorded in
       [32 § slice 2](32-smoke-tests.md#slice-2-what-shipped).
+- [x] Slice 3: the approval card with the steps in words and what changed, its count on the
+      workspace row, the run tab with output tailed from a byte offset and **Pass** / **Fail**
+      for `manual` steps, **Run smoke test…**, **Send result to agent** by the workflow driver's
+      rule, and Project settings → Smoke tests (the environment, **Ask every time**, retention;
+      migration 0020). Recorded in [32 § slice 3](32-smoke-tests.md#slice-3-what-shipped).
 
 _Exit:_ on all three platforms, an agent in a workspace writes a test with `run`, `http`,
 `browser` and `manual` steps, runs it, and is told in its own terminal which step failed and

@@ -1039,3 +1039,54 @@ teardown:
         "the test can be run again without a restart"
     );
 }
+
+#[test]
+fn an_approved_file_runs_unasked_unless_the_project_asks_to_see_every_run() {
+    let fx = Fx::new();
+    fx.write(
+        "quick",
+        "id: quick\nname: Quick\nversion: 1\nsteps:\n  - id: s\n    action: run\n    program: true\n",
+    );
+    let ask = |fx: &Fx| {
+        queue(
+            &fx.store,
+            &Request {
+                test_id: "quick",
+                workspace_id: &fx.workspace.id,
+                inputs: &BTreeMap::new(),
+                requested_by: "cli",
+                session_record_id: None,
+            },
+        )
+        .unwrap()
+    };
+    let first = ask(&fx);
+    assert!(first.awaiting_approval, "a file nobody has seen waits");
+    assert!(fx.store.approve_test_run(&first.id).unwrap());
+    assert!(fx.store.cancel_test_run(&first.id, "test").unwrap());
+
+    let second = ask(&fx);
+    assert!(
+        !second.awaiting_approval,
+        "the same file, approved, goes straight on"
+    );
+    assert_eq!(fx.run(&second.id).status, "queued");
+    assert!(fx.store.cancel_test_run(&second.id, "test").unwrap());
+
+    fx.store
+        .set_project_test_settings(
+            &fx._project.id,
+            &crate::store::TestSettings {
+                ask_every_time: true,
+                keep_days: 30,
+            },
+        )
+        .unwrap();
+    let third = ask(&fx);
+    assert!(third.awaiting_approval, "the project asks to see every run");
+    assert_eq!(fx.run(&third.id).status, "awaiting_approval");
+    assert!(
+        fx.store.approve_test_run(&third.id).unwrap(),
+        "and the answer is the same approval"
+    );
+}

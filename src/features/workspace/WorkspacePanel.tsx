@@ -19,6 +19,9 @@ import { TerminalView } from "@/features/terminal/TerminalView";
 import { useTerminalSessions } from "@/features/terminal/useTerminalSessions";
 import { ipc, errorMessage, type Project, type Workspace } from "@/lib/ipc";
 import { ProjectSettingsDialog } from "@/features/sidebar/ProjectSettingsDialog";
+import { ApprovalCard } from "@/features/smoke/ApprovalCard";
+import { TestRunTab } from "@/features/smoke/TestRunTab";
+import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useAppStore } from "@/stores/app";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
 import { useShortcutLabel } from "@/stores/preferences";
@@ -92,6 +95,11 @@ function WorkspaceTerminals(props: {
   const activeId = useTerminalStore((s) => s.active[workspace.id]);
   const activeTab = useTerminalStore((s) => s.tabs.find((tab) => tab.id === activeId));
   const sessionError = useSessionsStore((s) => s.error);
+  // A smoke test run's tab in front takes the terminal's place; the terminal keeps running.
+  const shownRunId = useSmokeTestsStore((s) => s.shown[workspace.id]);
+  const shownRun = useSmokeTestsStore((s) =>
+    shownRunId ? s.runs.find((run) => run.id === shownRunId) : undefined,
+  );
 
   // The history is what Resume and Fork are offered on; keep it fresh for the workspace in view:
   // when it comes into view, and whenever a terminal opens or closes in it.
@@ -116,6 +124,7 @@ function WorkspaceTerminals(props: {
   return (
     <>
       <ProjectRun key={workspace.id} project={project} workspace={workspace} />
+      <ApprovalCard workspaceId={workspace.id} />
       <TerminalTabs workspaceId={workspace.id} />
       {error && (
         <div
@@ -143,13 +152,15 @@ function WorkspaceTerminals(props: {
           </button>
         </div>
       )}
-      {activeTab && <EndedBar tab={activeTab} />}
-      {activeTab && <ContextBar tab={activeTab} />}
-      {activeTab && <ToldBar key={activeTab.id} tab={activeTab} />}
+      {activeTab && !shownRun && <EndedBar tab={activeTab} />}
+      {activeTab && !shownRun && <ContextBar tab={activeTab} />}
+      {activeTab && !shownRun && <ToldBar key={activeTab.id} tab={activeTab} />}
       <div className="min-h-0 flex-1">
         {/* Only the active terminal is mounted; the others keep running in the core and are
             repainted from a snapshot when they come back. `key` forces a fresh view per session. */}
-        {activeId ? (
+        {shownRun ? (
+          <TestRunTab key={shownRun.id} run={shownRun} workspaceId={workspace.id} />
+        ) : activeId ? (
           <TerminalView
             key={activeId}
             sessionId={activeId}

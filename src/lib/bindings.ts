@@ -480,7 +480,11 @@ export const commands = {
 	testRuns: (workspaceId: string | null, limit: number) => typedError<TestRun[], IpcError>(__TAURI_INVOKE("test_runs", { workspaceId, limit })),
 	/**  One run, with its steps in the order they run. */
 	testRunSteps: (runId: string) => typedError<TestStepRun[], IpcError>(__TAURI_INVOKE("test_run_steps", { runId })),
-	/**  Start a run. The same checks as `ys test run`; a file not yet approved waits. */
+	/**
+	 *  Start a run from the Run dialog. The same checks as `ys test run`; and since the dialog
+	 *  showed the file's steps, pressing Run is the approval: a file not approved yet is approved
+	 *  here, and the run goes straight on.
+	 */
 	testRunStart: (testId: string, workspaceId: string, inputs: { [key in string]: string }) => typedError<TestStarted, IpcError>(__TAURI_INVOKE("test_run_start", { testId, workspaceId, inputs })),
 	/**
 	 *  The user, having seen the run's file, lets it go: the file at this hash is approved for the
@@ -497,6 +501,31 @@ export const commands = {
 	testEnvGet: (projectId: string) => typedError<TestEnvEntry[], IpcError>(__TAURI_INVOKE("test_env_get", { projectId })),
 	/**  Replace a project's test environment. Names are environment variable names. */
 	testEnvSave: (projectId: string, entries: TestEnvEntry[]) => typedError<null, IpcError>(__TAURI_INVOKE("test_env_save", { projectId, entries })),
+	/**
+	 *  A test as the Run dialog shows it before it runs: its steps in words, its environment
+	 *  names, and what changed since it was last approved.
+	 */
+	testReview: (workspaceId: string, testId: string) => typedError<TestReview, IpcError>(__TAURI_INVOKE("test_review", { workspaceId, testId })),
+	/**
+	 *  A waiting run's file as the approval card shows it: the same as [`test_review`], of the
+	 *  file as it was when the run was asked for.
+	 */
+	testRunReview: (runId: string) => typedError<TestReview, IpcError>(__TAURI_INVOKE("test_run_review", { runId })),
+	/**
+	 *  A piece of a step's stdout or stderr, from `from`: the run tab tails the file with this,
+	 *  reading on each time the runner says the file grew.
+	 */
+	testStepOutput: (runId: string, stepId: string, stream: string, from: number | null) => typedError<OutputChunk, IpcError>(__TAURI_INVOKE("test_step_output", { runId, stepId, stream, from })),
+	/**
+	 *  Type a run's result into an agent's terminal, the way `ys test wait` would have printed it
+	 *  there: now if the agent is quiet, otherwise once it is. The session is one of the
+	 *  workspace's, chosen in the window.
+	 */
+	testRunSend: (runId: string, sessionId: string) => typedError<TestSent, IpcError>(__TAURI_INVOKE("test_run_send", { runId, sessionId })),
+	/**  What a project asks of its runs. */
+	testSettingsGet: (projectId: string) => typedError<TestSettings, IpcError>(__TAURI_INVOKE("test_settings_get", { projectId })),
+	/**  Change what a project asks of its runs. A shorter retention takes effect within the day. */
+	testSettingsSave: (projectId: string, settings: TestSettings) => typedError<null, IpcError>(__TAURI_INVOKE("test_settings_save", { projectId, settings })),
 	/**  What Yardsort and its agents use of this machine right now, with the last five minutes. */
 	usageMachine: () => typedError<MachineReport, IpcError>(__TAURI_INVOKE("usage_machine")),
 	/**
@@ -515,6 +544,7 @@ export const events = {
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
+	testResultSent: makeEvent<TestResultSent>("test-result-sent"),
 	testRunOutput: makeEvent<TestRunOutput>("test-run-output"),
 	testRunsChanged: makeEvent<TestRunsChanged>("test-runs-changed"),
 	workflowRunsChanged: makeEvent<WorkflowRunsChanged>("workflow-runs-changed"),
@@ -971,6 +1001,12 @@ export type EnvSource =
 "loginShell" | 
 /**  This process's own environment: always on Windows, and the fallback elsewhere. */
 "process";
+
+/**  One `{{ env.NAME }}` a test uses, and whether the project's test environment sets it. */
+export type EnvUse = {
+	name: string,
+	set: boolean,
+};
 
 /**  What an attempt's outcome rests on, beside the outcome itself. */
 export type Evidence = {
@@ -1480,6 +1516,16 @@ export type ObservedMatch = {
 export type ObservedWrite = {
 	at: number | null,
 	matches: ObservedMatch[],
+};
+
+/**  A piece of a step's output, from where the last piece ended. */
+export type OutputChunk = {
+	text: string,
+	/**  Where `text` starts; past what was asked for when the window had fallen far behind. */
+	from: number | null,
+	/**  Where to read from next. */
+	next: number | null,
+	size: number | null,
 };
 
 /**  Where the tokens were spent: a Yardsort workspace, or a folder Yardsort does not know. */
@@ -2237,6 +2283,17 @@ export type Step = {
 	needs: string[],
 } & Action;
 
+/**  One step, as the card lists it. */
+export type StepWords = {
+	id: string,
+	/**  `setup`, `steps` or `teardown`. */
+	phase: string,
+	/**  The action's name in the file. */
+	action: string,
+	/**  What the step does, in a sentence. */
+	words: string,
+};
+
 export type Suggestion = {
 	/**  The harness whose "Good at" fits best, when one clearly does. */
 	harnessId: string | null,
@@ -2406,6 +2463,33 @@ export type TestItem = {
 	inputs: TestInput[],
 };
 
+/**
+ *  A run's result typed into an agent once it is quiet — **Send result to agent** — and how
+ *  that went.
+ */
+export type TestResultSent = {
+	runId: string,
+	sessionId: string,
+	delivered: boolean,
+	/**  Why it was not, when it was not. */
+	why: string | null,
+};
+
+/**
+ *  A file as the person approving it reads it: every step in words, the environment names it
+ *  uses, and what it was before, when it was approved before and has changed since.
+ */
+export type TestReview = {
+	steps: StepWords[],
+	env: EnvUse[],
+	/**  This exact file is approved for the project already. */
+	approved: boolean,
+	/**  The project asks to see every run. */
+	askEveryTime: boolean,
+	/**  The file as it was when it was last approved, when that is not this file. */
+	previous: string | null,
+};
+
 /**  One run, as the window lists it. */
 export type TestRun = {
 	id: string,
@@ -2447,6 +2531,20 @@ export type TestRunOutput = {
  *  The window reloads what it shows of them.
  */
 export type TestRunsChanged = Record<string, never>;
+
+/**  What sending a result to an agent came to. */
+export type TestSent = {
+	/**  Typed in now. Otherwise the agent was busy, and it goes once the agent is quiet. */
+	delivered: boolean,
+};
+
+/**  What a project asks of its runs. */
+export type TestSettings = {
+	/**  Show every run's steps and ask, whether or not the file was approved before. */
+	askEveryTime: boolean,
+	/**  Ended runs older than this many days are removed, with their output. */
+	keepDays: number,
+};
 
 /**  What starting a run came to. */
 export type TestStarted = {

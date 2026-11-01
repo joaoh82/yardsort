@@ -20,6 +20,8 @@ import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
 import { RunWorkflowDialog } from "@/features/workflows/RunWorkflowDialog";
+import { RunSmokeTestDialog } from "@/features/smoke/RunSmokeTestDialog";
+import { useSmokeTestsStore, waitingIn } from "@/stores/smokeTests";
 import { MemoryDialog } from "./MemoryDialog";
 import { OutcomesDialog } from "./OutcomesDialog";
 import { useMemoryStore } from "@/stores/memory";
@@ -269,6 +271,10 @@ function WorkspaceNode({
   const [forgetting, setForgetting] = useState(false);
   // The Run dialog: `undefined` closed, `null` to choose a workflow, or the one to run.
   const [runWorkflow, setRunWorkflow] = useState<string | null | undefined>(undefined);
+  const [runSmokeTest, setRunSmokeTest] = useState(false);
+  // Smoke test runs waiting for approval here: a count on the row, and the card in the panel.
+  const testRuns = useSmokeTestsStore((s) => s.runs);
+  const waitingRuns = waitingIn(testRuns, workspace.id).length;
   const isWorktree = workspace.kind === "worktree";
   const gone = workspace.missing || workspace.archived;
   const unusable = disabled || gone;
@@ -301,6 +307,7 @@ function WorkspaceNode({
             onSelect: () => setRunWorkflow("code-review"),
           },
           { label: "Run workflow…", disabled, onSelect: () => setRunWorkflow(null) },
+          { label: "Run smoke test…", disabled, onSelect: () => setRunSmokeTest(true) },
           {
             // A new workspace on a new branch from this one's, its record going along: a handoff
             // that does not share the worktree.
@@ -434,6 +441,17 @@ function WorkspaceNode({
           </span>
         </button>
         <WorkspaceHarnesses tabs={tabs} workspaceId={workspace.id} />
+        {waitingRuns > 0 && (
+          <button
+            type="button"
+            onClick={() => enterWorkspace(workspace.id, isWorktree)}
+            title={`${waitingRuns} smoke test ${waitingRuns === 1 ? "run waits" : "runs wait"} for your approval`}
+            aria-label={`${waitingRuns} smoke test ${waitingRuns === 1 ? "run" : "runs"} waiting for approval in ${workspace.name}`}
+            className="mr-0.5 shrink-0 rounded-full border border-accent/50 px-1.5 text-[10px] leading-4 text-accent hover:bg-raised"
+          >
+            {waitingRuns}
+          </button>
+        )}
         {/* The task gives way to the pull request once there is one: a row has room for one
             number, and the pull request is the later word. The task stays in the hover. */}
         {!pr && workspace.tasks[0] && (
@@ -475,6 +493,9 @@ function WorkspaceNode({
           workflowId={runWorkflow ?? undefined}
           onClose={() => setRunWorkflow(undefined)}
         />
+      )}
+      {runSmokeTest && (
+        <RunSmokeTestDialog workspaceId={workspace.id} onClose={() => setRunSmokeTest(false)} />
       )}
     </li>
   );

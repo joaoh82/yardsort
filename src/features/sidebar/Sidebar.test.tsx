@@ -47,6 +47,8 @@ const core = vi.hoisted(() => ({
   workflowPreview: vi.fn(),
   harnessesList: vi.fn(),
   workspaceFork: vi.fn(),
+  testList: vi.fn(),
+  testRuns: vi.fn(),
 }));
 const native = vi.hoisted(() => ({
   pickFolder: vi.fn(),
@@ -71,6 +73,8 @@ import { useTerminalStore } from "@/stores/terminals";
 import { useUpdatesStore } from "@/stores/updates";
 import { useMemoryStore } from "@/stores/memory";
 import { useOutcomesStore } from "@/stores/outcomes";
+import { useSmokeTestsStore } from "@/stores/smokeTests";
+import { testRun } from "@/test/fixtures";
 import { Sidebar } from "./Sidebar";
 import { StartFromLinkDialog } from "./StartFromLinkDialog";
 import { runCommand } from "@/features/keyboard/commands";
@@ -668,6 +672,30 @@ describe("Sidebar", () => {
     await user.click(screen.getByRole("menuitem", { name: "Request code review…" }));
     const dialog = await screen.findByRole("dialog", { name: /Run/ });
     expect(within(dialog).queryByRole("combobox", { name: "Workspace" })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers Run smoke test… on a workspace, and counts the runs waiting for approval", async () => {
+    core.testList.mockResolvedValue([]);
+    useSmokeTestsStore.setState({
+      runs: [
+        testRun("r1", { workspaceId: "w-alpha-feature" }),
+        testRun("r2", { workspaceId: "w-alpha-feature" }),
+        testRun("r3", { workspaceId: "w-alpha-feature", status: "running" }),
+      ],
+    });
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    expect(
+      screen.getByRole("button", { name: "2 smoke test runs waiting for approval in feature" }),
+    ).toHaveTextContent("2");
+    expect(screen.queryByRole("button", { name: /waiting for approval in local/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Run smoke test…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Run a smoke test" });
+    expect(core.testList).toHaveBeenCalledWith("w-alpha-feature");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
   });

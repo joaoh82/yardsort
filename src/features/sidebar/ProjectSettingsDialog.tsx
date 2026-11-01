@@ -1,5 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { errorMessage, ipc, type Project, type ProjectAutomation } from "@/lib/ipc";
+import {
+  errorMessage,
+  ipc,
+  type Project,
+  type ProjectAutomation,
+  type TestEnvEntry,
+  type TestSettings,
+} from "@/lib/ipc";
 import { useModalFocus } from "@/lib/useModalFocus";
 
 export function ProjectSettingsDialog({
@@ -15,6 +22,10 @@ export function ProjectSettingsDialog({
   const [setupArgs, setSetupArgs] = useState("");
   const [run, setRun] = useState("");
   const [runArgs, setRunArgs] = useState("");
+  // Smoke tests: the test environment and what the project asks of its runs.
+  const [env, setEnv] = useState<TestEnvEntry[] | null>(null);
+  const [tests, setTests] = useState<TestSettings | null>(null);
+  const [showValues, setShowValues] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLFormElement>(null);
@@ -32,6 +43,15 @@ export function ProjectSettingsDialog({
         setSetupArgs(value.setup?.args.join("\n") ?? "");
         setRun(value.run?.program ?? "");
         setRunArgs(value.run?.args.join("\n") ?? "");
+      })
+      .catch((error) => {
+        if (!cancelled) setError(errorMessage(error));
+      });
+    void Promise.all([ipc.testEnvGet(project.id), ipc.testSettingsGet(project.id)])
+      .then(([entries, settings]) => {
+        if (cancelled) return;
+        setEnv(entries);
+        setTests(settings);
       })
       .catch((error) => {
         if (!cancelled) setError(errorMessage(error));
@@ -56,6 +76,15 @@ export function ProjectSettingsDialog({
         setup: setup.trim() ? { program: setup.trim(), args: args(setupArgs) } : null,
         run: run.trim() ? { program: run.trim(), args: args(runArgs) } : null,
       });
+      if (env && tests) {
+        await ipc.testEnvSave(
+          project.id,
+          env
+            .map((entry) => ({ name: entry.name.trim(), value: entry.value }))
+            .filter((entry) => entry.name !== ""),
+        );
+        await ipc.testSettingsSave(project.id, tests);
+      }
       onClose();
     } catch (error) {
       setError(errorMessage(error));
@@ -143,6 +172,106 @@ export function ProjectSettingsDialog({
             enter its interpreter (such as bash or pwsh) and its path as an argument. Leave an
             executable blank to disable it. Setup has a 10-minute limit and writes a log in the
             worktree’s private Git directory.
+          </p>
+        </fieldset>
+        <fieldset disabled={!env || !tests || busy} className="mt-5 space-y-3 disabled:opacity-50">
+          <legend className="font-semibold">Smoke tests</legend>
+          <p className="text-ink-muted">
+            The test environment: what a smoke test reads as <code>{"{{ env.NAME }}"}</code>, kept
+            here and never in the repository. A test that uses a name not set here gets an empty
+            string, and the approval card says so.
+          </p>
+          <div className="space-y-1.5">
+            {(env ?? []).map((entry, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <input
+                  aria-label={`Variable ${index + 1} name`}
+                  value={entry.name}
+                  onChange={(e) =>
+                    setEnv((all) =>
+                      (all ?? []).map((it, i) =>
+                        i === index ? { ...it, name: e.target.value } : it,
+                      ),
+                    )
+                  }
+                  placeholder="TEST_PASSWORD"
+                  className={`${input} mt-0 w-56`}
+                />
+                <input
+                  aria-label={`Variable ${index + 1} value`}
+                  type={showValues ? "text" : "password"}
+                  value={entry.value}
+                  onChange={(e) =>
+                    setEnv((all) =>
+                      (all ?? []).map((it, i) =>
+                        i === index ? { ...it, value: e.target.value } : it,
+                      ),
+                    )
+                  }
+                  className={`${input} mt-0 flex-1`}
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove variable ${index + 1}`}
+                  onClick={() => setEnv((all) => (all ?? []).filter((_, i) => i !== index))}
+                  className="shrink-0 rounded px-1.5 text-ink-faint hover:bg-raised hover:text-ink"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setEnv((all) => [...(all ?? []), { name: "", value: "" }])}
+                className="text-ink-muted hover:text-ink"
+              >
+                + Add a variable
+              </button>
+              {(env?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  aria-pressed={showValues}
+                  onClick={() => setShowValues((shown) => !shown)}
+                  className="text-ink-muted hover:text-ink"
+                >
+                  {showValues ? "Hide values" : "Show values"}
+                </button>
+              )}
+            </div>
+          </div>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={tests?.askEveryTime ?? false}
+              onChange={(e) =>
+                setTests((it) => (it ? { ...it, askEveryTime: e.target.checked } : it))
+              }
+            />
+            Ask every time
+          </label>
+          <p className="text-ink-faint">
+            Show every run’s steps and ask before it runs, even for a file you approved before. Off,
+            a file you have approved runs straight away until it changes.
+          </p>
+          <label className="flex items-center gap-2">
+            Keep runs for
+            <input
+              type="number"
+              min={1}
+              max={3650}
+              aria-label="Keep runs for days"
+              value={tests?.keepDays || ""}
+              onChange={(e) =>
+                setTests((it) => (it ? { ...it, keepDays: Number(e.target.value) || 0 } : it))
+              }
+              className={`${input} mt-0 w-20`}
+            />
+            days
+          </label>
+          <p className="text-ink-faint">
+            Older runs are removed with their output files. Runs waiting, queued or going are never
+            removed.
           </p>
         </fieldset>
         {error && (

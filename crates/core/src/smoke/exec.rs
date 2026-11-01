@@ -1198,6 +1198,52 @@ pub fn read_capped(path: &Path, max: usize) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+/// A piece of a step's output file, read from a byte offset: what the window tails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chunk {
+    /// The text, whole characters only.
+    pub text: String,
+    /// Where `text` starts. What was asked for, unless more than the cap lay between that and
+    /// the end: then the cap's worth before the end, and the window says lines were skipped.
+    pub from: u64,
+    /// Where to read from next: the end of `text`, which is before the file's end when the
+    /// process has written half a character so far.
+    pub next: u64,
+    /// The file's size when it was read.
+    pub size: u64,
+}
+
+/// Read a step's output from `from`, at most `max` bytes, as text. A process may have written
+/// half a multi-byte character when the file is read, so a trailing incomplete character is
+/// left for the next read rather than shown as a question mark.
+pub fn read_from(path: &Path, from: u64, max: usize) -> std::io::Result<Chunk> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = File::open(path)?;
+    let size = file.metadata()?.len();
+    let start = if size.saturating_sub(from) > max as u64 {
+        size - max as u64
+    } else {
+        from.min(size)
+    };
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(max as u64).read_to_end(&mut bytes)?;
+    let kept = match std::str::from_utf8(&bytes) {
+        Ok(_) => bytes.len(),
+        // Cut inside a character at the end: wait for the rest. Invalid bytes anywhere else
+        // are shown as such.
+        Err(error) if error.error_len().is_none() => error.valid_up_to(),
+        Err(_) => bytes.len(),
+    };
+    bytes.truncate(kept);
+    Ok(Chunk {
+        text: String::from_utf8_lossy(&bytes).into_owned(),
+        from: start,
+        next: start + kept as u64,
+        size,
+    })
+}
+
 /// The last `n` lines of `text`, trailing blank lines dropped.
 pub fn last_lines(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
@@ -1238,6 +1284,32 @@ pub fn duration_words(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chunk_is_read_from_where_the_last_ended_and_never_splits_a_character() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out");
+        // "héllo" with its é written in two halves, as a process might.
+        let bytes = "h\u{e9}llo\n".as_bytes();
+        std::fs::write(&path, &bytes[..2]).unwrap();
+        let first = read_from(&path, 0, 1024).unwrap();
+        assert_eq!(first.text, "h", "the half character waits");
+        assert_eq!((first.from, first.next, first.size), (0, 1, 2));
+
+        std::fs::write(&path, bytes).unwrap();
+        let rest = read_from(&path, first.next, 1024).unwrap();
+        assert_eq!(rest.text, "\u{e9}llo\n");
+        assert_eq!((rest.from, rest.next), (1, bytes.len() as u64));
+
+        // Far behind the end: the cap's worth before the end, and `from` says so.
+        let tail = read_from(&path, 0, 3).unwrap();
+        assert_eq!(tail.text, "lo\n");
+        assert_eq!(tail.from, bytes.len() as u64 - 3);
+        // Nothing new.
+        let none = read_from(&path, rest.next, 1024).unwrap();
+        assert_eq!(none.text, "");
+        assert_eq!(none.next, rest.next);
+    }
 
     #[test]
     fn json_inclusion_walks_objects_and_compares_the_rest_whole() {

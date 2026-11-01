@@ -72,6 +72,19 @@ pub fn summary(run: &TestRunRow, steps: &[TestStepRow]) -> String {
     out.join("\n")
 }
 
+/// The report as a message to an agent that did not ask for it: what **Send result to agent**
+/// types into the workspace's agent, with a line first saying what this is.
+pub fn for_agent(run: &TestRunRow, steps: &[TestStepRow]) -> String {
+    format!(
+        "The smoke test `{}` was run in Yardsort, in the workspace `{}`. The result, as \
+         `ys test wait {}` would print it:\n\n{}",
+        run.test_id,
+        run.workspace_name,
+        crate::memory::short_id(&run.id),
+        summary(run, steps)
+    )
+}
+
 /// `failed  login  (3 of 6 steps passed, 1m 12s)`.
 pub fn headline(run: &TestRunRow, steps: &[TestStepRow]) -> String {
     let counted: Vec<&TestStepRow> = steps.iter().filter(|s| s.phase != "teardown").collect();

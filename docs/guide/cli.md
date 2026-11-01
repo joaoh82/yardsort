@@ -506,8 +506,8 @@ has just written. `--json` works as everywhere; `list --json` says for each test
 `runnable` and whether it `usesBrowser`.
 
 `run` queues the run and returns at once with its id. Yardsort must be open: the app carries runs
-out, and a run of a file you have not approved in the app waits there first — `run` says so, and
-there is no way to approve from here. `wait` blocks until the run ends and prints the verdict
+out, and a run of a file you have not approved in the app waits there first, on a card at the
+top of the workspace — `run` says so, and there is no way to approve from here. `wait` blocks until the run ends and prints the verdict
 the way an agent can act on it: the status, the step that failed and why, and the last lines of
 any server the test started. It exits 0 when the run passed, 1 when it failed and 2 for anything
 else — cancelled, refused, errored, or still going when `--timeout` (20 minutes unless said)

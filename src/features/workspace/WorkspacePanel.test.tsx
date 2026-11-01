@@ -8,6 +8,8 @@ const core = vi.hoisted(() => ({
   activityTimeline: vi.fn(),
   onActivityChanged: vi.fn(),
   projectAutomationGet: vi.fn(),
+  testEnvGet: vi.fn(async () => []),
+  testSettingsGet: vi.fn(async () => ({ askEveryTime: false, keepDays: 30 })),
   workspaceRun: vi.fn(),
   ptyList: vi.fn(),
   sessionsList: vi.fn(),

@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ContextMenu, type MenuItem } from "@/features/sidebar/ContextMenu";
+import { runActivity, statusWords } from "@/features/smoke/words";
+import type { TestRun } from "@/lib/ipc";
 import { useShortcutLabel } from "@/stores/preferences";
 import { useSessionsStore } from "@/stores/sessions";
+import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
 import { AgentButton } from "./AgentButton";
@@ -17,13 +20,25 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
   const open = useTerminalStore((s) => s.open);
   const tabs = allTabs.filter((tab) => tab.workspaceId === workspaceId);
   const harnesses = launchable(useHarnessStore((s) => s.harnesses));
+  // Smoke test runs open as tabs here too, after the terminals; one in front hides them.
+  const openRuns = useSmokeTestsStore((s) => s.open[workspaceId]);
+  const shownRun = useSmokeTestsStore((s) => s.shown[workspaceId]);
+  const runs = useSmokeTestsStore((s) => s.runs);
 
   return (
     <div className="flex h-9 shrink-0 items-stretch border-b border-line bg-surface">
       <div role="tablist" aria-label="Terminals" className="flex min-w-0 items-stretch">
         {tabs.map((tab) => (
-          <Tab key={tab.id} tab={tab} active={tab.id === activeId} />
+          <Tab key={tab.id} tab={tab} active={tab.id === activeId && !shownRun} />
         ))}
+        {(openRuns ?? []).map((runId) => {
+          const run = runs.find((candidate) => candidate.id === runId);
+          return (
+            run && (
+              <RunTab key={runId} run={run} workspaceId={workspaceId} active={runId === shownRun} />
+            )
+          );
+        })}
       </div>
       <button
         type="button"
@@ -50,8 +65,56 @@ export function TerminalTabs({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+/** A smoke test run's tab: the test's name with a dot for how the run is going. */
+function RunTab({
+  run,
+  workspaceId,
+  active,
+}: {
+  run: TestRun;
+  workspaceId: string;
+  active: boolean;
+}) {
+  const openRun = useSmokeTestsStore((s) => s.openRun);
+  const closeRun = useSmokeTestsStore((s) => s.closeRun);
+  return (
+    <div
+      className={`group flex items-center border-r border-line ${
+        active ? "bg-canvas text-ink" : "text-ink-muted hover:bg-raised"
+      }`}
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        aria-label={`Smoke test ${run.testName}, ${statusWords(run)}`}
+        onClick={() => openRun(workspaceId, run.id)}
+        title={`Smoke test run: ${statusWords(run)}`}
+        className="flex h-full items-center gap-2 pr-1 pl-3"
+      >
+        <StatusDot activity={runActivity(run)} />
+        <span className="max-w-40 truncate">{run.testName}</span>
+        <span className="text-[11px] text-ink-faint">{statusWords(run)}</span>
+      </button>
+      <button
+        type="button"
+        aria-label={`Close ${run.testName}`}
+        onClick={() => closeRun(workspaceId, run.id)}
+        className="mr-1 rounded px-1 text-ink-faint opacity-0 group-hover:opacity-100 hover:bg-line hover:text-ink focus-visible:opacity-100"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
-  const activate = useTerminalStore((s) => s.activate);
+  const activateTerminal = useTerminalStore((s) => s.activate);
+  const showTerminals = useSmokeTestsStore((s) => s.showTerminals);
+  const activate = (id: TerminalTab["id"]) => {
+    activateTerminal(id);
+    showTerminals(tab.workspaceId);
+  };
   const close = useTerminalStore((s) => s.close);
   const fork = useTerminalStore((s) => s.fork);
   const record = useSessionsStore((s) =>

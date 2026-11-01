@@ -5,6 +5,18 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Smoke tests in the app: the approval card, the run tab and Run smoke test….** A run of a
+  file you have not approved — new, or changed since — now shows at the top of its workspace as
+  a card: every step in words, the environment names it reads and which are unset, what changed
+  since the version you approved, and **Run** or **Don't run**; the workspace's row counts the
+  runs waiting. A run opens as a tab beside the terminals, with its steps by phase, each step's
+  note, facts and output tailed as it writes, **Pass** / **Fail** with a note for `manual` steps,
+  **Cancel**, **Run again** and **Send result to agent**, which types the verdict into the
+  workspace's agent once it is quiet. **Run smoke test…** in a workspace's menu starts one from
+  the app, and pressing Run there is the approval. Project settings gain the test environment,
+  with values hidden, **Ask every time** and how long to keep runs. See
+  [Smoke tests](docs/guide/smoke-tests.md#in-the-app).
+
 - **A terminal open in the app and in `ys attach` at once answers a program's questions once.**
   When a program asked where the cursor was, or which colours the terminal used, both answered,
   and the program could read the second answer as typing — `^[[24;1R` in a prompt. Now only the
@@ -76,9 +88,8 @@ has the downloads and the full commit lists.
   of its own, output to files, a cancel that stops the step and still runs the teardown; and
   `ys test wait` prints the verdict for the agent that asked, with `runs`, `log` and `cancel`
   beside it. A file from a repository never runs unseen: a run of a new or changed file waits
-  until you approve it in Yardsort. The card that shows it, the run tab and the Tests view are
-  the next step, so for now a run started from `ys` waits; `browser` steps are not run yet. See
-  [Smoke tests](docs/guide/smoke-tests.md).
+  until you approve it in Yardsort. The Tests view is the next step, and `browser` steps are not
+  run yet. See [Smoke tests](docs/guide/smoke-tests.md).
 
 ## 0.20.2
 

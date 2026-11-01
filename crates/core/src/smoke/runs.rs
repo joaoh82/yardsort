@@ -33,7 +33,8 @@ pub struct Request<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Queued {
     pub id: String,
-    /// The file at this hash has not been approved: the run waits for the user in the app.
+    /// The file at this hash has not been approved, or the project asks to see every run:
+    /// the run waits for the user in the app.
     pub awaiting_approval: bool,
 }
 
@@ -130,7 +131,10 @@ pub fn queue(store: &Store, request: &Request<'_>) -> IpcResult<Queued> {
     }
 
     let hash = content_hash(&entry.text);
-    let approved = store.test_approved(&workspace.project_id, &entry.id, &hash)?;
+    // Approved, and the project does not ask to see every run: it goes straight to the queue.
+    let settings = store.project_test_settings(&workspace.project_id)?;
+    let approved =
+        store.test_approved(&workspace.project_id, &entry.id, &hash)? && !settings.ask_every_time;
     let id = uuid::Uuid::new_v4().to_string();
     let inputs_json = serde_json::to_string(&inputs).unwrap_or_else(|_| "{}".to_owned());
     let steps: Vec<(&str, &str, &str)> = test

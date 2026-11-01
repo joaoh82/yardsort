@@ -3,14 +3,16 @@
 //! rules live in the core (`yardsort_core::smoke`); a run started here goes through the same
 //! `runs::queue` as `ys test run`, and the runner in this module's parent carries it out.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::AppHandle;
-use yardsort_core::smoke::{self, runs, InputKind, Problem};
-use yardsort_core::store::{TestRunRow, TestStepRow};
+use tauri::{AppHandle, Manager};
+use yardsort_core::smoke::deliver::{try_deliver, Delivery, Tried};
+use yardsort_core::smoke::words::{test_words, StepWords};
+use yardsort_core::smoke::{self, exec, report, runs, InputKind, Problem};
+use yardsort_core::store::{Store, TestRunRow, TestStepRow};
 
 use crate::error::{IpcError, IpcResult};
 use crate::state::blocking;
@@ -113,6 +115,66 @@ pub struct TestStarted {
 pub struct TestEnvEntry {
     pub name: String,
     pub value: String,
+}
+
+/// What a project asks of its runs.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestSettings {
+    /// Show every run's steps and ask, whether or not the file was approved before.
+    pub ask_every_time: bool,
+    /// Ended runs older than this many days are removed, with their output.
+    pub keep_days: u32,
+}
+
+/// The longest a project may keep its runs: ten years, which is to say "keep them".
+const MAX_KEEP_DAYS: u32 = 3650;
+
+/// A file as the person approving it reads it: every step in words, the environment names it
+/// uses, and what it was before, when it was approved before and has changed since.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestReview {
+    pub steps: Vec<StepWords>,
+    pub env: Vec<EnvUse>,
+    /// This exact file is approved for the project already.
+    pub approved: bool,
+    /// The project asks to see every run.
+    pub ask_every_time: bool,
+    /// The file as it was when it was last approved, when that is not this file.
+    pub previous: Option<String>,
+}
+
+/// One `{{ env.NAME }}` a test uses, and whether the project's test environment sets it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvUse {
+    pub name: String,
+    pub set: bool,
+}
+
+/// A piece of a step's output, from where the last piece ended.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputChunk {
+    pub text: String,
+    /// Where `text` starts; past what was asked for when the window had fallen far behind.
+    pub from: f64,
+    /// Where to read from next.
+    pub next: f64,
+    pub size: f64,
+}
+
+/// How much of a step's output one read returns, at most. The window tails from where it was,
+/// so it only ever reads this much at once when it had fallen that far behind.
+const OUTPUT_READ_BYTES: usize = 256 * 1024;
+
+/// What sending a result to an agent came to.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestSent {
+    /// Typed in now. Otherwise the agent was busy, and it goes once the agent is quiet.
+    pub delivered: bool,
 }
 
 fn run_from(row: TestRunRow) -> TestRun {
@@ -234,7 +296,9 @@ pub async fn test_run_steps(app: AppHandle, run_id: String) -> IpcResult<Vec<Tes
     .await
 }
 
-/// Start a run. The same checks as `ys test run`; a file not yet approved waits.
+/// Start a run from the Run dialog. The same checks as `ys test run`; and since the dialog
+/// showed the file's steps, pressing Run is the approval: a file not approved yet is approved
+/// here, and the run goes straight on.
 #[tauri::command]
 #[specta::specta]
 pub async fn test_run_start(
@@ -244,7 +308,7 @@ pub async fn test_run_start(
     inputs: BTreeMap<String, String>,
 ) -> IpcResult<TestStarted> {
     let queued = blocking(app.clone(), move |state| {
-        runs::queue(
+        let queued = runs::queue(
             &state.store,
             &runs::Request {
                 test_id: &test_id,
@@ -253,14 +317,261 @@ pub async fn test_run_start(
                 requested_by: "app",
                 session_record_id: None,
             },
-        )
+        )?;
+        if queued.awaiting_approval {
+            state.store.approve_test_run(&queued.id)?;
+        }
+        Ok(queued)
     })
     .await?;
     super::changed(&app);
     Ok(TestStarted {
         run_id: queued.id,
-        awaiting_approval: queued.awaiting_approval,
+        awaiting_approval: false,
     })
+}
+
+/// A test as the Run dialog shows it before it runs: its steps in words, its environment
+/// names, and what changed since it was last approved.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_review(
+    app: AppHandle,
+    workspace_id: String,
+    test_id: String,
+) -> IpcResult<TestReview> {
+    blocking(app, move |state| {
+        let workspace = state
+            .store
+            .workspace(&workspace_id)?
+            .ok_or_else(|| IpcError::new("workspace_not_found", "That workspace is not there."))?;
+        let entry = smoke::find(Path::new(&workspace.path), &test_id).ok_or_else(|| {
+            IpcError::new(
+                "test_not_found",
+                format!("There is no smoke test `{test_id}` in this workspace."),
+            )
+        })?;
+        let test = entry.test.as_ref().ok_or_else(|| {
+            IpcError::new(
+                "test_invalid",
+                format!("`{}` has problems and cannot run.", entry.id),
+            )
+        })?;
+        review(
+            &state.store,
+            &workspace.project_id,
+            &entry.id,
+            test,
+            &entry.text,
+            &runs::content_hash(&entry.text),
+        )
+    })
+    .await
+}
+
+/// A waiting run's file as the approval card shows it: the same as [`test_review`], of the
+/// file as it was when the run was asked for.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_run_review(app: AppHandle, run_id: String) -> IpcResult<TestReview> {
+    blocking(app, move |state| {
+        let row = run_row(&state.store, &run_id)?;
+        let test = smoke::parse(&row.definition).map_err(|invalid| {
+            IpcError::new(
+                "test_invalid",
+                format!(
+                    "The run's file does not check out: {}",
+                    invalid
+                        .problems
+                        .first()
+                        .map(|p| p.message.clone())
+                        .unwrap_or_default()
+                ),
+            )
+        })?;
+        let project_id = row.project_id.clone().unwrap_or_default();
+        review(
+            &state.store,
+            &project_id,
+            &row.test_id,
+            &test,
+            &row.definition,
+            &row.content_hash,
+        )
+    })
+    .await
+}
+
+fn run_row(store: &Store, run_id: &str) -> IpcResult<TestRunRow> {
+    store
+        .test_run(run_id)?
+        .ok_or_else(|| IpcError::new("test_run_not_found", "That run is not there."))
+}
+
+fn review(
+    store: &Store,
+    project_id: &str,
+    test_id: &str,
+    test: &smoke::Test,
+    text: &str,
+    hash: &str,
+) -> IpcResult<TestReview> {
+    let set: BTreeSet<String> = store
+        .project_test_env(project_id)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    let settings = store.project_test_settings(project_id)?;
+    let previous = store
+        .last_approved_definition(project_id, test_id)?
+        .filter(|before| before != text);
+    Ok(TestReview {
+        steps: test_words(test),
+        env: runs::env_names(test)
+            .into_iter()
+            .map(|name| EnvUse {
+                set: set.contains(&name),
+                name,
+            })
+            .collect(),
+        approved: store.test_approved(project_id, test_id, hash)?,
+        ask_every_time: settings.ask_every_time,
+        previous,
+    })
+}
+
+/// A piece of a step's stdout or stderr, from `from`: the run tab tails the file with this,
+/// reading on each time the runner says the file grew.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_step_output(
+    app: AppHandle,
+    run_id: String,
+    step_id: String,
+    stream: String,
+    from: f64,
+) -> IpcResult<OutputChunk> {
+    blocking(app, move |state| {
+        let step = state
+            .store
+            .test_step(&run_id, &step_id)?
+            .ok_or_else(|| IpcError::new("test_step_not_found", "That step is not there."))?;
+        let outputs = step.outputs();
+        let Some(path) = outputs
+            .get(stream.as_str())
+            .filter(|_| matches!(stream.as_str(), "stdout" | "stderr"))
+        else {
+            return Ok(OutputChunk {
+                text: String::new(),
+                from: 0.0,
+                next: 0.0,
+                size: 0.0,
+            });
+        };
+        let chunk = exec::read_from(Path::new(path), from.max(0.0) as u64, OUTPUT_READ_BYTES)
+            .map_err(|error| {
+                IpcError::new(
+                    "test_output_unreadable",
+                    format!("Cannot read the step's output: {error}"),
+                )
+            })?;
+        Ok(OutputChunk {
+            text: chunk.text,
+            from: chunk.from as f64,
+            next: chunk.next as f64,
+            size: chunk.size as f64,
+        })
+    })
+    .await
+}
+
+/// Type a run's result into an agent's terminal, the way `ys test wait` would have printed it
+/// there: now if the agent is quiet, otherwise once it is. The session is one of the
+/// workspace's, chosen in the window.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_run_send(
+    app: AppHandle,
+    run_id: String,
+    session_id: String,
+) -> IpcResult<TestSent> {
+    let handle = app.clone();
+    blocking(app, move |state| {
+        let row = run_row(&state.store, &run_id)?;
+        if !row.ended() {
+            return Err(IpcError::new(
+                "test_run_going",
+                "The run has not ended yet. Send its result once it has.",
+            ));
+        }
+        let steps = state.store.test_steps(&row.id)?;
+        let delivery = Delivery {
+            run_id: row.id.clone(),
+            session_id,
+            text: report::for_agent(&row, &steps),
+        };
+        match try_deliver(state.host.as_ref(), &delivery) {
+            Tried::Delivered => Ok(TestSent { delivered: true }),
+            Tried::NotYet => {
+                let runner = handle.try_state::<super::Runner>().ok_or_else(|| {
+                    IpcError::new(
+                        "test_runner_absent",
+                        "Another Yardsort on this profile carries runs out; send it from there.",
+                    )
+                })?;
+                runner.later(delivery);
+                Ok(TestSent { delivered: false })
+            }
+            Tried::Gone(why) => Err(IpcError::new("test_send_session", why)),
+        }
+    })
+    .await
+}
+
+/// What a project asks of its runs.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_settings_get(app: AppHandle, project_id: String) -> IpcResult<TestSettings> {
+    blocking(app, move |state| {
+        let settings = state.store.project_test_settings(&project_id)?;
+        Ok(TestSettings {
+            ask_every_time: settings.ask_every_time,
+            keep_days: settings.keep_days,
+        })
+    })
+    .await
+}
+
+/// Change what a project asks of its runs. A shorter retention takes effect within the day.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_settings_save(
+    app: AppHandle,
+    project_id: String,
+    settings: TestSettings,
+) -> IpcResult<()> {
+    blocking(app, move |state| {
+        if state.store.project(&project_id)?.is_none() {
+            return Err(IpcError::new(
+                "project_not_found",
+                "That project is not there.",
+            ));
+        }
+        if settings.keep_days == 0 || settings.keep_days > MAX_KEEP_DAYS {
+            return Err(IpcError::new(
+                "test_keep_days",
+                format!("Keep runs for between 1 and {MAX_KEEP_DAYS} days."),
+            ));
+        }
+        Ok(state.store.set_project_test_settings(
+            &project_id,
+            &yardsort_core::store::TestSettings {
+                ask_every_time: settings.ask_every_time,
+                keep_days: settings.keep_days,
+            },
+        )?)
+    })
+    .await
 }
 
 /// The user, having seen the run's file, lets it go: the file at this hash is approved for the
