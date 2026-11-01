@@ -7,7 +7,7 @@
  * tested in `test/lib/`, against the real server.
  */
 
-import { webcrypto } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 
 import type { Crypto, Socket } from "@yardsort/remote-client";
 
@@ -286,8 +286,9 @@ function refused(message: string): Response {
 
 const crypto: Crypto = {
   random: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
-  sha256: async (data) =>
-    new Uint8Array(await webcrypto.subtle.digest("SHA-256", data as Uint8Array<ArrayBuffer>)),
+  // Not `subtle.digest`, which takes real time on a thread: these screens run under fake timers, so
+  // `findBy` gives up after a few real milliseconds, and on a loaded runner the digest lost that race.
+  sha256: async (data) => new Uint8Array(createHash("sha256").update(data).digest()),
 };
 
 export function envFor(server: FakeServer): Env {
