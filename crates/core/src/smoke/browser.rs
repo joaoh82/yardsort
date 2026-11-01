@@ -51,8 +51,9 @@ const SHOT_BUDGET: Duration = Duration::from_secs(10);
 /// accepts the connection and then stalls cannot block the run thread forever.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How often a blocked read wakes to check the stop signal and the deadline.
-const READ_TICK: Duration = Duration::from_millis(200);
+/// How long a non-blocking read of the DevTools socket waits before looking again, so a call
+/// gets its reply promptly while still checking the stop signal and the deadline between looks.
+const SOCKET_POLL: Duration = Duration::from_millis(5);
 
 /// What a `browser` step needs to run: the binary, where to keep its profile and screenshots,
 /// the actions (variables already filled in), and how it should behave.
@@ -320,8 +321,8 @@ fn run(
             None => return Done::failed("The browser opened no page."),
         },
         Err(CallError::Stopped(stop)) => return Done::stopped(stop),
-        Err(CallError::Failed(why)) => {
-            return Done::failed(format!("Could not open a page: {why}"))
+        Err(other) => {
+            return Done::failed(format!("Could not open a page: {}", other.into_message()))
         }
     };
     let mut page = match Conn::connect(&format!("{base}/devtools/page/{target}")) {
@@ -504,7 +505,9 @@ fn goto(page: &mut Conn, url: &str, watch: &dyn Watch, deadline: Instant) -> Act
             }
         }
         Err(CallError::Stopped(stop)) => return Act::Stopped(stop),
-        Err(CallError::Failed(why)) => return Act::Failed(format!("could not go to {url}: {why}")),
+        Err(other) => {
+            return Act::Failed(format!("could not go to {url}: {}", other.into_message()))
+        }
     }
     let body = "(()=>document.readyState==='complete')()";
     match poll(page, body, watch, deadline, |v| v == &Value::Bool(true)) {
@@ -586,8 +589,8 @@ fn press(page: &mut Conn, key: &str, watch: &dyn Watch, deadline: Instant) -> Ac
         match page.call("Input.dispatchKeyEvent", message, watch, deadline) {
             Ok(_) => {}
             Err(CallError::Stopped(stop)) => return Act::Stopped(stop),
-            Err(CallError::Failed(why)) => {
-                return Act::Failed(format!("could not press {key}: {why}"))
+            Err(other) => {
+                return Act::Failed(format!("could not press {key}: {}", other.into_message()))
             }
         }
     }
@@ -677,6 +680,11 @@ fn poll(
         if let Some(stop) = watch.stop() {
             return Poll::Stopped(stop);
         }
+        // Check the step's deadline before evaluating, not only after, so the expectation reads
+        // as "it did not appear" rather than a call cut off at the very end of the step's time.
+        if Instant::now() >= deadline {
+            return Poll::TimedOut(last);
+        }
         match eval(page, body, watch, deadline) {
             Ok(value) => {
                 if ready(&value) {
@@ -685,13 +693,11 @@ fn poll(
                 last = value;
             }
             Err(CallError::Stopped(stop)) => return Poll::Stopped(stop),
+            Err(CallError::TimedOut) => return Poll::TimedOut(last),
             // A page navigating out from under us (after a `click`, say) tears down the context
             // the expression ran in. That is transient: keep polling, the new page is coming.
             Err(CallError::Failed(why)) if is_navigating(&why) => {}
             Err(CallError::Failed(why)) => return Poll::Failed(why),
-        }
-        if Instant::now() >= deadline {
-            return Poll::TimedOut(last);
         }
         std::thread::sleep(POLL);
     }
@@ -799,9 +805,12 @@ fn eval(
 }
 
 /// Why a DevTools call did not return a value: the run was stopped (a cancel or the run's time
-/// limit, seen while waiting for the reply), or it failed.
+/// limit), the step's own deadline passed while waiting for the reply, or it failed. `TimedOut`
+/// is separate from `Failed` so a polling expectation can report "it did not appear" rather than
+/// a transport error when the step's time simply ran out.
 enum CallError {
     Stopped(Stop),
+    TimedOut,
     Failed(String),
 }
 
@@ -811,6 +820,7 @@ impl CallError {
         match self {
             CallError::Stopped(Stop::Cancelled) => "the run was cancelled".to_owned(),
             CallError::Stopped(_) => "the run's time limit passed".to_owned(),
+            CallError::TimedOut => "it did not answer in time".to_owned(),
             CallError::Failed(why) => why,
         }
     }
@@ -837,20 +847,29 @@ impl Conn {
             .ok_or_else(|| format!("could not resolve `{authority}`"))?;
         let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
             .map_err(|error| error.to_string())?;
-        // Bound the handshake; tightened to a short tick once it is up, so a `call` wakes often
-        // enough to check for a stop.
+        let _ = stream.set_nodelay(true);
+        // A read timeout bounds the handshake only: if it fires the handshake fails and we drop
+        // the socket, so we never go on to use a timed-out socket. Windows leaves a socket in an
+        // indeterminate state after a `SO_RCVTIMEO` read timeout, so the steady-state reads below
+        // must not rely on one — they poll a non-blocking socket instead.
         let _ = stream.set_read_timeout(Some(CONNECT_TIMEOUT));
         let _ = stream.set_write_timeout(Some(CONNECT_TIMEOUT));
         let (mut socket, _response) = tungstenite::client(url, MaybeTlsStream::Plain(stream))
             .map_err(|error| format!("the DevTools handshake did not complete: {error}"))?;
+        // The handshake succeeded, so the socket is healthy. Switch it to non-blocking for the
+        // calls to come, where a `read` that finds no full message yet returns `WouldBlock` and
+        // the loop sleeps a tick — portable, and it keeps the socket usable, unlike a timeout.
         if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
-            let _ = stream.set_read_timeout(Some(READ_TICK));
+            let _ = stream.set_read_timeout(None);
+            let _ = stream.set_write_timeout(None);
+            let _ = stream.set_nonblocking(true);
         }
         Ok(Self { socket, next_id: 0 })
     }
 
-    /// Send one method and wait for its reply, ignoring the events that arrive meanwhile. Wakes
-    /// every [`READ_TICK`] to honour a cancel or the run's time limit (`watch`) and the step's
+    /// Send one method and wait for its reply, ignoring the events that arrive meanwhile. The
+    /// socket is non-blocking, so a read with no full message yet returns `WouldBlock`; between
+    /// looks the loop honours a cancel or the run's time limit (`watch`) and the step's
     /// `deadline` — so a `goto` to a server that never answers, or a page stuck in a script, does
     /// not ignore `ys test cancel` until the whole timeout. A page that opens an `alert()` or
     /// `confirm()` is dismissed, since it would otherwise block every later call.
@@ -864,9 +883,7 @@ impl Conn {
         self.next_id += 1;
         let id = self.next_id;
         let message = json!({ "id": id, "method": method, "params": params }).to_string();
-        self.socket
-            .send(Message::text(message))
-            .map_err(|error| CallError::Failed(error.to_string()))?;
+        self.send(Message::text(message), watch, deadline)?;
         loop {
             match self.socket.read() {
                 Ok(Message::Text(text)) => {
@@ -885,7 +902,7 @@ impl Conn {
                             "params": { "accept": false },
                         })
                         .to_string();
-                        let _ = self.socket.send(Message::text(dismiss));
+                        let _ = self.send(Message::text(dismiss), watch, deadline);
                         continue;
                     }
                     if value.get("id").and_then(Value::as_i64) != Some(id) {
@@ -908,10 +925,40 @@ impl Conn {
                         return Err(CallError::Stopped(stop));
                     }
                     if Instant::now() >= deadline {
-                        return Err(CallError::Failed(format!(
-                            "`{method}` did not answer in time"
-                        )));
+                        return Err(CallError::TimedOut);
                     }
+                    std::thread::sleep(SOCKET_POLL);
+                }
+                Err(error) => return Err(CallError::Failed(error.to_string())),
+            }
+        }
+    }
+
+    /// Write a frame and flush it, retrying while the non-blocking socket says the flush would
+    /// block — a tiny control frame on a fresh socket writes at once, but a cancel or the
+    /// deadline still ends the wait if it somehow does not.
+    fn send(
+        &mut self,
+        message: Message,
+        watch: &dyn Watch,
+        deadline: Instant,
+    ) -> Result<(), CallError> {
+        match self.socket.send(message) {
+            Ok(()) => return Ok(()),
+            Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {}
+            Err(error) => return Err(CallError::Failed(error.to_string())),
+        }
+        loop {
+            match self.socket.flush() {
+                Ok(()) => return Ok(()),
+                Err(tungstenite::Error::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
+                    if let Some(stop) = watch.stop() {
+                        return Err(CallError::Stopped(stop));
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(CallError::TimedOut);
+                    }
+                    std::thread::sleep(SOCKET_POLL);
                 }
                 Err(error) => return Err(CallError::Failed(error.to_string())),
             }
