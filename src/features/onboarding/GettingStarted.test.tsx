@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Preflight, YsStatus } from "@/lib/ipc";
@@ -120,6 +120,28 @@ describe("GettingStarted", () => {
 
     await user.click(screen.getAllByRole("button", { name: /Install instructions/ })[0]!);
     expect(opener.openUrl).toHaveBeenCalledWith("https://example.com/claude");
+  });
+
+  it("says copied for a moment, and leaves no timer behind when it goes away", async () => {
+    await show(bare());
+    const button = await screen.findByRole("button", { name: /^Copy: sudo pacman/ });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      fireEvent.click(button);
+      await act(async () => {});
+      expect(button).toHaveTextContent(/^copied$/);
+      expect(vi.getTimerCount()).toBe(1);
+      act(() => void vi.advanceTimersByTime(1500));
+      expect(button).toHaveTextContent(/^copy$/);
+
+      fireEvent.click(button);
+      await act(async () => {});
+      expect(vi.getTimerCount()).toBe(1);
+      cleanup();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("checks again without a restart, re-reading the environment, and moves on when fixed", async () => {

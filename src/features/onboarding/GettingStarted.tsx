@@ -221,11 +221,12 @@ function Step(props: {
 
 function Command({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
-  const copy = () =>
-    void writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }, console.error);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copy = () => void writeText(text).then(() => setCopied(true), console.error);
   return (
     <div className="mt-1 flex items-center gap-2 rounded bg-raised px-2 py-1">
       <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[12px] whitespace-nowrap text-ink select-text">
