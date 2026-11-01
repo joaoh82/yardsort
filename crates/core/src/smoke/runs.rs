@@ -88,18 +88,25 @@ pub fn queue(store: &Store, request: &Request<'_>) -> IpcResult<Queued> {
             ),
         ));
     };
+    // A `browser` step needs a browser on the machine. Refuse at the door, naming what was
+    // looked for, rather than letting the run start and fail at the step.
     if let Some(step) = test
         .all_steps()
         .find(|(_, step)| matches!(step.action, Action::Browser { .. }))
     {
-        return Err(IpcError::new(
-            "test_browser_unsupported",
-            format!(
-                "`{}` has a `browser` step (`{}`), and this version of Yardsort cannot run \
-                 browser steps yet.",
-                entry.id, step.1.id
-            ),
-        ));
+        let setting = store.project_test_settings(&workspace.project_id)?.browser;
+        if super::browser::find_browser(&setting).is_none() {
+            return Err(IpcError::new(
+                "test_needs_browser",
+                format!(
+                    "`{}` has a `browser` step (`{}`), and no browser was found. Looked for {}. \
+                     Name one under the project's smoke test settings.",
+                    entry.id,
+                    step.1.id,
+                    super::browser::looked_for()
+                ),
+            ));
+        }
     }
     let inputs =
         check_inputs(test, request.inputs).map_err(|why| IpcError::new("test_inputs", why))?;

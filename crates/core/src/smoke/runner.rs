@@ -456,6 +456,7 @@ impl Drop for Leftovers<'_> {
                             None,
                             None,
                             Some(&why),
+                            None,
                         );
                     }
                 }
@@ -522,6 +523,13 @@ fn run(store: &Store, job: &Job) -> IpcResult<()> {
             Some(project_id) => store.project_test_env(project_id)?.into_iter().collect(),
             None => BTreeMap::new(),
         };
+        // The browser a `browser` step would use, found once: the project's named one, else what
+        // is on the machine. None when there is none; such a step then fails saying so.
+        let setting = match &row.project_id {
+            Some(project_id) => store.project_test_settings(project_id)?.browser,
+            None => String::new(),
+        };
+        let browser = crate::smoke::browser::find_browser(&setting);
         let mut vars = Vars {
             place,
             run_id: row.id.clone(),
@@ -538,6 +546,7 @@ fn run(store: &Store, job: &Job) -> IpcResult<()> {
             &test,
             &worktree,
             &output_dir,
+            browser.as_deref(),
             &mut vars,
             deadline,
             &left.servers,
@@ -597,6 +606,7 @@ fn phases(
     test: &Test,
     worktree: &Path,
     output_dir: &Path,
+    browser: Option<&Path>,
     vars: &mut Vars,
     deadline: Instant,
     servers: &Mutex<Vec<Server>>,
@@ -609,6 +619,7 @@ fn phases(
         Phase::Setup,
         worktree,
         output_dir,
+        browser,
         vars,
         deadline,
         servers,
@@ -622,6 +633,7 @@ fn phases(
             Phase::Steps,
             worktree,
             output_dir,
+            browser,
             vars,
             deadline,
             servers,
@@ -654,6 +666,7 @@ fn phases(
             Phase::Teardown,
             worktree,
             output_dir,
+            browser,
             vars,
             deadline,
             servers,
@@ -691,6 +704,7 @@ fn phase(
     which: Phase,
     worktree: &Path,
     output_dir: &Path,
+    browser: Option<&Path>,
     vars: &mut Vars,
     deadline: Instant,
     servers: &Mutex<Vec<Server>>,
@@ -737,6 +751,7 @@ fn phase(
                 None,
                 None,
                 Some(&why),
+                None,
             )? {
                 return Ok(PhaseEnd::Gone);
             }
@@ -761,6 +776,7 @@ fn phase(
                 None,
                 None,
                 Some(&why),
+                None,
             )? {
                 return Ok(PhaseEnd::Gone);
             }
@@ -777,6 +793,7 @@ fn phase(
                 "waiting",
                 None,
                 Some(&outputs),
+                None,
                 None,
             )? {
                 return Ok(PhaseEnd::Gone);
@@ -807,6 +824,7 @@ fn phase(
             None,
             None,
             None,
+            None,
         )? {
             return Ok(PhaseEnd::Gone);
         }
@@ -816,6 +834,7 @@ fn phase(
             worktree,
             output_dir,
             vars,
+            browser,
         };
         let mut started = Vec::new();
         let done: StepEnd = exec::carry_out(&ctx, &watching, &step.id, &step.action, &mut started);
@@ -829,6 +848,8 @@ fn phase(
                 });
         }
         let outputs = serde_json::to_string(&done.outputs).unwrap_or_else(|_| "{}".to_owned());
+        let screenshots = (!done.screenshots.is_empty())
+            .then(|| serde_json::to_string(&done.screenshots).unwrap_or_else(|_| "[]".to_owned()));
         if !mark(
             store,
             &row.id,
@@ -838,6 +859,7 @@ fn phase(
             done.exit,
             Some(&outputs),
             done.note.as_deref(),
+            screenshots.as_deref(),
         )? {
             return Ok(PhaseEnd::Gone);
         }
@@ -911,6 +933,7 @@ fn note_server_stop(
         None,
         None,
         Some(&note),
+        None,
     )?;
     Ok(())
 }
@@ -987,6 +1010,7 @@ fn wait_for_answer(
                 None,
                 None,
                 Some(&note),
+                None,
             )? {
                 return Ok(Answer::Gone);
             }
@@ -1012,6 +1036,7 @@ fn skip_rest(store: &Store, run_id: &str, to: &str, why: &str, teardown: bool) -
             None,
             None,
             Some(why),
+            None,
         )? {
             return Ok(false);
         }
@@ -1029,6 +1054,7 @@ fn mark(
     exit: Option<i64>,
     outputs: Option<&str>,
     note: Option<&str>,
+    screenshots: Option<&str>,
 ) -> IpcResult<bool> {
     Ok(store.move_test_step(
         run_id,
@@ -1039,7 +1065,7 @@ fn mark(
             exit,
             outputs,
             note,
-            screenshots: None,
+            screenshots,
         },
     )?)
 }

@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0018_remote_host.sql"),
     include_str!("../migrations/0019_smoke_tests.sql"),
     include_str!("../migrations/0020_smoke_test_settings.sql"),
+    include_str!("../migrations/0021_smoke_test_browser.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]

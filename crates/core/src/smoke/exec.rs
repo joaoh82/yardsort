@@ -13,8 +13,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use super::{
-    Action, ExitExpect, HttpExpect, HttpMethod, JsonExpect, ProcessExpect, StatusExpect,
-    WaitTarget, DEFAULT_STEP_TIMEOUT_SECS,
+    Action, BrowserAction, ExitExpect, HttpExpect, HttpMethod, JsonExpect, ProcessExpect,
+    StatusExpect, WaitTarget, DEFAULT_STEP_TIMEOUT_SECS,
 };
 use crate::env::ShellEnv;
 use crate::process::Group;
@@ -72,6 +72,8 @@ pub struct StepEnd {
     /// The fields the action produces, for `{{ steps.<id>.<field> }}` and the row.
     pub outputs: BTreeMap<String, String>,
     pub note: Option<String>,
+    /// Absolute paths of screenshots a `browser` step saved, in the order they were taken.
+    pub screenshots: Vec<String>,
     /// Why it stopped early, when it did.
     pub stopped: Option<Stop>,
 }
@@ -83,6 +85,7 @@ impl StepEnd {
             exit: None,
             outputs,
             note: None,
+            screenshots: Vec::new(),
             stopped: None,
         }
     }
@@ -93,6 +96,7 @@ impl StepEnd {
             exit: None,
             outputs: BTreeMap::new(),
             note: Some(note.into()),
+            screenshots: Vec::new(),
             stopped: None,
         }
     }
@@ -121,6 +125,7 @@ impl StepEnd {
             exit: None,
             outputs,
             note: Some(note),
+            screenshots: Vec::new(),
             stopped: Some(stop),
         }
     }
@@ -223,6 +228,9 @@ pub struct Context<'a> {
     pub worktree: &'a Path,
     pub output_dir: &'a Path,
     pub vars: &'a Vars,
+    /// The browser a `browser` step drives, found once when the run started, or `None` when the
+    /// machine has none. A non-browser step never looks at it.
+    pub browser: Option<&'a Path>,
 }
 
 impl Context<'_> {
@@ -557,10 +565,79 @@ pub fn carry_out(
             expect,
             *timeout_secs,
         ),
-        Action::Browser { .. } => {
-            StepEnd::failed("This version of Yardsort cannot run browser steps.")
+        Action::Browser {
+            actions,
+            screenshots,
+            viewport,
+            headed,
+            timeout_secs,
+        } => {
+            let Some(browser) = ctx.browser else {
+                return StepEnd::failed(format!(
+                    "This step needs a browser, and none was found. Looked for {}. Name one \
+                     under the project's smoke test settings.",
+                    super::browser::looked_for()
+                ));
+            };
+            // Variables are filled into the actions before anything runs — a port, an input.
+            let actions: Vec<BrowserAction> =
+                actions.iter().map(|a| render_action(a, ctx.vars)).collect();
+            let profile = ctx
+                .output_dir
+                .join("scratch")
+                .join(format!("{step_id}-browser"));
+            let deadline = Instant::now() + Duration::from_secs(timeout(*timeout_secs));
+            let plan = super::browser::Plan {
+                browser,
+                profile: &profile,
+                output_dir: ctx.output_dir,
+                step_id,
+                actions: &actions,
+                screenshots: *screenshots,
+                viewport: *viewport,
+                headed: *headed,
+            };
+            super::browser::carry_out(&plan, watch, deadline).into_step_end()
         }
         Action::Manual { .. } => StepEnd::failed("A manual step is the runner's to wait on."),
+    }
+}
+
+/// A `browser` action with its variables filled in: a `goto` to `{{ run.port }}`, text to fill
+/// from `{{ inputs.… }}`. Selectors are rendered too; a secret must not be in one, as the shell
+/// rule warns, but the words already left `{{ env.… }}` unexpanded for the card.
+fn render_action(action: &BrowserAction, vars: &Vars) -> BrowserAction {
+    let r = |s: &str| vars.render(s);
+    match action {
+        BrowserAction::Goto { url } => BrowserAction::Goto { url: r(url) },
+        BrowserAction::Click { selector } => BrowserAction::Click {
+            selector: r(selector),
+        },
+        BrowserAction::Fill { selector, text } => BrowserAction::Fill {
+            selector: r(selector),
+            text: r(text),
+        },
+        BrowserAction::Press { key } => BrowserAction::Press { key: key.clone() },
+        BrowserAction::Select { selector, value } => BrowserAction::Select {
+            selector: r(selector),
+            value: r(value),
+        },
+        BrowserAction::WaitFor { selector, text } => BrowserAction::WaitFor {
+            selector: selector.as_deref().map(r),
+            text: text.as_deref().map(r),
+        },
+        BrowserAction::ExpectText { text } => BrowserAction::ExpectText { text: r(text) },
+        BrowserAction::ExpectVisible { selector } => BrowserAction::ExpectVisible {
+            selector: r(selector),
+        },
+        BrowserAction::ExpectHidden { selector } => BrowserAction::ExpectHidden {
+            selector: r(selector),
+        },
+        BrowserAction::ExpectUrl { pattern } => BrowserAction::ExpectUrl {
+            pattern: r(pattern),
+        },
+        BrowserAction::ExpectTitle { title } => BrowserAction::ExpectTitle { title: r(title) },
+        BrowserAction::Screenshot { name } => BrowserAction::Screenshot { name: name.clone() },
     }
 }
 
@@ -632,6 +709,7 @@ fn run_process(
                 exit,
                 outputs: with_exit(outputs, exit),
                 note: (!notes.is_empty()).then(|| notes.join("\n")),
+                screenshots: Vec::new(),
                 stopped: None,
             }
         }
@@ -643,6 +721,7 @@ fn run_process(
                 "Still running after {}, so it was stopped.",
                 duration_words(timeout_secs)
             )),
+            screenshots: Vec::new(),
             stopped: None,
         },
         Waited::OutputCapped => StepEnd {
@@ -653,6 +732,7 @@ fn run_process(
                 "It wrote more than {} MiB of output, so it was stopped.",
                 MAX_OUTPUT_BYTES / (1024 * 1024)
             )),
+            screenshots: Vec::new(),
             stopped: None,
         },
         Waited::Stopped(stop) => StepEnd::stopped(stop, outputs),
@@ -994,6 +1074,7 @@ fn http(
                 exit: None,
                 outputs: http_outputs(status, &header_map, kept),
                 note: notes.pop(),
+                screenshots: Vec::new(),
                 stopped: None,
             };
         }
@@ -1003,6 +1084,7 @@ fn http(
         exit: None,
         outputs: http_outputs(status, &header_map, kept),
         note: (!notes.is_empty()).then(|| notes.join("\n")),
+        screenshots: Vec::new(),
         stopped: None,
     }
 }

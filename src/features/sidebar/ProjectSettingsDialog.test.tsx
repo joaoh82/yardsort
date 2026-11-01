@@ -22,7 +22,7 @@ beforeEach(() => {
   core.projectAutomationSave.mockResolvedValue(undefined);
   core.testEnvGet.mockResolvedValue([{ name: "TEST_PASSWORD", value: "hunter2" }]);
   core.testEnvSave.mockResolvedValue(undefined);
-  core.testSettingsGet.mockResolvedValue({ askEveryTime: false, keepDays: 30 });
+  core.testSettingsGet.mockResolvedValue({ askEveryTime: false, keepDays: 30, browser: "" });
   core.testSettingsSave.mockResolvedValue(undefined);
 });
 it("saves per-project files and literal command arguments", async () => {
@@ -80,7 +80,11 @@ it("keeps the smoke test environment with its values hidden, and what the projec
     { name: "TEST_PASSWORD", value: "hunter2" },
     { name: "DATABASE_URL", value: "postgres://test" },
   ]);
-  expect(core.testSettingsSave).toHaveBeenCalledWith("p-demo", { askEveryTime: true, keepDays: 7 });
+  expect(core.testSettingsSave).toHaveBeenCalledWith("p-demo", {
+    askEveryTime: true,
+    keepDays: 7,
+    browser: "",
+  });
   expect(onClose).toHaveBeenCalledOnce();
 });
 it("a removed variable is gone when saved", async () => {

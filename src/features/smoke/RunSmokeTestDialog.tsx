@@ -46,7 +46,7 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
         if (!current) return;
         setTests(found);
         // One runnable test and none asked for: it is the one.
-        const runnable = found.filter((test) => test.runnable && !test.usesBrowser);
+        const runnable = found.filter((test) => test.runnable && !test.browserMissing);
         if (!testId && runnable.length === 1 && runnable[0]) setChosenId(runnable[0].id);
       },
       (failed) => current && setError(errorMessage(failed)),
@@ -83,7 +83,12 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
     chosen?.inputs.filter((input) => input.required && !value(input.id, input.default).trim()) ??
     [];
   const ready =
-    !!chosen && chosen.runnable && !chosen.usesBrowser && !!review && missing.length === 0 && !busy;
+    !!chosen &&
+    chosen.runnable &&
+    !chosen.browserMissing &&
+    !!review &&
+    missing.length === 0 &&
+    !busy;
 
   async function start(event: React.FormEvent) {
     event.preventDefault();
@@ -113,8 +118,8 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
   const readiness = (test: TestItem) =>
     !test.runnable
       ? `${test.problems.length} problem${test.problems.length === 1 ? "" : "s"}`
-      : test.usesBrowser
-        ? "needs a browser, which this version cannot run"
+      : test.browserMissing
+        ? "needs a browser"
         : "ready";
 
   return (
@@ -176,10 +181,10 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
               ))}
             </ul>
           )}
-          {chosen && chosen.runnable && chosen.usesBrowser && (
+          {chosen && chosen.runnable && chosen.browserMissing && (
             <p role="alert" className="text-amber-300">
-              This test has a <code>browser</code> step, which this version of Yardsort cannot run
-              yet.
+              This test has a <code>browser</code> step, and no browser was found on this machine.
+              Install Chrome, Chromium or Edge, or name one under the project’s smoke test settings.
             </p>
           )}
 

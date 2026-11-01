@@ -1079,6 +1079,7 @@ fn an_approved_file_runs_unasked_unless_the_project_asks_to_see_every_run() {
             &crate::store::TestSettings {
                 ask_every_time: true,
                 keep_days: 30,
+                browser: String::new(),
             },
         )
         .unwrap();
