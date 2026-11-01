@@ -8,3 +8,13 @@ jest.mock(
   () =>
     jest.requireActual<{ default: unknown }>("react-native-safe-area-context/jest/mock").default,
 );
+
+// The camera, as far as a screen sees it: permission given, and a view a test fires scans at.
+jest.mock("expo-camera", () => {
+  const { createElement } = jest.requireActual<typeof import("react")>("react");
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    useCameraPermissions: () => [{ granted: true, canAskAgain: true }, async () => {}],
+    CameraView: (props: object) => createElement(View, { testID: "camera", ...props }),
+  };
+});

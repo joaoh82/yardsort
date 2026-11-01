@@ -9,7 +9,7 @@
 
 import { webcrypto } from "node:crypto";
 
-import type { Crypto } from "@yardsort/remote-client";
+import type { Crypto, Socket } from "@yardsort/remote-client";
 
 import type { Env } from "../../src/lib/accounts";
 
@@ -23,6 +23,21 @@ interface Device {
   createdAt: number;
   lastSeenAt: number | null;
   revokedAt: number | null;
+}
+
+interface Grant {
+  id: string;
+  host: string;
+  hostName: string;
+  device: string;
+  deviceName: string;
+  state: string;
+  requested: string[];
+  scopes: string[];
+  projects: { kind: "all" } | null;
+  createdAt: number;
+  decidedAt: number | null;
+  expiresInMs: number | null;
 }
 
 export class FakeServer {
@@ -47,6 +62,26 @@ export class FakeServer {
   down = false;
   /** When set, the device list is answered only after this. */
   devicesAfter: Promise<void> | null = null;
+  /** The computers on the account. */
+  hosts = [
+    {
+      id: "host-work",
+      name: "Workstation",
+      createdAt: 1_700_000_000_000,
+      lastSeenAt: 1_700_000_100_000,
+      current: false,
+    },
+  ];
+  /** Every grant and request. */
+  grants: Grant[] = [];
+  /** What a pairing may redeem, by what it presents. Each goes once. */
+  offers = new Set<string>(["ABCD2345"]);
+  /** Every offer presented to this server, as it was presented. */
+  presented: string[] = [];
+  /** Computers the relay says are offline. */
+  offline = new Set<string>();
+  /** How many relay sockets are open, and how many ever were. */
+  sockets = { open: 0, ever: 0 };
   #issued = 0;
 
   fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -96,6 +131,56 @@ export class FakeServer {
         devices: this.devices.map((d) => ({ ...d, current: d.id === signedIn.id })),
       });
     }
+    if (method === "GET" && url.pathname === "/v1/hosts") {
+      return Response.json({ hosts: this.hosts });
+    }
+    if (method === "GET" && url.pathname === "/v1/grants") {
+      return Response.json({ grants: this.grants.filter((g) => g.device === signedIn.id) });
+    }
+    if (method === "POST" && url.pathname === "/v1/pairings") {
+      const { offer, scopes } = JSON.parse(String(init?.body));
+      this.presented.push(offer.value);
+      if (!this.offers.delete(offer.value.replace(/-/g, ""))) {
+        return Response.json(
+          {
+            code: "not_found",
+            message: "That pairing code is wrong or has expired. Ask the host for a new one.",
+            retryable: false,
+          },
+          { status: 404 },
+        );
+      }
+      const host = this.hosts[0] as (typeof this.hosts)[number];
+      const grant: Grant = {
+        id: `grant-${this.grants.length + 1}`,
+        host: host.id,
+        hostName: host.name,
+        device: signedIn.id,
+        deviceName: signedIn.name,
+        state: "pending",
+        requested: scopes,
+        scopes: [],
+        projects: null,
+        createdAt: 1_700_000_200_000,
+        decidedAt: null,
+        expiresInMs: 300_000,
+      };
+      this.grants.push(grant);
+      return Response.json(grant);
+    }
+    const oneGrant = /^\/v1\/grants\/([^/]+)(\/revoke)?$/.exec(url.pathname);
+    if (oneGrant) {
+      const grant = this.grants.find((g) => g.id === oneGrant[1]);
+      if (grant && oneGrant[2] && method === "POST") {
+        grant.state = "revoked";
+        return new Response(null, { status: 204 });
+      }
+      if (grant && method === "GET") return Response.json(grant);
+    }
+    if (method === "POST" && url.pathname === "/v1/relay/tickets") {
+      const { host } = JSON.parse(String(init?.body));
+      return Response.json({ ticket: `ticket-${host}`, expiresInMs: 60_000 });
+    }
     const revoke = /^\/v1\/devices\/([^/]+)\/revoke$/.exec(url.pathname);
     if (method === "POST" && revoke) {
       this.revoke(revoke[1] as string);
@@ -106,6 +191,72 @@ export class FakeServer {
       { status: 404 },
     );
   }) as typeof fetch;
+
+  /** The person at the computer answering the newest request. */
+  answer(state: "approved" | "denied" | "expired"): void {
+    const grant = this.grants.at(-1);
+    if (!grant) throw new Error("nobody asked");
+    grant.state = state;
+    grant.expiresInMs = null;
+    if (state === "approved") {
+      grant.scopes = grant.requested;
+      grant.projects = { kind: "all" };
+    }
+  }
+
+  /** A relay and the computers behind it, as far as opening a channel goes. */
+  socket = (): Socket => {
+    let stage: "greeting" | "hello" | "open" = "greeting";
+    let host = "";
+    const socket: Socket = {
+      binaryType: "",
+      readyState: 0,
+      onopen: null,
+      onmessage: null,
+      onclose: null,
+      onerror: null,
+      send: (data) => {
+        setTimeout(() => {
+          const say = (value: unknown) => socket.onmessage?.({ data: JSON.stringify(value) });
+          if (stage === "greeting") {
+            host = String(JSON.parse(data).ticket).replace("ticket-", "");
+            if (this.offline.has(host)) {
+              say({
+                refused: { code: "host_offline", message: "It is offline.", retryable: true },
+              });
+              return;
+            }
+            stage = "hello";
+            say({ connected: { host } });
+          } else if (stage === "hello") {
+            stage = "open";
+            const protocol = { major: 1, minor: 4 };
+            say({
+              welcome: {
+                protocol,
+                host: {
+                  host,
+                  name: "Workstation",
+                  platform: "linux",
+                  appVersion: "0",
+                  protocol,
+                  capabilities: [],
+                },
+              },
+            });
+          }
+        }, 0);
+      },
+      close: (code = 1000) => {
+        this.sockets.open -= 1;
+        setTimeout(() => socket.onclose?.({ code, reason: "" }), 0);
+      },
+    };
+    this.sockets.open += 1;
+    this.sockets.ever += 1;
+    setTimeout(() => socket.onopen?.({}), 0);
+    return socket;
+  };
 
   /** Revoke a device, as another of the account's devices would. */
   revoke(id: string): void {
@@ -137,5 +288,11 @@ const crypto: Crypto = {
 };
 
 export function envFor(server: FakeServer): Env {
-  return { crypto, platform: "ios", userAgent: "yardsort-mobile/test (ios)", fetch: server.fetch };
+  return {
+    crypto,
+    platform: "ios",
+    userAgent: "yardsort-mobile/test (ios)",
+    fetch: server.fetch,
+    socket: server.socket,
+  };
 }

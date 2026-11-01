@@ -17,18 +17,27 @@
  */
 
 import {
+  type Channel,
   type Client,
   Client as ServerClient,
   ClientError,
   codeFromRedirect,
   type Crypto,
   type DevicePage,
+  type GrantId,
+  type GrantSummary,
+  type HostId,
   NotKept,
+  type OfferKey,
+  openChannel,
   type Platform,
+  type ProjectGrant,
+  type Scope,
   type Secret,
   type ServerDescription,
   Session,
   type SessionOptions,
+  type SocketFactory,
 } from "@yardsort/remote-client";
 
 import { type Profile, Profiles, type Vault } from "./profiles";
@@ -49,6 +58,8 @@ export interface Env {
   /** `yardsort-mobile/0.1.0 (ios)`. */
   userAgent: string;
   fetch?: typeof fetch;
+  /** Opens a relay socket. The platform's `WebSocket` unless given. */
+  socket?: SocketFactory;
   /** Milliseconds since the epoch. */
   clock?: () => number;
 }
@@ -71,6 +82,32 @@ export interface Snapshot {
   /** Something the person should be told once, such as being signed out at the server. */
   notice: string | null;
 }
+
+/** A computer that lets this phone in. */
+export interface Computer {
+  grant: GrantId;
+  host: HostId;
+  name: string;
+  /** History, not presence: when the server last heard from it. */
+  lastSeenAt: number | null;
+  scopes: Scope[];
+  projects: ProjectGrant | null;
+}
+
+/** The active profile's computers, and the requests still waiting for an answer at one. */
+export interface ComputerList {
+  computers: Computer[];
+  waiting: GrantSummary[];
+}
+
+/** What every pairing asks for: all a phone uses. The computer's person chooses (27 §7). */
+export const ASKED_SCOPES: Scope[] = [
+  "workspace:read",
+  "activity:read",
+  "memory:read",
+  "terminal:read",
+  "terminal:control",
+];
 
 /** A server looked up, before signing in to it. */
 export interface Found {
@@ -364,6 +401,61 @@ export class Accounts {
   /** The account's devices, this phone among them. */
   devices(): Promise<DevicePage> {
     return this.#withAccess((session, access) => session.client.devices(access));
+  }
+
+  /**
+   * The computers that let this phone in. A grant's computer no longer on the account is not one:
+   * the server has taken it off, and nothing can reach it.
+   */
+  computers(): Promise<ComputerList> {
+    return this.#withAccess(async (session, access) => {
+      const [{ grants }, { hosts }] = await Promise.all([
+        session.client.grants(access),
+        session.client.hosts(access),
+      ]);
+      const onAccount = new Map(hosts.map((host) => [host.id, host]));
+      const computers: Computer[] = [];
+      for (const grant of grants) {
+        const host = onAccount.get(grant.host);
+        if (grant.state !== "approved" || !host) continue;
+        computers.push({
+          grant: grant.id,
+          host: grant.host,
+          name: host.name,
+          lastSeenAt: host.lastSeenAt,
+          scopes: grant.scopes,
+          projects: grant.projects,
+        });
+      }
+      return { computers, waiting: grants.filter((grant) => grant.state === "pending") };
+    });
+  }
+
+  /** Redeem a computer's offer, and ask it to let this phone in. An offer goes once. */
+  pair(offer: OfferKey): Promise<GrantSummary> {
+    return this.#withAccess((session, access) =>
+      session.client.pair(access, { offer, scopes: ASKED_SCOPES }),
+    );
+  }
+
+  /** Where a request or a pairing stands now. */
+  grant(id: GrantId): Promise<GrantSummary> {
+    return this.#withAccess((session, access) => session.client.grant(access, id));
+  }
+
+  /** Take back a pairing, or a request still waiting. This phone stays signed in. */
+  unpair(id: GrantId): Promise<void> {
+    return this.#withAccess((session, access) => session.client.revokeGrant(access, id));
+  }
+
+  /** A channel to `host` through the relay, under the grant the server has in force. */
+  openChannel(host: HostId): Promise<Channel> {
+    return this.#withAccess((session, access) =>
+      openChannel(session.client, access, host, {
+        client: this.env.userAgent,
+        ...(this.env.socket ? { socket: this.env.socket } : {}),
+      }),
+    );
   }
 
   /**

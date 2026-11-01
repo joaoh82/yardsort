@@ -650,7 +650,9 @@ remote ever talks to it directly. Instead:
   and its own Bun project, MPL-2.0. It reaches servers only through `packages/remote-client`.
   Its screens read a snapshot from `src/lib/accounts.ts`, which signs in through the system
   browser to `yardsort://signed-in` and keeps a profile per server in SecureStore: the server's
-  address, the id it gave, this phone's device there and its refresh credential. Its native
+  address, the id it gave, this phone's device there and its refresh credential. A pairing link's
+  secret is taken before the router reads it, and held in memory. A computer's being online comes
+  from a channel held to it while someone is looking, since the server has no presence. Its native
   projects are generated, never committed.
 - `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
   Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of

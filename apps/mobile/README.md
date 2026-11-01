@@ -6,22 +6,26 @@ Yardsort server you sign in to. It is an [Expo](https://expo.dev) app, SDK 58 (R
 [`packages/remote-client`](../../packages/remote-client). Its plan, and why each decision went
 the way it did, is [docs/design/31](../../docs/design/31-remote-r3.md).
 
-**What it does so far (R3 slice 2):** connect to a server by its address and see what that
+**What it does so far (R3 slices 2 and 3):** connect to a server by its address and see what that
 server is and can see, sign in through the system browser, list the account's devices with this
-phone among them, sign out, and keep a profile per server with one in use. It does not pair with
-a computer yet, nor show one; the slices after this add that.
+phone among them, sign out, and keep a profile per server with one in use. Pair with a computer by
+scanning its code, typing it or following a link, see each computer online, offline or
+reconnecting, and unpair. It does not show what is on a computer yet; the slices after this add
+that.
 
 ## What is in it
 
-| Path                  | What                                                                                                                                                     |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/app/`            | The screens, as Expo Router routes: `index` (where to start), `connect`, `account` (the account's devices, signing out), `servers` (one profile in use). |
-| `src/lib/accounts.ts` | Signing in, opening a profile again, signing out. Screens read its snapshot and call it; none builds a request or holds a credential.                    |
-| `src/lib/profiles.ts` | The profiles, kept in the phone's credential store: each server's address, its id, this phone's device there and its refresh credential.                 |
-| `src/lib/native.ts`   | What only the phone has: SecureStore, the system browser's sign-in session, randomness and SHA-256, the phone's name.                                    |
-| `src/ui/parts.tsx`    | The few native components the screens are built from.                                                                                                    |
-| `test/lib/`           | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use).         |
-| `test/screens/`       | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                       |
+| Path                  | What                                                                                                                                                                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/app/`            | The screens, as Expo Router routes: `index` (where to start), `connect`, `account` (computers, devices, signing out), `servers` (one profile in use), `pair`, and `+native-intent`, which takes a pairing link before the router reads it. |
+| `src/lib/accounts.ts` | Signing in, opening a profile again, signing out. Screens read its snapshot and call it; none builds a request or holds a credential.                                                                                                      |
+| `src/lib/profiles.ts` | The profiles, kept in the phone's credential store: each server's address, its id, this phone's device there and its refresh credential.                                                                                                   |
+| `src/lib/pairing.ts`  | A pairing link held in memory until used, where it belongs among the profiles, and waiting for the person at the computer.                                                                                                                 |
+| `src/lib/presence.ts` | Whether each computer can be reached, from a channel held to it while someone is looking.                                                                                                                                                  |
+| `src/lib/native.ts`   | What only the phone has: SecureStore, the system browser's sign-in session, randomness and SHA-256, the phone's name.                                                                                                                      |
+| `src/ui/parts.tsx`    | The few native components the screens are built from.                                                                                                                                                                                      |
+| `test/lib/`           | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use).                                                                                           |
+| `test/screens/`       | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                                                                                                         |
 
 Things it holds to:
 
@@ -34,6 +38,10 @@ Things it holds to:
 - **Signed out at the server** (the refresh credential refused): the profile is deleted and the
   phone says so. A refused access credential is refreshed and tried once more first, since the
   server says the same for access that has lapsed. **A server out of reach** deletes nothing.
+- **A pairing link's secret** stays out of the router and off the disk, and a link is never used
+  on its own say: one from outside the app, or naming another server, is asked about first.
+- **Online is what the socket says.** Channels are held only while the computers are on screen and
+  the app is in the foreground. Offline never means a computer's agents stopped.
 - **Signing out** revokes this phone at the server, which takes back every computer's grant,
   then deletes the profile. With the server out of reach, it asks before deleting anything.
 
@@ -85,7 +93,7 @@ That builds the development app (`Yardsort Dev`, `dev.yardsort.mobile.developmen
 on the phone, and serves its code from the Mac. The first time, it asks which phone and which
 signing team: choose the paid team, so the build does not lapse after seven days. The phone and
 the Mac must be on the same network; let the app find devices on the local network when iOS
-asks. Afterwards, `just mobile-start` serves the code to the app already installed.
+asks. Afterwards, `just mobile-start` serves the code to the app already installed; a new native module, as slice 3's camera was, needs `just mobile-ios` again.
 
 The phone cannot reach a development server on the Mac's loopback, so on a phone use staging,
 `https://remote-staging.yardsort.sh` (31 §7). The iOS Simulator shares the Mac's loopback, so it

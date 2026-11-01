@@ -7,8 +7,8 @@
  * chooses to sign in.
  */
 
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useState, useSyncExternalStore } from "react";
 
 import { type Found, messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
@@ -16,10 +16,15 @@ import { issuerHost } from "../lib/format";
 import { Body, Button, Card, Field, Problem, Screen, Title } from "../ui/parts";
 
 export default function Connect() {
-  const { accounts, browser, deviceName: suggested } = useApp();
+  const { accounts, browser, deviceName: suggested, incoming } = useApp();
   const snapshot = useSnapshot();
   const router = useRouter();
-  const [address, setAddress] = useState("");
+  // The server a pairing link named, when that is what brought the person here.
+  const params = useLocalSearchParams<{ address?: string }>();
+  const held = useSyncExternalStore(incoming.subscribe, incoming.get);
+  // With a link waiting, back to the pair screen it was asked about on, not to a second one.
+  const onward = () => (held ? router.dismissTo("/pair") : router.replace("/account"));
+  const [address, setAddress] = useState(params.address ?? "");
   const [found, setFound] = useState<Found | null>(null);
   const [deviceName, setDeviceName] = useState(suggested);
   const [busy, setBusy] = useState<"lookingUp" | "signingIn" | null>(null);
@@ -42,7 +47,7 @@ export default function Connect() {
     setBusy("signingIn");
     setProblem(null);
     try {
-      if (await accounts.signIn(server, deviceName, browser)) router.replace("/account");
+      if (await accounts.signIn(server, deviceName, browser)) onward();
       else setProblem("The sign-in was closed before it finished.");
     } catch (error) {
       setProblem(messageOf(error));
@@ -53,7 +58,7 @@ export default function Connect() {
 
   const open = async (id: string) => {
     await accounts.activate(id);
-    router.replace("/account");
+    onward();
   };
 
   const known = found ? snapshot.profiles.find((p) => p.address === found.client.address) : null;
@@ -72,6 +77,7 @@ export default function Connect() {
         Yardsort reaches your computers through a server you sign in to: one you run yourself, or
         one run for you. Type its address as its operator gave it.
       </Body>
+      {held && <Body>After you sign in, this phone asks the computer to let it in.</Body>}
 
       <Field
         label="Server address"

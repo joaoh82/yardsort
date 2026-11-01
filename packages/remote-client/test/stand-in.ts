@@ -84,6 +84,8 @@ export class StandIn {
   typed = () => this.#ask<string[]>({ op: "typed" });
   signInAs = (subject: string) => this.#ask<null>({ op: "signInAs", subject });
   removeHost = () => this.#ask<null>({ op: "removeHost" });
+  hostOffline = () => this.#ask<null>({ op: "hostOffline" });
+  hostOnline = () => this.#ask<null>({ op: "hostOnline" });
 
   async stop(): Promise<void> {
     this.#process.stdin.end();

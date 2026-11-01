@@ -9,12 +9,14 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Accounts, messageOf } from "../lib/accounts";
 import { AppProvider } from "../lib/context";
 import { nativeEnv, secureVault, suggestedDeviceName, systemBrowser } from "../lib/native";
+import { incoming } from "../lib/pairing";
 import { Button, Problem, Screen } from "../ui/parts";
 
 const app = {
   accounts: new Accounts(nativeEnv, secureVault),
   browser: systemBrowser,
   deviceName: suggestedDeviceName(),
+  incoming,
 };
 
 export default function Layout() {
@@ -49,6 +51,8 @@ export default function Layout() {
             <Stack.Screen name="connect" options={{ title: "Connect" }} />
             <Stack.Screen name="account" options={{ title: "Account" }} />
             <Stack.Screen name="servers" options={{ title: "Servers" }} />
+            {/* One at a time: a link arriving while it is open comes to this one. */}
+            <Stack.Screen name="pair" options={{ title: "Pair a computer" }} dangerouslySingular />
           </Stack>
         )}
       </AppProvider>
