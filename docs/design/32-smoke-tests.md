@@ -324,11 +324,22 @@ same process start time. A run `awaiting_approval` survives a restart. The app h
 lock as before; `ys test run` tries it and refuses without it.
 
 **Browser steps** run through `yardsort_core::smoke::browser`: launch the found binary with
-`--headless=new --remote-debugging-pipe` and a profile folder under `run.dir`, speak the DevTools
-protocol over the pipe (the `chromiumoxide` crate, or a small client of our own over the dozen
-methods needed — to be decided in slice 4 by trying both), one page per step, a screenshot into
-`output_dir` on failure, or after every action when asked. The browser is closed at the end of
-each step; a test that needs state across steps keeps it in one step's `do[]`.
+`--headless=new --remote-debugging-port=0` and a profile folder under `run.dir`, read back the
+port and WebSocket path it writes to `DevToolsActivePort`, and speak the DevTools protocol over a
+blocking WebSocket. Slice 4 decided this against the pipe, which the proposal preferred: the core
+is deliberately synchronous with no tokio, so `chromiumoxide` (async) was out, and the pipe's
+extra inherited handles cannot be passed through `std::process` on Windows without a hand-rolled
+`CreateProcess`. The port is loopback-only and up only while the step runs, but it is not
+token-guarded: DevTools' `/json` endpoints hand the page's WebSocket URL to any local process that
+reaches the port, which could then drive the browser — its filled-in secrets included — for as
+long as the step lasts. On a single-user machine, for a port that lives only seconds, that is an
+accepted risk, and it is the argument for the port over the pipe; a multi-user host is out of
+scope for version one. The client (`Conn`) is small (a handful of methods) and the transport is
+behind it, so the
+pipe can replace it later without touching the actions. One page per step, driven mostly by
+evaluating JavaScript, with keys through the input domain; a screenshot into `output_dir` on
+failure, or after every action when asked. The browser is closed at the end of each step; a test
+that needs state across steps keeps it in one step's `do[]`.
 
 ## The command line
 
@@ -472,7 +483,7 @@ example | guide`, and `docs/guide/smoke-tests.md` with the format. Fixtures: one
    agent**; Settings → Projects → Smoke tests with the environment. Testing Library for the card's
    words, the tab's step list and the manual step's buttons; the tailing as a hook with a fake
    file.
-4. **Browser steps.** `smoke::browser` over the DevTools protocol, the finder, the action
+4. **Browser steps.** ✅ `smoke::browser` over the DevTools protocol, the finder, the action
    vocabulary with waiting, screenshots on failure and on demand, the headed mode; the example
    file gains its `sign_in` step. Tested against a page served by the test itself from a temp
    folder, on all three platforms in CI, skipped with a named reason where no browser is found.
@@ -619,6 +630,44 @@ the Smoke tests part of the Project settings dialog, `smoke::words` in the core,
   **Run smoke test…** lists the workspace's recent runs to reopen any of them; browser steps
   (slice 4); and the browser setting that goes with them. Screenshots are listed by path with
   **Reveal** until a browser writes one.
+
+## Slice 4: what shipped
+
+- **`browser` steps run,** through `yardsort_core::smoke::browser`. Chromium is launched
+  `--headless=new` (or headed, for watching) with a debug port on `127.0.0.1`; the port and
+  WebSocket path from its `DevToolsActivePort` file are read back, and a small synchronous client
+  (`Conn`, over `tungstenite`) speaks the dozen DevTools methods a page needs. No async runtime,
+  no port once the step ends. See the note above for why this, not the pipe or `chromiumoxide`.
+- **The action vocabulary** is carried out mostly by evaluating JavaScript on the page: `goto`
+  (and wait for the load), `click`, `fill`, `select`, `wait_for` (a selector or text),
+  `expect_text`/`expect_visible`/`expect_hidden`/`expect_url` (a glob)/`expect_title`, and
+  `screenshot`. `press` goes through the input domain, so `Enter` submits a form as a real key
+  would, and `fill` writes through the native value setter, so a React-style controlled input
+  sees the change. `goto` fails if the page never finishes loading in the step's time, but a 404
+  or 500 is still "gone to" — assert what the page shows with `expect_*`. Selectors are CSS or
+  `text=...` (which skips `script`/`style` and prefers a visible match); every action that needs
+  an element waits for it, visible, up to the step's timeout, so a file needs no `sleep`. A
+  `click` that navigates, an `alert()`/`confirm()`, and `ys test cancel` are all handled while a
+  call is in flight, so a step never hangs past its limit.
+- **The finder** uses the project's named browser if it set one — that path, and nothing else, so
+  a typo is _needs a browser_ rather than a silent fall back to another browser. With none named,
+  it looks for Chrome, then Chromium, then Edge: on `PATH`, then each platform's usual folders. A
+  `browser` test whose browser is not found is listed _needs a browser_ (`ys test list`, the Run
+  dialog) and refused at the door (`runs::queue`, `test_needs_browser`), saying whether it was the
+  named path or no browser at all. The project names one under Settings -> Projects -> Smoke tests
+  (migration 0021). The browser launches with its sandbox on; only after a sandboxed launch fails
+  — a CI container, a Linux with unprivileged user namespaces restricted — does it retry with
+  `--no-sandbox`, so a developer's own machine keeps the sandbox a `goto` relies on.
+- **Screenshots** are PNGs under the run's output, named `<step>.<name>.png`: one per `screenshot`
+  action, one of the page as it was on failure unless `screenshots: never`, or one after every
+  action with `screenshots: every_step`. They land on the step row and show in the run tab.
+- **Tested** against a two-page app the test serves itself on a free port -- `goto`,
+  `expect_text`, `fill`, `click` by text, a navigation, `expect_url`, `expect_title`,
+  `screenshot` -- and a failing expectation that fails the step and leaves a screenshot. Skipped
+  with a named reason, not failed, where no browser is found, as the runner's tests skip without
+  `bun`.
+- **Not here:** the `run_test` workflow action and the launch paragraph for agents (slice 5); the
+  Tests view (slice 6).
 
 ## Not in version one, on purpose
 

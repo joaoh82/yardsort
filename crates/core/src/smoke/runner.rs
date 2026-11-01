@@ -164,13 +164,15 @@ impl Driver {
     }
 }
 
-/// Runs found `running` were interrupted by the app stopping: they are ended, and the `start`
-/// processes they left are killed if they are still the same processes. True when any was.
+/// Runs found `running` were interrupted by the app stopping: they are ended, and the processes
+/// they left are killed if they are still the same processes. That is every `start` server, and
+/// a `browser` step that was running when the app died — its browser outlives the app on Unix.
+/// True when any run was interrupted.
 fn recover(store: &Store) -> IpcResult<bool> {
     let interrupted = store.end_interrupted_test_runs(INTERRUPTED)?;
     for run in &interrupted {
         for step in store.test_steps(&run.id)? {
-            if step.action != "start" {
+            if step.action != "start" && step.action != "browser" {
                 continue;
             }
             let outputs = step.outputs();
@@ -311,6 +313,30 @@ impl Watch for Watching<'_> {
             run_id: self.run_id.to_owned(),
             step_id: step_id.to_owned(),
         });
+    }
+
+    fn browser_launched(&self, step_id: &str, pid: u32, fingerprint: Option<&str>) {
+        // Put the pid and fingerprint on the step now, while it is still `running`, so a restart
+        // after a crash can find and kill the browser (see `recover`). The step's own end
+        // replaces these outputs with its url/title, by which time the browser is gone.
+        let mut outputs = BTreeMap::new();
+        outputs.insert("pid".to_owned(), pid.to_string());
+        if let Some(print) = fingerprint {
+            outputs.insert("process".to_owned(), print.to_owned());
+        }
+        let outputs = serde_json::to_string(&outputs).unwrap_or_else(|_| "{}".to_owned());
+        let _ = self.store.move_test_step(
+            self.run_id,
+            step_id,
+            &["running"],
+            &StepChange {
+                to: "running",
+                exit: None,
+                outputs: Some(&outputs),
+                note: None,
+                screenshots: None,
+            },
+        );
     }
 }
 
@@ -456,6 +482,7 @@ impl Drop for Leftovers<'_> {
                             None,
                             None,
                             Some(&why),
+                            None,
                         );
                     }
                 }
@@ -522,6 +549,13 @@ fn run(store: &Store, job: &Job) -> IpcResult<()> {
             Some(project_id) => store.project_test_env(project_id)?.into_iter().collect(),
             None => BTreeMap::new(),
         };
+        // The browser a `browser` step would use, found once: the project's named one, else what
+        // is on the machine. None when there is none; such a step then fails saying so.
+        let setting = match &row.project_id {
+            Some(project_id) => store.project_test_settings(project_id)?.browser,
+            None => String::new(),
+        };
+        let browser = crate::smoke::browser::find_browser(&setting);
         let mut vars = Vars {
             place,
             run_id: row.id.clone(),
@@ -538,6 +572,7 @@ fn run(store: &Store, job: &Job) -> IpcResult<()> {
             &test,
             &worktree,
             &output_dir,
+            browser.as_deref(),
             &mut vars,
             deadline,
             &left.servers,
@@ -597,6 +632,7 @@ fn phases(
     test: &Test,
     worktree: &Path,
     output_dir: &Path,
+    browser: Option<&Path>,
     vars: &mut Vars,
     deadline: Instant,
     servers: &Mutex<Vec<Server>>,
@@ -609,6 +645,7 @@ fn phases(
         Phase::Setup,
         worktree,
         output_dir,
+        browser,
         vars,
         deadline,
         servers,
@@ -622,6 +659,7 @@ fn phases(
             Phase::Steps,
             worktree,
             output_dir,
+            browser,
             vars,
             deadline,
             servers,
@@ -654,6 +692,7 @@ fn phases(
             Phase::Teardown,
             worktree,
             output_dir,
+            browser,
             vars,
             deadline,
             servers,
@@ -691,6 +730,7 @@ fn phase(
     which: Phase,
     worktree: &Path,
     output_dir: &Path,
+    browser: Option<&Path>,
     vars: &mut Vars,
     deadline: Instant,
     servers: &Mutex<Vec<Server>>,
@@ -737,6 +777,7 @@ fn phase(
                 None,
                 None,
                 Some(&why),
+                None,
             )? {
                 return Ok(PhaseEnd::Gone);
             }
@@ -761,6 +802,7 @@ fn phase(
                 None,
                 None,
                 Some(&why),
+                None,
             )? {
                 return Ok(PhaseEnd::Gone);
             }
@@ -777,6 +819,7 @@ fn phase(
                 "waiting",
                 None,
                 Some(&outputs),
+                None,
                 None,
             )? {
                 return Ok(PhaseEnd::Gone);
@@ -807,6 +850,7 @@ fn phase(
             None,
             None,
             None,
+            None,
         )? {
             return Ok(PhaseEnd::Gone);
         }
@@ -816,6 +860,7 @@ fn phase(
             worktree,
             output_dir,
             vars,
+            browser,
         };
         let mut started = Vec::new();
         let done: StepEnd = exec::carry_out(&ctx, &watching, &step.id, &step.action, &mut started);
@@ -829,6 +874,8 @@ fn phase(
                 });
         }
         let outputs = serde_json::to_string(&done.outputs).unwrap_or_else(|_| "{}".to_owned());
+        let screenshots = (!done.screenshots.is_empty())
+            .then(|| serde_json::to_string(&done.screenshots).unwrap_or_else(|_| "[]".to_owned()));
         if !mark(
             store,
             &row.id,
@@ -838,6 +885,7 @@ fn phase(
             done.exit,
             Some(&outputs),
             done.note.as_deref(),
+            screenshots.as_deref(),
         )? {
             return Ok(PhaseEnd::Gone);
         }
@@ -911,6 +959,7 @@ fn note_server_stop(
         None,
         None,
         Some(&note),
+        None,
     )?;
     Ok(())
 }
@@ -987,6 +1036,7 @@ fn wait_for_answer(
                 None,
                 None,
                 Some(&note),
+                None,
             )? {
                 return Ok(Answer::Gone);
             }
@@ -1012,6 +1062,7 @@ fn skip_rest(store: &Store, run_id: &str, to: &str, why: &str, teardown: bool) -
             None,
             None,
             Some(why),
+            None,
         )? {
             return Ok(false);
         }
@@ -1029,6 +1080,7 @@ fn mark(
     exit: Option<i64>,
     outputs: Option<&str>,
     note: Option<&str>,
+    screenshots: Option<&str>,
 ) -> IpcResult<bool> {
     Ok(store.move_test_step(
         run_id,
@@ -1039,7 +1091,7 @@ fn mark(
             exit,
             outputs,
             note,
-            screenshots: None,
+            screenshots,
         },
     )?)
 }

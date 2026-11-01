@@ -5,6 +5,16 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Smoke tests can drive a browser.** A `browser` step opens a page in a Chromium found on the
+  machine — Chrome, Chromium or Edge, headless unless `headed: true` — and goes through its
+  actions: `goto`, `click`, `fill`, `select`, `press`, `wait_for`, and the `expect_*` checks,
+  each waiting for its element up to the step's timeout. It saves a screenshot when an action
+  fails, after every action with `screenshots: every_step`, or wherever the file says
+  `screenshot`. Nothing is installed and no Node is needed. A test that needs a browser none was
+  found for is listed _needs a browser_ and refused, naming what was looked for; a project can
+  name the browser to use under its smoke test settings. See
+  [Smoke tests](docs/guide/smoke-tests.md#browser-actions).
+
 - **Smoke tests in the app: the approval card, the run tab and Run smoke test….** A run of a
   file you have not approved — new, or changed since — now shows at the top of its workspace as
   a card: every step in words (a script fed to a program and a request body shown whole), the

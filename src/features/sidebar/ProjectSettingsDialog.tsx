@@ -273,6 +273,21 @@ export function ProjectSettingsDialog({
             Older runs are removed with their output files. Runs waiting, queued or going are never
             removed.
           </p>
+          <label className="flex flex-col gap-1">
+            Browser
+            <input
+              type="text"
+              aria-label="Browser"
+              placeholder="Found automatically — Chrome, Chromium or Edge"
+              value={tests?.browser ?? ""}
+              onChange={(e) => setTests((it) => (it ? { ...it, browser: e.target.value } : it))}
+              className={`${input} mt-0`}
+            />
+          </label>
+          <p className="text-ink-faint">
+            The browser a <code>browser</code> step drives. Left empty, one is found on this
+            machine. Set the full path to a Chromium-family browser to use that one instead.
+          </p>
         </fieldset>
         {error && (
           <p role="alert" className="mt-3 text-red-400 select-text">

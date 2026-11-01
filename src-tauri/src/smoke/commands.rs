@@ -33,6 +33,9 @@ pub struct TestItem {
     pub problems: Vec<Problem>,
     pub runnable: bool,
     pub uses_browser: bool,
+    /// The test has a `browser` step and no browser was found on the machine: it cannot run
+    /// until one is installed or named in the project's settings.
+    pub browser_missing: bool,
     /// What a run asks for first.
     pub inputs: Vec<TestInput>,
 }
@@ -125,6 +128,8 @@ pub struct TestSettings {
     pub ask_every_time: bool,
     /// Ended runs older than this many days are removed, with their output.
     pub keep_days: u32,
+    /// The browser `browser` steps use; empty means find one on the machine.
+    pub browser: String,
 }
 
 /// The longest a project may keep its runs: ten years, which is to say "keep them".
@@ -233,10 +238,18 @@ pub async fn test_list(app: AppHandle, workspace_id: String) -> IpcResult<Vec<Te
             .store
             .workspace(&workspace_id)?
             .ok_or_else(|| IpcError::new("workspace_not_found", "That workspace is not there."))?;
+        // One search of the machine for a browser, so a `browser` test says whether it can run.
+        let browser = smoke::browser::find_browser(
+            &state
+                .store
+                .project_test_settings(&workspace.project_id)?
+                .browser,
+        );
         Ok(smoke::catalog(Path::new(&workspace.path))
             .into_iter()
             .map(|entry| TestItem {
                 runnable: entry.runnable(),
+                browser_missing: entry.uses_browser() && browser.is_none(),
                 uses_browser: entry.uses_browser(),
                 inputs: entry
                     .test
@@ -592,6 +605,7 @@ pub async fn test_settings_get(app: AppHandle, project_id: String) -> IpcResult<
         Ok(TestSettings {
             ask_every_time: settings.ask_every_time,
             keep_days: settings.keep_days,
+            browser: settings.browser,
         })
     })
     .await
@@ -623,6 +637,7 @@ pub async fn test_settings_save(
             &yardsort_core::store::TestSettings {
                 ask_every_time: settings.ask_every_time,
                 keep_days: settings.keep_days,
+                browser: settings.browser.trim().to_owned(),
             },
         )?)
     })
