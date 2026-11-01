@@ -7,10 +7,13 @@ can run it. A test is a YAML file in your repository, `.yardsort/tests/<id>.yaml
 to the code it checks: an agent writes one for the feature it built, in the worktree it is
 standing in, and the test travels with the branch.
 
-**This release reads and checks the files.** `ys test validate` names every mistake at its line
-and column, `ys test list` shows a workspace's tests, and `ys test guide` tells an agent how to
-write one, so tests can be written and committed now. Running them from Yardsort, with each step
-shown as it goes, comes in a later release; the format below is what will run.
+**This release reads, checks and runs the files.** `ys test validate` names every mistake at its
+line and column, `ys test list` shows a workspace's tests, `ys test guide` tells an agent how to
+write one, and `ys test run` queues a run that Yardsort carries out, step by step, with the
+verdict from `ys test wait`. A file from a repository never runs unseen: a run of a new or
+changed file waits until you approve it in Yardsort. The card that shows you the file, the tab
+that shows the run as it goes, and the Tests view are the next step; until they arrive a run
+started from `ys` waits, and `browser` steps are not run. See [Running a test](#running-a-test).
 
 ## Where tests live
 
@@ -137,7 +140,8 @@ A key that belongs to another action is reported as misplaced. `prompt` on a `ru
 example.
 
 **`cwd`** is a folder inside the workspace, relative to it, like `web` or `packages/api`. No
-`..`, no absolute path, no variables.
+`..`, no absolute path, no variables, and no symbolic link that leads outside the workspace: the
+step fails and says where the link went.
 
 **`env`** is a mapping of names to values. A name is letters, digits and `_`, not starting with a
 digit. Values may use variables.
@@ -148,6 +152,7 @@ variables are in the environment instead, and every `run` and `start` process ge
 
 | Variable               | Environment                 |
 | ---------------------- | --------------------------- |
+| `{{ run.id }}`         | `YS_RUN_ID`                 |
 | `{{ run.port }}`       | `YS_RUN_PORT`               |
 | `{{ run.dir }}`        | `YS_RUN_DIR`                |
 | `{{ workspace.path }}` | `YS_WORKSPACE_PATH`         |
@@ -241,10 +246,70 @@ with any problems after it. `ys test example` prints the example above, and `ys 
 prints the format written for an agent: every action, key and variable, with whole files as
 examples. See [the `ys` command line](cli.md#ys-test).
 
+## Running a test
+
+`ys test run <id>` queues a run of a test in the workspace you are in, or in `--workspace
+<name>`, with `--input id=value` for each of the test's inputs that has no default. Yardsort
+must be open: the app carries runs out, and `ys` says so and queues nothing when it is not.
+The command checks the file, every input and every `{{ env.NAME }}` the test uses before
+anything is queued, and refuses a test with a `browser` step, which this release cannot run.
+It prints the run's id and returns at once.
+
+**Approval.** A test says what to run on your machine, and it comes from a repository. So a run
+of a file you have not seen — new, or changed in any way since you last approved it — is queued
+as _awaiting approval_, and nothing runs until you approve the file in Yardsort. The approval is
+recorded for that exact file, by its content hash, so the next run of the same file goes straight
+ahead; a changed file waits again. `ys` has no way to approve, for the reason `ys memory` has no
+way to approve: an agent can run anything `ys` offers. The card in the app that shows the file
+and approves it is the next step; until it arrives a run started from `ys` waits.
+
+**What a run does.** It gets a free port of its own, `{{ run.port }}`, and a scratch folder,
+`{{ run.dir }}`, removed afterwards. `setup` runs first, then `steps`, stopping at the first
+step that fails; `teardown` runs whatever happened. Every `run`, `shell` and `start` process
+gets the run's variables in its environment (the table above) and the project's test
+environment as `YS_ENV_<NAME>`. A `start` process is kept running until the run ends, when it
+is stopped with everything it started; if it exits before that, the run fails there and the
+step's note has its exit code and last lines. A `manual` step waits for your **Pass** or
+**Fail** in the app. Each step has five minutes unless its `timeout` says, the whole run thirty
+unless the file's `timeout` says; a process that writes more than 16 MiB to stdout or stderr is
+stopped and fails, a `start` process too, whatever step the run is on by then. Each process's
+output goes to files under Yardsort's data directory, `test-runs/<run id>/<step>.stdout` and
+`.stderr`, kept for thirty days.
+
+**Cancelling.** `ys test cancel <run>` ends a run that is waiting or queued at once. A running
+run is asked to stop: the step it is on is ended, with its process and everything that process
+started, or the request or question it was waiting on, the steps not reached are marked
+cancelled, the teardown runs, and the run ends as cancelled. If Yardsort stops during a run, the
+next start ends the run as _errored_ and stops any server it left behind. A run Yardsort could
+not see through for a reason of its own, its database locked for too long for one, ends as
+_errored_ with that reason, its servers stopped.
+
+**The verdict.** `ys test wait <run>` blocks until the run ends and prints it the way an agent
+can act on it:
+
+```text
+$ ys test wait 8c1d
+failed  login  (3 of 6 steps passed, 1m 12s)
+  sign_in  http  failed after 31s
+    status: expected 200, got 500.
+    last lines of `server` (setup step):
+      [vite] 500 /api/session: TypeError: cannot read 'id' of undefined
+```
+
+The first line is the status, the test and how many of the setup and test steps passed. Then
+every step that did not pass, with its note: each expectation that failed, in words. Then, for a
+run that failed, the last lines of each server the test started. `wait` exits 0 when the run
+passed, 1 when it failed and 2 for anything else: cancelled, refused, errored, or still going
+when `--timeout` (20 minutes unless said) passed. `ys test runs` lists runs, newest first, and
+`--run <id>` shows one step by step; `ys test log <run>` prints a step's output, the first
+failed step's unless `--step` says, `--stderr` for the other stream. A run can be named by the
+start of its id.
+
 ## Agents
 
 The usual way a test gets written is by the agent in the workspace, because it knows the feature.
-Ask it to write a smoke test for what it built: `ys test guide` is the reference it reads, and
-`ys test validate` is how it checks the result. Every example in the guide is itself checked
+Ask it to write a smoke test for what it built: `ys test guide` is the reference it reads,
+`ys test validate` is how it checks the result, and `ys test run` then `ys test wait` is how it
+runs the test and reads the verdict, once you have approved the file. Every example in the guide is itself checked
 against the parser when Yardsort is built, so what an agent is told and what the validator
 accepts cannot drift.

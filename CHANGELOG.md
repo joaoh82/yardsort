@@ -66,13 +66,19 @@ has the downloads and the full commit lists.
   `ys workspace fork <workspace> "<prompt>"` does the same from a terminal; `--print` shows the
   message the agent would get.
 
-- **Smoke tests: the file format and `ys test`.** A smoke test is a YAML file in your
-  repository, `.yardsort/tests/<id>.yaml`: setup, steps and teardown in order, with typed steps
-  (`run`, `shell`, `start`, `wait_for`, `http`, `browser`, `manual`), expectations, and
+- **Smoke tests: the file format, the runner and `ys test`.** A smoke test is a YAML file in
+  your repository, `.yardsort/tests/<id>.yaml`: setup, steps and teardown in order, with typed
+  steps (`run`, `shell`, `start`, `wait_for`, `http`, `browser`, `manual`), expectations, and
   `{{ variables }}` checked when the file is read. `ys test validate` names every mistake at its
   line and column, `ys test list` and `show` read a workspace's tests, `ys test example` prints
-  one to start from and `ys test guide` tells an agent how to write one. Running a test from
-  Yardsort comes in a later release. See [Smoke tests](docs/guide/smoke-tests.md).
+  one to start from and `ys test guide` tells an agent how to write one. `ys test run <id>`
+  queues a run in a workspace and Yardsort carries it out: every step in order on a free port
+  of its own, output to files, a cancel that stops the step and still runs the teardown; and
+  `ys test wait` prints the verdict for the agent that asked, with `runs`, `log` and `cancel`
+  beside it. A file from a repository never runs unseen: a run of a new or changed file waits
+  until you approve it in Yardsort. The card that shows it, the run tab and the Tests view are
+  the next step, so for now a run started from `ys` waits; `browser` steps are not run yet. See
+  [Smoke tests](docs/guide/smoke-tests.md).
 
 ## 0.20.2
 

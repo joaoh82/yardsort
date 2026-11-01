@@ -9,6 +9,7 @@ use specta::Type;
 
 use crate::env::ShellEnv;
 use crate::error::{IpcError, IpcResult};
+use crate::process::Group;
 use crate::program::Program;
 use crate::store::{Store, WorkspaceRow};
 
@@ -185,15 +186,18 @@ fn run_setup(
         options.mode(0o600);
     }
     let log = options.open(&log_path).map_err(io)?;
-    let mut child = Program::at(program, env)
-        .command(cwd)
-        .args(&command.args)
-        .env("YARDSORT_PROJECT", root)
-        .env("YARDSORT_WORKSPACE", cwd)
-        .stdout(Stdio::from(log.try_clone().map_err(io)?))
-        .stderr(Stdio::from(log))
-        .spawn()
-        .map_err(io)?;
+    // In a group of its own, so a setup that is stopped for taking too long takes everything
+    // it started with it: a watcher or a server it left behind would hold the port.
+    let mut child = Group::spawn(
+        Program::at(program, env)
+            .command(cwd)
+            .args(&command.args)
+            .env("YARDSORT_PROJECT", root)
+            .env("YARDSORT_WORKSPACE", cwd)
+            .stdout(Stdio::from(log.try_clone().map_err(io)?))
+            .stderr(Stdio::from(log)),
+    )
+    .map_err(io)?;
     let started = Instant::now();
     loop {
         if let Some(status) = child.try_wait().map_err(io)? {
@@ -206,10 +210,9 @@ fn run_setup(
             )));
         }
         if started.elapsed() >= Duration::from_secs(600) {
-            let _ = child.kill();
-            let _ = child.wait();
+            child.kill_tree();
             return Err(invalid(format!(
-                "Setup exceeded 10 minutes. Read {}. Check for child processes before retrying.",
+                "Setup exceeded 10 minutes and was stopped, with everything it started. Read {}.",
                 log_path.display()
             )));
         }

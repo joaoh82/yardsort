@@ -34,28 +34,43 @@ use clap::{Parser, Subcommand};
 use crate::yardsort::Yardsort;
 
 /// Something the user needs to read, rather than a bug. Printed to stderr; exit status 1.
-pub struct Failure(String);
+pub struct Failure {
+    message: String,
+    /// What the process exits with: 1, unless a command means something by another number.
+    code: i32,
+}
 
 impl Failure {
     pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
+        Self {
+            message: message.into(),
+            code: 1,
+        }
+    }
+
+    /// A failure that exits with `code`, for a command whose exit code is part of its answer.
+    pub fn with_code(code: i32, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            code,
+        }
     }
 
     /// What it says, for handing to the core where it wants a reason.
     pub fn into_message(self) -> String {
-        self.0
+        self.message
     }
 }
 
 impl From<yardsort_core::error::IpcError> for Failure {
     fn from(error: yardsort_core::error::IpcError) -> Self {
-        Self(error.message)
+        Self::new(error.message)
     }
 }
 
 impl From<yardsort_core::store::StoreError> for Failure {
     fn from(error: yardsort_core::store::StoreError) -> Self {
-        Self(error.to_string())
+        Self::new(error.to_string())
     }
 }
 
@@ -166,9 +181,11 @@ fn main() {
             // So do `validate`, `example` and `guide`.
             Command::Test(command) => commands::test::run(cli.data_dir, command, &out),
         };
-    if let Err(Failure(message)) = result {
-        eprintln!("{message}");
-        std::process::exit(1);
+    if let Err(Failure { message, code }) = result {
+        if !message.is_empty() {
+            eprintln!("{message}");
+        }
+        std::process::exit(code);
     }
 }
 
