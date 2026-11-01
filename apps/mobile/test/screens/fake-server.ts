@@ -45,6 +45,8 @@ export class FakeServer {
   asked: string[] = [];
   /** When set, the server cannot be reached. */
   down = false;
+  /** When set, the device list is answered only after this. */
+  devicesAfter: Promise<void> | null = null;
   #issued = 0;
 
   fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -89,6 +91,7 @@ export class FakeServer {
     }
     if (!signedIn) return refused("Sign in first.");
     if (method === "GET" && url.pathname === "/v1/devices") {
+      await this.devicesAfter;
       return Response.json({
         devices: this.devices.map((d) => ({ ...d, current: d.id === signedIn.id })),
       });

@@ -28,11 +28,12 @@ Things it holds to:
 - **Credentials** live only in SecureStore, `WHEN_UNLOCKED_THIS_DEVICE_ONLY`: never in a backup,
   never on a new phone, never in a log. A new refresh credential is kept before the access that
   came with it is used.
-- **A profile is a server's address and the id it gave.** Before a refresh credential goes to an
-  address, the app asks the address who it is. If it now answers as another server, nothing is
-  sent, and the app says so.
-- **Signed out at the server** (the credential refused): the profile is deleted and the phone
-  says so. **A server out of reach** deletes nothing.
+- **A profile is a server's address and the id it gave.** Before every refresh credential goes to
+  an address, on opening or in a session already open, the app asks the address who it is. If it
+  now answers as another server, nothing is sent, and the app says so.
+- **Signed out at the server** (the refresh credential refused): the profile is deleted and the
+  phone says so. A refused access credential is refreshed and tried once more first, since the
+  server says the same for access that has lapsed. **A server out of reach** deletes nothing.
 - **Signing out** revokes this phone at the server, which takes back every computer's grant,
   then deletes the profile. With the server out of reach, it asks before deleting anything.
 

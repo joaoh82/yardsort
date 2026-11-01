@@ -14,7 +14,7 @@ import Account from "../../src/app/account";
 import Connect from "../../src/app/connect";
 import Start from "../../src/app/index";
 import Servers from "../../src/app/servers";
-import { Accounts, type Browser } from "../../src/lib/accounts";
+import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import { AppProvider } from "../../src/lib/context";
 import { MemoryVault } from "../lib/memory-vault";
 import { ADDRESS, envFor, FakeServer } from "./fake-server";
@@ -25,8 +25,9 @@ async function start({
   server = new FakeServer(),
   vault = new MemoryVault(),
   browser = signedInBrowser,
-}: { server?: FakeServer; vault?: MemoryVault; browser?: Browser } = {}) {
-  const accounts = new Accounts(envFor(server), vault);
+  env = envFor(server),
+}: { server?: FakeServer; vault?: MemoryVault; browser?: Browser; env?: Env } = {}) {
+  const accounts = new Accounts(env, vault);
   const app = { accounts, browser, deviceName: "iPhone" };
   void accounts.load();
   await renderRouter(
@@ -222,5 +223,37 @@ describe("Account", () => {
     server.down = false;
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
     await screen.findByText("Signed in to Example Remote as Ana’s phone.");
+  });
+
+  test("one server's devices do not show under another's name", async () => {
+    const server = new FakeServer();
+    const other = new FakeServer();
+    other.name = "Other Remote";
+    other.server = "srv-other";
+    other.devices[0]!.name = "Other workstation";
+    const OTHER_ADDRESS = "https://other.example.com/";
+    const env: Env = {
+      ...envFor(server),
+      fetch: ((input: string, init?: RequestInit) =>
+        (String(input).startsWith(OTHER_ADDRESS) ? other : server).fetch(
+          input,
+          init,
+        )) as typeof fetch,
+    };
+    const { accounts } = await start({ server, env });
+    await signIn();
+    await screen.findByText("Workstation");
+
+    let answer = () => {};
+    other.devicesAfter = new Promise((resolve) => (answer = resolve));
+    await act(async () => {
+      await accounts.signIn(await accounts.lookUp(OTHER_ADDRESS), "Ana’s phone", signedInBrowser);
+    });
+    await screen.findByText("Signed in to Other Remote as Ana’s phone.");
+    expect(screen.queryByText("Workstation")).toBeNull();
+    expect(screen.getByText("Asking the server")).toBeTruthy();
+
+    await act(async () => answer());
+    await screen.findByText("Other workstation");
   });
 });

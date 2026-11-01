@@ -403,7 +403,9 @@ Built on 2026-10-31, on Linux.
     is handed out. When `keep` fails, the `NotKept` error carries the session, since by then
     the session holds the only copy of the new credential. A refresh that never got through is
     retried on the next call, inside the server's 30 seconds if the phone is still online
-    (27 §21).
+    (27 §21). `beforeRefresh` runs before every refresh credential is sent, and when it throws,
+    nothing is sent and the credential is not spent. `accessAfterRefusal` replaces access the
+    server refused, once for everyone refused it. Its clock is monotonic unless given one.
   - **`explainRevoked`** asks with the phone's own credential. A grant revoked, denied, expired
     or not found, or a computer missing from `GET /v1/hosts`, is `unpaired`. A refused credential
     is `signedOut`. Anything else is `undetermined`.
@@ -468,7 +470,8 @@ Built on 2026-10-31, on Linux.
 Built on 2026-10-31, on Linux. Its smoke test, below, passed on 2026-11-01: a development build on
 the owner's iPhone, built on the Mac, against staging. That is the first time the client ran under
 Hermes, SecureStore kept a credential, and a sign-in came back through `yardsort://signed-in`.
-Android is still untried.
+Android is still untried. The review after it changed how refreshes and refused access are handled
+(below), and that was tested against the real server, not again on the phone.
 
 - **`apps/mobile`**, its own Bun project (§3): `LICENSE` with the MPL-2.0 text, `"license":
 "MPL-2.0"`, the MPL's short notice in each file, and a README on running it. Expo SDK 58, every
@@ -489,34 +492,49 @@ Android is still untried.
   end to end (proposal §9). Signing in names the phone; iOS tells an app only "iPhone", so the
   field starts with that.
 - **What it decides beyond §5:**
-  - **A profile is a server's address and the id it gave.** Before a refresh credential goes to
-    an address, the app asks the address who it is. If it now answers as another server, nothing
-    is sent; the app says so, and the person can remove the profile. A server's id is what the
-    server says, so this alone is no defence against a server that lies; it keeps a credential
-    from going to a server set up again, or moved, at the same address.
+  - **A profile is a server's address and the id it gave.** Before every refresh credential goes
+    to an address, on opening a profile or later in a session already open, the app asks the
+    address who it is. If it now answers as another server, nothing is sent; the app says so, and
+    the person can remove the profile. A server's id is what the server says, so this alone is no
+    defence against a server that lies; it keeps a credential from going to a server set up
+    again, or moved, at the same address. It covers the refresh credential, which is what lasts.
+    An access credential, which lasts 15 minutes, goes with each request without the question, so
+    until a refresh is due a replacement can be sent one.
   - Signing in where the phone is signed in already opens that profile instead.
   - A sign-in whose credential cannot be kept is revoked at once, with the access that came with
     it, so no device is left at the server that nothing holds.
-  - A credential the server refuses, on opening or on any request, means this phone was signed
-    out there: the profile is deleted and the phone says so. A server out of reach deletes
-    nothing, and is tried again.
+  - A refresh credential the server refuses means this phone was signed out there: the profile
+    is deleted and the phone says so. A server out of reach deletes nothing, and is tried again.
+  - A refused access credential means less, because the server answers the same for access that
+    has lapsed as for a device signed out. So it is refreshed and the request tried once more;
+    only a refusal after that deletes anything. Deleting on the first refusal would lose the only
+    credential able to sign the phone out, with the device still active at the server.
+  - Sessions run on the wall clock, since the steady clock may stop while the phone sleeps. One
+    that is wrong either way costs a refresh, through the retry above.
+  - An answer that arrives after switching to another server changes nothing about the profile
+    now in use. The account screen starts afresh for each profile, so one server's devices never
+    show under another's name.
   - Signing out revokes the phone at the server. When the server is out of reach, the phone
     stays signed in unless the person removes it from this phone only, and is told the server
     still counts it until another device revokes it.
   - Opening a profile is one at a time, since it spends the refresh credential: a second caller
     waits for the first.
   - Switching back to a profile opened since the app started reuses its session.
-- **Tests: 26.** The logic, 17 under `bun test`, against the real server and its sign-in through
+- **Tests: 40.** The logic, 30 under `bun test`, against the real server and its sign-in through
   the stand-in (two of them at once, for two servers): signing in, a closed browser, a sign-in
-  that cannot be kept, opening after a restart, opening twice at once, an address that answers
-  as another server, a server out of reach, signed out from another device on opening and while
-  open, signing out, and two servers. The screens, 9 under Jest with `jest-expo` and Expo
-  Router's in-memory router, against a small fake server whose answers the real client decodes:
-  Connect's lookup and what it says, a bad address, signing in, a closed sign-in, a server
-  signed in to already, signing out with a no respected, signing out out of reach, signed out at
-  the server, and out of reach on opening. Breaking the address check, the one-at-a-time
-  opening, the order credential-then-list, or the question before signing out each failed a
-  test. Two runners, because the screens need React Native's transforms and the logic needs the
+  that cannot be kept, opening after a restart, opening twice at once, an address that answers as
+  another server, a server out of reach, signed out from another device on opening and while open,
+  signing out, two servers, access refused and access past its time, another server at the address
+  of a session already open, and answers that come after a switch. The screens, 10 under Jest with
+  `jest-expo` and Expo Router's in-memory router, against a small fake server whose answers the
+  real client decodes: Connect's lookup and what it says, a bad address, signing in, a closed
+  sign-in, a server signed in to already, signing out with a no respected, signing out out of
+  reach, signed out at the server, out of reach on opening, and one server's devices under
+  another's name. Breaking the address check, the one-at-a-time opening, the order
+  credential-then-list, the question before signing out, the wall clock, the check on a resume or
+  on a later refresh, the retry of refused access, or leaving another profile's standing alone
+  each failed a test.
+  Two runners, because the screens need React Native's transforms and the logic needs the
   server, which Bun starts as the client's tests do.
 - **Lint is Expo's** (`eslint-config-expo`), on ESLint 9.39.5: its React plugin fails to load
   under the ESLint 10 the desktop uses. The desktop's lint skips `apps/mobile`, and Vitest

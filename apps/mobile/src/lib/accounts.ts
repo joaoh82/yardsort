@@ -7,11 +7,13 @@
  *
  * - **Signing in** goes through the system browser and comes back to `yardsort://signed-in`
  *   (31 §5). The refresh credential is kept before anything uses the access that came with it.
- * - **Opening a profile** first asks its address who it is. Only when it answers with the server
- *   id the profile was signed in to is the refresh credential sent there: an address that now
- *   answers as another server never sees it.
- * - **A credential the server refuses** means this phone was signed out there. The profile is
- *   deleted, and the phone says so. **A server that cannot be reached** deletes nothing.
+ * - **Every refresh**, on opening a profile or later in a session already open, first asks the
+ *   address who it is. Only when it answers with the server id the profile was signed in to is the
+ *   refresh credential sent there: an address that now answers as another server never sees it.
+ * - **A refresh credential the server refuses** means this phone was signed out there. The profile
+ *   is deleted, and the phone says so. A refused access means less: the server says the same for
+ *   access that has lapsed, so it is refreshed and tried once more first. **A server that cannot
+ *   be reached** deletes nothing.
  */
 
 import {
@@ -23,8 +25,10 @@ import {
   type DevicePage,
   NotKept,
   type Platform,
+  type Secret,
   type ServerDescription,
   Session,
+  type SessionOptions,
 } from "@yardsort/remote-client";
 
 import { type Profile, Profiles, type Vault } from "./profiles";
@@ -72,6 +76,14 @@ export interface Snapshot {
 export interface Found {
   client: Client;
   description: ServerDescription;
+}
+
+/** The profile's address answered as another server. Its refresh credential was not sent. */
+class OtherServer extends ClientError {
+  constructor(readonly serverName: string) {
+    super("invalid", `This address now answers as another server, “${serverName}”.`);
+    this.name = "OtherServer";
+  }
 }
 
 export class Accounts {
@@ -200,7 +212,10 @@ export class Accounts {
     for (const old of profiles.all) {
       if (old.address === profile.address && old.id !== profile.id) await profiles.forget(old.id);
     }
-    this.#sessions.set(profile.id, new Session(client, issued, profiles.keeper(profile.id)));
+    this.#sessions.set(
+      profile.id,
+      new Session(client, issued, profiles.keeper(profile.id), this.#options(profile, client)),
+    );
     this.#standing = { kind: "signedIn", session: this.#sessions.get(profile.id) as Session };
     this.#notice = null;
     this.#changed();
@@ -218,8 +233,23 @@ export class Accounts {
   }
 
   /**
-   * Open the active profile: check its server is still the one it signed in to, and refresh its
-   * credential. Called again to retry after `unreachable`.
+   * How every session of `profile` runs. By the wall clock, since the phone's monotonic clock may
+   * stop while it sleeps. And with its address asked who it is before each refresh, so a session
+   * open while a server is replaced is held to what opening one is.
+   */
+  #options(profile: Profile, client: Client): SessionOptions {
+    return {
+      now: this.env.clock ?? Date.now,
+      beforeRefresh: async () => {
+        const { server, name } = await client.describe();
+        if (server !== profile.server) throw new OtherServer(name);
+      },
+    };
+  }
+
+  /**
+   * Open the active profile: refresh its credential, once its address has answered as the server
+   * it signed in to. Called again to retry after `unreachable`.
    */
   open(): Promise<void> {
     const profile = this.#need().active;
@@ -243,18 +273,20 @@ export class Accounts {
     const client = this.clientFor(profile.address);
     let standing: Standing;
     try {
-      const description = await client.describe();
-      if (description.server !== profile.server) {
-        standing = { kind: "otherServer", name: description.name };
-      } else {
-        const refresh = await profiles.refresh(profile.id);
-        if (!refresh) return await this.#signedOut(profile);
-        const session = await Session.resume(client, refresh, profiles.keeper(profile.id));
-        this.#sessions.set(profile.id, session);
-        standing = { kind: "signedIn", session };
-      }
+      const refresh = await profiles.refresh(profile.id);
+      if (!refresh) return await this.#signedOut(profile);
+      const session = await Session.resume(
+        client,
+        refresh,
+        profiles.keeper(profile.id),
+        this.#options(profile, client),
+      );
+      this.#sessions.set(profile.id, session);
+      standing = { kind: "signedIn", session };
     } catch (error) {
-      if (error instanceof NotKept) {
+      if (error instanceof OtherServer) {
+        standing = { kind: "otherServer", name: error.serverName };
+      } else if (error instanceof NotKept) {
         // The session holds the only copy of the new credential: carry on, and say so.
         this.#sessions.set(profile.id, error.session);
         standing = { kind: "signedIn", session: error.session };
@@ -278,11 +310,20 @@ export class Accounts {
 
   /** The server refused this phone's credential: forget the profile, and say so. */
   async #signedOut(profile: Profile): Promise<void> {
-    this.#sessions.delete(profile.id);
-    await this.#need().forget(profile.id);
-    this.#standing = null;
+    await this.#forget(profile.id);
     this.#notice = `This phone was signed out of ${profile.serverName}. Nothing from it is kept here.`;
     this.#changed();
+  }
+
+  /**
+   * Delete a profile here. Where the active profile stands is cleared only when that is the one
+   * deleted: an answer that comes late for a profile switched away from says nothing about the
+   * one in use now.
+   */
+  async #forget(id: string): Promise<void> {
+    this.#sessions.delete(id);
+    await this.#need().forget(id);
+    if (!this.#need().active) this.#standing = null;
   }
 
   #session(): { profile: Profile; session: Session } {
@@ -293,20 +334,36 @@ export class Accounts {
     return { profile, session: standing.session };
   }
 
-  /** Run `call` with the active profile's access, signing the profile out if the server refuses it. */
-  async #withAccess<T>(call: (session: Session) => Promise<T>): Promise<T> {
+  /**
+   * Run `call` with the active profile's access. Refused, it is refreshed and tried once more: the
+   * server says the same for access that has lapsed, which a phone that slept can hand out. Only
+   * a refusal after that means this phone was signed out, and deletes the profile.
+   */
+  async #withAccess<T>(call: (session: Session, access: Secret) => Promise<T>): Promise<T> {
     const { profile, session } = this.#session();
     try {
-      return await call(session);
+      const access = await session.access();
+      try {
+        return await call(session, access);
+      } catch (error) {
+        if (!refused(error)) throw error;
+        return await call(session, await session.accessAfterRefusal(access));
+      }
     } catch (error) {
-      if (refused(error)) await this.#signedOut(profile);
+      if (refused(error)) {
+        await this.#signedOut(profile);
+      } else if (error instanceof OtherServer) {
+        // Opening it again asks again, from the credential kept.
+        this.#sessions.delete(profile.id);
+        this.#set(profile, { kind: "otherServer", name: error.serverName });
+      }
       throw error;
     }
   }
 
   /** The account's devices, this phone among them. */
   devices(): Promise<DevicePage> {
-    return this.#withAccess(async (session) => session.client.devices(await session.access()));
+    return this.#withAccess((session, access) => session.client.devices(access));
   }
 
   /**
@@ -317,15 +374,15 @@ export class Accounts {
   async signOut(): Promise<void> {
     const { profile } = this.#session();
     try {
-      await this.#withAccess((session) => session.signOut());
+      await this.#withAccess((session, access) =>
+        session.client.revokeDevice(access, session.device),
+      );
     } catch (error) {
       // Signed out already: #withAccess has forgotten the profile.
       if (refused(error)) return;
       throw error;
     }
-    this.#sessions.delete(profile.id);
-    await this.#need().forget(profile.id);
-    this.#standing = null;
+    await this.#forget(profile.id);
     this.#changed();
   }
 
@@ -334,10 +391,7 @@ export class Accounts {
    * it is revoked from another of the account's devices.
    */
   async forgetHere(id: string): Promise<void> {
-    this.#sessions.delete(id);
-    const wasActive = this.#need().active?.id === id;
-    await this.#need().forget(id);
-    if (wasActive) this.#standing = null;
+    await this.#forget(id);
     this.#changed();
   }
 }

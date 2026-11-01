@@ -71,7 +71,8 @@ export default function Account() {
     );
   }
 
-  return <SignedIn profile={profile} title={title} servers={servers} />;
+  // Keyed, so one server's devices never show under another's name, and a late answer lands nowhere.
+  return <SignedIn key={profile.id} profile={profile} title={title} servers={servers} />;
 }
 
 function SignedIn({

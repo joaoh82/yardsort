@@ -14,6 +14,9 @@
  *   saves it (the app's credential store); access is handed out only once `keep` has finished.
  *   When `keep` fails, the session still holds the new credential, so this process can carry on,
  *   and the failure is reported as {@link NotKept}, which carries the session.
+ * - **Every refresh can be checked first.** {@link SessionOptions.beforeRefresh} runs before a
+ *   refresh credential is sent, whichever path asked for the refresh. When it throws, nothing is
+ *   sent and the credential is not spent.
  */
 
 import type { Credentials } from "./account.ts";
@@ -43,8 +46,17 @@ export class NotKept extends ClientError {
 export type Keep = (refresh: Secret) => void | Promise<void>;
 
 export interface SessionOptions {
-  /** A monotonic clock, in milliseconds. */
+  /**
+   * A clock, in milliseconds. Monotonic unless given. One may stop while a phone sleeps, and access
+   * looks fresh long after it lapsed, so an app on a phone passes the wall clock. A clock that is
+   * wrong either way costs a refresh: see {@link Session.accessAfterRefusal}.
+   */
   now?: () => number;
+  /**
+   * Runs before each refresh credential is sent. Throw to stop it: nothing is sent, the credential
+   * is not spent, and the caller gets what was thrown.
+   */
+  beforeRefresh?: () => void | Promise<void>;
 }
 
 export class Session {
@@ -54,6 +66,7 @@ export class Session {
   #refreshAt: number;
   #flight: Promise<Secret> | null = null;
   readonly #now: () => number;
+  readonly #beforeRefresh: SessionOptions["beforeRefresh"];
 
   /** From credentials the server just issued, which `keep` has kept. */
   constructor(
@@ -63,6 +76,7 @@ export class Session {
     options: SessionOptions = {},
   ) {
     this.#now = options.now ?? (() => performance.now());
+    this.#beforeRefresh = options.beforeRefresh;
     this.device = credentials.device;
     this.#access = credentials.access;
     this.#refresh = credentials.refresh;
@@ -80,6 +94,7 @@ export class Session {
     keep: Keep,
     options: SessionOptions = {},
   ): Promise<Session> {
+    await options.beforeRefresh?.();
     const issued = await client.refresh(refresh);
     const session = new Session(client, issued, keep, options);
     await session.#kept(issued.refresh);
@@ -95,6 +110,22 @@ export class Session {
   access(): Promise<Secret> {
     if (this.#flight) return this.#flight;
     if (this.#now() < this.#refreshAt) return Promise.resolve(this.#access);
+    return this.#startRefresh();
+  }
+
+  /**
+   * New access, after the server refused `refused`. It answers the same for access that has lapsed
+   * as for a device signed out, so a refusal of access says nothing yet. Refreshing tells them
+   * apart: a device signed out is refused that too. Callers refused the same access share one
+   * refresh, and one whose access was replaced meanwhile gets the replacement.
+   */
+  accessAfterRefusal(refused: Secret): Promise<Secret> {
+    if (this.#flight) return this.#flight;
+    if (this.#access !== refused) return Promise.resolve(this.#access);
+    return this.#startRefresh();
+  }
+
+  #startRefresh(): Promise<Secret> {
     const flight = this.#refreshNow().finally(() => {
       this.#flight = null;
     });
@@ -103,6 +134,7 @@ export class Session {
   }
 
   async #refreshNow(): Promise<Secret> {
+    await this.#beforeRefresh?.();
     const issued = await this.client.refresh(this.#refresh);
     this.#access = issued.access;
     this.#refresh = issued.refresh;

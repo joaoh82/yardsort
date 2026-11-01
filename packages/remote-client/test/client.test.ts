@@ -227,4 +227,54 @@ describe("a session", () => {
     expect(access.expose()).toBe("ys1.at.3");
     expect(kept).toEqual(["ys1.rt.3"]);
   });
+
+  test("access refused is replaced once for everyone refused it, and only then", async () => {
+    const { client, presented } = tokenServer(15 * 60_000);
+    const fresh = { ...first, accessExpiresInMs: 15 * 60_000 };
+    const session = new Session(client, fresh, () => {});
+    const refused = await session.access();
+    expect(presented).toEqual([]);
+
+    const replaced = await Promise.all(
+      Array.from({ length: 3 }, () => session.accessAfterRefusal(refused)),
+    );
+    expect(replaced.map((a) => a.expose())).toEqual(Array(3).fill("ys1.at.1"));
+    // Refused the old one after it was replaced: the new one, with no refresh.
+    expect((await session.accessAfterRefusal(refused)).expose()).toBe("ys1.at.1");
+    expect(presented).toEqual(["ys1.rt.0"]);
+    // Refused the new one too: another refresh.
+    expect((await session.accessAfterRefusal(replaced[0] as Secret)).expose()).toBe("ys1.at.2");
+    expect(presented).toEqual(["ys1.rt.0", "ys1.rt.1"]);
+  });
+
+  test("a check before refreshing, on every path, sends nothing when it refuses", async () => {
+    const { client, presented } = tokenServer(15 * 60_000);
+    const no = new Error("not this server");
+    let allowed = false;
+    const checks: number[] = [];
+    const options = {
+      beforeRefresh: () => {
+        checks.push(presented.length);
+        if (!allowed) throw no;
+      },
+    };
+
+    // Resuming, access that is due, and access refused.
+    const resumed = Session.resume(client, new Secret("ys1.rt.0"), () => {}, options);
+    expect(await resumed.catch((e: unknown) => e)).toBe(no);
+    const session = new Session(client, first, () => {}, options);
+    expect(await session.access().catch((e: unknown) => e)).toBe(no);
+    const fresh = { ...first, accessExpiresInMs: 15 * 60_000 };
+    const open = new Session(client, fresh, () => {}, options);
+    const refused = await open.access();
+    expect(await open.accessAfterRefusal(refused).catch((e: unknown) => e)).toBe(no);
+    expect(presented).toEqual([]);
+    expect(checks).toHaveLength(3);
+
+    // The credential was not spent, so the same one goes when the check passes.
+    allowed = true;
+    expect((await session.access()).expose()).toBe("ys1.at.1");
+    expect(presented).toEqual(["ys1.rt.0"]);
+    expect(checks).toEqual([0, 0, 0, 0]);
+  });
 });
