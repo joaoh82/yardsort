@@ -912,8 +912,8 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       `just client-pair` ([31 §9](31-remote-r3.md#9--what-the-first-slice-adds)). Slice 2 was
       built the same day: `apps/mobile`, an Expo SDK 58 app that connects to a server, signs in
       through the system browser, lists the account's devices and signs out, with a profile per
-      server ([31 §10](31-remote-r3.md#10--what-the-second-slice-adds)). Nothing has run on a
-      phone yet; slice 2's smoke test, on the iPhone against staging, is the first time.
+      server ([31 §10](31-remote-r3.md#10--what-the-second-slice-adds)). Its smoke test passed
+      on the owner's iPhone against staging on 2026-11-01; Android is untried.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

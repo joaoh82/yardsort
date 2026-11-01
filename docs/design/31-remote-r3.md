@@ -1,8 +1,8 @@
 # Remote, R3: the phone app
 
 **Status:** planned on 2026-10-30. The first slice, the TypeScript protocol client, was built on
-2026-10-31 (§9). The second, the app signed in, was built the same day (§10), and has not yet run
-on a phone. This is R3's plan: what it has to show, what it starts
+2026-10-31 (§9). The second, the app signed in, was built the same day (§10), and its smoke
+test passed on the owner's iPhone against staging on 2026-11-01. This is R3's plan: what it has to show, what it starts
 from, the decisions taken before any app code exists, the slices, and what each slice's smoke
 test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -465,8 +465,10 @@ Built on 2026-10-31, on Linux.
 
 ## 10 · What the second slice adds
 
-Built on 2026-10-31, on Linux. Nothing of it has run on a phone yet: its smoke test, below, is the
-first time.
+Built on 2026-10-31, on Linux. Its smoke test, below, passed on 2026-11-01: a development build on
+the owner's iPhone, built on the Mac, against staging. That is the first time the client ran under
+Hermes, SecureStore kept a credential, and a sign-in came back through `yardsort://signed-in`.
+Android is still untried.
 
 - **`apps/mobile`**, its own Bun project (§3): `LICENSE` with the MPL-2.0 text, `"license":
 "MPL-2.0"`, the MPL's short notice in each file, and a README on running it. Expo SDK 58, every
@@ -542,8 +544,16 @@ first time.
    account's devices with this one marked **This phone**.
 4. Close the app from the app switcher and open it again: it is still signed in, with no browser.
 5. **Sign out**, then **Cancel**: still signed in. **Sign out** again, and confirm: Connect.
-6. `just client-pair devices https://remote-staging.yardsort.sh`, signing in in the browser,
-   lists the phone as revoked.
+   Confirming is what revokes the phone at the server.
+6. From the repository, on any computer with a browser:
+   `just client-pair devices https://remote-staging.yardsort.sh`, signing in in the browser with
+   the same account. It lists the phone as revoked, because step 5 revoked it.
+
+The Mac needs Bun, Node.js and CocoaPods besides Xcode, not Rust. A fresh one also needs Xcode's
+first-launch components, an Apple Development certificate, Apple's WWDR G3 intermediate and
+`codesign` allowed to use the key; `apps/mobile/README.md` has each step and the error it ends.
+On the first run, the list showed the phone still signed in: the second **Sign out** had not been
+confirmed. Confirmed, it showed it revoked.
 
 ## 11 · Open after this plan
 
