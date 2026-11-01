@@ -585,8 +585,9 @@ Built on 2026-11-01, on Linux. Its smoke test, below, passed on 2026-11-01: a de
 the owner's iPhone against staging, with the desktop app as the host, once the two things its first
 run found were fixed (below). That was the first time a channel opened under React Native. A link
 naming another server is shown only by tests, since the smoke test has no second server to name,
-and Android stays unbuilt. The server needed no change, so staging needs no deploy; the stand-in gained `hostOffline` and `hostOnline`, for its host to drop
-its link to the relay and make it again.
+and Android stays unbuilt. Step 10 came from review, after that run, and has not run on a phone
+yet. The server needed no change, so staging needs no deploy; the stand-in gained `hostOffline` and
+`hostOnline`, for its host to drop its link to the relay and make it again.
 
 - **Pairing** (`src/app/pair.tsx`, `src/lib/pairing.ts`): scan the computer's code with
   `expo-camera`, which opens only when asked for and asks for no microphone, or type its eight
@@ -607,6 +608,11 @@ its link to the relay and make it again.
   the same code many times a second, and an effect may run again. The pair screen is
   `dangerouslySingular`, and signing in returns to the one already open. The first version opened
   a second, and two screens could each have spent the offer; a test found that.
+- **A link arriving while the screen is busy** is asked about first, whatever the screen was doing:
+  sending another, waiting for a computer, or showing an answer. A no goes back to that. A yes goes
+  on, and an earlier request stays open at the server, where the account screen can cancel it until
+  it runs out. Letting go of a sent link leaves a newer one that replaced it, and only the newest
+  request moves the screen on. Review found the first version losing or hiding the newer link.
 - **Computers** (`src/ui/computers.tsx`) come first on the account screen: approved grants whose
   computer is still on the account, requests still waiting, which can be cancelled, and **Pair a
   computer**. **Unpair** asks first, and the phone stays signed in.
@@ -667,6 +673,12 @@ its link to the relay and make it again.
    phone's list, and the phone is still signed in.
 9. **A wrong or expired code.** Type `ABCD-2345`: it says the code is wrong or has expired. Show a
    code at the computer, wait out its five minutes, and type it: the same.
+10. **A second link while waiting.** **Pair a device**, then type the code on the phone, which says
+    to say yes at the computer. Don't answer. On the computer, **Done**, then **Pair a device**
+    again, and open that code's link with the iPhone's Camera app. The phone asks first, and says
+    the first request stays open. **Cancel**: it is back to waiting for the first. Open the link
+    again, then **Ask the computer**. The computer shows two requests; answer the newest and the
+    phone follows it. The first is on the account screen, and **Cancel the request** removes it.
 
 ## 12 · Open after this plan
 

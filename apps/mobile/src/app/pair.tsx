@@ -43,25 +43,35 @@ export default function Pair() {
   const place = held ? placeOf(held.link, active, profiles) : null;
   const signedIn = standing?.kind === "signedIn";
 
+  // Only the newest request moves this screen on. One overtaken stays at the server, on the account
+  // screen, where it can be cancelled.
+  const newest = useRef(0);
   const send = useCallback(
-    (offer: OfferKey) =>
-      accounts.pair(offer).then(
-        (grant) => setStage({ kind: "waiting", grant }),
+    (offer: OfferKey) => {
+      newest.current += 1;
+      const request = newest.current;
+      return accounts.pair(offer).then(
+        (grant) => {
+          if (request === newest.current) setStage({ kind: "waiting", grant });
+        },
         (error: unknown) => {
+          if (request !== newest.current) return;
           setStage({ kind: "entry" });
           setProblem(messageOf(error));
         },
-      ),
+      );
+    },
     [accounts],
   );
 
   // A link the person has agreed to, on the server in use. It is sent once, however often this
-  // runs, and dropped when the answer comes.
+  // runs, and let go when the answer comes.
   const ready = held?.agreed === true && place?.kind === "here" && signedIn;
   useEffect(() => {
     if (!ready) return;
     const link = incoming.claim();
-    if (link) void send({ kind: "secret", value: link.secret }).finally(() => incoming.drop());
+    if (link)
+      void send({ kind: "secret", value: link.secret }).finally(() => incoming.finish(link));
   }, [ready, incoming, send]);
 
   // Waiting for the person at the computer, for as long as this screen is open.
@@ -93,7 +103,106 @@ export default function Pair() {
   }
   if (!held && !active) return <Redirect href="/connect" />;
 
-  if (stage.kind === "asking" || ready) {
+  if (ready) {
+    return (
+      <Screen>
+        <Waiting label="Asking the computer" />
+      </Screen>
+    );
+  }
+
+  // A link not yet used comes before whatever this screen was doing, which waits behind it.
+  if (held && place) {
+    const cancel = () => {
+      incoming.drop();
+      if (!active) router.replace("/connect");
+    };
+    // Going on leaves any earlier request behind: it stays open at the server, and this screen stops
+    // asking about it.
+    const goOn = () => {
+      newest.current += 1;
+      setStage({ kind: "entry" });
+      setProblem(null);
+      incoming.agree();
+    };
+    const earlier = stage.kind === "waiting" && (
+      <Body muted>
+        If you go on, the request to {stage.grant.hostName} stays open, and you can cancel it on the
+        account screen.
+      </Body>
+    );
+    if (place.kind === "invalid") {
+      return (
+        <Screen>
+          <Problem>
+            This code names a server address this app will not use. Show a new code at the computer.
+          </Problem>
+          <Button title="OK" onPress={cancel} />
+        </Screen>
+      );
+    }
+    if (place.kind === "new") {
+      return (
+        <Screen>
+          <Title>This code is for another server</Title>
+          <Body>
+            It is for {place.address}, and this phone is not signed in there. A sign-in on one
+            server means nothing on another, so you would sign in there first.
+          </Body>
+          {earlier}
+          <Button
+            title="Sign in there"
+            kind="primary"
+            onPress={() => {
+              goOn();
+              router.push({ pathname: "/connect", params: { address: place.address } });
+            }}
+          />
+          <Button title="Cancel" onPress={cancel} />
+        </Screen>
+      );
+    }
+    if (place.kind === "known") {
+      return (
+        <Screen>
+          <Title>This code is for another server</Title>
+          <Body>
+            It is for {place.profile.serverName} ({place.profile.address}).
+            {active ? ` This phone is using ${active.serverName}.` : ""}
+          </Body>
+          {earlier}
+          <Button
+            title={`Switch to ${place.profile.serverName} and pair`}
+            kind="primary"
+            onPress={() => {
+              goOn();
+              void accounts.activate(place.profile.id);
+            }}
+          />
+          <Button title="Cancel" onPress={cancel} />
+        </Screen>
+      );
+    }
+    if (!signedIn) {
+      return <NotReady serverName={active?.serverName} onBack={home} />;
+    }
+    if (!held.agreed) {
+      return (
+        <Screen>
+          <Title>Pair with a computer?</Title>
+          <Body>
+            A link asks this phone to pair with a computer on {active?.serverName}. Nothing is given
+            until you say yes at that computer.
+          </Body>
+          {earlier}
+          <Button title="Ask the computer" kind="primary" onPress={goOn} />
+          <Button title="Cancel" onPress={cancel} />
+        </Screen>
+      );
+    }
+  }
+
+  if (stage.kind === "asking") {
     return (
       <Screen>
         <Waiting label="Asking the computer" />
@@ -126,79 +235,6 @@ export default function Pair() {
     return (
       <Answered grant={stage.grant} onAgain={() => setStage({ kind: "entry" })} onDone={home} />
     );
-  }
-
-  if (held && place) {
-    const cancel = () => {
-      incoming.drop();
-      if (!active) router.replace("/connect");
-    };
-    if (place.kind === "invalid") {
-      return (
-        <Screen>
-          <Problem>
-            This code names a server address this app will not use. Show a new code at the computer.
-          </Problem>
-          <Button title="OK" onPress={cancel} />
-        </Screen>
-      );
-    }
-    if (place.kind === "new") {
-      return (
-        <Screen>
-          <Title>This code is for another server</Title>
-          <Body>
-            It is for {place.address}, and this phone is not signed in there. A sign-in on one
-            server means nothing on another, so you would sign in there first.
-          </Body>
-          <Button
-            title="Sign in there"
-            kind="primary"
-            onPress={() => {
-              incoming.agree();
-              router.push({ pathname: "/connect", params: { address: place.address } });
-            }}
-          />
-          <Button title="Cancel" onPress={cancel} />
-        </Screen>
-      );
-    }
-    if (place.kind === "known") {
-      return (
-        <Screen>
-          <Title>This code is for another server</Title>
-          <Body>
-            It is for {place.profile.serverName} ({place.profile.address}).
-            {active ? ` This phone is using ${active.serverName}.` : ""}
-          </Body>
-          <Button
-            title={`Switch to ${place.profile.serverName} and pair`}
-            kind="primary"
-            onPress={() => {
-              incoming.agree();
-              void accounts.activate(place.profile.id);
-            }}
-          />
-          <Button title="Cancel" onPress={cancel} />
-        </Screen>
-      );
-    }
-    if (!signedIn) {
-      return <NotReady serverName={active?.serverName} onBack={home} />;
-    }
-    if (!held.agreed) {
-      return (
-        <Screen>
-          <Title>Pair with a computer?</Title>
-          <Body>
-            A link asks this phone to pair with a computer on {active?.serverName}. Nothing is given
-            until you say yes at that computer.
-          </Body>
-          <Button title="Ask the computer" kind="primary" onPress={() => incoming.agree()} />
-          <Button title="Cancel" onPress={cancel} />
-        </Screen>
-      );
-    }
   }
 
   if (!signedIn) {

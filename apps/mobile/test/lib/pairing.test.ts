@@ -305,6 +305,19 @@ describe("a link", () => {
     expect(held.claim()).toBe(second);
   });
 
+  test("finishing a link lets it go, and leaves a newer one that replaced it", () => {
+    const held = new Incoming();
+    const first = link("https://a.example.com");
+    held.hold(first, true);
+    held.claim();
+    const second = link("https://b.example.com");
+    held.hold(second, false);
+    held.finish(first);
+    expect(held.get()?.link).toBe(second);
+    held.finish(second);
+    expect(held.get()).toBeNull();
+  });
+
   test("is held until used, and a newer one replaces it", () => {
     const held = new Incoming();
     let told = 0;

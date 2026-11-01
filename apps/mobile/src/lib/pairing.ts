@@ -53,12 +53,17 @@ export class Incoming {
     this.#changed();
   }
 
-  /** The link, to send, for the first to ask. Whoever gets it drops it when the answer comes. */
+  /** The link, to send, for the first to ask. Whoever gets it finishes it when the answer comes. */
   claim(): HeldLink["link"] | null {
     const link = this.#held?.link ?? null;
     if (!link || this.#claimed === link) return null;
     this.#claimed = link;
     return link;
+  }
+
+  /** The answer to a claimed link came. A newer link that replaced it stays. */
+  finish(link: HeldLink["link"]): void {
+    if (this.#held?.link === link) this.drop();
   }
 
   drop(): void {

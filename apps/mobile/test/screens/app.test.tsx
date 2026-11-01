@@ -523,6 +523,134 @@ describe("Pairing", () => {
       expect(incoming.get()).toBeNull();
     });
 
+    describe("arriving while the screen is busy with another", () => {
+      const newer = new Secret("ys1.of.newer");
+
+      /** The first link sent and answered by the server only when told. */
+      async function firstHeldBack() {
+        const app = await twoServers(ADDRESS);
+        app.server.offers.add("ys1.of.newer");
+        let release = () => {};
+        app.server.pairAfter.set(
+          "ys1.of.linked",
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+        );
+        await fireEvent.press(await screen.findByRole("button", { name: "Ask the computer" }));
+        await waitFor(() => expect(app.server.presented).toEqual(["ys1.of.linked"]));
+        await act(async () => app.incoming.hold({ server: ADDRESS, secret: newer }, false));
+        await screen.findByText("Pair with a computer?");
+        return { ...app, release };
+      }
+
+      /** Let the first link's answer come back, all the way to the screen. */
+      async function answerFirst(app: { server: FakeServer; release: () => void }, before: number) {
+        app.release();
+        await waitFor(() => expect(app.server.grants).toHaveLength(before + 1));
+        await act(async () => jest.advanceTimersByTimeAsync(20));
+      }
+
+      test("the first one's answer does not lose it", async () => {
+        const app = await firstHeldBack();
+        await answerFirst(app, 0);
+        expect(app.incoming.get()?.link.secret).toBe(newer);
+        expect(screen.getByText("Pair with a computer?")).toBeTruthy();
+        await fireEvent.press(screen.getByRole("button", { name: "Ask the computer" }));
+        await screen.findByText("Say yes at Workstation");
+        expect(app.server.presented).toEqual(["ys1.of.linked", "ys1.of.newer"]);
+        expect(app.incoming.get()).toBeNull();
+      });
+
+      test("the first one's late answer does not take the screen from it", async () => {
+        const app = await firstHeldBack();
+        await fireEvent.press(screen.getByRole("button", { name: "Ask the computer" }));
+        await screen.findByText("Say yes at Workstation");
+        (app.server.hosts[0] as { name: string }).name = "Late";
+        await answerFirst(app, 1);
+        expect(screen.getByText("Say yes at Workstation")).toBeTruthy();
+      });
+
+      test("waiting for a computer: it asks first, and a no goes back to waiting", async () => {
+        const { server, incoming } = await twoServers(ADDRESS);
+        server.offers.add("ys1.of.newer");
+        await fireEvent.press(await screen.findByRole("button", { name: "Ask the computer" }));
+        await screen.findByText("Say yes at Workstation");
+
+        await act(async () => incoming.hold({ server: ADDRESS, secret: newer }, false));
+        await screen.findByText("Pair with a computer?");
+        expect(screen.getByText(/the request to Workstation stays open/)).toBeTruthy();
+        expect(server.presented).toEqual(["ys1.of.linked"]);
+
+        await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+        await screen.findByText("Say yes at Workstation");
+        expect(server.presented).toEqual(["ys1.of.linked"]);
+      });
+
+      test("waiting for a computer: a yes goes on, and the earlier request stays open", async () => {
+        const { server, incoming } = await twoServers(ADDRESS);
+        server.offers.add("ys1.of.newer");
+        await fireEvent.press(await screen.findByRole("button", { name: "Ask the computer" }));
+        await screen.findByText("Say yes at Workstation");
+
+        await act(async () => incoming.hold({ server: ADDRESS, secret: newer }, false));
+        await fireEvent.press(await screen.findByRole("button", { name: "Ask the computer" }));
+        await waitFor(() => expect(server.presented).toEqual(["ys1.of.linked", "ys1.of.newer"]));
+        await screen.findByText("Say yes at Workstation");
+        expect(server.grants.map((grant) => grant.state)).toEqual(["pending", "pending"]);
+
+        // The newest is the one this screen is waiting for.
+        server.answer("denied");
+        expect(await screen.findByText("Workstation said no.", undefined, ANSWER)).toBeTruthy();
+      });
+
+      test("showing an answer: it asks first, and a no goes back to the answer", async () => {
+        const { server, incoming } = await twoServers(ADDRESS);
+        await fireEvent.press(await screen.findByRole("button", { name: "Ask the computer" }));
+        await screen.findByText("Say yes at Workstation");
+        server.answer("approved");
+        await screen.findByText("Workstation let this phone in", undefined, ANSWER);
+
+        await act(async () => incoming.hold({ server: ADDRESS, secret: newer }, false));
+        await screen.findByText("Pair with a computer?");
+        await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+        await screen.findByText("Workstation let this phone in");
+      });
+
+      test("naming another server: going on stops asking about the earlier one", async () => {
+        const { server, accounts, incoming } = await twoServers(ADDRESS);
+        await fireEvent.press(await screen.findByRole("button", { name: "Cancel" }));
+        await act(async () => {
+          await accounts.signIn(await accounts.lookUp(OTHER), "Ana’s phone", signedInBrowser);
+        });
+        await act(async () => incoming.hold({ server: OTHER, secret }, false));
+        await fireEvent.press(await screen.findByRole("button", { name: "Ask the computer" }));
+        await screen.findByText("Say yes at Workstation");
+
+        server.offers.add("ys1.of.newer");
+        let release = () => {};
+        server.pairAfter.set(
+          "ys1.of.newer",
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+        );
+        await act(async () => incoming.hold({ server: ADDRESS, secret: newer }, false));
+        expect(await screen.findByText(/the request to Workstation stays open/)).toBeTruthy();
+        await fireEvent.press(
+          screen.getByRole("button", { name: "Switch to Example Remote and pair" }),
+        );
+        await waitFor(() => expect(server.presented).toEqual(["ys1.of.newer"]));
+
+        // Longer than the wait between asks: the earlier grant means nothing to this server.
+        await act(async () => jest.advanceTimersByTimeAsync(2_500));
+        expect(server.asked.filter((asked) => asked.startsWith("GET /v1/grants/"))).toEqual([]);
+
+        release();
+        await screen.findByText("Say yes at Workstation");
+      });
+    });
+
     test("on a server this phone is not signed in to: nothing goes to either until it has signed in there", async () => {
       const { server, other } = await twoServers(OTHER);
       await screen.findByText("This code is for another server");

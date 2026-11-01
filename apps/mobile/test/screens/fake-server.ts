@@ -78,6 +78,8 @@ export class FakeServer {
   offers = new Set<string>(["ABCD2345"]);
   /** Every offer presented to this server, as it was presented. */
   presented: string[] = [];
+  /** Offers answered only after their promise. */
+  pairAfter = new Map<string, Promise<void>>();
   /** Computers the relay says are offline. */
   offline = new Set<string>();
   /** How many relay sockets are open, and how many ever were. */
@@ -140,6 +142,7 @@ export class FakeServer {
     if (method === "POST" && url.pathname === "/v1/pairings") {
       const { offer, scopes } = JSON.parse(String(init?.body));
       this.presented.push(offer.value);
+      await this.pairAfter.get(offer.value);
       if (!this.offers.delete(offer.value.replace(/-/g, ""))) {
         return Response.json(
           {
