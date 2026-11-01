@@ -453,6 +453,17 @@ impl Entry {
     }
 }
 
+/// The first-message section that tells a new agent this project has smoke tests, the way
+/// `ys memory` and `ys task` are introduced. The composer adds it when the worktree has a
+/// `.yardsort/tests` folder or the project has a test environment set. Framed as a pointer, not
+/// an instruction, and it names approval so an agent does not run a file the user has not seen.
+pub const LAUNCH_SECTION: &str = "## Smoke tests\n\n\
+    This project has smoke tests in `.yardsort/tests/`: `ys test list` lists them, and \
+    `ys test run <id>` runs one in this workspace, with the result from `ys test wait <run>`. \
+    To write one for what you build, `ys test guide` prints the format; put it beside the others, \
+    check it with `ys test validate`, and ask before running a new file — the user approves each \
+    new test in Yardsort.";
+
 /// Where a worktree keeps its smoke tests.
 pub fn dir(worktree: &Path) -> PathBuf {
     worktree.join(".yardsort").join("tests")

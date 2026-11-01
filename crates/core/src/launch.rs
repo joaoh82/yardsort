@@ -216,8 +216,35 @@ impl Launcher<'_> {
             }
             _ => None,
         };
-        let mut resolved =
-            resolve_launch_with(launch, self.harnesses, memory.as_deref(), note.as_ref())?;
+        // A new agent is told the project has smoke tests — so it can run and write them — when
+        // the worktree has a `.yardsort/tests` folder or the project has a test environment set.
+        // Like memory, only for a fresh harness first message: a handoff or a fork already knows.
+        let smoke = match &launch {
+            Launch::Harness(request)
+                if request.fork_packet.is_none()
+                    && !request.handoff
+                    && request
+                        .prompt
+                        .as_deref()
+                        .is_some_and(|p| !p.trim().is_empty()) =>
+            {
+                let worktree = std::path::Path::new(&workspace.path);
+                let has_env = !self
+                    .store
+                    .project_test_env(&workspace.project_id)?
+                    .is_empty();
+                (crate::smoke::dir(worktree).is_dir() || has_env)
+                    .then_some(crate::smoke::LAUNCH_SECTION)
+            }
+            _ => None,
+        };
+        let mut resolved = resolve_launch_with(
+            launch,
+            self.harnesses,
+            memory.as_deref(),
+            smoke,
+            note.as_ref(),
+        )?;
         resolved
             .labels
             .insert(WORKSPACE_LABEL.to_owned(), workspace_id.to_owned());
@@ -478,18 +505,19 @@ const MAX_ARGV_PROMPT: usize = if cfg!(windows) { 24_000 } else { 100_000 };
 
 /// Turn a [`Launch`] into a program, its argv and the labels describing it.
 pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResult<ResolvedLaunch> {
-    resolve_launch_with(launch, overrides, None, None)
+    resolve_launch_with(launch, overrides, None, None, None)
 }
 
-/// As [`resolve_launch`], with `memory` added after a harness's first message, and the `note`
-/// about the workspace's other conversations given as background context where the harness
-/// takes it, or after the first message where it does not. The agent receives all of it; the
-/// record keeps only the first message, as the task. A launch with neither background context
-/// nor a first message has nowhere to put the note, and goes without.
+/// As [`resolve_launch`], with `memory` and the `smoke`-tests pointer added after a harness's
+/// first message, and the `note` about the workspace's other conversations given as background
+/// context where the harness takes it, or after the first message where it does not. The agent
+/// receives all of it; the record keeps only the first message, as the task. A launch with
+/// neither background context nor a first message has nowhere to put the note, and goes without.
 pub fn resolve_launch_with(
     launch: Launch,
     overrides: &[HarnessOverride],
     memory: Option<&str>,
+    smoke: Option<&str>,
     note: Option<&activity::digest::Note>,
 ) -> IpcResult<ResolvedLaunch> {
     let mut labels = Labels::new();
@@ -522,8 +550,8 @@ pub fn resolve_launch_with(
             // What the agent is given: the first message, then the memory and the note after it.
             // A fork's packet stands in the memory's place, and is sent even without a message;
             // memory itself is only looked up for a first message, so it never goes alone.
-            let sent = (prompt.is_some() || memory.is_some()).then(|| {
-                [prompt.as_deref(), memory, after.as_deref()]
+            let sent = (prompt.is_some() || memory.is_some() || smoke.is_some()).then(|| {
+                [prompt.as_deref(), memory, smoke, after.as_deref()]
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>()
@@ -1003,6 +1031,96 @@ mod tests {
         assert!(start(Some("exit 0"), false, false).contains("Nothing is in it yet."));
         quiet.set(true);
         assert!(!start(Some("exit 0"), false, false).contains("Project memory"));
+    }
+
+    /// A new agent's first message carries the smoke-tests pointer when the worktree has a
+    /// `.yardsort/tests` folder or the project has a test environment set — and not for a handoff,
+    /// a fork, a message-less launch, or a project with neither.
+    #[test]
+    fn a_new_agent_is_told_about_the_projects_smoke_tests() {
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let start = |ws: &str,
+                     store: &Store,
+                     dir: &std::path::Path,
+                     prompt: Option<&str>,
+                     handoff: bool,
+                     fork: Option<String>| {
+            let launcher = launcher(store, &host, &env, &harnesses, &activity, dir);
+            launcher
+                .in_workspace(
+                    ws,
+                    Launch::Harness(HarnessRequest {
+                        id: "sh-agent".into(),
+                        model: None,
+                        effort: None,
+                        prompt: prompt.map(str::to_owned),
+                        handoff,
+                        skip_memory: false,
+                        quiet_memory: false,
+                        skip_context: false,
+                        fork_packet: fork,
+                    }),
+                    SIZE,
+                )
+                .unwrap();
+            host.plans.lock().unwrap().pop().unwrap().args.join(" ")
+        };
+
+        // A worktree with a tests folder: the pointer is there, after the user's words.
+        let folder = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(folder.path(), &store);
+        std::fs::create_dir_all(crate::smoke::dir(folder.path())).unwrap();
+        std::fs::write(
+            crate::smoke::dir(folder.path()).join("health.yaml"),
+            crate::smoke::EXAMPLE,
+        )
+        .unwrap();
+        let sent = start(&ws, &store, folder.path(), Some("exit 0"), false, None);
+        assert!(
+            sent.contains("exit 0\n\n"),
+            "after the user's words: {sent}"
+        );
+        assert!(sent.contains("## Smoke tests"), "{sent}");
+        assert!(sent.contains("ys test list"), "{sent}");
+        assert_eq!(
+            store.session_prompts(&ws).unwrap(),
+            ["exit 0"],
+            "the task on record is the user's words alone"
+        );
+        // Not for a handoff, a fork, or a launch with no first message.
+        assert!(
+            !start(&ws, &store, folder.path(), Some("exit 0"), true, None).contains("Smoke tests")
+        );
+        assert!(!start(
+            &ws,
+            &store,
+            folder.path(),
+            Some("exit 0"),
+            false,
+            Some("packet".into())
+        )
+        .contains("Smoke tests"));
+        assert!(!start(&ws, &store, folder.path(), None, false, None).contains("Smoke tests"));
+
+        // A worktree with no folder but a test environment set: the pointer is there too.
+        let bare = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(bare.path(), &store);
+        let project = store.workspace(&ws).unwrap().unwrap().project_id;
+        assert!(
+            !start(&ws, &store, bare.path(), Some("exit 0"), false, None).contains("Smoke tests"),
+            "nothing set yet"
+        );
+        store
+            .set_project_test_env(&project, &[("TOKEN".to_owned(), "secret".to_owned())])
+            .unwrap();
+        assert!(
+            start(&ws, &store, bare.path(), Some("exit 0"), false, None).contains("## Smoke tests")
+        );
     }
 
     /// A fork's packet goes to the agent after the user's message, in place of the memory it

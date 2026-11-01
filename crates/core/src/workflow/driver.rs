@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use pty_host::{HostError, HostEvent, SessionId, SessionInfo, SessionState, TerminalHost};
 
-use super::engine::{self, Effect, Finish, Inputs, Move, Outputs, PrSeen, SessionFacts, World};
+use super::engine::{
+    self, Effect, Finish, Inputs, Move, Outputs, PrSeen, SessionFacts, TestRun, World,
+};
 use super::runs::{self, Facts, Place};
 use super::PrActivity;
 use crate::error::IpcResult;
@@ -333,8 +335,9 @@ fn move_on(
                 }
                 continue; // The step moved on without us.
             }
-            let change = match carry_out(host, hands, &place, effect, &mut typed_to) {
+            let change = match carry_out(store, host, hands, &place, effect, &mut typed_to) {
                 Outcome::Done(outputs) => engine::done(&step, &outputs),
+                Outcome::Queued(outputs) => engine::queued(&step, &outputs),
                 Outcome::Failed(why) => engine::failed(&step, &why),
                 Outcome::Skipped(why) => engine::skipped(&step, &why),
                 Outcome::NotYet => engine::not_yet(&step),
@@ -388,6 +391,8 @@ fn type_into(host: &dyn TerminalHost, id: &SessionId, text: &str) -> Outcome {
 /// How carrying out one effect went.
 enum Outcome {
     Done(Outputs),
+    /// A test run was queued: the step keeps its run id and waits for the run to end.
+    Queued(Outputs),
     Failed(String),
     /// It no longer made sense: the session it was for had ended.
     Skipped(String),
@@ -413,14 +418,16 @@ fn apply(driver: &Driver, store: &Store, run_id: &str, change: &Move) -> IpcResu
 
 fn step_of(effect: &Effect) -> &str {
     match effect {
-        Effect::Start { step, .. } | Effect::Paste { step, .. } | Effect::Notify { step, .. } => {
-            step
-        }
+        Effect::Start { step, .. }
+        | Effect::Paste { step, .. }
+        | Effect::Notify { step, .. }
+        | Effect::RunTest { step, .. } => step,
     }
 }
 
 /// Do what a step asks, and say what it left or why it could not.
 fn carry_out(
+    store: &Store,
     host: &dyn TerminalHost,
     hands: &dyn Hands,
     place: &Place,
@@ -482,6 +489,27 @@ fn carry_out(
                 .notify(&title, body.as_deref())
                 .map(|()| Outputs::new()),
         ),
+        Effect::RunTest { test, inputs, .. } => {
+            // Queue the run in this workspace; the smoke runner, ticking on this same thread,
+            // carries it out. The step then waits for the run's row to end. A run that needs the
+            // user to approve the file is still queued — it waits in the app, and the step waits
+            // with it until its timeout.
+            let request = crate::smoke::runs::Request {
+                test_id: &test,
+                workspace_id: &place.workspace.id,
+                inputs: &inputs,
+                requested_by: "workflow",
+                session_record_id: None,
+            };
+            match crate::smoke::runs::queue(store, &request) {
+                Ok(queued) => {
+                    let mut outputs = Outputs::new();
+                    outputs.insert("run".into(), queued.id);
+                    Outcome::Queued(outputs)
+                }
+                Err(error) => Outcome::Failed(error.message),
+            }
+        }
     }
 }
 
@@ -563,6 +591,16 @@ impl World for Seen<'_> {
         Some(PrSeen {
             count: u32::try_from(wanted.len()).unwrap_or(u32::MAX),
             latest_url: wanted.last().and_then(|post| post.url.clone()),
+        })
+    }
+
+    fn test_run(&self, run_id: &str) -> Option<TestRun> {
+        let row = self.store.test_run(run_id).ok().flatten()?;
+        let steps = self.store.test_steps(run_id).unwrap_or_default();
+        let summary = crate::smoke::report::summary(&row, &steps);
+        Some(TestRun {
+            status: row.status,
+            summary,
         })
     }
 }

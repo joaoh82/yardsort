@@ -487,9 +487,9 @@ example | guide`, and `docs/guide/smoke-tests.md` with the format. Fixtures: one
    vocabulary with waiting, screenshots on failure and on demand, the headed mode; the example
    file gains its `sign_in` step. Tested against a page served by the test itself from a temp
    folder, on all three platforms in CI, skipped with a named reason where no browser is found.
-5. **Agents and workflows.** The launch paragraph; `smoke::GUIDE` tested against the parser; the
+5. **Agents and workflows.** ✅ The launch paragraph; `smoke::GUIDE` tested against the parser; the
    `run_test` action in the workflow engine and driver, and the built-in **Smoke test, then tell
-   the agent**; Describe it in the Tests view.
+   the agent**. Describe it for tests waits for slice 6, where the Tests view it lives in is built.
 6. **The Tests view, docs and pictures.** The sidebar row, the view with its filters, the
    **Runs** tab, history across workspaces, **Run in…**; the README's highlight and section, the website's section and `ys`
    line, the quick start's mention, `docs/README.md`, `website/src/lib/docs.ts`, screenshots on
@@ -668,6 +668,30 @@ the Smoke tests part of the Project settings dialog, `smoke::words` in the core,
   `bun`.
 - **Not here:** the `run_test` workflow action and the launch paragraph for agents (slice 5); the
   Tests view (slice 6).
+
+## Slice 5: what shipped
+
+- **The launch paragraph.** A new agent's first message gets a `## Smoke tests` section
+  (`smoke::LAUNCH_SECTION`), added by the composer (`launch.rs`) when the worktree has a
+  `.yardsort/tests` folder or the project has a test environment set — the way `ys memory` and
+  `ys task` are introduced. Only for a fresh harness message, not a handoff or a fork. It points
+  at `ys test list`, `ys test run` and `ys test guide`, and names approval, so an agent does not
+  run a file the user has not seen.
+- **`smoke::GUIDE` against the parser** was already enforced from slice 2 (`every_example_in_the_guide_is_valid`);
+  it now covers the browser vocabulary slice 4 added.
+- **The `run_test` workflow action.** `test` (an id, or `{{ inputs.<id> }}` of a new `test` input
+  kind), `inputs{}`, `timeout`. The engine begins it with an `Effect::RunTest`; the driver queues
+  a run through `smoke::runs::queue` with `requested_by: workflow` — the smoke runner, ticking on
+  the same thread, carries it out — and the step then waits on the run's row, passing or failing
+  with it and leaving `run`, `verdict` and `summary` (the `ys test wait` text) for later steps. A
+  run awaiting approval waits in the app, and the step waits with it until its timeout.
+- **The built-in Smoke test, then tell the agent** (`smoke-then-tell`): `run_test` on a `test`
+  input, then `send_to_session` to `origin` with `{{ steps.test.summary }}`.
+- **The Run dialog** offers a `test` input as a picker of the workspace's runnable smoke tests
+  (`RunWorkflowDialog`, via `test_list`); the chart labels and the Describe-it system prompt learn
+  the new action and kind.
+- **Not here:** Describe it for smoke-test files, which belongs with the Tests view it is offered
+  in (slice 6).
 
 ## Not in version one, on purpose
 

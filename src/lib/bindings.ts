@@ -576,6 +576,15 @@ export type Action =
 { action: "send_to_session"; session: SessionRef; prompt: string; timeoutSecs: number | null } | 
 /**  Wait for a review or a comment on the workspace's pull request, newer than the run. */
 { action: "wait_pr_activity"; kind: PrActivity; timeoutSecs: number | null } | 
+/**
+ *  Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
+ *  the test passed or failed — a later step reads `verdict` and acts on either — and fails
+ *  only when the run reaches no verdict (cancelled, errored) or does not end in time. Leaves
+ *  `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+ */
+{ action: "run_test"; test: string; 
+/**  Values for the test's inputs, by input id; may hold `{{ variables }}`. */
+inputs: { [key in string]: string }; timeoutSecs: number | null } | 
 /**  Tell the person who started the run. */
 { action: "notify"; title: string; body: string | null };
 
@@ -1326,7 +1335,9 @@ export type Input = {
 
 export type InputKind = 
 /**  One of the harnesses set up in Yardsort, picked the way the composer picks one. */
-"harness" | "text" | "choice";
+"harness" | 
+/**  A smoke test in the run's workspace, by id, for a `run_test` step. */
+"test" | "text" | "choice";
 
 export type InstallHint = {
 	/**  An install command for the current OS; shown for the user to copy, never executed. */

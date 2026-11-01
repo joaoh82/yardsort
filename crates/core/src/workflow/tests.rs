@@ -675,7 +675,14 @@ fn a_users_files_are_listed_beside_the_built_ins_by_name() {
     std::fs::create_dir_all(user_dir(dir.path()).join("nested.yaml")).unwrap();
     let listed = catalog(dir.path());
     let names: Vec<&str> = listed.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, vec!["Another", "Request code review"]);
+    assert_eq!(
+        names,
+        vec![
+            "Another",
+            "Request code review",
+            "Smoke test, then tell the agent"
+        ]
+    );
     assert!(matches!(
         &listed[0].source,
         Source::File { replaces_built_in: false, path } if path.ends_with("demo.yaml")
@@ -693,10 +700,11 @@ fn a_file_with_a_built_ins_id_replaces_it_and_removing_it_brings_it_back() {
             .replace("name: Demo", "name: Mine"),
     );
     let listed = catalog(dir.path());
-    assert_eq!(listed.len(), 1, "one code-review, not two");
-    assert_eq!(listed[0].name, "Mine");
+    assert_eq!(listed.len(), BUILT_IN.len(), "one code-review, not two");
+    let mine = listed.iter().find(|e| e.id == "code-review").unwrap();
+    assert_eq!(mine.name, "Mine");
     assert!(matches!(
-        listed[0].source,
+        mine.source,
         Source::File {
             replaces_built_in: true,
             ..
@@ -724,7 +732,7 @@ fn a_broken_replacement_shows_its_problems_rather_than_running_the_built_in() {
             ..
         }
     ));
-    assert_eq!(catalog(dir.path()).len(), 1);
+    assert_eq!(catalog(dir.path()).len(), BUILT_IN.len());
 }
 
 #[test]
@@ -830,7 +838,7 @@ fn a_copy_under_a_new_id_sits_beside_the_original() {
         "careful-review"
     );
     let ids: Vec<String> = catalog(dir.path()).into_iter().map(|e| e.id).collect();
-    assert_eq!(ids.len(), 2, "{ids:?}");
+    assert_eq!(ids.len(), BUILT_IN.len() + 1, "{ids:?}");
     assert_eq!(
         find(dir.path(), "code-review").unwrap().source,
         Source::BuiltIn

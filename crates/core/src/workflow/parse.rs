@@ -36,6 +36,7 @@ const ACTIONS: &[&str] = &[
     "wait_session",
     "send_to_session",
     "wait_pr_activity",
+    "run_test",
     "notify",
 ];
 
@@ -46,6 +47,7 @@ fn allowed(action: &str) -> &'static [&'static str] {
         "wait_session" => &["session", "until", "timeout"],
         "send_to_session" => &["session", "prompt", "timeout"],
         "wait_pr_activity" => &["kind", "timeout"],
+        "run_test" => &["test", "inputs", "timeout"],
         "notify" => &["title", "body"],
         _ => &[],
     }
@@ -116,6 +118,10 @@ struct RawStep {
     #[serde(default)]
     kind: Option<Spanned<String>>,
     #[serde(default)]
+    test: Option<Spanned<String>>,
+    #[serde(default)]
+    inputs: Option<Spanned<BTreeMap<String, Spanned<String>>>>,
+    #[serde(default)]
     title: Option<Spanned<String>>,
     #[serde(default)]
     body: Option<Spanned<String>>,
@@ -137,6 +143,8 @@ impl RawStep {
             ("until", at(&self.until)),
             ("timeout", at(&self.timeout)),
             ("kind", at(&self.kind)),
+            ("test", at(&self.test)),
+            ("inputs", at(&self.inputs)),
             ("title", at(&self.title)),
             ("body", at(&self.body)),
         ]
@@ -320,13 +328,15 @@ impl Checker<'_> {
             }
             let kind = match input.kind.value.as_str() {
                 "harness" => InputKind::Harness,
+                "test" => InputKind::Test,
                 "text" => InputKind::Text,
                 "choice" => InputKind::Choice,
                 other => {
                     self.problem(
                         &input.kind.referenced,
                         format!(
-                            "`{other}` is not a kind of input. Use `harness`, `text` or `choice`."
+                            "`{other}` is not a kind of input. Use `harness`, `test`, `text` or \
+                             `choice`."
                         ),
                     );
                     InputKind::Text
@@ -585,6 +595,11 @@ impl Checker<'_> {
                 },
                 timeout_secs: self.timeout(raw),
             },
+            "run_test" => Action::RunTest {
+                test: self.test(raw, scope),
+                inputs: self.test_inputs(raw, scope),
+                timeout_secs: self.timeout(raw),
+            },
             _ => Action::Notify {
                 title: self.required(
                     &raw.title,
@@ -597,6 +612,60 @@ impl Checker<'_> {
             },
         };
         Step { id, needs, action }
+    }
+
+    /// A test id as written, or exactly one `{{ inputs.<test input> }}`.
+    fn test(&mut self, step: &RawStep, scope: &Scope) -> String {
+        let Some(field) = &step.test else {
+            self.problem(
+                &step.action.referenced,
+                "A `run_test` step needs `test`: which smoke test to run, like `login` or \
+                 `{{ inputs.suite }}`.",
+            );
+            return String::new();
+        };
+        let value = field.value.trim();
+        if !value.contains("{{") {
+            if value.is_empty() {
+                self.problem(&field.referenced, "`test` is empty.");
+            }
+            return value.to_owned();
+        }
+        let only = match template::parse(value) {
+            Ok(parts) if parts.len() == 1 => match &parts[0] {
+                template::Part::Var(var) => Some(var.clone()),
+                template::Part::Text(_) => None,
+            },
+            _ => None,
+        };
+        let usable = only.as_ref().is_some_and(|var| {
+            var.path.len() == 2
+                && var.path[0] == "inputs"
+                && scope.inputs.get(&var.path[1]) == Some(&InputKind::Test)
+        });
+        if !usable {
+            self.problem(
+                &field.referenced,
+                "`test` is a test id, or one `{{ inputs.<id> }}` naming an input of kind `test`, \
+                 and nothing else.",
+            );
+        }
+        value.to_owned()
+    }
+
+    /// The `inputs` map of a `run_test` step: each value may hold `{{ variables }}`.
+    fn test_inputs(&mut self, step: &RawStep, scope: &Scope) -> BTreeMap<String, String> {
+        let Some(field) = &step.inputs else {
+            return BTreeMap::new();
+        };
+        field
+            .value
+            .iter()
+            .map(|(name, value)| {
+                self.text(&Some(value.clone()), scope);
+                (name.clone(), value.value.clone())
+            })
+            .collect()
     }
 
     /// A key the action cannot do without.
