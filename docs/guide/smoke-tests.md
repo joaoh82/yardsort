@@ -7,13 +7,16 @@ can run it. A test is a YAML file in your repository, `.yardsort/tests/<id>.yaml
 to the code it checks: an agent writes one for the feature it built, in the worktree it is
 standing in, and the test travels with the branch.
 
-**This release reads, checks and runs the files.** `ys test validate` names every mistake at its
-line and column, `ys test list` shows a workspace's tests, `ys test guide` tells an agent how to
-write one, and `ys test run` queues a run that Yardsort carries out, step by step, with the
-verdict from `ys test wait`. A file from a repository never runs unseen: a run of a new or
-changed file waits until you approve it in Yardsort. The card that shows you the file, the tab
-that shows the run as it goes, and the Tests view are the next step; until they arrive a run
-started from `ys` waits, and `browser` steps are not run. See [Running a test](#running-a-test).
+**This release reads, checks and runs the files, and shows the runs.** `ys test validate` names
+every mistake at its line and column, `ys test list` shows a workspace's tests, `ys test guide`
+tells an agent how to write one, and `ys test run` queues a run that Yardsort carries out, step
+by step, with the verdict from `ys test wait`. A file from a repository never runs unseen: a run
+of a new or changed file waits until you approve it, on a card at the top of its workspace. The
+run opens as a tab beside the workspace's terminals, with every step, its output as it comes,
+and **Pass** / **Fail** for the steps a person does; **Run smoke test…** in a workspace's menu
+starts one from the app. See [Running a test](#running-a-test) and [In the app](#in-the-app).
+The Tests view, which lists every project's tests and runs in one place, is the next step, and
+`browser` steps are not run yet.
 
 ## Where tests live
 
@@ -27,8 +30,8 @@ problems. Two files with one `id`: the first by file name is used, and the secon
 the clash.
 
 A test says what to run on your machine, and it comes from a repository. That is why nothing
-here runs unseen: when running arrives, Yardsort shows a new or changed file's steps and asks
-you first, once per version of the file.
+here runs unseen: Yardsort shows a new or changed file's steps and asks you first, once per
+version of the file. See [The approval card](#the-approval-card).
 
 ## An example
 
@@ -257,11 +260,12 @@ It prints the run's id and returns at once.
 
 **Approval.** A test says what to run on your machine, and it comes from a repository. So a run
 of a file you have not seen — new, or changed in any way since you last approved it — is queued
-as _awaiting approval_, and nothing runs until you approve the file in Yardsort. The approval is
-recorded for that exact file, by its content hash, so the next run of the same file goes straight
-ahead; a changed file waits again. `ys` has no way to approve, for the reason `ys memory` has no
-way to approve: an agent can run anything `ys` offers. The card in the app that shows the file
-and approves it is the next step; until it arrives a run started from `ys` waits.
+as _awaiting approval_, and nothing runs until you approve the file in Yardsort, on
+[the card](#the-approval-card) at the top of the workspace. The approval is recorded for that
+exact file, by its content hash, so the next run of the same file goes straight ahead; a changed
+file waits again, and the card shows what changed. A project can ask to see every run instead:
+**Ask every time** in its [settings](#project-settings). `ys` has no way to approve, for the
+reason `ys memory` has no way to approve: an agent can run anything `ys` offers.
 
 **What a run does.** It gets a free port of its own, `{{ run.port }}`, and a scratch folder,
 `{{ run.dir }}`, removed afterwards. `setup` runs first, then `steps`, stopping at the first
@@ -304,6 +308,85 @@ when `--timeout` (20 minutes unless said) passed. `ys test runs` lists runs, new
 `--run <id>` shows one step by step; `ys test log <run>` prints a step's output, the first
 failed step's unless `--step` says, `--stderr` for the other stream. A run can be named by the
 start of its id.
+
+## In the app
+
+### The approval card
+
+A run waiting for your approval shows at the top of its workspace, above the terminal tabs, and
+the workspace's row in the sidebar carries a count of the runs waiting there. The card is the
+whole of what the file does, in words: who asked for the run and with what inputs, then every
+step, phase by phase — _run `bun run seed --user demo@example.test`; expect exit 0_,
+_GET http://localhost:{{ run.port }}/health; expect status 200_, _ask you: Does the dashboard
+chart animate in?_ — with every `{{ variable }}` left as written, since a port is picked when
+the run starts and a secret is never printed. A script a step feeds to a program and a request
+body are shown whole, so nothing a step carries out is hidden behind a summary. Under the steps,
+what it reads from the project's test environment: a step that runs a program is handed all of
+it (as `YS_ENV_*`), so when the file has such a step the card names the whole environment, not
+only the values the file mentions, and flags any it mentions that are not set. A file that was
+approved before and has changed since shows what changed, line by line.
+
+**Run** approves the file for the project and starts the run; its tab opens. **Don't run** ends
+the run as _refused_, which `ys test wait` reports to the agent in words; nothing is recorded
+against the file, so the same file asked for again waits again. While the card has the keyboard,
+`Mod+Enter` runs and `Esc` refuses, as in the composer; it never takes the keyboard from the
+terminal behind it, so an `Esc` meant for the agent refuses nothing. Several runs waiting in one
+workspace are shown one at a time, oldest first.
+
+### The run tab
+
+A run opens as a tab in its workspace's tab strip, beside the terminals, named after the test
+with a dot for how it is going. It opens when you approve a run or start one from the app;
+**Run smoke test…** lists the workspace's recent runs to open any of them again. The terminal
+behind it keeps running; `Mod+W` closes the tab, and closing it loses nothing, since the tab is a
+view of what the run recorded.
+
+Down the left are the steps in their three phases, each with its status and how long it took.
+The one in view is the step going, else the first that failed, else the last that ended; click
+any to see it. On the right: the step in words, its note — every expectation that failed, in
+words, or why it was skipped — the facts it left (`exit`, `status`, `pid`, `waited`), the
+response body of an `http` step, and the stdout and stderr of a process, tailed as it writes
+while the step runs. A `manual` step shows its question with **Pass**, **Fail** and a note,
+which the step keeps. The header has **Cancel** while the run goes — the step it is on is ended,
+the teardown runs, and the run ends as cancelled — and, once it has ended, **Run again**, which
+opens the Run dialog with the same inputs, and **Send result to agent**.
+
+### Run smoke test…
+
+In a workspace's **⋯** menu. The dialog lists the worktree's tests with their readiness — ready,
+the number of problems, or that a test needs a browser, which this release cannot run — asks the
+chosen test's inputs, starting from their defaults, and shows its steps as the card does, with
+the environment it reads and what changed since it was last approved. Pressing **Run** is the
+approval — of the file the dialog showed: the file is approved for the project, so no card
+follows, and the next run of the same file goes straight ahead. If an agent has changed the file
+since the dialog opened, the run waits on the approval card instead, showing the new version, so
+what runs is always a version you have seen. A workspace with no tests is told where they go and
+that `ys test guide` tells an agent how to write one.
+
+### Send result to agent
+
+On an ended run's tab. It types what `ys test wait` would have printed — the verdict, the step
+that failed and why, the last lines of any server the test started — into the workspace's
+agent, with a line first saying what it is, the way a workflow's `send_to_session` does: at
+once if the agent is quiet, otherwise as soon as it is, and never while someone else holds the
+terminal. With one agent running in the workspace it goes there; with several, a menu asks
+which. A run started by an agent with `ys test run` needs none of this: the agent reads the same
+words from `ys test wait`.
+
+### Project settings
+
+**Project settings…** in a project's menu, or **Project settings** above a workspace's terminal
+tabs, has a _Smoke tests_ part:
+
+- **The test environment** — names and values a test reads as `{{ env.NAME }}` and every
+  `run`, `shell` and `start` process gets as `YS_ENV_<NAME>`. Kept in Yardsort's own database,
+  never in the repository; the values are hidden until **Show values**. A test that uses a name
+  not set here is refused by `ys test run` and the Run dialog, and the card says which names a
+  waiting run would find empty.
+- **Ask every time** — show every run's steps and ask, even for a file approved before. Off by
+  default: a file you have approved runs straight away until it changes.
+- **Keep runs for** — how many days ended runs are kept, with their output files, thirty unless
+  changed. Runs waiting, queued or going are never removed.
 
 ## Agents
 

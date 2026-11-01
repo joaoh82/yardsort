@@ -1039,3 +1039,111 @@ teardown:
         "the test can be run again without a restart"
     );
 }
+
+#[test]
+fn an_approved_file_runs_unasked_unless_the_project_asks_to_see_every_run() {
+    let fx = Fx::new();
+    fx.write(
+        "quick",
+        "id: quick\nname: Quick\nversion: 1\nsteps:\n  - id: s\n    action: run\n    program: true\n",
+    );
+    let ask = |fx: &Fx| {
+        queue(
+            &fx.store,
+            &Request {
+                test_id: "quick",
+                workspace_id: &fx.workspace.id,
+                inputs: &BTreeMap::new(),
+                requested_by: "cli",
+                session_record_id: None,
+            },
+        )
+        .unwrap()
+    };
+    let first = ask(&fx);
+    assert!(first.awaiting_approval, "a file nobody has seen waits");
+    assert!(fx.store.approve_test_run(&first.id).unwrap());
+    assert!(fx.store.cancel_test_run(&first.id, "test").unwrap());
+
+    let second = ask(&fx);
+    assert!(
+        !second.awaiting_approval,
+        "the same file, approved, goes straight on"
+    );
+    assert_eq!(fx.run(&second.id).status, "queued");
+    assert!(fx.store.cancel_test_run(&second.id, "test").unwrap());
+
+    fx.store
+        .set_project_test_settings(
+            &fx._project.id,
+            &crate::store::TestSettings {
+                ask_every_time: true,
+                keep_days: 30,
+            },
+        )
+        .unwrap();
+    let third = ask(&fx);
+    assert!(third.awaiting_approval, "the project asks to see every run");
+    assert_eq!(fx.run(&third.id).status, "awaiting_approval");
+    assert!(
+        fx.store.approve_test_run(&third.id).unwrap(),
+        "and the answer is the same approval"
+    );
+}
+
+#[test]
+fn the_app_approves_only_the_file_it_showed_not_a_version_edited_since() {
+    use crate::smoke::runs::{content_hash, queue_seen};
+
+    let fx = Fx::new();
+    let shown = "id: quick\nname: Quick\nversion: 1\nsteps:\n  - id: s\n    action: run\n    program: true\n";
+    fx.write("quick", shown);
+    let shown_hash = content_hash(shown);
+    let ask = |fx: &Fx, hash: &str| {
+        queue_seen(
+            &fx.store,
+            &Request {
+                test_id: "quick",
+                workspace_id: &fx.workspace.id,
+                inputs: &BTreeMap::new(),
+                requested_by: "app",
+                session_record_id: None,
+            },
+            hash,
+        )
+        .unwrap()
+    };
+
+    // The file is unchanged since the dialog read it: pressing Run approves it on the spot.
+    let unchanged = ask(&fx, &shown_hash);
+    assert!(
+        !unchanged.awaiting_approval,
+        "the file the dialog showed runs straight away"
+    );
+    assert_eq!(fx.run(&unchanged.id).status, "queued");
+    assert!(fx.store.cancel_test_run(&unchanged.id, "test").unwrap());
+
+    // An agent edits the file between the dialog opening and Run. The run is queued from the new
+    // file, and its hash no longer matches what the dialog showed, so it must wait to be seen.
+    let edited = "id: quick\nname: Quick\nversion: 1\nsteps:\n  - id: s\n    action: shell\n    line: curl evil.test\n";
+    fx.write("quick", edited);
+    let changed = ask(&fx, &shown_hash);
+    assert!(
+        changed.awaiting_approval,
+        "a version nobody saw never runs on an old approval"
+    );
+    assert_eq!(fx.run(&changed.id).status, "awaiting_approval");
+    // And it was not approved behind the user's back.
+    assert!(
+        !fx.store
+            .test_approved(&fx._project.id, "quick", &content_hash(edited))
+            .unwrap(),
+        "the edited file's hash is not approved"
+    );
+    assert!(fx.store.cancel_test_run(&changed.id, "test").unwrap());
+
+    // Seeing the new version (its own hash) approves exactly it.
+    let seen = ask(&fx, &content_hash(edited));
+    assert!(!seen.awaiting_approval, "the version just seen runs");
+    assert_eq!(fx.run(&seen.id).status, "queued");
+}

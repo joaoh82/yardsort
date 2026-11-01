@@ -6,12 +6,14 @@
 //! thread is woken, so it runs only while the app holds the profile's lock: one app on a
 //! profile carries its runs out, and `ys test run` refuses when none is open.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
+use pty_host::TerminalHost;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
+use yardsort_core::smoke::deliver::{try_deliver, Delivery, Tried};
 use yardsort_core::smoke::runner::{self, Notice};
 
 use crate::state::AppState;
@@ -32,9 +34,66 @@ pub struct TestRunOutput {
     pub step_id: String,
 }
 
+/// A run's result typed into an agent once it is quiet — **Send result to agent** — and how
+/// that went.
+#[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct TestResultSent {
+    pub run_id: String,
+    pub session_id: String,
+    pub delivered: bool,
+    /// Why it was not, when it was not.
+    pub why: Option<String>,
+}
+
 /// Managed by Tauri while the app drives runs.
 pub struct Runner {
     driver: runner::Driver,
+    /// Results waiting for their agent to be quiet. Tried on every tick, which the host's
+    /// quiet and exit events wake.
+    pending: Mutex<Vec<Delivery>>,
+}
+
+impl Runner {
+    /// Keep a result for the next tick: its agent was busy.
+    pub fn later(&self, delivery: Delivery) {
+        self.pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(delivery);
+    }
+
+    /// Try every waiting result; tell the window of each that went or will never go.
+    fn deliver(&self, handle: &AppHandle, host: &dyn TerminalHost) {
+        let waiting: Vec<Delivery> = self
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect();
+        let mut kept = Vec::new();
+        for delivery in waiting {
+            let (delivered, why) = match try_deliver(host, &delivery) {
+                Tried::Delivered => (true, None),
+                Tried::NotYet => {
+                    kept.push(delivery);
+                    continue;
+                }
+                Tried::Gone(why) => (false, Some(why)),
+            };
+            let _ = TestResultSent {
+                run_id: delivery.run_id,
+                session_id: delivery.session_id,
+                delivered,
+                why,
+            }
+            .emit(handle);
+        }
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        // Anything queued while this ran goes behind what is still waiting.
+        kept.append(&mut pending);
+        *pending = kept;
+    }
 }
 
 /// Make the driver. Called by the workflow driver once it holds the profile's lock.
@@ -50,6 +109,7 @@ pub fn start(app: &AppHandle) {
     });
     app.manage(Runner {
         driver: runner::Driver::new(notify),
+        pending: Mutex::new(Vec::new()),
     });
 }
 
@@ -58,6 +118,7 @@ pub fn tick(handle: &AppHandle, state: &AppState) {
     let Some(runner) = handle.try_state::<Runner>() else {
         return;
     };
+    runner.deliver(handle, state.host.as_ref());
     match runner
         .driver
         .tick(&state.store, &state.data_dir, &state.env())

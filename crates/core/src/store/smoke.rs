@@ -119,6 +119,24 @@ pub enum TestQueued {
     AlreadyRunning(String),
 }
 
+/// What a project asks of its smoke test runs. See `migrations/0020_smoke_test_settings.sql`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestSettings {
+    /// Show every run's steps and ask, whether or not the file was approved before.
+    pub ask_every_time: bool,
+    /// Ended runs older than this many days are removed, with their output.
+    pub keep_days: u32,
+}
+
+impl Default for TestSettings {
+    fn default() -> Self {
+        Self {
+            ask_every_time: false,
+            keep_days: 30,
+        }
+    }
+}
+
 /// What one of a run's steps becomes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepChange<'a> {
@@ -449,7 +467,14 @@ impl Store {
         passed: bool,
         note: Option<&str>,
     ) -> StoreResult<bool> {
-        let outputs = serde_json::json!({ "note": note.unwrap_or_default() }).to_string();
+        // Keep what the step already left — the `manual` step's `prompt` — and add the note,
+        // so an answered step still shows the question it answered.
+        let mut outputs = self
+            .test_step(run_id, step_id)?
+            .map(|step| step.outputs())
+            .unwrap_or_default();
+        outputs.insert("note".to_owned(), note.unwrap_or_default().to_owned());
+        let outputs = serde_json::to_string(&outputs).unwrap_or_else(|_| "{}".to_owned());
         self.move_test_step(
             run_id,
             step_id,
@@ -464,18 +489,26 @@ impl Store {
         )
     }
 
-    /// Ended runs older than `before`, removed with their steps. Returns `(id, output_dir)` of
-    /// each, so the caller can remove the output folders too.
-    pub fn prune_test_runs(&self, before: i64) -> StoreResult<Vec<(String, Option<String>)>> {
+    /// Ended runs of one project — or, with `None`, of projects since removed — older than
+    /// `before`, removed with their steps. Returns `(id, output_dir)` of each, so the caller
+    /// can remove the output folders too.
+    pub fn prune_test_runs(
+        &self,
+        project_id: Option<&str>,
+        before: i64,
+    ) -> StoreResult<Vec<(String, Option<String>)>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let gone: Vec<(String, Option<String>)> = {
             let mut stmt = tx.prepare(
                 "SELECT id, output_dir FROM test_runs
                  WHERE status NOT IN ('awaiting_approval', 'queued', 'running')
+                   AND project_id IS ?
                    AND COALESCE(ended_at, created_at) < ?",
             )?;
-            let rows = stmt.query_map([before], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            let rows = stmt.query_map(params![project_id, before], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
             rows.collect::<Result<_, _>>()?
         };
         for (id, _) in &gone {
@@ -504,6 +537,28 @@ impl Store {
             )
             .optional()?
             .is_some())
+    }
+
+    /// The file as it was the last time it was approved for this project: what a changed file
+    /// is shown against. A run's own file is on its row; the approvals know only hashes, so
+    /// the text comes from the newest run that carried an approved hash.
+    pub fn last_approved_definition(
+        &self,
+        project_id: &str,
+        test_id: &str,
+    ) -> StoreResult<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT r.definition FROM test_approvals a
+                 JOIN test_runs r ON r.project_id = a.project_id AND r.test_id = a.test_id
+                                 AND r.content_hash = a.content_hash
+                 WHERE a.project_id = ? AND a.test_id = ?
+                 ORDER BY a.approved_at DESC, r.created_at DESC, r.rowid DESC LIMIT 1",
+                [project_id, test_id],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     /// The user approved a run's file: the approval is recorded for the project, and the run,
@@ -595,6 +650,69 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+
+    // --- the settings ---------------------------------------------------------------------
+
+    /// What a project asks of its runs; the defaults when it never said.
+    pub fn project_test_settings(&self, project_id: &str) -> StoreResult<TestSettings> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT ask_every_time, keep_days FROM project_test_settings
+                 WHERE project_id = ?",
+                [project_id],
+                test_settings_from_row,
+            )
+            .optional()?
+            .unwrap_or_default())
+    }
+
+    pub fn set_project_test_settings(
+        &self,
+        project_id: &str,
+        settings: &TestSettings,
+    ) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO project_test_settings (project_id, ask_every_time, keep_days)
+             VALUES (?, ?, ?)
+             ON CONFLICT(project_id) DO UPDATE
+             SET ask_every_time = excluded.ask_every_time, keep_days = excluded.keep_days",
+            params![project_id, settings.ask_every_time, settings.keep_days],
+        )?;
+        Ok(())
+    }
+
+    /// Every project with what it asks of its runs, the defaults for those that never said:
+    /// what pruning goes by.
+    pub fn test_settings_by_project(&self) -> StoreResult<Vec<(String, TestSettings)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT p.id, s.ask_every_time, s.keep_days FROM projects p
+             LEFT JOIN project_test_settings s ON s.project_id = p.id
+             ORDER BY p.sort_order",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let ask: Option<bool> = row.get(1)?;
+            let keep: Option<u32> = row.get(2)?;
+            let defaults = TestSettings::default();
+            Ok((
+                id,
+                TestSettings {
+                    ask_every_time: ask.unwrap_or(defaults.ask_every_time),
+                    keep_days: keep.unwrap_or(defaults.keep_days),
+                },
+            ))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+}
+
+fn test_settings_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestSettings> {
+    Ok(TestSettings {
+        ask_every_time: row.get(0)?,
+        keep_days: row.get(1)?,
+    })
 }
 
 #[cfg(test)]
@@ -674,6 +792,95 @@ mod tests {
         assert!(
             !store.test_approved(&project, "health", "abd").unwrap(),
             "another hash is another file"
+        );
+    }
+
+    #[test]
+    fn the_last_approved_file_is_the_newest_run_that_carried_an_approved_hash() {
+        let (_dir, store, project, workspace) = store_with_workspace();
+        assert_eq!(
+            store.last_approved_definition(&project, "health").unwrap(),
+            None
+        );
+        queue(&store, &project, &workspace, "r1", "awaiting_approval");
+        assert!(store.approve_test_run("r1").unwrap());
+        assert!(store.cancel_test_run("r1", "done with it").unwrap());
+        assert_eq!(
+            store.last_approved_definition(&project, "health").unwrap(),
+            Some("id: health\n".to_owned())
+        );
+        // A second run of a changed file, waiting: not approved, so not what is shown against.
+        store
+            .queue_test_run(&NewTestRun {
+                id: "r2",
+                project_id: &project,
+                workspace_id: &workspace,
+                workspace_name: "fix",
+                test_id: "health",
+                test_name: "Health",
+                definition: "id: health\nname: Changed\n",
+                content_hash: "abd",
+                inputs: "{}",
+                status: "awaiting_approval",
+                requested_by: "cli",
+                session_record_id: None,
+                steps: &[("ping", "steps", "http")],
+            })
+            .unwrap();
+        assert_eq!(
+            store.last_approved_definition(&project, "health").unwrap(),
+            Some("id: health\n".to_owned())
+        );
+        assert!(store.approve_test_run("r2").unwrap());
+        assert_eq!(
+            store.last_approved_definition(&project, "health").unwrap(),
+            Some("id: health\nname: Changed\n".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_project_has_the_default_settings_until_it_says_and_pruning_reads_them_all() {
+        let (_dir, store, project, _) = store_with_workspace();
+        assert_eq!(
+            store.project_test_settings(&project).unwrap(),
+            TestSettings::default()
+        );
+        let other = store.add_project("other", "/code/other").unwrap();
+        store
+            .set_project_test_settings(
+                &project,
+                &TestSettings {
+                    ask_every_time: true,
+                    keep_days: 7,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            store.project_test_settings(&project).unwrap(),
+            TestSettings {
+                ask_every_time: true,
+                keep_days: 7
+            }
+        );
+        assert_eq!(
+            store.test_settings_by_project().unwrap(),
+            vec![
+                (
+                    project.clone(),
+                    TestSettings {
+                        ask_every_time: true,
+                        keep_days: 7
+                    }
+                ),
+                (other.id, TestSettings::default()),
+            ]
+        );
+        store
+            .set_project_test_settings(&project, &TestSettings::default())
+            .unwrap();
+        assert_eq!(
+            store.project_test_settings(&project).unwrap(),
+            TestSettings::default()
         );
     }
 
@@ -768,8 +975,12 @@ mod tests {
             screenshots: None,
         };
         assert!(!store.answer_test_step("r2", "ask", true, None).unwrap());
+        let with_prompt = StepChange {
+            outputs: Some("{\"prompt\":\"Does it look right?\"}"),
+            ..waiting
+        };
         store
-            .move_test_step("r2", "ask", &["pending"], &waiting)
+            .move_test_step("r2", "ask", &["pending"], &with_prompt)
             .unwrap();
         assert!(store
             .answer_test_step("r2", "ask", false, Some("the chart flashed"))
@@ -780,6 +991,11 @@ mod tests {
         assert_eq!(
             ask.outputs().get("note").map(String::as_str),
             Some("the chart flashed")
+        );
+        assert_eq!(
+            ask.outputs().get("prompt").map(String::as_str),
+            Some("Does it look right?"),
+            "the question it answered is kept"
         );
     }
 
@@ -809,7 +1025,11 @@ mod tests {
         assert_eq!(steps[1].status, "skipped");
         assert!(store.end_interrupted_test_runs("again").unwrap().is_empty());
 
-        let pruned = store.prune_test_runs(now_ms() + 1).unwrap();
+        assert!(store
+            .prune_test_runs(None, now_ms() + 1)
+            .unwrap()
+            .is_empty());
+        let pruned = store.prune_test_runs(Some(&project), now_ms() + 1).unwrap();
         assert_eq!(pruned, vec![("r1".to_owned(), Some("/out/r1".to_owned()))]);
         assert!(store.test_run("r1").unwrap().is_none());
         assert!(store.test_steps("r1").unwrap().is_empty());

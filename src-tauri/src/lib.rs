@@ -206,6 +206,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::workflow_describe,
             smoke::commands::test_list,
             smoke::commands::test_runs,
+            smoke::commands::test_active_runs,
+            smoke::commands::test_runs_by_id,
             smoke::commands::test_run_steps,
             smoke::commands::test_run_start,
             smoke::commands::test_run_approve,
@@ -214,6 +216,12 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::commands::test_step_answer,
             smoke::commands::test_env_get,
             smoke::commands::test_env_save,
+            smoke::commands::test_review,
+            smoke::commands::test_run_review,
+            smoke::commands::test_step_output,
+            smoke::commands::test_run_send,
+            smoke::commands::test_settings_get,
+            smoke::commands::test_settings_save,
             usage::usage_machine,
             usage::usage_tokens,
             usage::settings_save_usage,
@@ -227,6 +235,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::WorkflowRunsChanged,
             smoke::TestRunsChanged,
             smoke::TestRunOutput,
+            smoke::TestResultSent,
             remote::RemotePairingRequested
         ])
 }

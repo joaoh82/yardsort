@@ -9,6 +9,9 @@ import type {
   SessionRecord,
   Task,
   TaskDetail,
+  TestReview,
+  TestRun,
+  TestStepRun,
   Workspace,
   RemoteRepository,
   Repositories,
@@ -256,5 +259,75 @@ export const repositoriesOf = (
   answered: true,
   problem: null,
   loggedOut: false,
+  ...overrides,
+});
+
+/** A smoke test run of `health` in `fix-login`, asked for by an agent and waiting for approval
+ *  unless overridden. */
+export const testRun = (id: string, overrides: Partial<TestRun> = {}): TestRun => ({
+  id,
+  projectId: "p-app",
+  workspaceId: "w-app-fix-login",
+  workspaceName: "fix-login",
+  testId: "health",
+  testName: "The server answers",
+  definition:
+    "id: health\nname: The server answers\nversion: 1\nsteps:\n  - id: ping\n    action: http\n    get: http://localhost:{{ run.port }}/health\n",
+  contentHash: "abc",
+  inputs: {},
+  status: "awaiting_approval",
+  requestedBy: "cli",
+  sessionRecordId: null,
+  port: null,
+  error: null,
+  outputDir: null,
+  stopping: false,
+  createdAt: Date.now() - 60_000,
+  startedAt: null,
+  endedAt: null,
+  ...overrides,
+});
+
+/** One step of a run: pending, in the `steps` phase, unless overridden. */
+export const testStep = (stepId: string, overrides: Partial<TestStepRun> = {}): TestStepRun => ({
+  stepId,
+  phase: "steps",
+  action: "run",
+  status: "pending",
+  startedAt: null,
+  endedAt: null,
+  exit: null,
+  outputs: {},
+  note: null,
+  screenshots: [],
+  ...overrides,
+});
+
+/** A file as the approval card reads it: one server and one request, one name unset. */
+export const testReview = (overrides: Partial<TestReview> = {}): TestReview => ({
+  steps: [
+    {
+      id: "server",
+      phase: "setup",
+      action: "start",
+      words: "start `bun run dev --port {{ run.port }}` and keep it running until the run ends",
+    },
+    {
+      id: "ping",
+      phase: "steps",
+      action: "http",
+      words: "GET http://localhost:{{ run.port }}/health; expect status 200",
+    },
+  ],
+  env: [
+    { name: "TEST_PASSWORD", set: true },
+    { name: "DATABASE_URL", set: false },
+  ],
+  approved: false,
+  askEveryTime: false,
+  previous: null,
+  contentHash: "abc",
+  runsAProgram: true,
+  environment: ["TEST_PASSWORD", "DATABASE_URL"],
   ...overrides,
 });

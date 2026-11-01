@@ -25,6 +25,11 @@ back the screen is repainted exactly as it was, scrollback included.
 A [workflow](workflows.md) can start an agent too. It opens as a new tab in its workspace, and the
 tab you were looking at stays in front.
 
+A [smoke test](smoke-tests.md#the-run-tab) run opens as a tab in the same strip, after the
+terminals, named after the test with a dot for how the run is going. It shows the run's steps and
+their output rather than a terminal; the terminal behind it keeps running, and `Mod+W` closes the
+tab without touching the run.
+
 ### Copy, paste, links
 
 |                    | Linux / Windows                                        | macOS     |

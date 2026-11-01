@@ -10,10 +10,12 @@
 
 mod parse;
 
+pub mod deliver;
 pub mod exec;
 pub mod report;
 pub mod runner;
 pub mod runs;
+pub mod words;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

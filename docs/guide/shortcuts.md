@@ -16,11 +16,14 @@ Open **Shortcuts** in the bottom bar, or **Settings → Keyboard**, for the in-a
 | Mod+O         | `Ctrl+Shift+O`       | `⌘O`        | Open a project (folder picker)                                                                      |
 | Mod+N         | `Ctrl+Shift+N`       | `⌘N`        | New workspace in the current project                                                                |
 | Mod+T         | `Ctrl+Shift+T`       | `⌘T`        | New shell tab in the selected workspace                                                             |
-| Mod+W         | `Ctrl+Shift+W`       | `⌘W`        | Close the active tab                                                                                |
+| Mod+W         | `Ctrl+Shift+W`       | `⌘W`        | Close the active tab — a terminal, or a smoke test run's tab in front of it                         |
 | Mod+B         | `Ctrl+Shift+B`       | `⌘B`        | Toggle the left panel                                                                               |
 | Mod+Alt+B     | `Ctrl+Shift+Alt+B`   | `⌥⌘B`       | Toggle the right panel                                                                              |
 | Mod+,         | `Ctrl+Shift+,`       | `⌘,`        | Settings                                                                                            |
 | Mod+C / Mod+V | `Ctrl+Shift+C` / `V` | `⌘C` / `⌘V` | Copy the selection / paste, in a terminal ([more ways](terminals-and-sessions.md#copy-paste-links)) |
+
+On a [smoke test's approval card](smoke-tests.md#the-approval-card), while it has the keyboard:
+`Mod+Enter` runs, `Esc` refuses.
 
 In the composer: `Enter` starts, `Shift+Enter` adds a line, `Esc` cancels. `Esc` also closes
 dialogs and menus. In an agent's terminal `Shift+Enter` adds a line too — see

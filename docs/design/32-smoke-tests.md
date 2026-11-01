@@ -467,7 +467,7 @@ example | guide`, and `docs/guide/smoke-tests.md` with the format. Fixtures: one
    to approve it. Tests with real processes in a temp data directory: a script that listens on
    `{{ run.port }}`, a `wait_for` on it, an `http` against it, a failing expectation, a cancel
    mid-step, a teardown that still runs.
-3. **The UI.** The approval card and its count in the sidebar; the run tab with live output,
+3. **The UI.** ✅ The approval card and its count in the sidebar; the run tab with live output,
    expectations and `manual` steps; **Run smoke test…** in the workspace menu; **Send result to
    agent**; Settings → Projects → Smoke tests with the environment. Testing Library for the card's
    words, the tab's step list and the manual step's buttons; the tailing as a hook with a fake
@@ -576,8 +576,49 @@ why:
   `TestRunOutput` events. The approval card, the tab and the Tests view are the pixels on top.
 - **Not here:** browser steps, which `run` refuses with the step's name; the `requested_by:
 workflow` path, which is slice 5; and the **Ask every time** switch, which is a setting the
-  slice 3 dialog needs before anything reads it. Until slice 3 there is nothing in the window
-  that approves, so a run started from `ys` waits; the changelog says so.
+  slice 3 dialog needs before anything reads it (it came with slice 3).
+
+## Slice 3: what shipped
+
+`src/features/smoke/` (the card, the tab, the Run dialog, the tailing hook), `src/stores/smokeTests.ts`,
+the Smoke tests part of the Project settings dialog, `smoke::words` in the core, migration
+0020, and six more commands. What changed from the proposal above, and why:
+
+- **The steps are put into words by the core,** `smoke::words::step_words`, not the window:
+  _run `bun run seed --user {{ inputs.user }}` in api, with DATABASE_URL set; expect exit 0,
+  stdout containing "seeded"_. One place says what a file does, tested against the parser, and
+  the Tests view and `ys` can use the same words. Every `{{ variable }}` is left as written:
+  the port is not known yet, and a secret must not be printed.
+- **The Run dialog approves.** Seeing the steps and pressing **Run** is the approval, as
+  proposed; so `test_run_start` records the approval itself and the run never waits on a card.
+  That is also why **Run again** opens the dialog rather than starting straight away: the file
+  may have changed since, and the dialog shows what changed before anything is approved.
+- **Ask every time is a row, not a flag in the automation JSON.** Migration 0020 adds
+  `project_test_settings (project_id, ask_every_time, keep_days)`: the automation config is
+  one struct saved whole by one dialog part, and a second part writing into it would have to
+  read and rewrite the first's fields. The queue reads the row: approved and not asked for
+  every time goes to `queued`, anything else to `awaiting_approval`.
+- **Retention is per project, and pruning runs daily,** not only on the first tick, so a
+  shorter **Keep runs for** takes effect the same day. Runs whose project is gone keep the
+  default thirty days.
+- **The card never takes the keyboard.** `Mod+Enter` and `Esc` work while the card has focus,
+  which a click or Tab gives it; it does not focus itself when it appears, because an `Esc`
+  meant for the agent in the terminal behind it must not refuse a run.
+- **What changed is a line diff in the window** against the file as it was at the newest run
+  that carried an approved hash (`last_approved_definition`): the approvals table knows only
+  hashes, and the run rows keep the text, so no second copy of the file is stored.
+- **Output is tailed from a byte offset** (`exec::read_from`, `test_step_output`): the tab
+  reads on from where it was each time the runner says the file grew, once more when the step
+  ends, and never splits a character a process has half written. A tab that has fallen far
+  behind reads the last 256 KiB and says lines were skipped.
+- **Send result to agent is a delivery the runner's tick carries out,** by the workflow driver's
+  rule: typed at once if the agent is quiet, kept until it is otherwise, and dropped with a word
+  to the window if the agent's terminal ends first. The text is `report::for_agent`: a line
+  saying what it is, then exactly what `ys test wait` prints.
+- **Not here:** the Tests view (slice 6), so the sidebar's count is on the workspace row and
+  **Run smoke test…** lists the workspace's recent runs to reopen any of them; browser steps
+  (slice 4); and the browser setting that goes with them. Screenshots are listed by path with
+  **Reveal** until a browser writes one.
 
 ## Not in version one, on purpose
 

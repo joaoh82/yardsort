@@ -46,10 +46,15 @@ pub enum Notice {
 
 pub type Notify = Arc<dyn Fn(Notice) + Send + Sync>;
 
+/// How often old runs are looked for after the first tick, so a shorter retention set while
+/// the app runs takes effect that day.
+const PRUNE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// What a driver keeps between ticks. The app holds one for as long as it runs.
 pub struct Driver {
     threads: Mutex<HashMap<String, JoinHandle<()>>>,
     recovered: AtomicBool,
+    pruned_at: Mutex<Option<Instant>>,
     notify: Notify,
     /// The runs that were active at the last tick. One that is gone since was ended from
     /// outside — `ys test cancel` — which is a change too.
@@ -61,6 +66,7 @@ impl Driver {
         Self {
             threads: Mutex::new(HashMap::new()),
             recovered: AtomicBool::new(false),
+            pruned_at: Mutex::new(None),
             notify,
             active: Mutex::new(HashSet::new()),
         }
@@ -75,7 +81,16 @@ impl Driver {
         let mut touched = false;
         if !self.recovered.swap(true, Ordering::SeqCst) {
             touched |= recover(store)?;
-            prune(store, data_dir);
+        }
+        {
+            let mut pruned_at = self
+                .pruned_at
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if pruned_at.is_none_or(|at| at.elapsed() >= PRUNE_EVERY) {
+                prune(store, data_dir);
+                *pruned_at = Some(Instant::now());
+            }
         }
         {
             let mut threads = self.threads.lock().unwrap_or_else(PoisonError::into_inner);
@@ -177,19 +192,31 @@ fn recover(store: &Store) -> IpcResult<bool> {
     Ok(!interrupted.is_empty())
 }
 
-/// Remove ended runs older than [`KEEP_RUNS_FOR`], and their output folders — and any output
-/// folder whose run is gone already, however that happened.
-fn prune(store: &Store, data_dir: &Path) {
-    let before = now_ms() - i64::try_from(KEEP_RUNS_FOR.as_millis()).unwrap_or(i64::MAX);
-    match store.prune_test_runs(before) {
-        Ok(gone) => {
-            for (_, output_dir) in gone {
-                if let Some(dir) = output_dir {
-                    let _ = std::fs::remove_dir_all(dir);
+/// Remove ended runs older than each project keeps them for — [`KEEP_RUNS_FOR`] unless the
+/// project's settings say — and their output folders; and any output folder whose run is gone
+/// already, however that happened.
+pub fn prune(store: &Store, data_dir: &Path) {
+    let now = now_ms();
+    let default_before = now - i64::try_from(KEEP_RUNS_FOR.as_millis()).unwrap_or(i64::MAX);
+    let mut ages: Vec<(Option<String>, i64)> = vec![(None, default_before)];
+    match store.test_settings_by_project() {
+        Ok(projects) => ages.extend(projects.into_iter().map(|(id, settings)| {
+            let keep = i64::from(settings.keep_days) * 24 * 60 * 60 * 1000;
+            (Some(id), now.saturating_sub(keep))
+        })),
+        Err(error) => eprintln!("smoke tests: cannot read the projects' settings: {error}"),
+    }
+    for (project_id, before) in ages {
+        match store.prune_test_runs(project_id.as_deref(), before) {
+            Ok(gone) => {
+                for (_, output_dir) in gone {
+                    if let Some(dir) = output_dir {
+                        let _ = std::fs::remove_dir_all(dir);
+                    }
                 }
             }
+            Err(error) => eprintln!("smoke tests: cannot prune old runs: {error}"),
         }
-        Err(error) => eprintln!("smoke tests: cannot prune old runs: {error}"),
     }
     let Ok(kept) = store.test_runs(None, usize::MAX) else {
         return;

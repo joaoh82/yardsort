@@ -133,6 +133,19 @@ import {
   type Repositories,
   type ResolvedLink,
   type LinkKind,
+  type TestItem,
+  type TestInput,
+  type TestRun as RawTestRun,
+  type TestStepRun as RawTestStepRun,
+  type TestStarted,
+  type TestEnvEntry,
+  type TestSettings,
+  type TestReview,
+  type StepWords,
+  type EnvUse,
+  type OutputChunk as RawOutputChunk,
+  type TestSent,
+  type TestResultSent,
 } from "./bindings";
 
 export type {
@@ -140,6 +153,16 @@ export type {
   Repositories,
   ResolvedLink,
   LinkKind,
+  TestItem,
+  TestInput,
+  TestStarted,
+  TestEnvEntry,
+  TestSettings,
+  TestReview,
+  StepWords,
+  EnvUse,
+  TestSent,
+  TestResultSent,
   Described,
   WorkflowItem,
   WorkflowCheck,
@@ -304,6 +327,10 @@ type Finite<T, Keep extends string> = [T] extends [number | null]
       ? { [K in keyof T]: K extends Keep ? T[K] : Finite<T[K], Keep> }
       : T;
 export type UsageReport = Finite<RawUsageReport, "knownCost" | "resetsAt">;
+/** A smoke test run: asked for at `createdAt`, started and ended when it was. */
+export type TestRun = Finite<RawTestRun, "startedAt" | "endedAt" | "port">;
+export type TestStepRun = Finite<RawTestStepRun, "startedAt" | "endedAt" | "exit">;
+export type OutputChunk = Finite<RawOutputChunk, never>;
 export type MachineReport = Finite<RawMachineReport, "loadOne">;
 export type AgentLimits = UsageReport["limits"][number];
 export type ModelUsage = UsageReport["models"][number];
@@ -759,6 +786,69 @@ export const ipc = {
   /** A run was queued, moved on, finished or cancelled. */
   onWorkflowRunsChanged: (handler: () => void) =>
     events.workflowRunsChanged.listen(() => handler()),
+
+  // --- smoke tests ---------------------------------------------------------------------
+  /** A workspace's smoke tests: every file in its worktree's `.yardsort/tests`. */
+  testList: (workspaceId: string) => unwrap(commands.testList(workspaceId)),
+  /** Runs, newest first: of one workspace, or of all. */
+  testRuns: (workspaceId: string | null, limit = 100): Promise<TestRun[]> =>
+    unwrap(commands.testRuns(workspaceId, limit)) as Promise<TestRun[]>,
+  /** Every run not ended yet, so a waiting or running one is never crowded out of the list. */
+  testActiveRuns: (): Promise<TestRun[]> => unwrap(commands.testActiveRuns()) as Promise<TestRun[]>,
+  /** Particular runs by id, skipping any that are gone: for the window's open run tabs. */
+  testRunsById: (ids: string[]): Promise<TestRun[]> =>
+    unwrap(commands.testRunsById(ids)) as Promise<TestRun[]>,
+  testRunSteps: (runId: string): Promise<TestStepRun[]> =>
+    unwrap(commands.testRunSteps(runId)) as Promise<TestStepRun[]>,
+  /**
+   * Start a run from the Run dialog, which showed the steps: pressing Run approves the file the
+   * dialog showed. `contentHash` is that file's hash (from `testReview`); if the file changed
+   * since, the run waits for the approval card instead of running unseen.
+   */
+  testRunStart: (
+    testId: string,
+    workspaceId: string,
+    inputs: Record<string, string>,
+    contentHash: string,
+  ) => unwrap(commands.testRunStart(testId, workspaceId, inputs, contentHash)),
+  /** A test as the Run dialog shows it: steps in words, environment names, what changed. */
+  testReview: (workspaceId: string, testId: string) =>
+    unwrap(commands.testReview(workspaceId, testId)),
+  /** A waiting run's file the same way, as it was when the run was asked for. */
+  testRunReview: (runId: string) => unwrap(commands.testRunReview(runId)),
+  /** The user saw the file and lets it run. False when the run was not waiting. */
+  testRunApprove: (runId: string) => unwrap(commands.testRunApprove(runId)),
+  /** The user chose not to run the file. */
+  testRunRefuse: (runId: string) => unwrap(commands.testRunRefuse(runId)),
+  /** Stop a run: at once when it has not started, after its teardown when it is running. */
+  testRunCancel: (runId: string) => unwrap(commands.testRunCancel(runId)),
+  /** Pass or fail a `manual` step the run waits on. */
+  testStepAnswer: (runId: string, stepId: string, passed: boolean, note: string | null) =>
+    unwrap(commands.testStepAnswer(runId, stepId, passed, note)),
+  /** A piece of a step's `stdout` or `stderr` from `from`; the tab tails with this. */
+  testStepOutput: (
+    runId: string,
+    stepId: string,
+    stream: "stdout" | "stderr",
+    from: number,
+  ): Promise<OutputChunk> =>
+    unwrap(commands.testStepOutput(runId, stepId, stream, from)) as Promise<OutputChunk>,
+  /** Type the run's result into an agent's terminal, now or once it is quiet. */
+  testRunSend: (runId: string, sessionId: string) => unwrap(commands.testRunSend(runId, sessionId)),
+  testEnvGet: (projectId: string) => unwrap(commands.testEnvGet(projectId)),
+  testEnvSave: (projectId: string, entries: TestEnvEntry[]) =>
+    done(commands.testEnvSave(projectId, entries)),
+  testSettingsGet: (projectId: string) => unwrap(commands.testSettingsGet(projectId)),
+  testSettingsSave: (projectId: string, settings: TestSettings) =>
+    done(commands.testSettingsSave(projectId, settings)),
+  /** A run was queued, approved, moved on, finished or cancelled, or a step changed. */
+  onTestRunsChanged: (handler: () => void) => events.testRunsChanged.listen(() => handler()),
+  /** A step's output file grew. */
+  onTestRunOutput: (handler: (runId: string, stepId: string) => void) =>
+    events.testRunOutput.listen((event) => handler(event.payload.runId, event.payload.stepId)),
+  /** A result sent to an agent went in, or never will. */
+  onTestResultSent: (handler: (sent: TestResultSent) => void) =>
+    events.testResultSent.listen((event) => handler(event.payload)),
 
   onHostEvent: (handler: (event: HostEvent) => void) =>
     events.ptyHostEvent.listen((event) => handler(event.payload)),

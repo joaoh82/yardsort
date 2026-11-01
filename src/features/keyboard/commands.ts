@@ -6,6 +6,7 @@ import {
 import type { CommandId } from "@/lib/shortcuts";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
+import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTerminalStore } from "@/stores/terminals";
 
 export function availableWorkspaces() {
@@ -56,7 +57,8 @@ export function commandEnabled(id: CommandId): boolean {
   if (["closeTerminal", "previousTerminal", "nextTerminal"].includes(id))
     return (
       !!workspaceId &&
-      !!useTerminalStore.getState().active[workspaceId] &&
+      (!!useTerminalStore.getState().active[workspaceId] ||
+        (id === "closeTerminal" && !!useSmokeTestsStore.getState().shown[workspaceId])) &&
       !projects.composingProjectId &&
       !projects.composingWorkspaceId &&
       !projects.workflowId &&
@@ -107,10 +109,15 @@ export function runCommand(id: CommandId) {
     case "newTerminal":
       if (workspaceId) void terminals.open(workspaceId);
       break;
-    case "closeTerminal":
-      if (workspaceId && terminals.active[workspaceId])
-        void terminals.close(terminals.active[workspaceId]!);
+    case "closeTerminal": {
+      if (!workspaceId) break;
+      // A smoke test run's tab in front is the one to close; the terminal behind it stays.
+      const smoke = useSmokeTestsStore.getState();
+      const shownRun = smoke.shown[workspaceId];
+      if (shownRun) smoke.closeRun(workspaceId, shownRun);
+      else if (terminals.active[workspaceId]) void terminals.close(terminals.active[workspaceId]!);
       break;
+    }
     case "toggleLeft":
       layout.toggle("left");
       break;

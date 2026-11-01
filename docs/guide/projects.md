@@ -150,7 +150,9 @@ Yardsort's window gets focus.
 
 Hover a project and press **⋯**, or right-click it:
 
-- **Project settings…** — files to copy into new worktrees, a setup command, and a run/dev-server command. See [Project automation](#project-automation).
+- **Project settings…** — files to copy into new worktrees, a setup command, a run/dev-server
+  command, and the smoke tests' environment and rules. See [Project automation](#project-automation)
+  and [Smoke tests](smoke-tests.md#project-settings).
 - **Memory…** — lessons about the project for its agents: what you write, what agents propose
   for you to approve, and whether they are given it. A count on the project's row says when
   proposals wait. See [Memory](memory.md).
@@ -224,3 +226,7 @@ you switch workspaces or close the window. Press Run again to focus an existing 
 after it exits, Run starts a new one. Use the terminal's Ctrl+C to stop it, or close its tab.
 If no command is configured, Run opens Project settings. Each workspace runs its own server;
 configure ports in your project if multiple servers would otherwise use the same port.
+
+The dialog's **Smoke tests** part holds the project's test environment — the names and values
+its [smoke tests](smoke-tests.md#project-settings) read as `{{ env.NAME }}`, kept here and never
+in the repository — with **Ask every time** and how long to keep runs.

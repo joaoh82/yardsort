@@ -125,6 +125,13 @@ review…** goes straight to the built-in review. Both open the same dialog, whi
 workflow's inputs and shows the pull request it will use. The `local` workspace has them too,
 from its right-click menu.
 
+### Run smoke test…
+
+Run one of the worktree's [smoke tests](smoke-tests.md#run-smoke-test) here: the dialog lists
+them with their readiness, asks the chosen test's inputs, and shows its steps in words before
+**Run**, which is also the approval a new or changed file needs. The run opens as a tab beside
+the terminals. The dialog lists the workspace's recent runs too, to open any again.
+
 ### Fork into new workspace…
 
 Start new work from where this workspace stands, without sharing its folder: a new workspace, on
