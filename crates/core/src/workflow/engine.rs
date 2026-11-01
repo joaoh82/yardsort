@@ -39,6 +39,28 @@ pub trait World {
     /// Reviews or comments of `kind` on the workspace's pull request since the run started, as
     /// the forge last said. `None` while nothing is known yet.
     fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen>;
+    /// A smoke test run by id: its status and the summary `ys test wait` prints. `None` when the
+    /// row is gone.
+    fn test_run(&self, run_id: &str) -> Option<TestRun>;
+}
+
+/// A smoke test run as a `run_test` step sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestRun {
+    /// `queued`, `awaiting_approval`, `running`, `passed`, `failed`, `cancelled`, `errored`, ….
+    pub status: String,
+    /// The verdict and the failing steps, the text `ys test wait` prints.
+    pub summary: String,
+}
+
+impl TestRun {
+    /// Still going: queued, waiting for the user to approve it, or running.
+    fn active(&self) -> bool {
+        matches!(
+            self.status.as_str(),
+            "queued" | "awaiting_approval" | "running"
+        )
+    }
 }
 
 /// Activity found on a pull request.
@@ -79,6 +101,13 @@ pub enum Effect {
         step: String,
         pty_id: String,
         text: String,
+    },
+    /// Queue a smoke test run in the run's workspace. The driver reports the queued run's id,
+    /// and the step then waits for that run to end.
+    RunTest {
+        step: String,
+        test: String,
+        inputs: Inputs,
     },
     /// Tell the person who started the run.
     Notify {
@@ -268,6 +297,18 @@ pub fn done(step: &str, outputs: &Outputs) -> Move {
     }
 }
 
+/// The driver queued a test run for a `run_test` step: it keeps its run id and waits for it to
+/// end, rather than finishing here.
+pub fn queued(step: &str, outputs: &Outputs) -> Move {
+    Move {
+        step: step.to_owned(),
+        from: vec![StepStatus::Running],
+        to: StepStatus::Waiting,
+        outputs: Some(serde_json::to_string(outputs).unwrap_or_else(|_| "{}".to_owned())),
+        note: None,
+    }
+}
+
 /// The driver found the step's effect no longer made sense, and why.
 pub fn skipped(step: &str, why: &str) -> Move {
     Move {
@@ -404,6 +445,17 @@ fn begin(
             }
         },
         Action::WaitPrActivity { .. } => to(id, StepStatus::Pending, StepStatus::Waiting),
+        Action::RunTest { test, inputs, .. } => {
+            effects.push(Effect::RunTest {
+                step: id.to_owned(),
+                test: render(test),
+                inputs: inputs
+                    .iter()
+                    .map(|(name, value)| (name.clone(), render(value)))
+                    .collect(),
+            });
+            to(id, StepStatus::Pending, StepStatus::Running)
+        }
     }
 }
 
@@ -476,6 +528,52 @@ fn wait(
             )),
             _ => None,
         },
+        Action::RunTest { timeout_secs, .. } => {
+            // The run's id was left when the driver queued it; wait for that run to end.
+            let run = lookup(&["steps".to_owned(), id.to_owned(), "run".to_owned()])?;
+            match world.test_run(&run) {
+                None => Some(fail(id, StepStatus::Waiting, "The test run is gone.")),
+                Some(test) if test.active() => {
+                    if timed_out(timeout_secs) {
+                        Some(fail(
+                            id,
+                            StepStatus::Waiting,
+                            &format!(
+                                "The test run did not end within {}.",
+                                duration(timeout_secs.unwrap_or(0))
+                            ),
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                Some(test) => {
+                    let mut left = Outputs::new();
+                    left.insert("run".into(), run);
+                    left.insert("verdict".into(), test.status.clone());
+                    left.insert("summary".into(), test.summary);
+                    let outputs =
+                        Some(serde_json::to_string(&left).unwrap_or_else(|_| "{}".into()));
+                    // A test that reached a verdict — passed or failed — succeeds the step, so a
+                    // later step can read `verdict` and act on either outcome; that is how "Smoke
+                    // test, then tell the agent" reports a failure for the agent to repair. A run
+                    // that reached no verdict (cancelled, errored) fails the step, so `needs`
+                    // gates downstream on it.
+                    match test.status.as_str() {
+                        "passed" | "failed" => Some(Move {
+                            outputs,
+                            note: Some(format!("The test {}.", test.status)),
+                            ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
+                        }),
+                        other => Some(Move {
+                            outputs,
+                            note: Some(format!("The test run {other}.")),
+                            ..to(id, StepStatus::Waiting, StepStatus::Failed)
+                        }),
+                    }
+                }
+            }
+        }
         Action::SendToSession {
             session,
             prompt,

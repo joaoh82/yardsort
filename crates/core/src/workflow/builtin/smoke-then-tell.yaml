@@ -1,0 +1,36 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: smoke-then-tell
+name: Smoke test, then tell the agent
+description: >
+  Run one of this workspace's smoke tests, then tell the workspace's own agent how it went —
+  the verdict and, if it failed, which step broke and why.
+version: 1
+
+trigger:
+  kind: manual
+  context: workspace
+
+inputs:
+  - id: suite
+    kind: test
+    label: Which smoke test
+    required: true
+
+steps:
+  - id: test
+    action: run_test
+    test: "{{ inputs.suite }}"
+    timeout: 30m
+
+  - id: tell
+    action: send_to_session
+    needs: [test]
+    session: origin
+    timeout: 1h
+    prompt: |
+      A smoke test just ran in this workspace. Here is how it went:
+
+      {{ steps.test.summary }}
+
+      If it failed, look into what broke and fix it; if it passed, carry on.

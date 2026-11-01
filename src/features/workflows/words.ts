@@ -8,6 +8,7 @@ export const ACTION_WORDS: Record<Step["action"], string> = {
   wait_session: "Wait for it to settle",
   send_to_session: "Send a message",
   wait_pr_activity: "Wait for the pull request",
+  run_test: "Run a smoke test",
   notify: "Notify you",
 };
 

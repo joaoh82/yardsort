@@ -310,6 +310,11 @@ fn texts(action: &Action) -> Vec<&str> {
         .flatten()
         .collect(),
         Action::SendToSession { prompt, .. } => vec![prompt],
+        Action::RunTest { test, inputs, .. } => {
+            let mut texts = vec![test.as_str()];
+            texts.extend(inputs.values().map(String::as_str));
+            texts
+        }
         Action::Notify { title, body } => [Some(title.as_str()), body.as_deref()]
             .into_iter()
             .flatten()

@@ -428,3 +428,106 @@ fn a_run_cancelled_from_ys_between_ticks_is_a_change_the_window_is_told_about() 
         "and said once"
     );
 }
+
+/// A smoke test file that needs nothing but Node, so it is runnable without a browser or a set
+/// environment — enough for `run_test` to accept and queue it.
+const SMOKE_DEMO: &str = r#"id: demo
+name: Demo
+version: 1
+steps:
+  - id: version
+    action: run
+    program: node
+    args: [--version]
+"#;
+
+/// One `run_test` step: the driver queues a smoke run in the workspace, marked as the workflow's,
+/// and the step waits for it. No agent, no terminal, so this runs everywhere.
+const RUN_A_TEST: &str = r#"id: smoke
+name: Smoke
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: run
+    action: run_test
+    test: demo
+    timeout: 30m
+"#;
+
+/// Hands a `run_test`-only workflow never reaches: it queues the run through the store itself.
+struct NoHands;
+impl Hands for NoHands {
+    fn start(&self, _: &str, _: HarnessRequest) -> Result<SessionInfo, String> {
+        unreachable!("no agent")
+    }
+    fn notify(&self, _: &str, _: Option<&str>) -> Result<(), String> {
+        unreachable!("no notify")
+    }
+    fn handoff(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn pr_posts(&self, _: &str, _: u32) -> PrAsk {
+        unreachable!("no pull request")
+    }
+}
+
+#[test]
+fn a_run_test_step_queues_a_run_marked_as_the_workflows_and_waits_for_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("yardsort.db");
+    let store = Store::open(&database).unwrap();
+    let project = store.add_project("app", "/code/app").unwrap();
+    // A real worktree folder with the smoke test the step names.
+    let worktree = dir.path().join("wt");
+    std::fs::create_dir_all(crate::smoke::dir(&worktree)).unwrap();
+    std::fs::write(crate::smoke::dir(&worktree).join("demo.yaml"), SMOKE_DEMO).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &worktree.to_string_lossy(),
+            None,
+            None,
+        )
+        .unwrap();
+    let folder = crate::workflow::user_dir(dir.path());
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("smoke.yaml"), RUN_A_TEST).unwrap();
+    let run = queue(
+        &store,
+        dir.path(),
+        &Request {
+            workflow_id: "smoke",
+            workspace_id: &workspace.id,
+            inputs: &BTreeMap::new(),
+            requested_by: "cli",
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap();
+
+    let host = PtyHost::new(Arc::new(|_| {}));
+    Driver::default()
+        .tick(&store, &host, &NoHands, &git())
+        .unwrap();
+
+    // The step queued a smoke run, in this workspace, marked as the workflow's.
+    let runs = store.active_test_runs().unwrap();
+    let queued = runs
+        .iter()
+        .find(|r| r.workspace_id.as_deref() == Some(workspace.id.as_str()))
+        .expect("a smoke run was queued");
+    assert_eq!(queued.requested_by, "workflow");
+    // And the step waits for it, rather than finishing.
+    let steps = store.workflow_steps(&run).unwrap();
+    let step = steps.iter().find(|s| s.step_id == "run").unwrap();
+    assert_eq!(step.status, "waiting");
+    assert_eq!(
+        super::engine::parse_outputs(&step.outputs)
+            .get("run")
+            .map(String::as_str),
+        Some(queued.id.as_str()),
+        "the step kept the run's id to wait on"
+    );
+}

@@ -412,3 +412,14 @@ Ask it to write a smoke test for what it built: `ys test guide` is the reference
 runs the test and reads the verdict, once you have approved the file. Every example in the guide is itself checked
 against the parser when Yardsort is built, so what an agent is told and what the validator
 accepts cannot drift.
+
+An agent is told about this the way it learns about `ys memory` and `ys task`: in its first
+message, when the project has a `.yardsort/tests` folder or a test environment set. It gets a
+short paragraph pointing it at `ys test list`, `ys test run` and `ys test guide`, so you need not
+explain the commands each time.
+
+A [workflow](workflows.md) can run a test too, with its `run_test` step, which queues a run and
+waits for its verdict — passing or failing with it, so a later step can act on either. The
+built-in **Smoke test, then tell the agent** is exactly that followed by a message to the
+workspace's agent with the result, whether it passed or failed — the shape of "when the agent is
+done, smoke test it and tell it what broke."
