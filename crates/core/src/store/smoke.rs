@@ -284,6 +284,23 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The newest run of each `(workspace, test)` pair, for the Tests view's verdict column: one
+    /// row per test that has ever run, whichever workspace it ran in. A test that never ran has
+    /// no row here. Newest is by `created_at`, with `rowid` to break a tie.
+    pub fn latest_test_runs(&self) -> StoreResult<Vec<TestRunRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {TEST_RUN_COLUMNS} FROM test_runs t
+             WHERE t.rowid = (
+                 SELECT t2.rowid FROM test_runs t2
+                 WHERE t2.test_id = t.test_id AND t2.workspace_id IS t.workspace_id
+                 ORDER BY t2.created_at DESC, t2.rowid DESC LIMIT 1
+             )"
+        ))?;
+        let rows = stmt.query_map([], test_run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Runs not ended yet, oldest first: what the runner has to look at.
     pub fn active_test_runs(&self) -> StoreResult<Vec<TestRunRow>> {
         let conn = self.conn();
@@ -792,6 +809,41 @@ mod tests {
             TestQueued::Queued,
             "a refused run holds nothing"
         );
+    }
+
+    #[test]
+    fn the_latest_run_of_each_test_is_one_row_per_pair() {
+        let (_dir, store, project, workspace) = store_with_workspace();
+        // Two runs of `health`: the first ends, the second is the latest and the only one kept.
+        queue(&store, &project, &workspace, "h1", "awaiting_approval");
+        assert!(store.cancel_test_run("h1", "done").unwrap());
+        queue(&store, &project, &workspace, "h2", "passed");
+        // A different test with its own single run.
+        store
+            .queue_test_run(&NewTestRun {
+                id: "p1",
+                project_id: &project,
+                workspace_id: &workspace,
+                workspace_name: "fix",
+                test_id: "ping",
+                test_name: "Ping",
+                definition: "id: ping\n",
+                content_hash: "def",
+                inputs: "{}",
+                status: "failed",
+                requested_by: "cli",
+                session_record_id: None,
+                steps: &[],
+            })
+            .unwrap();
+        let mut latest = store.latest_test_runs().unwrap();
+        latest.sort_by(|a, b| a.test_id.cmp(&b.test_id));
+        assert_eq!(latest.len(), 2, "one row per (workspace, test)");
+        assert_eq!(latest[0].test_id, "health");
+        assert_eq!(latest[0].id, "h2", "the newest run of health, not h1");
+        assert_eq!(latest[0].status, "passed");
+        assert_eq!(latest[1].test_id, "ping");
+        assert_eq!(latest[1].status, "failed");
     }
 
     #[test]

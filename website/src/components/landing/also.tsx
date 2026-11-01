@@ -34,6 +34,10 @@ const POINTS = [
     body: "Tasks lists every project's open GitHub issues and counts the ones that need an answer — where the last person to speak was not a maintainer. Open one, then Delegate: the composer opens with the issue as the agent's first message, marked as text other people wrote, and nothing starts until you say so. The workspace remembers the task it came from. Open a new task, answer one, close, label and assign it from the same view; ys task does all of it from a terminal, so an agent can tell you what is open and file an issue when you ask. Everything goes through gh.",
   },
   {
+    title: "Smoke tests: the ten-minute check, repeatable",
+    body: "The steps a person runs by hand before saying done — start the server, open a page, click, look for a word — written as a YAML file in your repository that an agent writes and Yardsort runs, step by step, with every output, screenshot and reason for a failure kept. Browser steps drive a Chromium already on your machine over the DevTools protocol; nothing is installed. Because a file from a repository says what to run, it never runs until you have seen it: the first time Yardsort meets a new or changed file it asks you to approve its steps. Tests, in the sidebar, lists every project's tests with the verdict of each one's last run, and every run; a workflow can run one, and ys test does it all from a terminal.",
+  },
+  {
     title: "Start from a repository or a link",
     body: "Clone a repository lists the repositories your gh account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from GitHub, GitLab, Bitbucket, Gitea, Forgejo or a host of your own. Start from a link takes an issue's or a pull request's address and opens it, ready to delegate; a repository that is not a project yet is cloned on the way.",
   },

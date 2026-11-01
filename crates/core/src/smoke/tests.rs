@@ -709,3 +709,31 @@ fn an_entry_knows_whether_it_needs_a_browser() {
     assert!(!find(tree.path(), "demo").unwrap().uses_browser());
     assert!(find(tree.path(), "health").unwrap().uses_browser());
 }
+
+#[test]
+fn saving_writes_the_file_at_its_id_and_the_catalog_sees_it() {
+    let tree = worktree();
+    let path = save(tree.path(), BASE).unwrap();
+    assert_eq!(path, dir(tree.path()).join("demo.yaml"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BASE);
+    assert!(find(tree.path(), "demo").unwrap().runnable());
+    // Saving the same id again overwrites its own file, no clash with itself.
+    let again = save(tree.path(), BASE).unwrap();
+    assert_eq!(again, path);
+}
+
+#[test]
+fn saving_refuses_an_id_another_file_already_holds() {
+    let tree = worktree();
+    write(tree.path(), "first.yaml", BASE); // id: demo, in first.yaml
+    let clash = save(tree.path(), BASE).unwrap_err(); // would be demo.yaml
+    assert_eq!(clash.code, "test_exists");
+    assert!(clash.message.contains("first.yaml"), "{}", clash.message);
+}
+
+#[test]
+fn saving_needs_a_valid_id() {
+    let tree = worktree();
+    let err = save(tree.path(), "name: No id here\n").unwrap_err();
+    assert_eq!(err.code, "test_invalid_id");
+}

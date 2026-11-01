@@ -14,8 +14,8 @@ by step, with the verdict from `ys test wait`. A file from a repository never ru
 of a new or changed file waits until you approve it, on a card at the top of its workspace. The
 run opens as a tab beside the workspace's terminals, with every step, its output as it comes,
 and **Pass** / **Fail** for the steps a person does; **Run smoke test…** in a workspace's menu
-starts one from the app. See [Running a test](#running-a-test) and [In the app](#in-the-app).
-The Tests view, which lists every project's tests and runs in one place, is the next step.
+starts one from the app, and **Tests** in the sidebar lists every project's tests and runs in
+one place. See [Running a test](#running-a-test) and [In the app](#in-the-app).
 
 ## Where tests live
 
@@ -320,6 +320,37 @@ failed step's unless `--step` says, `--stderr` for the other stream. A run can b
 start of its id.
 
 ## In the app
+
+### The Tests view
+
+**Tests**, in the sidebar under _Workflows_, opens every project's smoke tests in one place. Its
+number is the runs waiting for your approval, across every workspace; it reaches zero when nothing
+is waiting. The view is read from the repositories when you open it and on **Refresh**, the way
+Tasks reads the forge.
+
+It has two tabs. **Tests** lists every test across every workspace, with the verdict of its last
+run — _passed_, _failed_, _never run_, _waiting for approval_ — when it ran, and in which
+workspace. **Runs** lists every run, newest first. The header filters narrow both: by project, by
+workspace, and — on Tests — the last verdict and whether a test **needs attention** (a browser the
+machine lacks, or an environment value the project has not set); on Runs, who asked (you, an
+agent, a workflow). A search box narrows by name. The filters are remembered between sessions.
+
+A test opens beside the list, to its file (read-only — it is the repository's, so edit it in the
+worktree), the problems or missing pieces it has, its run history across workspaces, and **Run
+in…** a workspace of its project. A run, from either tab, opens its [run tab](#the-run-tab) in its
+workspace. A row with a problem, a missing browser or an unset environment value is flagged where
+it sits, so what cannot run yet is plain before you try it.
+
+### Describe it
+
+Rather than write a test by hand, press **Describe it…** in the Tests view header, say what it
+should check, and a model writes the file: the agent you already have, in its non-interactive
+mode, or your Anthropic key — the same writers that draft a [workflow](workflows.md), chosen in
+Settings → Assist. What comes back is editable, with any problems marked, and is nothing until you
+pick a workspace and **Save** it into that worktree's `.yardsort/tests`, where it is then an
+ordinary uncommitted change in the Changes panel. The usual way a test gets written, though, is
+the agent in the workspace writing it itself, because it knows the feature — press Describe it when
+you want one and no agent is on it.
 
 ### The approval card
 

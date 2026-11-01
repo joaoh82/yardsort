@@ -9,6 +9,7 @@
 //! it. See `docs/design/32-smoke-tests.md`.
 
 pub mod browser;
+pub mod describe;
 mod parse;
 
 pub mod deliver;
@@ -467,6 +468,63 @@ pub const LAUNCH_SECTION: &str = "## Smoke tests\n\n\
 /// Where a worktree keeps its smoke tests.
 pub fn dir(worktree: &Path) -> PathBuf {
     worktree.join(".yardsort").join("tests")
+}
+
+/// Write a test file into a worktree's `.yardsort/tests`, at `<id>.yaml` for the file's own id,
+/// and return where it went. This is how **Describe it** saves what a model wrote; the usual way
+/// a test gets here is an agent writing the file itself. The file then is an ordinary uncommitted
+/// change in the worktree, like any the agent makes — nothing is approved or run by saving.
+///
+/// The id comes from the text, valid or not, so a draft with problems can still be saved and
+/// fixed in place. A different file in the folder already holding that id is a clash, refused
+/// rather than left as two files one id, which neither would then run under.
+pub fn save(worktree: &Path, text: &str) -> crate::error::IpcResult<PathBuf> {
+    use crate::error::IpcError;
+    if text.len() as u64 > MAX_FILE_BYTES {
+        return Err(IpcError::new(
+            "test_too_big",
+            format!("A smoke test file may be at most {MAX_FILE_BYTES} bytes."),
+        ));
+    }
+    let id = match parse(text) {
+        Ok(test) => Some(test.id),
+        Err(invalid) => invalid.id,
+    }
+    .filter(|id| crate::yaml::is_id(id))
+    .ok_or_else(|| {
+        IpcError::new(
+            "test_invalid_id",
+            "Give the test an `id:` first: lowercase letters, digits and `-`, like `login`.",
+        )
+    })?;
+    let folder = dir(worktree);
+    let path = folder.join(format!("{id}.yaml"));
+    if let Some(other) = catalog(worktree)
+        .into_iter()
+        .find(|entry| entry.id == id && Path::new(&entry.path) != path)
+    {
+        return Err(IpcError::new(
+            "test_exists",
+            format!(
+                "{} already has the id `{id}`. Give this one an id of its own.",
+                other.path
+            ),
+        ));
+    }
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", folder.display())))?;
+    let written = |path: &Path, e: std::io::Error| {
+        IpcError::new("io", format!("Cannot write {}: {e}", path.display()))
+    };
+    // Write through a temporary and rename, so a half-written file never sits where a run would
+    // read it.
+    let temporary = path.with_extension("yaml.saving");
+    std::fs::write(&temporary, text).map_err(|e| written(&temporary, e))?;
+    std::fs::rename(&temporary, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&temporary);
+        written(&path, e)
+    })?;
+    Ok(path)
 }
 
 /// Every test in a worktree's `.yardsort/tests`, sorted by name. A missing folder has none.
