@@ -603,7 +603,7 @@ and wakes when the host reports a session quiet or exited. The app holds `app.lo
 directory for as long as it runs (`presence`), which is how `ys` knows it is there and why only
 one app drives a profile's runs.
 
-## Remote access (preview: sign-in, pairing and the relay built; no phone app yet)
+## Remote access (preview: sign-in, pairing, the relay and the phone app's first slices built)
 
 Proposed in [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); the records are
 [26](26-remote-r0-r1.md) and [27](27-remote-r2.md). The daemon's socket stays local and file-permission protected. Nothing

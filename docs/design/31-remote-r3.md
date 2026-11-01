@@ -3,9 +3,9 @@
 **Status:** planned on 2026-10-30. The first slice, the TypeScript protocol client, was built on
 2026-10-31 (§9). The second, the app signed in, was built the same day (§10), and its smoke
 test passed on the owner's iPhone against staging on 2026-11-01. The third, pairing and computers,
-was built on 2026-11-01 (§11), and has not yet run on a phone. This is R3's plan: what it has to show, what it starts
-from, the decisions taken before any app code exists, the slices, and what each slice's smoke
-test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
+was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. This is R3's
+plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
+slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are in [26](26-remote-r0-r1.md),
 R2 in [27](27-remote-r2.md).
@@ -581,9 +581,11 @@ confirmed. Confirmed, it showed it revoked.
 
 ## 11 · What the third slice adds
 
-Built on 2026-11-01, on Linux. Nothing of it has run on a phone yet: its smoke test, below, is the
-first time, and the first time a channel opens under React Native. The server needed no change, so
-staging needs no deploy; the stand-in gained `hostOffline` and `hostOnline`, for its host to drop
+Built on 2026-11-01, on Linux. Its smoke test, below, passed on 2026-11-01: a development build on
+the owner's iPhone against staging, with the desktop app as the host, once the two things its first
+run found were fixed (below). That was the first time a channel opened under React Native. A link
+naming another server is shown only by tests, since the smoke test has no second server to name,
+and Android stays unbuilt. The server needed no change, so staging needs no deploy; the stand-in gained `hostOffline` and `hostOnline`, for its host to drop
 its link to the relay and make it again.
 
 - **Pairing** (`src/app/pair.tsx`, `src/lib/pairing.ts`): scan the computer's code with
@@ -629,7 +631,7 @@ its link to the relay and make it again.
 - **What was shown without a phone:** Metro bundles the app for iOS and Android, Hermes compiles
   both, `expo-doctor` passes its 20 checks, and `expo prebuild` writes the camera's reason into
   `Info.plist` with no microphone. None of that runs the app: the scanner, a link from the system
-  camera, and `WebSocket` under React Native are what the smoke test shows.
+  camera, and `WebSocket` under React Native were shown by the smoke test.
 - **Not built here:** as in §10. This adds a native module, so a phone needs a new build, not only
   new code from Metro.
 - **Found on the first run of the smoke test, on the iPhone:** two things no check here could see.

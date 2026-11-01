@@ -917,7 +917,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       untried. Slice 3 was built the same day: pairing by scanning, typing or a link, with a link's
       secret kept out of the router and a question before one is used, the computers with online,
       offline and last seen from a real channel, and unpairing
-      ([31 §11](31-remote-r3.md#11--what-the-third-slice-adds)). It has not run on a phone yet.
+      ([31 §11](31-remote-r3.md#11--what-the-third-slice-adds)). Its smoke test passed on the same
+      iPhone on 2026-11-01, once it had found the camera's missing reason and screens starting under
+      the iOS 26 header; Android is untried.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
