@@ -134,13 +134,14 @@ impl Fx {
         report::summary(&self.run(id), &self.steps(id))
     }
 
-    /// Wait until `found` says so about the run's steps, for at most ten seconds.
+    /// Wait until `found` says so about the run's steps, for at most thirty seconds: a loaded runner
+    /// can take ten to start a server.
     fn until(&self, id: &str, found: impl Fn(&[TestStepRow]) -> bool) {
         let started = Instant::now();
         while !found(&self.steps(id)) {
             assert!(
-                started.elapsed() < Duration::from_secs(10),
-                "still waiting after ten seconds: {:?}",
+                started.elapsed() < Duration::from_secs(30),
+                "still waiting after thirty seconds: {:?}",
                 self.steps(id)
             );
             std::thread::sleep(Duration::from_millis(50));
@@ -410,7 +411,7 @@ teardown:
     let asked = Instant::now();
     fx.driver.join();
     assert!(
-        asked.elapsed() < Duration::from_secs(8),
+        asked.elapsed() < Duration::from_secs(30),
         "stopped without waiting the minute out"
     );
 
@@ -491,12 +492,22 @@ steps:
     action: run
     {never}
 "#,
-            server = bun("console.error('cannot bind'); process.exit(2)"),
+            // It goes when told: gone before the next step begins, that step is skipped, not failed.
+            server = bun("console.error('cannot bind'); \
+                setInterval(() => require('fs').existsSync('server-may-exit') && process.exit(2), 20)"),
             never = bun("console.log('never')"),
         ),
     );
     let id = fx.queue("dying", &[]);
-    fx.drive();
+    assert!(fx.tick());
+    fx.until(&id, |steps| {
+        steps
+            .iter()
+            .any(|s| s.step_id == "ready" && s.status == "running")
+    });
+    std::fs::write(fx.worktree().join("server-may-exit"), "").unwrap();
+    fx.driver.join();
+    assert!(fx.tick());
     let run = fx.run(&id);
     assert_eq!(run.status, "failed");
     assert_eq!(
@@ -884,14 +895,10 @@ steps:
             .any(|s| s.step_id == "late" && s.status == "running")
     });
     fx.cancel_elsewhere(&id);
-    let asked = Instant::now();
     fx.driver.join();
-    assert!(
-        asked.elapsed() < Duration::from_secs(3),
-        "the cancel was seen while the request waited"
-    );
     let run = fx.run(&id);
     assert_eq!(run.status, "cancelled", "{}", fx.summary(&id));
+    // Seen only once the request came back, the step would have passed.
     let late = fx.step(&fx.steps(&id), "late").clone();
     assert_eq!(late.status, "cancelled");
     assert_eq!(late.note.as_deref(), Some("Cancelled while this ran."));

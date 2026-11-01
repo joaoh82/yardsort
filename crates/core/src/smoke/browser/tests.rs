@@ -234,8 +234,8 @@ fn a_failed_expectation_fails_the_step_and_shoots_it() {
         viewport: None,
         headed: false,
     };
-    // A short deadline so the wait gives up quickly.
-    let done = carry_out(&plan, &NoWatch, Duration::from_secs(8));
+    // Short enough that the wait gives up, and long enough for a loaded runner to load the page.
+    let done = carry_out(&plan, &NoWatch, Duration::from_secs(20));
     stop.store(true, Ordering::Relaxed);
 
     assert!(!done.passed, "a missing expectation should fail");

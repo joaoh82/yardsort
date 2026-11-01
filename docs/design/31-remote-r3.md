@@ -585,8 +585,8 @@ Built on 2026-11-01, on Linux. Its smoke test, below, passed on 2026-11-01: a de
 the owner's iPhone against staging, with the desktop app as the host, once the two things its first
 run found were fixed (below). That was the first time a channel opened under React Native. A link
 naming another server is shown only by tests, since the smoke test has no second server to name,
-and Android stays unbuilt. Step 10 came from review, after that run, and has not run on a phone
-yet. The server needed no change, so staging needs no deploy; the stand-in gained `hostOffline` and
+and Android stays unbuilt. Step 10 came from review, after that run, and passed on the same phone
+the same day. The server needed no change, so staging needs no deploy; the stand-in gained `hostOffline` and
 `hostOnline`, for its host to drop its link to the relay and make it again.
 
 - **Pairing** (`src/app/pair.tsx`, `src/lib/pairing.ts`): scan the computer's code with
