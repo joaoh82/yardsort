@@ -29,6 +29,7 @@ const health: TestItem = {
   problems: [],
   runnable: true,
   usesBrowser: false,
+  browserMissing: false,
   inputs: [
     {
       id: "user",
@@ -57,6 +58,7 @@ const broken: TestItem = {
   problems: [{ line: 4, column: 3, message: "A `run` step needs `program`." }],
   runnable: false,
   usesBrowser: false,
+  browserMissing: false,
   inputs: [],
 };
 

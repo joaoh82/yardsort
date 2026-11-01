@@ -1160,9 +1160,23 @@ impl Checker<'_> {
                     text: values.next()?,
                 }
             }
-            "press" => BrowserAction::Press {
-                key: text(self, "a key, like `Enter`")?,
-            },
+            "press" => {
+                let key = text(self, "a key, like `Enter`")?;
+                // One character types itself; a longer name must be one Yardsort knows, or
+                // `press: F5` would silently send its first letter.
+                if key.chars().count() > 1 && !super::browser::KEYS.contains(&key.as_str()) {
+                    self.problem(
+                        at,
+                        format!(
+                            "`{key}` is not a key `press` knows. Use a single character, or one \
+                             of: {}.",
+                            super::browser::KEYS.join(", ")
+                        ),
+                    );
+                    return None;
+                }
+                BrowserAction::Press { key }
+            }
             "select" => {
                 let mut values = fields(self, &["selector", "value"], &["value"])?.into_iter();
                 BrowserAction::Select {

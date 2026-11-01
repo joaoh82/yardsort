@@ -2473,6 +2473,11 @@ export type TestItem = {
 	problems: Problem[],
 	runnable: boolean,
 	usesBrowser: boolean,
+	/**
+	 *  The test has a `browser` step and no browser was found on the machine: it cannot run
+	 *  until one is installed or named in the project's settings.
+	 */
+	browserMissing: boolean,
 	/**  What a run asks for first. */
 	inputs: TestInput[],
 };
@@ -2570,6 +2575,8 @@ export type TestSettings = {
 	askEveryTime: boolean,
 	/**  Ended runs older than this many days are removed, with their output. */
 	keepDays: number,
+	/**  The browser `browser` steps use; empty means find one on the machine. */
+	browser: string,
 };
 
 /**  What starting a run came to. */

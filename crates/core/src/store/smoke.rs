@@ -119,13 +119,17 @@ pub enum TestQueued {
     AlreadyRunning(String),
 }
 
-/// What a project asks of its smoke test runs. See `migrations/0020_smoke_test_settings.sql`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a project asks of its smoke test runs. See `migrations/0020_smoke_test_settings.sql`
+/// and `migrations/0021_smoke_test_browser.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestSettings {
     /// Show every run's steps and ask, whether or not the file was approved before.
     pub ask_every_time: bool,
     /// Ended runs older than this many days are removed, with their output.
     pub keep_days: u32,
+    /// The browser a `browser` step uses, when the finder should not choose. Empty means find
+    /// one on the machine.
+    pub browser: String,
 }
 
 impl Default for TestSettings {
@@ -133,6 +137,7 @@ impl Default for TestSettings {
         Self {
             ask_every_time: false,
             keep_days: 30,
+            browser: String::new(),
         }
     }
 }
@@ -658,7 +663,7 @@ impl Store {
         Ok(self
             .conn()
             .query_row(
-                "SELECT ask_every_time, keep_days FROM project_test_settings
+                "SELECT ask_every_time, keep_days, browser FROM project_test_settings
                  WHERE project_id = ?",
                 [project_id],
                 test_settings_from_row,
@@ -673,11 +678,17 @@ impl Store {
         settings: &TestSettings,
     ) -> StoreResult<()> {
         self.conn().execute(
-            "INSERT INTO project_test_settings (project_id, ask_every_time, keep_days)
-             VALUES (?, ?, ?)
+            "INSERT INTO project_test_settings (project_id, ask_every_time, keep_days, browser)
+             VALUES (?, ?, ?, ?)
              ON CONFLICT(project_id) DO UPDATE
-             SET ask_every_time = excluded.ask_every_time, keep_days = excluded.keep_days",
-            params![project_id, settings.ask_every_time, settings.keep_days],
+             SET ask_every_time = excluded.ask_every_time, keep_days = excluded.keep_days,
+                 browser = excluded.browser",
+            params![
+                project_id,
+                settings.ask_every_time,
+                settings.keep_days,
+                settings.browser
+            ],
         )?;
         Ok(())
     }
@@ -687,7 +698,7 @@ impl Store {
     pub fn test_settings_by_project(&self) -> StoreResult<Vec<(String, TestSettings)>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT p.id, s.ask_every_time, s.keep_days FROM projects p
+            "SELECT p.id, s.ask_every_time, s.keep_days, s.browser FROM projects p
              LEFT JOIN project_test_settings s ON s.project_id = p.id
              ORDER BY p.sort_order",
         )?;
@@ -695,12 +706,14 @@ impl Store {
             let id: String = row.get(0)?;
             let ask: Option<bool> = row.get(1)?;
             let keep: Option<u32> = row.get(2)?;
+            let browser: Option<String> = row.get(3)?;
             let defaults = TestSettings::default();
             Ok((
                 id,
                 TestSettings {
                     ask_every_time: ask.unwrap_or(defaults.ask_every_time),
                     keep_days: keep.unwrap_or(defaults.keep_days),
+                    browser: browser.unwrap_or(defaults.browser),
                 },
             ))
         })?;
@@ -712,6 +725,7 @@ fn test_settings_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TestSetti
     Ok(TestSettings {
         ask_every_time: row.get(0)?,
         keep_days: row.get(1)?,
+        browser: row.get(2)?,
     })
 }
 
@@ -852,6 +866,7 @@ mod tests {
                 &TestSettings {
                     ask_every_time: true,
                     keep_days: 7,
+                    browser: "/usr/bin/chromium".to_owned(),
                 },
             )
             .unwrap();
@@ -859,7 +874,8 @@ mod tests {
             store.project_test_settings(&project).unwrap(),
             TestSettings {
                 ask_every_time: true,
-                keep_days: 7
+                keep_days: 7,
+                browser: "/usr/bin/chromium".to_owned(),
             }
         );
         assert_eq!(
@@ -869,7 +885,8 @@ mod tests {
                     project.clone(),
                     TestSettings {
                         ask_every_time: true,
-                        keep_days: 7
+                        keep_days: 7,
+                        browser: "/usr/bin/chromium".to_owned(),
                     }
                 ),
                 (other.id, TestSettings::default()),

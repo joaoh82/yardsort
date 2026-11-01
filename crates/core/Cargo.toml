@@ -41,6 +41,10 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # A smoke test file is approved by its content hash.
 sha2 = "0.10"
+# A smoke test's `browser` step drives a Chromium found on the machine over the DevTools
+# protocol, from the runner's own thread: a synchronous WebSocket, no async runtime. This is
+# the same library (minus tokio) the remote client already pulls in.
+tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
 
 # `setsid` and `flock`, for putting the daemon out of reach of signals meant for the app.
 [target.'cfg(unix)'.dependencies]

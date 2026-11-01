@@ -2808,6 +2808,9 @@ fn smoke_tests_are_listed_from_the_workspace_s_own_folder() {
     let example = fx.ys(&["test", "example"]).ok();
     write_smoke_test(&path, "health.yaml", &example);
     write_smoke_test(&path, "ping.yaml", SMOKE_TEST_WITH_A_TYPO);
+    // A test that needs no browser, so there is a `ready` row whether or not this machine has a
+    // browser for the example's `browser` step.
+    write_smoke_test(&path, "demo.yaml", SMOKE_TEST_WITH_GIT);
     let table = fx.ys(&["test", "list", "--workspace", name]).ok();
     assert!(table.contains("health"), "{table}");
     assert!(table.contains("ready"), "{table}");

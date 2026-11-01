@@ -120,7 +120,7 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::List { workspace } => {
             let ys = Yardsort::open(data_dir)?;
             let workspace = place(&ys, workspace.as_deref())?;
-            list(&workspace, out)
+            list(&ys, &workspace, out)
         }
         Command::Show { id, workspace } => {
             let ys = Yardsort::open(data_dir)?;
@@ -169,7 +169,7 @@ fn place(ys: &Yardsort, workspace: Option<&str>) -> Result<WorkspaceRow, Failure
     }
 }
 
-fn list(workspace: &WorkspaceRow, out: &Output) -> Result<(), Failure> {
+fn list(ys: &Yardsort, workspace: &WorkspaceRow, out: &Output) -> Result<(), Failure> {
     let worktree = Path::new(&workspace.path);
     let entries = smoke::catalog(worktree);
     let listed: Vec<Listed> = entries
@@ -200,12 +200,21 @@ fn list(workspace: &WorkspaceRow, out: &Output) -> Result<(), Failure> {
             "STATUS".to_owned(),
             "FILE".to_owned(),
         ]];
+        // Whether a `browser` test can run here turns on a browser: the project's named one if
+        // it set one, else whatever is on the machine — the same setting `ys test run` uses, so
+        // the two agree.
+        let setting = ys
+            .store
+            .project_test_settings(&workspace.project_id)
+            .map(|s| s.browser)
+            .unwrap_or_default();
+        let browser_found = smoke::browser::find_browser(&setting).is_some();
         rows.extend(entries.iter().map(|e| {
             let file = Path::new(&e.path)
                 .file_name()
                 .map(|f| f.to_string_lossy().into_owned())
                 .unwrap_or_else(|| e.path.clone());
-            vec![e.id.clone(), e.name.clone(), status(e), file]
+            vec![e.id.clone(), e.name.clone(), status(e, browser_found), file]
         }));
         table(&rows);
         sayln!();
@@ -240,7 +249,10 @@ fn show(workspace: &WorkspaceRow, id: &str, out: &Output) -> Result<(), Failure>
         }
         if !entry.problems.is_empty() {
             eprintln!();
-            eprintln!("{} — it cannot run until it is fixed:", status(&entry));
+            eprintln!(
+                "{} — it cannot run until it is fixed:",
+                status(&entry, true)
+            );
             for problem in &entry.problems {
                 eprintln!("{}", located(&entry.path, problem));
             }
@@ -745,12 +757,14 @@ fn located(name: &str, problem: &Problem) -> String {
     }
 }
 
-fn status(entry: &Entry) -> String {
-    if entry.runnable() {
-        "ready".to_owned()
-    } else {
-        count(entry.problems.len())
+fn status(entry: &Entry, browser_found: bool) -> String {
+    if !entry.runnable() {
+        return count(entry.problems.len());
     }
+    if entry.uses_browser() && !browser_found {
+        return "needs a browser".to_owned();
+    }
+    "ready".to_owned()
 }
 
 fn count(problems: usize) -> String {

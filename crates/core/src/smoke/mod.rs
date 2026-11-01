@@ -8,6 +8,7 @@
 //! the runner's business, and a file from a repository never runs without the user having seen
 //! it. See `docs/design/32-smoke-tests.md`.
 
+pub mod browser;
 mod parse;
 
 pub mod deliver;
