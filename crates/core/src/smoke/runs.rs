@@ -99,11 +99,11 @@ pub fn queue(store: &Store, request: &Request<'_>) -> IpcResult<Queued> {
             return Err(IpcError::new(
                 "test_needs_browser",
                 format!(
-                    "`{}` has a `browser` step (`{}`), and no browser was found. Looked for {}. \
-                     Name one under the project's smoke test settings.",
+                    "`{}` has a `browser` step (`{}`), and {}. Name one under the project's \
+                     smoke test settings.",
                     entry.id,
                     step.1.id,
-                    super::browser::looked_for()
+                    super::browser::missing_browser(&setting),
                 ),
             ));
         }

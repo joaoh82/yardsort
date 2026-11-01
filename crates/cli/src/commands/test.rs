@@ -120,7 +120,7 @@ pub fn run(data_dir: Option<PathBuf>, command: Command, out: &Output) -> Result<
         Command::List { workspace } => {
             let ys = Yardsort::open(data_dir)?;
             let workspace = place(&ys, workspace.as_deref())?;
-            list(&workspace, out)
+            list(&ys, &workspace, out)
         }
         Command::Show { id, workspace } => {
             let ys = Yardsort::open(data_dir)?;
@@ -169,7 +169,7 @@ fn place(ys: &Yardsort, workspace: Option<&str>) -> Result<WorkspaceRow, Failure
     }
 }
 
-fn list(workspace: &WorkspaceRow, out: &Output) -> Result<(), Failure> {
+fn list(ys: &Yardsort, workspace: &WorkspaceRow, out: &Output) -> Result<(), Failure> {
     let worktree = Path::new(&workspace.path);
     let entries = smoke::catalog(worktree);
     let listed: Vec<Listed> = entries
@@ -200,8 +200,15 @@ fn list(workspace: &WorkspaceRow, out: &Output) -> Result<(), Failure> {
             "STATUS".to_owned(),
             "FILE".to_owned(),
         ]];
-        // Whether a `browser` test can run here turns on a browser being on the machine.
-        let browser_found = smoke::browser::find_browser("").is_some();
+        // Whether a `browser` test can run here turns on a browser: the project's named one if
+        // it set one, else whatever is on the machine — the same setting `ys test run` uses, so
+        // the two agree.
+        let setting = ys
+            .store
+            .project_test_settings(&workspace.project_id)
+            .map(|s| s.browser)
+            .unwrap_or_default();
+        let browser_found = smoke::browser::find_browser(&setting).is_some();
         rows.extend(entries.iter().map(|e| {
             let file = Path::new(&e.path)
                 .file_name()

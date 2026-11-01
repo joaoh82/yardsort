@@ -61,6 +61,10 @@ pub trait Watch {
     fn stop(&self) -> Option<Stop>;
     /// A step's output file grew: whoever shows it should look again.
     fn output_grew(&self, step_id: &str);
+    /// A `browser` step just launched its browser: its pid and start fingerprint, so a restart
+    /// after a crash can kill it. Recorded on the step at once, not kept for the step's end,
+    /// since the browser outlives the app on Unix. Does nothing by default.
+    fn browser_launched(&self, _step_id: &str, _pid: u32, _fingerprint: Option<&str>) {}
 }
 
 /// What a step came to.
@@ -586,7 +590,6 @@ pub fn carry_out(
                 .output_dir
                 .join("scratch")
                 .join(format!("{step_id}-browser"));
-            let deadline = Instant::now() + Duration::from_secs(timeout(*timeout_secs));
             let plan = super::browser::Plan {
                 browser,
                 profile: &profile,
@@ -597,7 +600,10 @@ pub fn carry_out(
                 viewport: *viewport,
                 headed: *headed,
             };
-            super::browser::carry_out(&plan, watch, deadline).into_step_end()
+            // The step's clock starts inside `carry_out`, once the browser is up, so a slow
+            // launch does not eat the step's time.
+            let timeout = Duration::from_secs(timeout(*timeout_secs));
+            super::browser::carry_out(&plan, watch, timeout).into_step_end()
         }
         Action::Manual { .. } => StepEnd::failed("A manual step is the runner's to wait on."),
     }

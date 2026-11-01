@@ -528,6 +528,15 @@ fn browser_actions_are_one_key_each_from_the_vocabulary_with_the_right_shape() {
             text: None
         }
     );
+    // A single character is a key; a multi-character name must be one `press` knows, so a typo
+    // like `F5` is caught rather than sent as its first letter.
+    let test = parse(&step("press: x")).unwrap();
+    let Action::Browser { actions, .. } = &test.steps[1].action else {
+        panic!()
+    };
+    assert_eq!(actions[0], BrowserAction::Press { key: "x".into() });
+    let found = problem(&step("press: F5"));
+    assert!(found.contains("`F5` is not a key `press` knows"), "{found}");
 }
 
 // Variables.

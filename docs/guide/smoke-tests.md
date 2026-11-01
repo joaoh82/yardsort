@@ -194,23 +194,32 @@ reported.
 ### Browser actions
 
 Each item in `do` is one key and its value. Selectors are CSS, or `text=…` for an element by its
-text. Every action waits for its selector to exist and be visible before acting, up to the step's
-`timeout`, so there is no `sleep` and none is needed.
+text (which skips `script` and `style`, and prefers one you can see). Every action waits for its
+selector to exist and be visible before acting, up to the step's `timeout`, so there is no `sleep`
+and none is needed.
 
-| Action           | Value                                           |
-| ---------------- | ----------------------------------------------- |
-| `goto`           | An address                                      |
-| `click`          | A selector                                      |
-| `fill`           | `{ selector, text }`; an empty `text` clears it |
-| `press`          | A key, to the focused element: `Enter`, `Tab`   |
-| `select`         | `{ selector, value }`                           |
-| `wait_for`       | A selector, or `{ text: … }`                    |
-| `expect_text`    | Text that must be on the page                   |
-| `expect_visible` | A selector                                      |
-| `expect_hidden`  | A selector                                      |
-| `expect_url`     | A pattern over the address, like `**/dashboard` |
-| `expect_title`   | The page title                                  |
-| `screenshot`     | A name for the file                             |
+`goto` waits for the page to finish loading and fails if it never does, but an HTTP error status
+(a 404 or a 500) is still a page it went to — check what the page shows with `expect_text` or
+`expect_title`. `fill` sets the value the way a real keypress would, so an input a framework
+controls (React and the like) sees the change. `press` sends one key to the focused element: a
+single character types itself, or one of `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`,
+`ArrowUp`/`ArrowDown`/`ArrowLeft`/`ArrowRight`, `Home`, `End`, `PageUp`, `PageDown`, `Space` — any
+other multi-letter name is reported when the file is checked.
+
+| Action           | Value                                                                       |
+| ---------------- | --------------------------------------------------------------------------- |
+| `goto`           | An address                                                                  |
+| `click`          | A selector                                                                  |
+| `fill`           | `{ selector, text }`; an empty `text` clears it                             |
+| `press`          | A key, to the focused element: a character, or a name like `Enter` or `Tab` |
+| `select`         | `{ selector, value }`                                                       |
+| `wait_for`       | A selector, or `{ text: … }`                                                |
+| `expect_text`    | Text that must be on the page                                               |
+| `expect_visible` | A selector                                                                  |
+| `expect_hidden`  | A selector                                                                  |
+| `expect_url`     | A pattern over the address, like `**/dashboard`                             |
+| `expect_title`   | The page title                                                              |
+| `screenshot`     | A name for the file                                                         |
 
 ### Variables
 
@@ -255,8 +264,9 @@ examples. See [the `ys` command line](cli.md#ys-test).
 must be open: the app carries runs out, and `ys` says so and queues nothing when it is not.
 The command checks the file, every input and every `{{ env.NAME }}` the test uses before
 anything is queued. A test with a `browser` step needs a browser on the machine; if none is
-found it is refused, naming what was looked for, so name one under the project's smoke test
-settings. It prints the run's id and returns at once.
+found it is refused, saying whether the project's named browser was not there or none was found
+at all, so name one under the project's smoke test settings. It prints the run's id and returns
+at once.
 
 **Approval.** A test says what to run on your machine, and it comes from a repository. So a run
 of a file you have not seen — new, or changed in any way since you last approved it — is queued
@@ -389,8 +399,10 @@ tabs, has a _Smoke tests_ part:
   changed. Runs waiting, queued or going are never removed.
 - **Browser** — the browser a `browser` step drives. Left empty, Yardsort finds one: Chrome,
   then Chromium, then Edge, on your `PATH` and in the usual install folders. Set the full path to
-  a Chromium-family browser to use that one instead. Nothing is installed and no Node is needed; a
-  `browser` test with no browser found is refused, naming what was looked for.
+  a Chromium-family browser to use that one, and only that one — a path that is not there is
+  _needs a browser_, never a quiet fall back to a different browser. Nothing is installed and no
+  Node is needed; a `browser` test whose browser is not found is refused, saying whether it was
+  the path you named or no browser at all.
 
 ## Agents
 

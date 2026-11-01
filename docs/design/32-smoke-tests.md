@@ -329,8 +329,13 @@ port and WebSocket path it writes to `DevToolsActivePort`, and speak the DevTool
 blocking WebSocket. Slice 4 decided this against the pipe, which the proposal preferred: the core
 is deliberately synchronous with no tokio, so `chromiumoxide` (async) was out, and the pipe's
 extra inherited handles cannot be passed through `std::process` on Windows without a hand-rolled
-`CreateProcess`. The port is loopback-only, token-guarded by the file, and up only while the step
-runs; the client (`Conn`) is small (a handful of methods) and the transport is behind it, so the
+`CreateProcess`. The port is loopback-only and up only while the step runs, but it is not
+token-guarded: DevTools' `/json` endpoints hand the page's WebSocket URL to any local process that
+reaches the port, which could then drive the browser — its filled-in secrets included — for as
+long as the step lasts. On a single-user machine, for a port that lives only seconds, that is an
+accepted risk, and it is the argument for the port over the pipe; a multi-user host is out of
+scope for version one. The client (`Conn`) is small (a handful of methods) and the transport is
+behind it, so the
 pipe can replace it later without touching the actions. One page per step, driven mostly by
 evaluating JavaScript, with keys through the input domain; a screenshot into `output_dir` on
 failure, or after every action when asked. The browser is closed at the end of each step; a test
@@ -637,13 +642,22 @@ the Smoke tests part of the Project settings dialog, `smoke::words` in the core,
   (and wait for the load), `click`, `fill`, `select`, `wait_for` (a selector or text),
   `expect_text`/`expect_visible`/`expect_hidden`/`expect_url` (a glob)/`expect_title`, and
   `screenshot`. `press` goes through the input domain, so `Enter` submits a form as a real key
-  would. Selectors are CSS or `text=...`; every action that needs an element waits for it,
-  visible, up to the step's timeout, so a file needs no `sleep`.
-- **The finder** looks for Chrome, then Chromium, then Edge: on `PATH`, then each platform's usual
-  folders, then the project's named browser. A `browser` test with none found is listed _needs a
-  browser_ (`ys test list`, the Run dialog) and refused at the door (`runs::queue`,
-  `test_needs_browser`), naming what was looked for. The project names one under Settings ->
-  Projects -> Smoke tests (migration 0021).
+  would, and `fill` writes through the native value setter, so a React-style controlled input
+  sees the change. `goto` fails if the page never finishes loading in the step's time, but a 404
+  or 500 is still "gone to" — assert what the page shows with `expect_*`. Selectors are CSS or
+  `text=...` (which skips `script`/`style` and prefers a visible match); every action that needs
+  an element waits for it, visible, up to the step's timeout, so a file needs no `sleep`. A
+  `click` that navigates, an `alert()`/`confirm()`, and `ys test cancel` are all handled while a
+  call is in flight, so a step never hangs past its limit.
+- **The finder** uses the project's named browser if it set one — that path, and nothing else, so
+  a typo is _needs a browser_ rather than a silent fall back to another browser. With none named,
+  it looks for Chrome, then Chromium, then Edge: on `PATH`, then each platform's usual folders. A
+  `browser` test whose browser is not found is listed _needs a browser_ (`ys test list`, the Run
+  dialog) and refused at the door (`runs::queue`, `test_needs_browser`), saying whether it was the
+  named path or no browser at all. The project names one under Settings -> Projects -> Smoke tests
+  (migration 0021). The browser launches with its sandbox on; only after a sandboxed launch fails
+  — a CI container, a Linux with unprivileged user namespaces restricted — does it retry with
+  `--no-sandbox`, so a developer's own machine keeps the sandbox a `goto` relies on.
 - **Screenshots** are PNGs under the run's output, named `<step>.<name>.png`: one per `screenshot`
   action, one of the page as it was on failure unless `screenshots: never`, or one after every
   action with `screenshots: every_step`. They land on the step row and show in the run tab.

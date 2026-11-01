@@ -164,13 +164,15 @@ impl Driver {
     }
 }
 
-/// Runs found `running` were interrupted by the app stopping: they are ended, and the `start`
-/// processes they left are killed if they are still the same processes. True when any was.
+/// Runs found `running` were interrupted by the app stopping: they are ended, and the processes
+/// they left are killed if they are still the same processes. That is every `start` server, and
+/// a `browser` step that was running when the app died — its browser outlives the app on Unix.
+/// True when any run was interrupted.
 fn recover(store: &Store) -> IpcResult<bool> {
     let interrupted = store.end_interrupted_test_runs(INTERRUPTED)?;
     for run in &interrupted {
         for step in store.test_steps(&run.id)? {
-            if step.action != "start" {
+            if step.action != "start" && step.action != "browser" {
                 continue;
             }
             let outputs = step.outputs();
@@ -311,6 +313,30 @@ impl Watch for Watching<'_> {
             run_id: self.run_id.to_owned(),
             step_id: step_id.to_owned(),
         });
+    }
+
+    fn browser_launched(&self, step_id: &str, pid: u32, fingerprint: Option<&str>) {
+        // Put the pid and fingerprint on the step now, while it is still `running`, so a restart
+        // after a crash can find and kill the browser (see `recover`). The step's own end
+        // replaces these outputs with its url/title, by which time the browser is gone.
+        let mut outputs = BTreeMap::new();
+        outputs.insert("pid".to_owned(), pid.to_string());
+        if let Some(print) = fingerprint {
+            outputs.insert("process".to_owned(), print.to_owned());
+        }
+        let outputs = serde_json::to_string(&outputs).unwrap_or_else(|_| "{}".to_owned());
+        let _ = self.store.move_test_step(
+            self.run_id,
+            step_id,
+            &["running"],
+            &StepChange {
+                to: "running",
+                exit: None,
+                outputs: Some(&outputs),
+                note: None,
+                screenshots: None,
+            },
+        );
     }
 }
 
