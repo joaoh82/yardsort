@@ -670,7 +670,9 @@ fn a_run_test_step_queues_the_run_waits_and_passes_with_it() {
 }
 
 #[test]
-fn a_run_test_step_fails_when_the_run_fails() {
+fn a_failed_test_succeeds_the_step_with_a_failed_verdict() {
+    // A test that ran and failed is still a verdict: the step succeeds and carries `failed`, so
+    // a later step can read it and act on the failure.
     let mut run = Run::from(RUN_TEST_WF);
     run.advance();
     let queued_out: Outputs = [("run".to_owned(), "tr-9".to_owned())].into();
@@ -683,10 +685,86 @@ fn a_run_test_step_fails_when_the_run_fails() {
         },
     );
     run.advance();
-    assert_eq!(run.status("smoke"), "failed");
+    assert_eq!(run.status("smoke"), "succeeded");
     let out = parse_outputs(&run.rows[0].outputs);
     assert_eq!(out.get("verdict").map(String::as_str), Some("failed"));
+    assert!(out.get("summary").unwrap().contains("failed  login"));
+    assert_eq!(run.note("smoke"), Some("The test failed."));
+    assert_eq!(run.finished, Some(Finish::Succeeded));
+}
+
+#[test]
+fn a_run_test_step_fails_when_the_run_reaches_no_verdict() {
+    // Cancelled or errored is not a verdict: the step fails, so `needs` can gate on it.
+    let mut run = Run::from(RUN_TEST_WF);
+    run.advance();
+    let queued_out: Outputs = [("run".to_owned(), "tr-c".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    run.world.test_runs.insert(
+        "tr-c".into(),
+        TestRun {
+            status: "cancelled".into(),
+            summary: "cancelled".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("smoke"), "failed");
+    assert_eq!(run.note("smoke"), Some("The test run cancelled."));
     assert!(matches!(run.finished, Some(Finish::Failed(_))));
+}
+
+const SMOKE_THEN_TELL_WF: &str = r#"
+id: stt
+name: T
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: test
+    action: run_test
+    test: login
+    timeout: 30m
+  - id: tell
+    action: send_to_session
+    needs: [test]
+    session: origin
+    timeout: 1h
+    prompt: "how it went: {{ steps.test.summary }}"
+"#;
+
+#[test]
+fn a_failing_test_still_tells_the_agent() {
+    // The shape of the "Smoke test, then tell the agent" built-in: `tell` needs `test`, and a
+    // failing test must still reach it, summary and all, so the agent can repair.
+    let mut run = Run::from(SMOKE_THEN_TELL_WF);
+    run.world.origin = Some("pty-o".into());
+    // A quiet origin session is waiting, so `tell` can fire the moment `test` ends.
+    run.session(
+        "pty-o",
+        SessionFacts {
+            alive: true,
+            busy: false,
+            settled_at: Some(0),
+        },
+    );
+    run.advance();
+    let queued_out: Outputs = [("run".to_owned(), "tr".to_owned())].into();
+    assert!(run.apply(&queued("test", &queued_out)));
+    run.world.test_runs.insert(
+        "tr".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "failed  login  (2 of 6 steps passed)".into(),
+        },
+    );
+    // One pass: `test` succeeds with the failed verdict, which unblocks `tell`, which pastes.
+    let effects = run.advance();
+    assert_eq!(run.status("test"), "succeeded");
+    assert_eq!(run.status("tell"), "running");
+    match effects.iter().find(|e| matches!(e, Effect::Paste { .. })) {
+        Some(Effect::Paste { text, .. }) => assert!(text.contains("failed  login")),
+        other => panic!("expected a paste, got {other:?}"),
+    }
 }
 
 #[test]

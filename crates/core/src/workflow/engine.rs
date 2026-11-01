@@ -554,17 +554,22 @@ fn wait(
                     left.insert("summary".into(), test.summary);
                     let outputs =
                         Some(serde_json::to_string(&left).unwrap_or_else(|_| "{}".into()));
-                    if test.status == "passed" {
-                        Some(Move {
-                            outputs,
-                            ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
-                        })
-                    } else {
-                        Some(Move {
+                    // A test that reached a verdict — passed or failed — succeeds the step, so a
+                    // later step can read `verdict` and act on either outcome; that is how "Smoke
+                    // test, then tell the agent" reports a failure for the agent to repair. A run
+                    // that reached no verdict (cancelled, errored) fails the step, so `needs`
+                    // gates downstream on it.
+                    match test.status.as_str() {
+                        "passed" | "failed" => Some(Move {
                             outputs,
                             note: Some(format!("The test {}.", test.status)),
+                            ..to(id, StepStatus::Waiting, StepStatus::Succeeded)
+                        }),
+                        other => Some(Move {
+                            outputs,
+                            note: Some(format!("The test run {other}.")),
                             ..to(id, StepStatus::Waiting, StepStatus::Failed)
-                        })
+                        }),
                     }
                 }
             }

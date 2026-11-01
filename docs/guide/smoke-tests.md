@@ -419,6 +419,7 @@ short paragraph pointing it at `ys test list`, `ys test run` and `ys test guide`
 explain the commands each time.
 
 A [workflow](workflows.md) can run a test too, with its `run_test` step, which queues a run and
-finishes with it. The built-in **Smoke test, then tell the agent** is exactly that followed by a
-message to the workspace's agent with the result — the shape of "when the agent is done, smoke
-test it and tell it what broke."
+waits for its verdict — passing or failing with it, so a later step can act on either. The
+built-in **Smoke test, then tell the agent** is exactly that followed by a message to the
+workspace's agent with the result, whether it passed or failed — the shape of "when the agent is
+done, smoke test it and tell it what broke."

@@ -50,8 +50,10 @@ pub const SYSTEM: &str = concat!(
      optional `timeout`.\n\
        - `wait_pr_activity`: waits for a review or comment on the workspace's pull request \
      after the run started. Optional `kind` (`review`, `comment`, `any`), optional `timeout`.\n\
-       - `run_test`: runs one of the workspace's smoke tests and waits for it to finish, \
-     passing or failing with it. `test` (a test id, or exactly `\"{{ inputs.<id> }}\"` for an \
+       - `run_test`: runs one of the workspace's smoke tests and waits for its verdict. The \
+     step succeeds whether the test passed or failed, leaving `verdict` for a later step to act \
+     on either way; it fails only if the run reached no verdict or did not end in time. `test` \
+     (a test id, or exactly `\"{{ inputs.<id> }}\"` for an \
      input of kind test), optional `inputs` (a map of the test's input ids to values), optional \
      `timeout`.\n\
        - `notify`: `title`, optional `body`. A system notification.\n\

@@ -49,8 +49,9 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
   const [previewed, setPreviewed] = useState<{ key: string; preview: RunPreview } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The chosen workspace's smoke tests, for a `test` input to pick from.
-  const [tests, setTests] = useState<TestItem[]>([]);
+  // The chosen workspace's smoke tests, for a `test` input to pick from, and which workspace the
+  // core listed them for: switching workspace leaves the old list stale until the new one lands.
+  const [tests, setTests] = useState<{ workspace: string; items: TestItem[] } | null>(null);
 
   useEffect(() => {
     void useHarnessStore.getState().load();
@@ -71,18 +72,35 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
   // Every input starts from its default. A required agent starts on the first one installed,
   // and a required choice on its first option: what the control shows must be the answer.
   const firstAgent = harnesses.find((h) => h.resolvedPath)?.id ?? "";
-  const runnableTests = tests.filter((test) => test.runnable && !test.browserMissing);
+  // A `test` input picks from the chosen workspace's smoke tests; load them when one is needed.
+  const needsTest = inputs.some((input) => input.kind === "test");
+  // Only the tests the core listed for the workspace now chosen count. Until that load lands
+  // (`testsLoaded` is false) there are none to offer and Run waits; a list left over from another
+  // workspace never leaks in.
+  const testsHere = tests?.workspace === chosenWorkspace ? tests.items : null;
+  const testsLoaded = testsHere !== null;
+  const runnableTests = (testsHere ?? []).filter((test) => test.runnable && !test.browserMissing);
   const firstTest = runnableTests[0]?.id ?? "";
   const startsOn = (input: Input): string => {
     if (input.default) return input.default;
     if (!input.required) return "";
     if (input.kind === "harness") return firstAgent;
-    if (input.kind === "test") return firstTest;
     if (input.kind === "choice") return input.options[0] ?? "";
     return "";
   };
+  // A `test` answer must be a runnable test in the chosen workspace: a pick left over from another
+  // workspace, or a default that is not among them, falls back to the first runnable one (or "").
+  // So what Run submits is always exactly what the select shows.
+  const answerFor = (input: Input): string => {
+    const stored = chosen[chosenWorkflow]?.[input.id];
+    if (input.kind === "test") {
+      const pick = stored ?? input.default ?? "";
+      return pick && runnableTests.some((test) => test.id === pick) ? pick : firstTest;
+    }
+    return stored ?? startsOn(input);
+  };
   const answers: Record<string, string> = Object.fromEntries(
-    inputs.map((input) => [input.id, chosen[chosenWorkflow]?.[input.id] ?? startsOn(input)]),
+    inputs.map((input) => [input.id, answerFor(input)]),
   );
   const answer = (id: string, value: string) =>
     setChosen((all) => ({ ...all, [chosenWorkflow]: { ...all[chosenWorkflow], [id]: value } }));
@@ -101,15 +119,12 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
     };
   }, [chosenWorkflow, chosenWorkspace, workflow, previewKey]);
 
-  // A `test` input picks from the chosen workspace's smoke tests; load them when one is needed.
-  const needsTest = inputs.some((input) => input.kind === "test");
   useEffect(() => {
-    if (!needsTest) return;
+    if (!needsTest || !chosenWorkspace) return;
     let current = true;
-    const load = chosenWorkspace ? ipc.testList(chosenWorkspace) : Promise.resolve([]);
-    load.then(
-      (found) => current && setTests(found),
-      () => current && setTests([]),
+    ipc.testList(chosenWorkspace).then(
+      (found) => current && setTests({ workspace: chosenWorkspace, items: found }),
+      () => current && setTests({ workspace: chosenWorkspace, items: [] }),
     );
     return () => {
       current = false;
@@ -129,6 +144,7 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
     preview !== null &&
     missing.length === 0 &&
     !blockedByPullRequest &&
+    (!needsTest || testsLoaded) &&
     !busy;
 
   async function start(event: React.FormEvent) {
@@ -253,10 +269,11 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
                   className={control}
                   value={answers[input.id] ?? ""}
                   onChange={(event) => answer(input.id, event.target.value)}
-                  disabled={runnableTests.length === 0}
+                  disabled={!testsLoaded || runnableTests.length === 0}
                 >
                   {!input.required && <option value="">None</option>}
-                  {runnableTests.length === 0 && (
+                  {chosenWorkspace && !testsLoaded && <option value="">Loading…</option>}
+                  {testsLoaded && runnableTests.length === 0 && (
                     <option value="">No runnable smoke tests here</option>
                   )}
                   {runnableTests.map((test) => (

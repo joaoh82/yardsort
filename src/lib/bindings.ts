@@ -577,8 +577,10 @@ export type Action =
 /**  Wait for a review or a comment on the workspace's pull request, newer than the run. */
 { action: "wait_pr_activity"; kind: PrActivity; timeoutSecs: number | null } | 
 /**
- *  Run a smoke test in the run's workspace and end when it does, passing or failing with it.
- *  Leaves `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+ *  Run a smoke test in the run's workspace and wait for its verdict. The step succeeds once
+ *  the test passed or failed — a later step reads `verdict` and acts on either — and fails
+ *  only when the run reaches no verdict (cancelled, errored) or does not end in time. Leaves
+ *  `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
  */
 { action: "run_test"; test: string; 
 /**  Values for the test's inputs, by input id; may hold `{{ variables }}`. */

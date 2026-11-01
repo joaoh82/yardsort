@@ -6,9 +6,10 @@ has the downloads and the full commit lists.
 ## Unreleased
 
 - **Workflows can run a smoke test.** A new `run_test` step queues one of the workspace's smoke
-  tests and waits for it, passing or failing with the run and leaving the verdict and summary for
-  later steps. The built-in **Smoke test, then tell the agent** does exactly that and then tells
-  the workspace's own agent how it went. Agents are told smoke tests exist in their first message,
+  tests and waits for its verdict, leaving the verdict and summary for later steps; it succeeds
+  whether the test passed or failed, so a later step can act on either, and fails only when the
+  run reaches no verdict or does not end in time. The built-in **Smoke test, then tell the agent**
+  does exactly that and then tells the workspace's own agent how it went, pass or fail. Agents are told smoke tests exist in their first message,
   when the project has a `.yardsort/tests` folder or a test environment set. See
   [Workflows](docs/guide/workflows.md#steps) and [Smoke tests](docs/guide/smoke-tests.md#agents).
 

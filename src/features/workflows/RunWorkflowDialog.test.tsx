@@ -212,6 +212,94 @@ describe("RunWorkflowDialog", () => {
     expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, { suite: "login" });
   });
 
+  it("revalidates the test pick when the workspace changes", async () => {
+    // One workflow, one required `test` input, chosen workspace and all.
+    const smokeOnly: WorkflowItem = {
+      ...review,
+      id: "smoke",
+      name: "Smoke",
+      workflow: {
+        ...review.workflow!,
+        id: "smoke",
+        name: "Smoke",
+        inputs: [
+          {
+            id: "suite",
+            kind: "test",
+            label: "Which smoke test",
+            required: true,
+            default: null,
+            options: [],
+          },
+        ],
+      },
+    };
+    useWorkflowStore.setState({ items: [smokeOnly], loaded: true });
+    const alpha = worktree("app", "alpha");
+    const beta = worktree("app", "beta");
+    const gamma = worktree("app", "gamma");
+    useProjectsStore.setState({
+      projects: [{ ...project("app"), workspaces: [alpha, beta, gamma] }],
+    });
+    const item = (id: string, name: string) => ({
+      id,
+      name,
+      description: null,
+      path: `/w/.yardsort/tests/${id}.yaml`,
+      text: "",
+      problems: [],
+      runnable: true,
+      usesBrowser: false,
+      browserMissing: false,
+      inputs: [],
+    });
+    const lists: Record<string, ReturnType<typeof item>[]> = {
+      [alpha.id]: [item("login", "Log in"), item("logout", "Log out")],
+      [beta.id]: [item("health", "Health")],
+      [gamma.id]: [],
+    };
+    core.testList.mockImplementation((ws: string) => Promise.resolve(lists[ws] ?? []));
+    core.workflowPreview.mockResolvedValue({
+      needsPullRequest: false,
+      pullRequest: null,
+      pullRequestProblem: null,
+      needsOrigin: false,
+      empty: [],
+    });
+    core.workflowStart.mockResolvedValue("run-s");
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog onClose={() => {}} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workflow" }), "smoke");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workspace" }), alpha.id);
+    const picker = await screen.findByRole("combobox", { name: "Which smoke test" });
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: "Log out" })).toBeInTheDocument(),
+    );
+    // Explicitly pick the second test, which only exists in workspace alpha.
+    await user.selectOptions(picker, "logout");
+    expect(picker).toHaveValue("logout");
+
+    // Switch to a workspace with no tests: the stale pick cannot carry over, and Run is disabled.
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workspace" }), gamma.id);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: "No runnable smoke tests here" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+
+    // Switch to a workspace whose only test is `health`: the pick revalidates to it, and that is
+    // what both the select shows and Run submits — never the stale `logout`.
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workspace" }), beta.id);
+    await waitFor(() => expect(picker).toHaveValue("health"));
+    expect(screen.queryByRole("option", { name: "Log out" })).toBeNull();
+    const run = screen.getByRole("button", { name: "Run" });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    expect(core.workflowStart).toHaveBeenCalledWith("smoke", beta.id, { suite: "health" });
+  });
+
   it("says what the run will render as nothing, and still lets it run", async () => {
     core.workflowPreview.mockResolvedValue({
       ...withPr,
