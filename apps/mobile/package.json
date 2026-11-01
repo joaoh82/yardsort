@@ -6,8 +6,8 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start --dev-client",
-    "ios": "expo run:ios --device",
-    "android": "expo run:android",
+    "ios": "expo prebuild --platform ios --no-install && expo run:ios --device",
+    "android": "expo prebuild --platform android --no-install && expo run:android",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "bun test test/lib && jest"
@@ -17,6 +17,7 @@
     "@expo/metro-runtime": "58.0.16",
     "@yardsort/remote-client": "file:../../packages/remote-client",
     "expo": "58.0.22",
+    "expo-camera": "58.0.14",
     "expo-constants": "58.0.14",
     "expo-crypto": "58.0.7",
     "expo-dev-client": "58.0.18",

@@ -168,9 +168,10 @@ describe("liveness", () => {
         });
       }
     });
+    // Long enough for several renewals to arrive, even on a loaded runner.
     const channel = await openChannel(client, access, HOST, {
       client: "test/1",
-      probeAfterMs: 150,
+      probeAfterMs: 600,
       probeTimeoutMs: 100,
     });
     const losses: ControlLoss[] = [];

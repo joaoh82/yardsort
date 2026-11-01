@@ -2,9 +2,10 @@
 
 **Status:** planned on 2026-10-30. The first slice, the TypeScript protocol client, was built on
 2026-10-31 (§9). The second, the app signed in, was built the same day (§10), and its smoke
-test passed on the owner's iPhone against staging on 2026-11-01. This is R3's plan: what it has to show, what it starts
-from, the decisions taken before any app code exists, the slices, and what each slice's smoke
-test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
+test passed on the owner's iPhone against staging on 2026-11-01. The third, pairing and computers,
+was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. This is R3's
+plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
+slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are in [26](26-remote-r0-r1.md),
 R2 in [27](27-remote-r2.md).
@@ -578,7 +579,108 @@ first-launch components, an Apple Development certificate, Apple's WWDR G3 inter
 On the first run, the list showed the phone still signed in: the second **Sign out** had not been
 confirmed. Confirmed, it showed it revoked.
 
-## 11 · Open after this plan
+## 11 · What the third slice adds
+
+Built on 2026-11-01, on Linux. Its smoke test, below, passed on 2026-11-01: a development build on
+the owner's iPhone against staging, with the desktop app as the host, once the two things its first
+run found were fixed (below). That was the first time a channel opened under React Native. A link
+naming another server is shown only by tests, since the smoke test has no second server to name,
+and Android stays unbuilt. Step 10 came from review, after that run, and passed on the same phone
+the same day. The server needed no change, so staging needs no deploy; the stand-in gained `hostOffline` and
+`hostOnline`, for its host to drop its link to the relay and make it again.
+
+- **Pairing** (`src/app/pair.tsx`, `src/lib/pairing.ts`): scan the computer's code with
+  `expo-camera`, which opens only when asked for and asks for no microphone, or type its eight
+  characters. The app redeems the offer, then asks for its grant every two seconds until the
+  person at the computer answers. It asks for every scope a phone uses, and says what it was given.
+  A no, a request that ran out, and a wrong or expired code each say so.
+- **A link keeps its secret out of the router.** `yardsort://pair` is taken in `+native-intent.ts`
+  before the router reads it, and held in memory in `Incoming`: routes, history and params only
+  ever see `/pair`, and nothing is written to disk. A link lost to a restart costs a new scan.
+- **A link is never used on its own say.**
+  - Scanned in the app, the person chose it, so it goes at once.
+  - From outside the app, whoever sent it is unknown, so the app asks first.
+  - Naming a server this phone is signed in to, not the one in use, it asks before switching.
+  - Naming one it is not signed in to, it asks, then goes through Connect, with what that server
+    can see, before anything is sent there. Nothing of one server goes to another.
+  - Naming an address the app will not use, plain `http` to a remote host for one, it goes nowhere.
+- **An offer goes once**, so `Incoming` hands a link out once, however many ask. A camera reports
+  the same code many times a second, and an effect may run again. The pair screen is
+  `dangerouslySingular`, and signing in returns to the one already open. The first version opened
+  a second, and two screens could each have spent the offer; a test found that.
+- **A link arriving while the screen is busy** is asked about first, whatever the screen was doing:
+  sending another, waiting for a computer, or showing an answer. A no goes back to that. A yes goes
+  on, and an earlier request stays open at the server, where the account screen can cancel it until
+  it runs out. Letting go of a sent link leaves a newer one that replaced it, and only the newest
+  request moves the screen on. Review found the first version losing or hiding the newer link.
+- **Computers** (`src/ui/computers.tsx`) come first on the account screen: approved grants whose
+  computer is still on the account, requests still waiting, which can be cancelled, and **Pair a
+  computer**. **Unpair** asks first, and the phone stays signed in.
+- **Online is what the socket says** (`src/lib/presence.ts`, §5). A computer is online while a
+  channel to it is open, offline with when it was last seen when the relay says so, and
+  reconnecting in between, waiting 2 seconds, doubling up to 30. An offline computer is asked
+  about again every 15 seconds. A computer that no longer lets this phone in (4003, 4010,
+  `forbidden`, `not_found`) is not asked again until the next start, and the list is read again.
+  Channels are held only while the list is on screen and the app is in the foreground.
+- **Left for later:** the small cache of computers (§5) comes with slice 4's workspaces, and telling
+  apart everything 4003 can mean comes with slice 7. For now a 4003 reads the list again, which
+  drops a computer that took back its grant and signs out a phone that was revoked.
+- **Tests: 84.** The logic, 54 under `bun test`, 24 of them new, against the real server, relay and
+  host: pairing by code and by link, a no, a wrong code, an offer going once, a request taken back,
+  unpairing, waiting through a server out of reach, where a link belongs, online, offline before
+  and after opening, coming back, a grant taken back at the computer, and channels closed on
+  stopping. The screens, 30 under Jest, 20 of them new. Breaking any of these failed a test:
+  closing channels on stopping, offline read from the close or from opening, not asking again
+  about a computer gone, where a link belongs, a link handed out once, the question before using
+  a link, keeping the secret from the router, returning to the pair screen, and holding channels
+  only on screen.
+- **What was shown without a phone:** Metro bundles the app for iOS and Android, Hermes compiles
+  both, `expo-doctor` passes its 20 checks, and `expo prebuild` writes the camera's reason into
+  `Info.plist` with no microphone. None of that runs the app: the scanner, a link from the system
+  camera, and `WebSocket` under React Native were shown by the smoke test.
+- **Not built here:** as in §10. This adds a native module, so a phone needs a new build, not only
+  new code from Metro.
+- **Found on the first run of the smoke test, on the iPhone:** two things no check here could see.
+  `expo run:ios` does not apply `app.config.ts` to an `ios/` that already exists, so a build over
+  slice 2's project linked the camera without its `Info.plist` reason, and the camera stopped the
+  app with a red error. `just mobile-ios` now runs `expo prebuild` first. With a project generated
+  here and its reason removed, that put the reason back. It also clears the signing team, which
+  `expo run:ios` sets again: by itself with one signing identity on the Mac, and by asking, last
+  choice first, with more. And from iOS 26 the header is glass laid over the screen, so every
+  screen began underneath it, since a React Native scroll view does not leave room for a header
+  unless told to. It now does.
+
+**Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
+
+1. On the computer, from this branch, with a throwaway profile:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
+   Settings → Remote: server `https://remote-staging.yardsort.sh`, **Turn on and sign in** with the
+   staging account.
+2. On the Mac, from this branch: `just mobile-ios`. Sign in on the phone with the same account. The
+   account screen says no computer lets this phone in yet.
+3. **By typing.** On the computer, **Pair a device**. On the phone, **Pair a computer**, type the
+   code. It says to say yes at the computer. Let it watch and type. The phone says it was let in and
+   what it may do; **Done**, and the computer is listed as **Online**.
+4. **Unpair.** **Unpair**, then **Cancel**: still listed. **Unpair** and confirm: gone from the
+   phone and from the computer's list, and the phone is still signed in.
+5. **By scanning.** **Pair a device**, **Pair a computer**, **Scan the code**, allow the camera, and
+   point it at the code. Deny it at the computer: the phone says the computer said no.
+6. **From the system camera.** **Pair a device**. Scan the code with the iPhone's Camera app, and
+   open the link. The app asks first. **Ask the computer**, and approve it. **Online.**
+7. **Offline.** Quit the desktop app. Within seconds the phone shows **Offline, last seen …**, and
+   that its agents did not stop. Start it again: **Online** within about 15 seconds.
+8. **Taken back at the computer.** **Revoke** it in the desktop app. The computer goes from the
+   phone's list, and the phone is still signed in.
+9. **A wrong or expired code.** Type `ABCD-2345`: it says the code is wrong or has expired. Show a
+   code at the computer, wait out its five minutes, and type it: the same.
+10. **A second link while waiting.** **Pair a device**, then type the code on the phone, which says
+    to say yes at the computer. Don't answer. On the computer, **Done**, then **Pair a device**
+    again, and open that code's link with the iPhone's Camera app. The phone asks first, and says
+    the first request stays open. **Cancel**: it is back to waiting for the first. Open the link
+    again, then **Ask the computer**. The computer shows two requests; answer the newest and the
+    phone follows it. The first is on the account screen, and **Cancel the request** removes it.
+
+## 12 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

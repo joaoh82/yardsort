@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/** The active profile: where it stands, the account's devices, and signing out. */
+/** The active profile: where it stands, its computers, the account's devices, and signing out. */
 
 import type { DevicePage, DeviceSummary } from "@yardsort/remote-client";
 import { Redirect, Stack, useRouter } from "expo-router";
@@ -12,6 +12,7 @@ import { messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
 import { moment } from "../lib/format";
 import type { Profile } from "../lib/profiles";
+import { Computers } from "../ui/computers";
 import { Body, Button, Card, Problem, Screen, Title, useColors, Waiting } from "../ui/parts";
 
 export default function Account() {
@@ -89,6 +90,8 @@ function SignedIn({
   const [problem, setProblem] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  /** Goes up with each pull to refresh, for the computers to ask again too. */
+  const [asked, setAsked] = useState(0);
 
   const fetchDevices = useCallback(
     () =>
@@ -113,6 +116,7 @@ function SignedIn({
 
   const refresh = async () => {
     setRefreshing(true);
+    setAsked((n) => n + 1);
     show(await fetchDevices());
     setRefreshing(false);
   };
@@ -145,6 +149,8 @@ function SignedIn({
         Signed in to {profile.serverName} as {profile.deviceName}.
       </Body>
       <Body muted>{profile.address}</Body>
+
+      <Computers asked={asked} />
 
       <Title>This account’s devices</Title>
       {problem && <Problem>{problem}</Problem>}

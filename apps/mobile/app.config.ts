@@ -27,5 +27,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     config: { usesNonExemptEncryption: false },
   },
   android: { package: identifier },
-  plugins: ["expo-router", "expo-secure-store", "expo-web-browser", "expo-status-bar"],
+  plugins: [
+    "expo-router",
+    "expo-secure-store",
+    "expo-web-browser",
+    "expo-status-bar",
+    [
+      "expo-camera",
+      {
+        cameraPermission: "Yardsort uses the camera to scan the code your computer shows to pair.",
+        microphonePermission: false,
+        recordAudioAndroid: false,
+      },
+    ],
+  ],
 });

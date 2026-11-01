@@ -33,6 +33,8 @@
 //! - `{"op":"signInAs","subject":…}`: whom the provider signs in from now on, for a second
 //!   account. Everyone is `someone` until then.
 //! - `{"op":"removeHost"}`: take the host off the account.
+//! - `{"op":"hostOffline"}` and `{"op":"hostOnline"}`: the host drops its link to the relay, and
+//!   makes it again, as a computer asleep and awake does.
 //!
 //! It stops when stdin closes, so a test that dies takes it with it. Nothing here is a secret
 //! worth keeping: the server, its keys and its accounts last as long as the process.
@@ -104,21 +106,7 @@ async fn main() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     let here = Here::new(&host)?;
-    let connector = Connector::start(
-        host.id.clone(),
-        Arc::new(Shared(Arc::clone(&session))),
-        Arc::clone(&here) as Arc<dyn Serving>,
-    );
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    while !matches!(connector.status(), Status::Connected { .. }) {
-        if tokio::time::Instant::now() > deadline {
-            return Err(format!(
-                "not connected to the relay: {:?}",
-                connector.status()
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    let mut connector = Some(connect(&host, &session, &here).await?);
     say(json!({"ready": {
         "server": served.base.as_str(),
         "host": host.id,
@@ -136,6 +124,25 @@ async fn main() -> Result<(), String> {
     });
     while let Some(line) = commands.recv().await {
         let answer = match serde_json::from_str::<Value>(&line) {
+            Ok(command) if command["op"] == "hostOffline" => {
+                if let Some(connector) = connector.take() {
+                    connector.stop().await;
+                }
+                Ok(Value::Null)
+            }
+            Ok(command) if command["op"] == "hostOnline" => {
+                if connector.is_none() {
+                    match connect(&host, &session, &here).await {
+                        Ok(again) => {
+                            connector = Some(again);
+                            Ok(Value::Null)
+                        }
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    Ok(Value::Null)
+                }
+            }
             Ok(command) => obey(&served, &client, &shared, &host, &here, &command).await,
             Err(e) => Err(format!("not a command: {e}")),
         };
@@ -144,9 +151,35 @@ async fn main() -> Result<(), String> {
             Err(error) => json!({ "error": error }),
         });
     }
-    connector.stop().await;
+    if let Some(connector) = connector {
+        connector.stop().await;
+    }
     here.stop();
     Ok(())
+}
+
+/// The host's link to the relay, once it is up.
+async fn connect(
+    host: &HostSummary,
+    session: &Arc<tokio::sync::Mutex<Session>>,
+    here: &Arc<Here>,
+) -> Result<Connector, String> {
+    let connector = Connector::start(
+        host.id.clone(),
+        Arc::new(Shared(Arc::clone(session))),
+        Arc::clone(here) as Arc<dyn Serving>,
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !matches!(connector.status(), Status::Connected { .. }) {
+        if tokio::time::Instant::now() > deadline {
+            return Err(format!(
+                "not connected to the relay: {:?}",
+                connector.status()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    Ok(connector)
 }
 
 fn say(line: Value) {

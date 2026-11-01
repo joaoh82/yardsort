@@ -4,12 +4,15 @@
 import { createContext, type ReactNode, useContext, useSyncExternalStore } from "react";
 
 import type { Accounts, Browser, Snapshot } from "./accounts";
+import type { Incoming } from "./pairing";
 
 interface App {
   accounts: Accounts;
   browser: Browser;
   /** What to call this phone until the person names it. */
   deviceName: string;
+  /** A pairing link on its way to being used. */
+  incoming: Incoming;
 }
 
 const AppContext = createContext<App | null>(null);
