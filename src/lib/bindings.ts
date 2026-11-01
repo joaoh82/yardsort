@@ -478,14 +478,28 @@ export const commands = {
 	testList: (workspaceId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list", { workspaceId })),
 	/**  Runs, newest first: of one workspace, or of all. */
 	testRuns: (workspaceId: string | null, limit: number) => typedError<TestRun[], IpcError>(__TAURI_INVOKE("test_runs", { workspaceId, limit })),
+	/**
+	 *  Every run not ended yet, across all workspaces: what the window keeps in view no matter how
+	 *  much history there is, so a run waiting for approval or still going is never crowded out of
+	 *  the list by newer, finished runs.
+	 */
+	testActiveRuns: () => typedError<TestRun[], IpcError>(__TAURI_INVOKE("test_active_runs")),
+	/**
+	 *  Particular runs by id, skipping any that are gone: the window loads the runs its open tabs
+	 *  point at this way, so a tab stays usable even once its run has aged out of the history list.
+	 */
+	testRunsById: (ids: string[]) => typedError<TestRun[], IpcError>(__TAURI_INVOKE("test_runs_by_id", { ids })),
 	/**  One run, with its steps in the order they run. */
 	testRunSteps: (runId: string) => typedError<TestStepRun[], IpcError>(__TAURI_INVOKE("test_run_steps", { runId })),
 	/**
 	 *  Start a run from the Run dialog. The same checks as `ys test run`; and since the dialog
-	 *  showed the file's steps, pressing Run is the approval: a file not approved yet is approved
-	 *  here, and the run goes straight on.
+	 *  showed the file's steps, pressing Run is the approval — but only of the file the dialog
+	 *  showed. `content_hash` is the file's hash when the dialog read it; the run is approved on the
+	 *  spot only when the file queued now still has that hash. If an agent edited the file in
+	 *  between, the run is left `awaiting_approval` so the card shows the new version — a file never
+	 *  runs on an approval of a version nobody saw.
 	 */
-	testRunStart: (testId: string, workspaceId: string, inputs: { [key in string]: string }) => typedError<TestStarted, IpcError>(__TAURI_INVOKE("test_run_start", { testId, workspaceId, inputs })),
+	testRunStart: (testId: string, workspaceId: string, inputs: { [key in string]: string }, contentHash: string) => typedError<TestStarted, IpcError>(__TAURI_INVOKE("test_run_start", { testId, workspaceId, inputs, contentHash })),
 	/**
 	 *  The user, having seen the run's file, lets it go: the file at this hash is approved for the
 	 *  project, and the run is queued. False when the run was not waiting.
@@ -2488,6 +2502,18 @@ export type TestReview = {
 	askEveryTime: boolean,
 	/**  The file as it was when it was last approved, when that is not this file. */
 	previous: string | null,
+	/**
+	 *  The hash of the file these words are of: what [`test_run_start`] must still see to run
+	 *  without the approval card, so a later edit is never approved unseen.
+	 */
+	contentHash: string,
+	/**
+	 *  A step runs a program (`run`, `shell` or `start`), which is given the whole test
+	 *  environment as `YS_ENV_*` — not only the names templated in the file.
+	 */
+	runsAProgram: boolean,
+	/**  Every name in the project's test environment: what a program step can read, in full. */
+	environment: string[],
 };
 
 /**  One run, as the window lists it. */

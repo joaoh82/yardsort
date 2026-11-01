@@ -319,9 +319,12 @@ whole of what the file does, in words: who asked for the run and with what input
 step, phase by phase — _run `bun run seed --user demo@example.test`; expect exit 0_,
 _GET http://localhost:{{ run.port }}/health; expect status 200_, _ask you: Does the dashboard
 chart animate in?_ — with every `{{ variable }}` left as written, since a port is picked when
-the run starts and a secret is never printed. Under the steps, the names it reads from the
-project's test environment, and which of them are not set. A file that was approved before and
-has changed since shows what changed, line by line.
+the run starts and a secret is never printed. A script a step feeds to a program and a request
+body are shown whole, so nothing a step carries out is hidden behind a summary. Under the steps,
+what it reads from the project's test environment: a step that runs a program is handed all of
+it (as `YS_ENV_*`), so when the file has such a step the card names the whole environment, not
+only the values the file mentions, and flags any it mentions that are not set. A file that was
+approved before and has changed since shows what changed, line by line.
 
 **Run** approves the file for the project and starts the run; its tab opens. **Don't run** ends
 the run as _refused_, which `ys test wait` reports to the agent in words; nothing is recorded
@@ -353,10 +356,12 @@ opens the Run dialog with the same inputs, and **Send result to agent**.
 In a workspace's **⋯** menu. The dialog lists the worktree's tests with their readiness — ready,
 the number of problems, or that a test needs a browser, which this release cannot run — asks the
 chosen test's inputs, starting from their defaults, and shows its steps as the card does, with
-the environment names it reads and what changed since it was last approved. Pressing **Run**
-is the approval: the file is approved for the project, so no card follows, and the next run of
-the same file goes straight ahead. A workspace with no tests is told where they go and that
-`ys test guide` tells an agent how to write one.
+the environment it reads and what changed since it was last approved. Pressing **Run** is the
+approval — of the file the dialog showed: the file is approved for the project, so no card
+follows, and the next run of the same file goes straight ahead. If an agent has changed the file
+since the dialog opened, the run waits on the approval card instead, showing the new version, so
+what runs is always a version you have seen. A workspace with no tests is told where they go and
+that `ys test guide` tells an agent how to write one.
 
 ### Send result to agent
 

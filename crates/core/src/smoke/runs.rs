@@ -177,6 +177,29 @@ pub fn queue(store: &Store, request: &Request<'_>) -> IpcResult<Queued> {
     }
 }
 
+/// Queue a run the way the app's Run dialog does: seeing the dialog's steps and pressing Run is
+/// the approval — but only of the file the dialog showed. `shown_hash` is that file's hash when
+/// the dialog read it. The file is read fresh here, as [`queue`] always does; the run is approved
+/// on the spot only when what was queued still has `shown_hash`. If an agent edited the file in
+/// between, the run is left `awaiting_approval` so the approval card shows the new version — a
+/// file never runs on an approval of a version nobody saw.
+pub fn queue_seen(store: &Store, request: &Request<'_>, shown_hash: &str) -> IpcResult<Queued> {
+    let queued = queue(store, request)?;
+    if queued.awaiting_approval {
+        let unchanged = store
+            .test_run(&queued.id)?
+            .is_some_and(|row| row.content_hash == shown_hash);
+        if unchanged {
+            store.approve_test_run(&queued.id)?;
+            return Ok(Queued {
+                id: queued.id,
+                awaiting_approval: false,
+            });
+        }
+    }
+    Ok(queued)
+}
+
 /// The inputs a run gets: what was given, defaults for the rest. Refuses unknown inputs,
 /// missing required ones and a choice that is not an option.
 pub fn check_inputs(

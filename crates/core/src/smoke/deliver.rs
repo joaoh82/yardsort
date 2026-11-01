@@ -46,7 +46,10 @@ pub fn try_deliver(host: &dyn TerminalHost, delivery: &Delivery) -> Tried {
     }
 }
 
-#[cfg(test)]
+// The tests drive real PTYs with `cat`, `sh` and `true`, so they are Unix-only. Gating the
+// whole module keeps its imports and helpers from being dead code on Windows, where `-D
+// warnings` would fail the build.
+#[cfg(all(test, unix))]
 mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};

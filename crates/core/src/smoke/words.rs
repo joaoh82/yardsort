@@ -56,8 +56,8 @@ pub fn step_words(step: &Step) -> String {
         } => {
             let mut words = format!("run `{}`", command_line(program, args));
             words.push_str(&place(cwd.as_deref(), env));
-            if stdin.is_some() {
-                words.push_str(", with text on its input");
+            if let Some(stdin) = stdin {
+                words.push_str(&feeding(stdin));
             }
             words.push_str(&expecting(&process_expectations(expect)));
             words.push_str(&within(*timeout_secs));
@@ -128,10 +128,10 @@ pub fn step_words(step: &Step) -> String {
                     headers.keys().cloned().collect::<Vec<_>>().join(", ")
                 ));
             }
-            if json.is_some() {
-                words.push_str(", with a JSON body");
-            } else if body.is_some() {
-                words.push_str(", with a body");
+            if let Some(json) = json {
+                words.push_str(&format!(", with the JSON body `{}`", json.trim()));
+            } else if let Some(body) = body {
+                words.push_str(&format!(", with the body `{}`", body.trim()));
             }
             words.push_str(&expecting(&http_expectations(expect)));
             words.push_str(&within(*timeout_secs));
@@ -186,12 +186,23 @@ fn place(cwd: Option<&str>, env: &std::collections::BTreeMap<String, String>) ->
         words.push_str(&format!(" in {cwd}"));
     }
     if !env.is_empty() {
+        // The value is part of what the step does — a literal shows, a `{{ env.X }}` stays a
+        // template, so a secret is still named and never printed.
         words.push_str(&format!(
             ", with {} set",
-            env.keys().cloned().collect::<Vec<_>>().join(", ")
+            env.iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     words
+}
+
+/// What a `run` step sends on the process's standard input, shown whole: this is the script an
+/// interpreter like `sh` or `psql` runs, so the card has to disclose it, not just say it exists.
+fn feeding(stdin: &str) -> String {
+    format!(", with `{}` on its input", stdin.trim_end())
 }
 
 fn expecting(expectations: &[String]) -> String {
@@ -336,9 +347,10 @@ mod tests {
         );
         assert_eq!(
             words[0].words,
-            "run `bun run seed --user \"a b\" \"\"` in api, with DATABASE_URL set, with text on its \
-             input; expect a nonzero exit, stdout containing \"seeded\", nothing on stderr, \
-             stdout JSON with n = 1, within 1m 30s"
+            "run `bun run seed --user \"a b\" \"\"` in api, with \
+             DATABASE_URL={{ env.TEST_DATABASE_URL }} set, with `hi` on its input; expect a \
+             nonzero exit, stdout containing \"seeded\", nothing on stderr, stdout JSON with \
+             n = 1, within 1m 30s"
         );
         assert_eq!(
             words[1].words,
@@ -346,9 +358,9 @@ mod tests {
         );
         assert_eq!(
             words[2].words,
-            "POST http://localhost:{{ run.port }}/x, with the header Authorization, with a JSON \
-             body; expect status 201, a JSON body with {\"ok\":true}, a body containing \"done\", \
-             the header content-type containing \"json\""
+            "POST http://localhost:{{ run.port }}/x, with the header Authorization, with the JSON \
+             body `{\"a\":1}`; expect status 201, a JSON body with {\"ok\":true}, a body \
+             containing \"done\", the header content-type containing \"json\""
         );
         assert_eq!(
             words[3].words,
@@ -368,7 +380,33 @@ mod tests {
         );
         assert_eq!(
             words[0].words,
-            "shell `echo $YS_ENV_TOKEN`, with TOKEN set; expect exit 0"
+            "shell `echo $YS_ENV_TOKEN`, with TOKEN={{ env.TOKEN }} set; expect exit 0"
+        );
+    }
+
+    #[test]
+    fn a_script_sent_to_an_interpreter_is_shown_whole() {
+        // The card is the only chance to read a script before it runs, so what `sh` is fed has
+        // to be in the words, not hidden behind "with text on its input".
+        let words = words_of(
+            "id: t\nname: T\nversion: 1\nsteps:\n\
+             - id: s\n  action: run\n  program: sh\n  stdin: |\n    rm -rf /tmp/x\n    echo done\n",
+        );
+        assert_eq!(
+            words[0].words,
+            "run `sh`, with `rm -rf /tmp/x\necho done` on its input; expect exit 0"
+        );
+    }
+
+    #[test]
+    fn an_http_body_is_shown_whole() {
+        let words = words_of(
+            "id: t\nname: T\nversion: 1\nsteps:\n\
+             - id: s\n  action: http\n  post: http://localhost/x\n  body: \"DROP TABLE users\"\n",
+        );
+        assert_eq!(
+            words[0].words,
+            "POST http://localhost/x, with the body `DROP TABLE users`; expect status 2xx"
         );
     }
 }

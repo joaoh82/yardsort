@@ -65,7 +65,6 @@ function Card({ run, behind }: { run: TestRun; behind: number }) {
     }
   };
 
-  const unset = review?.env.filter((use) => !use.set) ?? [];
   const inputs = Object.entries(run.inputs);
   const button =
     "rounded border border-line px-3 py-1 text-ink-muted hover:border-accent hover:text-ink disabled:opacity-40";
@@ -128,22 +127,7 @@ function Card({ run, behind }: { run: TestRun; behind: number }) {
           </p>
         )}
         {review && <Steps review={review} />}
-        {review && review.env.length > 0 && (
-          <p className="mt-2 text-ink-muted">
-            Uses{" "}
-            {review.env.map((use, index) => (
-              <span key={use.name}>
-                {index > 0 && ", "}
-                <span className="font-mono text-[11px]">{use.name}</span>
-                {use.set ? "" : " (not set)"}
-              </span>
-            ))}{" "}
-            from the project’s test environment
-            {unset.length > 0 &&
-              `; ${unset.length === 1 ? "one is" : `${unset.length} are`} not set and would be empty`}
-            .
-          </p>
-        )}
+        {review && <EnvUses review={review} className="mt-2" />}
         {review?.previous && <Changed before={review.previous} after={run.definition} />}
         {review?.approved && (
           <p className="mt-2 text-ink-faint">
@@ -181,6 +165,51 @@ export function Steps({ review }: { review: TestReview }) {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * What of the project's test environment the file can read. A step that runs a program is
+ * handed the whole environment as `YS_ENV_*`, not only the names the file templates — so when
+ * there is such a step, the card has to name all of it, or it understates the exposure.
+ */
+export function EnvUses({ review, className = "" }: { review: TestReview; className?: string }) {
+  const unset = review.env.filter((use) => !use.set);
+  if (review.runsAProgram && review.environment.length > 0) {
+    return (
+      <p className={`text-ink-muted ${className}`}>
+        A step runs a program, so it can read the project’s whole test environment:{" "}
+        {review.environment.map((name, index) => (
+          <span key={name}>
+            {index > 0 && ", "}
+            <span className="font-mono text-[11px]">{name}</span>
+          </span>
+        ))}{" "}
+        (as <span className="font-mono text-[11px]">YS_ENV_*</span>)
+        {unset.length > 0 &&
+          `. ${unset.map((use) => use.name).join(", ")} ${
+            unset.length === 1 ? "is named but" : "are named but"
+          } not set`}
+        .
+      </p>
+    );
+  }
+  if (review.env.length === 0) return null;
+  return (
+    <p className={`text-ink-muted ${className}`}>
+      Uses{" "}
+      {review.env.map((use, index) => (
+        <span key={use.name}>
+          {index > 0 && ", "}
+          <span className="font-mono text-[11px]">{use.name}</span>
+          {use.set ? "" : " (not set)"}
+        </span>
+      ))}{" "}
+      from the project’s test environment
+      {unset.length > 0 &&
+        `; ${unset.length === 1 ? "one is" : `${unset.length} are`} not set and would be empty`}
+      .
+    </p>
   );
 }
 

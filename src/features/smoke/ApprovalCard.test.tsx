@@ -50,11 +50,34 @@ describe("ApprovalCard", () => {
     expect(within(card).getByRole("list", { name: "Steps steps" })).toHaveTextContent(
       "GET http://localhost:{{ run.port }}/health; expect status 200",
     );
-    expect(card).toHaveTextContent("DATABASE_URL (not set)");
-    expect(card).toHaveTextContent("one is not set and would be empty");
+    // A program step reads the whole test environment, so the card names all of it, not only
+    // the templated names, and still flags the one that is not set.
+    expect(card).toHaveTextContent("read the project’s whole test environment");
+    expect(card).toHaveTextContent("TEST_PASSWORD");
+    expect(card).toHaveTextContent("DATABASE_URL is named but not set");
     expect(core.testRunReview).toHaveBeenCalledWith("r1");
     // Another workspace's run is not this workspace's business.
     expect(screen.queryByText(/other/)).toBeNull();
+  });
+
+  it("names only the templated environment when no step runs a program", async () => {
+    // With no run/shell/start step, nothing is handed the whole environment: the card lists
+    // just the names the file references, and whether they are set.
+    core.testRunReview.mockResolvedValue(
+      testReview({
+        runsAProgram: false,
+        environment: ["TEST_PASSWORD", "DATABASE_URL"],
+        env: [
+          { name: "TEST_PASSWORD", set: true },
+          { name: "DATABASE_URL", set: false },
+        ],
+      }),
+    );
+    render(<ApprovalCard workspaceId="w-app-fix-login" />);
+    const card = await screen.findByRole("region", { name: "Run “The server answers”?" });
+    expect(card).toHaveTextContent("DATABASE_URL (not set)");
+    expect(card).toHaveTextContent("one is not set and would be empty");
+    expect(card).not.toHaveTextContent("whole test environment");
   });
 
   it("shows what changed since the version approved before", async () => {

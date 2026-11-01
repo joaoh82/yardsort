@@ -793,11 +793,24 @@ export const ipc = {
   /** Runs, newest first: of one workspace, or of all. */
   testRuns: (workspaceId: string | null, limit = 100): Promise<TestRun[]> =>
     unwrap(commands.testRuns(workspaceId, limit)) as Promise<TestRun[]>,
+  /** Every run not ended yet, so a waiting or running one is never crowded out of the list. */
+  testActiveRuns: (): Promise<TestRun[]> => unwrap(commands.testActiveRuns()) as Promise<TestRun[]>,
+  /** Particular runs by id, skipping any that are gone: for the window's open run tabs. */
+  testRunsById: (ids: string[]): Promise<TestRun[]> =>
+    unwrap(commands.testRunsById(ids)) as Promise<TestRun[]>,
   testRunSteps: (runId: string): Promise<TestStepRun[]> =>
     unwrap(commands.testRunSteps(runId)) as Promise<TestStepRun[]>,
-  /** Start a run from the Run dialog, which showed the steps: pressing Run is the approval. */
-  testRunStart: (testId: string, workspaceId: string, inputs: Record<string, string>) =>
-    unwrap(commands.testRunStart(testId, workspaceId, inputs)),
+  /**
+   * Start a run from the Run dialog, which showed the steps: pressing Run approves the file the
+   * dialog showed. `contentHash` is that file's hash (from `testReview`); if the file changed
+   * since, the run waits for the approval card instead of running unseen.
+   */
+  testRunStart: (
+    testId: string,
+    workspaceId: string,
+    inputs: Record<string, string>,
+    contentHash: string,
+  ) => unwrap(commands.testRunStart(testId, workspaceId, inputs, contentHash)),
   /** A test as the Run dialog shows it: steps in words, environment names, what changed. */
   testReview: (workspaceId: string, testId: string) =>
     unwrap(commands.testReview(workspaceId, testId)),

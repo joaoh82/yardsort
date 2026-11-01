@@ -43,6 +43,9 @@ export function useStepOutput(
 ): StepOutput {
   const [output, setOutput] = useState<StepOutput>({ text: "", skipped: false, loaded: false });
   const next = useRef(0);
+  // The current effect's serialized `read`, so the end-of-step read goes through the same
+  // one-at-a-time gate and never races a read still in flight.
+  const readNow = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (!hasCore() && source === core) return;
@@ -90,28 +93,23 @@ export function useStepOutput(
       return reading;
     };
 
+    readNow.current = read;
     void read();
     const unlisten = source.subscribe((grewRun, grewStep) => {
       if (grewRun === runId && grewStep === stepId) void read();
     });
     return () => {
       current = false;
+      readNow.current = null;
       void unlisten.then((stop) => stop());
     };
   }, [runId, stepId, stream, source]);
 
-  // The step ended: whatever was written after the last notice is read now.
+  // The step ended: whatever was written after the last notice is read now, through the same
+  // serialized `read`, so it queues behind any read still in flight rather than reading twice.
   const wasLive = useRef(live);
   useEffect(() => {
-    if (wasLive.current && !live) {
-      void source.read(runId, stepId, stream, next.current).then(
-        (chunk) => {
-          next.current = chunk.next;
-          setOutput((shown) => ({ ...shown, text: shown.text + chunk.text, loaded: true }));
-        },
-        () => {},
-      );
-    }
+    if (wasLive.current && !live) void readNow.current?.();
     wasLive.current = live;
   }, [live, runId, stepId, stream, source]);
 

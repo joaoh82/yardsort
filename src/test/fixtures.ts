@@ -326,5 +326,8 @@ export const testReview = (overrides: Partial<TestReview> = {}): TestReview => (
   approved: false,
   askEveryTime: false,
   previous: null,
+  contentHash: "abc",
+  runsAProgram: true,
+  environment: ["TEST_PASSWORD", "DATABASE_URL"],
   ...overrides,
 });

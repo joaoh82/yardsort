@@ -206,6 +206,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             workflows::commands::workflow_describe,
             smoke::commands::test_list,
             smoke::commands::test_runs,
+            smoke::commands::test_active_runs,
+            smoke::commands::test_runs_by_id,
             smoke::commands::test_run_steps,
             smoke::commands::test_run_start,
             smoke::commands::test_run_approve,

@@ -99,10 +99,12 @@ describe("RunSmokeTestDialog", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Mode" }), "slow");
     await user.click(screen.getByRole("button", { name: "Run" }));
     await waitFor(() =>
-      expect(core.testRunStart).toHaveBeenCalledWith("health", "w-app-fix-login", {
-        user: "demo@example.test",
-        mode: "slow",
-      }),
+      expect(core.testRunStart).toHaveBeenCalledWith(
+        "health",
+        "w-app-fix-login",
+        { user: "demo@example.test", mode: "slow" },
+        "abc",
+      ),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(useSmokeTestsStore.getState().shown["w-app-fix-login"]).toBe("r9");

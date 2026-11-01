@@ -7,8 +7,9 @@ has the downloads and the full commit lists.
 
 - **Smoke tests in the app: the approval card, the run tab and Run smoke test….** A run of a
   file you have not approved — new, or changed since — now shows at the top of its workspace as
-  a card: every step in words, the environment names it reads and which are unset, what changed
-  since the version you approved, and **Run** or **Don't run**; the workspace's row counts the
+  a card: every step in words (a script fed to a program and a request body shown whole), the
+  test environment it can read, what changed since the version you approved, and **Run** or
+  **Don't run**; the workspace's row counts the
   runs waiting. A run opens as a tab beside the terminals, with its steps by phase, each step's
   note, facts and output tailed as it writes, **Pass** / **Fail** with a note for `manual` steps,
   **Cancel**, **Run again** and **Send result to agent**, which types the verdict into the

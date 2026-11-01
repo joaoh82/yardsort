@@ -44,7 +44,22 @@ export const useSmokeTestsStore = create<SmokeTestsState>((set, get) => ({
   async load() {
     if (!hasCore()) return;
     try {
-      set({ runs: await ipc.testRuns(null, RUNS_IN_VIEW), loaded: true });
+      // History is capped, but a run waiting for approval or still going must never be crowded
+      // out of the list by newer finished runs — nor must a run an open tab points at. So the
+      // capped history is merged with every active run, and with the open tabs' runs by id.
+      const openIds = new Set(Object.values(get().open).flatMap((ids) => ids ?? []));
+      const [history, active] = await Promise.all([
+        ipc.testRuns(null, RUNS_IN_VIEW),
+        ipc.testActiveRuns(),
+      ]);
+      const byId = new Map<string, TestRun>();
+      for (const run of [...history, ...active]) byId.set(run.id, run);
+      const missing = [...openIds].filter((id) => !byId.has(id));
+      if (missing.length > 0) {
+        for (const run of await ipc.testRunsById(missing)) byId.set(run.id, run);
+      }
+      const runs = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
+      set({ runs, loaded: true });
     } catch (error) {
       set({ error: errorMessage(error), loaded: true });
     }

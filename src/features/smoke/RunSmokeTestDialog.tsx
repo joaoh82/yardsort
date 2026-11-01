@@ -3,7 +3,7 @@ import { timeAgo } from "@/features/terminal/sessionText";
 import { errorMessage, ipc, type TestItem, type TestReview } from "@/lib/ipc";
 import { useModalFocus } from "@/lib/useModalFocus";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
-import { Changed, Steps } from "./ApprovalCard";
+import { Changed, EnvUses, Steps } from "./ApprovalCard";
 import { statusColour, statusWords } from "./words";
 
 const control =
@@ -87,7 +87,7 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
 
   async function start(event: React.FormEvent) {
     event.preventDefault();
-    if (!ready || !chosen) return;
+    if (!ready || !chosen || !review) return;
     setBusy(true);
     setError(null);
     try {
@@ -96,9 +96,13 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
           .map((input) => [input.id, value(input.id, input.default).trim()])
           .filter(([, text]) => text),
       );
-      const started = await ipc.testRunStart(chosen.id, workspaceId, inputs);
+      // The hash of the file the dialog showed: if it changed since, the run waits for the
+      // approval card instead, so what runs is always a version someone saw.
+      const started = await ipc.testRunStart(chosen.id, workspaceId, inputs, review.contentHash);
       await useSmokeTestsStore.getState().refresh();
-      openRun(workspaceId, started.runId);
+      // When the file is unchanged the run is going, so open its tab. When it changed, it waits
+      // for approval; the card at the top of the workspace shows the new version — leave it there.
+      if (!started.awaitingApproval) openRun(workspaceId, started.runId);
       onClose();
     } catch (failed) {
       setError(errorMessage(failed));
@@ -217,19 +221,7 @@ export function RunSmokeTestDialog({ workspaceId, testId, inputs: given, onClose
           {review && (
             <section aria-label="What it does" className="flex flex-col gap-2">
               <Steps review={review} />
-              {review.env.length > 0 && (
-                <p className="text-ink-muted">
-                  Uses{" "}
-                  {review.env.map((use, index) => (
-                    <span key={use.name}>
-                      {index > 0 && ", "}
-                      <span className="font-mono text-[11px]">{use.name}</span>
-                      {use.set ? "" : " (not set)"}
-                    </span>
-                  ))}{" "}
-                  from the project’s test environment.
-                </p>
-              )}
+              <EnvUses review={review} />
               {review.previous && chosen && (
                 <Changed before={review.previous} after={chosen.text} />
               )}
