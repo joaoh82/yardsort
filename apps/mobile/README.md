@@ -50,6 +50,32 @@ iPhone plugged in, unlocked and trusting the Mac. On the iPhone, turn on Develop
 (Expo's command line runs on it) and CocoaPods; with Homebrew,
 `brew install oven-sh/bun/bun node cocoapods watchman`. Rust is not needed for the app.
 
+A fresh Mac needs a little more before it can build onto a phone:
+
+- **Xcode's extra components.** Open Xcode once, or run `sudo xcodebuild -runFirstLaunch` in a
+  terminal. Without them `expo run:ios` stops with "xcrun is not configured correctly".
+- **A signing certificate.** Signing in to Xcode does not create one. In Xcode → Settings →
+  Accounts, select the team, then Manage Certificates → + → Apple Development. Without one,
+  `expo run:ios` stops with "No code signing certificates are available to use".
+- **Apple's G3 intermediate certificate.** Expo says the same thing when the certificate is there
+  but macOS cannot trust it: `security find-identity -v -p codesigning` reports 0 valid
+  identities. Import the intermediate from the command line (opening the file in Keychain Access
+  can fail with error -25294):
+
+  ```sh
+  curl -fsSLO https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+  security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
+  ```
+
+- **Access to the certificate's key.** During the first build, macOS asks whether `codesign` may
+  use the key: enter the login password and choose Always Allow, or it asks again for every
+  framework. If that dialog stops responding, quit it with `killall -9 SecurityAgent`, stop the
+  build, and grant the access once from a terminal:
+
+  ```sh
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db
+  ```
+
 ```sh
 just mobile-ios      # or, here: bun install && bun run ios
 ```
