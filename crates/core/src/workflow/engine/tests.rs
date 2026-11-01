@@ -39,6 +39,8 @@ struct Fake {
     origin: Option<String>,
     /// Reviews and comments on the pull request since the run started.
     posts: Vec<PrActivity>,
+    /// Smoke test runs by id, as `run_test` would see them.
+    test_runs: HashMap<String, TestRun>,
 }
 
 impl World for Fake {
@@ -68,6 +70,9 @@ impl World for Fake {
             count,
             latest_url: (count > 0).then(|| "https://example.test/pull/42".to_owned()),
         })
+    }
+    fn test_run(&self, run_id: &str) -> Option<TestRun> {
+        self.test_runs.get(run_id).cloned()
     }
 }
 
@@ -108,9 +113,34 @@ impl Run {
                 sessions: HashMap::new(),
                 origin: None,
                 posts: Vec::new(),
+                test_runs: HashMap::new(),
             },
             finished: None,
         }
+    }
+
+    /// Build a run from a given workflow source, every step pending.
+    fn from(source: &str) -> Self {
+        let mut run = Self::new();
+        run.workflow = parse(source).unwrap();
+        run.rows = run
+            .workflow
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(i, step)| WorkflowStepRow {
+                run_id: "run".into(),
+                step_id: step.id.clone(),
+                position: i as i64,
+                action: step.action.name().into(),
+                status: "pending".into(),
+                started_at: None,
+                ended_at: None,
+                outputs: "{}".into(),
+                note: None,
+            })
+            .collect();
+        run
     }
 
     /// One call to the engine, its moves applied. Returns the effects to carry out.
@@ -579,4 +609,104 @@ fn with_no_agent_of_its_own_in_the_workspace_the_author_step_is_skipped_saying_w
         Some("Skipped: no agent was running in the workspace when the run started.")
     );
     assert_eq!(run.finished, Some(Finish::Succeeded));
+}
+
+const RUN_TEST_WF: &str = r#"id: t
+name: T
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: smoke
+    action: run_test
+    test: login
+    timeout: 30m
+"#;
+
+#[test]
+fn a_run_test_step_queues_the_run_waits_and_passes_with_it() {
+    let mut run = Run::from(RUN_TEST_WF);
+    // It begins by asking the driver to queue the run, and goes running.
+    let effects = run.advance();
+    assert_eq!(
+        effects,
+        vec![Effect::RunTest {
+            step: "smoke".into(),
+            test: "login".into(),
+            inputs: Inputs::new(),
+        }]
+    );
+    assert_eq!(run.status("smoke"), "running");
+    // The driver queued it, leaving the run id; the step waits for the run to end.
+    let queued_out: Outputs = [("run".to_owned(), "tr-1".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    assert_eq!(run.status("smoke"), "waiting");
+    // While the run is still going, the step keeps waiting.
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "running".into(),
+            summary: "going".into(),
+        },
+    );
+    assert!(run.advance().is_empty());
+    assert_eq!(run.status("smoke"), "waiting");
+    // When it passes, the step succeeds and carries the run, verdict and summary.
+    run.world.test_runs.insert(
+        "tr-1".into(),
+        TestRun {
+            status: "passed".into(),
+            summary: "passed  login  (6 of 6 steps passed)".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("smoke"), "succeeded");
+    let row = run.rows.iter().find(|r| r.step_id == "smoke").unwrap();
+    let out = parse_outputs(&row.outputs);
+    assert_eq!(out.get("run").map(String::as_str), Some("tr-1"));
+    assert_eq!(out.get("verdict").map(String::as_str), Some("passed"));
+    assert!(out.get("summary").unwrap().contains("passed  login"));
+    assert_eq!(run.finished, Some(Finish::Succeeded));
+}
+
+#[test]
+fn a_run_test_step_fails_when_the_run_fails() {
+    let mut run = Run::from(RUN_TEST_WF);
+    run.advance();
+    let queued_out: Outputs = [("run".to_owned(), "tr-9".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    run.world.test_runs.insert(
+        "tr-9".into(),
+        TestRun {
+            status: "failed".into(),
+            summary: "failed  login  (2 of 6 steps passed)".into(),
+        },
+    );
+    run.advance();
+    assert_eq!(run.status("smoke"), "failed");
+    let out = parse_outputs(&run.rows[0].outputs);
+    assert_eq!(out.get("verdict").map(String::as_str), Some("failed"));
+    assert!(matches!(run.finished, Some(Finish::Failed(_))));
+}
+
+#[test]
+fn a_run_test_step_times_out_if_the_run_never_ends() {
+    let mut run = Run::from(RUN_TEST_WF);
+    run.advance();
+    let queued_out: Outputs = [("run".to_owned(), "tr-x".to_owned())].into();
+    assert!(run.apply(&queued("smoke", &queued_out)));
+    run.world.test_runs.insert(
+        "tr-x".into(),
+        TestRun {
+            status: "running".into(),
+            summary: "going".into(),
+        },
+    );
+    assert!(run.advance().is_empty());
+    assert_eq!(run.status("smoke"), "waiting");
+    // Past the 30m timeout, still going: the step fails.
+    run.later(31 * 60 * 1000);
+    run.advance();
+    assert_eq!(run.status("smoke"), "failed");
+    assert!(run.note("smoke").unwrap().contains("did not end within"));
 }

@@ -36,8 +36,8 @@ pub const SYSTEM: &str = concat!(
      - `version`: always `1`.\n\
      - `trigger`: always `kind: manual`.\n\
      - `inputs`: optional, a list. Each has `id` (a lowercase name), `kind` (`harness` for \
-     which agent, `text`, or `choice` with `options`), `label`, `required` (default false), \
-     `default`.\n\
+     which agent, `test` for one of the workspace's smoke tests, `text`, or `choice` with \
+     `options`), `label`, `required` (default false), `default`.\n\
      - `steps`: a list of at least one. Each has `id` (a lowercase name), `action`, optional \
      `needs` (the step ids that must succeed first; steps whose needs are met run together), \
      and the action's own keys, and no others:\n\
@@ -50,6 +50,10 @@ pub const SYSTEM: &str = concat!(
      optional `timeout`.\n\
        - `wait_pr_activity`: waits for a review or comment on the workspace's pull request \
      after the run started. Optional `kind` (`review`, `comment`, `any`), optional `timeout`.\n\
+       - `run_test`: runs one of the workspace's smoke tests and waits for it to finish, \
+     passing or failing with it. `test` (a test id, or exactly `\"{{ inputs.<id> }}\"` for an \
+     input of kind test), optional `inputs` (a map of the test's input ids to values), optional \
+     `timeout`.\n\
        - `notify`: `title`, optional `body`. A system notification.\n\
      `session` is `origin` (the agent already working in the workspace) or exactly \
      `\"{{ steps.<id>.session }}\"` for an earlier `start_session` step that is among this \
@@ -60,7 +64,8 @@ pub const SYSTEM: &str = concat!(
      `pr.number`, `pr.url`, `pr.title` (the workspace's open pull request), `inputs.<id>`, \
      `steps.<id>.session` and `steps.<id>.run` from a start_session step, \
      `steps.<id>.outcome` from wait_session, `steps.<id>.count` and `steps.<id>.latest_url` \
-     from wait_pr_activity, `memory` (the project's notes for agents), `handoff` (what \
+     from wait_pr_activity, `steps.<id>.run`, `steps.<id>.verdict` and `steps.<id>.summary` \
+     from run_test, `memory` (the project's notes for agents), `handoff` (what \
      happened in the workspace so far). No filters, no expressions. A prompt that uses the \
      pull request or `session: origin` needs the workspace to have one when the run starts.\n\n\
      Keep it small: the fewest steps that do what was asked, a `wait_session` after each \

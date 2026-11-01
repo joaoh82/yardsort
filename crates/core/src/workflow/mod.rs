@@ -18,6 +18,7 @@ pub mod runs;
 /// Shared with smoke tests: `{{ variables }}` are written the same way in both.
 pub use crate::template;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -88,6 +89,8 @@ pub struct Input {
 pub enum InputKind {
     /// One of the harnesses set up in Yardsort, picked the way the composer picks one.
     Harness,
+    /// A smoke test in the run's workspace, by id, for a `run_test` step.
+    Test,
     Text,
     Choice,
 }
@@ -138,6 +141,14 @@ pub enum Action {
         kind: PrActivity,
         timeout_secs: Option<u32>,
     },
+    /// Run a smoke test in the run's workspace and end when it does, passing or failing with it.
+    /// Leaves `run`, `verdict` and `summary` (the text `ys test wait` prints) for later steps.
+    RunTest {
+        test: String,
+        /// Values for the test's inputs, by input id; may hold `{{ variables }}`.
+        inputs: BTreeMap<String, String>,
+        timeout_secs: Option<u32>,
+    },
     /// Tell the person who started the run.
     Notify { title: String, body: Option<String> },
 }
@@ -150,6 +161,7 @@ impl Action {
             Action::WaitSession { .. } => "wait_session",
             Action::SendToSession { .. } => "send_to_session",
             Action::WaitPrActivity { .. } => "wait_pr_activity",
+            Action::RunTest { .. } => "run_test",
             Action::Notify { .. } => "notify",
         }
     }
@@ -160,6 +172,7 @@ impl Action {
             "start_session" => &["session", "run"],
             "wait_session" => &["outcome"],
             "wait_pr_activity" => &["count", "latest_url"],
+            "run_test" => &["run", "verdict", "summary"],
             _ => &[],
         }
     }
@@ -233,7 +246,13 @@ impl Entry {
 }
 
 /// The workflows that ship with Yardsort, as text.
-pub const BUILT_IN: &[(&str, &str)] = &[("code-review", include_str!("builtin/code-review.yaml"))];
+pub const BUILT_IN: &[(&str, &str)] = &[
+    ("code-review", include_str!("builtin/code-review.yaml")),
+    (
+        "smoke-then-tell",
+        include_str!("builtin/smoke-then-tell.yaml"),
+    ),
+];
 
 /// Where the user's own workflow files live.
 pub fn user_dir(data_dir: &Path) -> PathBuf {

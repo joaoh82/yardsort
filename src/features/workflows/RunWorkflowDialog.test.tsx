@@ -8,6 +8,7 @@ const core = vi.hoisted(() => ({
   workflowPreview: vi.fn(),
   workflowStart: vi.fn(),
   harnessList: vi.fn(),
+  testList: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -70,6 +71,7 @@ const fixLogin = worktree("app", "fix-login");
 describe("RunWorkflowDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    core.testList.mockResolvedValue([]);
     useWorkflowStore.setState({ items: [review], loaded: true });
     useHarnessStore.setState({
       loaded: true,
@@ -153,6 +155,61 @@ describe("RunWorkflowDialog", () => {
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
     expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, { depth: "safe" });
+  });
+
+  it("picks a smoke test for a `test` input from the workspace's runnable tests", async () => {
+    const workflow = review.workflow!;
+    useWorkflowStore.setState({
+      items: [
+        {
+          ...review,
+          workflow: {
+            ...workflow,
+            inputs: [
+              {
+                id: "suite",
+                kind: "test",
+                label: "Which smoke test",
+                required: true,
+                default: null,
+                options: [],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const item = (id: string, name: string, extra = {}) => ({
+      id,
+      name,
+      description: null,
+      path: `/w/.yardsort/tests/${id}.yaml`,
+      text: "",
+      problems: [],
+      runnable: true,
+      usesBrowser: false,
+      browserMissing: false,
+      inputs: [],
+      ...extra,
+    });
+    core.testList.mockResolvedValue([
+      item("login", "Log in"),
+      item("broken", "Broken", { runnable: false }),
+    ]);
+    core.workflowPreview.mockResolvedValue({ ...withPr, needsPullRequest: false });
+    core.workflowStart.mockResolvedValue("run-t");
+    const user = userEvent.setup();
+    render(<RunWorkflowDialog workflowId="code-review" workspace={fixLogin} onClose={() => {}} />);
+    const picker = await screen.findByRole("combobox", { name: "Which smoke test" });
+    // Only the runnable test is offered, and it is the default answer.
+    expect(screen.getByRole("option", { name: "Log in" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Broken" })).toBeNull();
+    expect(picker).toHaveValue("login");
+    expect(core.testList).toHaveBeenCalledWith(fixLogin.id);
+    const run = screen.getByRole("button", { name: "Run" });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    expect(core.workflowStart).toHaveBeenCalledWith("code-review", fixLogin.id, { suite: "login" });
   });
 
   it("says what the run will render as nothing, and still lets it run", async () => {

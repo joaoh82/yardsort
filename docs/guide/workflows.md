@@ -74,12 +74,14 @@ own, never in one of your projects; a repository because some agents will not ru
 
 ## Where workflows come from
 
-- **Built in.** Yardsort ships with one: **Request code review** (`code-review`). A second
+- **Built in.** Yardsort ships with two. **Request code review** (`code-review`): a second
   agent, one you pick, reviews the workspace's pull request in the same worktree and posts its
   review on GitHub with `gh`. When the review is on the pull request, you get a notification, and
   the agent that wrote the pull request is told once it is not busy. See
-  [Requesting a code review](#requesting-a-code-review). `ys workflow show code-review` prints the
-  whole file.
+  [Requesting a code review](#requesting-a-code-review). **Smoke test, then tell the agent**
+  (`smoke-then-tell`): it runs one of the workspace's [smoke tests](smoke-tests.md) and tells the
+  workspace's own agent how it went — the verdict, and if it failed, which step broke. Each is
+  read-only; `ys workflow show <id>` prints the whole file.
 - **Yours.** Every `.yaml` or `.yml` file in the `workflows` folder of Yardsort's data directory.
   [Where Yardsort keeps things](troubleshooting.md#where-yardsort-keeps-things) says where that
   is on your system, and `ys workflow list` prints it.
@@ -205,6 +207,11 @@ What each step does while it runs:
   request after the run started. It asks GitHub every 30 seconds, in the background, so a slow
   answer holds up no other step; a question GitHub has not answered within a minute is dropped
   and asked again.
+- **`run_test`** queues one of the workspace's [smoke tests](smoke-tests.md) and waits for it to
+  finish, passing or failing with it. The run shows as a tab in the workspace, like any other. A
+  test whose file you have not approved waits for you in Yardsort, and the step waits with it
+  until its timeout. It leaves the run's verdict and the summary `ys test wait` prints for later
+  steps to use.
 - **`notify`** shows a system notification.
 
 A step runs only when every step in its `needs` succeeded. When one fails, the steps after it are
@@ -265,7 +272,7 @@ silently skipped.
 | Key        | What it is                                                                                                |
 | ---------- | --------------------------------------------------------------------------------------------------------- |
 | `id`       | Starts with a lowercase letter; then lowercase letters, digits, `_` and `-`. Used as `{{ inputs.<id> }}`. |
-| `kind`     | `harness` (one of your agents), `text`, or `choice`.                                                      |
+| `kind`     | `harness` (one of your agents), `test` (one of the workspace's smoke tests), `text`, or `choice`.         |
 | `label`    | Optional. The question. The `id` when left out.                                                           |
 | `required` | Optional. `false` when left out. An optional input left empty is empty text wherever it is used.          |
 | `default`  | Optional. For a `choice`, one of its options.                                                             |
@@ -277,13 +284,14 @@ Every step has an `id`, named the same way as an input, and an `action`. `needs`
 steps that must finish first. A step cannot need itself. Steps that wait for each other in a
 circle are reported, because none of them could ever start.
 
-| Action             | Keys                                                             | What it does                                                                                                                                                                                                                     |
-| ------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`. |
-| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended.                            |
-| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                     |
-| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                   |
-| `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                           |
+| Action             | Keys                                                             | What it does                                                                                                                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `start_session`    | `harness` (required), `prompt`, `model`, `effort`, `skip_memory` | Starts an agent in the workspace, like the composer does, with `prompt` as its first message. It opens as a tab there. `harness` is an agent's id, like `claude`, or exactly `{{ inputs.<id> }}` for an input of kind `harness`.     |
+| `wait_session`     | `session` (required), `until`, `timeout`                         | Waits for a session. `until: settled`, the default, means it has gone quiet after at least 8 seconds of output, or its harness reported a finished turn. `until: exited` means the program has ended.                                |
+| `send_to_session`  | `session` (required), `prompt` (required), `timeout`             | Types `prompt` into a running session. It waits until that session is quiet: a busy agent is never interrupted. If the session is gone, the step is skipped.                                                                         |
+| `wait_pr_activity` | `kind`, `timeout`                                                | Waits for a new review or comment on the workspace's pull request, since the run started. `kind` is `review`, `comment` or `any`, the default.                                                                                       |
+| `run_test`         | `test` (required), `inputs`, `timeout`                           | Runs a smoke test in the workspace and waits for it to finish, passing or failing with it. `test` is a test id, or exactly `{{ inputs.<id> }}` for an input of kind `test`. `inputs` is a map of the test's own input ids to values. |
+| `notify`           | `title` (required), `body`                                       | Tells you, with a system notification.                                                                                                                                                                                               |
 
 A key that belongs to another action is reported as misplaced. `title` on a `start_session` step
 is an example.
@@ -306,7 +314,7 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                    |
 | `pr.number`, `pr.url`, `pr.title`                                                                 | The open pull request for the workspace's branch, found when the run is queued.                                                                                                                                                                                                                                                                                   |
 | `inputs.<id>`                                                                                     | What was given for that input.                                                                                                                                                                                                                                                                                                                                    |
-| `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`. The step must be among this step's `needs`.                                                                                                                                                                 |
+| `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`. The step must be among this step's `needs`.                                                                                                                 |
 | `memory`                                                                                          | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
 | `handoff`                                                                                         | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                            |
 

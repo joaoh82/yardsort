@@ -5,6 +5,13 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Workflows can run a smoke test.** A new `run_test` step queues one of the workspace's smoke
+  tests and waits for it, passing or failing with the run and leaving the verdict and summary for
+  later steps. The built-in **Smoke test, then tell the agent** does exactly that and then tells
+  the workspace's own agent how it went. Agents are told smoke tests exist in their first message,
+  when the project has a `.yardsort/tests` folder or a test environment set. See
+  [Workflows](docs/guide/workflows.md#steps) and [Smoke tests](docs/guide/smoke-tests.md#agents).
+
 - **Smoke tests can drive a browser.** A `browser` step opens a page in a Chromium found on the
   machine — Chrome, Chromium or Edge, headless unless `headed: true` — and goes through its
   actions: `goto`, `click`, `fill`, `select`, `press`, `wait_for`, and the `expect_*` checks,

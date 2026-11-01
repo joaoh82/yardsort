@@ -1,6 +1,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
-import { errorMessage, ipc, type Input, type RunPreview, type Workspace } from "@/lib/ipc";
+import {
+  errorMessage,
+  ipc,
+  type Input,
+  type RunPreview,
+  type TestItem,
+  type Workspace,
+} from "@/lib/ipc";
 import { useModalFocus } from "@/lib/useModalFocus";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
@@ -42,6 +49,8 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
   const [previewed, setPreviewed] = useState<{ key: string; preview: RunPreview } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The chosen workspace's smoke tests, for a `test` input to pick from.
+  const [tests, setTests] = useState<TestItem[]>([]);
 
   useEffect(() => {
     void useHarnessStore.getState().load();
@@ -62,10 +71,13 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
   // Every input starts from its default. A required agent starts on the first one installed,
   // and a required choice on its first option: what the control shows must be the answer.
   const firstAgent = harnesses.find((h) => h.resolvedPath)?.id ?? "";
+  const runnableTests = tests.filter((test) => test.runnable && !test.browserMissing);
+  const firstTest = runnableTests[0]?.id ?? "";
   const startsOn = (input: Input): string => {
     if (input.default) return input.default;
     if (!input.required) return "";
     if (input.kind === "harness") return firstAgent;
+    if (input.kind === "test") return firstTest;
     if (input.kind === "choice") return input.options[0] ?? "";
     return "";
   };
@@ -88,6 +100,21 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
       current = false;
     };
   }, [chosenWorkflow, chosenWorkspace, workflow, previewKey]);
+
+  // A `test` input picks from the chosen workspace's smoke tests; load them when one is needed.
+  const needsTest = inputs.some((input) => input.kind === "test");
+  useEffect(() => {
+    if (!needsTest) return;
+    let current = true;
+    const load = chosenWorkspace ? ipc.testList(chosenWorkspace) : Promise.resolve([]);
+    load.then(
+      (found) => current && setTests(found),
+      () => current && setTests([]),
+    );
+    return () => {
+      current = false;
+    };
+  }, [needsTest, chosenWorkspace]);
 
   const workspaces = projects.flatMap((project) =>
     project.workspaces
@@ -217,6 +244,24 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
                   {input.options.map((option) => (
                     <option key={option} value={option}>
                       {option}
+                    </option>
+                  ))}
+                </select>
+              ) : input.kind === "test" ? (
+                <select
+                  aria-label={input.label}
+                  className={control}
+                  value={answers[input.id] ?? ""}
+                  onChange={(event) => answer(input.id, event.target.value)}
+                  disabled={runnableTests.length === 0}
+                >
+                  {!input.required && <option value="">None</option>}
+                  {runnableTests.length === 0 && (
+                    <option value="">No runnable smoke tests here</option>
+                  )}
+                  {runnableTests.map((test) => (
+                    <option key={test.id} value={test.id}>
+                      {test.name}
                     </option>
                   ))}
                 </select>
