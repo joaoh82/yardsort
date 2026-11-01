@@ -92,6 +92,13 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+describe("Screens", () => {
+  test("start below the header, which from iOS 26 is laid over them", async () => {
+    await start();
+    expect(screen.getByTestId("screen").props.contentInsetAdjustmentBehavior).toBe("automatic");
+  });
+});
+
 describe("Connect", () => {
   test("looks the server up and says what it can see before anything else is sent", async () => {
     const { server } = await start();

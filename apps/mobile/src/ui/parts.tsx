@@ -65,7 +65,10 @@ export function Screen({
       edges={["bottom", "left", "right"]}
       style={[styles.fill, { backgroundColor: colors.background }]}
     >
+      {/* From iOS 26 the header is glass over the screen, so the content has to start below it. */}
       <ScrollView
+        testID="screen"
+        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.screen}
         keyboardShouldPersistTaps="handled"
         refreshControl={

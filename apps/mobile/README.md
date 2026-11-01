@@ -93,7 +93,11 @@ That builds the development app (`Yardsort Dev`, `dev.yardsort.mobile.developmen
 on the phone, and serves its code from the Mac. The first time, it asks which phone and which
 signing team: choose the paid team, so the build does not lapse after seven days. The phone and
 the Mac must be on the same network; let the app find devices on the local network when iOS
-asks. Afterwards, `just mobile-start` serves the code to the app already installed; a new native module, as slice 3's camera was, needs `just mobile-ios` again.
+asks. Afterwards, `just mobile-start` serves the code to the app already installed. A new native
+module or a change to `app.config.ts`, as slice 3's camera was, needs `just mobile-ios` again: it
+runs `expo prebuild` first, because `expo run:ios` alone builds an `ios/` that already exists
+without applying the config to it, and the app then lacks what the config adds. Prebuild clears
+the signing team, so with more than one signing identity on the Mac it asks for the team again.
 
 The phone cannot reach a development server on the Mac's loopback, so on a phone use staging,
 `https://remote-staging.yardsort.sh` (31 §7). The iOS Simulator shares the Mac's loopback, so it

@@ -632,6 +632,15 @@ its link to the relay and make it again.
   camera, and `WebSocket` under React Native are what the smoke test shows.
 - **Not built here:** as in §10. This adds a native module, so a phone needs a new build, not only
   new code from Metro.
+- **Found on the first run of the smoke test, on the iPhone:** two things no check here could see.
+  `expo run:ios` does not apply `app.config.ts` to an `ios/` that already exists, so a build over
+  slice 2's project linked the camera without its `Info.plist` reason, and the camera stopped the
+  app with a red error. `just mobile-ios` now runs `expo prebuild` first. With a project generated
+  here and its reason removed, that put the reason back. It also clears the signing team, which
+  `expo run:ios` sets again: by itself with one signing identity on the Mac, and by asking, last
+  choice first, with more. And from iOS 26 the header is glass laid over the screen, so every
+  screen began underneath it, since a React Native scroll view does not leave room for a header
+  unless told to. It now does.
 
 **Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
 
