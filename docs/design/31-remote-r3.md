@@ -471,7 +471,10 @@ Built on 2026-10-31, on Linux. Its smoke test, below, passed on 2026-11-01: a de
 the owner's iPhone, built on the Mac, against staging. That is the first time the client ran under
 Hermes, SecureStore kept a credential, and a sign-in came back through `yardsort://signed-in`.
 Android is still untried. The review after it changed how refreshes and refused access are handled
-(below), and that was tested against the real server, not again on the phone.
+(below). The smoke test was run again on the phone with those changes the same day, with one step
+added: the phone locked for at least 16 minutes, past the 15 minutes access lasts, and a pull to
+refresh on waking stays signed in. Another server taking over an address, and an answer arriving
+after a switch, are shown against the real server through the stand-in, not on the phone.
 
 - **`apps/mobile`**, its own Bun project (§3): `LICENSE` with the MPL-2.0 text, `"license":
 "MPL-2.0"`, the MPL's short notice in each file, and a README on running it. Expo SDK 58, every
@@ -561,11 +564,13 @@ Android is still untried. The review after it changed how refreshes and refused 
    and sign in with your staging account. Back in the app: "Signed in to … as …", and the
    account's devices with this one marked **This phone**.
 4. Close the app from the app switcher and open it again: it is still signed in, with no browser.
-5. **Sign out**, then **Cancel**: still signed in. **Sign out** again, and confirm: Connect.
+5. Lock the phone for at least 16 minutes, past the 15 minutes access lasts, then pull to refresh
+   on the devices: still signed in.
+6. **Sign out**, then **Cancel**: still signed in. **Sign out** again, and confirm: Connect.
    Confirming is what revokes the phone at the server.
-6. From the repository, on any computer with a browser:
+7. From the repository, on any computer with a browser:
    `just client-pair devices https://remote-staging.yardsort.sh`, signing in in the browser with
-   the same account. It lists the phone as revoked, because step 5 revoked it.
+   the same account. It lists the phone as revoked, because step 6 revoked it.
 
 The Mac needs Bun, Node.js and CocoaPods besides Xcode, not Rust. A fresh one also needs Xcode's
 first-launch components, an Apple Development certificate, Apple's WWDR G3 intermediate and

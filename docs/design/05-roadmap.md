@@ -913,7 +913,8 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       built the same day: `apps/mobile`, an Expo SDK 58 app that connects to a server, signs in
       through the system browser, lists the account's devices and signs out, with a profile per
       server ([31 §10](31-remote-r3.md#10--what-the-second-slice-adds)). Its smoke test passed
-      on the owner's iPhone against staging on 2026-11-01; Android is untried.
+      on the owner's iPhone against staging on 2026-11-01, and again after review; Android is
+      untried.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
