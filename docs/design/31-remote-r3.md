@@ -6,7 +6,8 @@ test passed on the owner's iPhone against staging on 2026-11-01. The third, pair
 was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. The fourth,
 workspaces, sessions and activity, was built the same day (§12), and its smoke test passed on the
 same iPhone on 2026-11-02. The fifth, watching a terminal, was built that day too (§13), and its smoke
-test passed on the same iPhone that day.
+test passed on the same iPhone that day. The sixth, taking control, was built the same day (§14), and
+has not been run on a phone yet.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -103,7 +104,7 @@ exactly and records it.
 | Credentials     | `expo-secure-store`, `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, so a backup or a new phone does not carry them                                             |
 | Sign-in         | `expo-web-browser`'s auth session: `ASWebAuthenticationSession` on iOS, Custom Tabs on Android. Not an embedded WebView, which RFC 8252 rules out |
 | Pairing code    | `expo-camera`'s QR scanning, and the `yardsort://pair` link when the phone's own camera opens it                                                  |
-| Terminal        | `react-native-webview` 14 with `@xterm/xterm` 6 and its Unicode 11 and web links addons; fit comes with control (§13)                             |
+| Terminal        | `react-native-webview` 14 with `@xterm/xterm` 6 and its Unicode 11 and web links addons                                                           |
 | Protocol client | `packages/remote-client`, plain TypeScript with no dependencies (§4)                                                                              |
 | Package manager | Bun, as the rest of the repository. The app is its own Bun project under `apps/mobile`, like `website/` (below)                                   |
 
@@ -212,7 +213,8 @@ Claude and Codex, which ask their terminal things when they start. If either is 
 question nobody answers, the controller's viewer becomes the responder: a minor version that
 lets the phone send answers marked as answers, which the host writes without taking control, as
 it does for a terminal shown a question (27 §8). That is a slice of its own if needed, not
-assumed.
+assumed. Tried on 2026-11-02 with both on Linux, started from a shell under a lease, up to their
+first screen: neither was held up (§14). The device run still has the last word.
 
 **View-only is drawn at the computer's size.** A phone that is only watching does not resize
 anything. It draws at the terminal's own columns and rows, and scrolls sideways when that is
@@ -349,7 +351,8 @@ seconds of coming back to the foreground.
   device run says whether that can be offered too.
 - **Programs that wait for an answer.** If Claude or Codex waits on a terminal question that no
   viewer answers while a phone controls, the controller's viewer has to become the responder: a
-  protocol change, and a slice (§5).
+  protocol change, and a slice (§5). Neither did on the way to its first screen (§14). A question
+  asked later in a session is for the device run to find.
 - **No Android phone yet.** Every Android result until there is one comes from an emulator, and
   R3 cannot close without a physical one (§7). Android-only trouble, such as xterm.js's input
   under some Android keyboards, may surface late.
@@ -815,8 +818,8 @@ staging needs no deploy. Nothing on this screen reaches the program: taking cont
   only by wheel, so one finger moving up or down goes through what scrolled off, once the page itself
   can move no further. Pinching zooms in, not out: allowing out made Chromium lay the page out nearly
   3,000 pixels tall, with empty space to pan into.
-- **What differs from §3:** the fit addon comes with slice 6, since a viewer never fits. The web
-  links addon is here, or a plain address printed by an agent could not be tapped.
+- **What differs from §3:** the web links addon is here, or a plain address printed by an agent could
+  not be tapped.
 - **What was tested:**
   - The logic against the real server, relay and host, with a real program in a real terminal: a
     snapshot at the computer's size, resuming with nothing cleared, lost or drawn twice, and nothing
@@ -875,7 +878,143 @@ staging needs no deploy. Nothing on this screen reaches the program: taking cont
 13. **Taken back.** With a terminal open, click **Revoke** at the computer. The phone says the computer
     no longer lets it in, and **Back to the account** works, still signed in.
 
-## 14 · Open after this plan
+## 14 · What the sixth slice adds
+
+Built on 2026-11-02, on Linux, and **not yet run on a phone**: the smoke test is below. It adds no
+native module, so `just mobile-start` serves it to the app already installed. The server and the host
+needed no change, so staging needs no deploy; the stand-in learned to type as the person at the
+computer does, for the tests.
+
+- **Taking it** (`src/lib/control.ts`): only ever a person pressing **Take control**. Another device's
+  control is named on the button, **Take over from …**, and pressing that is what asks to take over.
+  The person at the computer cannot be overridden, as the host holds to: a refusal says they are
+  typing, and to try again once they stop. A grant that only watches is told so. A computer may not
+  have read the name of a device let in since, which is then called another device.
+- **Holding it:** the client renews the lease. The moment the computer reports the person there or
+  another device, the phone lets go, without waiting for the next renewal. Only a new report counts,
+  since taking over starts from an old one naming the other device, and nobody is no loss by itself.
+- **Letting go:** **Hand back**, leaving the screen, the app going to the background, or the program
+  ending. The release goes before the channel closes, which is why the screen's hook for it comes
+  before the channel's. Nothing takes control again by itself: a phone coming back is watching.
+- **Typing** (`src/ui/composer.tsx`): a native field, with autocorrection off, since it turns `--` and
+  quotes into something else in a command. It is multiline so that a paste keeps its lines, and Return
+  sends instead of adding one.
+  - A line goes as keystrokes, not as a paste, or vim in normal mode would take a command as text. Then
+    Enter, after the same 150 ms the computer leaves for a first prompt, since a burst reads as a paste.
+  - Several lines go as one paste, for the host to bracket if the program asked, then Enter.
+  - An empty field sends Enter. More than one write's 32 KB stays in the field, and says so.
+  - **Type** sends the field without Enter. A menu that takes one key, vim's normal mode, or a line to
+    finish with Tab all need that, and an Enter nobody meant could answer the next question.
+- **The keys** (`src/lib/keys.ts`): Esc, Tab, Ctrl, the arrows, Backspace and Enter. They go at once and
+  leave the field alone.
+  - Backspace is beyond §5's list: nothing else could delete what the program already has.
+  - Ctrl is a toggle for the next thing pressed. A letter typed then is not put in the field: it sends
+    the control character. An arrow becomes Ctrl and that arrow. Something with no control character is
+    typed as it is.
+  - Arrows follow what the program asked for. The page reads application cursor keys off xterm.js and
+    says when they change, and a snapshot brings them back, as it does every input mode.
+- **What may not have arrived:** one thing goes at a time, each after the last was answered. If the
+  channel closes on one, it is shown, and never sent again by itself: **Put it back** puts text in the
+  field, and **Dismiss** lets go of it. Text may also have arrived and be waiting for Enter, so it asks
+  the person to look first.
+- **What was waiting:** losing control drops whatever had not gone, Enter included, and says so. A
+  refused lease is known not to have been typed, so it is not called uncertain.
+- **What is in the field is not what was waiting.** A person's half-written text stays when control is
+  lost, read-only, and goes only if they take control again and press Send. It is the person's, nothing
+  sends it, and §5 keeps it across a reconnect, so the proposal's "clear unsent input on lease loss"
+  is held to for what had been sent on its way, not for this.
+- **Fitting** (`fitted`): with control, the terminal is resized to what fits the room above the field,
+  and again when the keyboard or a rotation changes that, once it settles. Below 20 columns or 5 rows
+  the size stays. Watching never resizes, and the computer's own size comes back with control (27 §8).
+- **What differs from §3:** no fit addon. Only the app knows how much of the WebView can be seen, since
+  from iOS 26 it starts under a see-through header. So the page says how large a character is, and the
+  app works it out, taking off what the header covers.
+- **The terminal-question check (§5):** Claude Code 2.1.302 and Codex 0.163.0, on Linux, started from a
+  shell in a terminal held by a lease with no viewer shown any question, against tmux, which answers
+  them. Both reached their first screen with nothing waiting on an answer. Four runs each, with
+  throwaway config, so signed out:
+  - Claude's screen settled at 424 to 961 ms under the lease, and 436 to 1,083 ms in tmux.
+  - Codex's settled at 471 to 1,955 ms under the lease, and 549 to 760 ms in tmux. The 1,955 was its
+    first run, cold, and the next three were all faster than tmux's.
+  - So no change is needed for now. It shows nothing about signed-in sessions or questions asked later,
+    which the smoke test and the device run are for.
+- **What was tested:**
+  - The logic against the real server, relay and host, with a real program in a real terminal: a line
+    with its Enter, lines pasted, keys in their place, the size fitted and given back, a take-over and
+    being told of it, a dropped channel letting go and typing nothing, a grant that only watches, and
+    the person at the computer typing.
+  - What the host cannot be made to do on demand against a scripted lease: answers in order, closing on
+    an input, a lease lost before Enter, and letting go while control is being asked for.
+  - The page in real headless Chromium: the character size, what fits leaving nothing to scroll to, and
+    application cursor keys.
+  - The screens against a fake relay and a stand-in WebView.
+- **Writing the tests found** that a terminal stood 5 pixels taller than its rows, from how its box sat
+  on the line, which would have left a fitted page able to move. The real host found that a device can
+  be nameless, which the fake had not shown.
+- **Breaking each behaviour made a test fail,** 77 ways. Four first survived, each on a test too thin:
+  a wait for the size to settle that nothing raced, a notice said twice, the field outliving a program's
+  end with text in it, and a character's size said again unchanged. All four are fixed.
+- **What was shown without a phone:** nothing about WebKit, the system keyboard, the keyboard moving
+  the screen, or a real header: the fit's numbers come from a stand-in layout. The smoke test is the
+  first time any of that runs.
+- **Not built here:** direct typing into the terminal (§5 leaves that to the device run), a button to
+  paste from the clipboard (the system's own menu pastes into the field, where it can be read first,
+  and needs no new module), and selecting text to copy.
+
+**Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
+
+1. On the computer, from this branch, with a throwaway profile:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
+   Settings → Remote: server `https://remote-staging.yardsort.sh`, **Turn on and sign in**. In a
+   workspace with a branch, start a Claude agent and a Codex agent, and open a shell. Make the window
+   wide.
+2. On the Mac, from this branch: `just mobile-start`, and open Yardsort Dev on the phone. Nothing native
+   changed. If the phone is not paired, pair it and allow it to control terminals at the computer.
+3. **Taking it.** Open the computer, then the workspace, then Claude's conversation. It says **Watching.
+   Nobody has control.** and nothing can be typed. Press **Take control**. It says **You have control**,
+   and the screen redraws to fit the phone, its top line clear of the header and its bottom line above
+   the field, with nothing left to scroll sideways. The window on the computer shows the phone's size.
+4. **Typing.** Tap the field. The keyboard comes up and the screen redraws to fit what is left, with
+   Claude's prompt still in view. Type a short request and press return. Claude takes it and answers.
+   Do the same with **Send** rather than return.
+5. **The keys.** While Claude is working, press **Esc**: it stops. Ask it for something it has to ask
+   permission for. Answer with **↑**, **↓** and **Enter**, or type the option's number in the field and
+   press **Type**, which sends it without Enter. Then go back, open the shell and **Take control**:
+   - Send `ls`, then press **↑**: the line comes back at the prompt. **⌫** deletes its last letter. Type
+     that letter in the field, press **Type**, then **Enter** runs it.
+   - Type `ech` in the field, press **Type**, then **Tab**: the shell completes it to `echo`. **Enter**
+     runs it.
+   - Send `sleep 100`, press **Ctrl**, then type `c` on the keyboard: it stops, and no `c` is in the field.
+   - Send `vim /etc/hosts`. **↑**, **↓**, **←** and **→** move the cursor, with no letters typed. Then
+     send `:q!`.
+6. **Pasting.** Copy three lines from Notes. In the shell, run `cat`, long-press the field, **Paste**, and
+   press **Send**: the lines come back whole. **Ctrl** then `d` ends `cat`. Open Claude's conversation,
+   take control and do the same: Claude takes all three as one message, not three.
+7. **Unicode.** Send `héllo 日本語 👍` to the shell's `cat`. It comes back unbroken. Try dictation.
+8. **Codex.** Open its conversation and take control. Type to it, use the arrows in its prompt and press
+   **Esc**.
+9. **The terminal-question check.** With control of the shell, send `claude`, and answer what it shows
+   until it is at its prompt. Press **Ctrl** then `c` twice to leave, then do the same with `codex`. Each
+   comes up about as quickly as it does at the computer, with nothing stuck waiting.
+10. **Taken back mid-typing.** With control of the shell, type something in the field without sending it.
+    At the computer, type one key in that terminal. Within a second or so the phone says **The person at
+    the computer took control.**, the keys go, and the text stays in the field, read-only. The window
+    goes back to its own size. **Take control** straight away says they are typing. About 30 seconds
+    after the last key at the computer it works, and **Send** sends the text then, once.
+11. **Handing back.** Press **Hand back**. It says nobody has control, and the computer's size comes back.
+12. **Away and back.** Take control, then send the app to the background. At the computer, the terminal is
+    back to its own size at once, and typing there works. Come back: it is watching, with **Take control**
+    offered and nothing typed. Lock the phone and unlock it the same way.
+13. **A drop.** Take control of the shell, turn on airplane mode and press **Send** with something in the
+    field. Within about 30 seconds it says the connection dropped, and that the text may not have reached
+    the computer. Turn airplane mode off. **Watching** comes back, nothing was typed at the computer, and
+    control is not taken. **Put it back** returns the text.
+14. **Sideways.** Take control and rotate the phone, with and without the keyboard up. The screen redraws
+    to fit each, and with too little room for 5 rows it stays as it was.
+15. **A program's end.** With control of the shell, run `exit`. The phone says **The program ended**, and
+    the field goes.
+
+## 15 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

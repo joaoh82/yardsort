@@ -5,9 +5,9 @@
  * The page that draws a terminal, inside a WebView (31 §5). It draws what it is sent and nothing
  * else: `scripts/terminal-page.ts` builds it into one document, with no way to reach the network.
  *
- * Nothing typed here goes anywhere, and nothing is ever said back to a program: there is no
- * listener for what xterm.js would answer, and the host has already taken a program's questions out
- * of what a phone is sent. A clipboard write in an escape sequence goes nowhere too, since the addon
+ * Nothing typed here goes anywhere, since typing has a native field of its own, and nothing is ever
+ * said back to a program: there is no listener for what xterm.js would answer, and the host has
+ * already taken a program's questions out of what a phone is sent. A clipboard write in an escape sequence goes nowhere too, since the addon
  * that would carry it out is not here.
  */
 
@@ -56,6 +56,30 @@ if (field) {
   field.tabIndex = -1;
 }
 
+let cellSaid = { width: 0, height: 0 };
+
+/** How large a character is, for the app to work out what fits. Read from what is drawn. */
+function sayCell(): void {
+  const screen = terminal.element?.querySelector(".xterm-screen")?.getBoundingClientRect();
+  if (!screen || terminal.cols === 0 || terminal.rows === 0) return;
+  const width = screen.width / terminal.cols;
+  const height = screen.height / terminal.rows;
+  if (width <= 0 || height <= 0) return;
+  if (width === cellSaid.width && height === cellSaid.height) return;
+  cellSaid = { width, height };
+  say({ t: "cell", width, height });
+}
+
+let applicationCursor = false;
+
+/** Arrows are sent by the app, and what a program asked for changes what they should say. */
+function sayCursorKeys(): void {
+  const application = terminal.modes.applicationCursorKeysMode;
+  if (application === applicationCursor) return;
+  applicationCursor = application;
+  say({ t: "cursorKeys", application });
+}
+
 /**
  * Run `step` after everything sent before it has been drawn. xterm.js parses what it is given later,
  * so a reset or a size applied at once would land in the middle of what came before it.
@@ -75,13 +99,18 @@ function heard(message: unknown): void {
       inTurn(() => {
         terminal.reset();
         terminal.resize(m.cols, m.rows);
+        sayCell();
+        sayCursorKeys();
       });
       break;
     case "resize":
       inTurn(() => terminal.resize(m.cols, m.rows));
       break;
     case "output":
-      terminal.write(fromBase64(m.data), () => say({ t: "drawn", id: m.id }));
+      terminal.write(fromBase64(m.data), () => {
+        sayCursorKeys();
+        say({ t: "drawn", id: m.id });
+      });
       break;
   }
 }

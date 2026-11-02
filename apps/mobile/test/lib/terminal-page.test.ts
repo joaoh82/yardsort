@@ -286,6 +286,77 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     expect(pageHeight).toBeLessThanOrEqual(phoneHeight);
   });
 
+  test("says how large a character is, and what fits by that leaves nothing to move to", async () => {
+    await load();
+    await post({ t: "reset", cols: 200, rows: 60 });
+    await print("wide");
+    const cell = (await said()).filter((m) => m.t === "cell").at(-1) as unknown as {
+      width: number;
+      height: number;
+    };
+    expect(cell.width).toBeGreaterThan(3);
+    expect(cell.height).toBeGreaterThan(cell.width);
+    // Wider and taller than the phone, as watching a computer's terminal is.
+    expect(await tab.read<number>("document.documentElement.scrollWidth")).toBeGreaterThan(390);
+
+    // Worked out as the app does, the terminal now fills the phone without going past it.
+    const cols = Math.floor(390 / cell.width);
+    const rows = Math.floor(800 / cell.height);
+    await post({ t: "resize", cols, rows });
+    await print(`${"x".repeat(cols - 3)}END`);
+    await onScreen("END");
+    const page = await tab.read<{ wide: number; tall: number; right: number; bottom: number }>(
+      `(() => {
+        const screen = document.querySelector('.xterm-screen').getBoundingClientRect();
+        const root = document.documentElement;
+        return { wide: root.scrollWidth, tall: root.scrollHeight, right: screen.right, bottom: screen.bottom };
+      })()`,
+    );
+    expect(page.wide).toBeLessThanOrEqual(390);
+    expect(page.tall).toBeLessThanOrEqual(800);
+    expect(page.right).toBeLessThanOrEqual(390);
+    expect(page.bottom).toBeLessThanOrEqual(800);
+    // There was room for no more: one more column or row would not have fitted.
+    expect(page.right + cell.width).toBeGreaterThan(390);
+    expect(page.bottom + cell.height).toBeGreaterThan(800);
+  });
+
+  test("says a character's size again only if it changed", async () => {
+    await load();
+    await post({ t: "reset", cols: 40, rows: 10 });
+    await print("one");
+    await post({ t: "reset", cols: 60, rows: 20 });
+    await print("two");
+    expect((await said()).filter((m) => m.t === "cell").length).toBe(1);
+  });
+
+  test("says when a program asks for application cursor keys, and when that ends", async () => {
+    await load();
+    const keys = async () =>
+      (await said()).filter((m) => m.t === "cursorKeys") as unknown as { application: boolean }[];
+    await post({ t: "reset", cols: 40, rows: 10 });
+    await print("plain");
+    expect(await keys()).toEqual([]);
+
+    await print("\x1b[?1h");
+    expect((await keys()).map((m) => m.application)).toEqual([true]);
+    await print("still");
+    expect((await keys()).length).toBe(1);
+
+    await print("\x1b[?1l");
+    expect((await keys()).map((m) => m.application)).toEqual([true, false]);
+
+    // A new snapshot starts from nothing, and says it again if the program still wants it.
+    await print("\x1b[?1h");
+    await post({ t: "reset", cols: 40, rows: 10 });
+    await print("\x1b[?1h");
+    await until(
+      "said both",
+      keys,
+      (k) => k.map((m) => m.application).join() === "true,false,true,false,true",
+    );
+  });
+
   test("a new size applies in its place among the output", async () => {
     await load();
     await post({ t: "reset", cols: 100, rows: 10 });
@@ -312,7 +383,7 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     await tab.send("Input.insertText", { text: "typed" });
     await Bun.sleep(150);
     const kinds = (await said()).map((m) => m.t);
-    expect(kinds.filter((k) => k !== "ready" && k !== "drawn")).toEqual([]);
+    expect(kinds.filter((k) => k !== "ready" && k !== "drawn" && k !== "cell")).toEqual([]);
     const field = await tab.read<{ readOnly: boolean; inputMode: string }>(
       "(()=>{const f=document.querySelector('.xterm-helper-textarea');return {readOnly:f.readOnly,inputMode:f.inputMode}})()",
     );
@@ -370,7 +441,7 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     await print(`\u001b]52;c;${secret}\u0007shown`);
     await onScreen("shown");
     const kinds = (await said()).map((m) => m.t);
-    expect(kinds.filter((k) => k !== "ready" && k !== "drawn")).toEqual([]);
+    expect(kinds.filter((k) => k !== "ready" && k !== "drawn" && k !== "cell")).toEqual([]);
   });
 
   test("a message it cannot read draws nothing, and is said to be unreadable", async () => {

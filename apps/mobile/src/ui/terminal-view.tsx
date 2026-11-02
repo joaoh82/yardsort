@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Alert, Linking, StyleSheet } from "react-native";
+import { Alert, type HostInstance, Linking, StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 
 import { readToApp } from "../lib/bridge";
@@ -18,17 +18,32 @@ import { TERMINAL_PAGE } from "./terminal-page.generated";
 
 const BLANK = "about:blank";
 
+/** How much the view has, and how far down the screen it starts. */
+export interface Room {
+  width: number;
+  height: number;
+  top: number;
+}
+
 export function TerminalView({
   feed,
   started,
   trouble,
+  room,
+  cell,
+  cursorKeys,
 }: {
   feed: PageFeed;
   /** The page has started, with nothing on it: the first time, and whenever it is started again. */
   started: () => void;
   trouble: (what: "script" | "unreadable") => void;
+  room: (room: Room) => void;
+  cell: (cell: { width: number; height: number }) => void;
+  cursorKeys: (application: boolean) => void;
 }) {
   const web = useRef<WebView<object>>(null);
+  const holder = useRef<HostInstance>(null);
+  const top = useRef(0);
   // The system may end a WebView's process to free memory. A new view starts it again.
   const [life, setLife] = useState(0);
   useEffect(() => () => feed.connect(null), [feed]);
@@ -39,52 +54,71 @@ export function TerminalView({
   };
 
   return (
-    <WebView<object>
-      key={life}
-      ref={web}
-      testID="terminal"
-      accessibilityLabel="Terminal, drawn at the computer’s size"
+    <View
+      ref={holder}
+      testID="terminal-room"
       style={styles.fill}
-      source={{ html: TERMINAL_PAGE, baseUrl: BLANK }}
-      originWhitelist={[BLANK]}
-      onShouldStartLoadWithRequest={(request) => request.url === BLANK}
-      onMessage={(event) => {
-        const message = readToApp(event.nativeEvent.data);
-        if (!message) return;
-        const left = pageSaid(message, feed);
-        if (left?.t === "ready") {
-          feed.connect((text) => web.current?.postMessage(text));
-          started();
-        } else if (left?.t === "link") {
-          confirmLink(left.url);
-        } else if (left?.t === "trouble") {
-          trouble(left.what);
-        }
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        room({ width, height, top: top.current });
+        // Where it starts on the screen is not in the event, and takes the header into account.
+        holder.current?.measureInWindow((_x, y) => {
+          top.current = y;
+          room({ width, height, top: y });
+        });
       }}
-      onContentProcessDidTerminate={lost}
-      onRenderProcessGone={lost}
-      contentInsetAdjustmentBehavior="automatic"
-      bounces={false}
-      javaScriptEnabled
-      javaScriptCanOpenWindowsAutomatically={false}
-      setSupportMultipleWindows={false}
-      domStorageEnabled={false}
-      cacheEnabled={false}
-      incognito
-      thirdPartyCookiesEnabled={false}
-      sharedCookiesEnabled={false}
-      allowFileAccess={false}
-      allowFileAccessFromFileURLs={false}
-      allowUniversalAccessFromFileURLs={false}
-      allowsLinkPreview={false}
-      geolocationEnabled={false}
-      mediaCapturePermissionGrantType="deny"
-      dataDetectorTypes="none"
-      saveFormDataDisabled
-      setBuiltInZoomControls
-      setDisplayZoomControls={false}
-      hideKeyboardAccessoryView
-    />
+    >
+      <WebView<object>
+        key={life}
+        ref={web}
+        testID="terminal"
+        accessibilityLabel="Terminal"
+        style={styles.fill}
+        source={{ html: TERMINAL_PAGE, baseUrl: BLANK }}
+        originWhitelist={[BLANK]}
+        onShouldStartLoadWithRequest={(request) => request.url === BLANK}
+        onMessage={(event) => {
+          const message = readToApp(event.nativeEvent.data);
+          if (!message) return;
+          const left = pageSaid(message, feed);
+          if (left?.t === "ready") {
+            feed.connect((text) => web.current?.postMessage(text));
+            started();
+          } else if (left?.t === "link") {
+            confirmLink(left.url);
+          } else if (left?.t === "cell") {
+            cell(left);
+          } else if (left?.t === "cursorKeys") {
+            cursorKeys(left.application);
+          } else if (left?.t === "trouble") {
+            trouble(left.what);
+          }
+        }}
+        onContentProcessDidTerminate={lost}
+        onRenderProcessGone={lost}
+        contentInsetAdjustmentBehavior="automatic"
+        bounces={false}
+        javaScriptEnabled
+        javaScriptCanOpenWindowsAutomatically={false}
+        setSupportMultipleWindows={false}
+        domStorageEnabled={false}
+        cacheEnabled={false}
+        incognito
+        thirdPartyCookiesEnabled={false}
+        sharedCookiesEnabled={false}
+        allowFileAccess={false}
+        allowFileAccessFromFileURLs={false}
+        allowUniversalAccessFromFileURLs={false}
+        allowsLinkPreview={false}
+        geolocationEnabled={false}
+        mediaCapturePermissionGrantType="deny"
+        dataDetectorTypes="none"
+        saveFormDataDisabled
+        setBuiltInZoomControls
+        setDisplayZoomControls={false}
+        hideKeyboardAccessoryView
+      />
+    </View>
   );
 }
 

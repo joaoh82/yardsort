@@ -18,7 +18,7 @@ export const GENERATED = join(ROOT, "src/ui/terminal-page.generated.ts");
 
 const PAGE_STYLE = `
 html, body { margin: 0; background: #151514; }
-#terminal { display: inline-block; }
+#terminal { display: inline-block; vertical-align: top; }
 `;
 
 /** The document, and the source file that holds it. */

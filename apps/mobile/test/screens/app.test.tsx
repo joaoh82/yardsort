@@ -902,6 +902,309 @@ describe("A computer", () => {
       expect(outputs()).toEqual(["the screen as it is", "and then this"]);
     });
 
+    describe("taking control", () => {
+      const button = (name: string | RegExp) => screen.findByRole("button", { name });
+
+      /** On the terminal's screen, with this phone in control. */
+      async function inControl(server = new FakeServer()) {
+        const app = await watching(server);
+        await fireEvent.press(await button("Take control"));
+        await screen.findByTestId("composer");
+        return app;
+      }
+      const typed = (server: FakeServer) => server.inputs.map((input) => input.data);
+      const type = async (text: string) => {
+        await fireEvent.changeText(screen.getByTestId("composer"), text);
+      };
+      const sent = () => act(async () => jest.advanceTimersByTimeAsync(500));
+
+      test("is only ever asked for, and nothing can be typed until then", async () => {
+        const { server } = await watching();
+        await screen.findByText("Watching. Nobody has control.");
+        expect(screen.queryByTestId("composer")).toBeNull();
+        expect(server.acquires).toEqual([]);
+
+        await fireEvent.press(await button("Take control"));
+        await screen.findByText(/^You have control/);
+        expect(server.acquires).toEqual([false]);
+        expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
+      });
+
+      test("Send types the line and then Enter, and empties the field", async () => {
+        const { server } = await inControl();
+        await type("hello there");
+        await fireEvent.press(await button("Send"));
+        await sent();
+        expect(server.inputs).toEqual([
+          { data: "hello there", paste: false },
+          { data: "\r", paste: false },
+        ]);
+        expect(screen.getByTestId("composer").props.value).toBe("");
+      });
+
+      test("Return does the same, and nothing in the field is Enter alone", async () => {
+        const { server } = await inControl();
+        await type("by return");
+        await fireEvent(screen.getByTestId("composer"), "submitEditing");
+        await sent();
+        expect(typed(server)).toEqual(["by return", "\r"]);
+        await fireEvent(screen.getByTestId("composer"), "submitEditing");
+        await sent();
+        expect(typed(server)).toEqual(["by return", "\r", "\r"]);
+      });
+
+      test("Type sends what is in the field with no Enter, and an empty field sends nothing", async () => {
+        const { server } = await inControl();
+        await fireEvent.press(await button("Type without Enter"));
+        await sent();
+        expect(typed(server)).toEqual([]);
+
+        await type("1");
+        await fireEvent.press(await button("Type without Enter"));
+        await sent();
+        expect(server.inputs).toEqual([{ data: "1", paste: false }]);
+        expect(screen.getByTestId("composer").props.value).toBe("");
+      });
+
+      test("several lines go as one paste, for the computer to bracket", async () => {
+        const { server } = await inControl();
+        await type("line one\nline two");
+        await fireEvent.press(await button("Send"));
+        await sent();
+        expect(server.inputs[0]).toEqual({ data: "line one\nline two", paste: true });
+      });
+
+      test("the keys a phone lacks go at once, with the field left alone", async () => {
+        const { server } = await inControl();
+        await type("half a thought");
+        for (const name of ["Escape", "Tab", "Up arrow", "Left arrow", "Backspace", "Enter"]) {
+          await fireEvent.press(await button(name));
+          await sent();
+        }
+        expect(typed(server)).toEqual(["\x1b", "\t", "\x1b[A", "\x1b[D", "\x7f", "\r"]);
+        expect(screen.getByTestId("composer").props.value).toBe("half a thought");
+      });
+
+      test("arrows follow what the program asked for", async () => {
+        const { server } = await inControl();
+        await pageSays({ t: "cursorKeys", application: true });
+        await fireEvent.press(await button("Up arrow"));
+        await sent();
+        await pageSays({ t: "cursorKeys", application: false });
+        await fireEvent.press(await button("Up arrow"));
+        await sent();
+        expect(typed(server)).toEqual(["\x1bOA", "\x1b[A"]);
+      });
+
+      test("Ctrl and a typed letter send the control character, once, and not into the field", async () => {
+        const { server } = await inControl();
+        await type("kept");
+        await fireEvent.press(await screen.findByRole("togglebutton", { name: "Control" }));
+        await type("keptc");
+        await sent();
+        expect(typed(server)).toEqual(["\x03"]);
+        expect(screen.getByTestId("composer").props.value).toBe("kept");
+
+        await type("keptc");
+        expect(screen.getByTestId("composer").props.value).toBe("keptc");
+        await sent();
+        expect(typed(server)).toEqual(["\x03"]);
+      });
+
+      test("Ctrl with something that has no control character types it", async () => {
+        const { server } = await inControl();
+        await fireEvent.press(await screen.findByRole("togglebutton", { name: "Control" }));
+        await type("1");
+        await sent();
+        expect(typed(server)).toEqual([]);
+        expect(screen.getByTestId("composer").props.value).toBe("1");
+      });
+
+      test("Ctrl changes the next arrow, then lets go", async () => {
+        const { server } = await inControl();
+        await fireEvent.press(await screen.findByRole("togglebutton", { name: "Control" }));
+        await fireEvent.press(await button("Left arrow"));
+        await sent();
+        await fireEvent.press(await button("Left arrow"));
+        await sent();
+        expect(typed(server)).toEqual(["\x1b[1;5D", "\x1b[D"]);
+      });
+
+      test("once in control it fits the room, and watching never asks", async () => {
+        const { server } = await watching();
+        await act(async () =>
+          fireEvent(screen.getByTestId("terminal-room"), "layout", {
+            nativeEvent: { layout: { x: 0, y: 0, width: 400, height: 600 } },
+          }),
+        );
+        await pageSays({ t: "cell", width: 8, height: 16 });
+        await sent();
+        expect(server.resizes).toEqual([]);
+
+        await fireEvent.press(await button("Take control"));
+        await screen.findByTestId("composer");
+        await sent();
+        // Under a see-through header, whose 44 points cover the first rows.
+        expect(server.resizes).toEqual([{ cols: 50, rows: 34 }]);
+
+        // A keyboard coming up.
+        await act(async () =>
+          fireEvent(screen.getByTestId("terminal-room"), "layout", {
+            nativeEvent: { layout: { x: 0, y: 0, width: 400, height: 300 } },
+          }),
+        );
+        await sent();
+        expect(server.resizes.at(-1)).toEqual({ cols: 50, rows: 16 });
+      });
+
+      test("handing back says so to the computer, and offers it again", async () => {
+        const { server } = await inControl();
+        await fireEvent.press(await button("Hand back"));
+        await sent();
+        expect(server.releases).toBe(1);
+        await button("Take control");
+        expect(screen.queryByTestId("composer")).toBeNull();
+      });
+
+      test("the person at the computer taking it clears the way, and keeps what was being written", async () => {
+        const { server } = await inControl();
+        await type("half written");
+        await act(async () => server.controlNow({ kind: "local" }));
+        await screen.findByText("The person at the computer took control.");
+        await screen.findByText("Watching. The person at the computer has control.");
+        // Still there to send by hand later, and it cannot be sent now.
+        const field = screen.getByTestId("composer");
+        expect(field.props.value).toBe("half written");
+        expect(field.props.editable).toBe(false);
+        expect(screen.queryByRole("button", { name: "Up arrow" })).toBeNull();
+        await fireEvent.press(await button("Send"));
+        await sent();
+        expect(typed(server)).toEqual([]);
+
+        // Refused while they type. Taken by hand once they stop, and the text goes only then.
+        server.refuseControl = true;
+        await fireEvent.press(await button("Take control"));
+        await screen.findByText(/is typing here/);
+        server.refuseControl = false;
+        await act(async () => server.controlNow({ kind: "nobody" }));
+        await fireEvent.press(await button("Take control"));
+        await screen.findByText(/^You have control/);
+        await sent();
+        expect(typed(server)).toEqual([]);
+        await fireEvent.press(await button("Send"));
+        await sent();
+        expect(typed(server)).toEqual(["half written", "\r"]);
+      });
+
+      test("another device's control is named, and only taken over by asking", async () => {
+        const { server } = await watching();
+        await act(async () =>
+          server.controlNow({ kind: "device", device: "device-other", name: "The tablet" }),
+        );
+        await screen.findByText("Watching. The tablet has control.");
+        expect(server.acquires).toEqual([]);
+        await fireEvent.press(await button("Take over from The tablet"));
+        await screen.findByText(/^You have control/);
+        expect(server.acquires).toEqual([true]);
+      });
+
+      test("another device it cannot name yet is still offered, as what it is", async () => {
+        const { server } = await watching();
+        await act(async () => server.controlNow({ kind: "device", device: "device-x", name: "" }));
+        await screen.findByText("Watching. Another device has control.");
+        await button("Take over from another device");
+      });
+
+      test("a drop on its way says it may not have arrived, sends nothing again, and takes nothing back", async () => {
+        const { server } = await inControl();
+        server.unanswered.add("terminal.input");
+        await type("maybe arrived");
+        await fireEvent.press(await button("Send"));
+        await act(async () => jest.advanceTimersByTimeAsync(10));
+        expect(typed(server)).toEqual(["maybe arrived"]);
+
+        await act(async () => {
+          for (const socket of [...server.relaySockets]) socket.close(1006);
+          await jest.advanceTimersByTimeAsync(10);
+        });
+        await screen.findByText(/may not have reached the computer.*maybe arrived/);
+        await screen.findByText(/connection dropped/);
+        expect(screen.queryByTestId("composer")).toBeNull();
+
+        server.unanswered.clear();
+        await screen.findByText(/^Watching/, {}, { timeout: 60_000 });
+        await sent();
+        expect(typed(server)).toEqual(["maybe arrived"]);
+        expect(server.acquires).toEqual([false]);
+
+        // Only the person says to try again, and only into the field.
+        await fireEvent.press(await button("Put it back"));
+        expect(screen.queryByText(/may not have reached/)).toBeNull();
+        expect(screen.getByTestId("composer").props.value).toBe("maybe arrived");
+        await button("Take control");
+        await sent();
+        expect(typed(server)).toEqual(["maybe arrived"]);
+      });
+
+      test("what may not have arrived can be let go of, leaving the field alone", async () => {
+        const { server } = await inControl();
+        server.unanswered.add("terminal.input");
+        await fireEvent.press(await button("Escape"));
+        await act(async () => jest.advanceTimersByTimeAsync(10));
+        await act(async () => {
+          for (const socket of [...server.relaySockets]) socket.close(1006);
+          await jest.advanceTimersByTimeAsync(10);
+        });
+        await screen.findByText(/may not have reached the computer.*Escape/);
+        // A key has nothing to put back.
+        expect(screen.queryByRole("button", { name: "Put it back" })).toBeNull();
+        await fireEvent.press(await button("Dismiss"));
+        expect(screen.queryByText(/may not have reached/)).toBeNull();
+        expect(screen.queryByTestId("composer")).toBeNull();
+      });
+
+      test("a page started anew forgets what the last one was told about arrows", async () => {
+        const { server } = await inControl();
+        await pageSays({ t: "cursorKeys", application: true });
+        await pageSays({ t: "ready" });
+        await screen.findByText(/^You have control/);
+        await fireEvent.press(await button("Up arrow"));
+        await sent();
+        expect(typed(server)).toEqual(["\x1b[A"]);
+      });
+
+      test("the app going to the background lets go first, and coming back does not take it again", async () => {
+        const changes: ((state: string) => void)[] = [];
+        jest.spyOn(AppState, "addEventListener").mockImplementation(((
+          _: string,
+          listener: (state: string) => void,
+        ) => {
+          changes.push(listener);
+          return { remove: () => {} };
+        }) as typeof AppState.addEventListener);
+        const { server } = await inControl();
+        await act(async () => changes.forEach((tell) => tell("background")));
+        await sent();
+        expect(server.operations.at(-1)?.op).toBe("terminal.release");
+        expect(server.releases).toBe(1);
+
+        await act(async () => changes.forEach((tell) => tell("active")));
+        await screen.findByText(/^Watching/, {}, { timeout: 60_000 });
+        await sent();
+        expect(server.acquires).toEqual([false]);
+        await button("Take control");
+      });
+
+      test("a program's end takes the field away, with whatever was in it", async () => {
+        const { server } = await inControl();
+        await type("never to be sent");
+        await act(async () => server.programEnded({ code: 0, success: true }));
+        await screen.findByText("The program ended.");
+        expect(screen.queryByTestId("composer")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
+      });
+    });
+
     test("nothing is asked for until the page has started", async () => {
       const server = new FakeServer();
       told().length = 0;
