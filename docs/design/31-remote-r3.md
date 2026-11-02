@@ -5,7 +5,8 @@
 test passed on the owner's iPhone against staging on 2026-11-01. The third, pairing and computers,
 was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. The fourth,
 workspaces, sessions and activity, was built the same day (§12), and its smoke test passed on the
-same iPhone on 2026-11-02.
+same iPhone on 2026-11-02. The fifth, watching a terminal, was built that day too (§13), and its smoke
+test passed on the same iPhone that day.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -102,7 +103,7 @@ exactly and records it.
 | Credentials     | `expo-secure-store`, `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, so a backup or a new phone does not carry them                                             |
 | Sign-in         | `expo-web-browser`'s auth session: `ASWebAuthenticationSession` on iOS, Custom Tabs on Android. Not an embedded WebView, which RFC 8252 rules out |
 | Pairing code    | `expo-camera`'s QR scanning, and the `yardsort://pair` link when the phone's own camera opens it                                                  |
-| Terminal        | `react-native-webview` 14 with `@xterm/xterm` 6 and its fit and Unicode 11 addons                                                                 |
+| Terminal        | `react-native-webview` 14 with `@xterm/xterm` 6 and its Unicode 11 and web links addons; fit comes with control (§13)                             |
 | Protocol client | `packages/remote-client`, plain TypeScript with no dependencies (§4)                                                                              |
 | Package manager | Bun, as the rest of the repository. The app is its own Bun project under `apps/mobile`, like `website/` (below)                                   |
 
@@ -773,7 +774,108 @@ through a channel, and a phone changes nothing on the computer.
 11. **Signed out.** Pair again, open the computer, then **Sign out** and confirm. Sign in again: no
     computer shows until the phone is paired again.
 
-## 13 · Open after this plan
+## 13 · What the fifth slice adds
+
+Built on 2026-11-02, on Linux. Its smoke test, below, passed on the owner's iPhone against staging
+that day, the first time WebKit drew the page. Android is still unbuilt. A new native module means
+`just mobile-ios` again, not `just mobile-start`. The server and the host needed no change, so
+staging needs no deploy. Nothing on this screen reaches the program: taking control is slice 6.
+
+- **Opening one** (`src/app/workspace.tsx`): a conversation with a terminal, or another terminal, is
+  now a button. The route carries the host, the terminal and the agent's name, never a conversation's
+  title, which is the person's own words (§5).
+- **The page** (`terminal/page.ts`, built by `scripts/terminal-page.ts` into
+  `src/ui/terminal-page.generated.ts`): one document with xterm.js inlined. A test fails when it is
+  out of date, and `just mobile-terminal-page` builds it. The build is the same on the Bun CI pins and
+  on a later one. Its Content-Security-Policy allows its own script by hash and connects to nothing.
+  xterm.js's input is read-only, with stdin disabled and nothing listening for what it would answer.
+  OSC 52 goes nowhere, as the addon that would carry it out is not there.
+- **The bridge** (`src/lib/bridge.ts`): the only thing the two sides share. Each message is bounded
+  and read by a checker on the side receiving it: `reset`, `output` and `resize` in, `ready`, `drawn`,
+  `link` and `trouble` out. `trouble` says which, never what the terminal printed.
+- **The WebView** (`src/ui/terminal-view.tsx`): it goes nowhere but its own document and keeps
+  nothing. A link must be `https` and tapped, and then the person sees where it leads and says yes,
+  since a link's text in a terminal can say anything. If the system ends the WebView's process, a new
+  one starts and gets a new snapshot.
+- **Watching** (`src/lib/watch.ts`), through the screen's channel, whose retries and foreground rule
+  are the same as every other screen's:
+  - A dropped channel, or the app in the background, attaches again from the last position drawn,
+    and the computer says whether that goes on or a snapshot replaces the screen.
+  - 4008 and `resnapshot_required` start from a snapshot, and so does a gap. A position refused on
+    resuming falls back to one too.
+  - Five fresh starts stop and say so, unless the page caught up on output past the snapshot in
+    between. A snapshot's own frames do not count, since one always comes, and neither does new output
+    alone, which a program outrunning the page has plenty of.
+  - Nothing is sent to the program by any of this.
+- **Holding output back** (`PageFeed`): at most 256 KB is with the page, undrawn. Up to 4 MB waits in
+  the app, a size change keeping its place among it, and past that the page starts over from a new
+  snapshot, which counts as a fresh start. A WebView's queue of messages would otherwise have no
+  bottom, and a phone draws slower than a program can print.
+- **Scrolling:** at the computer's size, the document moves sideways under a finger. xterm.js scrolls
+  only by wheel, so one finger moving up or down goes through what scrolled off, once the page itself
+  can move no further. Pinching zooms in, not out: allowing out made Chromium lay the page out nearly
+  3,000 pixels tall, with empty space to pan into.
+- **What differs from §3:** the fit addon comes with slice 6, since a viewer never fits. The web
+  links addon is here, or a plain address printed by an agent could not be tapped.
+- **What was tested:**
+  - The logic against the real server, relay and host, with a real program in a real terminal: a
+    snapshot at the computer's size, resuming with nothing cleared, lost or drawn twice, and nothing
+    typed by coming back, a page started anew, a program's end, a terminal that is gone, and a grant
+    that does not reach terminals.
+  - What the host cannot be made to do on demand against a scripted channel: a new epoch, 4008,
+    `resnapshot_required`, repeated gaps and output arriving before its reply.
+  - The page, as built, in real headless Chromium at a phone's size, with real touch and mouse events:
+    what it draws, order against a reset or a resize, sideways and back through what scrolled off, no
+    question answered, no typing taken, links only when tapped and only `https`, and nothing reaching
+    a real server beside it. Skipped, saying so, where no browser is found. It forces a frame on each
+    look, because a headless tab need not paint on its own. It passed eight runs in a row, three of
+    them with every core busy.
+  - The screens against a fake relay and a stand-in WebView.
+- **Breaking each behaviour made a test fail,** 38 ways, and 13 more after review. Doing that found four tests that proved
+  nothing: a reset and a size change sent too slowly to race the output before them, a check for
+  answers that a second layer already stopped, and a check that the page reaches nothing that passed
+  because nothing was listening. All four are fixed. Writing the tests found a real bug too: a write
+  larger than the page's allowance would have waited forever. Review then found that giving up never
+  happened against the real host: every snapshot comes as a frame, which cleared the count, and the
+  scripted channel sent none. It now sends one as the host does, and starting over counts too. That
+  came after the smoke test, so giving up has only run under tests.
+- **What was shown without a phone:** Metro bundles the app for iOS and Android, and `expo-doctor`
+  passes its 20 checks. Chromium is not a phone's WebView, so only the smoke test tried WebKit's
+  drawing, touch and scrolling.
+- **Not built here:** as in §10.
+
+**Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
+
+1. On the computer, from this branch, with a throwaway profile:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
+   Settings → Remote: server `https://remote-staging.yardsort.sh`, **Turn on and sign in**. Add a
+   project and a workspace with a branch. Start a Claude agent in it, open a shell in it, and make the
+   window wide.
+2. On the Mac, from this branch: `just mobile-ios`, since this slice adds a native module. Pair the
+   phone if it is not already, letting it watch and read everything.
+3. **Opening one.** Open the computer, then the workspace, then tap the conversation. Claude's screen
+   shows as it is on the computer, in colour, its top line clear of the header, with **Watching** below.
+4. **Moving around.** Drag sideways: the rest of the wide screen comes into view. Drag down: what
+   scrolled off the top comes back. Drag up again to return. Pinching zooms in.
+5. **Live.** Send the agent a prompt at the computer. The phone follows within a second or so, with no
+   corrupt screen.
+6. **Nothing reaches the program.** Tap the terminal. No keyboard comes up, and nothing changes at the
+   computer.
+7. **A full-screen program.** Go back and open the shell, then run `vim` or `htop` at the computer. It
+   draws whole on the phone, and leaving it brings the shell back.
+8. **A new size.** Make the desktop window narrower. The phone redraws at the new size.
+9. **A short drop.** Turn on airplane mode for a few seconds, while the agent or the shell prints
+   something. **Reconnecting**, then **Watching** within about 30 seconds of turning it off. The screen
+   is intact, what was printed meanwhile is there, and nothing was typed at the computer.
+10. **Away and back.** Send the app to the background for a minute while something prints, then come
+    back. Lock the phone and unlock it the same way. It resumes both times.
+11. **A link.** Have something print `https://example.com`, then tap it. The phone asks first, showing
+    the address. Cancel, and nothing opens.
+12. **A program's end.** In the shell, run `exit`. The phone says **The program ended**.
+13. **Taken back.** With a terminal open, click **Revoke** at the computer. The phone says the computer
+    no longer lets it in, and **Back to the account** works, still signed in.
+
+## 14 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

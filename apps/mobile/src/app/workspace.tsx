@@ -93,6 +93,10 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
     }
   };
 
+  // Not a conversation's title, which is the person's own words and has no place in a route.
+  const watch = (terminal: TerminalSummary, label: string) =>
+    router.push({ pathname: "/terminal", params: { host, terminal: terminal.id, label } });
+
   const name = detail.answer?.workspace.name ?? seen?.name ?? "Workspace";
   const project = detail.answer?.project.id ?? seen?.project;
   const title = <Stack.Screen options={{ title: name }} />;
@@ -129,7 +133,15 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
         <Body muted>{ended ? "No conversations yet." : "No conversations running."}</Body>
       )}
       {page?.sessions.map((session) => (
-        <SessionRow key={session.id} session={session} />
+        <SessionRow
+          key={session.id}
+          session={session}
+          watch={
+            session.terminal
+              ? () => watch(session.terminal as TerminalSummary, session.harness)
+              : undefined
+          }
+        />
       ))}
       {page?.next && (
         <Button
@@ -150,7 +162,11 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
         <>
           <Label>Other terminals</Label>
           {page.terminals.map(({ purpose, program, terminal }) => (
-            <Card key={terminal.id} label={`${purposeWords(purpose, program)}, terminal`}>
+            <Card
+              key={terminal.id}
+              label={`${purposeWords(purpose, program)}, terminal`}
+              onPress={() => watch(terminal, purposeWords(purpose, program))}
+            >
               <Body>{purposeWords(purpose, program)}</Body>
               <Body muted>{terminalWords(terminal)}</Body>
             </Card>
@@ -195,10 +211,10 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
   );
 }
 
-function SessionRow({ session }: { session: SessionSummary }) {
+function SessionRow({ session, watch }: { session: SessionSummary; watch?: () => void }) {
   const about = [session.harness, session.model].filter(Boolean).join(" · ");
   return (
-    <Card label={session.title}>
+    <Card label={session.title} onPress={watch}>
       <Body>{session.title}</Body>
       <Body muted>{about}</Body>
       <Body muted>{sessionWords(session)}</Body>

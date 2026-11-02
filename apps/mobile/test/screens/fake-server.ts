@@ -9,7 +9,7 @@
 
 import { createHash, webcrypto } from "node:crypto";
 
-import type { Crypto, Socket } from "@yardsort/remote-client";
+import { type Crypto, encodeFrame, type Socket } from "@yardsort/remote-client";
 
 import type { Env } from "../../src/lib/accounts";
 
@@ -124,6 +124,9 @@ export class FakeServer {
     ],
     endedSessions: [] as Record<string, unknown>[],
     terminals: [] as Record<string, unknown>[],
+    terminalEpoch: 1,
+    terminalSize: { cols: 120, rows: 40 },
+    terminalScreen: "the screen as it is",
     events: [event("event-1", "process.started", { harness: "claude", model: "a-model" })],
     olderEvents: null as null | Record<string, unknown>[],
     notes: [
@@ -144,6 +147,10 @@ export class FakeServer {
   operations: { op: string; params: Record<string, unknown> | undefined }[] = [];
   /** The sockets open. */
   relaySockets = new Set<Socket>();
+  /** Where each attachment asked to resume from, in order. */
+  attaches: ({ epoch: number; seq: number } | null)[] = [];
+  #watching = new Map<Socket, { stream: number; epoch: number; seq: number }>();
+  #nextStream = 1;
   /** Sockets with a subscription open, to tell of what is recorded. */
   #following = new Map<Socket, number>();
   /** How many relay sockets are open, and how many ever were. */
@@ -326,6 +333,7 @@ export class FakeServer {
       close: (code = 1000) => {
         this.relaySockets.delete(socket);
         this.#following.delete(socket);
+        this.#watching.delete(socket);
         this.sockets.open -= 1;
         setTimeout(() => socket.onclose?.({ code, reason: "" }), 0);
       },
@@ -380,6 +388,39 @@ export class FakeServer {
       case "activity.unsubscribe":
         this.#following.delete(socket);
         return { kind: "done" };
+      case "terminal.attach": {
+        const resume = params.resumeAfter as unknown as { epoch: number; seq: number } | null;
+        // A resume in the terminal's own epoch goes on from there. Otherwise, a snapshot.
+        const resumed = resume !== null && resume.epoch === computer.terminalEpoch;
+        const stream = this.#nextStream;
+        this.#nextStream += 1;
+        const seq = resumed ? resume.seq : 5;
+        const watching = { stream, epoch: computer.terminalEpoch, seq };
+        this.#watching.set(socket, watching);
+        this.attaches.push(resume);
+        if (!resumed) {
+          setTimeout(() => {
+            socket.onmessage?.({
+              data: encodeFrame({
+                stream,
+                position: { epoch: watching.epoch, seq },
+                bytes: new TextEncoder().encode(computer.terminalScreen),
+              }).buffer as ArrayBuffer,
+            });
+          }, 0);
+        }
+        return {
+          kind: "attached",
+          stream,
+          start: resumed ? "resumed" : "snapshot",
+          position: { epoch: watching.epoch, seq },
+          size: computer.terminalSize,
+          controller: { kind: "nobody" },
+        };
+      }
+      case "terminal.detach":
+        this.#watching.delete(socket);
+        return { kind: "done" };
       case "memory.list":
         return { kind: "memory", notes: computer.notes, next: null };
       default:
@@ -392,6 +433,35 @@ export class FakeServer {
           protocol: { major: 1, minor: 4 },
           capabilities: [],
         };
+    }
+  }
+
+  /** A terminal printing, to whoever is watching it. */
+  print(text: string): void {
+    for (const [socket, watching] of this.#watching) {
+      watching.seq += 1;
+      socket.onmessage?.({
+        data: encodeFrame({
+          stream: watching.stream,
+          position: { epoch: watching.epoch, seq: watching.seq },
+          bytes: new TextEncoder().encode(text),
+        }).buffer as ArrayBuffer,
+      });
+    }
+  }
+
+  /** The computer detaching whoever is watching, who fell behind, for a new snapshot. */
+  needsSnapshot(): void {
+    for (const [socket, { stream }] of this.#watching) {
+      const error = { code: "resnapshot_required", message: "Behind.", retryable: true };
+      socket.onmessage?.({ data: JSON.stringify({ event: "terminal.detached", stream, error }) });
+    }
+  }
+
+  /** A terminal's program ending, told to whoever is watching it. */
+  programEnded(exit: { code: number; success: boolean }): void {
+    for (const [socket, { stream }] of this.#watching) {
+      socket.onmessage?.({ data: JSON.stringify({ event: "terminal.exited", stream, exit }) });
     }
   }
 

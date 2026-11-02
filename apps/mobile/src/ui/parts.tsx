@@ -99,8 +99,36 @@ export function Body({ children, muted }: { children: ReactNode; muted?: boolean
   );
 }
 
-export function Card({ children, label }: { children: ReactNode; label?: string }) {
+export function Card({
+  children,
+  label,
+  onPress,
+}: {
+  children: ReactNode;
+  label?: string;
+  /** What pressing it does, when it does anything. */
+  onPress?: () => void;
+}) {
   const colors = useColors();
+  if (onPress) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.card,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.line,
+            opacity: pressed ? 0.7 : 1,
+          },
+        ]}
+      >
+        {children}
+      </Pressable>
+    );
+  }
   return (
     <View
       accessibilityLabel={label}

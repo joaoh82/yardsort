@@ -9,13 +9,14 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globa
 import { Secret } from "@yardsort/remote-client";
 import { router, Stack } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
-import { Alert, type AlertButton, AppState } from "react-native";
+import { Alert, type AlertButton, AppState, Linking } from "react-native";
 
 import Account from "../../src/app/account";
 import ComputerScreen from "../../src/app/computer";
 import Connect from "../../src/app/connect";
 import Start from "../../src/app/index";
 import MemoryScreen from "../../src/app/memory";
+import TerminalScreen from "../../src/app/terminal";
 import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
 import WorkspaceScreen from "../../src/app/workspace";
@@ -60,6 +61,7 @@ async function start({
       computer: ComputerScreen,
       workspace: WorkspaceScreen,
       memory: MemoryScreen,
+      terminal: TerminalScreen,
     },
     { initialUrl: "/" },
   );
@@ -860,6 +862,238 @@ describe("A computer", () => {
       await act(async () => router.back());
       await screen.findByRole("button", { name: /^fix-login/ });
       await waitFor(() => expect(server.sockets.open).toBe(1));
+    });
+  });
+
+  describe("a terminal", () => {
+    const told = () =>
+      (jest.requireMock("react-native-webview") as { told: string[] }).told as string[];
+    const page = () => screen.getByTestId("terminal");
+    const pageSays = (message: unknown): Promise<unknown> =>
+      act(async () =>
+        fireEvent(page(), "message", { nativeEvent: { data: JSON.stringify(message) } }),
+      );
+    const outputs = () =>
+      told()
+        .map((text) => JSON.parse(text))
+        .filter((m) => m.t === "output")
+        .map((m) => Buffer.from(m.data, "base64").toString());
+    const kinds = () => told().map((text) => JSON.parse(text).t);
+
+    /** On the terminal's screen, with its page started. */
+    async function watching(server = new FakeServer()) {
+      told().length = 0;
+      const app = await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      await fireEvent.press(
+        await screen.findByRole("button", { name: "The login page times out" }),
+      );
+      await screen.findByTestId("terminal");
+      await pageSays({ t: "ready" });
+      await screen.findByText(/^Watching/);
+      await waitFor(() => expect(outputs()).toEqual(["the screen as it is"]));
+      return app;
+    }
+
+    test("a conversation opens its terminal, cleared to the computer's size, then what it prints", async () => {
+      const { server } = await watching();
+      expect(JSON.parse(told()[0] as string)).toEqual({ t: "reset", cols: 120, rows: 40 });
+      await act(async () => server.print("and then this"));
+      expect(outputs()).toEqual(["the screen as it is", "and then this"]);
+    });
+
+    test("nothing is asked for until the page has started", async () => {
+      const server = new FakeServer();
+      told().length = 0;
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      await fireEvent.press(
+        await screen.findByRole("button", { name: "The login page times out" }),
+      );
+      await screen.findByTestId("terminal");
+      await act(async () => jest.advanceTimersByTimeAsync(100));
+      expect(server.attaches).toEqual([]);
+      expect(told()).toEqual([]);
+    });
+
+    test("a route never carries a conversation's title", async () => {
+      await watching();
+      const route = screen as unknown as {
+        getPathname(): string;
+        getSearchParams(): Record<string, string>;
+      };
+      expect(route.getPathname()).toBe("/terminal");
+      expect(route.getSearchParams()).toEqual({
+        host: "host-work",
+        terminal: "terminal-1",
+        label: "claude",
+      });
+    });
+
+    test("a dropped channel resumes where it was, and clears nothing", async () => {
+      const { server } = await watching();
+      await act(async () => server.print("before"));
+      await act(async () => {
+        for (const socket of [...server.relaySockets]) socket.close(1006);
+      });
+      await screen.findByText(/^Reconnecting/);
+      await act(async () => jest.advanceTimersByTimeAsync(2_500));
+      await screen.findByText(/^Watching/);
+      expect(server.attaches).toEqual([null, { epoch: 1, seq: 6 }]);
+      expect(kinds().filter((k) => k === "reset")).toHaveLength(1);
+      await act(async () => server.print("after"));
+      expect(outputs()).toEqual(["the screen as it is", "before", "after"]);
+    });
+
+    test("a new epoch replaces the screen", async () => {
+      const { server } = await watching();
+      await act(async () => {
+        server.computer.terminalEpoch = 2;
+        server.computer.terminalScreen = "a whole new screen";
+        for (const socket of [...server.relaySockets]) socket.close(1006);
+      });
+      await act(async () => jest.advanceTimersByTimeAsync(2_500));
+      await waitFor(() => expect(outputs()).toContain("a whole new screen"));
+      expect(kinds().filter((k) => k === "reset")).toHaveLength(2);
+    });
+
+    test("the app in the background lets go, and resumes on coming back", async () => {
+      const changes: ((state: string) => void)[] = [];
+      jest.spyOn(AppState, "addEventListener").mockImplementation(((
+        _type: string,
+        tell: (state: string) => void,
+      ) => {
+        changes.push(tell);
+        return { remove: () => {} };
+      }) as typeof AppState.addEventListener);
+      const { server } = await watching();
+      await act(async () => changes.forEach((tell) => tell("background")));
+      await waitFor(() => expect(server.sockets.open).toBe(0));
+      await act(async () => changes.forEach((tell) => tell("active")));
+      await screen.findByText(/^Watching/);
+      expect(server.attaches.at(-1)).toEqual({ epoch: 1, seq: 5 });
+      expect(kinds().filter((k) => k === "reset")).toHaveLength(1);
+    });
+
+    test("a page that started anew gets a new snapshot", async () => {
+      const { server } = await watching();
+      await pageSays({ t: "ready" });
+      await waitFor(() => expect(kinds().filter((k) => k === "reset")).toHaveLength(2));
+      expect(server.attaches).toEqual([null, null]);
+    });
+
+    test("a WebView's process ending starts the page again", async () => {
+      const { server } = await watching();
+      await act(async () => fireEvent(page(), "contentProcessDidTerminate"));
+      await act(async () => server.print("nowhere to draw this"));
+      expect(outputs()).not.toContain("nowhere to draw this");
+      await pageSays({ t: "ready" });
+      await waitFor(() => expect(server.attaches).toEqual([null, null]));
+    });
+
+    /** The page saying it drew everything it has been sent. */
+    async function pageDrawsAll() {
+      for (const { id } of told()
+        .map((text) => JSON.parse(text))
+        .filter((m) => m.t === "output")) {
+        await pageSays({ t: "drawn", id });
+      }
+    }
+
+    const settle = () => act(async () => jest.advanceTimersByTimeAsync(10));
+
+    test("a snapshot followed by another, again and again, gives up and says so", async () => {
+      const { server } = await watching();
+      for (let i = 0; i < 8; i += 1) {
+        await pageDrawsAll();
+        await act(async () => server.needsSnapshot());
+        await settle();
+      }
+      expect(await screen.findByText(/could not be followed/)).toBeTruthy();
+      expect(server.attaches).toHaveLength(6);
+    });
+
+    test("falling behind goes on while the page keeps catching up with what is new", async () => {
+      const { server } = await watching();
+      for (let i = 0; i < 8; i += 1) {
+        await act(async () => server.print("something new"));
+        await pageDrawsAll();
+        await act(async () => server.needsSnapshot());
+        await settle();
+      }
+      expect(screen.queryByText(/could not be followed/)).toBeNull();
+      expect(server.attaches).toHaveLength(9);
+    });
+
+    test("a page that has too much waiting starts over from a snapshot", async () => {
+      const { server } = await watching();
+      const chunk = "x".repeat(60_000);
+      for (let i = 0; i < 80 && server.attaches.length < 2; i += 1) {
+        await act(async () => server.print(chunk));
+      }
+      await settle();
+      expect(server.attaches).toEqual([null, null]);
+      expect(kinds().filter((k) => k === "reset")).toHaveLength(2);
+    });
+
+    test("a program's end is said, and watching goes no further", async () => {
+      const { server } = await watching();
+      await act(async () => server.programEnded({ code: 3, success: false }));
+      expect(screen.getByText("The program ended with exit code 3.")).toBeTruthy();
+    });
+
+    test("an https link asks first, and goes nowhere on a no", async () => {
+      await watching();
+      const open = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
+      const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+      await pageSays({ t: "link", url: "https://example.com/a" });
+      expect(open).not.toHaveBeenCalled();
+      const [, url, buttons] = alert.mock.calls.at(-1) as [string, string, AlertButton[]];
+      expect(url).toBe("https://example.com/a");
+      expect(buttons.map((b) => b.text)).toEqual(["Cancel", "Open"]);
+      buttons.find((b) => b.text === "Cancel")?.onPress?.();
+      expect(open).not.toHaveBeenCalled();
+      buttons.find((b) => b.text === "Open")?.onPress?.();
+      expect(open).toHaveBeenCalledWith("https://example.com/a");
+    });
+
+    test("a link to anything else is not even asked about", async () => {
+      await watching();
+      const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+      alert.mockClear();
+      await pageSays({ t: "link", url: "javascript:alert(1)" });
+      await pageSays({ t: "link", url: "http://example.com" });
+      expect(alert).not.toHaveBeenCalled();
+    });
+
+    test("the page goes nowhere else", async () => {
+      await watching();
+      const go = page().props.onShouldStartLoadWithRequest as (r: { url: string }) => boolean;
+      expect(go({ url: "about:blank" })).toBe(true);
+      for (const url of ["https://example.com", "file:///etc/passwd", "yardsort://pair"]) {
+        expect(go({ url })).toBe(false);
+      }
+      expect(page().props.originWhitelist).toEqual(["about:blank"]);
+      expect(page().props.incognito).toBe(true);
+      expect(page().props.allowFileAccess).toBe(false);
+    });
+
+    test("an ended conversation with no terminal has nothing to open", async () => {
+      const server = new FakeServer();
+      const first = server.computer.sessions[0] as Record<string, unknown>;
+      first.terminal = null;
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      await screen.findByText("The login page times out");
+      expect(screen.queryByRole("button", { name: "The login page times out" })).toBeNull();
+    });
+
+    test("a computer that took the phone back takes the terminal with it", async () => {
+      const { server } = await watching();
+      await act(async () => {
+        for (const socket of [...server.relaySockets]) socket.close(4003);
+      });
+      expect(await screen.findByText("This computer no longer lets this phone in.")).toBeTruthy();
     });
   });
 

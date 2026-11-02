@@ -655,8 +655,10 @@ remote ever talks to it directly. Instead:
   from a channel held to it while someone is looking, since the server has no presence. Each screen
   reads a computer's workspaces, conversations, activity and approved memory through its own channel,
   and changes nothing there. Only computers' and workspaces' names and branches are kept, in the
-  cache folder, per profile and marked with when they were seen. Its native projects are generated,
-  never committed.
+  cache folder, per profile and marked with when they were seen. A terminal is drawn by xterm.js in a
+  WebView that loads one document shipped with the app and reaches nothing else, spoken to only
+  through typed, bounded messages (`src/lib/bridge.ts`). Watching resumes from the last position
+  drawn, and never sends anything to the program. Its native projects are generated, never committed.
 - `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
   Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of
   its own with `yardsort_core::remote::serve`. When the link fails, every channel lets go of what

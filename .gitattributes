@@ -3,3 +3,4 @@
 *.ico binary
 *.icns binary
 src/lib/bindings.ts linguist-generated=true
+apps/mobile/src/ui/terminal-page.generated.ts linguist-generated=true
