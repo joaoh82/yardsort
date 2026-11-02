@@ -334,10 +334,12 @@ workspace. **Runs** lists every run, newest first. The header filters narrow bot
 workspace, and — on Tests — the last verdict and whether a test **needs attention** (a browser the
 machine lacks, or an environment value the project has not set); on Runs, who asked (you, an
 agent, a workflow). A search box narrows by name. The filters are remembered between sessions.
+Filtering to a workspace reaches back through that workspace's own history, so an older
+workspace's runs stay findable however many newer ones other workspaces have since produced.
 
 A test opens beside the list, to its file (read-only — it is the repository's, so edit it in the
-worktree), the problems or missing pieces it has, its run history across workspaces, and **Run
-in…** a workspace of its project. A run, from either tab, opens its [run tab](#the-run-tab) in its
+worktree), the problems or missing pieces it has, its run history (that test, in that project,
+across its workspaces), and **Run in…** a workspace of its project. A run, from either tab, opens its [run tab](#the-run-tab) in its
 workspace. A row with a problem, a missing browser or an unset environment value is flagged where
 it sits, so what cannot run yet is plain before you try it.
 
@@ -348,8 +350,12 @@ should check, and a model writes the file: the agent you already have, in its no
 mode, or your Anthropic key — the same writers that draft a [workflow](workflows.md), chosen in
 Settings → Assist. What comes back is editable, with any problems marked, and is nothing until you
 pick a workspace and **Save** it into that worktree's `.yardsort/tests`, where it is then an
-ordinary uncommitted change in the Changes panel. The usual way a test gets written, though, is
-the agent in the workspace writing it itself, because it knows the feature — press Describe it when
+ordinary uncommitted change in the Changes panel. You can save into any live workspace of any
+project, including one that has no smoke tests yet. Saving only ever creates: if the id is
+already taken — by this test's own file or another's — the save is refused rather than quietly
+replacing it, so an agent's uncommitted edits are never lost; give the new test an id of its own,
+or edit the existing file in the worktree. The usual way a test gets written, though, is the
+agent in the workspace writing it itself, because it knows the feature — press Describe it when
 you want one and no agent is on it.
 
 ### The approval card

@@ -112,4 +112,29 @@ describe("TestsView", () => {
     // The read-only file is shown.
     expect(screen.getByText(/^id: health/)).toBeInTheDocument();
   });
+
+  it("resets the run destination when a different workspace's copy is opened", async () => {
+    // The same test id lives in two worktrees of the project. Opening one then the other must not
+    // leave the run destination pointing at the first workspace.
+    core.testCatalog.mockResolvedValue([
+      listing("health", { workspaceId: "w-app-a", workspaceName: "a" }),
+      listing("health", { workspaceId: "w-app-b", workspaceName: "b" }),
+    ]);
+    const user = userEvent.setup();
+    render(<TestsView />);
+    await screen.findByRole("list", { name: "Tests" });
+    await user.click(screen.getByText("app / a").closest("button")!);
+    await user.click(screen.getByText("app / b").closest("button")!);
+    expect(await screen.findByLabelText("Run in workspace")).toHaveValue("w-app-b");
+  });
+
+  it("loads a filtered workspace's own history, past the global cap", async () => {
+    const user = userEvent.setup();
+    render(<TestsView />);
+    await screen.findByRole("list", { name: "Tests" });
+    core.testRuns.mockClear();
+    await user.selectOptions(screen.getByLabelText("Workspace"), "w-app-fix-login");
+    // The workspace's full history is fetched for the filter, not just the global cache.
+    expect(core.testRuns).toHaveBeenCalledWith("w-app-fix-login", expect.any(Number));
+  });
 });

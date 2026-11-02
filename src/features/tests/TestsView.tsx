@@ -10,6 +10,7 @@ import {
   FILTERS_KEY,
   TABS,
   readFilters,
+  saveTargets,
   visibleRuns,
   visibleTests,
   type Filters,
@@ -58,6 +59,9 @@ export function TestsView() {
   }, []);
 
   const listed = useMemo(() => projects.filter((project) => !project.missing), [projects]);
+  // Every live workspace, project-qualified: where Describe it can save a new test, including a
+  // workspace that has no smoke tests yet. Not the picker list below, which is history-derived.
+  const describeTargets = useMemo(() => saveTargets(projects), [projects]);
   // Every workspace that has a test or a run, for the workspace picker.
   const workspaces = useMemo(() => {
     const seen = new Map<string, string>();
@@ -84,6 +88,15 @@ export function TestsView() {
   const shownRuns = useMemo(() => visibleRuns(runs, filters, search), [runs, filters, search]);
 
   const current = catalog.find((listing) => keyOf(listing) === selected) ?? null;
+
+  // A filtered or opened workspace's full (capped) history may reach back past the global cap, so
+  // load it on demand — otherwise an older workspace can read "No runs match" while another has
+  // filled the cache with newer runs. The global cache stays as it is; these merge into it.
+  const focusWorkspace = filters.workspace ?? current?.workspaceId ?? null;
+  useEffect(() => {
+    if (focusWorkspace) void useSmokeTestsStore.getState().loadWorkspaceRuns(focusWorkspace);
+  }, [focusWorkspace]);
+
   const active =
     filters.projects.length > 0 ||
     filters.workspace !== null ||
@@ -212,7 +225,10 @@ export function TestsView() {
         </div>
         {current && (
           <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* Keyed by the selection so switching tests remounts it: its run-destination state
+                starts from the newly selected listing's workspace, not the one before. */}
             <TestDetail
+              key={selected ?? undefined}
               listing={current}
               catalog={catalog}
               runs={runs}
@@ -226,7 +242,7 @@ export function TestsView() {
 
       {describing && (
         <DescribeTest
-          workspaces={workspaces}
+          workspaces={describeTargets}
           onClose={() => setDescribing(false)}
           onSaved={() => void refresh()}
         />

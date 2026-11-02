@@ -30,8 +30,12 @@ export function TestDetail({
     .map((other) => ({ id: other.workspaceId, name: other.workspaceName }));
   const [runIn, setRunIn] = useState(listing.workspaceId);
   const [running, setRunning] = useState(false);
-  // Every run of this test, newest first, whichever workspace it ran in.
-  const history = runs.filter((run) => run.testId === listing.item.id);
+  // Every run of this test in its project, newest first, whichever workspace it ran in. Test ids
+  // are repository-local, so a `health` in one project is not the `health` of another: scope by
+  // project id too, or two projects' identical ids would show each other's runs.
+  const history = runs.filter(
+    (run) => run.testId === listing.item.id && run.projectId === listing.projectId,
+  );
 
   return (
     <div className="flex h-full flex-col">

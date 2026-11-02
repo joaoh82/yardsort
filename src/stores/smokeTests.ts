@@ -30,6 +30,10 @@ interface SmokeTestsState {
   load: () => Promise<void>;
   /** Read every test across every workspace, for the Tests view. */
   loadCatalog: () => Promise<void>;
+  /** Merge in one workspace's history, newest first, so the Tests view can reach runs that have
+   *  aged out of the global cap once another workspace has produced enough newer ones. The global
+   *  cache (`load`) is left as it is; these are added to it by id. */
+  loadWorkspaceRuns: (workspaceId: string) => Promise<void>;
   loadSteps: (runId: string) => Promise<void>;
   /** Everything already loaded, again: the runs, and the steps on screen. */
   refresh: () => Promise<void>;
@@ -87,6 +91,21 @@ export const useSmokeTestsStore = create<SmokeTestsState>((set, get) => ({
       set({ catalog, catalogLoaded: true });
     } catch (error) {
       set({ error: errorMessage(error), catalogLoaded: true });
+    }
+  },
+
+  async loadWorkspaceRuns(workspaceId) {
+    if (!hasCore() || !workspaceId) return;
+    try {
+      const more = await ipc.testRuns(workspaceId, RUNS_IN_VIEW);
+      set((state) => {
+        const byId = new Map(state.runs.map((run) => [run.id, run]));
+        for (const run of more) byId.set(run.id, run);
+        const runs = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
+        return { runs };
+      });
+    } catch (error) {
+      set({ error: errorMessage(error) });
     }
   },
 

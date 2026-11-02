@@ -1,4 +1,4 @@
-import type { TestListing, TestRun } from "@/lib/ipc";
+import type { Project, TestListing, TestRun } from "@/lib/ipc";
 
 /** The two tabs of the Tests view: the tests themselves, or every run of them. */
 export type Tab = "tests" | "runs";
@@ -49,6 +49,22 @@ export const REQUESTED_BY: { id: string; label: string }[] = [
   { id: "cli", label: "An agent" },
   { id: "workflow", label: "A workflow" },
 ];
+
+/**
+ * The live workspaces a new test can be saved into, project-qualified, for **Describe it**: every
+ * present, non-archived workspace of every shown project — including a project or workspace that
+ * has no smoke test yet, which the history-derived picker would miss. The name carries the project
+ * so two workspaces called `local` can be told apart.
+ */
+export function saveTargets(projects: Project[]): { id: string; name: string }[] {
+  return projects
+    .filter((project) => !project.missing)
+    .flatMap((project) =>
+      project.workspaces
+        .filter((workspace) => !workspace.archived && !workspace.missing)
+        .map((workspace) => ({ id: workspace.id, name: `${project.name} / ${workspace.name}` })),
+    );
+}
 
 /** The verdict of a test's last run, as the filter and the column name it. */
 export function verdictOf(listing: TestListing): Verdict {

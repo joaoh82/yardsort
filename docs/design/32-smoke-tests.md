@@ -722,6 +722,30 @@ the Smoke tests part of the Project settings dialog, `smoke::words` in the core,
   manual checklist a smoke-tests section. Screenshots on the throwaway profile are left to a run of
   `scripts/screenshots.sh` once a demo test that needs nothing but a shell is seeded.
 
+### What the slice-6 review changed
+
+A review of the first cut found two data-safety holes in `smoke::save` and four narrower bugs in
+the view; all six are fixed here, the last with its edges honestly bounded.
+
+- **`smoke::save` only ever creates.** A save that landed on an id already present replaced its
+  file unconditionally — an agent's uncommitted edits with it. It is now create-only: a path
+  already there, a `<id>.yaml` above all (checked with `symlink_metadata`, which does not follow a
+  link), is refused. Describe it is for new tests; an existing one is edited in the worktree.
+- **`smoke::save` cannot be walked out of the worktree.** It wrote through a predictable
+  `<id>.yaml.saving` and `std::fs::write`, which follows a symlink planted at that path. The write
+  now goes to a uniquely named temporary opened with `create_new` (so an existing file or symlink
+  makes it fail, not redirect), and the `.yardsort/tests` folder must `canonicalize` to inside the
+  worktree or the save is refused — a symlinked tests folder can no longer send a write outside.
+- **The view's smaller fixes.** `DescribeTest` now lists every live workspace from the projects
+  store (`saveTargets`), not only those with a test or run, so a fresh project can take its first
+  test. `TestDetail` is keyed by the selected listing, so opening another workspace's copy resets
+  **Run in…** instead of keeping the previous one. Its run history is scoped by project id as well
+  as test id, so two projects' identical ids (`health`, `login`) no longer show each other's runs.
+  And filtering to a workspace now loads that workspace's own history
+  (`smokeTests.loadWorkspaceRuns`), so an older workspace's runs are reachable past the global
+  200-row cache; a fully paged, filter-before-limit history across all workspaces at once is still
+  a later refinement.
+
 ## Not in version one, on purpose
 
 - **Driving native desktop applications.** "Open the app and click around" for a Tauri or

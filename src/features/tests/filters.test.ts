@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { TestListing, TestRun } from "@/lib/ipc";
+import type { Project, TestListing, TestRun } from "@/lib/ipc";
+import { project, worktree } from "@/test/fixtures";
 import {
   DEFAULT_FILTERS,
   needsSomething,
   readFilters,
+  saveTargets,
   verdictOf,
   visibleRuns,
   visibleTests,
@@ -131,6 +133,31 @@ describe("visibleRuns", () => {
     ]);
     expect(visibleRuns(runs, filters({ tab: "runs", projects: ["p2"] }), "")).toEqual([runs[1]]);
     expect(visibleRuns(runs, filters({ tab: "runs" }), "log in")).toEqual([runs[0]]);
+  });
+});
+
+describe("saveTargets", () => {
+  it("is every live workspace, project-qualified, including ones with no tests", () => {
+    const projects: Project[] = [
+      // Default project() has its `local` workspace; add a worktree too.
+      { ...project("app"), workspaces: [...project("app").workspaces, worktree("app", "fix")] },
+      // A missing project contributes nothing.
+      { ...project("gone"), missing: true },
+      // An archived or missing workspace is not a target.
+      {
+        ...project("web"),
+        workspaces: [
+          worktree("web", "live"),
+          worktree("web", "shelved", { archived: true }),
+          worktree("web", "lost", { missing: true }),
+        ],
+      },
+    ];
+    expect(saveTargets(projects)).toEqual([
+      { id: "w-app", name: "app / local" },
+      { id: "w-app-fix", name: "app / fix" },
+      { id: "w-web-live", name: "web / live" },
+    ]);
   });
 });
 
