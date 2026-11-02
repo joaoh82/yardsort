@@ -709,3 +709,62 @@ fn an_entry_knows_whether_it_needs_a_browser() {
     assert!(!find(tree.path(), "demo").unwrap().uses_browser());
     assert!(find(tree.path(), "health").unwrap().uses_browser());
 }
+
+#[test]
+fn saving_writes_the_file_at_its_id_and_the_catalog_sees_it() {
+    let tree = worktree();
+    let path = save(tree.path(), BASE).unwrap();
+    assert_eq!(path, dir(tree.path()).join("demo.yaml"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BASE);
+    assert!(find(tree.path(), "demo").unwrap().runnable());
+}
+
+#[test]
+fn saving_refuses_an_id_another_file_already_holds() {
+    let tree = worktree();
+    write(tree.path(), "first.yaml", BASE); // id: demo, in first.yaml
+    let clash = save(tree.path(), BASE).unwrap_err(); // would be demo.yaml
+    assert_eq!(clash.code, "test_exists");
+    assert!(clash.message.contains("first.yaml"), "{}", clash.message);
+}
+
+#[test]
+fn saving_never_replaces_an_existing_test() {
+    // Describe it creates; it must not silently destroy a test already there — the file might
+    // hold an agent's uncommitted edits. A second save of the same id is refused, bytes intact.
+    let tree = worktree();
+    let path = save(tree.path(), BASE).unwrap();
+    let changed =
+        with_steps("  - id: extra\n    action: run\n    program: node\n    args: [--version]\n");
+    let err = save(tree.path(), &changed).unwrap_err();
+    assert_eq!(err.code, "test_exists");
+    assert!(err.message.contains("demo.yaml"), "{}", err.message);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BASE);
+}
+
+#[test]
+fn saving_needs_a_valid_id() {
+    let tree = worktree();
+    let err = save(tree.path(), "name: No id here\n").unwrap_err();
+    assert_eq!(err.code, "test_invalid_id");
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_refuses_a_tests_folder_that_leaves_the_worktree() {
+    // A `.yardsort/tests` symlink pointing outside the worktree must not let a save land there
+    // and clobber whatever file is at its mercy. The outside target is left untouched.
+    use std::os::unix::fs::symlink;
+    let tree = worktree();
+    let outside = worktree();
+    let victim = outside.path().join("secret.yaml");
+    std::fs::write(&victim, "keep me\n").unwrap();
+    std::fs::create_dir_all(tree.path().join(".yardsort")).unwrap();
+    symlink(outside.path(), tree.path().join(".yardsort").join("tests")).unwrap();
+
+    // id: demo would be demo.yaml, i.e. not the victim — the point is the folder itself escapes.
+    let err = save(tree.path(), BASE).unwrap_err();
+    assert_eq!(err.code, "test_outside_worktree", "{}", err.message);
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me\n");
+    assert!(!outside.path().join("demo.yaml").exists());
+}

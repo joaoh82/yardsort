@@ -35,6 +35,10 @@ const LINES: { command: string; note: string }[] = [
     note: "the GitHub issues waiting on you — and ys task create files one",
   },
   {
+    command: "ys test run login",
+    note: "run a smoke test and read its verdict with ys test wait",
+  },
+  {
     command: "ys workspace delete fix-the-flaky-login-test",
     note: "the folder goes; the branch stays",
   },

@@ -72,6 +72,13 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   `ys workflow run`, its steps drawn as a chart, every mistake named at its line. The built-in
   code review is one click in a workspace's menu. Describe one in your own words and a model
   writes the file, for you to check and save. [More below](#workflows-named-agent-work-in-steps).
+
+- **Smoke tests: the ten-minute check, repeatable.** The steps a person runs by hand before
+  saying "done" — start the server, open a page, click, look for a word — written as a YAML file
+  in your repository, that an agent writes and Yardsort runs, step by step, with every output,
+  screenshot and reason for a failure kept. **Tests**, in the sidebar, lists every test and every
+  run. A file from a repository never runs until you have seen it.
+  [More below](#smoke-tests-the-ten-minute-check-repeatable).
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
   image previews. Edit text files inside Yardsort, with retained drafts and a check before
   overwriting a file changed on disk, or open them in your editor. With an agent reporting,
@@ -318,6 +325,33 @@ ys workflow run code-review --workspace fix-login --input reviewer=codex
 
 The app carries the run out in the background, with the agents it starts as ordinary tabs, and
 `ys workflow runs` follows it step by step. See [Workflows](docs/guide/workflows.md).
+
+## Smoke tests: the ten-minute check, repeatable
+
+A smoke test is a short, structured list of steps that checks a piece of software from the
+outside — start the server, wait for it, hit an endpoint, open a page, click a button, look for a
+word. Today an agent writes those steps as prose and you do them by hand, every time. Yardsort
+makes them a file the agent writes, the app runs, and you watch: typed steps with expectations,
+browser actions over the DevTools protocol against a Chromium already on your machine, and
+variables for ports and secrets.
+
+The file lives in your repository, at `.yardsort/tests/<id>.yaml`, so the test travels with the
+branch. Because it comes from a repository and says what to run, **a file never runs until you
+have seen it**: the first time Yardsort meets a file — new, or changed — it shows the steps and
+asks you to approve them; from then on that exact file runs without asking.
+
+**Tests**, in the sidebar, lists every project's tests with the verdict of each one's last run,
+and a **Runs** tab of every run; filter by project, workspace, verdict or what the machine lacks.
+A run opens as a tab beside the agent whose work it checks, each step with its status, the one
+running with its live output, a failed one with what it expected, what it got, and the screenshot
+it took. An agent writes a test itself, or press **Describe it** and a model writes one for you to
+check and save. A [workflow](docs/guide/workflows.md) can run one too. From a terminal:
+
+```sh
+ys test run login --workspace fix-login   # the result from `ys test wait`
+```
+
+See [Smoke tests](docs/guide/smoke-tests.md).
 
 ## Supported agents
 

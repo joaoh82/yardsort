@@ -1,13 +1,24 @@
 import { create } from "zustand";
-import { errorMessage, hasCore, ipc, type TestRun, type TestStepRun } from "@/lib/ipc";
+import {
+  errorMessage,
+  hasCore,
+  ipc,
+  type TestListing,
+  type TestRun,
+  type TestStepRun,
+} from "@/lib/ipc";
 
-/** How many runs the window keeps in view, newest first. The Tests view will page further. */
+/** How many runs the window keeps in view, newest first. The Tests view pages further. */
 const RUNS_IN_VIEW = 200;
 
 interface SmokeTestsState {
   /** Runs across every workspace, newest first, as the core lists them. */
   runs: TestRun[];
   loaded: boolean;
+  /** Every test across every workspace, as the Tests view lists them. Read on opening the view
+   *  and on Refresh — a scan of each worktree, so not on every run event. */
+  catalog: TestListing[];
+  catalogLoaded: boolean;
   /** Steps of each run whose steps were asked for. */
   steps: Record<string, TestStepRun[] | undefined>;
   /** Run tabs open in each workspace, in the order they were opened. */
@@ -17,6 +28,12 @@ interface SmokeTestsState {
   error: string | null;
 
   load: () => Promise<void>;
+  /** Read every test across every workspace, for the Tests view. */
+  loadCatalog: () => Promise<void>;
+  /** Merge in one workspace's history, newest first, so the Tests view can reach runs that have
+   *  aged out of the global cap once another workspace has produced enough newer ones. The global
+   *  cache (`load`) is left as it is; these are added to it by id. */
+  loadWorkspaceRuns: (workspaceId: string) => Promise<void>;
   loadSteps: (runId: string) => Promise<void>;
   /** Everything already loaded, again: the runs, and the steps on screen. */
   refresh: () => Promise<void>;
@@ -36,6 +53,8 @@ interface SmokeTestsState {
 export const useSmokeTestsStore = create<SmokeTestsState>((set, get) => ({
   runs: [],
   loaded: false,
+  catalog: [],
+  catalogLoaded: false,
   steps: {},
   open: {},
   shown: {},
@@ -62,6 +81,31 @@ export const useSmokeTestsStore = create<SmokeTestsState>((set, get) => ({
       set({ runs, loaded: true });
     } catch (error) {
       set({ error: errorMessage(error), loaded: true });
+    }
+  },
+
+  async loadCatalog() {
+    if (!hasCore()) return;
+    try {
+      const catalog = await ipc.testCatalog();
+      set({ catalog, catalogLoaded: true });
+    } catch (error) {
+      set({ error: errorMessage(error), catalogLoaded: true });
+    }
+  },
+
+  async loadWorkspaceRuns(workspaceId) {
+    if (!hasCore() || !workspaceId) return;
+    try {
+      const more = await ipc.testRuns(workspaceId, RUNS_IN_VIEW);
+      set((state) => {
+        const byId = new Map(state.runs.map((run) => [run.id, run]));
+        for (const run of more) byId.set(run.id, run);
+        const runs = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
+        return { runs };
+      });
+    } catch (error) {
+      set({ error: errorMessage(error) });
     }
   },
 
@@ -144,6 +188,12 @@ export function waitingIn(runs: TestRun[], workspaceId: string): TestRun[] {
   return runs
     .filter((run) => run.workspaceId === workspaceId && run.status === "awaiting_approval")
     .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** How many runs, across every workspace, are waiting for the user to approve them: the number
+ *  on the Tests sidebar row. */
+export function waitingTotal(runs: TestRun[]): number {
+  return runs.filter((run) => run.status === "awaiting_approval").length;
 }
 
 /** Not ended yet: waiting for approval, queued or running. */

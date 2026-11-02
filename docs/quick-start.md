@@ -142,6 +142,12 @@ With the pull request open, **Request code review…** in the workspace's menu h
 review it and post on GitHub, then tells you and the agent that wrote it. That is a
 [workflow](guide/workflows.md); the **Workflows** section above Projects has it and any you write.
 
+Ask the agent to _write a smoke test for this_ and it leaves a short YAML file in the
+repository — start the server, open a page, look for a word — that Yardsort runs step by step and
+keeps. **Run smoke test…** in the workspace's menu starts one; the first time a file runs you
+approve its steps, and **Tests** in the sidebar lists every project's tests and runs.
+See [Smoke tests](guide/smoke-tests.md).
+
 ### Check tokens and machine resources
 
 Open **Usage** beside **Settings** at the foot of the sidebar, or search for _Usage_ with
@@ -170,6 +176,7 @@ to reopen it with its conversation intact.
 - [Tasks](guide/tasks.md) — your projects' GitHub issues: which need an answer, and handing one
   to an agent
 - [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review
+- [Smoke tests](guide/smoke-tests.md) — the ten-minute check written as a file an agent runs
 - [Usage](guide/usage.md) — tokens, estimated API costs, plan limits and live CPU and memory
 - [Settings & harnesses](guide/settings.md) — make an agent start the way you like
 - [Keyboard shortcuts](guide/shortcuts.md)

@@ -490,10 +490,11 @@ example | guide`, and `docs/guide/smoke-tests.md` with the format. Fixtures: one
 5. **Agents and workflows.** ✅ The launch paragraph; `smoke::GUIDE` tested against the parser; the
    `run_test` action in the workflow engine and driver, and the built-in **Smoke test, then tell
    the agent**. Describe it for tests waits for slice 6, where the Tests view it lives in is built.
-6. **The Tests view, docs and pictures.** The sidebar row, the view with its filters, the
-   **Runs** tab, history across workspaces, **Run in…**; the README's highlight and section, the website's section and `ys`
-   line, the quick start's mention, `docs/README.md`, `website/src/lib/docs.ts`, screenshots on
-   the throwaway profile with a demo test that needs nothing but a shell, and [08] gains §26.
+6. **The Tests view, docs and pictures.** ✅ The sidebar row, the view with its filters, the
+   **Runs** tab, history across workspaces, **Run in…**, and **Describe it** for tests; the
+   README's highlight and section, the website's section and `ys` line, the quick start's mention,
+   `docs/README.md`, `website/src/lib/docs.ts`, and [08] gains a smoke-tests section. Screenshots
+   on the throwaway profile wait for a run of `scripts/screenshots.sh` with a demo test.
 
 Slices 1 and 2 work with no window but for approval, which is the point: a test queued by a
 workflow or, later, a schedule needs nothing the window has except a person to approve a new
@@ -692,6 +693,58 @@ the Smoke tests part of the Project settings dialog, `smoke::words` in the core,
   the new action and kind.
 - **Not here:** Describe it for smoke-test files, which belongs with the Tests view it is offered
   in (slice 6).
+
+## Slice 6: what shipped
+
+- **The Tests view.** **Tests** in the sidebar (`TestsRow`, under _Workflows_), its number the
+  runs waiting for approval across every workspace. The view (`TestsView`) has two tabs: **Tests**
+  lists every test across every workspace with the verdict of its last run, when and where; **Runs**
+  lists every run. Header filters narrow both — project (a multi-select), workspace, and, per tab,
+  the last verdict and _needs attention_, or who asked. A test opens to its file (read-only), its
+  problems and missing pieces, its run history across workspaces, and **Run in…** a workspace of
+  its project (which reuses `RunSmokeTestDialog`). A run opens its tab in its workspace. Read on
+  opening and on **Refresh**, like Tasks; the filters persist in `ui_state` (`tests.filters`).
+- **The cross-project catalog.** A new `test_catalog` command walks every workspace on show,
+  reads each worktree's `.yardsort/tests`, and returns a `TestListing` per test with its project
+  and workspace, the env names the project has not set, a machine-wide browser check, and its last
+  run — the newest of each `(workspace, test)` pair from a new `store.latest_test_runs()`.
+- **Describe it for tests.** `smoke::describe` mirrors `workflow::describe`: a `SYSTEM` built from
+  `smoke::GUIDE` and `smoke::EXAMPLE`, the two-try loop, the answer re-parsed with `smoke::parse`.
+  The `test_describe` command uses the same Drafting writers the workflow editor does, in the same
+  profile-owned scratch repository. `test_save` writes the result to a chosen worktree's
+  `.yardsort/tests/<id>.yaml` (`smoke::save`), where it is an ordinary uncommitted change — the
+  `DescribeTest` dialog is in the Tests view header.
+- **Routing.** `testsOpen` / `openTests` on the projects store, cleared by every other view like
+  `tasksOpen`; the center panel (`WorkspacePanel`) gains a `testsOpen` branch; a **Tests** command
+  in the palette.
+- **Docs and pictures.** The guide gains the Tests-view and Describe-it sections; the README a
+  highlight and a section; the website a card and a `ys test` line; the quick start a mention; the
+  manual checklist a smoke-tests section. Screenshots on the throwaway profile are left to a run of
+  `scripts/screenshots.sh` once a demo test that needs nothing but a shell is seeded.
+
+### What the slice-6 review changed
+
+A review of the first cut found two data-safety holes in `smoke::save` and four narrower bugs in
+the view; all six are fixed here, the last with its edges honestly bounded.
+
+- **`smoke::save` only ever creates.** A save that landed on an id already present replaced its
+  file unconditionally — an agent's uncommitted edits with it. It is now create-only: a path
+  already there, a `<id>.yaml` above all (checked with `symlink_metadata`, which does not follow a
+  link), is refused. Describe it is for new tests; an existing one is edited in the worktree.
+- **`smoke::save` cannot be walked out of the worktree.** It wrote through a predictable
+  `<id>.yaml.saving` and `std::fs::write`, which follows a symlink planted at that path. The write
+  now goes to a uniquely named temporary opened with `create_new` (so an existing file or symlink
+  makes it fail, not redirect), and the `.yardsort/tests` folder must `canonicalize` to inside the
+  worktree or the save is refused — a symlinked tests folder can no longer send a write outside.
+- **The view's smaller fixes.** `DescribeTest` now lists every live workspace from the projects
+  store (`saveTargets`), not only those with a test or run, so a fresh project can take its first
+  test. `TestDetail` is keyed by the selected listing, so opening another workspace's copy resets
+  **Run in…** instead of keeping the previous one. Its run history is scoped by project id as well
+  as test id, so two projects' identical ids (`health`, `login`) no longer show each other's runs.
+  And filtering to a workspace now loads that workspace's own history
+  (`smokeTests.loadWorkspaceRuns`), so an older workspace's runs are reachable past the global
+  200-row cache; a fully paged, filter-before-limit history across all workspaces at once is still
+  a later refinement.
 
 ## Not in version one, on purpose
 

@@ -9,6 +9,7 @@
 //! it. See `docs/design/32-smoke-tests.md`.
 
 pub mod browser;
+pub mod describe;
 mod parse;
 
 pub mod deliver;
@@ -467,6 +468,116 @@ pub const LAUNCH_SECTION: &str = "## Smoke tests\n\n\
 /// Where a worktree keeps its smoke tests.
 pub fn dir(worktree: &Path) -> PathBuf {
     worktree.join(".yardsort").join("tests")
+}
+
+/// Write a test file into a worktree's `.yardsort/tests`, at `<id>.yaml` for the file's own id,
+/// and return where it went. This is how **Describe it** saves what a model wrote; the usual way
+/// a test gets here is an agent writing the file itself. The file then is an ordinary uncommitted
+/// change in the worktree, like any the agent makes — nothing is approved or run by saving.
+///
+/// The id comes from the text, valid or not, so a draft with problems can still be saved and
+/// fixed in place. A different file in the folder already holding that id is a clash, refused
+/// rather than left as two files one id, which neither would then run under.
+///
+/// Saving only ever *creates*: a path already there — a test with this id above all — is refused,
+/// never overwritten, so an agent's uncommitted edits are safe. The folder must resolve inside
+/// the worktree, and the write goes through an exclusively created temporary, so a planted
+/// symlink cannot send a save out to some other file the app happens to be able to reach.
+pub fn save(worktree: &Path, text: &str) -> crate::error::IpcResult<PathBuf> {
+    use crate::error::IpcError;
+    use std::io::Write;
+    if text.len() as u64 > MAX_FILE_BYTES {
+        return Err(IpcError::new(
+            "test_too_big",
+            format!("A smoke test file may be at most {MAX_FILE_BYTES} bytes."),
+        ));
+    }
+    let id = match parse(text) {
+        Ok(test) => Some(test.id),
+        Err(invalid) => invalid.id,
+    }
+    .filter(|id| crate::yaml::is_id(id))
+    .ok_or_else(|| {
+        IpcError::new(
+            "test_invalid_id",
+            "Give the test an `id:` first: lowercase letters, digits and `-`, like `login`.",
+        )
+    })?;
+    let folder = dir(worktree);
+    let path = folder.join(format!("{id}.yaml"));
+    // Another file, by any name, already holding this id: two files one id, neither would run.
+    if let Some(other) = catalog(worktree)
+        .into_iter()
+        .find(|entry| entry.id == id && Path::new(&entry.path) != path)
+    {
+        return Err(IpcError::new(
+            "test_exists",
+            format!(
+                "{} already has the id `{id}`. Give this one an id of its own.",
+                other.path
+            ),
+        ));
+    }
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| IpcError::new("io", format!("Cannot create {}: {e}", folder.display())))?;
+    // The folder must resolve inside the worktree. A `.yardsort` or `.yardsort/tests` symlink
+    // that escaped it would let a save land on a file the user never authorised, anywhere the
+    // app can reach; refuse rather than follow it out.
+    let contained = match (folder.canonicalize(), worktree.canonicalize()) {
+        (Ok(resolved), Ok(root)) => resolved.starts_with(&root),
+        _ => false,
+    };
+    if !contained {
+        return Err(IpcError::new(
+            "test_outside_worktree",
+            format!(
+                "{} does not resolve inside the workspace, so a test cannot be saved there.",
+                folder.display()
+            ),
+        ));
+    }
+    // Create-only: never replace a test already there. Describe it writes new tests, and silently
+    // overwriting one would destroy its file — uncommitted edits and all. A symlink at the path
+    // counts as present (via `symlink_metadata`, which does not follow it) and is refused too.
+    if path.symlink_metadata().is_ok() {
+        return Err(IpcError::new(
+            "test_exists",
+            format!(
+                "{} already exists. Give this test an id of its own, or edit that file in the \
+                 worktree.",
+                path.display()
+            ),
+        ));
+    }
+    let written = |path: &Path, e: std::io::Error| {
+        IpcError::new("io", format!("Cannot write {}: {e}", path.display()))
+    };
+    // Write through a uniquely named temporary, created exclusively (`create_new`, so an existing
+    // file or symlink at the path makes it fail rather than be followed), then rename it over the
+    // destination — rename replaces a symlink at the target instead of following it. So a
+    // half-written file never sits where a run would read it, and neither step follows a link out.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temporary = folder.join(format!(".{id}.{}-{stamp}.saving", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|e| written(&temporary, e))?;
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&temporary);
+            written(&temporary, e)
+        })?;
+    drop(file);
+    std::fs::rename(&temporary, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&temporary);
+        written(&path, e)
+    })?;
+    Ok(path)
 }
 
 /// Every test in a worktree's `.yardsort/tests`, sorted by name. A missing folder has none.

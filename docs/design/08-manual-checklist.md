@@ -587,6 +587,39 @@ build's `ys` first for the agents, and prints the steps for the macOS and Window
 |     | Start Cursor, OpenCode, Grok, OMP and pi in the workspace and give each a message; Grok, OMP and pi start from the tab bar without the question, told as background context. Quit OMP and **Resume** it: its tab says _Told about …_ again; resume Grok: it does not. **Show** on a new agent's line, or `ys workspace context`: every conversation is there with its messages, and none of the tools they ran. |
 |     | **macOS / Windows:** the first two rows, and the row with the other five agents.                                                                                                                                                                                                                                                                                                                                |
 
+## 27 · Smoke tests
+
+Needs `ys` on your `PATH` and a project with a worktree workspace. Save this as
+`.yardsort/tests/greet.yaml` in the worktree — it needs nothing but a shell, so it runs on every
+platform. For the browser row, have Chrome, Chromium or Edge on the machine.
+
+```yaml
+id: greet
+name: Greet
+version: 1
+steps:
+  - id: say
+    action: run
+    program: echo
+    args: [hello]
+    expect:
+      stdout: hello
+  - id: confirm
+    action: manual
+    prompt: Did it say hello?
+```
+
+| ✓   | Check                                                                                                                                                                                                                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | `ys test validate greet`: no problems. `ys test list`: `greet` is runnable. Break a line (`expct:`) and validate again: the mistake is named at its line and column.                                                                                                                                                              |
+|     | `ys test run greet --workspace <name>`: _awaiting approval_. In Yardsort, the workspace's row carries a count and a card at the top shows the two steps in words. **Run**: the `say` step passes, `confirm` asks; the run tab is open with the steps and the echo output.                                                         |
+|     | Press **Pass** on the manual step: the run ends _passed_, and `ys test wait <run>` prints the verdict and exits 0. Run it again: no approval card this time — the file is unchanged. Edit the file, run again: the card returns, showing what changed.                                                                            |
+|     | **Tests** in the sidebar: the **Tests** tab lists `greet` with its last verdict, when and the workspace; filter by project, workspace and verdict, and search by name. The **Runs** tab lists the runs; filter by who asked. Open `greet`: its file read-only, its run history, and **Run in…**; pick the workspace and **Run…**. |
+|     | **Describe it…**: type _check the echo command prints hello_, **Write it** (needs an agent or an Anthropic key in Settings → Assist), a file comes back editable; pick the workspace, **Save**, and the new file appears in the Changes panel and in the Tests list.                                                              |
+|     | Add a `browser` step that opens a page and looks for a word; run it: a headless Chromium does it, and a failing look takes a screenshot shown on the step. With no browser on the machine, the test is listed as _needs a browser_ and the run says so without starting one.                                                      |
+|     | The built-in **Smoke test, then tell the agent**: with an agent running in the workspace, `ys workflow run smoke-then-tell --input suite=greet`; the run queues a smoke run marked as the workflow's, waits for it, and types the verdict into the agent once quiet.                                                              |
+|     | **macOS / Windows:** the first three rows, the Tests view, and the browser row.                                                                                                                                                                                                                                                   |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:

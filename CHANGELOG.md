@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **A Tests view for every project's smoke tests.** **Tests**, in the sidebar, lists every
+  project's tests with the verdict of each one's last run, and a **Runs** tab of every run across
+  workspaces; filter by project, workspace, verdict or what the machine lacks, and on Runs by who
+  asked. A test opens to its file, its history and **Run in…** a workspace of its project; a run
+  opens its tab in that workspace. Its sidebar number is the runs waiting for approval. Press
+  **Describe it** and a model writes a test from a description — the same Drafting writers the
+  workflow editor uses — for you to check and save into a worktree's `.yardsort/tests`. See
+  [Smoke tests](docs/guide/smoke-tests.md#in-the-app).
+
 - **Workflows can run a smoke test.** A new `run_test` step queues one of the workspace's smoke
   tests and waits for its verdict, leaving the verdict and summary for later steps; it succeeds
   whether the test passed or failed, so a later step can act on either, and fails only when the

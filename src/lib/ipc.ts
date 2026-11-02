@@ -134,6 +134,9 @@ import {
   type ResolvedLink,
   type LinkKind,
   type TestItem,
+  type TestListing,
+  type LastRun,
+  type TestDescribed,
   type TestInput,
   type TestRun as RawTestRun,
   type TestStepRun as RawTestStepRun,
@@ -154,6 +157,9 @@ export type {
   ResolvedLink,
   LinkKind,
   TestItem,
+  TestListing,
+  LastRun,
+  TestDescribed,
   TestInput,
   TestStarted,
   TestEnvEntry,
@@ -790,6 +796,15 @@ export const ipc = {
   // --- smoke tests ---------------------------------------------------------------------
   /** A workspace's smoke tests: every file in its worktree's `.yardsort/tests`. */
   testList: (workspaceId: string) => unwrap(commands.testList(workspaceId)),
+  /** Every test in every workspace on show, with where it lives and how it last ran. */
+  testCatalog: (): Promise<TestListing[]> =>
+    unwrap(commands.testCatalog()) as Promise<TestListing[]>,
+  /** A model writes a smoke test from a description, through Drafting; checked, never saved. */
+  testDescribe: (description: string): Promise<TestDescribed> =>
+    unwrap(commands.testDescribe(description)) as Promise<TestDescribed>,
+  /** Save a described test into a workspace's `.yardsort/tests`; returns the file's path. */
+  testSave: (workspaceId: string, text: string): Promise<string> =>
+    unwrap(commands.testSave(workspaceId, text)) as Promise<string>,
   /** Runs, newest first: of one workspace, or of all. */
   testRuns: (workspaceId: string | null, limit = 100): Promise<TestRun[]> =>
     unwrap(commands.testRuns(workspaceId, limit)) as Promise<TestRun[]>,

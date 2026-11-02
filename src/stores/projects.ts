@@ -79,6 +79,7 @@ interface ProjectsState {
   pullRequestsOpen: boolean;
   /** The Tasks view is open in the center panel, which it takes over the same way. */
   tasksOpen: boolean;
+  testsOpen: boolean;
   /** The branch the composer should open rather than start from: a pull request's, got ready
    *  by the core. Cleared with the composer. */
   composingBranch: PreparedBranch | null;
@@ -151,6 +152,7 @@ interface ProjectsState {
   openPullRequests: (open: boolean) => void;
   /** Show the Tasks view in the center panel, or close it. */
   openTasks: (open: boolean) => void;
+  openTests: (open: boolean) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
   composeIn: (workspace: Workspace, prompt?: string, harness?: string) => void;
   /** Compose a new workspace forked from `workspace`: a new branch from its branch, in a new
@@ -242,6 +244,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     usageOpen: false,
     pullRequestsOpen: false,
     tasksOpen: false,
+    testsOpen: false,
     ui: {},
     collapsed: [],
     lastParentDir: null,
@@ -424,6 +427,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           usageOpen: false,
           pullRequestsOpen: false,
           tasksOpen: false,
+          testsOpen: false,
         });
       }
       set({
@@ -439,6 +443,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         usageOpen: false,
         pullRequestsOpen: false,
         tasksOpen: false,
+        testsOpen: false,
       });
       save(KEYS.selected, workspaceId);
     },
@@ -456,6 +461,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         usageOpen: false,
         pullRequestsOpen: false,
         tasksOpen: false,
+        testsOpen: false,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
@@ -467,6 +473,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         usageOpen: false,
         pullRequestsOpen: false,
         tasksOpen: false,
+        testsOpen: false,
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
@@ -482,6 +489,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         usageOpen: open,
         pullRequestsOpen: false,
         tasksOpen: false,
+        testsOpen: false,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -497,6 +505,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({
         pullRequestsOpen: open,
         tasksOpen: false,
+        testsOpen: false,
         usageOpen: false,
         workflowId: null,
         composingProjectId: null,
@@ -512,6 +521,24 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     openTasks(open) {
       set({
         tasksOpen: open,
+        testsOpen: false,
+        pullRequestsOpen: false,
+        usageOpen: false,
+        workflowId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+        composingTask: null,
+        composingHarness: null,
+        composingFork: null,
+      });
+    },
+
+    openTests(open) {
+      set({
+        testsOpen: open,
+        tasksOpen: false,
         pullRequestsOpen: false,
         usageOpen: false,
         workflowId: null,
@@ -539,6 +566,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         usageOpen: false,
         pullRequestsOpen: false,
         tasksOpen: false,
+        testsOpen: false,
       });
       save(KEYS.selected, workspace.id);
     },
@@ -575,6 +603,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         usageOpen: false,
         pullRequestsOpen: false,
         tasksOpen: false,
+        testsOpen: false,
         collapsed: state.collapsed.filter((id) => id !== workspace.projectId),
       }));
       return true;

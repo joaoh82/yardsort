@@ -476,6 +476,27 @@ export const commands = {
 	workflowDescribe: (description: string) => typedError<Described, IpcError>(__TAURI_INVOKE("workflow_describe", { description })),
 	/**  A workspace's smoke tests: every file in its worktree's `.yardsort/tests`. */
 	testList: (workspaceId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list", { workspaceId })),
+	/**
+	 *  Every test in every workspace on show, for the Tests view: each file with where it lives, the
+	 *  env names the project has not set that it needs, and how its last run here went. The window
+	 *  reads this on opening the view and on Refresh, the way Tasks reads the forge. Archived
+	 *  workspaces, whose worktree is gone from disk, are left out; they have no files to read.
+	 */
+	testCatalog: () => typedError<TestListing[], IpcError>(__TAURI_INVOKE("test_catalog")),
+	/**
+	 *  Have a model write a smoke test from `description`, through Drafting — the same writers the
+	 *  workflow editor uses (the agent the user has in its non-interactive mode, or their Anthropic
+	 *  key). The answer is checked as a typed file is, and sent back once with its problems when it
+	 *  has any. The agent runs in an empty git repository of the profile's own, not in any project
+	 *  of the user's: a description is not a change to describe, and nothing here reads their work.
+	 */
+	testDescribe: (description: string) => typedError<TestDescribed, IpcError>(__TAURI_INVOKE("test_describe", { description })),
+	/**
+	 *  Save a test file into a workspace's worktree, at `.yardsort/tests/<id>.yaml`, and return where
+	 *  it went. This is how **Describe it** persists what a model wrote; the file is then an ordinary
+	 *  uncommitted change in the worktree. Nothing is approved or run by saving.
+	 */
+	testSave: (workspaceId: string, text: string) => typedError<string, IpcError>(__TAURI_INVOKE("test_save", { workspaceId, text })),
 	/**  Runs, newest first: of one workspace, or of all. */
 	testRuns: (workspaceId: string | null, limit: number) => typedError<TestRun[], IpcError>(__TAURI_INVOKE("test_runs", { workspaceId, limit })),
 	/**
@@ -1369,6 +1390,15 @@ export type KeySource = "none" |
 "keychain" | 
 /**  `TYPESAFE_API_KEY`, from the environment Yardsort runs in. */
 "environment";
+
+/**  How a test last did, for the catalog's verdict column. */
+export type LastRun = {
+	runId: string,
+	/**  The run's `status`: `passed`, `failed`, `awaiting_approval`, and the rest. */
+	status: string,
+	createdAt: number | null,
+	endedAt: number | null,
+};
 
 export type LimitWindowDto = {
 	minutes: number | null,
@@ -2451,6 +2481,20 @@ export type TerminalLoad = {
 	load: Load,
 };
 
+/**
+ *  A smoke test a model wrote from a description, checked, for the editor. Nothing is saved
+ *  until the person presses Save. Mirrors workflow drafting's `Described`.
+ */
+export type TestDescribed = {
+	text: string,
+	/**  What is still wrong with it, marked in the editor; empty when it checks out. */
+	problems: Problem[],
+	/**  How many answers it took: one, or two when the first had problems. */
+	tries: number,
+	/**  Who wrote it, in words. */
+	writer: string,
+};
+
 /**  One entry of a project's test environment. */
 export type TestEnvEntry = {
 	name: string,
@@ -2491,6 +2535,22 @@ export type TestItem = {
 	browserMissing: boolean,
 	/**  What a run asks for first. */
 	inputs: TestInput[],
+};
+
+/**
+ *  One test in the Tests view's catalog: a `TestItem` with where it lives and how it last did,
+ *  so the view can show every test across every workspace with its verdict and what it needs.
+ */
+export type TestListing = {
+	item: TestItem,
+	projectId: string,
+	projectName: string,
+	workspaceId: string,
+	workspaceName: string,
+	/**  Env names the test uses that the project has not set: it would fail for want of them. */
+	envMissing: string[],
+	/**  The newest run of this test in this workspace, or `None` when it has never run here. */
+	lastRun: LastRun | null,
 };
 
 /**
