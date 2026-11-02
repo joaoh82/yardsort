@@ -932,7 +932,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       taking control by asking, typing through a native field and a row of keys, drawn to fit the
       phone while it has control, and letting go on losing it, leaving or going to the background,
       with nothing sent twice ([31 §14](31-remote-r3.md#14--what-the-sixth-slice-adds)). Neither Claude
-      nor Codex waited on a question on the way to its first screen under a lease. Not yet run on a phone.
+      nor Codex waited on a question on the way to its first screen under a lease. Its smoke test passed
+      on the owner's iPhone against staging that day, after it found that the pointer over an agent's
+      tab at the computer took control, now fixed in the host; Android is untried.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

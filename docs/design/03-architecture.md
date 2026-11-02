@@ -158,8 +158,9 @@ question at startup and run nothing until it is answered.
 
 **One controller.** Typing or pasting from this computer gives it control of the terminal at
 once. Anyone else — a device through the relay — asks for a lease, renews it, and numbers its
-input under it; typing here ends the lease (`pty_host::control`). A lease holder's size stands
-while it holds control, and the size asked for here comes back after. What the app types on its
+input under it; typing here ends the lease (`pty_host::control`). A terminal saying where the
+pointer and focus are is not typing, and takes nothing. A lease holder's size stands while it
+holds control, and the size asked for here comes back after. What the app types on its
 own, a workflow's message, takes no control and waits while a lease is held
 (`type_unattended`).
 

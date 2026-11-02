@@ -1139,6 +1139,58 @@ fn input_under_a_lease_is_written_once_in_order_until_someone_here_types() {
     host.kill(id).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn a_pointer_passing_or_focus_changing_here_takes_nothing_and_a_press_does() {
+    // As xterm.js sends them, for a program that asked for every movement and for focus: both
+    // Claude and Codex do.
+    const POINTER: &[u8] = b"\x1b[<35;12;4M";
+    const FOCUS_IN: &[u8] = b"\x1b[I";
+    const FOCUS_OUT: &[u8] = b"\x1b[O";
+    const PRESS: &[u8] = b"\x1b[<0;16;5M";
+
+    let (host, _events) = host();
+    let session = host
+        .spawn(shell(
+            "stty -echo; while IFS= read -r line; do echo \"got:$line\"; done",
+        ))
+        .unwrap();
+    let capture = Capture::default();
+    attach_terminal(&host, &session.id, &capture);
+    let id = &session.id;
+
+    // With nobody in control, the program hears them and nobody gains control.
+    host.write(id, POINTER).unwrap();
+    host.write(id, FOCUS_OUT).unwrap();
+    assert_eq!(host.controller(id).unwrap(), Controller::Nobody);
+
+    // A phone in control keeps it. The program hears where the person's focus is, and nothing of
+    // a pointer over a screen drawn at the phone's size.
+    let lease = host.acquire(id, "phone", false).unwrap().reference();
+    let phone = Controller::Leased {
+        holder: "phone".into(),
+    };
+    host.write(id, POINTER).unwrap();
+    host.write(id, FOCUS_IN).unwrap();
+    assert_eq!(host.controller(id).unwrap(), phone);
+    host.input(id, &lease, 1, "typed\r", false).unwrap();
+    capture.wait_for("typed");
+    let text = capture.text();
+    assert!(
+        text.contains("got:\x1b[<35;12;4M\x1b[O\x1b[Ityped"),
+        "{text:?}"
+    );
+
+    // Doing something is another matter, however little: a press takes it, as typing does.
+    host.write(id, PRESS).unwrap();
+    assert_eq!(host.controller(id).unwrap(), Controller::Local);
+    assert!(matches!(
+        host.input(id, &lease, 2, "late\r", false),
+        Err(HostError::LeaseLost(_))
+    ));
+    host.kill(id).unwrap();
+}
+
 #[test]
 fn a_lease_holders_size_stands_until_control_comes_back_here() {
     let (host, _events) = host();

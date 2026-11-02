@@ -7,7 +7,7 @@ was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone tha
 workspaces, sessions and activity, was built the same day (§12), and its smoke test passed on the
 same iPhone on 2026-11-02. The fifth, watching a terminal, was built that day too (§13), and its smoke
 test passed on the same iPhone that day. The sixth, taking control, was built the same day (§14), and
-has not been run on a phone yet.
+its smoke test passed on the same iPhone that day, after it found a tab at the computer taking control.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -880,10 +880,11 @@ staging needs no deploy. Nothing on this screen reaches the program: taking cont
 
 ## 14 · What the sixth slice adds
 
-Built on 2026-11-02, on Linux, and **not yet run on a phone**: the smoke test is below. It adds no
-native module, so `just mobile-start` serves it to the app already installed. The server and the host
-needed no change, so staging needs no deploy; the stand-in learned to type as the person at the
-computer does, for the tests.
+Built on 2026-11-02, on Linux. Its smoke test, below, passed on the owner's iPhone against staging that
+day, once it had found one bug, fixed before it passed; Android stays unbuilt. It adds no
+native module, so `just mobile-start` serves it to the app already installed. The server needed no
+change, so staging needs no deploy; the stand-in learned to type as the person at the computer does,
+for the tests. The host changed once, for what the smoke test found (below).
 
 - **Taking it** (`src/lib/control.ts`): only ever a person pressing **Take control**. Another device's
   control is named on the button, **Take over from …**, and pressing that is what asks to take over.
@@ -936,8 +937,9 @@ computer does, for the tests.
   - Claude's screen settled at 424 to 961 ms under the lease, and 436 to 1,083 ms in tmux.
   - Codex's settled at 471 to 1,955 ms under the lease, and 549 to 760 ms in tmux. The 1,955 was its
     first run, cold, and the next three were all faster than tmux's.
-  - So no change is needed for now. It shows nothing about signed-in sessions or questions asked later,
-    which the smoke test and the device run are for.
+  - So no change is needed for now. It shows nothing about signed-in sessions or questions asked later.
+    The smoke test's step 9 tried signed-in agents on the phone and found nothing stuck; the device run
+    still has questions asked later.
 - **What was tested:**
   - The logic against the real server, relay and host, with a real program in a real terminal: a line
     with its Enter, lines pasted, keys in their place, the size fitted and given back, a take-over and
@@ -961,13 +963,26 @@ computer does, for the tests.
   paste from the clipboard (the system's own menu pastes into the field, where it can be read first,
   and needs no new module), and selecting text to copy.
 
+**What the smoke test found.** Selecting Claude's or Codex's tab at the computer took control from the
+phone, and a shell's did not. Signed in, both agents ask for every pointer movement (`?1003h` with
+`?1006h`), and a snapshot restores mouse modes, so a tab just selected reports the pointer as it moves.
+Those reports came to the host as writes from this computer, and any such write took control. Focus
+reports (`?1004h`) did the same in a terminal that saw the program ask for them; a snapshot does not
+restore that mode. Now `pty_host::control::presence` tells these from typing, by the bytes real xterm.js
+sends. Neither takes control or extends the person's hold. While a lease holds, the program still
+hears about focus, and nothing of a pointer over a screen drawn at another device's size. A press, a
+drag or the wheel goes to the program as something the person did, and takes control as typing does.
+The fix runs in the terminal daemon, and a build of the same protocol keeps the daemon already running,
+so trying it means stopping that daemon first (step 1).
+
 **Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
 
 1. On the computer, from this branch, with a throwaway profile:
    `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
    Settings → Remote: server `https://remote-staging.yardsort.sh`, **Turn on and sign in**. In a
    workspace with a branch, start a Claude agent and a Codex agent, and open a shell. Make the window
-   wide.
+   wide. A daemon from an earlier build of this slice keeps running through a rebuild: with `just dev`
+   stopped, `pkill -f 'yardsort-daemon .*/tmp/ys31/'` ends it and that profile's agents first.
 2. On the Mac, from this branch: `just mobile-start`, and open Yardsort Dev on the phone. Nothing native
    changed. If the phone is not paired, pair it and allow it to control terminals at the computer.
 3. **Taking it.** Open the computer, then the workspace, then Claude's conversation. It says **Watching.
@@ -1001,17 +1016,22 @@ computer does, for the tests.
     the computer took control.**, the keys go, and the text stays in the field, read-only. The window
     goes back to its own size. **Take control** straight away says they are typing. About 30 seconds
     after the last key at the computer it works, and **Send** sends the text then, once.
-11. **Handing back.** Press **Hand back**. It says nobody has control, and the computer's size comes back.
-12. **Away and back.** Take control, then send the app to the background. At the computer, the terminal is
+11. **Only being at the computer.** With the shell's tab showing at the computer, take control of Claude
+    on the phone. At the computer, select Claude's tab, move the pointer over the terminal, and switch to
+    another window and back. The phone keeps control throughout, and **Send** still works. Do the same with
+    Codex. Then click once inside the terminal: **The person at the computer took control.**
+12. **Handing back.** Wait about 30 seconds, take control again, and press **Hand back**. It says nobody
+    has control, and the computer's size comes back.
+13. **Away and back.** Take control, then send the app to the background. At the computer, the terminal is
     back to its own size at once, and typing there works. Come back: it is watching, with **Take control**
     offered and nothing typed. Lock the phone and unlock it the same way.
-13. **A drop.** Take control of the shell, turn on airplane mode and press **Send** with something in the
+14. **A drop.** Take control of the shell, turn on airplane mode and press **Send** with something in the
     field. Within about 30 seconds it says the connection dropped, and that the text may not have reached
     the computer. Turn airplane mode off. **Watching** comes back, nothing was typed at the computer, and
     control is not taken. **Put it back** returns the text.
-14. **Sideways.** Take control and rotate the phone, with and without the keyboard up. The screen redraws
+15. **Sideways.** Take control and rotate the phone, with and without the keyboard up. The screen redraws
     to fit each, and with too little room for 5 rows it stays as it was.
-15. **A program's end.** With control of the shell, run `exit`. The phone says **The program ended**, and
+16. **A program's end.** With control of the shell, run `exit`. The phone says **The program ended**, and
     the field goes.
 
 ## 15 · Open after this plan
