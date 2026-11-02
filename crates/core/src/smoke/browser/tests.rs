@@ -115,6 +115,7 @@ fn a_browser_step_visits_a_page_acts_on_it_and_screenshots_it() {
         );
         return;
     };
+    let _turn = crate::smoke::test_turns::browser();
     let (port, stop) = serve();
     let (_tmp, output_dir, profile) = scratch();
 
@@ -212,6 +213,7 @@ fn a_failed_expectation_fails_the_step_and_shoots_it() {
         );
         return;
     };
+    let _turn = crate::smoke::test_turns::browser();
     let (port, stop) = serve();
     let (_tmp, output_dir, profile) = scratch();
 
@@ -261,6 +263,7 @@ fn a_cancel_ends_a_browser_step() {
         );
         return;
     };
+    let _turn = crate::smoke::test_turns::browser();
     let (port, stop) = serve();
     let (_tmp, output_dir, profile) = scratch();
 
@@ -313,6 +316,7 @@ fn every_step_screenshots_each_action_and_never_skips_the_failure_shot() {
         );
         return;
     };
+    let _turn = crate::smoke::test_turns::browser();
     let (port, stop) = serve();
     let (_tmp, output_dir, profile) = scratch();
     let url = format!("http://127.0.0.1:{port}/");

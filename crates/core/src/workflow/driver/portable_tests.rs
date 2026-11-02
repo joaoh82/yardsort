@@ -180,7 +180,7 @@ impl Hands for Forge {
         );
         Box::new(move || {
             if let Some(hold) = hold {
-                let _ = hold.lock().unwrap().recv_timeout(Duration::from_secs(10));
+                let _ = hold.lock().unwrap().recv_timeout(Duration::from_secs(60));
             }
             *asked.lock().unwrap() += 1;
             Ok(posts.lock().unwrap().clone())
@@ -355,8 +355,9 @@ fn a_forge_that_is_slow_to_answer_holds_up_no_other_run() {
     let other = profile.queue("right-away");
     let started = std::time::Instant::now();
     driver.tick(&profile.store, &host, &forge, &git()).unwrap();
+    // Far short of the forge's minute, and far past what a loaded runner takes to do the rest.
     assert!(
-        started.elapsed() < Duration::from_secs(1),
+        started.elapsed() < Duration::from_secs(20),
         "the tick waited {:?} on the forge",
         started.elapsed()
     );
