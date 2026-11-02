@@ -35,10 +35,12 @@ struct Fx {
     env: Arc<ShellEnv>,
     notices: Arc<Mutex<Vec<Notice>>>,
     driver: Driver,
+    _turn: std::sync::RwLockReadGuard<'static, ()>,
 }
 
 impl Fx {
     fn new() -> Self {
+        let turn = crate::smoke::test_turns::server();
         let dir = tempfile::tempdir().unwrap();
         let data_dir = dir.path().join("data");
         std::fs::create_dir_all(&data_dir).unwrap();
@@ -68,6 +70,7 @@ impl Fx {
             env,
             notices,
             driver,
+            _turn: turn,
         }
     }
 
@@ -134,14 +137,14 @@ impl Fx {
         report::summary(&self.run(id), &self.steps(id))
     }
 
-    /// Wait until `found` says so about the run's steps, for at most thirty seconds: a loaded runner
-    /// can take ten to start a server.
+    /// Wait until `found` says so about the run's steps, for at most ninety seconds: past the minute
+    /// these tests give a server to come up, since a loaded runner has taken over twenty.
     fn until(&self, id: &str, found: impl Fn(&[TestStepRow]) -> bool) {
         let started = Instant::now();
         while !found(&self.steps(id)) {
             assert!(
-                started.elapsed() < Duration::from_secs(30),
-                "still waiting after thirty seconds: {:?}",
+                started.elapsed() < Duration::from_secs(90),
+                "still waiting after ninety seconds: {:?}",
                 self.steps(id)
             );
             std::thread::sleep(Duration::from_millis(50));
@@ -204,7 +207,7 @@ setup:
   - id: ready
     action: wait_for
     port: "{{{{ run.port }}}}"
-    timeout: 20s
+    timeout: 60s
 steps:
   - id: health
     action: http
@@ -486,7 +489,7 @@ setup:
   - id: ready
     action: wait_for
     port: "{{{{ run.port }}}}"
-    timeout: 20s
+    timeout: 60s
 steps:
   - id: never
     action: run
@@ -830,7 +833,7 @@ setup:
   - id: ready
     action: wait_for
     port: "{{{{ run.port }}}}"
-    timeout: 20s
+    timeout: 60s
 steps:
   - id: late
     action: http
@@ -877,7 +880,7 @@ setup:
   - id: ready
     action: wait_for
     port: "{{{{ run.port }}}}"
-    timeout: 20s
+    timeout: 60s
 steps:
   - id: late
     action: http
@@ -924,7 +927,7 @@ steps:
   - id: meanwhile
     action: run
     {meanwhile}
-    timeout: 20s
+    timeout: 60s
 "#,
             // 17 MiB at once, then it stays up.
             server = bun(

@@ -30,6 +30,7 @@
 //! - `{"op":"deny","grant":…}` and `{"op":"revoke","grant":…}`.
 //! - `{"op":"run"}`: start a short program in the workspace and record it, for activity.
 //! - `{"op":"typed"}`: the lines the program printed back.
+//! - `{"op":"note","text":…}`: write an approved memory note in the workspace's project.
 //! - `{"op":"signInAs","subject":…}`: whom the provider signs in from now on, for a second
 //!   account. Everyone is `someone` until then.
 //! - `{"op":"removeHost"}`: take the host off the account.
@@ -283,6 +284,12 @@ async fn obey(
             Ok(Value::Null)
         }
         "typed" => Ok(json!(here.typed())),
+        "note" => {
+            let text = command["text"].as_str().ok_or("say what the note says")?;
+            yardsort_core::memory::write(&here.store, &here.project, text)
+                .map_err(|e| e.message)?;
+            Ok(Value::Null)
+        }
         "signInAs" => {
             let subject = command["subject"]
                 .as_str()
@@ -337,6 +344,7 @@ struct Here {
     terminals: PtyHost,
     identity: HostIdentity,
     program: SessionId,
+    project: String,
     workspace: String,
     seen: Arc<Mutex<String>>,
 }
@@ -390,6 +398,7 @@ impl Here {
                 name: host.name.clone(),
             },
             program: program.id,
+            project: project.id,
             workspace: workspace.id,
             seen,
         }))

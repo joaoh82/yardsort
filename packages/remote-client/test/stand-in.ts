@@ -84,6 +84,7 @@ export class StandIn {
   typed = () => this.#ask<string[]>({ op: "typed" });
   signInAs = (subject: string) => this.#ask<null>({ op: "signInAs", subject });
   removeHost = () => this.#ask<null>({ op: "removeHost" });
+  note = (text: string) => this.#ask<null>({ op: "note", text });
   hostOffline = () => this.#ask<null>({ op: "hostOffline" });
   hostOnline = () => this.#ask<null>({ op: "hostOnline" });
 

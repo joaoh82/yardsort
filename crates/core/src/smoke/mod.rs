@@ -714,3 +714,23 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests;
+
+/// Tests that launch a real browser take turns, and run apart from those that start a server.
+/// Several browsers starting at once have kept a small CI runner busy for half a minute, so a
+/// server beside them missed its time to come up, in tests that were not about that.
+#[cfg(test)]
+pub(crate) mod test_turns {
+    use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+    static TURNS: RwLock<()> = RwLock::new(());
+
+    /// For a test that launches a browser: held, nothing else that takes a turn runs.
+    pub fn browser() -> RwLockWriteGuard<'static, ()> {
+        TURNS.write().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// For a test that starts a server: these run together, but never beside a browser.
+    pub fn server() -> RwLockReadGuard<'static, ()> {
+        TURNS.read().unwrap_or_else(PoisonError::into_inner)
+    }
+}

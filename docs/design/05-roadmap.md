@@ -920,7 +920,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       ([31 §11](31-remote-r3.md#11--what-the-third-slice-adds)). Its smoke test passed on the same
       iPhone on 2026-11-01, once it had found the camera's missing reason and screens starting under
       the iOS 26 header. Review then changed what a second link does, and that step passed too; Android
-      is untried.
+      is untried. Slice 4 was built the same day: a computer's workspaces, a workspace's
+      conversations and other terminals, activity followed live, approved memory read-only, and what
+      was last seen shown as such
+      ([31 §12](31-remote-r3.md#12--what-the-fourth-slice-adds)). Its smoke test passed on the
+      owner's iPhone against staging on 2026-11-02, after correcting a step that had left capture
+      off; Android is untried.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

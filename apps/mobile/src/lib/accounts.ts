@@ -40,6 +40,7 @@ import {
   type SocketFactory,
 } from "@yardsort/remote-client";
 
+import { Observed, type Shelf } from "./observed";
 import { type Profile, Profiles, type Vault } from "./profiles";
 
 /** Where every sign-in comes back to. Every server allows it (31 §5). */
@@ -60,6 +61,8 @@ export interface Env {
   fetch?: typeof fetch;
   /** Opens a relay socket. The platform's `WebSocket` unless given. */
   socket?: SocketFactory;
+  /** Where what was last seen is kept. Without one, nothing is. */
+  shelf?: Shelf;
   /** Milliseconds since the epoch. */
   clock?: () => number;
 }
@@ -125,6 +128,7 @@ class OtherServer extends ClientError {
 
 export class Accounts {
   #profiles: Profiles | null = null;
+  #observed = new Map<string, Observed>();
   #standing: Standing | null = null;
   #notice: string | null = null;
   #snapshot: Snapshot;
@@ -247,7 +251,7 @@ export class Accounts {
     }
     // A profile signed in again at the same address replaces the one before it.
     for (const old of profiles.all) {
-      if (old.address === profile.address && old.id !== profile.id) await profiles.forget(old.id);
+      if (old.address === profile.address && old.id !== profile.id) await this.#forget(old.id);
     }
     this.#sessions.set(
       profile.id,
@@ -360,6 +364,8 @@ export class Accounts {
   async #forget(id: string): Promise<void> {
     this.#sessions.delete(id);
     await this.#need().forget(id);
+    await this.#observedFor(id)?.forget();
+    this.#observed.delete(id);
     if (!this.#need().active) this.#standing = null;
   }
 
@@ -398,6 +404,23 @@ export class Accounts {
     }
   }
 
+  /** What the active profile last saw, when there is somewhere to keep it. */
+  observed(): Observed | null {
+    const id = this.#profiles?.active?.id;
+    return id ? this.#observedFor(id) : null;
+  }
+
+  #observedFor(id: string): Observed | null {
+    const { shelf } = this.env;
+    if (!shelf) return null;
+    let observed = this.#observed.get(id);
+    if (!observed) {
+      observed = new Observed(shelf, `observed.${id}`, this.env.clock ?? Date.now);
+      this.#observed.set(id, observed);
+    }
+    return observed;
+  }
+
   /** The account's devices, this phone among them. */
   devices(): Promise<DevicePage> {
     return this.#withAccess((session, access) => session.client.devices(access));
@@ -408,6 +431,7 @@ export class Accounts {
    * the server has taken it off, and nothing can reach it.
    */
   computers(): Promise<ComputerList> {
+    const observed = this.observed();
     return this.#withAccess(async (session, access) => {
       const [{ grants }, { hosts }] = await Promise.all([
         session.client.grants(access),
@@ -427,6 +451,7 @@ export class Accounts {
           projects: grant.projects,
         });
       }
+      await observed?.keepComputers(computers);
       return { computers, waiting: grants.filter((grant) => grant.state === "pending") };
     });
   }

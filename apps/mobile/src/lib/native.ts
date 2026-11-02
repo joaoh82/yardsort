@@ -11,11 +11,13 @@ import type { Crypto, Platform } from "@yardsort/remote-client";
 import Constants from "expo-constants";
 import * as ExpoCrypto from "expo-crypto";
 import * as Device from "expo-device";
+import { File, Paths } from "expo-file-system";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { Platform as ReactPlatform } from "react-native";
 
 import type { Browser, Env } from "./accounts";
+import type { Shelf } from "./observed";
 import type { Vault } from "./profiles";
 
 /**
@@ -30,6 +32,26 @@ export const secureVault: Vault = {
   get: (key) => SecureStore.getItemAsync(key, KEPT),
   set: (key, value) => SecureStore.setItemAsync(key, value, KEPT),
   delete: (key) => SecureStore.deleteItemAsync(key, KEPT),
+};
+
+/**
+ * The phone's cache folder: never in a backup, and the system may clear it, which costs only what
+ * was last seen. A key is this app's own, never anything a server said.
+ */
+export const cacheShelf: Shelf = {
+  get: async (key) => {
+    const file = new File(Paths.cache, `${key}.json`);
+    return file.exists ? file.text() : null;
+  },
+  set: async (key, value) => {
+    const file = new File(Paths.cache, `${key}.json`);
+    if (!file.exists) file.create();
+    file.write(value);
+  },
+  delete: async (key) => {
+    const file = new File(Paths.cache, `${key}.json`);
+    if (file.exists) file.delete();
+  },
 };
 
 /**
@@ -62,6 +84,7 @@ export const nativeEnv: Env = {
   crypto: nativeCrypto,
   platform,
   userAgent: `yardsort-mobile/${appVersion} (${platform})`,
+  shelf: cacheShelf,
 };
 
 /**

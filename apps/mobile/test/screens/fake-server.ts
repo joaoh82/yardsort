@@ -82,6 +82,70 @@ export class FakeServer {
   pairAfter = new Map<string, Promise<void>>();
   /** Computers the relay says are offline. */
   offline = new Set<string>();
+  /** What a computer answers through a channel. */
+  computer = {
+    projects: [{ id: "project-1", name: "demo", missing: false }],
+    workspaces: [
+      {
+        id: "workspace-1",
+        project: "project-1",
+        name: "fix-login",
+        kind: "worktree",
+        branch: { label: "ys/fix-login", detached: false, unborn: false },
+        archived: false,
+        missing: false,
+        tasks: [],
+        runningSessions: 1,
+      },
+    ],
+    /** A second page of workspaces, when set. */
+    moreWorkspaces: null as null | Record<string, unknown>[],
+    sessions: [
+      {
+        id: "session-1",
+        workspace: "workspace-1",
+        harness: "claude",
+        model: "a-model",
+        effort: null,
+        title: "The login page times out",
+        forkedFrom: null,
+        startedAt: 1_700_000_000_000,
+        endedAt: null,
+        exitCode: null,
+        process: "running",
+        terminal: {
+          id: "terminal-1",
+          activity: "quiet",
+          idleMs: 180_000,
+          size: { cols: 80, rows: 24 },
+          exitCode: null,
+        },
+      },
+    ],
+    endedSessions: [] as Record<string, unknown>[],
+    terminals: [] as Record<string, unknown>[],
+    events: [event("event-1", "process.started", { harness: "claude", model: "a-model" })],
+    olderEvents: null as null | Record<string, unknown>[],
+    notes: [
+      {
+        id: "note-1",
+        project: "project-1",
+        text: "Migrations are append-only.",
+        author: "ana",
+        harness: null,
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      },
+    ],
+    /** Operations refused, as a computer refuses what a grant does not reach. */
+    refuses: new Map<string, string>(),
+  };
+  /** Every operation a computer was asked, in order. */
+  operations: { op: string; params: Record<string, unknown> | undefined }[] = [];
+  /** The sockets open. */
+  relaySockets = new Set<Socket>();
+  /** Sockets with a subscription open, to tell of what is recorded. */
+  #following = new Map<Socket, number>();
   /** How many relay sockets are open, and how many ever were. */
   sockets = { open: 0, ever: 0 };
   #issued = 0;
@@ -247,19 +311,98 @@ export class FakeServer {
                 },
               },
             });
+          } else {
+            const { requestId, op, params } = JSON.parse(data);
+            this.operations.push({ op, params });
+            const refusal = this.computer.refuses.get(op);
+            say(
+              refusal
+                ? { requestId, error: { code: "forbidden", message: refusal, retryable: false } }
+                : { requestId, result: this.#answer(op, params, socket) },
+            );
           }
         }, 0);
       },
       close: (code = 1000) => {
+        this.relaySockets.delete(socket);
+        this.#following.delete(socket);
         this.sockets.open -= 1;
         setTimeout(() => socket.onclose?.({ code, reason: "" }), 0);
       },
     };
+    this.relaySockets.add(socket);
     this.sockets.open += 1;
     this.sockets.ever += 1;
     setTimeout(() => socket.onopen?.({}), 0);
     return socket;
   };
+
+  /** A computer's answer to one operation. */
+  #answer(op: string, params: Record<string, never>, socket: Socket): unknown {
+    const { computer } = this;
+    switch (op) {
+      case "workspace.list":
+        return params.cursor
+          ? { kind: "workspaces", projects: [], workspaces: computer.moreWorkspaces, next: null }
+          : {
+              kind: "workspaces",
+              projects: computer.projects,
+              workspaces: computer.workspaces,
+              next: computer.moreWorkspaces ? "k1.more" : null,
+            };
+      case "workspace.describe":
+        return {
+          kind: "workspace",
+          workspace: computer.workspaces[0],
+          project: computer.projects[0],
+        };
+      case "session.list":
+        return {
+          kind: "sessions",
+          sessions: params.includeEnded
+            ? [...computer.sessions, ...computer.endedSessions]
+            : computer.sessions,
+          terminals: computer.terminals,
+          next: null,
+        };
+      case "activity.list":
+        return params.cursor
+          ? { kind: "activity", events: computer.olderEvents, older: null, newer: "a1.n1" }
+          : {
+              kind: "activity",
+              events: computer.events,
+              older: computer.olderEvents ? "a1.older" : null,
+              newer: "a1.n1",
+            };
+      case "activity.subscribe":
+        this.#following.set(socket, this.#following.size + 1);
+        return { kind: "subscribed", subscription: this.#following.get(socket), newer: "a1.n1" };
+      case "activity.unsubscribe":
+        this.#following.delete(socket);
+        return { kind: "done" };
+      case "memory.list":
+        return { kind: "memory", notes: computer.notes, next: null };
+      default:
+        return {
+          kind: "host",
+          host: "host-work",
+          name: "Workstation",
+          platform: "linux",
+          appVersion: "0",
+          protocol: { major: 1, minor: 4 },
+          capabilities: [],
+        };
+    }
+  }
+
+  /** The computer recording something, told to whoever is following. */
+  record(...events: Record<string, unknown>[]): void {
+    for (const [socket, subscription] of this.#following) {
+      socket.onmessage?.({
+        data: JSON.stringify({ event: "activity.events", subscription, events, newer: "a1.n2" }),
+      });
+    }
+  }
 
   /** Revoke a device, as another of the account's devices would. */
   revoke(id: string): void {
@@ -278,6 +421,20 @@ export class FakeServer {
       refresh,
     });
   }
+}
+
+/** An activity event as a computer sends it. */
+export function event(id: string, kind: string, detail: Record<string, unknown> = {}) {
+  return {
+    id,
+    workspace: "workspace-1",
+    session: null,
+    run: null,
+    occurredAt: 1_700_000_000_000,
+    kind,
+    source: { producer: "app", method: "launcher", fidelity: "observed" },
+    detail,
+  };
 }
 
 function refused(message: string): Response {

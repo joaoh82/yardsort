@@ -51,6 +51,9 @@ export default function Layout() {
             <Stack.Screen name="connect" options={{ title: "Connect" }} />
             <Stack.Screen name="account" options={{ title: "Account" }} />
             <Stack.Screen name="servers" options={{ title: "Servers" }} />
+            <Stack.Screen name="computer" options={{ title: "Computer" }} />
+            <Stack.Screen name="workspace" options={{ title: "Workspace" }} />
+            <Stack.Screen name="memory" options={{ title: "Approved memory" }} />
             {/* One at a time: a link arriving while it is open comes to this one. */}
             <Stack.Screen name="pair" options={{ title: "Pair a computer" }} dangerouslySingular />
           </Stack>

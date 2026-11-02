@@ -6,26 +6,31 @@ Yardsort server you sign in to. It is an [Expo](https://expo.dev) app, SDK 58 (R
 [`packages/remote-client`](../../packages/remote-client). Its plan, and why each decision went
 the way it did, is [docs/design/31](../../docs/design/31-remote-r3.md).
 
-**What it does so far (R3 slices 2 and 3):** connect to a server by its address and see what that
+**What it does so far (R3 slices 2 to 4):** connect to a server by its address and see what that
 server is and can see, sign in through the system browser, list the account's devices with this
 phone among them, sign out, and keep a profile per server with one in use. Pair with a computer by
 scanning its code, typing it or following a link, see each computer online, offline or
-reconnecting, and unpair. It does not show what is on a computer yet; the slices after this add
-that.
+reconnecting, and unpair. See each computer's workspaces, a workspace's conversations and other
+terminals, its activity as it is recorded, and a project's approved memory, with what was last seen
+shown as such when a computer cannot be reached. It cannot open a terminal yet; the slices after
+this add that.
 
 ## What is in it
 
-| Path                  | What                                                                                                                                                                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/app/`            | The screens, as Expo Router routes: `index` (where to start), `connect`, `account` (computers, devices, signing out), `servers` (one profile in use), `pair`, and `+native-intent`, which takes a pairing link before the router reads it. |
-| `src/lib/accounts.ts` | Signing in, opening a profile again, signing out. Screens read its snapshot and call it; none builds a request or holds a credential.                                                                                                      |
-| `src/lib/profiles.ts` | The profiles, kept in the phone's credential store: each server's address, its id, this phone's device there and its refresh credential.                                                                                                   |
-| `src/lib/pairing.ts`  | A pairing link held in memory until used, where it belongs among the profiles, and waiting for the person at the computer.                                                                                                                 |
-| `src/lib/presence.ts` | Whether each computer can be reached, from a channel held to it while someone is looking.                                                                                                                                                  |
-| `src/lib/native.ts`   | What only the phone has: SecureStore, the system browser's sign-in session, randomness and SHA-256, the phone's name.                                                                                                                      |
-| `src/ui/parts.tsx`    | The few native components the screens are built from.                                                                                                                                                                                      |
-| `test/lib/`           | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use).                                                                                           |
-| `test/screens/`       | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                                                                                                         |
+| Path                  | What                                                                                                                                                                                                                                                                                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app/`            | The screens, as Expo Router routes: `index` (where to start), `connect`, `account` (computers, devices, signing out), `servers` (one profile in use), `pair`, `computer` (a computer's workspaces), `workspace` (conversations, terminals and activity), `memory`, and `+native-intent`, which takes a pairing link before the router reads it. |
+| `src/lib/accounts.ts` | Signing in, opening a profile again, signing out. Screens read its snapshot and call it; none builds a request or holds a credential.                                                                                                                                                                                                           |
+| `src/lib/profiles.ts` | The profiles, kept in the phone's credential store: each server's address, its id, this phone's device there and its refresh credential.                                                                                                                                                                                                        |
+| `src/lib/pairing.ts`  | A pairing link held in memory until used, where it belongs among the profiles, and waiting for the person at the computer.                                                                                                                                                                                                                      |
+| `src/lib/presence.ts` | Whether each computer can be reached, from a channel held to it while someone is looking.                                                                                                                                                                                                                                                       |
+| `src/lib/activity.ts` | A workspace's activity followed through a channel, and what each event says. In memory only.                                                                                                                                                                                                                                                    |
+| `src/lib/observed.ts` | What was last seen of a profile's computers and workspaces, kept in the cache folder.                                                                                                                                                                                                                                                           |
+| `src/lib/native.ts`   | What only the phone has: SecureStore, the cache folder, the system browser's sign-in session, randomness and SHA-256, the phone's name.                                                                                                                                                                                                         |
+| `src/ui/parts.tsx`    | The few native components the screens are built from.                                                                                                                                                                                                                                                                                           |
+| `src/ui/live.tsx`     | What screens share about being live: a channel held only while on screen, how far a computer can be reached, and what was last seen meanwhile.                                                                                                                                                                                                  |
+| `test/lib/`           | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use).                                                                                                                                                                                                |
+| `test/screens/`       | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                                                                                                                                                                                                              |
 
 Things it holds to:
 
@@ -42,6 +47,9 @@ Things it holds to:
   on its own say: one from outside the app, or naming another server, is asked about first.
 - **Online is what the socket says.** Channels are held only while the computers are on screen and
   the app is in the foreground. Offline never means a computer's agents stopped.
+- **What is kept of a computer** is names and branches, each marked with when it was seen: never
+  a session title, activity, memory or terminal output. It goes with a computer that took this phone
+  back and with the profile. Nothing on these screens changes anything on the computer.
 - **Signing out** revokes this phone at the server, which takes back every computer's grant,
   then deletes the profile. With the server out of reach, it asks before deleting anything.
 
