@@ -548,7 +548,8 @@ The remote server, `crates/server`, is [AGPL-3.0](crates/server/LICENSE): the sa
 whoever runs a changed copy for others over a network must offer them its source too. The
 phone app, `apps/mobile`, and its TypeScript protocol client, `packages/remote-client`, are
 [MPL-2.0](apps/mobile/LICENSE), so that the app can be published through app stores. Why, and
-what stays out of this repository: [docs/design/30](docs/design/30-open-source-and-managed.md).
+what stays out of this repository: [docs/design/30](docs/design/30-open-source-and-managed.md). The
+website's fonts are under the SIL Open Font License: [website/src/app/fonts](website/src/app/fonts/README.md).
 
 Yardsort was called **Switchyard** until v0.2; if you used that, your projects and settings come
 along automatically the first time you start Yardsort.
