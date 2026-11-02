@@ -4,7 +4,8 @@
 2026-10-31 (§9). The second, the app signed in, was built the same day (§10), and its smoke
 test passed on the owner's iPhone against staging on 2026-11-01. The third, pairing and computers,
 was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. The fourth,
-workspaces, sessions and activity, was built the same day (§12), and has not yet run on a phone.
+workspaces, sessions and activity, was built the same day (§12), and its smoke test passed on the
+same iPhone on 2026-11-02.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -685,8 +686,13 @@ the same day. The server needed no change, so staging needs no deploy; the stand
 
 ## 12 · What the fourth slice adds
 
-Built on 2026-11-01, on Linux. Nothing of it has run on a phone yet: its smoke test, below, is the
-first time. The server and the host needed no change, so staging needs no deploy; the stand-in
+Built on 2026-11-01, on Linux. Its smoke test, below, passed on the owner's iPhone against staging
+on 2026-11-02, the first use of the real cache file on a phone. Step 5 first failed as written, and
+the fault was the step's: it did not turn capture on, so the agent's prompts and tools were never
+recorded and the phone was right to show only its start. The step is corrected, and with capture on
+the rows came in. The screen's line saying an agent reports only its start and end was written after
+that failure and was not on the phone for the test, so it has only run under tests. Android is still
+unbuilt. The server and the host needed no change, so staging needs no deploy; the stand-in
 gained `note`, for a test to read an approved note through the real host. Everything here is read
 through a channel, and a phone changes nothing on the computer.
 
@@ -699,7 +705,10 @@ through a channel, and a phone changes nothing on the computer.
 - **Activity is followed live** (`src/lib/activity.ts`): the newest page, then a subscription after
   it. A channel lost carries on from the last batch, so nothing still kept is missed and nothing
   repeats. Older pages come when asked for. It says what the desktop says of each event, and a kind
-  this build does not know by its name. At most 300 events are held in memory.
+  this build does not know by its name. At most 300 events are held in memory. An agent reports its
+  prompts and tools only if its capture was on at the computer when it started, which by default it
+  is not. Then only its start and end are recorded, and the screen says so and where to turn it on,
+  so that a short list does not read as an agent doing nothing.
 - **Approved memory** (`src/app/memory.tsx`): a project's approved notes, to read, with no way to
   change one from here. The host serves only approved notes (§1).
 - **What was last seen** (`src/lib/observed.ts`): the computers and each one's first page of
@@ -727,7 +736,7 @@ through a channel, and a phone changes nothing on the computer.
   whose program exited after the phone had reconnected, so it proved nothing, and a real double
   subscription when a pull to refresh came during the first read; both are fixed.
 - **What was shown without a phone:** Metro bundles the app for iOS and Android, and `expo-doctor`
-  passes its 20 checks. `expo-file-system`'s real files are first used on a phone: tests use a map.
+  passes its 20 checks. Tests use a map for the cache file, so only the smoke test used a real one.
 - **Not built here:** as in §10.
 
 **Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
@@ -735,16 +744,18 @@ through a channel, and a phone changes nothing on the computer.
 1. On the computer, from this branch, with a throwaway profile:
    `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
    Settings → Remote: server `https://remote-staging.yardsort.sh`, **Turn on and sign in**. Add a
-   project and a workspace with a branch, start an agent in it, open a shell in it, and write a note
-   in the project's Memory view.
+   project and a workspace with a branch. Settings → General → Activity: turn on **Capture what
+   Claude Code reports** and **Save activity settings**, since an agent reports its prompts and tools
+   only if this was on when it started. Start a Claude agent in the workspace, open a shell in it,
+   and write a note in the project's Memory view.
 2. On the Mac, from this branch: `just mobile-ios`. Pair the phone if it is not already, letting it
    watch and read everything.
 3. **A computer.** **Open** the computer. It says **Online**, with the workspace under its project,
    its branch and **1 running**.
 4. **A workspace.** Tap it. The conversation shows with its title and agent, and the shell under
    other terminals. **Show ended conversations** shows any that ended.
-5. **Live.** With the phone on that screen, have the agent do something at the computer. New rows
-   come in under Activity without touching the phone.
+5. **Live.** With the phone on that screen, send the agent a prompt that makes it use a tool. Rows
+   such as **prompt submitted** and the tool's come in under Activity without touching the phone.
 6. **Away and back.** Lock the phone for a minute while the agent does something else. Unlock it.
    What happened meanwhile is there, once each.
 7. **Memory.** **Approved memory** shows the note, with nothing to change it. A proposal waiting for

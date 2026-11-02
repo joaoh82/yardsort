@@ -786,6 +786,28 @@ describe("A computer", () => {
       expect(screen.getAllByText("Bash failed")).toHaveLength(1);
     });
 
+    test("says when an agent reports only its start and end, until one reports more", async () => {
+      const { server } = await inside();
+      const only = /^Only starts and ends show/;
+      expect(screen.queryByText(only)).toBeNull();
+      await act(async () =>
+        server.record(
+          event("event-4", "process.started", { runKind: "harness", harness: "claude" }),
+        ),
+      );
+      expect(await screen.findByText(only)).toBeTruthy();
+      await act(async () =>
+        server.record(
+          event("event-5", "process.started", {
+            runKind: "harness",
+            harness: "claude",
+            capture: "hook",
+          }),
+        ),
+      );
+      await waitFor(() => expect(screen.queryByText(only)).toBeNull());
+    });
+
     test("a kind this build does not know is shown by its name", async () => {
       const { server } = await inside();
       await act(async () => server.record(event("event-3", "something.new")));

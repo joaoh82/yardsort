@@ -20,7 +20,7 @@ import {
 
 import { StandIn, START_TIMEOUT_MS } from "../../../../packages/remote-client/test/stand-in.ts";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
-import { ActivityFeed, describeEvent } from "../../src/lib/activity";
+import { ActivityFeed, describeEvent, reportsOnlyStartAndEnd } from "../../src/lib/activity";
 import { Observed } from "../../src/lib/observed";
 import { MemoryVault } from "./memory-vault";
 
@@ -341,6 +341,20 @@ describe("following activity", () => {
   test("a kind this build does not know is shown by its name", () => {
     const words = describeEvent({ kind: "something.new", detail: {} } as unknown as ActivityEvent);
     expect(words).toEqual({ title: "something.new", detail: "", tone: "plain" });
+  });
+
+  test("an agent started without reporting is told apart, by the one started last", () => {
+    const started = (runKind: string, capture?: string) =>
+      ({ kind: "process.started", detail: { runKind, capture } }) as unknown as ActivityEvent;
+    expect(reportsOnlyStartAndEnd([])).toBe(false);
+    expect(reportsOnlyStartAndEnd([started("shell")])).toBe(false);
+    expect(reportsOnlyStartAndEnd([started("harness")])).toBe(true);
+    expect(reportsOnlyStartAndEnd([started("harness", "hook")])).toBe(false);
+    // A shell opened since says nothing about the agent.
+    expect(reportsOnlyStartAndEnd([started("harness"), started("shell")])).toBe(true);
+    // A new agent, after capture was turned on, settles it.
+    expect(reportsOnlyStartAndEnd([started("harness"), started("harness", "hook")])).toBe(false);
+    expect(reportsOnlyStartAndEnd([started("harness", "hook"), started("harness")])).toBe(true);
   });
 });
 

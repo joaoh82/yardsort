@@ -19,7 +19,7 @@ import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { ActivityFeed, describeEvent } from "../lib/activity";
+import { ActivityFeed, describeEvent, reportsOnlyStartAndEnd } from "../lib/activity";
 import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
 import { moment } from "../lib/format";
@@ -171,6 +171,12 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
       {activity.following && <Body muted>Following as it is recorded.</Body>}
       {activity.loaded && activity.events.length === 0 && (
         <Body muted>Nothing recorded here yet.</Body>
+      )}
+      {reportsOnlyStartAndEnd(activity.events) && (
+        <Body muted>
+          Only starts and ends show for this agent. To see its prompts and tools here, turn on its
+          capture at the computer, in Settings, General, Activity, then start a new conversation.
+        </Body>
       )}
       {newestFirst.map((event) => {
         const words = describeEvent(event);

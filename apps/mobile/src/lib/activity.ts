@@ -177,6 +177,21 @@ export interface EventWords {
   tone: "ok" | "bad" | "plain";
 }
 
+/**
+ * Whether the agent started last was started without reporting what it does, so that only its start
+ * and end are recorded. Reporting is off at the computer until someone turns it on (`capture`), so
+ * a quiet list usually means this and not that nothing is happening.
+ */
+export function reportsOnlyStartAndEnd(events: readonly ActivityEvent[]): boolean {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (event?.kind === "process.started" && event.detail.runKind === "harness") {
+      return !event.detail.capture;
+    }
+  }
+  return false;
+}
+
 /** What an event says, as the desktop says it. A kind this build does not know, by its name. */
 export function describeEvent(event: ActivityEvent): EventWords {
   const d = event.detail;
