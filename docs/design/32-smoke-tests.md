@@ -493,8 +493,9 @@ example | guide`, and `docs/guide/smoke-tests.md` with the format. Fixtures: one
 6. **The Tests view, docs and pictures.** ✅ The sidebar row, the view with its filters, the
    **Runs** tab, history across workspaces, **Run in…**, and **Describe it** for tests; the
    README's highlight and section, the website's section and `ys` line, the quick start's mention,
-   `docs/README.md`, `website/src/lib/docs.ts`, and [08] gains a smoke-tests section. Screenshots
-   on the throwaway profile wait for a run of `scripts/screenshots.sh` with a demo test.
+   `docs/README.md`, `website/src/lib/docs.ts`, and [08] gains a smoke-tests section. The Tests
+   view's shot (`docs/images/tests.png`) is taken on the throwaway profile: `scripts/screenshots.sh`
+   seeds shell-only demo smoke tests and a handful of runs for it.
 
 Slices 1 and 2 work with no window but for approval, which is the point: a test queued by a
 workflow or, later, a schedule needs nothing the window has except a person to approve a new
@@ -718,9 +719,10 @@ the Smoke tests part of the Project settings dialog, `smoke::words` in the core,
   `tasksOpen`; the center panel (`WorkspacePanel`) gains a `testsOpen` branch; a **Tests** command
   in the palette.
 - **Docs and pictures.** The guide gains the Tests-view and Describe-it sections; the README a
-  highlight and a section; the website a card and a `ys test` line; the quick start a mention; the
-  manual checklist a smoke-tests section. Screenshots on the throwaway profile are left to a run of
-  `scripts/screenshots.sh` once a demo test that needs nothing but a shell is seeded.
+  highlight, a section and the Tests-view shot (`docs/images/tests.png`); the website a card and a
+  `ys test` line; the quick start a mention; the manual checklist a smoke-tests section.
+  `scripts/screenshots.sh` now seeds shell-only demo smoke tests (`version-check`, `unit-tests`,
+  `readme`) and a handful of runs, so the Tests-view shot can be retaken with no network.
 
 ### What the slice-6 review changed
 

@@ -345,7 +345,11 @@ and a **Runs** tab of every run; filter by project, workspace, verdict or what t
 A run opens as a tab beside the agent whose work it checks, each step with its status, the one
 running with its live output, a failed one with what it expected, what it got, and the screenshot
 it took. An agent writes a test itself, or press **Describe it** and a model writes one for you to
-check and save. A [workflow](docs/guide/workflows.md) can run one too. From a terminal:
+check and save. A [workflow](docs/guide/workflows.md) can run one too.
+
+![Tests: every project's smoke tests in one list, each with the verdict of its last run and the workspace it ran in, a Runs tab, filters, and Describe it](docs/images/tests.png)
+
+From a terminal:
 
 ```sh
 ys test run login --workspace fix-login   # the result from `ys test wait`
