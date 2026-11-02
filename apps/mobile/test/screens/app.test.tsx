@@ -991,6 +991,51 @@ describe("A computer", () => {
       await waitFor(() => expect(server.attaches).toEqual([null, null]));
     });
 
+    /** The page saying it drew everything it has been sent. */
+    async function pageDrawsAll() {
+      for (const { id } of told()
+        .map((text) => JSON.parse(text))
+        .filter((m) => m.t === "output")) {
+        await pageSays({ t: "drawn", id });
+      }
+    }
+
+    const settle = () => act(async () => jest.advanceTimersByTimeAsync(10));
+
+    test("a snapshot followed by another, again and again, gives up and says so", async () => {
+      const { server } = await watching();
+      for (let i = 0; i < 8; i += 1) {
+        await pageDrawsAll();
+        await act(async () => server.needsSnapshot());
+        await settle();
+      }
+      expect(await screen.findByText(/could not be followed/)).toBeTruthy();
+      expect(server.attaches).toHaveLength(6);
+    });
+
+    test("falling behind goes on while the page keeps catching up with what is new", async () => {
+      const { server } = await watching();
+      for (let i = 0; i < 8; i += 1) {
+        await act(async () => server.print("something new"));
+        await pageDrawsAll();
+        await act(async () => server.needsSnapshot());
+        await settle();
+      }
+      expect(screen.queryByText(/could not be followed/)).toBeNull();
+      expect(server.attaches).toHaveLength(9);
+    });
+
+    test("a page that has too much waiting starts over from a snapshot", async () => {
+      const { server } = await watching();
+      const chunk = "x".repeat(60_000);
+      for (let i = 0; i < 80 && server.attaches.length < 2; i += 1) {
+        await act(async () => server.print(chunk));
+      }
+      await settle();
+      expect(server.attaches).toEqual([null, null]);
+      expect(kinds().filter((k) => k === "reset")).toHaveLength(2);
+    });
+
     test("a program's end is said, and watching goes no further", async () => {
       const { server } = await watching();
       await act(async () => server.programEnded({ code: 3, success: false }));

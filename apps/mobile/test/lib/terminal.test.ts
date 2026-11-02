@@ -216,8 +216,14 @@ describe("watching a program", () => {
   });
 });
 
+/** The number a scripted snapshot's frames carry. */
+const SNAPSHOT_SEQ = 5;
+
 describe("what the host cannot be made to do on demand", () => {
-  /** A channel that says what a test tells it to, recording what it is asked for. */
+  /**
+   * A channel that says what a test tells it to, recording what it is asked for. A snapshot comes as
+   * the host sends it, at least one frame at the position's own number, whatever is on the screen.
+   */
   function scripted(
     attached: (
       from: unknown,
@@ -226,13 +232,17 @@ describe("what the host cannot be made to do on demand", () => {
   ) {
     const asked: unknown[] = [];
     let last: Watcher | undefined;
+    let seq = SNAPSHOT_SEQ;
     const channel = {
       attach: async (_t: TerminalId, watcher: Watcher, from?: unknown) => {
         asked.push(from ?? null);
         last = watcher;
         const { start, size } = attached(from, watcher);
+        seq = SNAPSHOT_SEQ;
+        if (start === "snapshot") watcher.output(new Uint8Array(0), { epoch: 1, seq });
         return {
           start,
+          position: { epoch: 1, seq },
           size: size ?? { cols: 80, rows: 24 },
           controller: { kind: "nobody" },
           ended: false,
@@ -245,11 +255,25 @@ describe("what the host cannot be made to do on demand", () => {
       channel,
       asked,
       end: (why: AttachmentEnd) => last?.ended?.(why),
-      print: (text: string) => last?.output(new TextEncoder().encode(text), { epoch: 1, seq: 9 }),
+      /** Output past the snapshot: the stream moving on. */
+      print: (text: string) => {
+        seq += 1;
+        last?.output(new TextEncoder().encode(text), { epoch: 1, seq });
+      },
       exit: (exit: { code: number; success: boolean }) => last?.exited?.(exit),
     };
   }
   const TERMINAL = "t" as TerminalId;
+  const GAP: AttachmentEnd = {
+    kind: "gap",
+    expected: { epoch: 1, seq: 2 },
+    got: { epoch: 1, seq: 3 },
+  };
+  const NEEDS_SNAPSHOT = {
+    kind: "detached",
+    error: { code: "resnapshot_required", message: "Behind.", retryable: true },
+  } as AttachmentEnd;
+  const COULD_NOT = "could not be followed";
   const closed = (reason: string): AttachmentEnd =>
     ({ kind: "closed", end: { reason, code: null, text: reason } }) as AttachmentEnd;
 
@@ -260,7 +284,7 @@ describe("what the host cannot be made to do on demand", () => {
       return { start: "snapshot" };
     });
     await new TerminalWatch(TERMINAL, screen).follow(channel);
-    expect(screen.said).toEqual(["reset 80x24", "output"]);
+    expect(screen.said).toEqual(["reset 80x24", "output", "output"]);
     expect(screen.text).toBe("early");
   });
 
@@ -307,33 +331,98 @@ describe("what the host cannot be made to do on demand", () => {
     expect(script.asked).toEqual([null, null]);
   });
 
-  test("a gap attaches again, and one that keeps happening gives up and says so", async () => {
-    const script = scripted(() => ({ start: "snapshot" }));
-    const screen = new Screen();
-    const watch = new TerminalWatch(TERMINAL, screen);
-    await watch.follow(script.channel);
-    const gap: AttachmentEnd = {
-      kind: "gap",
-      expected: { epoch: 1, seq: 2 },
-      got: { epoch: 1, seq: 3 },
-    };
-    for (let i = 0; i < 8; i += 1) {
-      script.end(gap);
-      await Bun.sleep(5);
-    }
-    expect(watch.getSnapshot().problem).toContain("could not be followed");
-    expect(screen.resets).toBeLessThanOrEqual(6);
+  for (const [name, why] of [
+    ["a gap", GAP],
+    ["the host needing a new snapshot", NEEDS_SNAPSHOT],
+  ] as const) {
+    test(`${name} attaches again, and doing so every time gives up, snapshots or not`, async () => {
+      const script = scripted(() => ({ start: "snapshot" }));
+      const screen = new Screen();
+      const watch = new TerminalWatch(TERMINAL, screen);
+      await watch.follow(script.channel);
+      for (let i = 0; i < 8; i += 1) {
+        // The page draws each snapshot. That alone says nothing about the stream moving on.
+        watch.pageCaughtUp();
+        script.end(why);
+        await Bun.sleep(5);
+      }
+      expect(watch.getSnapshot().problem).toContain(COULD_NOT);
+      expect(watch.getSnapshot().following).toBe(false);
+      // The first attachment and five fresh starts, and then no more.
+      expect(script.asked).toHaveLength(6);
+    });
+  }
 
-    // Output between gaps is progress: it is not giving up on a stream that does move.
-    const moving = scripted(() => ({ start: "snapshot" }));
-    const another = new TerminalWatch(TERMINAL, new Screen());
-    await another.follow(moving.channel);
+  test("a stream that moves on, with the page keeping up, never gives up", async () => {
+    const script = scripted(() => ({ start: "snapshot" }));
+    const watch = new TerminalWatch(TERMINAL, new Screen());
+    await watch.follow(script.channel);
     for (let i = 0; i < 12; i += 1) {
-      moving.print("x");
-      moving.end(gap);
+      script.print("x");
+      watch.pageCaughtUp();
+      script.end(GAP);
       await Bun.sleep(5);
     }
-    expect(another.getSnapshot().problem).toBeNull();
+    expect(watch.getSnapshot().problem).toBeNull();
+    expect(script.asked).toHaveLength(13);
+  });
+
+  test("moving on once does not excuse every snapshot after it", async () => {
+    const script = scripted(() => ({ start: "snapshot" }));
+    const watch = new TerminalWatch(TERMINAL, new Screen());
+    await watch.follow(script.channel);
+    script.print("once");
+    for (let i = 0; i < 8; i += 1) {
+      script.end(GAP);
+      await Bun.sleep(5);
+      watch.pageCaughtUp();
+    }
+    expect(watch.getSnapshot().problem).toContain(COULD_NOT);
+    expect(script.asked).toHaveLength(6);
+  });
+
+  test("a page that never catches up gives up, however much new output there is", async () => {
+    const script = scripted(() => ({ start: "snapshot" }));
+    const watch = new TerminalWatch(TERMINAL, new Screen());
+    await watch.follow(script.channel);
+    for (let i = 0; i < 8; i += 1) {
+      // As `PageFeed` does when too much is waiting: new output, and the page still behind.
+      script.print("more than the page can draw");
+      watch.startOver();
+      await Bun.sleep(5);
+    }
+    expect(watch.getSnapshot().problem).toContain(COULD_NOT);
+    expect(watch.getSnapshot().following).toBe(false);
+    expect(script.asked).toHaveLength(6);
+  });
+
+  test("a page that catches up each time it falls behind goes on", async () => {
+    const script = scripted(() => ({ start: "snapshot" }));
+    const watch = new TerminalWatch(TERMINAL, new Screen());
+    await watch.follow(script.channel);
+    for (let i = 0; i < 12; i += 1) {
+      script.print("a burst");
+      watch.pageCaughtUp();
+      watch.startOver();
+      await Bun.sleep(5);
+    }
+    expect(watch.getSnapshot().problem).toBeNull();
+    expect(script.asked).toHaveLength(13);
+  });
+
+  test("output resumed after a drop counts as moving on", async () => {
+    const script = scripted((from) => ({ start: from ? "resumed" : "snapshot" }));
+    const watch = new TerminalWatch(TERMINAL, new Screen());
+    await watch.follow(script.channel);
+    for (let i = 0; i < 12; i += 1) {
+      script.end(closed("gone"));
+      await watch.follow(script.channel);
+      script.print("x");
+      watch.pageCaughtUp();
+      script.end(GAP);
+      await Bun.sleep(5);
+    }
+    expect(watch.getSnapshot().problem).toBeNull();
   });
 
   test("a position refused on resuming falls back to a snapshot", async () => {
@@ -445,6 +534,31 @@ describe("what goes to the page", () => {
     expect(posted.length).toBe(2);
     feed.drawn(2);
     expect(posted.length).toBe(3);
+  });
+
+  test("says when the page has drawn everything, and not before", () => {
+    let caughtUp = 0;
+    const posted: { id?: number }[] = [];
+    const feed = new PageFeed(
+      () => {},
+      () => (caughtUp += 1),
+    );
+    feed.connect((text) => posted.push(JSON.parse(text)));
+    feed.write(chunk(200 * 1024));
+    feed.write(chunk(200 * 1024));
+    feed.write(chunk(10));
+    expect(posted.map((m) => m.id)).toEqual([0]);
+
+    // The first is drawn, which sends the next two: more to draw, so not caught up.
+    feed.drawn(0);
+    expect(posted.map((m) => m.id)).toEqual([0, 1, 2]);
+    feed.drawn(1);
+    expect(caughtUp).toBe(0);
+    feed.drawn(2);
+    expect(caughtUp).toBe(1);
+    // An answer it has already had changes nothing.
+    feed.drawn(2);
+    expect(caughtUp).toBe(1);
   });
 
   test("a frame of the largest size fits in a message the page will read", () => {

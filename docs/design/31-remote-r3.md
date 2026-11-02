@@ -802,12 +802,15 @@ staging needs no deploy. Nothing on this screen reaches the program: taking cont
   - A dropped channel, or the app in the background, attaches again from the last position drawn,
     and the computer says whether that goes on or a snapshot replaces the screen.
   - 4008 and `resnapshot_required` start from a snapshot, and so does a gap. A position refused on
-    resuming falls back to one too. Five fresh starts with nothing drawn between them stop and say so.
+    resuming falls back to one too.
+  - Five fresh starts stop and say so, unless the page caught up on output past the snapshot in
+    between. A snapshot's own frames do not count, since one always comes, and neither does new output
+    alone, which a program outrunning the page has plenty of.
   - Nothing is sent to the program by any of this.
 - **Holding output back** (`PageFeed`): at most 256 KB is with the page, undrawn. Up to 4 MB waits in
   the app, a size change keeping its place among it, and past that the page starts over from a new
-  snapshot. A WebView's queue of messages would otherwise have no bottom, and a phone draws slower
-  than a program can print.
+  snapshot, which counts as a fresh start. A WebView's queue of messages would otherwise have no
+  bottom, and a phone draws slower than a program can print.
 - **Scrolling:** at the computer's size, the document moves sideways under a finger. xterm.js scrolls
   only by wheel, so one finger moving up or down goes through what scrolled off, once the page itself
   can move no further. Pinching zooms in, not out: allowing out made Chromium lay the page out nearly
@@ -828,11 +831,14 @@ staging needs no deploy. Nothing on this screen reaches the program: taking cont
     look, because a headless tab need not paint on its own. It passed eight runs in a row, three of
     them with every core busy.
   - The screens against a fake relay and a stand-in WebView.
-- **Breaking each behaviour made a test fail,** 38 ways. Doing that found four tests that proved
+- **Breaking each behaviour made a test fail,** 38 ways, and 13 more after review. Doing that found four tests that proved
   nothing: a reset and a size change sent too slowly to race the output before them, a check for
   answers that a second layer already stopped, and a check that the page reaches nothing that passed
   because nothing was listening. All four are fixed. Writing the tests found a real bug too: a write
-  larger than the page's allowance would have waited forever.
+  larger than the page's allowance would have waited forever. Review then found that giving up never
+  happened against the real host: every snapshot comes as a frame, which cleared the count, and the
+  scripted channel sent none. It now sends one as the host does, and starting over counts too. That
+  came after the smoke test, so giving up has only run under tests.
 - **What was shown without a phone:** Metro bundles the app for iOS and Android, and `expo-doctor`
   passes its 20 checks. Chromium is not a phone's WebView, so only the smoke test tried WebKit's
   drawing, touch and scrolling.

@@ -450,6 +450,14 @@ export class FakeServer {
     }
   }
 
+  /** The computer detaching whoever is watching, who fell behind, for a new snapshot. */
+  needsSnapshot(): void {
+    for (const [socket, { stream }] of this.#watching) {
+      const error = { code: "resnapshot_required", message: "Behind.", retryable: true };
+      socket.onmessage?.({ data: JSON.stringify({ event: "terminal.detached", stream, error }) });
+    }
+  }
+
   /** A terminal's program ending, told to whoever is watching it. */
   programEnded(exit: { code: number; success: boolean }): void {
     for (const [socket, { stream }] of this.#watching) {

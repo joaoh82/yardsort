@@ -47,7 +47,10 @@ function Watching({
   const [trouble, setTrouble] = useState(false);
 
   const { feed, watch } = useMemo(() => {
-    const feed = new PageFeed(() => watch.startOver());
+    const feed = new PageFeed(
+      () => watch.startOver(),
+      () => watch.pageCaughtUp(),
+    );
     const watch = new TerminalWatch(terminal, feed);
     return { feed, watch };
   }, [terminal]);

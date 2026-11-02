@@ -27,7 +27,7 @@ import { drawable, toBase64, type ToApp, type ToPage } from "./bridge";
 const MAX_WITH_PAGE = 256 * 1024;
 /** What may wait here. Past this a page is too far behind to catch up on: it starts again. */
 const MAX_WAITING = 4 * 1024 * 1024;
-/** Attaching again this many times with nothing drawn between means it will not settle. */
+/** Starting again this many times without the page catching up means it will not settle. */
 const MAX_FRESH_STARTS = 5;
 
 /** What a watch asks to be drawn. */
@@ -49,8 +49,14 @@ export class PageFeed implements Drawing {
   #bytesWaiting = 0;
   #next = 0;
 
-  /** @param behind Called when the page is too far behind: all that is left is a new snapshot. */
-  constructor(readonly behind: () => void) {}
+  /**
+   * @param behind Called when the page is too far behind: all that is left is a new snapshot.
+   * @param caughtUp Called when the page has drawn everything it was sent, and nothing is waiting.
+   */
+  constructor(
+    readonly behind: () => void,
+    readonly caughtUp: () => void = () => {},
+  ) {}
 
   /** Where messages go. The page is starting anew: nothing it was sent counts any more. */
   connect(post: ((message: string) => void) | null): void {
@@ -110,6 +116,8 @@ export class PageFeed implements Drawing {
         this.#send(next.message);
       }
     }
+    // Nothing is left waiting here: with nothing at the page, all of it went.
+    if (this.#withPage.size === 0) this.caughtUp();
   }
 
   /** With nothing at the page, anything goes: nothing else would ever send it. */
@@ -158,6 +166,8 @@ export class TerminalWatch {
   /** Goes up with each start and stop: what an earlier one was waiting for no longer counts. */
   #run = 0;
   #freshStarts = 0;
+  /** Whether output past the snapshot has come since the last fresh start. */
+  #movedOn = false;
   #listeners = new Set<() => void>();
 
   constructor(
@@ -188,9 +198,12 @@ export class TerminalWatch {
       else step();
     };
     const watcher: Watcher = {
-      output: (bytes) =>
+      output: (bytes, position) =>
         inTurn(() => {
-          this.#freshStarts = 0;
+          // A snapshot's frames carry the position's own number, and always come, so they say
+          // nothing about the stream moving on. What comes next, or after resuming, is past it.
+          const started = this.#attachment;
+          if (started && position.seq > started.position.seq) this.#movedOn = true;
           this.drawing.write(bytes);
         }),
       resized: (size) =>
@@ -243,6 +256,14 @@ export class TerminalWatch {
     this.#update({ following: false });
   }
 
+  /**
+   * The page has drawn all it was sent. Having moved on past the snapshot too, this is what settling
+   * looks like: new output alone is not, since a program outrunning the page has plenty of that.
+   */
+  pageCaughtUp(): void {
+    if (this.#movedOn) this.#freshStarts = 0;
+  }
+
   /** The page started anew, with nothing on it: the next attachment starts from a snapshot. */
   pageStarted(): void {
     this.stop();
@@ -253,7 +274,7 @@ export class TerminalWatch {
   startOver(): void {
     const channel = this.#channel;
     this.pageStarted();
-    if (channel) void this.follow(channel);
+    if (channel && this.#mayStartAgain()) void this.follow(channel);
   }
 
   async #attach(channel: Channel, watcher: Watcher, run: number): Promise<Attachment | null> {
@@ -296,17 +317,22 @@ export class TerminalWatch {
     }
   }
 
-  /** Attach again for a snapshot, unless that keeps happening with nothing drawn in between. */
+  /** Attach again for a snapshot, unless that keeps happening without the page settling. */
   #again(channel: Channel): void {
     this.#drawn = null;
+    if (this.#mayStartAgain()) void this.follow(channel);
+  }
+
+  /** Count a fresh start, and say so if it is one too many. */
+  #mayStartAgain(): boolean {
     this.#freshStarts += 1;
-    if (this.#freshStarts > MAX_FRESH_STARTS) {
-      this.#update({
-        problem: "The computer’s output could not be followed. Go back and try again.",
-      });
-      return;
-    }
-    void this.follow(channel);
+    this.#movedOn = false;
+    if (this.#freshStarts <= MAX_FRESH_STARTS) return true;
+    this.#update({
+      following: false,
+      problem: "The computer’s output could not be followed. Go back and try again.",
+    });
+    return false;
   }
 
   #remember(attachment: Attachment): void {
