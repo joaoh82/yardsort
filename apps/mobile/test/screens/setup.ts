@@ -9,6 +9,22 @@ jest.mock(
     jest.requireActual<{ default: unknown }>("react-native-safe-area-context/jest/mock").default,
 );
 
+// A WebView, as far as a screen sees it: a view a test fires the page's messages at, and that keeps
+// what it was told. The page itself has its own tests, in a real browser.
+jest.mock("react-native-webview", () => {
+  const { createElement, useImperativeHandle } =
+    jest.requireActual<typeof import("react")>("react");
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  const told: string[] = [];
+  return {
+    told,
+    WebView: ({ ref, ...props }: { ref?: unknown }) => {
+      useImperativeHandle(ref as never, () => ({ postMessage: (text: string) => told.push(text) }));
+      return createElement(View, props);
+    },
+  };
+});
+
 // The camera, as far as a screen sees it: permission given, and a view a test fires scans at.
 jest.mock("expo-camera", () => {
   const { createElement } = jest.requireActual<typeof import("react")>("react");

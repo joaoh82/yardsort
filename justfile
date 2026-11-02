@@ -131,6 +131,10 @@ mobile-ios:
 mobile-start:
     cd apps/mobile && bun install --frozen-lockfile && bun run start
 
+# Build the terminal's page into the app, after changing it or the versions of xterm.js it uses
+mobile-terminal-page:
+    cd apps/mobile && bun install --frozen-lockfile && bun scripts/terminal-page.ts
+
 # The server's tests, with its PostgreSQL half against the local database
 server-test *args:
     bun scripts/server-dev.mjs test {{ args }}
