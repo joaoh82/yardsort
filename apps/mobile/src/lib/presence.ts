@@ -60,6 +60,11 @@ export class Presence {
   /** The same object until something changes, as `useSyncExternalStore` needs. */
   getSnapshot = (): ReadonlyMap<HostId, Reach> => this.#reach;
 
+  /** The channel held to `host` while it is online, for whoever is looking to read through. */
+  channelOf(host: HostId): Channel | null {
+    return this.#watches.get(host)?.channel ?? null;
+  }
+
   /** Hold a channel to each of `hosts`, and to nothing else. */
   watch(hosts: readonly HostId[]): void {
     for (const [host, watch] of this.#watches) {

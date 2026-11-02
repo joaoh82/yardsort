@@ -3,8 +3,9 @@
 **Status:** planned on 2026-10-30. The first slice, the TypeScript protocol client, was built on
 2026-10-31 (§9). The second, the app signed in, was built the same day (§10), and its smoke
 test passed on the owner's iPhone against staging on 2026-11-01. The third, pairing and computers,
-was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. This is R3's
-plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
+was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. The fourth,
+workspaces, sessions and activity, was built the same day (§12), and has not yet run on a phone.
+This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
 [25](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md); R0 and R1 are in [26](26-remote-r0-r1.md),
@@ -231,7 +232,9 @@ it.
 
 **What the phone keeps.** Its own profile in SecureStore. A small cache of computers and
 workspaces, each entry with when it was observed and shown as such, so a cold start shows
-something before the network answers. No terminal output is kept, and no activity, memory or
+something before the network answers. It is a file in the phone's cache folder, not SecureStore,
+which is meant for small secrets: names and branches are not credentials, the folder is never
+backed up, and the system clearing it costs only what was last seen. No terminal output is kept, and no activity, memory or
 session title (below). Signing out, or removing a profile, deletes that profile's credentials and
 cache. What a closed channel takes away depends on what was revoked, and the relay's 4003 does
 not say, so the app asks with its own credential (refreshing it first if it has lapsed):
@@ -680,7 +683,86 @@ the same day. The server needed no change, so staging needs no deploy; the stand
     again, then **Ask the computer**. The computer shows two requests; answer the newest and the
     phone follows it. The first is on the account screen, and **Cancel the request** removes it.
 
-## 12 · Open after this plan
+## 12 · What the fourth slice adds
+
+Built on 2026-11-01, on Linux. Nothing of it has run on a phone yet: its smoke test, below, is the
+first time. The server and the host needed no change, so staging needs no deploy; the stand-in
+gained `note`, for a test to read an approved note through the real host. Everything here is read
+through a channel, and a phone changes nothing on the computer.
+
+- **A computer** (`src/app/computer.tsx`): its workspaces by project, with the branch and how many
+  conversations are running. A page at a time, and more when asked for.
+- **A workspace** (`src/app/workspace.tsx`): its conversations, ended ones when asked for, its other
+  terminals, and its activity. A terminal's state comes from when it last printed, so a quiet one
+  says "Nothing printed for 3 min" and never that it is waiting for anything. Opening a terminal is
+  slice 5.
+- **Activity is followed live** (`src/lib/activity.ts`): the newest page, then a subscription after
+  it. A channel lost carries on from the last batch, so nothing still kept is missed and nothing
+  repeats. Older pages come when asked for. It says what the desktop says of each event, and a kind
+  this build does not know by its name. At most 300 events are held in memory.
+- **Approved memory** (`src/app/memory.tsx`): a project's approved notes, to read, with no way to
+  change one from here. The host serves only approved notes (§1).
+- **What was last seen** (`src/lib/observed.ts`): the computers and each one's first page of
+  workspaces, in a file per profile in the cache folder (§5). The account shows the computers before
+  the server answers or when it cannot; a computer's screen shows its workspaces, marked "As of",
+  until it answers or while it cannot. It holds names and branches, and never a session title, a
+  task's title, activity, memory or a grant's scopes. A failed read or write costs only that.
+- **What was last seen goes** with a computer that took this phone back, which the next list from
+  the server settles, and with the profile. A server out of reach deletes nothing. A computer that
+  refuses a channel takes its screen with it at once; telling apart everything a 4003 can mean stays
+  with slice 7.
+- **One channel at a time:** each screen holds its own while it is the one shown (`src/ui/live.tsx`),
+  with the same reach, retries and foreground rule as the account's list. Coming back to a screen, or
+  pulling it, reads again.
+- **What a grant does not reach** says so in the computer's own words, whichever list it stops.
+- **Not built:** a workspace's linked tasks are not shown. No conversation is kept, so a list of
+  them shows only when the computer can be reached, marked "As of" if the channel drops while it is
+  open.
+- **What was tested:** the logic against the real server, relay and host: reading and following,
+  carrying on after a dropped channel, stopping, a grant that does not reach activity or memory,
+  and what is kept going with a sign-out, a computer's refusal and nothing with a server out of
+  reach. The screens against a fake relay: the lists, paging, live events, the same event told
+  twice, memory with nothing that changes it, a cold start with the server down, and nothing but
+  names and branches on the shelf. Breaking each of those made a test fail. Doing that found a test
+  whose program exited after the phone had reconnected, so it proved nothing, and a real double
+  subscription when a pull to refresh came during the first read; both are fixed.
+- **What was shown without a phone:** Metro bundles the app for iOS and Android, and `expo-doctor`
+  passes its 20 checks. `expo-file-system`'s real files are first used on a phone: tests use a map.
+- **Not built here:** as in §10.
+
+**Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
+
+1. On the computer, from this branch, with a throwaway profile:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
+   Settings → Remote: server `https://remote-staging.yardsort.sh`, **Turn on and sign in**. Add a
+   project and a workspace with a branch, start an agent in it, open a shell in it, and write a note
+   in the project's Memory view.
+2. On the Mac, from this branch: `just mobile-ios`. Pair the phone if it is not already, letting it
+   watch and read everything.
+3. **A computer.** **Open** the computer. It says **Online**, with the workspace under its project,
+   its branch and **1 running**.
+4. **A workspace.** Tap it. The conversation shows with its title and agent, and the shell under
+   other terminals. **Show ended conversations** shows any that ended.
+5. **Live.** With the phone on that screen, have the agent do something at the computer. New rows
+   come in under Activity without touching the phone.
+6. **Away and back.** Lock the phone for a minute while the agent does something else. Unlock it.
+   What happened meanwhile is there, once each.
+7. **Memory.** **Approved memory** shows the note, with nothing to change it. A proposal waiting for
+   review does not show.
+8. **Offline.** Back on the computer's screen, quit the desktop app. It says **Offline, last seen
+   …**, and that its agents did not stop. Leave and reopen the screen: the workspace shows, marked
+   **As of**. Start the app again: **Online** within about 15 seconds.
+9. **No network.** Turn on airplane mode and force-quit the app. Open it: it says the server could
+   not be reached, and the computer shows marked **As of**. Open it: the workspace shows, marked **As
+   of**, and tapping it says conversations show when the computer can be reached. Turn airplane mode
+   off and **Try again**.
+10. **Taken back.** With the computer's screen open, **Revoke** the phone in the desktop app. The
+    screen says the computer no longer lets this phone in. **Back to the account**: the computer is
+    gone, and the phone is still signed in.
+11. **Signed out.** Pair again, open the computer, then **Sign out** and confirm. Sign in again: no
+    computer shows until the phone is paired again.
+
+## 13 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

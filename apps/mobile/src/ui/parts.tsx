@@ -185,6 +185,43 @@ export function Button({
   );
 }
 
+/** A small heading inside a section. */
+export function Label({ children }: { children: ReactNode }) {
+  const colors = useColors();
+  return <Text style={[styles.label, { color: colors.muted }]}>{children}</Text>;
+}
+
+/** A card that goes somewhere when pressed. */
+export function Row({
+  title,
+  detail,
+  onPress,
+}: {
+  title: string;
+  detail?: string;
+  onPress: () => void;
+}) {
+  const colors = useColors();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={detail ? `${title}, ${detail}` : title}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.card,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.line,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
+    >
+      <Text style={[styles.rowTitle, { color: colors.ink }]}>{title}</Text>
+      {detail ? <Text style={[styles.hint, { color: colors.muted }]}>{detail}</Text> : null}
+    </Pressable>
+  );
+}
+
 /** Something that went wrong, announced to a screen reader as it appears. */
 export function Problem({ children }: { children: ReactNode }) {
   const colors = useColors();
@@ -225,6 +262,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   hint: { fontSize: 13 },
+  rowTitle: { fontSize: 16, fontWeight: "600" },
   button: {
     borderWidth: 1,
     borderRadius: 8,

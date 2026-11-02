@@ -12,15 +12,18 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { Alert, type AlertButton, AppState } from "react-native";
 
 import Account from "../../src/app/account";
+import ComputerScreen from "../../src/app/computer";
 import Connect from "../../src/app/connect";
 import Start from "../../src/app/index";
+import MemoryScreen from "../../src/app/memory";
 import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
+import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import { AppProvider } from "../../src/lib/context";
 import { Incoming } from "../../src/lib/pairing";
 import { MemoryVault } from "../lib/memory-vault";
-import { ADDRESS, envFor, FakeServer } from "./fake-server";
+import { ADDRESS, envFor, event, FakeServer } from "./fake-server";
 
 const signedInBrowser: Browser = async (_url, redirect) => `${redirect}?code=a-code`;
 
@@ -54,6 +57,9 @@ async function start({
       account: Account,
       servers: Servers,
       pair: Pair,
+      computer: ComputerScreen,
+      workspace: WorkspaceScreen,
+      memory: MemoryScreen,
     },
     { initialUrl: "/" },
   );
@@ -699,6 +705,204 @@ describe("Pairing", () => {
       await fireEvent.press(screen.getByRole("button", { name: "OK" }));
       expect(incoming.get()).toBeNull();
       expect(server.presented).toEqual([]);
+    });
+  });
+});
+
+describe("A computer", () => {
+  /** Signed in, with the computer letting this phone in, and something to keep things on. */
+  async function paired(shelf = new MemoryVault(), server = new FakeServer()) {
+    const app = await start({ server, env: { ...envFor(server), shelf } });
+    await signIn();
+    await fireEvent.press(await screen.findByRole("button", { name: "Pair a computer" }));
+    await fireEvent.changeText(await screen.findByLabelText("Pairing code"), "ABCD2345");
+    await fireEvent.press(screen.getByRole("button", { name: "Pair with ABCD-2345" }));
+    await screen.findByText("Say yes at Workstation");
+    server.answer("approved");
+    await fireEvent.press(await screen.findByRole("button", { name: "Done" }, ANSWER));
+    await screen.findByRole("button", { name: "Open Workstation" });
+    return { ...app, server, shelf };
+  }
+
+  async function open() {
+    await fireEvent.press(await screen.findByRole("button", { name: "Open Workstation" }));
+    return screen.findByRole("button", { name: /^fix-login/ });
+  }
+
+  test("lists its workspaces by project, and goes into one", async () => {
+    await paired();
+    const row = await open();
+    expect(row.props.accessibilityLabel).toBe("fix-login, ys/fix-login · 1 running");
+    expect(screen.getByText("demo")).toBeTruthy();
+    expect(screen.getByText("Online")).toBeTruthy();
+
+    await fireEvent.press(row);
+    expect(await screen.findByText("The login page times out")).toBeTruthy();
+    expect(screen.getByText("claude · a-model")).toBeTruthy();
+    // Quiet says only that nothing printed, never that it waits for anything.
+    expect(screen.getByText("Nothing printed for 3 min")).toBeTruthy();
+  });
+
+  test("more than a page is asked for when wanted", async () => {
+    const server = new FakeServer();
+    server.computer.moreWorkspaces = [
+      { ...server.computer.workspaces[0], id: "w2", name: "second" },
+    ];
+    await paired(new MemoryVault(), server);
+    await open();
+    expect(screen.queryByRole("button", { name: /^second/ })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Show more" }));
+    expect(await screen.findByRole("button", { name: /^second/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^fix-login/ })).toBeTruthy();
+  });
+
+  test("what a grant does not reach says so, in the computer's words", async () => {
+    const server = new FakeServer();
+    server.computer.refuses.set("workspace.list", "This phone may not see workspaces here.");
+    await paired(new MemoryVault(), server);
+    await fireEvent.press(await screen.findByRole("button", { name: "Open Workstation" }));
+    expect(await screen.findByText("This phone may not see workspaces here.")).toBeTruthy();
+  });
+
+  describe("a workspace", () => {
+    async function inside(server = new FakeServer()) {
+      const app = await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      await screen.findByText("Following as it is recorded.");
+      return app;
+    }
+
+    test("shows what was recorded, and what is recorded next as it happens", async () => {
+      const { server } = await inside();
+      expect(screen.getByText("claude started")).toBeTruthy();
+      await act(async () =>
+        server.record(event("event-2", "tool.failed", { tool: "Bash", exitCode: 1 })),
+      );
+      expect(await screen.findByText("Bash failed")).toBeTruthy();
+      // The same event told again is shown once.
+      await act(async () =>
+        server.record(event("event-2", "tool.failed", { tool: "Bash", exitCode: 1 })),
+      );
+      expect(screen.getAllByText("Bash failed")).toHaveLength(1);
+    });
+
+    test("a kind this build does not know is shown by its name", async () => {
+      const { server } = await inside();
+      await act(async () => server.record(event("event-3", "something.new")));
+      expect(await screen.findByText("something.new")).toBeTruthy();
+    });
+
+    test("older activity is read when asked for", async () => {
+      const server = new FakeServer();
+      server.computer.olderEvents = [event("event-0", "turn.started", { turnNumber: 1 })];
+      await inside(server);
+      expect(screen.queryByText("agent started a turn")).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Show older" }));
+      expect(await screen.findByText("agent started a turn")).toBeTruthy();
+      expect(screen.getByText("claude started")).toBeTruthy();
+    });
+
+    test("ended conversations show when asked for", async () => {
+      const server = new FakeServer();
+      server.computer.endedSessions = [
+        {
+          ...server.computer.sessions[0],
+          id: "session-2",
+          title: "An older conversation",
+          endedAt: 1_700_000_000_500,
+          exitCode: 2,
+          process: "ended",
+          terminal: null,
+        },
+      ];
+      await inside(server);
+      expect(screen.queryByText("An older conversation")).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Show ended conversations" }));
+      expect(await screen.findByText("An older conversation")).toBeTruthy();
+      expect(screen.getByText("Ended with 2")).toBeTruthy();
+    });
+
+    test("approved memory can be read, and nothing there changes it", async () => {
+      const { server } = await inside();
+      await fireEvent.press(screen.getByRole("button", { name: "Approved memory" }));
+      expect(await screen.findByText("Migrations are append-only.")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /approve|reject|edit|delete/i })).toBeNull();
+      expect(server.operations.filter((o) => o.op.startsWith("memory."))).toEqual([
+        { op: "memory.list", params: expect.objectContaining({ project: "project-1" }) },
+      ]);
+    });
+
+    test("holds one channel at a time, to the screen being looked at", async () => {
+      const { server } = await inside();
+      expect(server.sockets.open).toBe(1);
+      await act(async () => router.back());
+      await screen.findByRole("button", { name: /^fix-login/ });
+      await waitFor(() => expect(server.sockets.open).toBe(1));
+    });
+  });
+
+  describe("what was last seen", () => {
+    test("shows when the computer is offline, marked as such", async () => {
+      const { server } = await paired();
+      await open();
+      await act(async () => router.dismissTo("/account"));
+      server.offline.add("host-work");
+      await fireEvent.press(await screen.findByRole("button", { name: "Open Workstation" }));
+      expect(await screen.findByText(/^Offline, last seen/)).toBeTruthy();
+      expect(screen.getByText("Offline does not mean its agents stopped.")).toBeTruthy();
+      expect(await screen.findByText(/^As of /)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "fix-login, ys/fix-login" })).toBeTruthy();
+    });
+
+    test("holds names and branches, and never a title, activity or memory", async () => {
+      const { shelf } = await paired();
+      await fireEvent.press(await open());
+      await screen.findByText("The login page times out");
+      await fireEvent.press(screen.getByRole("button", { name: "Approved memory" }));
+      await screen.findByText("Migrations are append-only.");
+
+      const kept = [...shelf.kept.values()].join();
+      expect(kept).toContain("fix-login");
+      expect(kept).not.toContain("The login page times out");
+      expect(kept).not.toContain("Migrations are append-only");
+      expect(kept).not.toContain("process.started");
+      expect(kept).not.toContain("a-model");
+    });
+
+    test("shows before the server answers on a cold start", async () => {
+      const { shelf, vault, server } = await paired();
+      await open();
+      await act(async () => router.dismissTo("/account"));
+      server.down = true;
+      await start({ server, vault, env: { ...envFor(server), shelf } });
+      expect(await screen.findByText(/could not be reached/)).toBeTruthy();
+      const row = await screen.findByRole("button", { name: /^Workstation, As of / });
+      await fireEvent.press(row);
+      expect(await screen.findByRole("button", { name: "fix-login, ys/fix-login" })).toBeTruthy();
+      expect(screen.getByText(/^As of /)).toBeTruthy();
+    });
+
+    test("goes when the computer takes this phone back, and the phone stays signed in", async () => {
+      const { shelf, server } = await paired();
+      await open();
+      await waitFor(() => expect([...shelf.kept.values()].join()).toContain("fix-login"));
+      server.grants[0]!.state = "revoked";
+      await act(async () => {
+        for (const socket of server.relaySockets) socket.onclose?.({ code: 4003, reason: "" });
+      });
+      expect(await screen.findByText("This computer no longer lets this phone in.")).toBeTruthy();
+      await waitFor(() => expect([...shelf.kept.values()].join()).not.toContain("fix-login"));
+      expect(screen.queryByRole("button", { name: /^fix-login/ })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Back to the account" }));
+      expect(await screen.findByRole("button", { name: "Sign out" })).toBeTruthy();
+    });
+
+    test("goes with the profile", async () => {
+      const { shelf, accounts } = await paired();
+      await open();
+      await waitFor(() => expect(shelf.kept.size).toBeGreaterThan(0));
+      await act(async () => accounts.signOut());
+      await waitFor(() => expect(shelf.kept.size).toBe(0));
     });
   });
 });

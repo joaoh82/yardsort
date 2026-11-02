@@ -8,14 +8,14 @@
  */
 
 import type { GrantId } from "@yardsort/remote-client";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Alert, AppState, StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { type Computer, type ComputerList, messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
-import { moment } from "../lib/format";
 import { Presence, type Reach } from "../lib/presence";
+import { describeReach, SeenComputers, useLive } from "./live";
 import { Body, Button, Card, Problem, Title, useColors, Waiting } from "./parts";
 
 /** How often the list is asked again while a request waits at a computer (31 §5). */
@@ -31,9 +31,7 @@ export function Computers({ asked }: { asked: number }) {
   const reach = useSyncExternalStore(presence.subscribe, presence.getSnapshot);
   const [list, setList] = useState<ComputerList | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [focused, setFocused] = useState(false);
-  const [foreground, setForeground] = useState(AppState.currentState !== "background");
-  const live = focused && foreground;
+  const live = useLive();
 
   const load = useCallback(
     () =>
@@ -46,20 +44,6 @@ export function Computers({ asked }: { asked: number }) {
       ),
     [accounts],
   );
-
-  useFocusEffect(
-    useCallback(() => {
-      setFocused(true);
-      return () => setFocused(false);
-    }, []),
-  );
-
-  useEffect(() => {
-    const watcher = AppState.addEventListener("change", (state) =>
-      setForeground(state !== "background"),
-    );
-    return () => watcher.remove();
-  }, []);
 
   // Asked again on coming back, and on each pull to refresh.
   useEffect(() => {
@@ -103,6 +87,7 @@ export function Computers({ asked }: { asked: number }) {
       <Title>Computers</Title>
       {problem && <Problem>{problem}</Problem>}
       {!list && !problem && <Waiting label="Asking the server" />}
+      {!list && <SeenComputers />}
       {list?.computers.length === 0 && waiting === 0 && (
         <Body muted>
           No computer lets this phone in yet. Open Yardsort on one, choose Pair a device in
@@ -114,6 +99,7 @@ export function Computers({ asked }: { asked: number }) {
           key={computer.grant}
           computer={computer}
           reach={reach.get(computer.host)}
+          onOpen={() => router.push({ pathname: "/computer", params: { host: computer.host } })}
           onUnpair={() => confirmUnpair(computer.name, () => void takeBack(computer.grant))}
         />
       ))}
@@ -132,10 +118,12 @@ export function Computers({ asked }: { asked: number }) {
 function ComputerRow({
   computer,
   reach,
+  onOpen,
   onUnpair,
 }: {
   computer: Computer;
   reach: Reach | undefined;
+  onOpen: () => void;
   onUnpair: () => void;
 }) {
   const colors = useColors();
@@ -148,24 +136,10 @@ function ComputerRow({
           {says}
         </Text>
       </View>
+      <Button title={`Open ${computer.name}`} onPress={onOpen} />
       <Button title={`Unpair ${computer.name}`} kind="danger" onPress={onUnpair} />
     </Card>
   );
-}
-
-function describeReach(reach: Reach | undefined, lastSeenAt: number | null): string {
-  switch (reach?.kind) {
-    case "online":
-      return "Online";
-    case "offline":
-      return lastSeenAt ? `Offline, last seen ${moment(lastSeenAt)}` : "Offline";
-    case "reconnecting":
-      return "Reconnecting";
-    case "gone":
-      return "No longer lets this phone in";
-    default:
-      return "Connecting";
-  }
 }
 
 function confirmUnpair(name: string, unpair: () => void): void {

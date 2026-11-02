@@ -13,6 +13,7 @@ import { useApp, useSnapshot } from "../lib/context";
 import { moment } from "../lib/format";
 import type { Profile } from "../lib/profiles";
 import { Computers } from "../ui/computers";
+import { SeenComputers } from "../ui/live";
 import { Body, Button, Card, Problem, Screen, Title, useColors, Waiting } from "../ui/parts";
 
 export default function Account() {
@@ -33,6 +34,7 @@ export default function Account() {
       <Screen>
         {title}
         <Waiting label={`Signing in to ${profile.serverName}`} />
+        <SeenComputers key={profile.id} />
       </Screen>
     );
   }
@@ -46,6 +48,7 @@ export default function Account() {
         </Problem>
         <Body muted>Nothing was changed on this phone. Your computers keep working.</Body>
         <Button title="Try again" kind="primary" onPress={() => void accounts.open()} />
+        <SeenComputers key={profile.id} />
         {servers}
       </Screen>
     );
