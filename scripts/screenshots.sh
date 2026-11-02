@@ -299,10 +299,59 @@ test("rounds to whole units", () => {
   assert.equal(render({ ...lisbon, temperature: 20.5 }), "Lisbon: 21°C, wind 12 km/h");
 });
 EOF
+  # Smoke tests travel with the branch, in `.yardsort/tests`. These two need nothing but a
+  # shell — no server, no browser — so a shot of the Tests view can be taken with no network.
+  mkdir -p .yardsort/tests
+  cat >.yardsort/tests/version-check.yaml <<'EOF'
+id: version-check
+name: Node is new enough to run
+description: Checks the Node runtime the CLI needs is on the machine and reports a modern version.
+version: 1
+
+steps:
+  - id: node
+    action: run
+    program: node
+    args: [--version]
+    expect:
+      exit: 0
+      stdout_matches: '^v\d+\.'
+EOF
+  cat >.yardsort/tests/unit-tests.yaml <<'EOF'
+id: unit-tests
+name: The test suite passes
+description: Runs the project's own unit tests with node --test and checks they all pass.
+version: 1
+
+steps:
+  - id: tests
+    action: run
+    program: node
+    args: [--test]
+    expect:
+      exit: 0
+      stdout_contains: pass
+EOF
   commit_all "Read the wind speed from the current conditions"
 
   demo_repo api-gateway
   printf '# api-gateway\n\nRoutes public traffic to the internal services.\n' >README.md
+  mkdir -p .yardsort/tests
+  cat >.yardsort/tests/readme.yaml <<'EOF'
+id: readme
+name: The service README is present
+description: A shell-only sanity check that the repository README is there and names the service.
+version: 1
+
+steps:
+  - id: readme
+    action: run
+    program: cat
+    args: [README.md]
+    expect:
+      exit: 0
+      stdout_contains: api-gateway
+EOF
   commit_all "Initial commit"
 
   demo_repo docs-site
@@ -847,8 +896,12 @@ seed() {
     echo "The profile already has projects; nothing added." >&2
     exit 1
   fi
-  local now
+  local now hour
   now=$(date +%s000)
+  hour=$((3600 * 1000))
+  # When each seeded run happened, so the Tests view shows ages like "2h ago", newest first.
+  local t_15m=$((now - hour / 4)) t_1h=$((now - hour)) t_2h=$((now - 2 * hour))
+  local t_4h=$((now - 4 * hour)) t_6h=$((now - 6 * hour))
   sqlite3 "$db" <<EOF
 INSERT INTO projects (id, name, root_path, sort_order, created_at) VALUES
   ('demo-weather-cli', 'weather-cli', '$DEMO/repos/weather-cli', 0, $now),
@@ -866,6 +919,28 @@ INSERT INTO workspace_tasks (workspace_id, source, repo, key, url, title, create
    'https://github.com/yardsort-demo/weather-cli/issues/9', 'Print the temperature in Fahrenheit', $now);
 -- The welcome tour wants no screenshot of its own but the onboarding one, taken by hand.
 INSERT OR REPLACE INTO ui_state (key, value) VALUES ('onboarding.welcomeSeen', 'true');
+-- A handful of runs so the Tests view shows real verdicts: two tests in weather-cli (passed,
+-- one of them across its worktree too), one in api-gateway, and one still waiting for approval
+-- in the worktree, which is the sidebar row's count. The definition and hash are stand-ins: the
+-- view reads the file from the repository for the verdict, the run row only for the status.
+INSERT INTO test_runs
+  (id, project_id, workspace_id, workspace_name, test_id, test_name, definition, content_hash,
+   inputs, status, requested_by, created_at, started_at, ended_at) VALUES
+  ('demo-run-1', 'demo-weather-cli', 'demo-weather-cli-local', 'local',
+   'version-check', 'Node is new enough to run', 'id: version-check', 'seed1',
+   '{}', 'passed', 'app', $t_2h, $t_2h, $t_2h),
+  ('demo-run-2', 'demo-weather-cli', 'demo-weather-cli-local', 'local',
+   'unit-tests', 'The test suite passes', 'id: unit-tests', 'seed2',
+   '{}', 'passed', 'cli', $t_4h, $t_4h, $t_4h),
+  ('demo-run-3', 'demo-weather-cli', 'demo-weather-cli-pr', 'celsius-fahrenheit',
+   'version-check', 'Node is new enough to run', 'id: version-check', 'seed3',
+   '{}', 'failed', 'cli', $t_1h, $t_1h, $t_1h),
+  ('demo-run-4', 'demo-api-gateway', 'demo-api-gateway-local', 'local',
+   'readme', 'The service README is present', 'id: readme', 'seed4',
+   '{}', 'passed', 'workflow', $t_6h, $t_6h, $t_6h),
+  ('demo-run-5', 'demo-weather-cli', 'demo-weather-cli-pr', 'celsius-fahrenheit',
+   'unit-tests', 'The test suite passes', 'id: unit-tests', 'seed5',
+   '{}', 'awaiting_approval', 'cli', $t_15m, NULL, NULL);
 EOF
   echo "Added weather-cli, api-gateway and docs-site to $db, and marked the welcome tour seen."
   echo "Focus the window to see them."
