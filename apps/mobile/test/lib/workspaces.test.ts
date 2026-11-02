@@ -181,6 +181,16 @@ describe("what is kept", () => {
     expect(shelf.kept.size).toBe(0);
   });
 
+  test("goes with a profile that signing in again replaced, and signing out leaves nothing", async () => {
+    const { accounts, shelf } = await paired("Signing-in-again phone");
+    expect([...shelf.kept.values()].join()).toContain("Stand-in host");
+    await accounts.signIn(await accounts.lookUp(standIn.server), "Signing-in-again phone", browser);
+    expect(shelf.kept.size).toBe(0);
+    await accounts.computers();
+    await accounts.signOut();
+    expect(shelf.kept.size).toBe(0);
+  });
+
   test("of a computer that took this phone back goes, and the phone stays signed in", async () => {
     const { accounts, shelf, grant } = await paired("Taken-back phone");
     const channel = await accounts.openChannel(standIn.host);

@@ -251,7 +251,7 @@ export class Accounts {
     }
     // A profile signed in again at the same address replaces the one before it.
     for (const old of profiles.all) {
-      if (old.address === profile.address && old.id !== profile.id) await profiles.forget(old.id);
+      if (old.address === profile.address && old.id !== profile.id) await this.#forget(old.id);
     }
     this.#sessions.set(
       profile.id,
