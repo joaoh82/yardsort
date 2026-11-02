@@ -5,8 +5,8 @@
 test passed on the owner's iPhone against staging on 2026-11-01. The third, pairing and computers,
 was built on 2026-11-01 (§11), and its smoke test passed on the same iPhone that day. The fourth,
 workspaces, sessions and activity, was built the same day (§12), and its smoke test passed on the
-same iPhone on 2026-11-02. The fifth, watching a terminal, was built that day too (§13), and has not
-yet run on a phone.
+same iPhone on 2026-11-02. The fifth, watching a terminal, was built that day too (§13), and its smoke
+test passed on the same iPhone that day.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -776,10 +776,10 @@ through a channel, and a phone changes nothing on the computer.
 
 ## 13 · What the fifth slice adds
 
-Built on 2026-11-02, on Linux. Nothing of it has run on a phone yet: its smoke test, below, is the
-first time, and a new native module means `just mobile-ios` again, not `just mobile-start`. The
-server and the host needed no change, so staging needs no deploy. Nothing on this screen reaches the
-program: taking control is slice 6.
+Built on 2026-11-02, on Linux. Its smoke test, below, passed on the owner's iPhone against staging
+that day, the first time WebKit drew the page. Android is still unbuilt. A new native module means
+`just mobile-ios` again, not `just mobile-start`. The server and the host needed no change, so
+staging needs no deploy. Nothing on this screen reaches the program: taking control is slice 6.
 
 - **Opening one** (`src/app/workspace.tsx`): a conversation with a terminal, or another terminal, is
   now a button. The route carries the host, the terminal and the agent's name, never a conversation's
@@ -834,8 +834,8 @@ program: taking control is slice 6.
   because nothing was listening. All four are fixed. Writing the tests found a real bug too: a write
   larger than the page's allowance would have waited forever.
 - **What was shown without a phone:** Metro bundles the app for iOS and Android, and `expo-doctor`
-  passes its 20 checks. Chromium is not a phone's WebView, so WebKit's drawing, touch and scrolling are
-  first tried in the smoke test.
+  passes its 20 checks. Chromium is not a phone's WebView, so only the smoke test tried WebKit's
+  drawing, touch and scrolling.
 - **Not built here:** as in §10.
 
 **Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
