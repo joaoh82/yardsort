@@ -10,7 +10,8 @@ test passed on the same iPhone that day. The sixth, taking control, was built th
 its smoke test passed on the same iPhone that day, after it found a tab at the computer taking control.
 The seventh, signed out, revoked and switching, was built on 2026-11-03 (§15), and its smoke test passed on
 the same iPhone that day. That is the last slice, and R3 is not done: the device run below is its gate, and
-needs an Android phone.
+needs an Android phone. Android was built and run in an emulator on 2026-11-03, which found three bugs, now fixed
+(§16). That is not the device run.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -1139,7 +1140,90 @@ the rest. A sign-in does come back at that address, so step 9 needs no Simulator
     that a computer took it back. **Servers on this phone** is gone if it was the last. Force-quit and open: Connect, with
     nothing shown.
 
-## 16 · Open after this plan
+## 16 · Android in an emulator
+
+Run on 2026-11-03, on Linux, after the seven slices: §7 asks for Android to be built and tried in an emulator as the
+work goes, and until now this machine had no Android SDK. **It shows that the app builds and runs on Android, not that
+it works on a phone,** and it is not the device run. The emulator was Android 16 (API 36) with Google APIs, a Pixel 7's
+screen, x86_64, WebView and Chrome 133, with no window, driven through `adb`. The server, relay, host and sign-in
+were the stand-in (`crates/server/examples/stand-in.rs`), reached through `adb reverse`: no real account, no real agent.
+
+**It found three things no test had, each fixed here and with a test that fails without the fix:**
+
+- **Opening any terminal crashed the app.** `dataDetectorTypes="none"` is a word, which the WebView's iOS side turns into
+  the list its native prop is, and its Android side passes on as it is. React Native's native code then aborts the
+  process. It is `["none"]` now.
+- **A dark phone had a white header**, with the status bar's white icons lost against it. Android's header is drawn
+  from the navigation theme, and nothing set one. The root layout now gives it the app's own colors. iOS 26's glass
+  bar is left alone, since nothing sets a header background. Its title color comes from the same theme, so **iOS's dark
+  mode wants a look** on the next run there.
+- **A sign-in's return reached the router, code and all.** On Android it comes to the app like any link, as well as to
+  the browser session waiting for it. A sign-in that went on to the account was left looking fine. Backing out of the
+  browser just as it came back left **Unmatched Route** on the screen, with the code in it, and the phone not signed
+  in. It now stops in `+native-intent`, as a pairing link's secret does, and the session still hears it. Six sign-ins in
+  a row afterwards came back to the account. A code is useless without the verifier the session holds, but it had no
+  business in a route.
+
+**What worked, seen on the emulator:**
+
+| Area       | What                                                                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Signing in | A Custom Tab through to `yardsort://signed-in`, after Chrome's first-run screen. Signed in again after a crash and a force-stop. Signing out, and Connect after it             |
+| Pairing    | Typing the code, a link from outside the app (asked about first), and the camera permission denied, asked again and allowed                                                    |
+| Watching   | The WebView's page, messages both ways, Unicode, CJK and emoji, sideways scrolling, a link tapped and asked about, no keyboard from tapping the terminal                       |
+| Control    | Refused while the computer types, taken, typed, handed back, let go on leaving and in the background. Type, Esc, ↑ and Enter reached the program as the right bytes            |
+| Keyboard   | The composer stays above it with the screen fitted, and Back closes it before leaving the screen. The status-bar and keyboard measures §14 left untested work on this emulator |
+| Lifecycle  | Back from the background with what was missed, a connection dropped and regained (15 seconds after it returned), and the WebView's process killed                              |
+| Losing it  | Taken back while watching: says so there and on the account, with **OK**                                                                                                       |
+| Looks      | Dark and light, followed while running, landscape, and the account's screen with text at 1.6 times its size                                                                    |
+| Kept       | SecureStore's backup rules are in the manifest, leaving credentials out of cloud backup and device transfer                                                                    |
+
+**Left as they are, for the device run or later:**
+
+- **Landscape with the keyboard up** gets Android's full-screen text entry, which hides the terminal. Its Send works.
+  There is too little room beside a keyboard to show both, so this is left alone until it has been tried on a phone.
+- **Changing the system's text size** recreates the Android activity, which goes back to the first screen and lets go
+  of control. `fontScale` is not among the config changes the generated project handles. Nothing is lost, and it is rare.
+- **Backing out of the browser just as a sign-in returns** can still read as not signed in, since Expo races the app
+  coming back against the address arriving. The person presses **Sign in** again.
+- **Permissions.** The generated project also asks for external storage, vibration and drawing over other apps, which
+  the app does not use. They want blocking before any store build (R7). `RECORD_AUDIO` is not asked for.
+- **SecureStore's `WHEN_UNLOCKED_THIS_DEVICE_ONLY` is iOS's.** On Android the values are encrypted with a key in the
+  Keystore, and the backup rules above do the rest.
+
+**Not tried at all:** a real phone and its keyboards, a real scan (the camera's view opened, black without a window, and
+nothing was scanned), the other keys on the row, an external keyboard, the phone locked and woken, Wi-Fi to cellular, or a release build. Real agents and a real sign-in are
+for the smoke test below.
+
+**Setting it up.** `apps/mobile/README.md` has the packages. This machine's Java is a runtime with no compiler, which
+stops the build, so JDK 17 sits beside the SDK in `~/Android/jdk17`. `just mobile-android` then built, installed and opened
+the app from nothing.
+
+**Its smoke test, on this computer, against staging.** A person signing in for real, with real agents, which the run
+above had neither of. It needs no deploy.
+
+1. In one terminal, start the emulator: `ANDROID_AVD_HOME=~/.config/.android/avd ~/Android/Sdk/emulator/emulator -avd yardsort`.
+   A window with a phone in it should open: the run above had none, so that part is untried here. If it does not, put
+   `QT_QPA_PLATFORM=xcb` in front.
+2. In another, from the worktree: `~/Android/Sdk/platform-tools/adb reverse tcp:8081 tcp:8081`, then `just mobile-start`. This
+   serves the app's code to the emulator, as the Mac does for the iPhone.
+3. In a third, from the worktree, the desktop app with a throwaway profile:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
+   Settings → Remote on against `https://remote-staging.yardsort.sh`, with Claude running in a workspace.
+4. **Signing in.** Open **Yardsort Dev** in the emulator. Connect to `https://remote-staging.yardsort.sh`, and **Sign in**. Chrome
+   opens: sign in there. It comes back to the account, with no page saying **Unmatched Route** on the way.
+5. **Pairing.** At the computer, Settings → Remote → **Pair a device**. Type the code in the emulator, and say yes at the computer. The
+   computer reads **Online**.
+6. **A terminal.** Open it, and open Claude's conversation. The terminal draws, where it used to crash the app.
+7. **Control.** **Take control**, tap the field, and send `hi`. Claude answers, with the keyboard below the field and
+   nothing hidden. Press the emulator's Back: the keyboard goes. Press it again: the screen goes, and the phone lets go of control.
+8. **Dark.** `~/Android/Sdk/platform-tools/adb shell cmd uimode night yes`: the header goes dark, and the clock and icons
+   above it can be read. Then the same with `no`.
+9. **Background.** Open the terminal again, press the emulator's Home, type something at the computer, and open the app: what
+   was typed is there.
+10. **Taken back.** At the computer, **Revoke** beside the phone: **This computer no longer lets this phone in.**
+
+## 17 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

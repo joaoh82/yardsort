@@ -44,8 +44,9 @@ a server from the phone.
 
 Things it holds to:
 
-- **Credentials** live only in SecureStore, `WHEN_UNLOCKED_THIS_DEVICE_ONLY`: never in a backup,
-  never on a new phone, never in a log. A new refresh credential is kept before the access that
+- **Credentials** live only in SecureStore: on iOS `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, and on Android
+  under a Keystore key with its backup rules leaving them out. Never in a backup, never on a new
+  phone, never in a log. A new refresh credential is kept before the access that
   came with it is used.
 - **A profile is a server's address and the id it gave.** Before every refresh credential goes to
   an address, on opening or in a session already open, the app asks the address who it is. If it
@@ -54,7 +55,8 @@ Things it holds to:
   phone says so. A refused access credential is refreshed and tried once more first, since the
   server says the same for access that has lapsed. **A server out of reach** deletes nothing.
 - **A pairing link's secret** stays out of the router and off the disk, and a link is never used
-  on its own say: one from outside the app, or naming another server, is asked about first.
+  on its own say: one from outside the app, or naming another server, is asked about first. **A
+  sign-in's code** stays out of the router too, though Android hands it to the app as a link.
 - **Online is what the socket says.** Channels are held only while the computers are on screen and
   the app is in the foreground. Offline never means a computer's agents stopped.
 - **A computer refusing this phone** does not say why, so the server is asked before anything goes.
@@ -136,10 +138,26 @@ can use `just server-up` and `http://127.0.0.1:8787`.
 
 ### On Android
 
-`bun run android` builds with the Android SDK, on Linux, macOS or Windows, without EAS, onto an
-emulator or a phone over USB. A phone or emulator reaches a local server through
-`adb reverse tcp:8787 tcp:8787` and `adb reverse tcp:8080 tcp:8080` (31 §7). Not tried yet: the
-machine slice 2 was built on had no Android SDK.
+`just mobile-android` (here: `bun run android`) builds with the Android SDK, without EAS, onto an
+emulator or a phone over USB. So far it has run on Linux, onto an emulator: **no physical Android phone
+has run this app** (31 §16). It needs:
+
+- **JDK 17**, which is what it has been built with. `JAVA_HOME` says which one to use. A Java with no
+  compiler stops the build with `does not provide the required capabilities: [JAVA_COMPILER]`.
+- **The Android SDK**, with `ANDROID_HOME` pointing at it, `sdkmanager` from Google's command-line
+  tools, and these packages: `platform-tools`, `platforms/android-37.0`, `build-tools/37.0.0`,
+  `ndk/27.1.12297006` and `cmake/3.22.1`. An emulator also takes `emulator` and
+  `system-images/android-36/google_apis/x86_64`, which has Chrome for signing in.
+
+```sh
+export JAVA_HOME=~/Android/jdk17 ANDROID_HOME=~/Android/Sdk
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+just mobile-android
+```
+
+Afterwards, `adb reverse tcp:8081 tcp:8081` and `just mobile-start` serve the code to the app already
+installed. A phone or emulator reaches a local server through `adb reverse tcp:8787 tcp:8787` and
+`adb reverse tcp:8080 tcp:8080` (31 §7), or uses staging, which an emulator reaches directly.
 
 ## Checks
 

@@ -1031,6 +1031,12 @@ describe("A computer", () => {
       return app;
     }
 
+    test("what the WebView is told not to detect is a list, which Android's native side needs", async () => {
+      // A single word goes through to Android's native side as it is, and aborts the whole app.
+      await watching();
+      expect(page().props.dataDetectorTypes).toEqual(["none"]);
+    });
+
     test("a conversation opens its terminal, cleared to the computer's size, then what it prints", async () => {
       const { server } = await watching();
       expect(JSON.parse(told()[0] as string)).toEqual({ t: "reset", cols: 120, rows: 40 });

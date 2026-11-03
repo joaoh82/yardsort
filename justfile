@@ -127,6 +127,10 @@ client-pair *args:
 mobile-ios:
     cd apps/mobile && bun install --frozen-lockfile && bun run ios
 
+# Build the development app onto an Android emulator or a phone over USB. Needs the Android SDK and JDK 17.
+mobile-android:
+    cd apps/mobile && bun install --frozen-lockfile && bun run android
+
 # Serve the app's code to a development build already installed on the phone
 mobile-start:
     cd apps/mobile && bun install --frozen-lockfile && bun run start
