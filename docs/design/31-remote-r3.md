@@ -8,9 +8,9 @@ workspaces, sessions and activity, was built the same day (§12), and its smoke 
 same iPhone on 2026-11-02. The fifth, watching a terminal, was built that day too (§13), and its smoke
 test passed on the same iPhone that day. The sixth, taking control, was built the same day (§14), and
 its smoke test passed on the same iPhone that day, after it found a tab at the computer taking control.
-The seventh, signed out, revoked and switching, was built on 2026-11-03 (§15), and has not been run on a
-phone yet. That is the last slice, and R3 is not done: the device run below is its gate, and needs an
-Android phone.
+The seventh, signed out, revoked and switching, was built on 2026-11-03 (§15), and its smoke test passed on
+the same iPhone that day. That is the last slice, and R3 is not done: the device run below is its gate, and
+needs an Android phone.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -1047,8 +1047,8 @@ and macOS failed. Its test now passes here with wider fonts substituted through 
 
 ## 15 · What the seventh slice adds
 
-Built on 2026-11-03, on Linux. Not yet run on a phone: its smoke test is below. Android stays unbuilt. It
-adds no native module, so `just mobile-start` serves it to the app already installed. The server and
+Built on 2026-11-03, on Linux. Its smoke test, below, passed on the owner's iPhone against staging that day.
+Android stays unbuilt. It adds no native module, so `just mobile-start` serves it to the app already installed. The server and
 the host did not change, so staging needs no deploy.
 
 - **Telling apart what a refusal meant** (`Accounts.explain`, §5). A channel closed with 4003 or 4010, or a
@@ -1086,17 +1086,18 @@ the host did not change, so staging needs no deploy.
   a grant taken back with someone looking and with nobody looking, unpairing here, the phone revoked, the server
   out of reach, lapsed access, a computer taken off the account, and removing a server in each state it can be in.
   The screens, 107 under Jest, 17 of them new. Breaking any of 29 lines on purpose failed a test.
-- **What has not been tried:** any of it on a phone. The **Cannot be reached** state needs the relay's close to arrive
-  while the server does not answer, which a phone cannot be made to do on purpose: tests against the real
-  server cover it, and step 7 covers the part a phone can show. Two computers are tried on the screens against
-  a fake and in the smoke test: the stand-in has one host.
+- **What has not been tried on a phone:** Android at all. The **Cannot be reached** state: it needs the relay's
+  close to arrive while the server does not answer, which a phone cannot be made to do on purpose, so tests against
+  the real server cover it, and step 7 covers the part a phone can show. Two different servers: the smoke test's
+  second profile is the same server at another address, and tests cover two real ones. Two computers are tried on
+  the screens against a fake and in the smoke test: the stand-in has one host.
 
 **Its smoke test, on the iPhone against staging.** The plan's second computer was the Mac, and its second server
 a local one. Neither is needed to show this. The pairing tool is a real second computer through the relay, with
 no Rust on the Mac. A phone cannot reach a local server (§7), but staging also answers at its Fly address, under
 the same id, so a second profile needs no setup. It is the same account, so the devices list is the same on both.
 What it shows is that computers and what was kept are per profile; tests against two real servers cover
-the rest. Whether a sign-in comes back at that address has not been tried: if it does not, step 9 needs the Simulator.
+the rest. A sign-in does come back at that address, so step 9 needs no Simulator.
 
 1. On this computer, from the worktree, with a throwaway profile:
    `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
