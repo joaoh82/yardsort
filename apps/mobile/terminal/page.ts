@@ -15,7 +15,14 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 
-import { fromBase64, linkable, readToPage, type ToApp } from "../src/lib/bridge";
+import {
+  type Drawn,
+  fromBase64,
+  linkable,
+  readToPage,
+  sameCell,
+  type ToApp,
+} from "../src/lib/bridge";
 
 declare global {
   interface Window {
@@ -56,18 +63,17 @@ if (field) {
   field.tabIndex = -1;
 }
 
-let cellSaid = { width: 0, height: 0 };
+let cellSaid: Drawn | null = null;
 
 /** How large a character is, for the app to work out what fits. Read from what is drawn. */
 function sayCell(): void {
   const screen = terminal.element?.querySelector(".xterm-screen")?.getBoundingClientRect();
-  if (!screen || terminal.cols === 0 || terminal.rows === 0) return;
-  const width = screen.width / terminal.cols;
-  const height = screen.height / terminal.rows;
-  if (width <= 0 || height <= 0) return;
-  if (width === cellSaid.width && height === cellSaid.height) return;
-  cellSaid = { width, height };
-  say({ t: "cell", width, height });
+  const { cols, rows } = terminal;
+  if (!screen || cols === 0 || rows === 0 || screen.width <= 0 || screen.height <= 0) return;
+  const drawn = { width: screen.width, height: screen.height, cols, rows };
+  if (cellSaid && sameCell(cellSaid, drawn)) return;
+  cellSaid = drawn;
+  say({ t: "cell", width: drawn.width / cols, height: drawn.height / rows });
 }
 
 let applicationCursor = false;

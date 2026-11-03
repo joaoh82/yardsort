@@ -917,6 +917,18 @@ describe("A computer", () => {
         await fireEvent.changeText(screen.getByTestId("composer"), text);
       };
       const sent = () => act(async () => jest.advanceTimersByTimeAsync(500));
+      /** What a view has been asked about where it is, for a test to answer as the system would. */
+      const measured = (view: ReturnType<typeof screen.getByTestId>) => {
+        type Answer = (x: number, y: number, width: number, height: number) => void;
+        type Fiber = {
+          return: Fiber;
+          stateNode?: { measureInWindow?: jest.Mock<(answer: Answer) => void> };
+        };
+        let fiber = (view as unknown as { unstable_fiber: Fiber }).unstable_fiber;
+        while (!fiber.stateNode?.measureInWindow) fiber = fiber.return;
+        const measure = fiber.stateNode.measureInWindow;
+        return () => measure.mock.calls.map(([answer]) => answer);
+      };
 
       test("is only ever asked for, and nothing can be typed until then", async () => {
         const { server } = await watching();
@@ -1055,6 +1067,35 @@ describe("A computer", () => {
         );
         await sent();
         expect(server.resizes.at(-1)).toEqual({ cols: 50, rows: 16 });
+      });
+
+      test("where the room starts, answered late, does not bring back its old size", async () => {
+        const { server } = await watching();
+        const room = screen.getByTestId("terminal-room");
+        const layout = (height: number) =>
+          act(async () =>
+            fireEvent(room, "layout", {
+              nativeEvent: { layout: { x: 0, y: 0, width: 400, height } },
+            }),
+          );
+        const answers = measured(room);
+        await layout(600);
+        await pageSays({ t: "cell", width: 8, height: 16 });
+        await fireEvent.press(await button("Take control"));
+        await screen.findByTestId("composer");
+        await sent();
+        expect(server.resizes.at(-1)).toEqual({ cols: 50, rows: 34 });
+
+        // A keyboard coming up: two layouts, and the first's answer comes after the second's.
+        await layout(450);
+        await layout(300);
+        const [first, second] = answers().slice(-2);
+        await act(async () => {
+          second?.(0, 44, 400, 300);
+          first?.(0, 44, 400, 450);
+        });
+        await sent();
+        expect(server.resizes.at(-1)).toEqual({ cols: 50, rows: 18 });
       });
 
       test("handing back says so to the computer, and offers it again", async () => {

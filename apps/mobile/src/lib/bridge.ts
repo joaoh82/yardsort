@@ -21,6 +21,22 @@ export interface PageSize {
   rows: number;
 }
 
+/** A terminal as drawn: how many characters, and how many pixels they took. */
+export interface Drawn extends PageSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Whether two drawings can be the same size of character. Only the whole is on the screen, rounded
+ * to a pixel, so the same character works out differently at different sizes.
+ */
+export function sameCell(a: Drawn, b: Drawn): boolean {
+  const near = (x: number, n: number, y: number, m: number) =>
+    Math.abs(x / n - y / m) <= 0.5 / n + 0.5 / m;
+  return near(a.width, a.cols, b.width, b.cols) && near(a.height, a.rows, b.height, b.rows);
+}
+
 export type ToPage =
   /** Forget everything, and draw at this size: a snapshot follows. */
   | ({ t: "reset" } & PageSize)

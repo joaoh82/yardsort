@@ -316,9 +316,10 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     expect(page.tall).toBeLessThanOrEqual(800);
     expect(page.right).toBeLessThanOrEqual(390);
     expect(page.bottom).toBeLessThanOrEqual(800);
-    // There was room for no more: one more column or row would not have fitted.
-    expect(page.right + cell.width).toBeGreaterThan(390);
-    expect(page.bottom + cell.height).toBeGreaterThan(800);
+    // There was room for no more: one more column or row would not have fitted, give or take the
+    // half a pixel the screen is rounded by.
+    expect(page.right + cell.width + 0.5).toBeGreaterThan(390);
+    expect(page.bottom + cell.height + 0.5).toBeGreaterThan(800);
   });
 
   test("says a character's size again only if it changed", async () => {

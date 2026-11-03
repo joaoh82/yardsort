@@ -975,6 +975,14 @@ drag or the wheel goes to the program as something the person did, and takes con
 The fix runs in the terminal daemon, and a build of the same protocol keeps the daemon already running,
 so trying it means stopping that daemon first (step 1).
 
+**Found after it, in review and CI, and fixed without running on a phone again.** Two sizes went wrong
+under particular timing and fonts. An answer to where the room starts could come after a newer layout
+and bring back the size from before a keyboard settled, so it now says only where. And xterm.js rounds
+the drawn screen to a whole pixel, so a character read from it came out differently at another column
+count. The page now says it again only if rounding cannot explain the difference (`sameCell`). This
+machine's fonts are all exactly 7.2 pixels wide, which hid that; CI's are not. Its test now passes here
+with other fonts substituted through fontconfig too.
+
 **Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
 
 1. On the computer, from this branch, with a throwaway profile:

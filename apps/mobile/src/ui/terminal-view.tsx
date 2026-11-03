@@ -44,6 +44,7 @@ export function TerminalView({
   const web = useRef<WebView<object>>(null);
   const holder = useRef<HostInstance>(null);
   const top = useRef(0);
+  const laidOut = useRef({ width: 0, height: 0 });
   // The system may end a WebView's process to free memory. A new view starts it again.
   const [life, setLife] = useState(0);
   useEffect(() => () => feed.connect(null), [feed]);
@@ -60,11 +61,13 @@ export function TerminalView({
       style={styles.fill}
       onLayout={(event) => {
         const { width, height } = event.nativeEvent.layout;
+        laidOut.current = { width, height };
         room({ width, height, top: top.current });
-        // Where it starts on the screen is not in the event, and takes the header into account.
+        // Where it starts on the screen is not in the event, and takes the header into account. The
+        // answer can come after a newer layout, as a keyboard moves, so it says only where.
         holder.current?.measureInWindow((_x, y) => {
           top.current = y;
-          room({ width, height, top: y });
+          room({ ...laidOut.current, top: y });
         });
       }}
     >
