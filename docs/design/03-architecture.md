@@ -662,6 +662,9 @@ remote ever talks to it directly. Instead:
   drawn, and never sends anything to the program. Typing goes through a native field and a row of
   keys, only under a lease a person asked for (`src/lib/control.ts`). It is sent once, in order,
   and what may not have arrived is shown, never sent again. Leaving the screen or the app lets go.
+  A computer refusing the phone says nothing about why, so the app asks the server, and deletes
+  only what the answer settles: that computer's kept entries, or the whole profile if the phone's
+  own credential is refused. A screen shows a profile's things only while that profile is in use.
   Its native projects are generated, never committed.
 - `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
   Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of

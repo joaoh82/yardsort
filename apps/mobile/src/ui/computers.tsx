@@ -7,15 +7,15 @@
  * app is in the foreground.
  */
 
-import type { GrantId } from "@yardsort/remote-client";
+import type { GrantId, HostId } from "@yardsort/remote-client";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { type Computer, type ComputerList, messageOf } from "../lib/accounts";
-import { useApp } from "../lib/context";
+import { useApp, useSnapshot } from "../lib/context";
 import { Presence, type Reach } from "../lib/presence";
-import { describeReach, SeenComputers, useLive } from "./live";
+import { describeReach, PARTED, SeenComputers, UNREACHABLE, useLive } from "./live";
 import { Body, Button, Card, Problem, Title, useColors, Waiting } from "./parts";
 
 /** How often the list is asked again while a request waits at a computer (31 §5). */
@@ -23,9 +23,14 @@ const WAITING_POLL_MS = 2_000;
 
 export function Computers({ asked }: { asked: number }) {
   const { accounts } = useApp();
+  const { lost } = useSnapshot();
   const router = useRouter();
   const presence = useMemo(
-    () => new Presence({ open: (host) => accounts.openChannel(host) }),
+    () =>
+      new Presence({
+        open: (host) => accounts.openChannel(host),
+        explain: (host) => accounts.explain(host),
+      }),
     [accounts],
   );
   const reach = useSyncExternalStore(presence.subscribe, presence.getSnapshot);
@@ -71,20 +76,29 @@ export function Computers({ asked }: { asked: number }) {
     return () => clearInterval(timer);
   }, [live, waiting, load]);
 
-  const takeBack = async (grant: GrantId) => {
+  const takeBack = async (grant: GrantId, host?: HostId) => {
     try {
-      await accounts.unpair(grant);
+      await accounts.unpair(grant, host);
     } catch (error) {
       setProblem(messageOf(error));
     }
     await load();
   };
 
-  const anyOffline = list?.computers.some((c) => reach.get(c.host)?.kind === "offline") ?? false;
+  const anyIs = (kind: Reach["kind"]) =>
+    list?.computers.some((c) => reach.get(c.host)?.kind === kind) ?? false;
 
   return (
     <>
       <Title>Computers</Title>
+      {lost.map(({ host, name, why }) => (
+        <Card key={host} label={`${name} ${PARTED[why].what}`}>
+          <Body>
+            {name} {PARTED[why].what} {PARTED[why].next}
+          </Body>
+          <Button title="OK" onPress={() => accounts.dismissLost(host)} />
+        </Card>
+      ))}
       {problem && <Problem>{problem}</Problem>}
       {!list && !problem && <Waiting label="Asking the server" />}
       {!list && <SeenComputers />}
@@ -100,10 +114,13 @@ export function Computers({ asked }: { asked: number }) {
           computer={computer}
           reach={reach.get(computer.host)}
           onOpen={() => router.push({ pathname: "/computer", params: { host: computer.host } })}
-          onUnpair={() => confirmUnpair(computer.name, () => void takeBack(computer.grant))}
+          onUnpair={() =>
+            confirmUnpair(computer.name, () => void takeBack(computer.grant, computer.host))
+          }
         />
       ))}
-      {anyOffline && <Body muted>Offline does not mean its agents stopped.</Body>}
+      {anyIs("offline") && <Body muted>Offline does not mean its agents stopped.</Body>}
+      {anyIs("unreachable") && <Body muted>{UNREACHABLE}</Body>}
       {list?.waiting.map((grant) => (
         <Card key={grant.id} label={`Waiting for ${grant.hostName}`}>
           <Body>Waiting for an answer at {grant.hostName}.</Body>

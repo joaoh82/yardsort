@@ -43,6 +43,16 @@ describe("profiles", () => {
     expect((await profiles.refresh(profile(1).id))?.expose()).toBe("second");
   });
 
+  test("a credential that comes back after the profile was deleted is not kept", async () => {
+    const vault = new MemoryVault();
+    const profiles = await Profiles.load(vault);
+    await profiles.add(profile(1), new Secret("first"));
+    const keep = profiles.keeper(profile(1).id);
+    await profiles.forget(profile(1).id);
+    await keep(new Secret("second"));
+    expect(vault.credentials()).toEqual([]);
+  });
+
   test("a profile is listed only once its credential is kept", async () => {
     const vault = new MemoryVault();
     const profiles = await Profiles.load(vault);

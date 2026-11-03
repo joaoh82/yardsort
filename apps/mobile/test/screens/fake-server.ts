@@ -60,6 +60,8 @@ export class FakeServer {
   asked: string[] = [];
   /** When set, the server cannot be reached. */
   down = false;
+  /** When set, access is refused, as the server does for access that has lapsed. */
+  refuseAccess = false;
   /** When set, the device list is answered only after this. */
   devicesAfter: Promise<void> | null = null;
   /** The computers on the account. */
@@ -147,6 +149,8 @@ export class FakeServer {
   operations: { op: string; params: Record<string, unknown> | undefined }[] = [];
   /** The sockets open. */
   relaySockets = new Set<Socket>();
+  /** Which computer each open relay socket reaches. */
+  #hostOf = new Map<Socket, string>();
   /** Where each attachment asked to resume from, in order. */
   attaches: ({ epoch: number; seq: number } | null)[] = [];
   /** Each request for control: whether it was a take-over. */
@@ -207,6 +211,7 @@ export class FakeServer {
       return this.#issue(device);
     }
     if (!signedIn) return refused("Sign in first.");
+    if (this.refuseAccess) return refused("It has lapsed.");
     if (method === "GET" && url.pathname === "/v1/devices") {
       await this.devicesAfter;
       return Response.json({
@@ -303,6 +308,7 @@ export class FakeServer {
           const say = (value: unknown) => socket.onmessage?.({ data: JSON.stringify(value) });
           if (stage === "greeting") {
             host = String(JSON.parse(data).ticket).replace("ticket-", "");
+            this.#hostOf.set(socket, host);
             if (this.offline.has(host)) {
               say({
                 refused: { code: "host_offline", message: "It is offline.", retryable: true },
@@ -350,6 +356,7 @@ export class FakeServer {
       },
       close: (code = 1000) => {
         this.relaySockets.delete(socket);
+        this.#hostOf.delete(socket);
         this.#following.delete(socket);
         this.#watching.delete(socket);
         this.sockets.open -= 1;
@@ -362,6 +369,11 @@ export class FakeServer {
     setTimeout(() => socket.onopen?.({}), 0);
     return socket;
   };
+
+  /** The relay closing every channel to `host`, as it does with 4003 for anything revoked. */
+  closeChannelsTo(host: string, code: number): void {
+    for (const [socket, to] of [...this.#hostOf]) if (to === host) socket.close(code);
+  }
 
   /** A computer's answer to one operation. */
   #answer(op: string, params: Record<string, never>, socket: Socket): unknown {

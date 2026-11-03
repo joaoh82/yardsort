@@ -93,9 +93,16 @@ export class Profiles {
     });
   }
 
-  /** Keeps a profile's new refresh credential, in place of the one just spent. */
+  /**
+   * Keeps a profile's new refresh credential, in place of the one just spent. An answer that comes
+   * after the profile was deleted is not kept: nothing would ever delete it.
+   */
   keeper(id: string): (refresh: Secret) => Promise<void> {
-    return (refresh) => this.#write(() => this.vault.set(refreshKey(id), refresh.expose()));
+    return (refresh) =>
+      this.#write(async () => {
+        if (!this.#index.profiles.some((p) => p.id === id)) return;
+        await this.vault.set(refreshKey(id), refresh.expose());
+      });
   }
 
   /** A profile's refresh credential, or `null` when none is kept. */

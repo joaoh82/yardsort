@@ -18,16 +18,22 @@ import {
   type HostId,
 } from "@yardsort/remote-client";
 
+import type { Parted, Refusal } from "./accounts";
+
 export type Reach =
   | { kind: "connecting" }
   | { kind: "online" }
   | { kind: "reconnecting" }
   | { kind: "offline" }
-  /** The server or the computer no longer lets this phone in. The list should be asked again. */
-  | { kind: "gone" };
+  /** It refused this phone, and the server cannot say why. It is asked again, as after a drop. */
+  | { kind: "unreachable" }
+  /** The server says this computer no longer lets this phone in. */
+  | { kind: "gone"; why: Parted };
 
 export interface PresenceOptions {
   open(host: HostId): Promise<Channel>;
+  /** What a computer refusing this phone came to: the refusal itself does not say (31 §5). */
+  explain(host: HostId): Promise<Refusal>;
   /** How often to ask again after the relay said a computer is offline. */
   offlineRetryMs?: number;
   /** The first wait after losing a channel; it doubles up to {@link maxRetryMs}. */
@@ -41,7 +47,7 @@ interface Watch {
   wake: (() => void) | null;
 }
 
-type Outcome = "offline" | "dropped" | "gone" | "signedOut";
+type Outcome = "offline" | "dropped" | "refused" | "signedOut";
 
 export class Presence {
   #reach: ReadonlyMap<HostId, Reach> = new Map();
@@ -127,13 +133,20 @@ export class Presence {
         // The profile is deleted by now, and the screen holding this goes with it.
         return;
       }
-      if (outcome === "gone") {
-        this.#gone.add(host);
-        this.#watches.delete(host);
-        this.#set(host, { kind: "gone" });
-        return;
-      }
-      if (outcome === "offline") {
+      if (outcome === "refused") {
+        this.#set(host, { kind: "reconnecting" });
+        const refusal = await this.options.explain(host);
+        if (!watch.live || refusal === "signedOut") return;
+        if (refusal !== "undetermined") {
+          this.#gone.add(host);
+          this.#watches.delete(host);
+          this.#set(host, { kind: "gone", why: refusal });
+          return;
+        }
+        this.#set(host, { kind: "unreachable" });
+        await this.#sleep(watch, waitMs);
+        waitMs = Math.min(waitMs * 2, most);
+      } else if (outcome === "offline") {
         this.#set(host, { kind: "offline" });
         await this.#sleep(watch, this.options.offlineRetryMs ?? 15_000);
       } else {
@@ -165,7 +178,7 @@ export class Presence {
 }
 
 function fromEnd(end: ChannelEnd): Outcome {
-  if (end.reason === "revoked" || end.reason === "refused") return "gone";
+  if (end.reason === "revoked" || end.reason === "refused") return "refused";
   return end.reason === "hostOffline" ? "offline" : "dropped";
 }
 
@@ -177,7 +190,7 @@ function fromError(error: unknown): Outcome {
       return "offline";
     case "forbidden":
     case "not_found":
-      return "gone";
+      return "refused";
     case "unauthenticated":
       return "signedOut";
     default:

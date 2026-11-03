@@ -934,7 +934,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       with nothing sent twice ([31 §14](31-remote-r3.md#14--what-the-sixth-slice-adds)). Neither Claude
       nor Codex waited on a question on the way to its first screen under a lease. Its smoke test passed
       on the owner's iPhone against staging that day, after it found that the pointer over an agent's
-      tab at the computer took control, now fixed in the host; Android is untried.
+      tab at the computer took control, now fixed in the host; Android is untried. Slice 7 was built on
+      2026-11-03: a computer refusing the phone is told apart by asking the server (taken back, off the
+      account, the phone signed out, or not known, which deletes nothing), nothing of a profile stays on
+      screen once it is gone or not in use, and a server can be removed
+      ([31 §15](31-remote-r3.md#15--what-the-seventh-slice-adds)). Its smoke test passed on the owner's
+      iPhone against staging that day; Android is untried.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

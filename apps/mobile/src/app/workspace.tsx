@@ -24,13 +24,17 @@ import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
 import { moment } from "../lib/format";
 import type { ObservedWorkspace } from "../lib/observed";
-import { NoLongerPaired, ReachLine, useChannelTo, useRead } from "../ui/live";
+import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { Body, Button, Card, Label, Problem, Screen, Title, useColors, Waiting } from "../ui/parts";
 
 export default function WorkspaceScreen() {
   const params = useLocalSearchParams<{ host?: string; workspace?: string }>();
   if (!params.host || !params.workspace) return <Redirect href="/account" />;
-  return <Workspace host={params.host as HostId} workspace={params.workspace as WorkspaceId} />;
+  return (
+    <OfProfile>
+      <Workspace host={params.host as HostId} workspace={params.workspace as WorkspaceId} />
+    </OfProfile>
+  );
 }
 
 function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }) {
@@ -105,7 +109,7 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
     return (
       <Screen>
         {title}
-        <NoLongerPaired />
+        <NoLongerPaired why={reach.why} />
       </Screen>
     );
   }

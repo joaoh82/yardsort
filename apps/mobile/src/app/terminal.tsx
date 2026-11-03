@@ -22,7 +22,7 @@ import { useApp } from "../lib/context";
 import { deviceName, fitted, TerminalControl } from "../lib/control";
 import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
 import { Composer } from "../ui/composer";
-import { describeReach, NoLongerPaired, useChannelTo, useLive } from "../ui/live";
+import { describeReach, NoLongerPaired, OfProfile, useChannelTo, useLive } from "../ui/live";
 import { Body, Button, Problem, Screen, useColors } from "../ui/parts";
 import { type Room, TerminalView } from "../ui/terminal-view";
 
@@ -30,11 +30,13 @@ export default function TerminalScreen() {
   const params = useLocalSearchParams<{ host?: string; terminal?: string; label?: string }>();
   if (!params.host || !params.terminal) return <Redirect href="/account" />;
   return (
-    <Watching
-      host={params.host as HostId}
-      terminal={params.terminal as TerminalId}
-      label={params.label || "Terminal"}
-    />
+    <OfProfile>
+      <Watching
+        host={params.host as HostId}
+        terminal={params.terminal as TerminalId}
+        label={params.label || "Terminal"}
+      />
+    </OfProfile>
   );
 }
 
@@ -101,7 +103,7 @@ function Watching({
     return (
       <Screen>
         {title}
-        <NoLongerPaired />
+        <NoLongerPaired why={reach.why} />
       </Screen>
     );
   }

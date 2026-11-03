@@ -8,6 +8,9 @@ workspaces, sessions and activity, was built the same day (§12), and its smoke 
 same iPhone on 2026-11-02. The fifth, watching a terminal, was built that day too (§13), and its smoke
 test passed on the same iPhone that day. The sixth, taking control, was built the same day (§14), and
 its smoke test passed on the same iPhone that day, after it found a tab at the computer taking control.
+The seventh, signed out, revoked and switching, was built on 2026-11-03 (§15), and its smoke test passed on
+the same iPhone that day. That is the last slice, and R3 is not done: the device run below is its gate, and
+needs an Android phone.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -631,7 +634,7 @@ the same day. The server needed no change, so staging needs no deploy; the stand
   `forbidden`, `not_found`) is not asked again until the next start, and the list is read again.
   Channels are held only while the list is on screen and the app is in the foreground.
 - **Left for later:** the small cache of computers (§5) comes with slice 4's workspaces, and telling
-  apart everything 4003 can mean comes with slice 7. For now a 4003 reads the list again, which
+  apart everything 4003 can mean comes with slice 7 (§15). For now a 4003 reads the list again, which
   drops a computer that took back its grant and signs out a phone that was revoked.
 - **Tests: 84.** The logic, 54 under `bun test`, 24 of them new, against the real server, relay and
   host: pairing by code and by link, a no, a wrong code, an offer going once, a request taken back,
@@ -723,7 +726,7 @@ through a channel, and a phone changes nothing on the computer.
 - **What was last seen goes** with a computer that took this phone back, which the next list from
   the server settles, and with the profile. A server out of reach deletes nothing. A computer that
   refuses a channel takes its screen with it at once; telling apart everything a 4003 can mean stays
-  with slice 7.
+  with slice 7 (§15).
 - **One channel at a time:** each screen holds its own while it is the one shown (`src/ui/live.tsx`),
   with the same reach, retries and foreground rule as the account's list. Coming back to a screen, or
   pulling it, reads again.
@@ -1042,7 +1045,101 @@ and macOS failed. Its test now passes here with wider fonts substituted through 
 16. **A program's end.** With control of the shell, run `exit`. The phone says **The program ended**, and
     the field goes.
 
-## 15 · Open after this plan
+## 15 · What the seventh slice adds
+
+Built on 2026-11-03, on Linux. Its smoke test, below, passed on the owner's iPhone against staging that day.
+Android stays unbuilt. It adds no native module, so `just mobile-start` serves it to the app already installed. The server and
+the host did not change, so staging needs no deploy.
+
+- **Telling apart what a refusal meant** (`Accounts.explain`, §5). A channel closed with 4003 or 4010, or a
+  ticket refused with `forbidden` or `not_found`, used to read as the computer no longer letting the
+  phone in. Now the server is asked first, by reading the list of computers:
+  - A computer the list no longer has, but the account does, **took the phone back**. One the account no
+    longer has **is no longer on this account**. Each says so in those words, on the screen that was
+    looking and on the account, and what was kept of it goes. The phone stays signed in, and every other
+    computer's channel stays as it was.
+  - **The phone refused** means signed out, as anywhere else: its credential, its profile and what was kept
+    go, and Connect says so.
+  - **Anything else**, a server out of reach or one that still lists the computer, deletes nothing. The
+    computer reads **Cannot be reached**, the terminal or what was last seen stays, and the channel is tried
+    again, waiting 2 seconds and doubling up to 30.
+- **Why not `explainRevoked`:** the client's function answers the same three questions, and the pairing tool
+  still uses it. But it takes refused access for being signed out, and the app refreshes first, since a
+  phone that slept can hand out access that has lapsed. And it does not tell the two kinds of parting apart.
+- **Told once, and only when it is news** (`Snapshot.lost`). The list says which computers it dropped from what
+  was kept, so a computer that left while the app was closed is told on opening too. It is in memory, per
+  profile, until **OK**. A computer unpaired here tells nobody anything: the relay's close can come before
+  the request's answer, so unpairing marks it before asking.
+- **Nothing is left on screen** (`OfProfile`, `src/ui/live.tsx`). A computer, workspace, memory or terminal screen
+  belongs to the profile that opened it. Once that profile is gone or not the one in use, or its address
+  answers as another server, the screen shows nothing and goes to the account, which says what happened. It
+  is per screen, not a guard in the layout, because a pairing link can switch servers from the top of a stack
+  with another server's terminal under it: going back to that terminal shows nothing of it.
+- **Removing a server** (`src/app/servers.tsx`): **Remove** on any profile, in use or not, asks first, then
+  signs out at that server and deletes the credential and what was kept. One not opened since the app started
+  is opened for this and no more, with its address asked who it is first. With the server out of reach, or
+  another server at its address, nothing is sent and nothing goes unless the person chooses **Remove from this
+  phone**, as with signing out. Removing the one in use leaves no profile in use until one is picked.
+- **A credential that comes back too late** is no longer kept: a refresh answered after its profile was deleted
+  would have left a credential in the store that nothing could ever delete.
+- **Tests: 287 in the app.** The logic, 180 under `bun test`, 19 of them new, against the real server, relay and host:
+  a grant taken back with someone looking and with nobody looking, unpairing here, the phone revoked, the server
+  out of reach, lapsed access, a computer taken off the account, and removing a server in each state it can be in.
+  The screens, 107 under Jest, 17 of them new. Breaking any of 29 lines on purpose failed a test.
+- **What has not been tried on a phone:** Android at all. The **Cannot be reached** state: it needs the relay's
+  close to arrive while the server does not answer, which a phone cannot be made to do on purpose, so tests against
+  the real server cover it, and step 7 covers the part a phone can show. Two different servers: the smoke test's
+  second profile is the same server at another address, and tests cover two real ones. Two computers are tried on
+  the screens against a fake and in the smoke test: the stand-in has one host.
+
+**Its smoke test, on the iPhone against staging.** The plan's second computer was the Mac, and its second server
+a local one. Neither is needed to show this. The pairing tool is a real second computer through the relay, with
+no Rust on the Mac. A phone cannot reach a local server (§7), but staging also answers at its Fly address, under
+the same id, so a second profile needs no setup. It is the same account, so the devices list is the same on both.
+What it shows is that computers and what was kept are per profile; tests against two real servers cover
+the rest. A sign-in does come back at that address, so step 9 needs no Simulator.
+
+1. On this computer, from the worktree, with a throwaway profile:
+   `YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev`.
+   Settings → Remote on against `https://remote-staging.yardsort.sh`, with a shell open in a workspace.
+2. On the Mac, from your clone, on this branch: `just mobile-start`, and open Yardsort Dev on the phone. If it is
+   not paired with this computer, pair it.
+3. **A second computer.** On this computer, in another terminal, from the worktree:
+   `just server-pair host https://remote-staging.yardsort.sh --control --serve --revoke-after 1800`. Open the address
+   it prints and sign in. It prints a code. On the phone, **Pair a computer**, type the code. **Pairing tool host**
+   joins the list, and both computers read **Online**. It stays for 30 minutes, then takes the phone back and
+   removes itself.
+4. **One computer takes the phone back.** On the phone, open this computer's shell, so it is watching. At the
+   computer, Settings → Remote → **Revoke** beside the phone. Within a second or so the phone says **This computer no
+   longer lets this phone in.**, and the terminal is gone. **Back to the account**: a card says the same by name, the
+   computer is off the list, and **Pairing tool host** still reads **Online**. Open its terminal, take control and
+   send `hi`: `got: hi` comes back. **OK** clears the card. Pair with this computer again.
+5. **While the app was closed.** Force-quit the app. Revoke the phone at the computer again. Open the app: the same
+   card is on the account. **OK**, and pair again.
+6. **Unpairing here.** On the phone, **Unpair** this computer and confirm. It leaves the list, and no card says anything.
+   Pair again.
+7. **Out of reach deletes nothing.** Open this computer on the phone, so its workspaces show. Turn on airplane mode: within
+   about 30 seconds it reads **Reconnecting**, and the workspaces stay, marked **As of**. Revoke the phone at the computer. Nothing changes
+   on the phone. Turn airplane mode off: within about 30 seconds it says **This computer no longer lets this phone
+   in.**, and the workspaces are gone. Pair again.
+8. **A computer gone.** Open this computer's shell on the phone. At the computer, Settings → Remote → **Turn off**. Within
+   about 15 seconds the phone says **This computer is no longer on this account.**, not that it took the phone back.
+   **Back to the account**: a card says the same. Turn Remote on again at the computer, and pair again.
+9. **A second server.** Account → **Servers on this phone** → **Add a server**: `https://yardsort-remote-staging.fly.dev`.
+   Look it up and sign in. Its account screen says no computer lets this phone in yet, with none of the computers from
+   before. **Servers on this phone** lists both, with their addresses. Press the first: its computers are back, with no
+   sign-in. Press the second again: none.
+10. **Removing a server.** With the second in use, **Remove** the first and press **Cancel**: nothing changes. Then
+    **Remove** the second and confirm. It leaves the list, and none is in use: **Choose one to use.** Press the first:
+    its computers are there. Its devices list shows the second's device as signed out.
+11. **The phone revoked while watching.** Open this computer's shell on the phone. On this computer, from the worktree:
+    `just client-pair devices https://remote-staging.yardsort.sh`, sign in, and note the id beside the phone. Then
+    `just client-pair devices https://remote-staging.yardsort.sh --revoke ID`, and sign in again. The phone leaves the
+    terminal for Connect, saying **This phone was signed out of Yardsort staging. Nothing from it is kept here.**, not
+    that a computer took it back. **Servers on this phone** is gone if it was the last. Force-quit and open: Connect, with
+    nothing shown.
+
+## 16 · Open after this plan
 
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.

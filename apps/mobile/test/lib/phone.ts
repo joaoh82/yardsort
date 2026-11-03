@@ -24,15 +24,22 @@ export const browser: Browser = async (url, redirect) => {
 };
 
 /** A phone the computer has said yes to, with what it was allowed. */
-export async function paired(standIn: StandIn, name: string, scopes?: Scope[]) {
+export async function paired(
+  standIn: StandIn,
+  name: string,
+  scopes?: Scope[],
+  fetch?: typeof globalThis.fetch,
+) {
   const shelf = new MemoryVault();
+  const vault = new MemoryVault();
   const env: Env = {
     crypto: webCrypto() as NonNullable<ReturnType<typeof webCrypto>>,
     platform: "ios",
     userAgent: "yardsort-mobile/test (ios)",
     shelf,
+    ...(fetch ? { fetch } : {}),
   };
-  const accounts = new Accounts(env, new MemoryVault());
+  const accounts = new Accounts(env, vault);
   await accounts.load();
   expect(await accounts.signIn(await accounts.lookUp(standIn.server), name, browser)).toBe(true);
   const { code } = await standIn.offer();
@@ -41,5 +48,5 @@ export async function paired(standIn: StandIn, name: string, scopes?: Scope[]) {
   await standIn.approve(asked.id, scopes);
   const list = await accounts.computers();
   expect(list.computers.map((c) => c.host)).toEqual([standIn.host]);
-  return { accounts, shelf, grant: asked };
+  return { accounts, shelf, vault, grant: asked };
 }

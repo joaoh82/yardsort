@@ -6,7 +6,7 @@ Yardsort server you sign in to. It is an [Expo](https://expo.dev) app, SDK 58 (R
 [`packages/remote-client`](../../packages/remote-client). Its plan, and why each decision went
 the way it did, is [docs/design/31](../../docs/design/31-remote-r3.md).
 
-**What it does so far (R3 slices 2 to 6):** connect to a server by its address and see what that
+**What it does so far (R3 slices 2 to 7):** connect to a server by its address and see what that
 server is and can see, sign in through the system browser, list the account's devices with this
 phone among them, sign out, and keep a profile per server with one in use. Pair with a computer by
 scanning its code, typing it or following a link, see each computer online, offline or
@@ -14,7 +14,9 @@ reconnecting, and unpair. See each computer's workspaces, a workspace's conversa
 terminals, its activity as it is recorded, and a project's approved memory, with what was last seen
 shown as such when a computer cannot be reached. Watch a terminal at the computer's size, resuming
 after a drop or the background. Take control of it, type, paste and use the keys a phone lacks, drawn
-to fit the phone, and hand it back, or have the person at the computer take it at any time.
+to fit the phone, and hand it back, or have the person at the computer take it at any time. Tell a
+computer that took this phone back or left the account from this phone being signed out, and remove
+a server from the phone.
 
 ## What is in it
 
@@ -35,7 +37,8 @@ to fit the phone, and hand it back, or have the person at the computer take it a
 | `src/lib/native.ts`   | What only the phone has: SecureStore, the cache folder, the system browser's sign-in session, randomness and SHA-256, the phone's name.                                                                                                                                                                                                                     |
 | `src/ui/parts.tsx`    | The few native components the screens are built from.                                                                                                                                                                                                                                                                                                       |
 | `src/ui/composer.tsx` | The field and the row of keys for typing into a terminal.                                                                                                                                                                                                                                                                                                   |
-| `src/ui/live.tsx`     | What screens share about being live: a channel held only while on screen, how far a computer can be reached, and what was last seen meanwhile.                                                                                                                                                                                                              |
+| `src/ui/live.tsx`     | What screens share about being live: a channel held only while on screen, how far a computer can be reached, what was last seen meanwhile, and showing a profile's things only while it is in use.                                                                                                                                                          |
+| `src/ui/leaving.ts`   | What is asked when signing out cannot reach the server.                                                                                                                                                                                                                                                                                                     |
 | `test/lib/`           | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use), and the terminal's page in real headless Chromium, skipped where no browser is found.                                                                                                                      |
 | `test/screens/`       | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                                                                                                                                                                                                                          |
 
@@ -54,6 +57,11 @@ Things it holds to:
   on its own say: one from outside the app, or naming another server, is asked about first.
 - **Online is what the socket says.** Channels are held only while the computers are on screen and
   the app is in the foreground. Offline never means a computer's agents stopped.
+- **A computer refusing this phone** does not say why, so the server is asked before anything goes.
+  Taken back or off the account: that computer's kept entries go, and every other computer goes on
+  working. The phone's own credential refused: signed out, as below. Not known: nothing goes, it
+  reads as unreachable, and it is tried again.
+- **What a profile reaches stays on screen only while that profile is in use.**
 - **What is kept of a computer** is names and branches, each marked with when it was seen: never
   a session title, activity, memory or terminal output. It goes with a computer that took this phone
   back and with the profile. Taking control of a terminal is the only thing here that changes anything
@@ -64,8 +72,9 @@ Things it holds to:
 - **Control is only taken by a person pressing something**, and never taken back by itself. Nothing is
   sent twice: what may not have arrived is shown as such, and what was waiting when control was lost
   is dropped. Reconnecting never types. Leaving the screen or the app lets go.
-- **Signing out** revokes this phone at the server, which takes back every computer's grant,
-  then deletes the profile. With the server out of reach, it asks before deleting anything.
+- **Signing out or removing a server** revokes this phone at that server, which takes back every
+  computer's grant, then deletes the profile. With the server out of reach, or another server at its
+  address, it sends nothing and asks before deleting anything.
 
 ## Running it
 
