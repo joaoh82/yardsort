@@ -13,6 +13,7 @@ import { useApp, useSnapshot } from "../lib/context";
 import { moment } from "../lib/format";
 import type { Profile } from "../lib/profiles";
 import { Computers } from "../ui/computers";
+import { stillSignedIn } from "../ui/leaving";
 import { SeenComputers } from "../ui/live";
 import { Body, Button, Card, Problem, Screen, Title, useColors, Waiting } from "../ui/parts";
 
@@ -130,18 +131,7 @@ function SignedIn({
       await accounts.signOut();
     } catch (error) {
       setSigningOut(false);
-      Alert.alert(
-        "Still signed in",
-        `${messageOf(error)} ${profile.serverName} still counts this phone as signed in. You can remove it from this phone only, then revoke it from another of your devices.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Remove from this phone",
-            style: "destructive",
-            onPress: () => void accounts.forgetHere(profile.id),
-          },
-        ],
-      );
+      stillSignedIn(profile.serverName, error, () => void accounts.forgetHere(profile.id));
     }
   };
 

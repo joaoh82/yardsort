@@ -16,6 +16,7 @@ import {
   START_TIMEOUT_MS,
 } from "../../../../packages/remote-client/test/stand-in.ts";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
+import type { Profile } from "../../src/lib/profiles";
 import { MemoryVault } from "./memory-vault";
 
 let standIn: StandIn;
@@ -490,6 +491,117 @@ describe("an answer that comes after switching to another server", () => {
 });
 
 describe("two servers", () => {
+  async function onBoth() {
+    const it = await signedIn(standIn);
+    const first = it.accounts.getSnapshot().active as Profile;
+    await it.accounts.signIn(await it.accounts.lookUp(second.server), "Ana’s phone", browser);
+    return { ...it, first };
+  }
+
+  const stillListed = async (device: string) => {
+    const { client, access } = await elsewhere(standIn);
+    return (await client.devices(access)).devices.find((d) => d.id === device)?.revokedAt === null;
+  };
+
+  test("removing the one not in use signs out of it, and leaves the other as it is", async () => {
+    const { accounts, vault, first } = await onBoth();
+    const inUse = accounts.getSnapshot().active?.id;
+    const kept = secrets(vault);
+    expect(await stillListed(first.device)).toBe(true);
+
+    await accounts.signOut(first.id);
+    expect(accounts.getSnapshot().profiles.map((p) => p.id)).toEqual([inUse as string]);
+    expect(accounts.getSnapshot().active?.id).toBe(inUse as string);
+    expect(accounts.getSnapshot().standing?.kind).toBe("signedIn");
+    expect(vault.credentials()).toHaveLength(1);
+    expect(kept).toContain(secrets(vault)[0] as string);
+    expect(await stillListed(first.device)).toBe(false);
+    expect((await accounts.devices()).devices.some((d) => d.current)).toBe(true);
+  });
+
+  test("removing one not opened since the app started opens it for that, and no more", async () => {
+    const { vault, first } = await onBoth();
+    const again = phone(vault);
+    await again.accounts.load();
+    const inUse = again.accounts.getSnapshot().active?.id;
+    again.net.asked.length = 0;
+
+    await again.accounts.signOut(first.id);
+    expect(again.net.asked).toEqual([
+      "GET /v1/server",
+      "POST /v1/token",
+      `POST /v1/devices/${first.device}/revoke`,
+    ]);
+    expect(again.accounts.getSnapshot().active?.id).toBe(inUse as string);
+    expect(vault.credentials()).toHaveLength(1);
+    expect(await stillListed(first.device)).toBe(false);
+  });
+
+  test("removing one still being opened waits, and spends its credential once", async () => {
+    const { vault } = await onBoth();
+    const again = phone(vault);
+    again.net.held = /\/v1\/token$/;
+    const loading = again.accounts.load();
+    while (!again.accounts.getSnapshot().loaded) await Bun.sleep(5);
+    const id = again.accounts.getSnapshot().active?.id as string;
+    const device = again.accounts.getSnapshot().active?.device as string;
+    const removing = again.accounts.signOut(id);
+    while (!again.net.asked.includes("POST /v1/token")) await Bun.sleep(5);
+    await Bun.sleep(20);
+    again.net.release();
+    await Promise.all([loading, removing]);
+    expect(again.net.asked.filter((r) => r === "POST /v1/token")).toHaveLength(1);
+    expect(again.net.asked).toContain(`POST /v1/devices/${device}/revoke`);
+    expect(again.accounts.getSnapshot().notice).toBeNull();
+    expect(vault.credentials()).toHaveLength(1);
+  });
+
+  test("removing one whose new credential cannot be kept still signs out of it", async () => {
+    const { vault, first } = await onBoth();
+    const again = phone(vault);
+    await again.accounts.load();
+    vault.failing = /^yardsort\.refresh\./;
+    await again.accounts.signOut(first.id);
+    vault.failing = null;
+    expect(again.accounts.getSnapshot().profiles).toHaveLength(1);
+    expect(vault.credentials()).toHaveLength(1);
+    expect(await stillListed(first.device)).toBe(false);
+  });
+
+  test("removing one with its server out of reach deletes nothing", async () => {
+    const { vault, first } = await onBoth();
+    const again = phone(vault);
+    await again.accounts.load();
+    again.net.down = true;
+    await expect(again.accounts.signOut(first.id)).rejects.toThrow();
+    expect(again.accounts.getSnapshot().profiles).toHaveLength(2);
+    expect(vault.credentials()).toHaveLength(2);
+  });
+
+  test("removing one whose address now answers as another server sends nothing", async () => {
+    const { vault, first } = await onBoth();
+    const again = phone(vault);
+    await again.accounts.load();
+    const kept = secrets(vault);
+    again.net.answeredBy = second.server;
+    again.net.asked.length = 0;
+    await expect(again.accounts.signOut(first.id)).rejects.toThrow(/another server/);
+    expect(again.net.asked).toEqual(["GET /v1/server"]);
+    expect(secrets(vault)).toEqual(kept);
+    expect(again.accounts.getSnapshot().profiles).toHaveLength(2);
+    expect(again.accounts.getSnapshot().standing?.kind).toBe("signedIn");
+  });
+
+  test("removing one already signed out at its server just deletes it", async () => {
+    const { accounts, vault, first } = await onBoth();
+    const { client, access } = await elsewhere(standIn);
+    await client.revokeDevice(access, first.device);
+    await accounts.signOut(first.id);
+    expect(accounts.getSnapshot().profiles).toHaveLength(1);
+    expect(vault.credentials()).toHaveLength(1);
+    expect(accounts.getSnapshot().standing?.kind).toBe("signedIn");
+  });
+
   test("each keeps its own sign-in, and switching back needs no new one", async () => {
     const { accounts, vault, net } = await signedIn(standIn, "Ana’s phone");
     const firstId = accounts.getSnapshot().active?.id as string;

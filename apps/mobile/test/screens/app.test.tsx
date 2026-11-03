@@ -26,6 +26,8 @@ import { Incoming } from "../../src/lib/pairing";
 import { MemoryVault } from "../lib/memory-vault";
 import { ADDRESS, envFor, event, FakeServer } from "./fake-server";
 
+const OTHER_ADDRESS = "https://other.example.com";
+
 const signedInBrowser: Browser = async (_url, redirect) => `${redirect}?code=a-code`;
 
 async function start({
@@ -290,6 +292,102 @@ describe("Account", () => {
   });
 });
 
+describe("Servers", () => {
+  /** Signed in to two servers, the second in use, on the list of them. */
+  async function onTwo() {
+    const server = new FakeServer();
+    const other = new FakeServer();
+    other.name = "Other Remote";
+    other.server = "srv-other";
+    const env: Env = {
+      ...envFor(server),
+      fetch: ((input: string, init?: RequestInit) =>
+        (String(input).startsWith(OTHER_ADDRESS) ? other : server).fetch(
+          input,
+          init,
+        )) as typeof fetch,
+    };
+    const app = await start({ server, env });
+    await signIn();
+    await act(async () => {
+      await app.accounts.signIn(
+        await app.accounts.lookUp(OTHER_ADDRESS),
+        "Ana’s phone",
+        signedInBrowser,
+      );
+    });
+    await screen.findByText("Signed in to Other Remote as Ana’s phone.");
+    await fireEvent.press(await screen.findByRole("button", { name: "Servers on this phone" }));
+    await screen.findByRole("button", { name: "Remove Example Remote" });
+    return { ...app, server, other };
+  }
+
+  test("removing one asks first, and a no changes nothing", async () => {
+    const { server, vault } = await onTwo();
+    await fireEvent.press(screen.getByRole("button", { name: "Remove Example Remote" }));
+    await answerAlert("Cancel");
+    expect(vault.credentials()).toHaveLength(2);
+    expect(server.devices.every((d) => !d.revokedAt)).toBe(true);
+    expect(screen.getByRole("button", { name: "Example Remote" })).toBeTruthy();
+  });
+
+  test("removing the one not in use signs out of it there, and leaves the other", async () => {
+    const { server, other, vault } = await onTwo();
+    await fireEvent.press(screen.getByRole("button", { name: "Remove Example Remote" }));
+    await answerAlert("Remove");
+    await waitFor(() => expect(vault.credentials()).toHaveLength(1));
+    expect(server.devices.find((d) => d.name === "Ana’s phone")?.revokedAt).not.toBeNull();
+    expect(other.devices.find((d) => d.name === "Ana’s phone")?.revokedAt).toBeNull();
+    expect(screen.queryByRole("button", { name: "Example Remote" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Other Remote, in use" })).toBeTruthy();
+  });
+
+  test("removing the one in use leaves the other to choose", async () => {
+    const { vault } = await onTwo();
+    await fireEvent.press(screen.getByRole("button", { name: "Remove Other Remote" }));
+    await answerAlert("Remove");
+    await screen.findByText("Choose one to use.");
+    expect(vault.credentials()).toHaveLength(1);
+    await fireEvent.press(screen.getByRole("button", { name: "Example Remote" }));
+    expect(await screen.findByText("Signed in to Example Remote as Ana’s phone.")).toBeTruthy();
+  });
+
+  test("with its server out of reach it says so, and deletes only if told", async () => {
+    const { server, vault } = await onTwo();
+    server.down = true;
+    await fireEvent.press(screen.getByRole("button", { name: "Remove Example Remote" }));
+    await answerAlert("Remove");
+    await waitFor(() =>
+      expect(jest.mocked(Alert.alert).mock.lastCall?.[0]).toBe("Still signed in"),
+    );
+    expect(vault.credentials()).toHaveLength(2);
+    await answerAlert("Cancel");
+    expect(vault.credentials()).toHaveLength(2);
+
+    await fireEvent.press(screen.getByRole("button", { name: "Remove Example Remote" }));
+    await answerAlert("Remove");
+    await waitFor(() =>
+      expect(jest.mocked(Alert.alert).mock.lastCall?.[0]).toBe("Still signed in"),
+    );
+    await answerAlert("Remove from this phone");
+    await waitFor(() => expect(vault.credentials()).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: "Example Remote" })).toBeNull();
+  });
+
+  test("switching shows nothing of the other server's computers or devices", async () => {
+    const { server, other } = await onTwo();
+    other.devices[0]!.name = "Only on the other";
+    server.devices.find((d) => d.name === "Workstation")!.name = "Only on the first";
+    await fireEvent.press(screen.getByRole("button", { name: "Example Remote" }));
+    await screen.findByText("Only on the first");
+    expect(screen.queryByText("Only on the other")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Servers on this phone" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Other Remote" }));
+    await screen.findByText("Only on the other");
+    expect(screen.queryByText("Only on the first")).toBeNull();
+  });
+});
+
 describe("Computers", () => {
   test("none yet: it says how to start", async () => {
     await start();
@@ -490,7 +588,7 @@ describe("Pairing", () => {
 
   describe("a link from outside the app", () => {
     const secret = new Secret("ys1.of.linked");
-    const OTHER = "https://other.example.com";
+    const OTHER = OTHER_ADDRESS;
 
     /** Two servers behind one phone, the phone signed in to the first. */
     async function twoServers(linkServer: string, incoming = new Incoming()) {
@@ -881,6 +979,44 @@ describe("A computer", () => {
     const kinds = () => told().map((text) => JSON.parse(text).t);
 
     /** On the terminal's screen, with its page started. */
+    /** Watching on one server, with a second signed in to, and the first in use. */
+    async function watchingOnTwoServers() {
+      told().length = 0;
+      const server = new FakeServer();
+      const other = new FakeServer();
+      other.name = "Other Remote";
+      other.server = "srv-other";
+      const env: Env = {
+        ...envFor(server),
+        fetch: ((input: string, init?: RequestInit) =>
+          (String(input).startsWith(OTHER_ADDRESS) ? other : server).fetch(
+            input,
+            init,
+          )) as typeof fetch,
+      };
+      const app = await start({ server, env });
+      await signIn();
+      const { accounts } = app;
+      await act(async () => {
+        await accounts.signIn(await accounts.lookUp(OTHER_ADDRESS), "Ana’s phone", signedInBrowser);
+        await accounts.activate(accounts.getSnapshot().profiles[0]?.id as string);
+      });
+      await fireEvent.press(await screen.findByRole("button", { name: "Pair a computer" }));
+      await fireEvent.changeText(await screen.findByLabelText("Pairing code"), "ABCD2345");
+      await fireEvent.press(screen.getByRole("button", { name: "Pair with ABCD-2345" }));
+      await screen.findByText("Say yes at Workstation");
+      server.answer("approved");
+      await fireEvent.press(await screen.findByRole("button", { name: "Done" }, ANSWER));
+      await fireEvent.press(await open());
+      await fireEvent.press(
+        await screen.findByRole("button", { name: "The login page times out" }),
+      );
+      await screen.findByTestId("terminal");
+      await pageSays({ t: "ready" });
+      await screen.findByText(/^Watching/);
+      return { ...app, server, other };
+    }
+
     async function watching(server = new FakeServer()) {
       told().length = 0;
       const app = await paired(new MemoryVault(), server);
@@ -1434,10 +1570,171 @@ describe("A computer", () => {
 
     test("a computer that took the phone back takes the terminal with it", async () => {
       const { server } = await watching();
+      server.grants[0]!.state = "revoked";
       await act(async () => {
         for (const socket of [...server.relaySockets]) socket.close(4003);
       });
       expect(await screen.findByText("This computer no longer lets this phone in.")).toBeTruthy();
+      expect(screen.queryByTestId("terminal")).toBeNull();
+    });
+
+    test("a phone revoked while watching is signed out, and nothing of the terminal stays", async () => {
+      const { server, vault, accounts } = await watching();
+      server.revoke(accounts.getSnapshot().active?.device as string);
+      await act(async () => server.closeChannelsTo("host-work", 4003));
+
+      expect(await screen.findByText(/This phone was signed out of Example Remote/)).toBeTruthy();
+      expect(screen.getByText("Connect to a server")).toBeTruthy();
+      expect(screen.queryByTestId("terminal")).toBeNull();
+      expect(screen.queryByText("This computer no longer lets this phone in.")).toBeNull();
+      expect(vault.credentials()).toEqual([]);
+    });
+
+    test("a refusal the server cannot explain leaves the terminal, and it comes back", async () => {
+      const { server, vault } = await watching();
+      server.down = true;
+      await act(async () => server.closeChannelsTo("host-work", 4003));
+
+      expect(await screen.findByText(/^Cannot be reached\. What is on the computer/)).toBeTruthy();
+      expect(screen.getByTestId("terminal")).toBeTruthy();
+      expect(screen.queryByText("This computer no longer lets this phone in.")).toBeNull();
+      expect(vault.credentials()).toHaveLength(1);
+
+      server.down = false;
+      expect(await screen.findByText(/^Watching/, undefined, ANSWER)).toBeTruthy();
+    });
+
+    test("a screen left behind by switching servers shows nothing of the first", async () => {
+      const { accounts, server } = await watchingOnTwoServers();
+      await act(async () => accounts.activate(accounts.getSnapshot().profiles[1]?.id as string));
+
+      expect(await screen.findByText("Signed in to Other Remote as Ana’s phone.")).toBeTruthy();
+      expect(screen.queryByTestId("terminal")).toBeNull();
+      expect(screen.queryByText("Signed in to Example Remote as Ana’s phone.")).toBeNull();
+      await waitFor(() => expect(server.sockets.open).toBe(0));
+    });
+
+    test("an address that now answers as another server takes the terminal with it", async () => {
+      const { server, accounts } = await watching();
+      server.server = "srv-replacement";
+      server.name = "Replacement";
+      server.refuseAccess = true;
+      await act(async () => {
+        await accounts.computers().catch(() => {});
+      });
+
+      expect(await screen.findByText(/now answers as another server/)).toBeTruthy();
+      expect(screen.queryByTestId("terminal")).toBeNull();
+    });
+  });
+
+  describe("no longer reached", () => {
+    for (const [where, go] of [
+      ["a computer", async () => {}],
+      [
+        "a workspace",
+        async () => {
+          await fireEvent.press(await screen.findByRole("button", { name: /^fix-login/ }));
+          await screen.findByText("The login page times out");
+        },
+      ],
+      [
+        "approved memory",
+        async () => {
+          await fireEvent.press(await screen.findByRole("button", { name: /^fix-login/ }));
+          await fireEvent.press(await screen.findByRole("button", { name: "Approved memory" }));
+          await screen.findByText("Migrations are append-only.");
+        },
+      ],
+    ] as const) {
+      test(`a phone revoked while on ${where} is signed out, and nothing of it stays`, async () => {
+        const { server, vault, accounts } = await paired();
+        await open();
+        await go();
+        server.revoke(accounts.getSnapshot().active?.device as string);
+        await act(async () => server.closeChannelsTo("host-work", 4003));
+
+        expect(await screen.findByText(/This phone was signed out of Example Remote/)).toBeTruthy();
+        expect(screen.getByText("Connect to a server")).toBeTruthy();
+        expect(screen.queryByText("fix-login")).toBeNull();
+        expect(screen.queryByText("Migrations are append-only.")).toBeNull();
+        expect(screen.queryByText(/no longer lets this phone in/)).toBeNull();
+        expect(vault.credentials()).toEqual([]);
+      });
+    }
+
+    test("taken off the account says so, and not that it took the phone back", async () => {
+      const { server, shelf } = await paired();
+      await open();
+      await waitFor(() => expect([...shelf.kept.values()].join()).toContain("fix-login"));
+      server.hosts = [];
+      await act(async () => server.closeChannelsTo("host-work", 4003));
+
+      expect(await screen.findByText("This computer is no longer on this account.")).toBeTruthy();
+      expect(screen.queryByText("This computer no longer lets this phone in.")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^fix-login/ })).toBeNull();
+      await waitFor(() => expect([...shelf.kept.values()].join()).not.toContain("fix-login"));
+
+      await fireEvent.press(screen.getByRole("button", { name: "Back to the account" }));
+      expect(await screen.findByText(/^Workstation is no longer on this account\./)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+    });
+
+    test("a refusal the server cannot explain shows what was seen, and deletes nothing", async () => {
+      const { server, shelf, vault } = await paired();
+      await open();
+      await waitFor(() => expect([...shelf.kept.values()].join()).toContain("fix-login"));
+      server.down = true;
+      await act(async () => server.closeChannelsTo("host-work", 4003));
+
+      expect(await screen.findByText("Cannot be reached")).toBeTruthy();
+      expect(screen.getByText(/the server could not say why/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^fix-login/ })).toBeTruthy();
+      expect([...shelf.kept.values()].join()).toContain("fix-login");
+      expect(vault.credentials()).toHaveLength(1);
+    });
+
+    test("one computer taking the phone back leaves the other working", async () => {
+      const { server, vault } = await paired();
+      const grant = server.grants[0] as (typeof server.grants)[number];
+      server.hosts.push({ ...(server.hosts[0] as (typeof server.hosts)[number]), id: "host-home" });
+      (server.hosts[1] as { name: string }).name = "Laptop";
+      server.grants.push({ ...grant, id: "grant-home", host: "host-home", hostName: "Laptop" });
+      await act(async () => screen.getByTestId("screen").props.refreshControl.props.onRefresh());
+      await screen.findByLabelText("Laptop, Online");
+      await screen.findByLabelText(/^Workstation, Online/);
+
+      grant.state = "revoked";
+      await act(async () => server.closeChannelsTo("host-work", 4003));
+
+      expect(await screen.findByText(/^Workstation no longer lets this phone in\./)).toBeTruthy();
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Open Workstation" })).toBeNull(),
+      );
+      expect(screen.getByLabelText("Laptop, Online")).toBeTruthy();
+      expect(server.sockets.open).toBe(1);
+      expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+      expect(vault.credentials()).toHaveLength(1);
+
+      await fireEvent.press(screen.getByRole("button", { name: "OK" }));
+      expect(screen.queryByText(/^Workstation no longer lets/)).toBeNull();
+      expect(screen.getByLabelText("Laptop, Online")).toBeTruthy();
+    });
+
+    test("found on opening the app, it is told there too", async () => {
+      const { server, shelf, vault } = await paired();
+      server.grants[0]!.state = "revoked";
+      await start({ server, vault, env: { ...envFor(server), shelf } });
+      expect(await screen.findByText(/^Workstation no longer lets this phone in\./)).toBeTruthy();
+    });
+
+    test("unpairing here tells nobody what they just did", async () => {
+      await paired();
+      await screen.findByLabelText(/^Workstation, Online/);
+      await fireEvent.press(screen.getByRole("button", { name: "Unpair Workstation" }));
+      await answerAlert("Unpair");
+      await screen.findByText(/No computer lets this phone in yet/);
+      expect(screen.queryByText(/^Workstation no longer lets/)).toBeNull();
     });
   });
 

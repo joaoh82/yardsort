@@ -12,13 +12,17 @@ import { useCallback, useState } from "react";
 
 import { messageOf } from "../lib/accounts";
 import { moment } from "../lib/format";
-import { NoLongerPaired, ReachLine, useChannelTo, useRead } from "../ui/live";
+import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { Body, Button, Card, Problem, Screen, Waiting } from "../ui/parts";
 
 export default function MemoryScreen() {
   const params = useLocalSearchParams<{ host?: string; project?: string }>();
   if (!params.host || !params.project) return <Redirect href="/account" />;
-  return <Memory host={params.host as HostId} project={params.project as ProjectId} />;
+  return (
+    <OfProfile>
+      <Memory host={params.host as HostId} project={params.project as ProjectId} />
+    </OfProfile>
+  );
 }
 
 function Memory({ host, project }: { host: HostId; project: ProjectId }) {
@@ -51,7 +55,7 @@ function Memory({ host, project }: { host: HostId; project: ProjectId }) {
   if (reach?.kind === "gone") {
     return (
       <Screen>
-        <NoLongerPaired />
+        <NoLongerPaired why={reach.why} />
       </Screen>
     );
   }

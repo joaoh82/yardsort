@@ -14,6 +14,8 @@
  *   is deleted, and the phone says so. A refused access means less: the server says the same for
  *   access that has lapsed, so it is refreshed and tried once more first. **A server that cannot
  *   be reached** deletes nothing.
+ * - **A computer that refuses this phone** says nothing about why. The server is asked: see
+ *   {@link Accounts.explain}.
  */
 
 import {
@@ -84,7 +86,27 @@ export interface Snapshot {
   standing: Standing | null;
   /** Something the person should be told once, such as being signed out at the server. */
   notice: string | null;
+  /** The active profile's computers that stopped letting this phone in, until the person has read it. */
+  lost: readonly Lost[];
 }
+
+/** Why a computer stopped letting this phone in: it took the phone back, or left the account. */
+export type Parted = "tookBack" | "removed";
+
+/** A computer this phone used to reach, and no longer can. */
+export interface Lost {
+  host: HostId;
+  name: string;
+  why: Parted;
+}
+
+/** What a computer refusing this phone came to, as the server tells it (31 §5). */
+export type Refusal =
+  | Parted
+  /** The server refused this phone's own credential. The profile is deleted by now. */
+  | "signedOut"
+  /** The server could not be asked, or does not know of anything changing. Nothing is deleted. */
+  | "undetermined";
 
 /** A computer that lets this phone in. */
 export interface Computer {
@@ -101,6 +123,8 @@ export interface Computer {
 export interface ComputerList {
   computers: Computer[];
   waiting: GrantSummary[];
+  /** Every computer on the account, whether or not it lets this phone in. */
+  onAccount: ReadonlySet<HostId>;
 }
 
 /** What every pairing asks for: all a phone uses. The computer's person chooses (27 §7). */
@@ -131,6 +155,10 @@ export class Accounts {
   #observed = new Map<string, Observed>();
   #standing: Standing | null = null;
   #notice: string | null = null;
+  /** By profile, and only in memory: a list read later finds nothing more to say. */
+  #lost = new Map<string, Lost[]>();
+  /** Computers being unpaired here, whose going is no news to anyone. */
+  #unpairing = new Set<HostId>();
   #snapshot: Snapshot;
   /** Sessions opened since the app started, by profile. Switching back reuses one. */
   #sessions = new Map<string, Session>();
@@ -167,6 +195,7 @@ export class Accounts {
       active: profiles?.active ?? null,
       standing: profiles?.active ? this.#standing : null,
       notice: this.#notice,
+      lost: (profiles?.active && this.#lost.get(profiles.active.id)) || [],
     };
   }
 
@@ -177,6 +206,13 @@ export class Accounts {
 
   dismissNotice(): void {
     this.#notice = null;
+    this.#changed();
+  }
+
+  dismissLost(host: HostId): void {
+    const id = this.#profiles?.active?.id;
+    if (!id) return;
+    this.#lost.set(id, this.#lost.get(id)?.filter((lost) => lost.host !== host) ?? []);
     this.#changed();
   }
 
@@ -363,6 +399,7 @@ export class Accounts {
    */
   async #forget(id: string): Promise<void> {
     this.#sessions.delete(id);
+    this.#lost.delete(id);
     await this.#need().forget(id);
     await this.#observedFor(id)?.forget();
     this.#observed.delete(id);
@@ -384,7 +421,16 @@ export class Accounts {
    */
   async #withAccess<T>(call: (session: Session, access: Secret) => Promise<T>): Promise<T> {
     const { profile, session } = this.#session();
+    return this.#withAccessOf(profile, session, call);
+  }
+
+  async #withAccessOf<T>(
+    profile: Profile,
+    opened: Session | Promise<Session>,
+    call: (session: Session, access: Secret) => Promise<T>,
+  ): Promise<T> {
     try {
+      const session = await opened;
       const access = await session.access();
       try {
         return await call(session, access);
@@ -432,6 +478,7 @@ export class Accounts {
    */
   computers(): Promise<ComputerList> {
     const observed = this.observed();
+    const profile = this.#profiles?.active?.id;
     return this.#withAccess(async (session, access) => {
       const [{ grants }, { hosts }] = await Promise.all([
         session.client.grants(access),
@@ -451,9 +498,47 @@ export class Accounts {
           projects: grant.projects,
         });
       }
-      await observed?.keepComputers(computers);
-      return { computers, waiting: grants.filter((grant) => grant.state === "pending") };
+      const dropped = (await observed?.keepComputers(computers)) ?? [];
+      if (profile) this.#noteLost(profile, dropped, onAccount);
+      return {
+        computers,
+        waiting: grants.filter((grant) => grant.state === "pending"),
+        onAccount: new Set(onAccount.keys()),
+      };
     });
+  }
+
+  /** Say so of computers this phone knew and the server no longer lists, unless it did that itself. */
+  #noteLost(
+    profile: string,
+    dropped: readonly { host: HostId; name: string }[],
+    onAccount: ReadonlyMap<HostId, unknown>,
+  ): void {
+    const lost = dropped
+      .filter((computer) => !this.#unpairing.delete(computer.host))
+      .map(({ host, name }): Lost => ({
+        host,
+        name,
+        why: onAccount.has(host) ? "tookBack" : "removed",
+      }));
+    if (lost.length === 0) return;
+    this.#lost.set(profile, [...(this.#lost.get(profile) ?? []), ...lost]);
+    this.#changed();
+  }
+
+  /**
+   * What became of a computer that refused this phone. The relay's close does not say, so the
+   * server is asked, with access refreshed if it has lapsed. Reading the list deletes what was kept
+   * of a computer that parted; being refused deletes the profile; anything else deletes nothing.
+   */
+  async explain(host: HostId): Promise<Refusal> {
+    try {
+      const { computers, onAccount } = await this.computers();
+      if (computers.some((computer) => computer.host === host)) return "undetermined";
+      return onAccount.has(host) ? "tookBack" : "removed";
+    } catch (error) {
+      return refused(error) ? "signedOut" : "undetermined";
+    }
   }
 
   /** Redeem a computer's offer, and ask it to let this phone in. An offer goes once. */
@@ -468,9 +553,18 @@ export class Accounts {
     return this.#withAccess((session, access) => session.client.grant(access, id));
   }
 
-  /** Take back a pairing, or a request still waiting. This phone stays signed in. */
-  unpair(id: GrantId): Promise<void> {
-    return this.#withAccess((session, access) => session.client.revokeGrant(access, id));
+  /**
+   * Take back a pairing, or a request still waiting. This phone stays signed in. `host` is the
+   * computer of a pairing: it closes the channel to it before this has its answer.
+   */
+  async unpair(id: GrantId, host?: HostId): Promise<void> {
+    if (host) this.#unpairing.add(host);
+    try {
+      await this.#withAccess((session, access) => session.client.revokeGrant(access, id));
+    } catch (error) {
+      if (host) this.#unpairing.delete(host);
+      throw error;
+    }
   }
 
   /** A channel to `host` through the relay, under the grant the server has in force. */
@@ -484,14 +578,15 @@ export class Accounts {
   }
 
   /**
-   * Sign out: revoke this phone at the server, which takes back every computer's grant, then
-   * delete the profile here. When the server cannot be reached this throws, and nothing is
-   * deleted: see {@link forgetHere}.
+   * Sign out of a profile, the active one unless another is named: revoke this phone at that
+   * server, which takes back every computer's grant, then delete the profile here. When the server
+   * cannot be reached this throws, and nothing is deleted: see {@link forgetHere}.
    */
-  async signOut(): Promise<void> {
-    const { profile } = this.#session();
+  async signOut(id?: string): Promise<void> {
+    const profile = id ? this.#need().all.find((p) => p.id === id) : this.#session().profile;
+    if (!profile) return;
     try {
-      await this.#withAccess((session, access) =>
+      await this.#withAccessOf(profile, this.#sessionOf(profile), (session, access) =>
         session.client.revokeDevice(access, session.device),
       );
     } catch (error) {
@@ -501,6 +596,37 @@ export class Accounts {
     }
     await this.#forget(profile.id);
     this.#changed();
+  }
+
+  /** A profile's session, opened for this when it is not the one in use. Nothing shows it. */
+  async #sessionOf(profile: Profile): Promise<Session> {
+    await this.#opening.get(profile.id);
+    const open = this.#sessions.get(profile.id);
+    if (open) return open;
+    const profiles = this.#need();
+    const refresh = await profiles.refresh(profile.id);
+    if (!refresh) {
+      throw ClientError.from({
+        code: "unauthenticated",
+        message: "This phone holds no sign-in there.",
+        retryable: false,
+      });
+    }
+    const client = this.clientFor(profile.address);
+    let session: Session;
+    try {
+      session = await Session.resume(
+        client,
+        refresh,
+        profiles.keeper(profile.id),
+        this.#options(profile, client),
+      );
+    } catch (error) {
+      if (!(error instanceof NotKept)) throw error;
+      session = error.session;
+    }
+    this.#sessions.set(profile.id, session);
+    return session;
   }
 
   /**

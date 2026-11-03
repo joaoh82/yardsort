@@ -21,7 +21,7 @@ import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
 import { moment } from "../lib/format";
 import type { ObservedComputer, ObservedWorkspaces } from "../lib/observed";
-import { NoLongerPaired, ReachLine, useChannelTo, useRead } from "../ui/live";
+import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { Body, Button, Label, Problem, Row, Screen, Title, Waiting } from "../ui/parts";
 
 /** A workspace as this screen shows it, from the computer or from what was last seen. */
@@ -35,7 +35,11 @@ interface Shown {
 export default function ComputerScreen() {
   const params = useLocalSearchParams<{ host?: string }>();
   if (!params.host) return <Redirect href="/account" />;
-  return <Computer host={params.host as HostId} />;
+  return (
+    <OfProfile>
+      <Computer host={params.host as HostId} />
+    </OfProfile>
+  );
 }
 
 function Computer({ host }: { host: HostId }) {
@@ -101,7 +105,7 @@ function Computer({ host }: { host: HostId }) {
     return (
       <Screen>
         {title}
-        <NoLongerPaired />
+        <NoLongerPaired why={reach.why} />
       </Screen>
     );
   }

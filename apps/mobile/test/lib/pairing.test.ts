@@ -75,6 +75,7 @@ async function paired(name = "Paired phone") {
 function watching(accounts: Accounts) {
   const presence = new Presence({
     open: (host) => accounts.openChannel(host),
+    explain: (host) => accounts.explain(host),
     offlineRetryMs: 50,
     firstRetryMs: 50,
     maxRetryMs: 100,
@@ -144,7 +145,7 @@ describe("pairing", () => {
     const answer = waitForAnswer(accounts, asked, FAST);
     await standIn.deny((await standIn.pending()).id);
     expect((await answer)?.state).toBe("denied");
-    expect(await accounts.computers()).toEqual({ computers: [], waiting: [] });
+    expect(await accounts.computers()).toMatchObject({ computers: [], waiting: [] });
   });
 
   test("a code that is wrong says so, and the phone stays signed in", async () => {
@@ -416,6 +417,7 @@ describe("whether a computer can be reached", () => {
         opened += 1;
         return accounts.openChannel(host);
       },
+      explain: (host) => accounts.explain(host),
       firstRetryMs: 10,
     });
     counted.watch([standIn.host]);
@@ -440,6 +442,7 @@ describe("whether a computer can be reached", () => {
         channels.push(channel);
         return channel;
       },
+      explain: (host) => accounts.explain(host),
     });
     const online = async () => {
       const deadline = Date.now() + 10_000;

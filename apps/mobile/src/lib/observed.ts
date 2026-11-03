@@ -76,9 +76,16 @@ export class Observed {
     return (await this.#read()).workspaces[host] ?? null;
   }
 
-  /** The computers the server says let this phone in. What was kept of any other goes. */
-  keepComputers(computers: readonly Omit<ObservedComputer, "observedAt">[]): Promise<void> {
-    return this.#write((kept) => {
+  /**
+   * The computers the server says let this phone in. What was kept of any other goes, and those
+   * are given back: computers this phone knew, and now does not.
+   */
+  async keepComputers(
+    computers: readonly Omit<ObservedComputer, "observedAt">[],
+  ): Promise<ObservedComputer[]> {
+    let dropped: ObservedComputer[] = [];
+    await this.#write((kept) => {
+      dropped = kept.computers.filter((c) => !computers.some((now) => now.host === c.host));
       const hosts = computers.slice(0, MAX_COMPUTERS).map((c) => c.host);
       const workspaces: Kept["workspaces"] = {};
       for (const host of hosts) {
@@ -96,6 +103,7 @@ export class Observed {
         workspaces,
       };
     });
+    return dropped;
   }
 
   /** A computer's workspaces as it listed them, for a computer still known to let this phone in. */
