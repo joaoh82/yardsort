@@ -23,14 +23,13 @@ const app = {
 export default function Layout() {
   const [failed, setFailed] = useState<string | null>(null);
   const colors = useColors();
-  // Android's header is drawn from this, and iOS's title. Without it, a dark phone gets a white
-  // header, with the status bar's white icons lost against it.
+  // Android's header is drawn from this. Without it, a dark phone gets a white header, with the
+  // status bar's white icons lost against it. iOS 26's glass bar and its title stay the system's.
   const base = useColorScheme() === "dark" ? DarkTheme : DefaultTheme;
   const theme = {
     ...base,
     colors: {
       ...base.colors,
-      primary: colors.accent,
       background: colors.background,
       card: colors.surface,
       text: colors.ink,

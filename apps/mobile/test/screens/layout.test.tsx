@@ -4,7 +4,7 @@
 // The root layout as the app has it, for what it gives every screen.
 
 import { describe, expect, jest, test } from "@jest/globals";
-import { useTheme } from "expo-router";
+import { DarkTheme, DefaultTheme, useTheme } from "expo-router";
 import { act, renderRouter, screen } from "expo-router/testing-library";
 import { Text } from "react-native";
 
@@ -25,7 +25,9 @@ function phoneIs(scheme: "dark" | "light") {
 function Header() {
   const { dark, colors } = useTheme();
   return (
-    <Text testID="header">{JSON.stringify({ dark, card: colors.card, text: colors.text })}</Text>
+    <Text testID="header">
+      {JSON.stringify({ dark, card: colors.card, text: colors.text, primary: colors.primary })}
+    </Text>
   );
 }
 
@@ -37,13 +39,24 @@ async function header() {
 
 describe("the header", () => {
   // Android's is drawn from the theme. A white one on a dark phone hides the status bar's white icons.
+  // `primary` is only iOS's back button, which keeps the system's blue.
   test("on a dark phone is dark, with light words", async () => {
     phoneIs("dark");
-    expect(await header()).toEqual({ dark: true, card: "#1f1f1d", text: "#ecece8" });
+    expect(await header()).toEqual({
+      dark: true,
+      card: "#1f1f1d",
+      text: "#ecece8",
+      primary: DarkTheme.colors.primary,
+    });
   });
 
   test("on a light phone is light, with dark words", async () => {
     phoneIs("light");
-    expect(await header()).toEqual({ dark: false, card: "#ffffff", text: "#1c1c1a" });
+    expect(await header()).toEqual({
+      dark: false,
+      card: "#ffffff",
+      text: "#1c1c1a",
+      primary: DefaultTheme.colors.primary,
+    });
   });
 });

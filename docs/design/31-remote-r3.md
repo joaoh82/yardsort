@@ -564,7 +564,7 @@ after a switch, are shown against the real server through the stand-in, not on t
   the app: whether the client works under Hermes, SecureStore keeps what it is given, and the
   sign-in session comes back through `yardsort://signed-in` is what the smoke test shows.
 - **Not built here:** iOS needs macOS and Xcode, and this machine had no Android SDK, so neither
-  app was built. Android stays untried until it is, in an emulator first (§7).
+  app was built. Android stays untried until it is, in an emulator first (§7). It was, on 2026-11-03 (§16).
 
 **Its smoke test, on the iPhone against staging:**
 
@@ -1154,14 +1154,15 @@ were the stand-in (`crates/server/examples/stand-in.rs`), reached through `adb r
   the list its native prop is, and its Android side passes on as it is. React Native's native code then aborts the
   process. It is `["none"]` now.
 - **A dark phone had a white header**, with the status bar's white icons lost against it. Android's header is drawn
-  from the navigation theme, and nothing set one. The root layout now gives it the app's own colors. iOS 26's glass
-  bar is left alone, since nothing sets a header background. Its title color comes from the same theme, so **iOS's dark
-  mode wants a look** on the next run there.
+  from the navigation theme, and nothing set one. The root layout now gives it the app's own colors. On iOS 26 the glass
+  bar and the title stay the system's, since nothing sets a header background or tint. What changes there is that the
+  bar is told a dark phone is dark, and the back button takes the dark theme's blue, so **iOS's dark mode wants a look**
+  on the next run there.
 - **A sign-in's return reached the router, code and all.** On Android it comes to the app like any link, as well as to
   the browser session waiting for it. A sign-in that went on to the account was left looking fine. Backing out of the
   browser just as it came back left **Unmatched Route** on the screen, with the code in it, and the phone not signed
-  in. It now stops in `+native-intent`, as a pairing link's secret does, and the session still hears it. Six sign-ins in
-  a row afterwards came back to the account. A code is useless without the verifier the session holds, but it had no
+  in. It now stops in `+native-intent`, as a pairing link's secret does, and a session still waiting hears it through its
+  own listener. Six sign-ins in a row afterwards came back to the account. A code is useless without the verifier the session holds, but it had no
   business in a route.
 
 **What worked, seen on the emulator:**

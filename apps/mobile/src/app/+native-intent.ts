@@ -8,8 +8,9 @@
  *
  * A sign-in's return carries its code, and stays out of the router too. iOS gives it only to the
  * browser session waiting for it. Android hands it to the app like any link as well, and the router
- * would show it as a page that does not exist. The session has its own way of hearing it, so nothing
- * is lost. An app started by one has no session waiting, and opens as it would.
+ * would show it as a page that does not exist. The session listens for it itself, so one still
+ * waiting carries on. One that has stopped, or an app started by the return, has nothing to use the
+ * code with: it goes no further, and the person signs in again.
  */
 
 import { parsePairingLink } from "@yardsort/remote-client";
