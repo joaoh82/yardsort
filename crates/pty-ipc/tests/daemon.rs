@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use pty_host::{HostEvent, LaunchPlan, TermSize, TerminalHost};
 use pty_ipc::{DaemonClient, Endpoint};
 
-const TIMEOUT: Duration = Duration::from_secs(20);
+/// Only a test that is failing waits this long. A first PowerShell on a Windows runner has taken
+/// about 15 seconds to answer.
+const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A daemon in its own process, killed when the test ends however it ends.
 struct Daemon {
@@ -603,6 +605,8 @@ fn a_lease_taken_over_the_socket_holds_until_someone_here_types() {
     let capture = Capture::default();
     attach_terminal(&here, &session.id, &capture);
     let id = &session.id;
+    // Before the lease: it lasts 30 seconds, and a program slow to start would use them up.
+    capture.wait_for("ready");
 
     let lease = remote.acquire(id, "phone", false).unwrap();
     assert_eq!((lease.ttl_ms, lease.renew_every_ms), (30_000, 10_000));
@@ -663,7 +667,7 @@ fn a_lease_taken_over_the_socket_holds_until_someone_here_types() {
     here.kill(id).unwrap();
 }
 
-/// Echoes every line it reads, `got:` in front.
+/// Says `ready`, then echoes every line it reads, `got:` in front.
 fn echo_lines() -> LaunchPlan {
     if cfg!(windows) {
         // PowerShell is on every Windows CI runner; cmd has no loop that reads lines.
@@ -672,14 +676,15 @@ fn echo_lines() -> LaunchPlan {
             args: vec![
                 "-NoProfile".into(),
                 "-Command".into(),
-                "while ($true) { $l = [Console]::In.ReadLine(); if ($l -eq $null) { break }; \
+                "Write-Output ready; \
+                 while ($true) { $l = [Console]::In.ReadLine(); if ($l -eq $null) { break }; \
                  Write-Output \"got:$l\" }"
                     .into(),
             ],
             ..shell("")
         }
     } else {
-        shell("stty -echo; while IFS= read -r line; do echo \"got:$line\"; done")
+        shell("stty -echo; echo ready; while IFS= read -r line; do echo \"got:$line\"; done")
     }
 }
 
