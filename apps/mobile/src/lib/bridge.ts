@@ -13,10 +13,28 @@ export const MAX_MESSAGE = 96 * 1024;
 export const MAX_SIDE = 1000;
 /** The longest address a link may have. */
 export const MAX_LINK = 2048;
+/** The largest a character can be said to be, in pixels. */
+export const MAX_CELL = 200;
 
 export interface PageSize {
   cols: number;
   rows: number;
+}
+
+/** A terminal as drawn: how many characters, and how many pixels they took. */
+export interface Drawn extends PageSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Whether two drawings can be the same size of character. Only the whole is on the screen, rounded
+ * to a pixel, so the same character works out differently at different sizes.
+ */
+export function sameCell(a: Drawn, b: Drawn): boolean {
+  const near = (x: number, n: number, y: number, m: number) =>
+    Math.abs(x / n - y / m) <= 0.5 / n + 0.5 / m;
+  return near(a.width, a.cols, b.width, b.cols) && near(a.height, a.rows, b.height, b.rows);
 }
 
 export type ToPage =
@@ -33,6 +51,10 @@ export type ToApp =
   | { t: "drawn"; id: number }
   /** The person tapped a link. */
   | { t: "link"; url: string }
+  /** How large a character is drawn, in the page's pixels, which says how many would fit. */
+  | { t: "cell"; width: number; height: number }
+  /** Whether the program asked for application cursor keys, which changes what arrows send. */
+  | { t: "cursorKeys"; application: boolean }
   /** Something went wrong in the page. Which, and never what the terminal said. */
   | { t: "trouble"; what: "script" | "unreadable" };
 
@@ -52,6 +74,10 @@ function side(value: unknown): value is number {
 
 function counter(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function cellSide(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_CELL;
 }
 
 /** Whether a size can be drawn. */
@@ -87,6 +113,14 @@ export function readToApp(message: unknown): ToApp | null {
       return counter(m.id) ? { t: "drawn", id: m.id } : null;
     case "link":
       return typeof m.url === "string" && linkable(m.url) ? { t: "link", url: m.url } : null;
+    case "cell":
+      return cellSide(m.width) && cellSide(m.height)
+        ? { t: "cell", width: m.width, height: m.height }
+        : null;
+    case "cursorKeys":
+      return typeof m.application === "boolean"
+        ? { t: "cursorKeys", application: m.application }
+        : null;
     case "trouble":
       return m.what === "script" || m.what === "unreadable" ? { t: "trouble", what: m.what } : null;
     default:

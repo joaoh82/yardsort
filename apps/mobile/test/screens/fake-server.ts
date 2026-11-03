@@ -149,6 +149,15 @@ export class FakeServer {
   relaySockets = new Set<Socket>();
   /** Where each attachment asked to resume from, in order. */
   attaches: ({ epoch: number; seq: number } | null)[] = [];
+  /** Each request for control: whether it was a take-over. */
+  acquires: boolean[] = [];
+  releases = 0;
+  inputs: { data: string; paste: boolean }[] = [];
+  resizes: { cols: number; rows: number }[] = [];
+  /** Answer requests for control as if someone else held it. */
+  refuseControl = false;
+  /** Operations taken and never answered, as when a link goes quiet just after one. */
+  unanswered = new Set<string>();
   #watching = new Map<Socket, { stream: number; epoch: number; seq: number }>();
   #nextStream = 1;
   /** Sockets with a subscription open, to tell of what is recorded. */
@@ -322,10 +331,19 @@ export class FakeServer {
             const { requestId, op, params } = JSON.parse(data);
             this.operations.push({ op, params });
             const refusal = this.computer.refuses.get(op);
+            if (this.unanswered.has(op)) {
+              this.#answer(op, params, socket);
+              return;
+            }
             say(
-              refusal
-                ? { requestId, error: { code: "forbidden", message: refusal, retryable: false } }
-                : { requestId, result: this.#answer(op, params, socket) },
+              op === "terminal.acquire" && this.refuseControl
+                ? {
+                    requestId,
+                    error: { code: "control_conflict", message: "Held.", retryable: false },
+                  }
+                : refusal
+                  ? { requestId, error: { code: "forbidden", message: refusal, retryable: false } }
+                  : { requestId, result: this.#answer(op, params, socket) },
             );
           }
         }, 0);
@@ -421,6 +439,24 @@ export class FakeServer {
       case "terminal.detach":
         this.#watching.delete(socket);
         return { kind: "done" };
+      case "terminal.acquire": {
+        this.acquires.push(params.takeOver as unknown as boolean);
+        return { kind: "lease", id: "lease-1", generation: 1, ttlMs: 30000, renewEveryMs: 10000 };
+      }
+      case "terminal.renew":
+        return { kind: "lease", id: "lease-1", generation: 1, ttlMs: 30000, renewEveryMs: 10000 };
+      case "terminal.release":
+        this.releases += 1;
+        return { kind: "done" };
+      case "terminal.input":
+        this.inputs.push({
+          data: params.data as unknown as string,
+          paste: params.paste as unknown as boolean,
+        });
+        return { kind: "done" };
+      case "terminal.resize":
+        this.resizes.push(params.size as unknown as { cols: number; rows: number });
+        return { kind: "done" };
       case "memory.list":
         return { kind: "memory", notes: computer.notes, next: null };
       default:
@@ -446,6 +482,15 @@ export class FakeServer {
           position: { epoch: watching.epoch, seq: watching.seq },
           bytes: new TextEncoder().encode(text),
         }).buffer as ArrayBuffer,
+      });
+    }
+  }
+
+  /** Who controls the terminal from now on, told to whoever is watching it. */
+  controlNow(controller: Record<string, unknown>): void {
+    for (const [socket, { stream }] of this.#watching) {
+      socket.onmessage?.({
+        data: JSON.stringify({ event: "terminal.control", stream, controller }),
       });
     }
   }

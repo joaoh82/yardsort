@@ -8,6 +8,10 @@
 //! name. Each change of hands bumps the session's generation, so a holder that lost control
 //! cannot type on with the lease it had, even over a connection that is still open.
 //!
+//! What a terminal sends without anyone doing anything is not typing: the pointer passing over a
+//! program that asked for every movement, and focus coming and going (see [`presence`]). A tab
+//! left open on this computer must not take control from a phone because a mouse was nudged.
+//!
 //! Local control lapses after [`LOCAL_HOLD`] without local input, and a lease after
 //! [`LEASE_TTL`] without renewal. Both lapse lazily: whoever asks next finds them gone.
 //!
@@ -111,6 +115,42 @@ pub(crate) enum Delivery {
     Fresh,
     /// One already written under this lease, sent again: drop it.
     Repeat,
+}
+
+/// The focus reports in `input`, when all of it only says where the person's pointer and focus
+/// are: `CSI I` and `CSI O`, and SGR mouse reports of movement with no button held. `None` when
+/// any of it is anything else, a key, a press, a wheel, a drag, and so counts as typing. Other
+/// mouse encodings count as typing too: neither agent that follows the pointer uses them.
+pub(crate) fn presence(input: &[u8]) -> Option<Vec<u8>> {
+    if input.is_empty() {
+        return None;
+    }
+    let mut focus = Vec::new();
+    let mut rest = input;
+    while !rest.is_empty() {
+        let body = rest.strip_prefix(b"\x1b[")?;
+        if let [b'I' | b'O', after @ ..] = body {
+            focus.extend_from_slice(&rest[..3]);
+            rest = after;
+            continue;
+        }
+        let body = body.strip_prefix(b"<")?;
+        let end = body.iter().position(|&b| b == b'M')?;
+        let fields = std::str::from_utf8(&body[..end]).ok()?;
+        let mut numbers = fields.split(';').map(|field| field.parse::<u16>().ok());
+        let (button, _x, _y) = (numbers.next()??, numbers.next()??, numbers.next()??);
+        if numbers.next().is_some() || !moved_without_a_button(button) {
+            return None;
+        }
+        rest = &body[end + 1..];
+    }
+    Some(focus)
+}
+
+/// An SGR report's first number: its low bits say which button, 3 being none, and 32 says it is a
+/// movement. 64 and above are the wheel and the extra buttons; 4, 8 and 16 are modifiers.
+fn moved_without_a_button(button: u16) -> bool {
+    button < 64 && button & 32 != 0 && button & 3 == 3
 }
 
 /// A session's control state. Lives under the session's view lock, beside its viewers, because
@@ -352,6 +392,51 @@ mod tests {
             })
         );
         assert_eq!(control.input(&lease, 3, t0), Ok(Delivery::Fresh));
+    }
+
+    #[test]
+    fn only_the_pointer_passing_and_focus_changing_are_not_typing() {
+        // As real xterm.js sends them.
+        let hover: &[u8] = b"\x1b[<35;12;4M";
+        assert_eq!(presence(hover), Some(vec![]));
+        assert_eq!(presence(b"\x1b[<39;12;4M"), Some(vec![]), "with Shift");
+        assert_eq!(presence(b"\x1b[I"), Some(b"\x1b[I".to_vec()));
+        assert_eq!(presence(b"\x1b[O"), Some(b"\x1b[O".to_vec()));
+        // Gathered into one write while the last was on its way.
+        assert_eq!(
+            presence(b"\x1b[<35;12;4M\x1b[O\x1b[<35;14;4M\x1b[I"),
+            Some(b"\x1b[O\x1b[I".to_vec())
+        );
+        let typing: &[&[u8]] = &[
+            b"",
+            b"a",
+            b"\r",
+            b"\x1b",
+            b"\x1b[",
+            b"\x1b[A",
+            b"\x1b[<0;16;5M",
+            b"\x1b[<0;16;5m",
+            b"\x1b[<2;16;5M",
+            b"\x1b[<32;16;5M",
+            b"\x1b[<33;16;5M",
+            b"\x1b[<34;16;5M",
+            b"\x1b[<64;16;5M",
+            b"\x1b[<65;16;5M",
+            b"\x1b[<99;16;5M",
+            b"\x1b[<3;16;5M",
+            b"\x1b[<35;12;4m",
+            b"\x1b[<35;12M",
+            b"\x1b[<35;12;4;9M",
+            b"\x1b[<35;;4M",
+            b"\x1b[<35;12;4",
+            b"\x1b[<35;12;4Mx",
+            b"x\x1b[<35;12;4M",
+            b"\x1b[Ix",
+            b"\x1b[<35;12;4M\x1b[A",
+        ];
+        for keys in typing {
+            assert_eq!(presence(keys), None, "{:?}", String::from_utf8_lossy(keys));
+        }
     }
 
     #[test]

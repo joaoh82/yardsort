@@ -158,8 +158,9 @@ question at startup and run nothing until it is answered.
 
 **One controller.** Typing or pasting from this computer gives it control of the terminal at
 once. Anyone else — a device through the relay — asks for a lease, renews it, and numbers its
-input under it; typing here ends the lease (`pty_host::control`). A lease holder's size stands
-while it holds control, and the size asked for here comes back after. What the app types on its
+input under it; typing here ends the lease (`pty_host::control`). A terminal saying where the
+pointer and focus are is not typing, and takes nothing. A lease holder's size stands while it
+holds control, and the size asked for here comes back after. What the app types on its
 own, a workflow's message, takes no control and waits while a lease is held
 (`type_unattended`).
 
@@ -658,7 +659,10 @@ remote ever talks to it directly. Instead:
   cache folder, per profile and marked with when they were seen. A terminal is drawn by xterm.js in a
   WebView that loads one document shipped with the app and reaches nothing else, spoken to only
   through typed, bounded messages (`src/lib/bridge.ts`). Watching resumes from the last position
-  drawn, and never sends anything to the program. Its native projects are generated, never committed.
+  drawn, and never sends anything to the program. Typing goes through a native field and a row of
+  keys, only under a lease a person asked for (`src/lib/control.ts`). It is sent once, in order,
+  and what may not have arrived is shown, never sent again. Leaving the screen or the app lets go.
+  Its native projects are generated, never committed.
 - `crates/remote-host` is the host's outbound connector: it keeps the link to the relay while
   Remote is on, reconnecting with a growing wait, and answers each device's channel on a thread of
   its own with `yardsort_core::remote::serve`. When the link fails, every channel lets go of what

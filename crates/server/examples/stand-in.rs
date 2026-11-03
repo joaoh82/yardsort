@@ -30,6 +30,7 @@
 //! - `{"op":"deny","grant":…}` and `{"op":"revoke","grant":…}`.
 //! - `{"op":"run"}`: start a short program in the workspace and record it, for activity.
 //! - `{"op":"typed"}`: the lines the program printed back.
+//! - `{"op":"typeHere","text":…}`: type into the program as the person at the computer does.
 //! - `{"op":"note","text":…}`: write an approved memory note in the workspace's project.
 //! - `{"op":"signInAs","subject":…}`: whom the provider signs in from now on, for a second
 //!   account. Everyone is `someone` until then.
@@ -284,6 +285,13 @@ async fn obey(
             Ok(Value::Null)
         }
         "typed" => Ok(json!(here.typed())),
+        "typeHere" => {
+            let text = command["text"].as_str().ok_or("say what is typed")?;
+            here.terminals
+                .write(&here.program, text.as_bytes())
+                .map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
         "note" => {
             let text = command["text"].as_str().ok_or("say what the note says")?;
             yardsort_core::memory::write(&here.store, &here.project, text)

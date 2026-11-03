@@ -27,6 +27,7 @@ import {
   MAX_MESSAGE,
   readToApp,
   readToPage,
+  sameCell,
   toBase64,
 } from "../../src/lib/bridge";
 import { PageFeed, TerminalWatch } from "../../src/lib/watch";
@@ -584,6 +585,29 @@ describe("the bridge", () => {
     }
     const all = Uint8Array.from({ length: 256 }, (_, i) => i);
     expect(fromBase64(toBase64(all))).toEqual(all);
+  });
+
+  test("a character is the same size however many are drawn, each whole rounded to a pixel", () => {
+    const drawn = (width: number, cols: number, height = 160, rows = 10) => ({
+      width,
+      height,
+      cols,
+      rows,
+    });
+    // As Chromium drew them, with a font 11.33 wide and the same in reverse: 453 / 40 is 11.325.
+    expect(sameCell(drawn(453, 40), drawn(680, 60))).toBe(true);
+    expect(sameCell(drawn(680, 60), drawn(453, 40))).toBe(true);
+    // The furthest apart rounding can put them: 11.3124 wide.
+    expect(sameCell(drawn(452, 40), drawn(679, 60))).toBe(true);
+    expect(sameCell(drawn(288, 40), drawn(432, 60))).toBe(true);
+    // And for rows, when a line is not a whole number of pixels: 16.4 high.
+    expect(sameCell(drawn(288, 40, 164, 10), drawn(288, 40, 328, 20))).toBe(true);
+
+    // A pixel more than rounding explains, either way, is another size.
+    expect(sameCell(drawn(453, 40), drawn(682, 60))).toBe(false);
+    expect(sameCell(drawn(453, 40), drawn(678, 60))).toBe(false);
+    expect(sameCell(drawn(288, 40), drawn(320, 40))).toBe(false);
+    expect(sameCell(drawn(288, 40, 160, 10), drawn(288, 40, 180, 10))).toBe(false);
   });
 
   test("the page reads only what it may be told", () => {

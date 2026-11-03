@@ -6,14 +6,15 @@ Yardsort server you sign in to. It is an [Expo](https://expo.dev) app, SDK 58 (R
 [`packages/remote-client`](../../packages/remote-client). Its plan, and why each decision went
 the way it did, is [docs/design/31](../../docs/design/31-remote-r3.md).
 
-**What it does so far (R3 slices 2 to 5):** connect to a server by its address and see what that
+**What it does so far (R3 slices 2 to 6):** connect to a server by its address and see what that
 server is and can see, sign in through the system browser, list the account's devices with this
 phone among them, sign out, and keep a profile per server with one in use. Pair with a computer by
 scanning its code, typing it or following a link, see each computer online, offline or
 reconnecting, and unpair. See each computer's workspaces, a workspace's conversations and other
 terminals, its activity as it is recorded, and a project's approved memory, with what was last seen
 shown as such when a computer cannot be reached. Watch a terminal at the computer's size, resuming
-after a drop or the background. It cannot type into one yet; the next slice adds that.
+after a drop or the background. Take control of it, type, paste and use the keys a phone lacks, drawn
+to fit the phone, and hand it back, or have the person at the computer take it at any time.
 
 ## What is in it
 
@@ -25,12 +26,15 @@ after a drop or the background. It cannot type into one yet; the next slice adds
 | `src/lib/pairing.ts`  | A pairing link held in memory until used, where it belongs among the profiles, and waiting for the person at the computer.                                                                                                                                                                                                                                  |
 | `src/lib/presence.ts` | Whether each computer can be reached, from a channel held to it while someone is looking.                                                                                                                                                                                                                                                                   |
 | `src/lib/activity.ts` | A workspace's activity followed through a channel, and what each event says. In memory only.                                                                                                                                                                                                                                                                |
+| `src/lib/control.ts`  | Having control of a terminal: asking for it, what is typed going one at a time, what may not have arrived, and letting go.                                                                                                                                                                                                                                  |
+| `src/lib/keys.ts`     | The keys a phone lacks, as the bytes a terminal would send for them.                                                                                                                                                                                                                                                                                        |
 | `src/lib/watch.ts`    | Watching a terminal through whichever channel is open, and holding output back from a page that has not caught up.                                                                                                                                                                                                                                          |
 | `src/lib/bridge.ts`   | The only thing the app and the terminal's page share: typed, bounded messages, each checked by the side reading it.                                                                                                                                                                                                                                         |
 | `terminal/`           | The page a terminal is drawn in. `scripts/terminal-page.ts` builds it into `src/ui/terminal-page.generated.ts`: `just mobile-terminal-page` after changing it. A test says when it is out of date.                                                                                                                                                          |
 | `src/lib/observed.ts` | What was last seen of a profile's computers and workspaces, kept in the cache folder.                                                                                                                                                                                                                                                                       |
 | `src/lib/native.ts`   | What only the phone has: SecureStore, the cache folder, the system browser's sign-in session, randomness and SHA-256, the phone's name.                                                                                                                                                                                                                     |
 | `src/ui/parts.tsx`    | The few native components the screens are built from.                                                                                                                                                                                                                                                                                                       |
+| `src/ui/composer.tsx` | The field and the row of keys for typing into a terminal.                                                                                                                                                                                                                                                                                                   |
 | `src/ui/live.tsx`     | What screens share about being live: a channel held only while on screen, how far a computer can be reached, and what was last seen meanwhile.                                                                                                                                                                                                              |
 | `test/lib/`           | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use), and the terminal's page in real headless Chromium, skipped where no browser is found.                                                                                                                      |
 | `test/screens/`       | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                                                                                                                                                                                                                          |
@@ -52,10 +56,14 @@ Things it holds to:
   the app is in the foreground. Offline never means a computer's agents stopped.
 - **What is kept of a computer** is names and branches, each marked with when it was seen: never
   a session title, activity, memory or terminal output. It goes with a computer that took this phone
-  back and with the profile. Nothing on these screens changes anything on the computer.
+  back and with the profile. Taking control of a terminal is the only thing here that changes anything
+  on the computer.
 - **A terminal is drawn, and nothing more.** Its page connects to nothing, goes nowhere, and keeps
-  nothing, and no terminal output is written anywhere. Reconnecting never types. A link is `https`,
-  tapped, and asked about first.
+  nothing, and no terminal output is written anywhere. A link is `https`, tapped, and asked about
+  first. Typing has a native field of its own.
+- **Control is only taken by a person pressing something**, and never taken back by itself. Nothing is
+  sent twice: what may not have arrived is shown as such, and what was waiting when control was lost
+  is dropped. Reconnecting never types. Leaving the screen or the app lets go.
 - **Signing out** revokes this phone at the server, which takes back every computer's grant,
   then deletes the profile. With the server out of reach, it asks before deleting anything.
 

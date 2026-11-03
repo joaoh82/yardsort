@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 
-use crate::control::{Control, Controller, Delivery, Holds, Lease, LeaseRef, Refusal};
+use crate::control::{self, Control, Controller, Delivery, Holds, Lease, LeaseRef, Refusal};
 use crate::queries::{self, Queries};
 use crate::replay::Replay;
 use crate::snapshot::Headless;
@@ -311,8 +311,14 @@ impl Session {
 
     /// Something typed at this computer: it takes control of the session, from a lease holder
     /// if there is one, and puts back the size the person here asked for. A terminal answering
-    /// a query it was just shown is not typing, and takes nothing.
+    /// a query it was just shown is not typing, and takes nothing, nor is one saying where the
+    /// pointer and focus are. While a lease holds, the program keeps hearing about focus, but
+    /// not about a pointer over a screen drawn at someone else's size.
     pub(crate) fn local_write(&self, data: &[u8]) -> Result<()> {
+        if let Some(focus) = control::presence(data) {
+            let leased = self.view().control.leased(Instant::now());
+            return self.write(if leased { &focus } else { data });
+        }
         let answering = {
             let view = self.view();
             view.answers_until

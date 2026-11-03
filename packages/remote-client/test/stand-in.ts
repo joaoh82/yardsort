@@ -82,6 +82,7 @@ export class StandIn {
   revoke = (grant: GrantId) => this.#ask<null>({ op: "revoke", grant });
   run = () => this.#ask<null>({ op: "run" });
   typed = () => this.#ask<string[]>({ op: "typed" });
+  typeHere = (text: string) => this.#ask<null>({ op: "typeHere", text });
   signInAs = (subject: string) => this.#ask<null>({ op: "signInAs", subject });
   removeHost = () => this.#ask<null>({ op: "removeHost" });
   note = (text: string) => this.#ask<null>({ op: "note", text });

@@ -5,9 +5,9 @@
  * The page that draws a terminal, inside a WebView (31 §5). It draws what it is sent and nothing
  * else: `scripts/terminal-page.ts` builds it into one document, with no way to reach the network.
  *
- * Nothing typed here goes anywhere, and nothing is ever said back to a program: there is no
- * listener for what xterm.js would answer, and the host has already taken a program's questions out
- * of what a phone is sent. A clipboard write in an escape sequence goes nowhere too, since the addon
+ * Nothing typed here goes anywhere, since typing has a native field of its own, and nothing is ever
+ * said back to a program: there is no listener for what xterm.js would answer, and the host has
+ * already taken a program's questions out of what a phone is sent. A clipboard write in an escape sequence goes nowhere too, since the addon
  * that would carry it out is not here.
  */
 
@@ -15,7 +15,14 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 
-import { fromBase64, linkable, readToPage, type ToApp } from "../src/lib/bridge";
+import {
+  type Drawn,
+  fromBase64,
+  linkable,
+  readToPage,
+  sameCell,
+  type ToApp,
+} from "../src/lib/bridge";
 
 declare global {
   interface Window {
@@ -56,6 +63,29 @@ if (field) {
   field.tabIndex = -1;
 }
 
+let cellSaid: Drawn | null = null;
+
+/** How large a character is, for the app to work out what fits. Read from what is drawn. */
+function sayCell(): void {
+  const screen = terminal.element?.querySelector(".xterm-screen")?.getBoundingClientRect();
+  const { cols, rows } = terminal;
+  if (!screen || cols === 0 || rows === 0 || screen.width <= 0 || screen.height <= 0) return;
+  const drawn = { width: screen.width, height: screen.height, cols, rows };
+  if (cellSaid && sameCell(cellSaid, drawn)) return;
+  cellSaid = drawn;
+  say({ t: "cell", width: drawn.width / cols, height: drawn.height / rows });
+}
+
+let applicationCursor = false;
+
+/** Arrows are sent by the app, and what a program asked for changes what they should say. */
+function sayCursorKeys(): void {
+  const application = terminal.modes.applicationCursorKeysMode;
+  if (application === applicationCursor) return;
+  applicationCursor = application;
+  say({ t: "cursorKeys", application });
+}
+
 /**
  * Run `step` after everything sent before it has been drawn. xterm.js parses what it is given later,
  * so a reset or a size applied at once would land in the middle of what came before it.
@@ -75,13 +105,18 @@ function heard(message: unknown): void {
       inTurn(() => {
         terminal.reset();
         terminal.resize(m.cols, m.rows);
+        sayCell();
+        sayCursorKeys();
       });
       break;
     case "resize":
       inTurn(() => terminal.resize(m.cols, m.rows));
       break;
     case "output":
-      terminal.write(fromBase64(m.data), () => say({ t: "drawn", id: m.id }));
+      terminal.write(fromBase64(m.data), () => {
+        sayCursorKeys();
+        say({ t: "drawn", id: m.id });
+      });
       break;
   }
 }
