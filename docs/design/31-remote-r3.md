@@ -979,9 +979,9 @@ so trying it means stopping that daemon first (step 1).
 under particular timing and fonts. An answer to where the room starts could come after a newer layout
 and bring back the size from before a keyboard settled, so it now says only where. And xterm.js rounds
 the drawn screen to a whole pixel, so a character read from it came out differently at another column
-count. The page now says it again only if rounding cannot explain the difference (`sameCell`). This
-machine's fonts are all exactly 7.2 pixels wide, which hid that; CI's are not. Its test now passes here
-with other fonts substituted through fontconfig too.
+count. The page now says it again only if rounding cannot explain the difference (`sameCell`). Every
+monospace font tried on this machine is exactly 7.2 pixels wide, which hid that on Linux here; CI's Linux
+and macOS failed. Its test now passes here with wider fonts substituted through fontconfig too.
 
 **Its smoke test, on the iPhone against staging,** with the desktop app on a computer as the host:
 
