@@ -243,8 +243,8 @@ when there is more than one. `--json` gives `{ "conversations": [{ "id", "harnes
 "reply", "shortened" }], "omitted", "unreadable" }] }`, or, with `--turn`, that one turn with
 everything the agent `said`.
 
-Claude Code's and Codex's conversations are read today. Any other agent's is listed with the
-reason it is not there.
+Every built-in agent's conversations are read: Claude Code, Codex, Grok, Cursor, OpenCode, OMP and
+pi. A custom agent's is listed with the reason it is not there.
 
 ### `ys session list`
 

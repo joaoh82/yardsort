@@ -11,7 +11,7 @@ const POINTS = [
   },
   {
     title: "Private by construction",
-    body: "No account, no telemetry, no keys of ours. Agents use their own logins; Yardsort just starts them. It checks for new versions, which you can switch off — and nothing else leaves your machine unless you switch Assist on and bring your own TypeSafe key.",
+    body: "No account, no telemetry, no keys of ours. Agents use their own logins; Yardsort just starts them. It checks for new versions, which you can switch off. Nothing else leaves your machine unless you switch Assist on and bring your own TypeSafe key, or turn on Remote and sign in to a server you choose.",
   },
   {
     title: "A record of what ran",
@@ -34,10 +34,6 @@ const POINTS = [
     body: "Tasks lists every project's open GitHub issues and counts the ones that need an answer — where the last person to speak was not a maintainer. Open one, then Delegate: the composer opens with the issue as the agent's first message, marked as text other people wrote, and nothing starts until you say so. The workspace remembers the task it came from. Open a new task, answer one, close, label and assign it from the same view; ys task does all of it from a terminal, so an agent can tell you what is open and file an issue when you ask. Everything goes through gh.",
   },
   {
-    title: "Smoke tests: the ten-minute check, repeatable",
-    body: "The steps a person runs by hand before saying done — start the server, open a page, click, look for a word — written as a YAML file in your repository that an agent writes and Yardsort runs, step by step, with every output, screenshot and reason for a failure kept. Browser steps drive a Chromium already on your machine over the DevTools protocol; nothing is installed. Because a file from a repository says what to run, it never runs until you have seen it: the first time Yardsort meets a new or changed file it asks you to approve its steps. Tests, in the sidebar, lists every project's tests with the verdict of each one's last run, and every run; a workflow can run one, and ys test does it all from a terminal.",
-  },
-  {
     title: "Start from a repository or a link",
     body: "Clone a repository lists the repositories your gh account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from GitHub, GitLab, Bitbucket, Gitea, Forgejo or a host of your own. Start from a link takes an issue's or a pull request's address and opens it, ready to delegate; a repository that is not a project yet is cloned on the way.",
   },
@@ -58,6 +54,10 @@ const POINTS = [
     body: "Signed in-app updates on macOS, Windows and the Linux AppImage — one click, and your agents' conversations resume afterwards.",
   },
   {
+    title: "Remote, still under development",
+    body: "Reach this computer's workspaces and terminals from your phone, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you turn it on, and a device gets in only if you say yes at this computer. Whoever runs the server can see what passes through it, and the phone app is not in the app stores yet. Expect it to change until the whole plan is finished.",
+  },
+  {
     title: "Light",
     body: "Built with Tauri and Rust: a few megabytes, not a bundled browser.",
   },
@@ -68,7 +68,7 @@ export function Also() {
     <section aria-labelledby="h-also" className="mx-auto max-w-[1120px] px-5 pt-[120px] md:px-8">
       <div className="grid items-start gap-12 md:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         <div className="md:order-2">
-          <p className="mb-2.5 font-mono text-[12.5px] text-accent">10 · Also</p>
+          <p className="mb-2.5 font-mono text-[12.5px] text-accent">12 · Also</p>
           <h3 id="h-also" className="text-2xl leading-[1.2] font-medium tracking-[-0.015em]">
             Quiet about the rest
           </h3>

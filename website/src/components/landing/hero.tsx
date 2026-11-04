@@ -21,7 +21,8 @@ export function Hero() {
       <p className="mx-auto mt-[22px] max-w-[640px] text-[17px] text-muted md:text-[19px]">
         Open-source desktop for Claude Code, Codex and any CLI agent you already use. Parallel tasks
         get their own git worktrees; several agents can share one. Hand the work to the next agent
-        with the context Yardsort already recorded — no re-explaining the branch.
+        with the context Yardsort already recorded — no re-explaining the branch. Agents can read
+        what the others said, and write smoke tests that Yardsort runs.
       </p>
       <div className="mx-auto mt-8 flex flex-col flex-wrap items-stretch justify-center gap-3 md:flex-row md:items-center">
         <a

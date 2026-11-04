@@ -32,6 +32,39 @@ export function Idea({ label, title, shot, shotFirst, children }: IdeaProps) {
   );
 }
 
+// What `ys workspace context` prints, in the shape crates/core/src/activity/digest.rs renders it.
+// The words are made up.
+function ContextExample() {
+  return (
+    <figure className="overflow-hidden rounded-[10px] border border-line bg-surface font-mono text-[13px]">
+      <pre className="overflow-x-auto px-4 py-3.5 leading-relaxed whitespace-pre-wrap">
+        <code>
+          <span className="text-faint select-none">$ </span>ys workspace context
+          {"\n\n"}
+          <span className="text-muted">
+            ## claude (opus) · conversation 3f2a1b9c · 12 turns · last turn 2026-11-02 11:40 UTC ·
+            running
+          </span>
+          {"\n\n"}
+          <span className="text-muted">### Turn 12 · 2026-11-02 11:40 UTC</span>
+          {"\n\n"}User:{"\n"}
+          <span className="text-muted">
+            &gt; leave the retry out for now, it hides the real failure
+          </span>
+          {"\n\n"}Agent:{"\n"}
+          <span className="text-muted">
+            &gt; Removed it. The login test now fails on the expired fixture, which is the actual
+            bug.
+          </span>
+        </code>
+      </pre>
+      <figcaption className="border-t border-line bg-raised px-4 py-2.5 text-[12px] text-faint">
+        An example, shortened. The words are made up.
+      </figcaption>
+    </figure>
+  );
+}
+
 export function Ideas() {
   return (
     <section aria-labelledby="h-how" className="mx-auto max-w-[1120px] px-5 pt-[120px] md:px-8">
@@ -43,8 +76,9 @@ export function Ideas() {
       </h2>
       <p className="mt-4 max-w-[640px] text-[17px] text-muted">
         Like a sorting yard: fan tasks onto parallel tracks, or keep several agents on one. Hand
-        work from Claude to Codex without re-briefing the branch. Review each result before bringing
-        the changes together.
+        work from Claude to Codex without re-briefing the branch, let agents read what the others
+        said, and have them write the smoke test that checks the result. Review each one before
+        bringing the changes together.
       </p>
 
       <div className="mt-[72px] space-y-[88px]">
@@ -178,7 +212,32 @@ export function Ideas() {
 
         <Idea
           shotFirst
-          label="06 · Workflows"
+          label="06 · Conversations"
+          title="Agents that know what the others said"
+          shot={<ContextExample />}
+        >
+          <p>
+            A handoff is one message, at one moment. An agent working beside another can also just
+            ask: <code className={code}>ys workspace context</code> prints every message you typed
+            and each turn&apos;s reply from the workspace&apos;s other conversations, newest first.
+            Claude Code, Codex, Grok, Cursor, OpenCode, OMP and pi can all be read.
+          </p>
+          <p>
+            A new agent is told the others are there, and its tab says so. Tool output and reasoning
+            are left out, and Yardsort keeps no copy: the words are read from the agents&apos; own
+            transcripts when the command runs.
+          </p>
+          <p>
+            What an agent reads goes to its provider, so each project has a switch:{" "}
+            <strong className={strong}>
+              Share conversations between this project&apos;s agents
+            </strong>
+            , on unless you untick it.
+          </p>
+        </Idea>
+
+        <Idea
+          label="07 · Workflows"
           title="Named agent work, in steps"
           shot={
             <Shot
@@ -208,6 +267,37 @@ export function Ideas() {
             posts on GitHub, then you are told, and the agent that wrote it is told to address the
             review. <code className={code}>ys workflow run</code> does the same from a terminal, and
             the open app carries it out in the background.
+          </p>
+        </Idea>
+
+        <Idea
+          shotFirst
+          label="08 · Smoke tests"
+          title="Automated smoke tests, written by the agent"
+          shot={
+            <Shot
+              name="tests"
+              alt="Tests: every project's smoke tests in one list, each with the verdict of its last run and the workspace it ran in"
+            />
+          }
+        >
+          <p>
+            The ten-minute check you do before saying done — start the server, open a page, click,
+            look for a word — written as a YAML file in your repository, so it travels with the
+            branch. An agent writes it, Yardsort runs it step by step, and every output, screenshot
+            and reason for a failure is kept. Browser steps drive a Chromium already on your
+            machine; nothing is installed.
+          </p>
+          <p>
+            A file from a repository says what to run, so it never runs until you have seen it:
+            Yardsort shows a new or changed file&apos;s steps and asks you first.
+          </p>
+          <p>
+            <strong className={strong}>Tests</strong>, in the sidebar, lists every project&apos;s
+            tests with the verdict of each one&apos;s last run, and every run. Press{" "}
+            <strong className={strong}>Send result to agent</strong> to tell the agent how it went,
+            or let a workflow do it. <code className={code}>ys test</code> does it all from a
+            terminal.
           </p>
         </Idea>
       </div>
