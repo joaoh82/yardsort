@@ -351,9 +351,22 @@ describe("a link the system hands the app", () => {
     incoming.drop();
   });
 
-  test("anything else goes to the router as it came, a sign-in's return among them", () => {
+  test("a sign-in's return never reaches the router, so its code is never in a route", () => {
     for (const path of [
-      "yardsort://signed-in?code=abc",
+      "yardsort://signed-in?code=ys1.hc.private",
+      "yardsort:///signed-in?code=ys1.hc.private",
+      "yardsort://signed-in",
+    ]) {
+      expect(redirectSystemPath({ path, initial: false })).toBeNull();
+      // Nothing is waiting for it in an app it started, which opens as it would.
+      expect(redirectSystemPath({ path, initial: true })).toBe("/");
+    }
+    expect(incoming.get()).toBeNull();
+  });
+
+  test("anything else goes to the router as it came", () => {
+    for (const path of [
+      "yardsort://signed-in-elsewhere?code=abc",
       "yardsort://pair?server=only",
       "/account",
     ]) {

@@ -115,7 +115,7 @@ export function TerminalView({
         allowsLinkPreview={false}
         geolocationEnabled={false}
         mediaCapturePermissionGrantType="deny"
-        dataDetectorTypes="none"
+        dataDetectorTypes={["none"]}
         saveFormDataDisabled
         setBuiltInZoomControls
         setDisplayZoomControls={false}

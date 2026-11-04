@@ -939,7 +939,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       account, the phone signed out, or not known, which deletes nothing), nothing of a profile stays on
       screen once it is gone or not in use, and a server can be removed
       ([31 §15](31-remote-r3.md#15--what-the-seventh-slice-adds)). Its smoke test passed on the owner's
-      iPhone against staging that day; Android is untried.
+      iPhone against staging that day. Android was first built and run that day too, in an emulator: it
+      crashed on opening any terminal, had a white header on a dark phone, and let a sign-in's code reach
+      the router, all fixed ([31 §16](31-remote-r3.md#16--android-in-an-emulator)). No Android phone yet, so
+      R3's device run is still to do.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
