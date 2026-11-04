@@ -132,4 +132,4 @@ function confirmLink(url: string): void {
   ]);
 }
 
-const styles = StyleSheet.create({ fill: { flex: 1, backgroundColor: "#151514" } });
+const styles = StyleSheet.create({ fill: { flex: 1, backgroundColor: "#0b0d10" } });

@@ -21,17 +21,42 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: "yardsort",
   orientation: "default",
   userInterfaceStyle: "automatic",
+  icon: "./assets/icon.png",
   ios: {
     bundleIdentifier: identifier,
     supportsTablet: true,
     config: { usesNonExemptEncryption: false },
   },
-  android: { package: identifier },
+  android: {
+    package: identifier,
+    adaptiveIcon: { foregroundImage: "./assets/icon-foreground.png", backgroundColor: "#14171c" },
+  },
   plugins: [
     "expo-router",
     "expo-secure-store",
     "expo-web-browser",
     "expo-status-bar",
+    [
+      "expo-font",
+      {
+        // Each named as its PostScript name, which is how iOS finds it, and Android by its file's.
+        fonts: [
+          "./assets/fonts/Inter-Regular.ttf",
+          "./assets/fonts/Inter-Medium.ttf",
+          "./assets/fonts/Inter-SemiBold.ttf",
+          "./assets/fonts/JetBrainsMono-Regular.ttf",
+          "./assets/fonts/JetBrainsMono-Medium.ttf",
+        ],
+      },
+    ],
+    [
+      "expo-splash-screen",
+      {
+        image: "./assets/splash.png",
+        imageWidth: 160,
+        backgroundColor: "#0f1115",
+      },
+    ],
     [
       "expo-camera",
       {

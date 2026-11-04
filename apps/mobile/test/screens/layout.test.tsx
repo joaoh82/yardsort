@@ -44,8 +44,8 @@ describe("the header", () => {
     phoneIs("dark");
     expect(await header()).toEqual({
       dark: true,
-      card: "#1f1f1d",
-      text: "#ecece8",
+      card: "#0f1115",
+      text: "#e8eaed",
       primary: DarkTheme.colors.primary,
     });
   });
@@ -54,8 +54,8 @@ describe("the header", () => {
     phoneIs("light");
     expect(await header()).toEqual({
       dark: false,
-      card: "#ffffff",
-      text: "#1c1c1a",
+      card: "#f4f5f7",
+      text: "#14171c",
       primary: DefaultTheme.colors.primary,
     });
   });

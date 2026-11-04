@@ -7,16 +7,15 @@
  * app is in the foreground.
  */
 
-import type { GrantId, HostId } from "@yardsort/remote-client";
+import type { GrantId } from "@yardsort/remote-client";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { type Computer, type ComputerList, messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
 import { Presence, type Reach } from "../lib/presence";
-import { describeReach, PARTED, SeenComputers, UNREACHABLE, useLive } from "./live";
-import { Body, Button, Card, Problem, Title, useColors, Waiting } from "./parts";
+import { describeReach, PARTED, reachDot, SeenComputers, UNREACHABLE, useLive } from "./live";
+import { Body, Button, Card, Dot, Group, Problem, Row, Section, Waiting } from "./parts";
 
 /** How often the list is asked again while a request waits at a computer (31 §5). */
 const WAITING_POLL_MS = 2_000;
@@ -76,9 +75,9 @@ export function Computers({ asked }: { asked: number }) {
     return () => clearInterval(timer);
   }, [live, waiting, load]);
 
-  const takeBack = async (grant: GrantId, host?: HostId) => {
+  const takeBack = async (grant: GrantId) => {
     try {
-      await accounts.unpair(grant, host);
+      await accounts.unpair(grant);
     } catch (error) {
       setProblem(messageOf(error));
     }
@@ -89,8 +88,7 @@ export function Computers({ asked }: { asked: number }) {
     list?.computers.some((c) => reach.get(c.host)?.kind === kind) ?? false;
 
   return (
-    <>
-      <Title>Computers</Title>
+    <Section title="Computers" note={list?.computers.length}>
       {lost.map(({ host, name, why }) => (
         <Card key={host} label={`${name} ${PARTED[why].what}`}>
           <Body>
@@ -108,17 +106,16 @@ export function Computers({ asked }: { asked: number }) {
           Settings, then pair here.
         </Body>
       )}
-      {list?.computers.map((computer) => (
-        <ComputerRow
-          key={computer.grant}
-          computer={computer}
-          reach={reach.get(computer.host)}
-          onOpen={() => router.push({ pathname: "/computer", params: { host: computer.host } })}
-          onUnpair={() =>
-            confirmUnpair(computer.name, () => void takeBack(computer.grant, computer.host))
-          }
-        />
-      ))}
+      <Group>
+        {list?.computers.map((computer) => (
+          <ComputerRow
+            key={computer.grant}
+            computer={computer}
+            reach={reach.get(computer.host)}
+            onOpen={() => router.push({ pathname: "/computer", params: { host: computer.host } })}
+          />
+        ))}
+      </Group>
       {anyIs("offline") && <Body muted>Offline does not mean its agents stopped.</Body>}
       {anyIs("unreachable") && <Body muted>{UNREACHABLE}</Body>}
       {list?.waiting.map((grant) => (
@@ -128,7 +125,7 @@ export function Computers({ asked }: { asked: number }) {
         </Card>
       ))}
       <Button title="Pair a computer" kind="primary" onPress={() => router.push("/pair")} />
-    </>
+    </Section>
   );
 }
 
@@ -136,41 +133,18 @@ function ComputerRow({
   computer,
   reach,
   onOpen,
-  onUnpair,
 }: {
   computer: Computer;
   reach: Reach | undefined;
   onOpen: () => void;
-  onUnpair: () => void;
 }) {
-  const colors = useColors();
-  const says = describeReach(reach, computer.lastSeenAt);
   return (
-    <Card label={`${computer.name}, ${says}`}>
-      <View style={styles.row}>
-        <Text style={[styles.name, { color: colors.ink }]}>{computer.name}</Text>
-        <Text style={{ color: reach?.kind === "online" ? colors.accent : colors.muted }}>
-          {says}
-        </Text>
-      </View>
-      <Button title={`Open ${computer.name}`} onPress={onOpen} />
-      <Button title={`Unpair ${computer.name}`} kind="danger" onPress={onUnpair} />
-    </Card>
+    <Row
+      title={computer.name}
+      detail={describeReach(reach, computer.lastSeenAt)}
+      monoDetail
+      leading={<Dot kind={reachDot(reach)} />}
+      onPress={onOpen}
+    />
   );
 }
-
-function confirmUnpair(name: string, unpair: () => void): void {
-  Alert.alert(
-    `Unpair ${name}?`,
-    "This phone stops reaching it, and stays signed in. To reach it again, pair again and say yes at that computer.",
-    [
-      { text: "Cancel", style: "cancel" },
-      { text: "Unpair", style: "destructive", onPress: unpair },
-    ],
-  );
-}
-
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
-  name: { fontSize: 17, fontWeight: "600" },
-});

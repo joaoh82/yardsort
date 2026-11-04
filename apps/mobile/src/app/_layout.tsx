@@ -4,14 +4,22 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { useColorScheme } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { Accounts, messageOf } from "../lib/accounts";
+import { appearance } from "../lib/appearance";
 import { AppProvider } from "../lib/context";
-import { nativeEnv, secureVault, suggestedDeviceName, systemBrowser } from "../lib/native";
+import {
+  appearanceFile,
+  nativeEnv,
+  secureVault,
+  suggestedDeviceName,
+  systemBrowser,
+} from "../lib/native";
 import { incoming } from "../lib/pairing";
-import { Button, Problem, Screen, useColors } from "../ui/parts";
+import { Button, FONTS, Problem, Screen, useColors, useScheme } from "../ui/parts";
+
+appearance.start(appearanceFile);
 
 const app = {
   accounts: new Accounts(nativeEnv, secureVault),
@@ -25,13 +33,14 @@ export default function Layout() {
   const colors = useColors();
   // Android's header is drawn from this. Without it, a dark phone gets a white header, with the
   // status bar's white icons lost against it. iOS 26's glass bar and its title stay the system's.
-  const base = useColorScheme() === "dark" ? DarkTheme : DefaultTheme;
+  const scheme = useScheme();
+  const base = scheme === "dark" ? DarkTheme : DefaultTheme;
   const theme = {
     ...base,
     colors: {
       ...base.colors,
       background: colors.background,
-      card: colors.surface,
+      card: colors.background,
       text: colors.ink,
       border: colors.line,
     },
@@ -45,7 +54,7 @@ export default function Layout() {
   return (
     <SafeAreaProvider>
       <AppProvider value={app}>
-        <StatusBar style="auto" />
+        <StatusBar style={scheme === "dark" ? "light" : "dark"} />
         {failed ? (
           // Nothing is shown, and nothing written, until what is kept can be read: writing over a
           // list that did not read would lose every profile in it.
@@ -62,11 +71,18 @@ export default function Layout() {
           </Screen>
         ) : (
           <ThemeProvider value={theme}>
-            <Stack screenOptions={{ headerBackTitle: "Back" }}>
+            <Stack
+              screenOptions={{
+                headerBackTitle: "Back",
+                headerBackButtonDisplayMode: "minimal",
+                headerTitleStyle: { fontFamily: FONTS.semibold },
+              }}
+            >
               <Stack.Screen name="index" options={{ headerShown: false }} />
               <Stack.Screen name="connect" options={{ title: "Connect" }} />
               <Stack.Screen name="account" options={{ title: "Account" }} />
               <Stack.Screen name="servers" options={{ title: "Servers" }} />
+              <Stack.Screen name="settings" options={{ title: "Settings" }} />
               <Stack.Screen name="computer" options={{ title: "Computer" }} />
               <Stack.Screen name="workspace" options={{ title: "Workspace" }} />
               <Stack.Screen name="memory" options={{ title: "Approved memory" }} />

@@ -48,7 +48,7 @@ const terminal = new Terminal({
   fontSize: 12,
   scrollback: 5000,
   linkHandler: { activate: (_event, url) => open(url), allowNonHttpProtocols: false },
-  theme: { background: "#151514", foreground: "#ecece8", cursor: "#ecece8" },
+  theme: { background: "#0b0d10", foreground: "#e8eaed", cursor: "#f5b83d" },
 });
 terminal.loadAddon(new Unicode11Addon());
 terminal.unicode.activeVersion = "11";
