@@ -166,6 +166,11 @@ October 2026 `brew style` also rejects a named minimum at or below Homebrew's ol
 redundant, and requires the bare stanza on every cask that installs an app; leaving it out broke
 the 0.18.0 tap update.
 
+Homebrew has refused to load a non-official tap's cask until it is trusted since 6.0.0. A user's
+`brew install --cask joaoh82/yardsort/yardsort` trusts that cask by naming it in full, so nothing
+changes for them, but `brew audit` does not, so the job runs `brew trust --cask` first. Without it,
+the 0.21.0 tap update failed.
+
 It needs `HOMEBREW_TAP_DEPLOY_KEY`: the private half of an SSH **deploy key** registered, with
 write access, on the tap repository only — it can touch nothing else.
 

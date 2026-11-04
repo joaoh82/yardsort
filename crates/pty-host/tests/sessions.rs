@@ -1152,12 +1152,14 @@ fn a_pointer_passing_or_focus_changing_here_takes_nothing_and_a_press_does() {
     let (host, _events) = host();
     let session = host
         .spawn(shell(
-            "stty -echo; while IFS= read -r line; do echo \"got:$line\"; done",
+            "stty -echo; echo ready; while IFS= read -r line; do echo \"got:$line\"; done",
         ))
         .unwrap();
     let capture = Capture::default();
     attach_terminal(&host, &session.id, &capture);
     let id = &session.id;
+    // Until then the terminal echoes what is written, and the "typed" waited for below is the echo.
+    capture.wait_for("ready");
 
     // With nobody in control, the program hears them and nobody gains control.
     host.write(id, POINTER).unwrap();

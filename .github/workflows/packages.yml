@@ -172,6 +172,9 @@ jobs:
           # month old when it passed a `depends_on` stanza every user's Homebrew refused (#90).
           brew update
           brew tap joaoh82/yardsort "$RUNNER_TEMP/tap"
+          # Homebrew refuses to load a non-official tap's cask until it is trusted. A user's
+          # `brew install --cask joaoh82/yardsort/yardsort` does that itself; `brew audit` does not.
+          brew trust --cask joaoh82/yardsort/yardsort
           brew style --cask joaoh82/yardsort/yardsort
           brew audit --cask --strict --online joaoh82/yardsort/yardsort
           brew install --cask joaoh82/yardsort/yardsort
