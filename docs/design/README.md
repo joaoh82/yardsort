@@ -37,7 +37,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 30  | [Open source and the managed service](30-open-source-and-managed.md)    | The server is AGPL, the phone app MPL, the rest GPL; production runs the public server unmodified; what stays private   |
 | 31  | [Remote, R3](31-remote-r3.md)                                           | The phone app. All seven slices built and on an iPhone, Android in an emulator. Its device run is to do                 |
 | 32  | [Smoke tests](32-smoke-tests.md)                                        | Proposal, and slice 1 built: a test file in the repository an agent writes and Yardsort checks, approved before it runs |
-| 33  | [The phone app's design](33-phone-design.md)                            | Built on an Android emulator, not yet on a real phone. The look, the icon and where it differs from the Figma file      |
+| 33  | [The phone app's design](33-phone-design.md)                            | Built, and its smoke test passed on the iPhone. The look, the icon, Settings and where it differs from the Figma file   |
 
 ## Vocabulary
 

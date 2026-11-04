@@ -948,7 +948,7 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       2026-11-04: the app redesigned before its first real use, from a Figma file, with the desktop's
       colours, embedded fonts, a proper icon and a splash screen, **Unpair** moved to the computer's own
       screen, and a Settings screen with a choice of light, dark or automatic ([33](33-phone-design.md)).
-      Seen on an Android emulator, not yet on a phone.
+      Its smoke test passed on the iPhone the same day.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

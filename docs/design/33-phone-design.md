@@ -1,7 +1,7 @@
 # The phone app's design
 
-_Built on 2026-11-04, ahead of the owner's first real use of the app. On an Android emulator so far;
-not yet seen on a real phone._
+_Built on 2026-11-04, ahead of the owner's first real use of the app. Its smoke test passed on the
+owner's iPhone that day. It has not been on a physical Android phone._
 
 The phone app worked, but looked plain: off-white and green, unlike the desktop app, with a default
 icon. This gives it the desktop app's colours and a more developer-like look, with a proper icon. It
@@ -76,9 +76,9 @@ looked at, apart from a few of those in one mode only. The screen tests cover th
 The appearance choice was checked there too: Dark on a light phone, Automatic following the phone as it
 changed, and Dark still chosen after quitting and reopening.
 
-An emulator is not a phone. Not checked: anything on an iPhone, which includes whether iOS finds the
-embedded fonts, how its header looks, whether its alerts and keyboard follow the choice, scanning a code, the largest text sizes, and anything on a
-physical Android phone.
+The owner then ran the smoke test below on their iPhone, on 2026-11-04, and it passed.
+
+Not checked: scanning a code, the largest text sizes, and anything on a physical Android phone.
 
 ## Smoke test on the iPhone
 
