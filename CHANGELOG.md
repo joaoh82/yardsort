@@ -122,8 +122,7 @@ has the downloads and the full commit lists.
   of its own, output to files, a cancel that stops the step and still runs the teardown; and
   `ys test wait` prints the verdict for the agent that asked, with `runs`, `log` and `cancel`
   beside it. A file from a repository never runs unseen: a run of a new or changed file waits
-  until you approve it in Yardsort. The Tests view is the next step, and `browser` steps are not
-  run yet. See [Smoke tests](docs/guide/smoke-tests.md).
+  until you approve it in Yardsort. See [Smoke tests](docs/guide/smoke-tests.md).
 
 ## 0.20.2
 

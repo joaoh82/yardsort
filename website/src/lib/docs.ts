@@ -50,7 +50,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/terminals-and-sessions",
         title: "Terminals & sessions",
         description:
-          "Run coding agents in real terminals, resume or fork sessions, hand off work, and keep agents running when you close the Yardsort window.",
+          "Run coding agents in real terminals, resume or fork sessions, hand off work, let agents read each other's conversations, and keep them running in the background.",
       },
       {
         slug: "guide/changes-and-files",
@@ -128,7 +128,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/smoke-tests",
         title: "Smoke tests",
         description:
-          "Write smoke tests as YAML files in your repository: typed steps, expectations, browser actions and variables, checked line by line with ys test validate.",
+          "Smoke tests as YAML files an agent writes and Yardsort runs: typed steps, browser actions, approval before anything runs, the Tests view and ys test.",
       },
       {
         slug: "guide/updates",

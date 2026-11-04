@@ -142,6 +142,11 @@ With the pull request open, **Request code review…** in the workspace's menu h
 review it and post on GitHub, then tells you and the agent that wrote it. That is a
 [workflow](guide/workflows.md); the **Workflows** section above Projects has it and any you write.
 
+Start a second agent beside the first and there is no need to retell the story: it can read what
+the first was asked and answered with `ys workspace context`, and is told so. A project can turn
+that off, since what an agent reads goes to its provider. See
+[what agents can read of each other](guide/terminals-and-sessions.md#what-agents-can-read-of-each-other).
+
 Ask the agent to _write a smoke test for this_ and it leaves a short YAML file in the
 repository — start the server, open a page, look for a word — that Yardsort runs step by step and
 keeps. **Run smoke test…** in the workspace's menu starts one; the first time a file runs you
@@ -172,11 +177,14 @@ to reopen it with its conversation intact.
 ## Next
 
 - [Workspaces](guide/workspaces.md) — branches, archiving, cleaning up
-- [Terminals & sessions](guide/terminals-and-sessions.md) — resume, fork, notifications
+- [Terminals & sessions](guide/terminals-and-sessions.md) — resume, fork, notifications, handing
+  work on, what agents can read of each other
 - [Tasks](guide/tasks.md) — your projects' GitHub issues: which need an answer, and handing one
   to an agent
 - [Workflows](guide/workflows.md) — named agent work in steps, the built-in code review
 - [Smoke tests](guide/smoke-tests.md) — the ten-minute check written as a file an agent runs
+- [Remote](guide/remote.md) — your phone, through a server; still under development, and off until
+  you turn it on
 - [Usage](guide/usage.md) — tokens, estimated API costs, plan limits and live CPU and memory
 - [Settings & harnesses](guide/settings.md) — make an agent start the way you like
 - [Keyboard shortcuts](guide/shortcuts.md)

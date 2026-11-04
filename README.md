@@ -5,7 +5,7 @@
   <p>
     Open-source desktop for Claude Code, Codex and any CLI agent you already use. Parallel tasks get their own git
     worktrees; several agents can share one. Hand the work to the next agent with the context Yardsort already
-    recorded — no re-explaining the branch.
+    recorded — no re-explaining the branch. Agents can read what the others said, and write smoke tests that Yardsort runs.
   </p>
   <p>
     <a href="https://yardsort.sh">yardsort.sh</a> ·
@@ -35,7 +35,8 @@ worktree** for it — a separate folder — and starts the agent there in a real
 another task on another track, or start a second agent in the same worktree. **Hand off** writes
 the next agent a first message from what happened here: your task, the branch, who wrote each file,
 what every run did. Project memory carries the short lessons you approved. On the right you watch
-the files each one touches, live, with diffs.
+the files each one touches, live, with diffs. An agent started beside another can read what that
+one was asked and answered, and a smoke test an agent wrote checks the result step by step.
 
 It is modeled on tools like Conductor and Superset, with the requirement they do not meet:
 **Linux, macOS and Windows are all first-class**, built and tested together on every change.
@@ -67,6 +68,14 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   Yardsort recorded — your task, where the branch stands, who wrote each file, what every agent
   run did and what is not known — for you to read and edit before it goes. Codex after Claude,
   without retyping the story. [More below](#hand-the-work-to-another-agent).
+- **Agents that know what the others said.** An agent started in a workspace where another has
+  been working is told so, and `ys workspace context` reads it what you typed and each turn's reply,
+  from the agents' own transcripts, without tool output. Every built-in agent can be read, nothing
+  is stored, and a project can turn it off, since what an agent reads goes to its provider.
+  [More below](#shared-conversations-agents-that-know-what-the-others-said).
+- **Build on work in progress.** **Fork into new workspace…** starts a new branch from a
+  workspace's branch, in a worktree of its own, and tells the new agent what was recorded about the
+  one you forked. [More below](#hand-the-work-to-another-agent).
 - **Workflows: named agent work, in steps.** A short YAML file — have a second agent review
   this pull request, then tell me and the agent that wrote it — run from the sidebar or with
   `ys workflow run`, its steps drawn as a chart, every mistake named at its line. The built-in
@@ -152,9 +161,15 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 "<prompt>"`. The agent belongs to the background process, so it carries on after the command
   returns — and `ys attach` puts it back on your terminal, `ys logs` prints what a session ended
   up with, `ys workspace handoff` prints the next agent's first message, `ys workspace fork`
-  starts the next feature on a new branch from a workspace's, `ys workflow run`
-  queues a workflow for the open app to carry out. `ys workspace delete` removes one when the
-  work is done, keeping the branch. Every command takes `--json`.
+  starts the next feature on a new branch from a workspace's, `ys workspace context` prints what
+  its other agents were asked and answered, `ys workflow run` queues a workflow for the open app to
+  carry out, and `ys test run` a smoke test. `ys workspace delete` removes one when the work is
+  done, keeping the branch. Every command takes `--json`.
+- **Remote, still under development.** Reach this computer's workspaces and terminals from your
+  phone, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
+  turn it on, and a device gets in only if you say yes at this computer. Whoever runs the server
+  can see what passes through it, and the phone app is not in the app stores yet. Expect it to
+  change until the whole plan is finished. See [Remote](docs/guide/remote.md).
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>
@@ -298,6 +313,44 @@ the same record after your message, which is the new workspace's task. Uncommitt
 where they were. From a terminal, `ys workspace fork <workspace> "<prompt>"` does the same. See
 [Fork into new workspace…](docs/guide/workspaces.md#fork-into-new-workspace).
 
+## Shared conversations: agents that know what the others said
+
+A handoff is one message, at one moment. An agent working beside another can also just ask.
+`ys workspace context` prints what was said in the workspace's other conversations: every message
+you typed and each agent's reply at the end of each turn, newest first, within about 8,000 tokens.
+What does not fit is listed by turn, and `--turn` shows any one whole. It looks like this, shortened, with
+made-up words:
+
+```markdown
+# What was said in this workspace
+
+## claude (opus) · conversation 3f2a1b9c · 12 turns · started 2026-11-02 09:14 UTC · last turn 2026-11-02 11:40 UTC · running
+
+### Turn 12 · 2026-11-02 11:40 UTC
+
+User:
+
+> leave the retry out for now, it hides the real failure
+
+Agent:
+
+> Removed it. The login test now fails on the expired fixture, which is the actual bug.
+```
+
+Yardsort reads these from the agents' own transcripts when the command runs, for Claude Code, Codex,
+Grok, Cursor, OpenCode, OMP and pi alike. Tool calls, their output and the agents' reasoning are
+left out, and no copy is kept.
+
+An agent started in a workspace where another has said something is told, in a short note, which
+conversations there are and how to read them. Most agents take that as background context, so one
+started from the tab bar knows without a first message and starts no turn. Its tab says so, with
+**Show** to see the note; **Alt-click** starts an agent without it.
+
+This is on unless you untick **Share conversations between this project's agents** in a project's
+Memory view. What an agent reads goes to that agent's provider: Claude's conversation, read by
+Codex, is sent to OpenAI as part of Codex's work. See
+[what agents can read of each other](docs/guide/terminals-and-sessions.md#what-agents-can-read-of-each-other).
+
 ## Workflows: named agent work, in steps
 
 A workflow is a named, reusable piece of agent work that runs in steps — have a second agent
@@ -345,7 +398,9 @@ and a **Runs** tab of every run; filter by project, workspace, verdict or what t
 A run opens as a tab beside the agent whose work it checks, each step with its status, the one
 running with its live output, a failed one with what it expected, what it got, and the screenshot
 it took. An agent writes a test itself, or press **Describe it** and a model writes one for you to
-check and save. A [workflow](docs/guide/workflows.md) can run one too.
+check and save. **Send result to agent** types the verdict into the workspace's agent once it is
+quiet, and a [workflow](docs/guide/workflows.md) can run a test too: the built-in **Smoke test, then
+tell the agent** does both.
 
 ![Tests: every project's smoke tests in one list, each with the verdict of its last run and the workspace it ran in, a Runs tab, filters, and Describe it](docs/images/tests.png)
 
@@ -475,25 +530,27 @@ says no.
 
 ## Documentation
 
-|                                                                                                  |                                                                           |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                                   |
-| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                              |
-| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off            |
-| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                               |
-| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                  |
-| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                           |
-| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history                     |
-| [Pull requests](docs/guide/pull-requests.md)                                                     | Every project's pull requests: filter, start a workspace, merge           |
-| [Tasks](docs/guide/tasks.md)                                                                     | Every project's GitHub issues: which need an answer, hand one to an agent |
-| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own              |
-| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                     |
-| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                |
-| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                            |
-| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints                         |
-| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs             |
-| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                           |
-| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions                      |
+|                                                                                                  |                                                                                      |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                                              |
+| [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                                         |
+| [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off, shared conversations |
+| [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                                          |
+| [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                             |
+| [Memory](docs/guide/memory.md)                                                                   | Lessons for a project's agents, approved by you                                      |
+| [Outcomes](docs/guide/outcomes.md)                                                               | What became of each attempt, and each agent's history                                |
+| [Pull requests](docs/guide/pull-requests.md)                                                     | Every project's pull requests: filter, start a workspace, merge                      |
+| [Tasks](docs/guide/tasks.md)                                                                     | Every project's GitHub issues: which need an answer, hand one to an agent            |
+| [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own                         |
+| [Smoke tests](docs/guide/smoke-tests.md)                                                         | A file an agent writes and Yardsort runs: steps, browser, approval, the Tests view   |
+| [Remote](docs/guide/remote.md)                                                                   | Your phone, through a server. Still under development, and off until you turn it on  |
+| [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                                |
+| [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                           |
+| [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                                       |
+| [Assist](docs/guide/assist.md)                                                                   | Optional Jev checks on changes and composer hints                                    |
+| [The `ys` command line](docs/guide/cli.md)                                                       | Installing it; workspaces, agents, `attach`, `logs`, handoffs                        |
+| [Keyboard shortcuts](docs/guide/shortcuts.md) · [Troubleshooting](docs/guide/troubleshooting.md) |                                                                                      |
+| [Design docs](docs/design/README.md)                                                             | Architecture, harness model, roadmap, open questions                                 |
 
 ## Build from source
 
