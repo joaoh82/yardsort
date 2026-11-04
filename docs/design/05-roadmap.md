@@ -942,7 +942,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       iPhone against staging that day. Android was first built and run that day too, in an emulator: it
       crashed on opening any terminal, had a white header on a dark phone, and let a sign-in's code reach
       the router, all fixed ([31 §16](31-remote-r3.md#16--android-in-an-emulator)). No Android phone yet, so
-      R3's device run is still to do.
+      R3's device run is still to do. Its iPhone half is cut to what the smoke tests never
+      ran ([31 §17](31-remote-r3.md#17--the-device-run-on-the-iphone)), with the time budgets and an external
+      keyboard moved to R4.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
