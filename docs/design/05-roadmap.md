@@ -964,7 +964,8 @@ unchanged.
 
 Proposed in [29-conversation-context](29-conversation-context.md) on 2026-10-25. A second agent in
 a workspace sees the same files as the first and nothing of its conversation; the handoff packet
-says so, because the record is metadata. Slices 1–3 are built.
+says so, because the record is metadata. Shipped in 0.21.0 on 2026-11-04; the exit is still open,
+until checklist § 26 has been run on macOS and Windows.
 
 - A **conversation digest** — every message the user typed and the agent's final reply per turn,
   from the harness's own transcript, within a budget, with no model — read live by
@@ -1002,6 +1003,8 @@ says so, because the record is metadata. Slices 1–3 are built.
 - [x] Checklist § 26 in the app on Linux, 2026-10-26: every row passes. Found: two of its rows had
       been filed under § 21, and `ys attach` / `ys logs` did not take the id `ys session list`
       prints. Recorded in [29 § checked in the app](29-conversation-context.md#checked-in-the-app).
+- [ ] Checklist § 26 in the app on macOS and Windows, with `scripts/checklist-26.sh` and
+      `scripts/checklist-26.ps1`. Neither script has been run on those platforms yet.
 
 _Exit:_ on all three platforms, Claude works in a workspace, Codex is started from the tab bar
 beside it, and before its first answer Codex reads Claude's conversation and uses it; with the

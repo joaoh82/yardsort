@@ -1,13 +1,14 @@
 # 29 — Conversation context between a workspace's agents
 
-_Proposal, 2026-10-25. Decisions from the design pass on 2026-10-24 and 2026-10-25 are recorded.
-Slices 1–3 are built — the digest for every built-in agent,
+_Shipped in 0.21.0, 2026-11-04; proposed on 2026-10-25. Decisions from the design pass on 2026-10-24
+and 2026-10-25 are recorded. What shipped — the digest for every built-in agent,
 `ys workspace context`, the switch, telling every new agent, and *What was said* in the handoff
 packet — and [§ slice 1](#slice-1-what-shipped), [§ slice 2](#slice-2-what-shipped) and
 [§ slice 3](#slice-3-what-shipped) say where they differ from the proposal below, with
 [§ after slice 3](#after-slice-3-grok-and-resume) for Grok and the note on resume, and
 [§ Claude Code on resume](#claude-code-on-resume) for the last of it;
-[§ checked in the app](#checked-in-the-app) records the pass on Linux._
+[§ checked in the app](#checked-in-the-app) records the pass on Linux. Checklist § 26 has not been
+run on macOS or Windows, so [M27](05-roadmap.md#m27--conversation-context) stays open until it has._
 
 A workspace can hold several conversations: Claude in one tab, Codex or Cursor in the next. They
 share the worktree, so the second agent sees the same files and the same diff — and nothing of
