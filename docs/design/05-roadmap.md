@@ -948,7 +948,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       2026-11-04: the app redesigned before its first real use, from a Figma file, with the desktop's
       colours, embedded fonts, a proper icon and a splash screen, **Unpair** moved to the computer's own
       screen, and a Settings screen with a choice of light, dark or automatic ([33](33-phone-design.md)).
-      Its smoke test passed on the iPhone the same day.
+      Its smoke test passed on the iPhone the same day. By the owner's decision, internal TestFlight builds
+      move earlier than R7, and Settings → Remote is shown to everyone from the next release, off until
+      turned on, and marked as still under development.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

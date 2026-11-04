@@ -665,7 +665,7 @@ export const ipc = {
     unwrap(commands.draftSaveSettings(enabled, model)),
 
   /**
-   * Remote, a preview: this computer as a host on a Yardsort server. The webview never sees a
+   * Remote, still under development: this computer as a host on a Yardsort server. The webview never sees a
    * credential, only whether Remote is on, a pairing code while one is shown, and the devices
    * let in. See `src-tauri/src/remote.rs`.
    */

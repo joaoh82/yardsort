@@ -639,8 +639,8 @@ remote ever talks to it directly. Instead:
   ([28](28-remote-infrastructure.md)).
 - `crates/remote-client` is a device's side of the server's API: signing in through the system
   browser to a loopback listener, refreshing, the device, host and pairing calls, and relay
-  sockets. The app uses it as a host (`src-tauri/src/remote.rs`, Settings → Remote, behind
-  `YARDSORT_REMOTE_PREVIEW=1`); `ys` never does.
+  sockets. The app uses it as a host (`src-tauri/src/remote.rs`, Settings → Remote, off until the
+  person turns it on); `ys` never does.
 - `packages/remote-client` is the same device's side in TypeScript, for the phone app (R3,
   [31](31-remote-r3.md)): the protocol's types with the bounds `remote-proto` sets, signing in,
   the session and its refresh, pairing, and relay channels that check every terminal item's

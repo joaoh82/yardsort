@@ -45,8 +45,13 @@ R3 does **not** include:
 - diagnostics export, privacy defaults beyond those below, or the self-host push story (R4);
 - a headless host or a desktop client of another computer (R5);
 - sync (R6);
-- store listings, store builds or billing (R7). Every build in R3 is a development build on the
-  owner's own devices;
+- store listings, public store builds or billing (R7). Every build in R3 is a development build on
+  the owner's own devices, except that on 2026-11-04 the owner moved one thing earlier so as to start
+  using the app: **internal TestFlight builds**, archived in Xcode with no EAS
+  ([the README](../../apps/mobile/README.md#on-testflight)). External testers and listings stay in R7.
+  The release identity was first built that day, for Android, and run on the emulator: its code is
+  embedded, it shows no developer tools, and it looked up staging. Android's generated permissions (§16)
+  still want blocking before any build goes to a store;
 - editing code, Git writes, launching a new agent, approving anything on an agent's behalf, or
   approving memory. The proposal excludes them from the first mobile scope (§3.4). Reading
   approved memory is in scope, as `memory.list` already serves it.

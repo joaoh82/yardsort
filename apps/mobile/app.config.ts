@@ -5,7 +5,7 @@
  * The app's identity. A development build is its own app on the phone, beside a release one:
  * its own name and bundle identifier, the same `yardsort` scheme (31 §5). The system's sign-in
  * session hands its answer to the app that opened it, so two apps with one scheme do not mix.
- * `APP_VARIANT=release` builds the release identity; nothing in R3 does.
+ * `APP_VARIANT=release` builds the release identity, which `just mobile-testflight` does.
  */
 
 import type { ConfigContext, ExpoConfig } from "expo/config";
@@ -24,6 +24,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   icon: "./assets/icon.png",
   ios: {
     bundleIdentifier: identifier,
+    // TestFlight refuses a build number it has seen; `just mobile-testflight` gives each a new one.
+    buildNumber: process.env.YARDSORT_BUILD_NUMBER ?? "1",
+    ...(process.env.APPLE_TEAM_ID ? { appleTeamId: process.env.APPLE_TEAM_ID } : {}),
     supportsTablet: true,
     config: { usesNonExemptEncryption: false },
   },
@@ -61,7 +64,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "expo-camera",
       {
         cameraPermission: "Yardsort uses the camera to scan the code your computer shows to pair.",
-        microphonePermission: false,
+        // Never asked: scanning records nothing. The library's code refers to the microphone, and
+        // Apple refuses an upload whose code does and whose Info.plist has no words for it.
+        microphonePermission: "Yardsort does not use the microphone.",
         recordAudioAndroid: false,
       },
     ],
