@@ -23,7 +23,7 @@ import { Linking, StyleSheet, View } from "react-native";
 import { messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
 import { placeOf, waitForAnswer } from "../lib/pairing";
-import { Body, Button, Card, Field, Problem, Screen, Title, Waiting } from "../ui/parts";
+import { Body, Button, Field, Problem, Screen, Section, Title, Waiting } from "../ui/parts";
 
 type Stage =
   | { kind: "entry" }
@@ -92,7 +92,7 @@ export default function Pair() {
     return () => stop.abort();
   }, [waitingFor, accounts]);
 
-  const home = () => router.replace("/");
+  const home = () => router.dismissTo("/account");
 
   if (!snapshot.loaded) {
     return (
@@ -342,7 +342,7 @@ function Entry({
         <Button title="Scan the code" kind="primary" onPress={() => setScanning(true)} />
       )}
 
-      <Card label="Type the code">
+      <Section title="Or type the code">
         <Field
           label="Pairing code"
           hint={`Eight letters and digits. It goes to ${serverName}.`}
@@ -359,7 +359,7 @@ function Entry({
           disabled={!code}
           onPress={() => code && onCode(code)}
         />
-      </Card>
+      </Section>
     </Screen>
   );
 }

@@ -11,7 +11,7 @@ import { Accounts, messageOf } from "../lib/accounts";
 import { AppProvider } from "../lib/context";
 import { nativeEnv, secureVault, suggestedDeviceName, systemBrowser } from "../lib/native";
 import { incoming } from "../lib/pairing";
-import { Button, Problem, Screen, useColors } from "../ui/parts";
+import { Button, FONTS, Problem, Screen, useColors } from "../ui/parts";
 
 const app = {
   accounts: new Accounts(nativeEnv, secureVault),
@@ -31,7 +31,7 @@ export default function Layout() {
     colors: {
       ...base.colors,
       background: colors.background,
-      card: colors.surface,
+      card: colors.background,
       text: colors.ink,
       border: colors.line,
     },
@@ -62,7 +62,13 @@ export default function Layout() {
           </Screen>
         ) : (
           <ThemeProvider value={theme}>
-            <Stack screenOptions={{ headerBackTitle: "Back" }}>
+            <Stack
+              screenOptions={{
+                headerBackTitle: "Back",
+                headerBackButtonDisplayMode: "minimal",
+                headerTitleStyle: { fontFamily: FONTS.semibold },
+              }}
+            >
               <Stack.Screen name="index" options={{ headerShown: false }} />
               <Stack.Screen name="connect" options={{ title: "Connect" }} />
               <Stack.Screen name="account" options={{ title: "Account" }} />

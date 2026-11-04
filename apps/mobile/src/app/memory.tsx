@@ -13,7 +13,7 @@ import { useCallback, useState } from "react";
 import { messageOf } from "../lib/accounts";
 import { moment } from "../lib/format";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
-import { Body, Button, Card, Problem, Screen, Waiting } from "../ui/parts";
+import { Body, Button, Card, Mono, Problem, Screen, Waiting } from "../ui/parts";
 
 export default function MemoryScreen() {
   const params = useLocalSearchParams<{ host?: string; project?: string }>();
@@ -74,9 +74,9 @@ function Memory({ host, project }: { host: HostId; project: ProjectId }) {
       {page?.notes.map((note) => (
         <Card key={note.id} label="A note">
           <Body>{note.text}</Body>
-          <Body muted>
+          <Mono>
             {note.author}, {moment(note.updatedAt)}
-          </Body>
+          </Mono>
         </Card>
       ))}
       {page?.next && (

@@ -16,13 +16,14 @@ import type {
 } from "@yardsort/remote-client";
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
+import { Alert } from "react-native";
 
 import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
 import { moment } from "../lib/format";
 import type { ObservedComputer, ObservedWorkspaces } from "../lib/observed";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
-import { Body, Button, Label, Problem, Row, Screen, Title, Waiting } from "../ui/parts";
+import { Body, Button, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
 
 /** A workspace as this screen shows it, from the computer or from what was last seen. */
 interface Shown {
@@ -30,6 +31,7 @@ interface Shown {
   project: ProjectId;
   name: string;
   detail: string;
+  running?: string | undefined;
 }
 
 export default function ComputerScreen() {
@@ -51,6 +53,21 @@ function Computer({ host }: { host: HostId }) {
   const [asked, setAsked] = useState(0);
   const [more, setMore] = useState<WorkspacePage | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [unpairing, setUnpairing] = useState(false);
+
+  const unpair = async () => {
+    setUnpairing(true);
+    setProblem(null);
+    try {
+      // Which grant is the server's to say, so it is asked only when needed.
+      const paired = (await accounts.computers()).computers.find((c) => c.host === host);
+      if (paired) await accounts.unpair(paired.grant, host);
+      router.dismissTo("/account");
+    } catch (error) {
+      setProblem(messageOf(error));
+      setUnpairing(false);
+    }
+  };
 
   useEffect(() => {
     const observed = accounts.observed();
@@ -128,7 +145,6 @@ function Computer({ host }: { host: HostId }) {
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       {title}
       <ReachLine reach={reach} lastSeenAt={computer?.lastSeenAt ?? null} />
-      <Title>Workspaces</Title>
       {first.problem && <Problem>{first.problem}</Problem>}
       {problem && <Problem>{problem}</Problem>}
       {oldShown && <Body muted>As of {moment(seen.observedAt)}.</Body>}
@@ -141,20 +157,30 @@ function Computer({ host }: { host: HostId }) {
         const here = shown?.filter((workspace) => workspace.project === project.id) ?? [];
         if (here.length === 0) return null;
         return (
-          <Section key={project.id} name={project.name}>
-            {here.map((workspace) => (
-              <Row
-                key={workspace.id}
-                title={workspace.name}
-                {...(workspace.detail ? { detail: workspace.detail } : {})}
-                onPress={() =>
-                  router.push({
-                    pathname: "/workspace",
-                    params: { host, workspace: workspace.id },
-                  })
-                }
-              />
-            ))}
+          <Section key={project.id} title={project.name} note={here.length}>
+            <Group>
+              {here.map((workspace) => (
+                <Row
+                  key={workspace.id}
+                  title={workspace.name}
+                  {...(workspace.detail ? { detail: workspace.detail } : {})}
+                  monoDetail
+                  {...(workspace.running ? { badge: workspace.running } : {})}
+                  label={[
+                    workspace.name,
+                    [workspace.detail, workspace.running].filter(Boolean).join(" · "),
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/workspace",
+                      params: { host, workspace: workspace.id },
+                    })
+                  }
+                />
+              ))}
+            </Group>
           </Section>
         );
       })}
@@ -166,16 +192,24 @@ function Computer({ host }: { host: HostId }) {
           }}
         />
       )}
+      <Button
+        title={`Unpair ${name}`}
+        kind="danger"
+        busy={unpairing}
+        onPress={() => confirmUnpair(name, () => void unpair())}
+      />
     </Screen>
   );
 }
 
-function Section({ name, children }: { name: string; children: React.ReactNode }) {
-  return (
-    <>
-      <Label>{name}</Label>
-      {children}
-    </>
+function confirmUnpair(name: string, unpair: () => void): void {
+  Alert.alert(
+    `Unpair ${name}?`,
+    "This phone stops reaching it, and stays signed in. To reach it again, pair again and say yes at that computer.",
+    [
+      { text: "Cancel", style: "cancel" },
+      { text: "Unpair", style: "destructive", onPress: unpair },
+    ],
   );
 }
 
@@ -193,11 +227,7 @@ function shownFromComputer(workspace: WorkspaceSummary): Shown {
     id: workspace.id,
     project: workspace.project,
     name: workspace.name,
-    detail: [
-      workspace.missing ? "Its folder is gone" : on,
-      running > 0 ? `${running} running` : null,
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    detail: (workspace.missing ? "Its folder is gone" : on) ?? "",
+    running: running > 0 ? `${running} running` : undefined,
   };
 }

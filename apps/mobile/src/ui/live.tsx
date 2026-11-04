@@ -16,14 +16,14 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { AppState } from "react-native";
+import { AppState, StyleSheet, View } from "react-native";
 
 import { messageOf, type Parted } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
 import { moment } from "../lib/format";
 import type { ObservedComputer } from "../lib/observed";
 import { Presence, type Reach } from "../lib/presence";
-import { Body, Button, Problem, Row, Screen } from "./parts";
+import { Body, Button, Dot, Group, Mono, Problem, Row, Screen } from "./parts";
 
 /**
  * What one profile reaches, shown only while that profile is the one in use and its address still
@@ -144,17 +144,38 @@ export function describeReach(reach: Reach | undefined, lastSeenAt: number | nul
   }
 }
 
+export function reachDot(reach: Reach | undefined): "on" | "off" | "trying" | "bad" {
+  switch (reach?.kind) {
+    case "online":
+      return "on";
+    case "reconnecting":
+      return "trying";
+    case "unreachable":
+    case "gone":
+      return "bad";
+    default:
+      return "off";
+  }
+}
+
 /** Where a computer stands, at the top of what is read from it. */
 export function ReachLine({
   reach,
   lastSeenAt,
+  also,
 }: {
   reach: Reach | undefined;
   lastSeenAt: number | null;
+  /** Where in the computer this is: a branch. */
+  also?: string | undefined;
 }) {
   return (
     <>
-      <Body muted>{describeReach(reach, lastSeenAt)}</Body>
+      <View style={styles.reach}>
+        <Dot kind={reachDot(reach)} />
+        <Mono>{describeReach(reach, lastSeenAt)}</Mono>
+        {also ? <Mono>· {also}</Mono> : null}
+      </View>
       {reach?.kind === "offline" && <Body muted>Offline does not mean its agents stopped.</Body>}
       {reach?.kind === "unreachable" && <Body muted>{UNREACHABLE}</Body>}
     </>
@@ -209,15 +230,21 @@ export function SeenComputers() {
   }, [accounts]);
 
   return (
-    <>
+    <Group>
       {seen.map((computer) => (
         <Row
           key={computer.host}
           title={computer.name}
           detail={`As of ${moment(computer.observedAt)}`}
+          monoDetail
+          leading={<Dot kind="off" />}
           onPress={() => router.push({ pathname: "/computer", params: { host: computer.host } })}
         />
       ))}
-    </>
+    </Group>
   );
 }
+
+const styles = StyleSheet.create({
+  reach: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+});

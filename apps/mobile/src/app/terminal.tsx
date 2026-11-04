@@ -15,15 +15,22 @@ import type { Controller, HostId, TerminalId } from "@yardsort/remote-client";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { KeyboardAvoidingView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useApp } from "../lib/context";
 import { deviceName, fitted, TerminalControl } from "../lib/control";
 import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
 import { Composer } from "../ui/composer";
-import { describeReach, NoLongerPaired, OfProfile, useChannelTo, useLive } from "../ui/live";
-import { Body, Button, Problem, Screen, useColors } from "../ui/parts";
+import {
+  describeReach,
+  NoLongerPaired,
+  OfProfile,
+  reachDot,
+  useChannelTo,
+  useLive,
+} from "../ui/live";
+import { Button, Dot, FONTS, Problem, Screen, useColors } from "../ui/parts";
 import { type Room, TerminalView } from "../ui/terminal-view";
 
 export default function TerminalScreen() {
@@ -115,7 +122,7 @@ function Watching({
   return (
     <SafeAreaView
       edges={["bottom", "left", "right"]}
-      style={[styles.fill, { backgroundColor: colors.background }]}
+      style={[styles.fill, { backgroundColor: colors.surface }]}
     >
       {title}
       <KeyboardAvoidingView
@@ -135,31 +142,44 @@ function Watching({
           cell={setCell}
           cursorKeys={setApplicationCursor}
         />
-        <View style={styles.below}>
+        <View style={[styles.below, { borderColor: colors.line }]}>
           {sight.problem && <Problem>{sight.problem}</Problem>}
           {trouble && <Problem>Something went wrong drawing this terminal.</Problem>}
           {hold.notice && <Problem>{hold.notice}</Problem>}
           {hold.uncertain && (
             <View style={styles.uncertain}>
-              <Problem>
+              <Problem attention>
                 This may not have reached the computer, or may be waiting there for Enter. Look at
                 the screen before sending it again: {hold.uncertain.said}
               </Problem>
               <View style={styles.choices}>
                 {hold.uncertain.text !== null && (
-                  <Button
-                    title="Put it back"
-                    onPress={() => {
-                      const text = control.settleUncertain();
-                      if (text !== null) setDraft(draft ? `${draft}\n${text}` : text);
-                    }}
-                  />
+                  <View style={styles.fill}>
+                    <Button
+                      title="Put it back"
+                      onPress={() => {
+                        const text = control.settleUncertain();
+                        if (text !== null) setDraft(draft ? `${draft}\n${text}` : text);
+                      }}
+                    />
+                  </View>
                 )}
-                <Button title="Dismiss" onPress={() => void control.settleUncertain()} />
+                <View style={styles.fill}>
+                  <Button
+                    title="Dismiss"
+                    kind="quiet"
+                    onPress={() => void control.settleUncertain()}
+                  />
+                </View>
               </View>
             </View>
           )}
-          <Body muted>{statusLine(sight, describeReach(reach, null), hold.holding)}</Body>
+          <View style={styles.status}>
+            <Dot kind={reachDot(reach)} />
+            <Text style={[styles.statusWords, { color: colors.muted }]}>
+              {statusLine(sight, describeReach(reach, null), hold.holding)}
+            </Text>
+          </View>
           {canTake && (
             <Button
               title={
@@ -180,7 +200,9 @@ function Watching({
               applicationCursor={applicationCursor}
             />
           )}
-          {hold.holding && <Button title="Hand back" onPress={() => control.release()} />}
+          {hold.holding && (
+            <Button title="Hand back" kind="quiet" onPress={() => control.release()} />
+          )}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -217,7 +239,14 @@ function controlWords(controller: Controller | null): string {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  below: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  below: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  status: { flexDirection: "row", alignItems: "center", gap: 8 },
+  statusWords: { flex: 1, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 18 },
   uncertain: { gap: 8 },
   choices: { flexDirection: "row", gap: 8 },
 });

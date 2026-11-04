@@ -631,6 +631,8 @@ the same day. The server needed no change, so staging needs no deploy; the stand
 - **Computers** (`src/ui/computers.tsx`) come first on the account screen: approved grants whose
   computer is still on the account, requests still waiting, which can be cancelled, and **Pair a
   computer**. **Unpair** asks first, and the phone stays signed in.
+  (**Unpair** moved to the computer's own screen on 2026-11-04, [33](33-phone-design.md). Later steps
+  in this document that find it in the list were written before that.)
 - **Online is what the socket says** (`src/lib/presence.ts`, §5). A computer is online while a
   channel to it is open, offline with when it was last seen when the relay says so, and
   reconnecting in between, waiting 2 seconds, doubling up to 30. An offline computer is asked

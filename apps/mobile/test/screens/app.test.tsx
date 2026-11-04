@@ -410,6 +410,11 @@ describe("Computers", () => {
     return app;
   }
 
+  test("done with pairing returns to the account, not to a second one on top", async () => {
+    await pairedComputer();
+    expect(router.canGoBack()).toBe(false);
+  });
+
   test("a computer that answers is online", async () => {
     await pairedComputer();
     expect(await screen.findByText("Online")).toBeTruthy();
@@ -462,17 +467,33 @@ describe("Computers", () => {
   test("unpairing asks first, and a no changes nothing", async () => {
     const { server } = await pairedComputer();
     await screen.findByText("Online");
-    await fireEvent.press(screen.getByRole("button", { name: "Unpair Workstation" }));
+    // On the computer's own screen, so that a list of computers holds nothing that ends one.
+    expect(screen.queryByRole("button", { name: "Unpair Workstation" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: /^Workstation, / }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Unpair Workstation" }));
     await answerAlert("Cancel");
     expect(server.grants[0]?.state).toBe("approved");
     expect(screen.getByRole("button", { name: "Unpair Workstation" })).toBeTruthy();
 
     await fireEvent.press(screen.getByRole("button", { name: "Unpair Workstation" }));
     await answerAlert("Unpair");
+    // Back at the account, with the computer gone from it.
     await screen.findByText(/No computer lets this phone in yet/);
     expect(server.grants[0]?.state).toBe("revoked");
     // Still signed in.
     expect(screen.getByText("Signed in to Example Remote as Ana’s phone.")).toBeTruthy();
+  });
+
+  test("unpairing that cannot reach the server stays, and says so", async () => {
+    const { server } = await pairedComputer();
+    await fireEvent.press(await screen.findByRole("button", { name: /^Workstation, / }));
+    const button = await screen.findByRole("button", { name: "Unpair Workstation" });
+    server.down = true;
+    await fireEvent.press(button);
+    await answerAlert("Unpair");
+    await screen.findByRole("alert");
+    expect(server.grants[0]?.state).toBe("approved");
+    expect(screen.getByRole("button", { name: "Unpair Workstation" })).toBeTruthy();
   });
 
   test("a request still waiting is shown, and can be cancelled", async () => {
@@ -820,12 +841,12 @@ describe("A computer", () => {
     await screen.findByText("Say yes at Workstation");
     server.answer("approved");
     await fireEvent.press(await screen.findByRole("button", { name: "Done" }, ANSWER));
-    await screen.findByRole("button", { name: "Open Workstation" });
+    await screen.findByRole("button", { name: /^Workstation, / });
     return { ...app, server, shelf };
   }
 
   async function open() {
-    await fireEvent.press(await screen.findByRole("button", { name: "Open Workstation" }));
+    await fireEvent.press(await screen.findByRole("button", { name: /^Workstation, / }));
     return screen.findByRole("button", { name: /^fix-login/ });
   }
 
@@ -860,7 +881,7 @@ describe("A computer", () => {
     const server = new FakeServer();
     server.computer.refuses.set("workspace.list", "This phone may not see workspaces here.");
     await paired(new MemoryVault(), server);
-    await fireEvent.press(await screen.findByRole("button", { name: "Open Workstation" }));
+    await fireEvent.press(await screen.findByRole("button", { name: /^Workstation, / }));
     expect(await screen.findByText("This phone may not see workspaces here.")).toBeTruthy();
   });
 
@@ -1715,7 +1736,7 @@ describe("A computer", () => {
 
       expect(await screen.findByText(/^Workstation no longer lets this phone in\./)).toBeTruthy();
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "Open Workstation" })).toBeNull(),
+        expect(screen.queryByRole("button", { name: /^Workstation, / })).toBeNull(),
       );
       expect(screen.getByLabelText("Laptop, Online")).toBeTruthy();
       expect(server.sockets.open).toBe(1);
@@ -1736,8 +1757,8 @@ describe("A computer", () => {
 
     test("unpairing here tells nobody what they just did", async () => {
       await paired();
-      await screen.findByLabelText(/^Workstation, Online/);
-      await fireEvent.press(screen.getByRole("button", { name: "Unpair Workstation" }));
+      await fireEvent.press(await screen.findByLabelText(/^Workstation, Online/));
+      await fireEvent.press(await screen.findByRole("button", { name: "Unpair Workstation" }));
       await answerAlert("Unpair");
       await screen.findByText(/No computer lets this phone in yet/);
       expect(screen.queryByText(/^Workstation no longer lets/)).toBeNull();
@@ -1750,7 +1771,7 @@ describe("A computer", () => {
       await open();
       await act(async () => router.dismissTo("/account"));
       server.offline.add("host-work");
-      await fireEvent.press(await screen.findByRole("button", { name: "Open Workstation" }));
+      await fireEvent.press(await screen.findByRole("button", { name: /^Workstation, / }));
       expect(await screen.findByText(/^Offline, last seen/)).toBeTruthy();
       expect(screen.getByText("Offline does not mean its agents stopped.")).toBeTruthy();
       expect(await screen.findByText(/^As of /)).toBeTruthy();

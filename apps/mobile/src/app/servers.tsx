@@ -5,18 +5,17 @@
 
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 
 import { useApp, useSnapshot } from "../lib/context";
 import type { Profile } from "../lib/profiles";
 import { stillSignedIn } from "../ui/leaving";
-import { Body, Button, Screen, useColors } from "../ui/parts";
+import { Body, Button, Group, Icon, Row, Screen } from "../ui/parts";
 
 export default function Servers() {
   const { accounts } = useApp();
   const snapshot = useSnapshot();
   const router = useRouter();
-  const colors = useColors();
   const [switching, setSwitching] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
 
@@ -52,20 +51,20 @@ export default function Servers() {
         const inUse = profile.id === snapshot.active?.id;
         return (
           <View key={profile.id} style={styles.entry}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${profile.serverName}${inUse ? ", in use" : ""}`}
-              accessibilityState={{ selected: inUse, busy: switching === profile.id }}
-              disabled={switching !== null || removing !== null}
-              onPress={() => void use(profile.id)}
-              style={[styles.row, { borderColor: colors.line, backgroundColor: colors.surface }]}
-            >
-              <View style={styles.text}>
-                <Text style={[styles.name, { color: colors.ink }]}>{profile.serverName}</Text>
-                <Text style={{ color: colors.muted }}>{profile.address}</Text>
-              </View>
-              {inUse && <Text style={{ color: colors.accent }}>In use</Text>}
-            </Pressable>
+            <Group>
+              <Row
+                title={profile.serverName}
+                detail={profile.address}
+                monoDetail
+                leading={<Icon name="server" />}
+                label={`${profile.serverName}${inUse ? ", in use" : ""}`}
+                selected={inUse}
+                busy={switching === profile.id}
+                disabled={switching !== null || removing !== null}
+                {...(inUse ? { tag: "In use" } : {})}
+                onPress={() => void use(profile.id)}
+              />
+            </Group>
             <Button
               title={`Remove ${profile.serverName}`}
               kind="danger"
@@ -94,14 +93,4 @@ function confirmRemove(profile: Profile, remove: () => void): void {
 
 const styles = StyleSheet.create({
   entry: { gap: 8 },
-  row: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  text: { flex: 1, gap: 2 },
-  name: { fontSize: 16, fontWeight: "600" },
 });

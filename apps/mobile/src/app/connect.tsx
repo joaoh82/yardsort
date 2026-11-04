@@ -13,7 +13,7 @@ import { useState, useSyncExternalStore } from "react";
 import { type Found, messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
 import { issuerHost } from "../lib/format";
-import { Body, Button, Card, Field, Problem, Screen, Title } from "../ui/parts";
+import { Body, Button, Card, Field, Mono, Problem, Screen, Title } from "../ui/parts";
 
 export default function Connect() {
   const { accounts, browser, deviceName: suggested, incoming } = useApp();
@@ -108,7 +108,7 @@ export default function Connect() {
       {found && (
         <Card label="The server">
           <Title>{found.description.name}</Title>
-          <Body muted>{found.client.address}</Body>
+          <Mono>{found.client.address}</Mono>
           <Body>You sign in with {issuerHost(found.description.issuer)}.</Body>
           <Body>
             Your account here is this server’s own. It is not linked to an account on any other

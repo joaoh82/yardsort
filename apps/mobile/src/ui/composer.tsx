@@ -12,7 +12,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 
 import type { TerminalControl } from "../lib/control";
 import { addedCharacter, bytesOf, controlByte, type Key, KEY_NAMES } from "../lib/keys";
-import { Button, useColors } from "./parts";
+import { Button, FONTS, useColors } from "./parts";
 
 const ROW: { key: Key | "ctrl" | "type"; label: string }[] = [
   { key: "type", label: "Type" },
@@ -94,10 +94,10 @@ export function Composer({
           onSubmitEditing={send}
           style={[
             styles.field,
-            { color: colors.ink, borderColor: colors.line, backgroundColor: colors.surface },
+            { color: colors.ink, borderColor: colors.line, backgroundColor: colors.background },
           ]}
         />
-        <Button title="Send" kind="primary" disabled={!holding} onPress={send} />
+        <Button title="Send" kind="primary" compact disabled={!holding} onPress={send} />
       </View>
       {holding && (
         <ScrollView
@@ -129,7 +129,7 @@ export function Composer({
                   styles.key,
                   {
                     borderColor: colors.line,
-                    backgroundColor: armed ? colors.accent : colors.surface,
+                    backgroundColor: armed ? colors.accent : colors.raised,
                     opacity: pressed ? 0.7 : 1,
                   },
                 ]}
@@ -154,9 +154,10 @@ const styles = StyleSheet.create({
     minHeight: 44,
     maxHeight: 110,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    fontFamily: FONTS.mono,
     fontSize: 16,
   },
   keys: { gap: 6 },
@@ -165,9 +166,9 @@ const styles = StyleSheet.create({
     minWidth: 44,
     paddingHorizontal: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
+    borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
   },
-  keyText: { fontSize: 15, fontWeight: "500" },
+  keyText: { fontFamily: FONTS.monoMedium, fontSize: 14 },
 });

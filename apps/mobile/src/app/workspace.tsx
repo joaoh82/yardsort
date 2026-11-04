@@ -22,10 +22,22 @@ import { StyleSheet, Text, View } from "react-native";
 import { ActivityFeed, describeEvent, reportsOnlyStartAndEnd } from "../lib/activity";
 import { messageOf } from "../lib/accounts";
 import { useApp } from "../lib/context";
-import { moment } from "../lib/format";
+import { moment, stamp } from "../lib/format";
 import type { ObservedWorkspace } from "../lib/observed";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
-import { Body, Button, Card, Label, Problem, Screen, Title, useColors, Waiting } from "../ui/parts";
+import {
+  Body,
+  Button,
+  Group,
+  FONTS,
+  Icon,
+  Problem,
+  Row,
+  Screen,
+  Section,
+  useColors,
+  Waiting,
+} from "../ui/parts";
 
 export default function WorkspaceScreen() {
   const params = useLocalSearchParams<{ host?: string; workspace?: string }>();
@@ -120,97 +132,109 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
   return (
     <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
       {title}
-      <ReachLine reach={reach} lastSeenAt={null} />
-      {detail.answer?.workspace.branch && (
-        <Body muted>On {detail.answer.workspace.branch.label}</Body>
-      )}
+      <ReachLine reach={reach} lastSeenAt={null} also={detail.answer?.workspace.branch?.label} />
       {!channel && !page && (
         <Body muted>Conversations and activity show when the computer can be reached.</Body>
       )}
 
-      <Title>Conversations</Title>
-      {sessions.problem && <Problem>{sessions.problem}</Problem>}
-      {problem && <Problem>{problem}</Problem>}
-      {channel && !page && !sessions.problem && <Waiting label="Asking the computer" />}
-      {page && !channel && sessions.at !== null && <Body muted>As of {moment(sessions.at)}.</Body>}
-      {page?.sessions.length === 0 && (
-        <Body muted>{ended ? "No conversations yet." : "No conversations running."}</Body>
-      )}
-      {page?.sessions.map((session) => (
-        <SessionRow
-          key={session.id}
-          session={session}
-          watch={
-            session.terminal
-              ? () => watch(session.terminal as TerminalSummary, session.harness)
-              : undefined
-          }
-        />
-      ))}
-      {page?.next && (
-        <Button
-          title="Show more conversations"
-          onPress={() => {
-            if (page.next) void showMore(page.next);
-          }}
-        />
-      )}
-      {page && (
-        <Button
-          title={ended ? "Hide ended conversations" : "Show ended conversations"}
-          onPress={() => setEnded((was) => !was)}
-        />
-      )}
+      <Section title="Conversations" note={page?.sessions.length}>
+        {sessions.problem && <Problem>{sessions.problem}</Problem>}
+        {problem && <Problem>{problem}</Problem>}
+        {channel && !page && !sessions.problem && <Waiting label="Asking the computer" />}
+        {page && !channel && sessions.at !== null && (
+          <Body muted>As of {moment(sessions.at)}.</Body>
+        )}
+        {page?.sessions.length === 0 && (
+          <Body muted>{ended ? "No conversations yet." : "No conversations running."}</Body>
+        )}
+        <Group>
+          {page?.sessions.map((session) => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              watch={
+                session.terminal
+                  ? () => watch(session.terminal as TerminalSummary, session.harness)
+                  : undefined
+              }
+            />
+          ))}
+        </Group>
+        {page?.next && (
+          <Button
+            title="Show more conversations"
+            onPress={() => {
+              if (page.next) void showMore(page.next);
+            }}
+          />
+        )}
+        {page && (
+          <Button
+            title={ended ? "Hide ended conversations" : "Show ended conversations"}
+            kind="quiet"
+            onPress={() => setEnded((was) => !was)}
+          />
+        )}
+      </Section>
 
       {page && page.terminals.length > 0 && (
-        <>
-          <Label>Other terminals</Label>
-          {page.terminals.map(({ purpose, program, terminal }) => (
-            <Card
-              key={terminal.id}
-              label={`${purposeWords(purpose, program)}, terminal`}
-              onPress={() => watch(terminal, purposeWords(purpose, program))}
-            >
-              <Body>{purposeWords(purpose, program)}</Body>
-              <Body muted>{terminalWords(terminal)}</Body>
-            </Card>
-          ))}
-        </>
+        <Section title="Other terminals">
+          <Group>
+            {page.terminals.map(({ purpose, program, terminal }) => (
+              <Row
+                key={terminal.id}
+                title={purposeWords(purpose, program)}
+                plainTitle
+                detail={terminalWords(terminal)}
+                leading={<Icon name="terminal" />}
+                label={`${purposeWords(purpose, program)}, terminal`}
+                onPress={() => watch(terminal, purposeWords(purpose, program))}
+              />
+            ))}
+          </Group>
+        </Section>
       )}
 
       {project && (
-        <Button
-          title="Approved memory"
-          onPress={() => router.push({ pathname: "/memory", params: { host, project } })}
-        />
+        <Group>
+          <Row
+            title="Approved memory"
+            plainTitle
+            leading={<Icon name="note" />}
+            onPress={() => router.push({ pathname: "/memory", params: { host, project } })}
+          />
+        </Group>
       )}
 
-      <Title>Activity</Title>
-      {activity.problem && <Problem>{activity.problem}</Problem>}
-      {channel && !activity.loaded && <Waiting label="Asking the computer" />}
-      {activity.following && <Body muted>Following as it is recorded.</Body>}
-      {activity.loaded && activity.events.length === 0 && (
-        <Body muted>Nothing recorded here yet.</Body>
-      )}
-      {reportsOnlyStartAndEnd(activity.events) && (
-        <Body muted>
-          Only starts and ends show for this agent. To see its prompts and tools here, turn on its
-          capture at the computer, in Settings, General, Activity, then start a new conversation.
-        </Body>
-      )}
-      {newestFirst.map((event) => {
-        const words = describeEvent(event);
-        return (
-          <EventRow
-            key={event.id}
-            title={words.title}
-            detail={words.detail}
-            tone={words.tone}
-            at={moment(event.occurredAt)}
-          />
-        );
-      })}
-      {activity.hasOlder && <Button title="Show older" onPress={() => void feed.older()} />}
+      <Section title="Activity">
+        {activity.problem && <Problem>{activity.problem}</Problem>}
+        {channel && !activity.loaded && <Waiting label="Asking the computer" />}
+        {activity.following && <Body muted>Following as it is recorded.</Body>}
+        {activity.loaded && activity.events.length === 0 && (
+          <Body muted>Nothing recorded here yet.</Body>
+        )}
+        {reportsOnlyStartAndEnd(activity.events) && (
+          <Body muted>
+            Only starts and ends show for this agent. To see its prompts and tools here, turn on its
+            capture at the computer, in Settings, General, Activity, then start a new conversation.
+          </Body>
+        )}
+        <Group>
+          {newestFirst.map((event) => {
+            const words = describeEvent(event);
+            return (
+              <EventRow
+                key={event.id}
+                title={words.title}
+                detail={words.detail}
+                tone={words.tone}
+                at={event.occurredAt}
+              />
+            );
+          })}
+        </Group>
+        {activity.hasOlder && <Button title="Show older" onPress={() => void feed.older()} />}
+      </Section>
     </Screen>
   );
 }
@@ -218,12 +242,24 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
 function SessionRow({ session, watch }: { session: SessionSummary; watch?: () => void }) {
   const about = [session.harness, session.model].filter(Boolean).join(" · ");
   return (
-    <Card label={session.title} onPress={watch}>
-      <Body>{session.title}</Body>
-      <Body muted>{about}</Body>
-      <Body muted>{sessionWords(session)}</Body>
-    </Card>
+    <Row
+      title={session.title}
+      plainTitle
+      about={about}
+      detail={sessionWords(session)}
+      leading={<AgentMark harness={session.harness} />}
+      label={session.title}
+      {...(watch ? { onPress: watch } : {})}
+    />
   );
+}
+
+/** Which agent, as the desktop app colors it. */
+function AgentMark({ harness }: { harness: string }) {
+  const colors = useColors();
+  const color =
+    harness === "claude" ? colors.claude : harness === "codex" ? colors.codex : colors.muted;
+  return <View style={[styles.mark, { backgroundColor: color }]} />;
 }
 
 function EventRow({
@@ -235,15 +271,19 @@ function EventRow({
   title: string;
   detail: string;
   tone: "ok" | "bad" | "plain";
-  at: string;
+  at: number;
 }) {
   const colors = useColors();
-  const color = tone === "bad" ? colors.danger : tone === "ok" ? colors.accent : colors.ink;
+  const color = tone === "bad" ? colors.danger : tone === "ok" ? colors.online : colors.ink;
   return (
     <View accessible style={styles.event}>
-      <Text style={[styles.eventTitle, { color }]}>{title}</Text>
-      {detail ? <Text style={[styles.eventDetail, { color: colors.muted }]}>{detail}</Text> : null}
-      <Text style={[styles.eventDetail, { color: colors.muted }]}>{at}</Text>
+      <Text style={[styles.eventTime, { color: colors.faint }]}>{stamp(at)}</Text>
+      <View style={styles.eventText}>
+        <Text style={[styles.eventTitle, { color }]}>{title}</Text>
+        {detail ? (
+          <Text style={[styles.eventDetail, { color: colors.muted }]}>{detail}</Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -296,7 +336,10 @@ function purposeWords(purpose: TerminalPurpose, program: string): string {
 }
 
 const styles = StyleSheet.create({
-  event: { gap: 2 },
-  eventTitle: { fontSize: 15, fontWeight: "500" },
-  eventDetail: { fontSize: 13 },
+  mark: { width: 10, height: 10, borderRadius: 2 },
+  event: { flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
+  eventTime: { fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18 },
+  eventText: { flex: 1, gap: 2 },
+  eventTitle: { fontFamily: FONTS.mono, fontSize: 13, lineHeight: 18 },
+  eventDetail: { fontFamily: FONTS.regular, fontSize: 13, lineHeight: 18 },
 });

@@ -17,7 +17,7 @@ const ROOT = join(import.meta.dir, "..");
 export const GENERATED = join(ROOT, "src/ui/terminal-page.generated.ts");
 
 const PAGE_STYLE = `
-html, body { margin: 0; background: #151514; }
+html, body { margin: 0; background: #0b0d10; }
 #terminal { display: inline-block; vertical-align: top; }
 `;
 

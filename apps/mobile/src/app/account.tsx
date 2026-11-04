@@ -6,7 +6,7 @@
 import type { DevicePage, DeviceSummary } from "@yardsort/remote-client";
 import { Redirect, Stack, useRouter } from "expo-router";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { Alert } from "react-native";
 
 import { messageOf } from "../lib/accounts";
 import { useApp, useSnapshot } from "../lib/context";
@@ -15,7 +15,18 @@ import type { Profile } from "../lib/profiles";
 import { Computers } from "../ui/computers";
 import { stillSignedIn } from "../ui/leaving";
 import { SeenComputers } from "../ui/live";
-import { Body, Button, Card, Problem, Screen, Title, useColors, Waiting } from "../ui/parts";
+import {
+  Body,
+  Button,
+  Group,
+  Icon,
+  Mono,
+  Problem,
+  Row,
+  Screen,
+  Section,
+  Waiting,
+} from "../ui/parts";
 
 export default function Account() {
   const { accounts } = useApp();
@@ -141,17 +152,21 @@ function SignedIn({
       <Body>
         Signed in to {profile.serverName} as {profile.deviceName}.
       </Body>
-      <Body muted>{profile.address}</Body>
+      <Mono>{profile.address}</Mono>
 
       <Computers asked={asked} />
 
-      <Title>This account’s devices</Title>
-      {problem && <Problem>{problem}</Problem>}
-      {!page && !problem && <Waiting label="Asking the server" />}
-      {page?.devices.map((device) => (
-        <DeviceRow key={device.id} device={device} />
-      ))}
+      <Section title="This account’s devices" note={page?.devices.length}>
+        {problem && <Problem>{problem}</Problem>}
+        {!page && !problem && <Waiting label="Asking the server" />}
+        <Group>
+          {page?.devices.map((device) => (
+            <DeviceRow key={device.id} device={device} />
+          ))}
+        </Group>
+      </Section>
 
+      {servers}
       <Button
         title="Sign out"
         kind="danger"
@@ -167,28 +182,25 @@ function SignedIn({
           )
         }
       />
-      {servers}
     </Screen>
   );
 }
 
 function DeviceRow({ device }: { device: DeviceSummary }) {
-  const colors = useColors();
   const when = device.revokedAt
     ? `Signed out ${moment(device.revokedAt)}`
     : device.lastSeenAt
       ? `Last seen ${moment(device.lastSeenAt)}`
       : "Not seen yet";
   return (
-    <Card label={device.current ? `${device.name}, this phone` : device.name}>
-      <View style={styles.row}>
-        <Text style={[styles.name, { color: colors.ink }]}>{device.name}</Text>
-        {device.current && <Text style={{ color: colors.accent }}>This phone</Text>}
-      </View>
-      <Body muted>
-        {KINDS[device.kind]} · {PLATFORMS[device.platform]} · {when}
-      </Body>
-    </Card>
+    <Row
+      title={device.name}
+      plainTitle
+      detail={`${KINDS[device.kind]} · ${PLATFORMS[device.platform]} · ${when}`}
+      leading={<Icon name={device.kind === "phone" ? "phone" : "computer"} />}
+      label={device.current ? `${device.name}, this phone` : device.name}
+      {...(device.current ? { tag: "This phone" } : {})}
+    />
   );
 }
 
@@ -218,8 +230,3 @@ const PLATFORMS: Record<DeviceSummary["platform"], string> = {
   android: "Android",
   other: "Other",
 };
-
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
-  name: { fontSize: 16, fontWeight: "600", flexShrink: 1 },
-});
