@@ -154,6 +154,7 @@ export default function Connect() {
       {snapshot.profiles.length > 0 && (
         <Button title="Servers on this phone" onPress={() => router.push("/servers")} />
       )}
+      <Button title="Settings" kind="quiet" onPress={() => router.push("/settings")} />
     </Screen>
   );
 }

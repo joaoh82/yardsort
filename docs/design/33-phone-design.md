@@ -17,7 +17,12 @@ Components, Screens and App icon. Names in it are made up.
 - **Colours.** The desktop's canvas, surface and amber accent (`src/styles.css`), with a light set
   beside the dark one, following the phone's setting. They are in `apps/mobile/src/ui/parts.tsx` and
   in the Figma file's variables under the same names. Change them in both.
-- **The terminal stays dark in both modes**, at `#0b0d10`, with an amber cursor.
+- **Light, dark or automatic** is a choice in the app's Settings, reached from the account screen and
+  from Connect. Automatic, the default, follows the phone. It changes the screens at once and tells the
+  system too, for alerts and the keyboard. It is kept in a small file in the app's documents folder, read
+  before the first screen is drawn so the other mode never flashes, and is never sent to a server. It may
+  go along in a phone's backup, since it says nothing about anyone.
+- **The terminal stays dark in all of them**, at `#0b0d10`, with an amber cursor.
 - **Type.** Inter for text and JetBrains Mono for what a developer would read as data: addresses,
   branches, reach, times and section headings. Both are embedded under the SIL Open Font License,
   with the licenses beside them in `apps/mobile/assets/fonts/`.
@@ -56,6 +61,7 @@ rsvg-convert -w 512 -h 512 splash.svg -o splash.png
   measures its cells from the font, and it has a strict content policy that an embedded font would
   have to pass. That is a risk to the part of the app that matters most, for a small gain.
 - **Android's header titles are on the left**, as Android's are. Figma draws the iOS header.
+- **Settings is not in the Figma file.** It was added after the design, from the same parts.
 - **The row of keys scrolls.** The eight keys, at a size a thumb can hit, are wider than a phone, so
   the last one sits partly off the edge until the row is scrolled.
 
@@ -67,8 +73,11 @@ workspace, approved memory, Servers and a computer offline; the terminal watchin
 person at the computer types, in control, sending a line, and handing back. Dark and light were both
 looked at, apart from a few of those in one mode only. The screen tests cover the states.
 
+The appearance choice was checked there too: Dark on a light phone, Automatic following the phone as it
+changed, and Dark still chosen after quitting and reopening.
+
 An emulator is not a phone. Not checked: anything on an iPhone, which includes whether iOS finds the
-embedded fonts and how its header looks, scanning a code, the largest text sizes, and anything on a
+embedded fonts, how its header looks, whether its alerts and keyboard follow the choice, scanning a code, the largest text sizes, and anything on a
 physical Android phone.
 
 ## Smoke test on the iPhone
@@ -82,8 +91,11 @@ older build of the app cannot run this code. Use staging and your real computer,
 3. **The fonts.** This is the check most likely to fail on iOS. On the account screen, the server's
    address and the small section headings should be visibly monospaced, and everything else Inter. If
    the headings look like ordinary system text, the fonts were not found.
-4. **Dark and light.** In iOS Settings, Display & Brightness, switch between them with the app open.
-   Everything stays readable, and the terminal stays dark in both.
+4. **Dark and light.** On the account screen, open **Settings** and choose **Dark**: the app changes
+   at once, header and status bar included, and stays dark after force-quitting it. Choose **Light**
+   too, then **Automatic**, which follows iOS Settings, Display & Brightness. Everything stays readable
+   and the terminal stays dark throughout. Sign out's question should match the mode, as should the
+   keyboard (**Cancel** the question).
 5. **A real terminal.** Open your computer, a workspace, then a terminal. Its text should line up in
    columns as on the computer. **Take control**, type a line, **Send**, then **Hand back**.
 6. **Unpair moved.** On the computer's screen, **Unpair** is at the bottom and no longer in the

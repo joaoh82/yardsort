@@ -17,6 +17,7 @@ import * as WebBrowser from "expo-web-browser";
 import { Platform as ReactPlatform } from "react-native";
 
 import type { Browser, Env } from "./accounts";
+import type { ChoiceFile } from "./appearance";
 import type { Shelf } from "./observed";
 import type { Vault } from "./profiles";
 
@@ -51,6 +52,19 @@ export const cacheShelf: Shelf = {
   delete: async (key) => {
     const file = new File(Paths.cache, `${key}.json`);
     if (file.exists) file.delete();
+  },
+};
+
+/** In the documents folder, as the system never clears it. It says nothing about anyone. */
+export const appearanceFile: ChoiceFile = {
+  read: () => {
+    const file = new File(Paths.document, "appearance.txt");
+    return file.exists ? file.textSync() : null;
+  },
+  write: (choice) => {
+    const file = new File(Paths.document, "appearance.txt");
+    if (!file.exists) file.create();
+    file.write(choice);
   },
 };
 

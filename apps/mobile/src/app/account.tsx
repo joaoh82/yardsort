@@ -38,7 +38,12 @@ export default function Account() {
   if (!snapshot.loaded) return <Screen>{null}</Screen>;
   if (!profile) return <Redirect href="/connect" />;
 
-  const servers = <Button title="Servers on this phone" onPress={() => router.push("/servers")} />;
+  const servers = (
+    <>
+      <Button title="Servers on this phone" onPress={() => router.push("/servers")} />
+      <Button title="Settings" onPress={() => router.push("/settings")} />
+    </>
+  );
   const title = <Stack.Screen options={{ title: profile.serverName }} />;
 
   if (!standing || standing.kind === "opening") {

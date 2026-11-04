@@ -19,6 +19,7 @@ import MemoryScreen from "../../src/app/memory";
 import TerminalScreen from "../../src/app/terminal";
 import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
+import Settings from "../../src/app/settings";
 import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
 import { AppProvider } from "../../src/lib/context";
@@ -59,6 +60,7 @@ async function start({
       connect: Connect,
       account: Account,
       servers: Servers,
+      settings: Settings,
       pair: Pair,
       computer: ComputerScreen,
       workspace: WorkspaceScreen,
@@ -409,6 +411,19 @@ describe("Computers", () => {
     await screen.findByLabelText(/^Workstation, /);
     return app;
   }
+
+  test("settings can be reached before there is any server", async () => {
+    await start();
+    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
+  });
+
+  test("settings can be reached signed in", async () => {
+    await start();
+    await signIn();
+    await fireEvent.press(await screen.findByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("radio", { name: "Dark" })).toBeTruthy();
+  });
 
   test("done with pairing returns to the account, not to a second one on top", async () => {
     await pairedComputer();

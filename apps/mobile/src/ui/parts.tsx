@@ -7,7 +7,7 @@
  * screen reader.
  */
 
-import { Children, type ReactNode } from "react";
+import { Children, type ReactNode, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -22,6 +22,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
+
+import { appearance } from "../lib/appearance";
 
 // The desktop app's own, with faint text and amber words made stronger for a phone's small text.
 const LIGHT = {
@@ -66,8 +68,16 @@ const DARK: typeof LIGHT = {
 
 export type Colors = typeof LIGHT;
 
+/** What this person chose, or else as the phone is. */
+export function useScheme(): "light" | "dark" {
+  const chosen = useSyncExternalStore(appearance.subscribe, appearance.get);
+  const phone = useColorScheme();
+  if (chosen !== "automatic") return chosen;
+  return phone === "dark" ? "dark" : "light";
+}
+
 export function useColors(): Colors {
-  return useColorScheme() === "dark" ? DARK : LIGHT;
+  return useScheme() === "dark" ? DARK : LIGHT;
 }
 
 /** Embedded by the build (app.config.ts). A weight is its own family, so nothing sets `fontWeight`. */
@@ -80,6 +90,7 @@ export const FONTS = {
 };
 
 const ICONS = {
+  check: "M5 12.5l4.5 4.5L19 7.5",
   chevron: "M9 6l6 6-6 6",
   computer: "M4 5h16v11H4zM9 20h6M12 16v4",
   phone: "M8 3h8a1 1 0 011 1v16a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1zM11 18h2",
@@ -339,6 +350,7 @@ export function Row({
   badge,
   label,
   selected,
+  checked,
   busy,
   disabled,
   onPress,
@@ -359,6 +371,8 @@ export function Row({
   /** What a screen reader says, when not the title and detail. */
   label?: string;
   selected?: boolean;
+  /** One of a choice, this one or not, rather than somewhere to go. */
+  checked?: boolean;
   busy?: boolean;
   disabled?: boolean;
   onPress?: () => void;
@@ -389,7 +403,8 @@ export function Row({
           <Text style={[styles.monoSmall, { color: colors.accentText }]}>{tag}</Text>
         </View>
       ) : null}
-      {onPress ? <Icon name="chevron" color={colors.faint} /> : null}
+      {checked ? <Icon name="check" color={colors.accentText} /> : null}
+      {onPress && checked === undefined ? <Icon name="chevron" color={colors.faint} /> : null}
     </>
   );
   if (!onPress) {
@@ -401,11 +416,12 @@ export function Row({
   }
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={checked === undefined ? "button" : "radio"}
       accessibilityLabel={says}
       {...(selected !== undefined || busy !== undefined
         ? { accessibilityState: { selected: selected ?? false, busy: busy ?? false } }
         : {})}
+      {...(checked !== undefined ? { accessibilityState: { checked } } : {})}
       disabled={disabled ?? false}
       onPress={onPress}
       style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}
