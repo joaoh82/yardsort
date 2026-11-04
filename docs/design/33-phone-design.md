@@ -5,8 +5,9 @@ owner's iPhone that day. It has not been on a physical Android phone._
 
 The phone app worked, but looked plain: off-white and green, unlike the desktop app, with a default
 icon. This gives it the desktop app's colours and a more developer-like look, with a proper icon. It
-changes how the app looks, and moves one button. The app's states, its wording and what it says to a
-server are unchanged, apart from the two fixes under [What changed besides the look](#what-changed-besides-the-look).
+changes how the app looks, moves one button and adds a Settings screen. Otherwise the app's states, its
+wording and what it says to a server are unchanged, apart from the two fixes under
+[What changed besides the look](#what-changed-besides-the-look).
 
 The design is in Figma, in the Yardsort project:
 [Yardsort phone app](https://www.figma.com/design/ezlPCcxVNBFKP0bkGODMHZ). Its pages are Foundations,
@@ -14,9 +15,12 @@ Components, Screens and App icon. Names in it are made up.
 
 ## The look
 
-- **Colours.** The desktop's canvas, surface and amber accent (`src/styles.css`), with a light set
-  beside the dark one, following the phone's setting. They are in `apps/mobile/src/ui/parts.tsx` and
-  in the Figma file's variables under the same names. Change them in both.
+- **Colours.** The desktop's dark and light sets (`src/styles.css`), with three differences for a phone.
+  Faint text is stronger for small text: `#858d9a` in dark and `#636c7a` in light, where the desktop has
+  `#6b7380` and `#7b8493`. The light accent stays the bright amber, `#f5b83d`, where the desktop has
+  `#b77a00`, because here it fills buttons under dark text. Amber words use `accentText`, a darker
+  `#8a5c00` in light. The phone's colours are in `apps/mobile/src/ui/parts.tsx` and in the Figma file's
+  variables under the same names: a change to one goes in the other. The desktop's are separate.
 - **Light, dark or automatic** is a choice in the app's Settings, reached from the account screen and
   from Connect. Automatic, the default, follows the phone. It changes the screens at once and tells the
   system too, for alerts and the keyboard. It is kept in a small file in the app's documents folder, read
@@ -76,7 +80,9 @@ looked at, apart from a few of those in one mode only. The screen tests cover th
 The appearance choice was checked there too: Dark on a light phone, Automatic following the phone as it
 changed, and Dark still chosen after quitting and reopening.
 
-The owner then ran the smoke test below on their iPhone, on 2026-11-04, and it passed.
+The owner then ran the smoke test below on their iPhone, on 2026-11-04, and it passed. A review afterwards
+changed how the choice is written, so it is on disk before choosing returns. That was checked on the
+emulator, quitting straight after the press, and not on the iPhone again.
 
 Not checked: scanning a code, the largest text sizes, and anything on a physical Android phone.
 

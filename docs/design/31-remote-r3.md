@@ -678,7 +678,7 @@ the same day. The server needed no change, so staging needs no deploy; the stand
 3. **By typing.** On the computer, **Pair a device**. On the phone, **Pair a computer**, type the
    code. It says to say yes at the computer. Let it watch and type. The phone says it was let in and
    what it may do; **Done**, and the computer is listed as **Online**.
-4. **Unpair.** **Unpair**, then **Cancel**: still listed. **Unpair** and confirm: gone from the
+4. **Unpair**, on the computer's own screen since [33](33-phone-design.md). **Unpair**, then **Cancel**: still listed. **Unpair** and confirm: gone from the
    phone and from the computer's list, and the phone is still signed in.
 5. **By scanning.** **Pair a device**, **Pair a computer**, **Scan the code**, allow the camera, and
    point it at the code. Deny it at the computer: the phone says the computer said no.
@@ -1122,7 +1122,7 @@ the rest. A sign-in does come back at that address, so step 9 needs no Simulator
    send `hi`: `got: hi` comes back. **OK** clears the card. Pair with this computer again.
 5. **While the app was closed.** Force-quit the app. Revoke the phone at the computer again. Open the app: the same
    card is on the account. **OK**, and pair again.
-6. **Unpairing here.** On the phone, **Unpair** this computer and confirm. It leaves the list, and no card says anything.
+6. **Unpairing here.** On the phone, open this computer, **Unpair** it and confirm. It leaves the list, and no card says anything.
    Pair again.
 7. **Out of reach deletes nothing.** Open this computer on the phone, so its workspaces show. Turn on airplane mode: within
    about 30 seconds it reads **Reconnecting**, and the workspaces stay, marked **As of**. Revoke the phone at the computer. Nothing changes
@@ -1330,7 +1330,7 @@ While a phone has control, the host answers only where the cursor is, and nothin
 - `L1` **The sizing fixes** (§14). With control of the shell, quickly raise and dismiss the keyboard five times, rotate twice quickly, and leave it. Send
   `stty size`. **Expect:** it settles with no half row and nothing to scroll, its top line clear of the header and its bottom line above the field, and the
   rows and columns are what fits. Do the same in Claude's conversation.
-- `L2` **Dark mode** (Settings → Display & Brightness). Go through the account, a computer, a workspace and a terminal, in dark and light. **Find out** how the header's glass, its title and the back button look. They changed on 2026-11-03 (§16), and nobody has looked at them on iOS.
+- `L2` **Dark mode** (Settings → Display & Brightness, with the app's own choice in its Settings on Automatic, [33](33-phone-design.md)). Go through the account, a computer, a workspace and a terminal, in dark and light. **Find out** how the header's glass, its title and the back button look. They changed on 2026-11-03 (§16), and nobody has looked at them on iOS.
 
 ### The record
 

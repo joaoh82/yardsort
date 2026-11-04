@@ -11,7 +11,10 @@ import { Appearance } from "react-native";
 export const CHOICES = ["automatic", "light", "dark"] as const;
 export type Choice = (typeof CHOICES)[number];
 
-/** Where the choice is kept. Read before the first screen is drawn, so it never flashes the other. */
+/**
+ * Where the choice is kept. Read before the first screen is drawn, so it never flashes the other.
+ * Both are done, or have thrown, by the time they return.
+ */
 export interface ChoiceFile {
   read(): string | null;
   write(choice: string): void;

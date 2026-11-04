@@ -47,7 +47,7 @@ export const cacheShelf: Shelf = {
   set: async (key, value) => {
     const file = new File(Paths.cache, `${key}.json`);
     if (!file.exists) file.create();
-    file.write(value);
+    await file.write(value);
   },
   delete: async (key) => {
     const file = new File(Paths.cache, `${key}.json`);
@@ -64,7 +64,7 @@ export const appearanceFile: ChoiceFile = {
   write: (choice) => {
     const file = new File(Paths.document, "appearance.txt");
     if (!file.exists) file.create();
-    file.write(choice);
+    file.writeSync(choice);
   },
 };
 

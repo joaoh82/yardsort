@@ -25,7 +25,8 @@ import Svg, { Path } from "react-native-svg";
 
 import { appearance } from "../lib/appearance";
 
-// The desktop app's own, with faint text and amber words made stronger for a phone's small text.
+// The desktop app's own, with faint text and amber words made stronger for a phone's small text,
+// and the bright amber kept in light mode too, as buttons are filled with it (docs/design/33).
 const LIGHT = {
   background: "#f4f5f7",
   surface: "#ffffff",
