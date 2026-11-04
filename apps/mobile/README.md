@@ -146,11 +146,15 @@ identity (`Yardsort`, `dev.yardsort.mobile`), so it sits beside the development 
 its own sign-in: sign in and pair again. Each build lasts 90 days. It is archived in Xcode on a Mac, with
 no EAS. The first time only, register the app:
 
-1. Run the recipe below once and choose your team in step 2, which registers `dev.yardsort.mobile`.
+1. Run the recipe below once and choose your team in step 2, which should register
+   `dev.yardsort.mobile`.
 2. In [App Store Connect](https://appstoreconnect.apple.com), under **Apps**, **+**, **New App**: iOS,
    the name `Yardsort` (any other if it is taken: it is only a listing), the bundle ID
-   `dev.yardsort.mobile`, and any SKU, such as `yardsort-mobile`. Then in that app's **TestFlight** tab,
-   add an internal testing group with yourself in it.
+   `dev.yardsort.mobile`, and any SKU, such as `yardsort-mobile`. If the bundle ID is not offered, the
+   form's **Register a new bundle ID** does the same, as an explicit ID with no capabilities: reload the
+   form afterwards. Then in that app's **TestFlight** tab, add an internal testing group with yourself in
+   it.
+3. On the phone, install the **TestFlight** app and sign in with the same Apple ID.
 
 Then, for each build:
 
@@ -161,7 +165,9 @@ Then, for each build:
    signing**, and choose the paid team.
 3. Set the destination at the top to **Any iOS Device (arm64)**, then **Product**, **Archive**.
 4. When the Organizer opens, **Distribute App**, **TestFlight Internal Only**, **Distribute**.
-5. Apple takes a few minutes to process it, then the **TestFlight** app on the phone offers it.
+5. Apple then processes it, and until that is done App Store Connect shows no build at all, though the
+   Organizer says it was uploaded. A problem with the build comes by email. Once it is ready, the
+   **TestFlight** app on the phone offers it.
 
 ### On Android
 

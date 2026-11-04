@@ -929,11 +929,16 @@ steps:
     {meanwhile}
     timeout: 60s
 "#,
-            // 17 MiB at once, then it stays up.
-            server = bun(
-                "process.stdout.write(Buffer.alloc(17 * 1024 * 1024, 120)); setTimeout(() => {}, 60000)"
-            ),
-            meanwhile = bun("setTimeout(() => {}, 15000)"),
+            // 17 MiB at once, once the step has begun, then it stays up. Sooner, and that step is
+            // skipped, not failed.
+            server = bun("const told = setInterval(() => { \
+                    if (!require('fs').existsSync('step-began')) return; \
+                    clearInterval(told); \
+                    process.stdout.write(Buffer.alloc(17 * 1024 * 1024, 120)); \
+                    setTimeout(() => {}, 60000); \
+                }, 20)"),
+            meanwhile =
+                bun("require('fs').writeFileSync('step-began', ''); setTimeout(() => {}, 15000)"),
         ),
     );
     let id = fx.queue("loud", &[]);
