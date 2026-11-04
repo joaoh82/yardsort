@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.21.0
 
 - **Remote, still under development.** Settings → Remote lets a phone reach this computer's
   workspaces and terminals through a Yardsort server you sign in to. It stays off, and connects to
