@@ -10,8 +10,7 @@ use std::time::{Duration, Instant};
 use pty_host::{HostEvent, LaunchPlan, TermSize, TerminalHost};
 use pty_ipc::{DaemonClient, Endpoint};
 
-/// Only a test that is failing waits this long. A first PowerShell on a Windows runner has taken
-/// about 15 seconds to answer.
+/// Only a test that is failing waits this long.
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A daemon in its own process, killed when the test ends however it ends.
@@ -670,16 +669,13 @@ fn a_lease_taken_over_the_socket_holds_until_someone_here_types() {
 /// Says `ready`, then echoes every line it reads, `got:` in front.
 fn echo_lines() -> LaunchPlan {
     if cfg!(windows) {
-        // PowerShell is on every Windows CI runner; cmd has no loop that reads lines.
+        // Not PowerShell: on a Windows runner it has taken over a minute to print anything, and
+        // these tests are not about how long it takes.
         LaunchPlan {
-            program: "powershell.exe".into(),
             args: vec![
-                "-NoProfile".into(),
-                "-Command".into(),
-                "Write-Output ready; \
-                 while ($true) { $l = [Console]::In.ReadLine(); if ($l -eq $null) { break }; \
-                 Write-Output \"got:$l\" }"
-                    .into(),
+                "/V:ON".into(),
+                "/C".into(),
+                "echo ready& for /L %i in (0,0,1) do @(set l=& set /p l=& echo got:!l!)".into(),
             ],
             ..shell("")
         }
