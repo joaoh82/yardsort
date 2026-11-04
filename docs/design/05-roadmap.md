@@ -950,7 +950,8 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       screen, and a Settings screen with a choice of light, dark or automatic ([33](33-phone-design.md)).
       Its smoke test passed on the iPhone the same day. By the owner's decision, internal TestFlight builds
       move earlier than R7, and Settings → Remote is shown to everyone from the next release, off until
-      turned on, and marked as still under development.
+      turned on, and marked as still under development. v0.21.0 shipped that, and the first TestFlight
+      build was installed on the iPhone the same day, and signed in and paired.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
