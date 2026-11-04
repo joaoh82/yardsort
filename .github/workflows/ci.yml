@@ -28,8 +28,19 @@ jobs:
     # About twice the slowest run, a cold cache included: a hang fails rather than holding a
     # pull request until GitHub's six-hour limit.
     timeout-minutes: 45
+    env:
+      # Backtraces keep their line numbers. With full debug info the tests' build takes 11 GB, not 6.6.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v5
+
+      # What a Linux runner has free depends on its image, and one ran out building the tests.
+      # Nothing here uses these two. The number printed says how close it is next time.
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h /
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
