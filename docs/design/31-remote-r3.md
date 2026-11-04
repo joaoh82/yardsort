@@ -11,7 +11,7 @@ its smoke test passed on the same iPhone that day, after it found a tab at the c
 The seventh, signed out, revoked and switching, was built on 2026-11-03 (§15), and its smoke test passed on
 the same iPhone that day. That is the last slice, and R3 is not done: the device run below is its gate, and
 needs an Android phone. Android was built and run in an emulator on 2026-11-03, which found three bugs, now fixed
-(§16). That is not the device run.
+(§16). That is not the device run. The run's iPhone half is written down (§17), and has not been run.
 This is R3's plan: what it has to show, what it starts from, the decisions taken before any app code exists, the
 slices, and what each slice's smoke test needs. The phone app's license was decided with it: MPL-2.0 (§6). Like
 [27](27-remote-r2.md), it becomes the record of the slices as they are built. The proposal is
@@ -347,6 +347,9 @@ keyboard and an external one, in portrait and landscape:
 The proposal's budgets are measured there and recorded with how they were measured (§14): input
 to its echo at p95 under 300 ms on a link with 100 ms of round trip, and a usable screen within 5
 seconds of coming back to the foreground.
+
+The owner changed this on 2026-11-04. The iPhone repeats only what its smoke tests never ran (§17), the budgets and an external keyboard
+move to R4 on both phones (§18), and Android, with no smoke tests of its own on a phone, still does the rest of the list above.
 
 ## 8 · Risks
 
@@ -1224,7 +1227,124 @@ above had neither of. It needs no deploy.
    was typed is there.
 10. **Taken back.** At the computer, **Revoke** beside the phone: **This computer no longer lets this phone in.**
 
-## 17 · Open after this plan
+## 17 · The device run, on the iPhone
 
+Cut on 2026-11-04, by the owner's decision, to what the smoke tests never ran on a phone, and **not yet run**.
+It takes about 20 minutes, with the phone also left locked for 20 minutes at some point. Android's half stays
+open, so this does not close §7's gate.
+
+**How to read it.** **Expect** is what the app was built to do, so anything else is a failure. **Find out** is
+something nobody has decided or seen, so there is nothing to fail: write down what happened. Report a step by its
+name, such as `C2`.
+
+**Already passed on this iPhone, against staging, and not repeated here:**
+
+| Passed     | Smoke test                                                                                                                                         |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-02 | §12: workspaces and activity. §13: watching a terminal, airplane mode and the background                                                           |
+| 2026-11-02 | §14: Claude, Codex and a shell under control, the keys, pasting, Unicode, dictation, vim, handing over, locking, rotating, a drop, a program's end |
+| 2026-11-03 | §15: signed out, revoked and switching                                                                                                             |
+
+**Moved to R4 by the same decision:** the proposal's two time budgets, input to echo and back from the foreground,
+and an external keyboard. Neither has been tried. Nothing in the app reads a physical key, so most of them may do nothing
+there.
+
+**Left for the Android phone:** direct typing into the terminal, which §5 said this run would try. The page has it turned off
+(`disableStdin`), so it needs a build of its own, and it could only be offered once it had worked on both phones.
+
+### Setting up
+
+The phone needs data of its own, with Settings → Apps → Yardsort Dev → Cellular Data on and any VPN off. Nothing native has
+changed since the last iPhone run, so the app already installed will do.
+
+1. **The host.** On this computer, stop any `just dev` for this profile. Then, from
+   `/home/josh/yardsort/yardsort/implement-remote-workspace`, end its old daemon and agents, since a daemon keeps running through a rebuild, and start again:
+
+   ```sh
+   pkill -f 'yardsort-daemon .*/tmp/ys31/'
+   YARDSORT_REMOTE_PREVIEW=1 YARDSORT_CREDENTIALS_DIR=/tmp/ys-credentials YARDSORT_DATA_DIR=/tmp/ys31 YARDSORT_WORKTREE_ROOT=/tmp/ys31-wt just dev
+   ```
+
+   Settings → Remote: server `https://remote-staging.yardsort.sh`, **Turn on and sign in**.
+
+2. **The terminals.** In a workspace on a throwaway project, start a Claude agent and open two shells. In the first, run
+   `bash --norc`: this is **the shell**. In the second, run `while :; do date +%T; sleep 1; done`: this is **the clock**, which
+   shows at a glance whether a screen is live and current. Make the window wide.
+
+3. **The phone.** On the Mac, from your clone: `git fetch origin && git checkout --detach origin/main`, then `just mobile-start`, and leave it
+   running. Open Yardsort Dev, and sign in and pair if it asks, allowing it to control terminals. If iOS ends the app while it is away, it
+   needs the Mac to start again. On cellular, a notice about Metro is the development build's, not a failure.
+
+### N · Wi-Fi to cellular and back
+
+Airplane mode is a clean drop, and this can leave a connection half dead. Toggle Wi-Fi in Settings, since Control Center's button only
+disconnects it for a while. Write down how long each return takes, by the clock.
+
+- `N1` Watch the clock on Wi-Fi, and turn Wi-Fi off. **Expect:** **Reconnecting. What is on the computer keeps running.**, then the clock live over
+  cellular, with an unbroken screen.
+- `N2` Turn Wi-Fi back on, and keep watching. **Find out** whether it moves over by itself, how long that takes, and whether the screen notices.
+- `N3` Open the shell, **Take control**, and send `cat`. Send `1`, turn Wi-Fi off, come straight back, send `2`, then `3` as soon as you can. **Expect:** at
+  the computer each line at most once and in order. A line that may not have arrived is shown as such with **Put it back** and **Dismiss**, nothing is
+  sent by itself, and control is not taken again by itself.
+- `N4` Turn Wi-Fi back on, and do `N3` again. Then press **Ctrl** and `d` to end `cat`.
+
+### W · Away past the credential's 15 minutes
+
+- `W1` Ask Claude for a task that takes a while, open its conversation on the phone, and lock the phone for over 20 minutes. Unlock. **Expect:** no
+  sign-in asked for, **Watching**, and the agent's screen current. Then open the clock. **Expect:** it is current and ticking, and at the computer it has not missed a beat.
+
+### C · Composing text
+
+Add a keyboard: Settings → General → Keyboard → Keyboards → Add New Keyboard → Japanese → Romaji. Take control of the shell, and send `cat`.
+
+- `C1` Type `nihongo`, choose `日本語` from the suggestions, and press **Send**. **Expect:** `日本語`, once, with no `nihongo`.
+- `C2` Type `nihongo`, and press return **while it is still underlined**. **Find out** whether return only accepts the word or sends it too, and whether a
+  half-made word ever reaches the computer. Then do the same with **Send**.
+- `C3` Type `nihongo`, and while it is underlined press **Ctrl**, then type `c`. **Find out** what happens. Ctrl works out what was added to the field, and
+  composing changes what is there. Then press **Ctrl** and `d` to end `cat`.
+
+### Q · Programs that ask the terminal things
+
+While a phone has control, the host answers only where the cursor is, and nothing else is answered.
+
+- `Q1` With control of the shell, send `tmux`. Press **Ctrl** then type `b`, then type `%` and press **Type**. **Expect:** a split, with no stray
+  characters. **Find out** whether it starts slower than at the computer. Send `exit` in each pane.
+- `Q2` Paste each of these into the field, copied on the Mac or from Notes, and press **Send**:
+
+  ```sh
+  printf '\e[6n'; IFS= read -rsd R -t 2 a; printf '%q\n' "$a"
+  printf '\e[c'; IFS= read -rsd c -t 2 a; printf '%q\n' "$a"
+  ```
+
+  **Expect:** the first prints a position, such as `$'\E[12;1'`, once. The second prints `''` after two seconds. Neither leaves stray characters at the next
+  prompt. Run in tmux and with nothing answering on 2026-11-04, these print those shapes. Through a phone's lease, they have not been tried.
+
+- `Q3` With control of Claude's conversation, type `/` in the field and press **Type**, since Enter would choose from the menu. Use its arrows, leave it with
+  **Esc**, then send it two requests in a row. **Expect:** nothing sits stuck. If anything hangs until a key is pressed, that is §5's slice, so write
+  down what it was doing.
+
+### L · What changed after the last run
+
+- `L1` **The sizing fixes** (§14). With control of the shell, quickly raise and dismiss the keyboard five times, rotate twice quickly, and leave it. Send
+  `stty size`. **Expect:** it settles with no half row and nothing to scroll, its top line clear of the header and its bottom line above the field, and the
+  rows and columns are what fits. Do the same in Claude's conversation.
+- `L2` **Dark mode** (Settings → Display & Brightness). Go through the account, a computer, a workspace and a terminal, in dark and light. **Find out** how the header's glass, its title and the back button look. They changed on 2026-11-03 (§16), and nobody has looked at them on iOS.
+
+### The record
+
+To be filled in from the run, with the iPhone's model and iOS version, `claude --version` and the commit:
+
+| Part                     | Result  | Notes |
+| ------------------------ | ------- | ----- |
+| N · Wi-Fi and cellular   | Not run |       |
+| W · Away past 15 minutes | Not run |       |
+| C · Composing text       | Not run |       |
+| Q · Programs that ask    | Not run |       |
+| L · After the last run   | Not run |       |
+
+## 18 · Open after this plan
+
+- **For R4, moved from the device run on 2026-11-04 (§7):** input to echo at p95 under 300 ms at 100 ms of round trip, a usable screen within 5 seconds
+  of coming back to the foreground, and an external keyboard. None has been tried.
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.
