@@ -2,10 +2,10 @@
 //! See [`yardsort_core::remote::host`] for what is kept where, and
 //! [docs/design/27-remote-r2.md](../../docs/design/27-remote-r2.md) for the design.
 //!
-//! **A preview, off unless `YARDSORT_REMOTE_PREVIEW=1`.** Without it the Remote settings are not
-//! shown, every command here refuses, and nothing connects. With it, a host that is on keeps a
-//! link to its server's relay ([`remote_host::Connector`]) from the moment the app starts, and
-//! paired devices reach it through that; there is no phone app yet to do so.
+//! **Still under development, and off until the person turns it on and signs in.** Until then
+//! nothing connects. A host that is on keeps a link to its server's relay
+//! ([`remote_host::Connector`]) from the moment the app starts, and paired devices reach it
+//! through that.
 //!
 //! The host signs in through the system browser, like any device, and keeps its refresh
 //! credential in the OS credential store (or `YARDSORT_CREDENTIALS_DIR`, a directory only its
@@ -46,8 +46,6 @@ use yardsort_core::store::RemoteHostRow;
 use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
 
-/// The switch that shows Remote at all.
-pub const PREVIEW_VAR: &str = "YARDSORT_REMOTE_PREVIEW";
 /// A directory to keep the host's credential in, instead of the OS credential store.
 pub const CREDENTIALS_DIR_VAR: &str = "YARDSORT_CREDENTIALS_DIR";
 const KEYRING_SERVICE: &str = "dev.yardsort.app";
@@ -72,9 +70,6 @@ pub struct Remote {
 /// Keep a link to the relay, when Remote is on: at start, and once it is turned on. Needs a
 /// Tokio runtime: call it from async code.
 pub fn connect(app: &AppHandle) {
-    if !available() {
-        return;
-    }
     let state = app.state::<AppState>();
     let Ok(Some(row)) = state.store.remote_host() else {
         return;
@@ -224,15 +219,9 @@ fn request(grant: GrantSummary) -> RemoteRequest {
     }
 }
 
-pub fn available() -> bool {
-    std::env::var_os(PREVIEW_VAR).is_some_and(|v| v == "1")
-}
-
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteStatus {
-    /// Whether this build shows Remote at all (the preview switch).
-    pub available: bool,
     /// This computer as a host, when Remote is on.
     pub host: Option<RemoteHost>,
     /// The devices let in here.
@@ -354,13 +343,6 @@ pub enum RemoteAnswer {
     },
 }
 
-fn unavailable() -> IpcError {
-    IpcError::new(
-        "remote_unavailable",
-        format!("Remote is a preview; start Yardsort with {PREVIEW_VAR}=1 to try it."),
-    )
-}
-
 fn failed(error: ClientError) -> IpcError {
     let code = match error.code() {
         Some(ErrorCode::Unauthenticated) => "remote_signed_out",
@@ -475,7 +457,6 @@ fn status(state: &AppState) -> IpcResult<RemoteStatus> {
         None => Vec::new(),
     };
     Ok(RemoteStatus {
-        available: available(),
         host: host.map(|h| RemoteHost {
             server_url: h.server_url,
             name: h.name,
@@ -524,9 +505,6 @@ pub async fn remote_enable(
     server_url: String,
     name: String,
 ) -> IpcResult<RemoteStatus> {
-    if !available() {
-        return Err(unavailable());
-    }
     let name = name.trim().to_owned();
     // Checked before signing in, so a name the server would refuse leaves no device behind.
     HostRegistration {
@@ -883,9 +861,6 @@ fn now_ms() -> i64 {
 }
 
 fn enabled(state: &AppState) -> IpcResult<RemoteHostRow> {
-    if !available() {
-        return Err(unavailable());
-    }
     state
         .store
         .remote_host()

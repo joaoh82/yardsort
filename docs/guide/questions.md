@@ -59,6 +59,9 @@ you run can send prompts and code to their own providers under their own setting
 The [Usage](usage.md) view reads the token counts the agents keep in their own logs on this
 machine, and the operating system's process figures; it sends nothing.
 
+Optional [Remote](remote.md), off until you turn it on, passes what your paired devices see and type,
+terminals included, through the server you sign in to. Whoever runs that server can see it.
+
 Optional Assist uses TypeSafe Jev. Depending on the features you enable, it sends changed-file
 diffs and task context, composer text and harness descriptions, or memory proposals and approved
 entries. Assist does not send terminal output. The [Assist guide](assist.md) explains what each

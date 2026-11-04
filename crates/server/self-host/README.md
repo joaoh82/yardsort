@@ -21,10 +21,10 @@ source of your changed version
 **What works today.** Signing in, listing and revoking devices, pairing a device with a host
 (approved at the host), and the relay, through which a paired device reaches its host's
 workspaces and terminals with neither of them listening for connections
-([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app is a host
-only as a preview (`YARDSORT_REMOTE_PREVIEW=1`), and there is no phone app yet: the repository's
-pairing tool stands in for one. So for now this is for trying the server and getting ready for
-what comes next.
+([docs/design/27-remote-r2.md](../../../docs/design/27-remote-r2.md)). The Yardsort app can be a host, in
+Settings → Remote, which is still under development. The phone app is in `apps/mobile`, and is not in
+the app stores yet, so you build it yourself; the repository's pairing tool also stands in for one. So
+for now this is for trying the server and getting ready for what comes next.
 
 ## What you need
 

@@ -139,6 +139,30 @@ The phone cannot reach a development server on the Mac's loopback, so on a phone
 `https://remote-staging.yardsort.sh` (31 §7). The iOS Simulator shares the Mac's loopback, so it
 can use `just server-up` and `http://127.0.0.1:8787`.
 
+### On TestFlight
+
+A build you can install and keep using, away from the Mac, for internal testers. It is the release
+identity (`Yardsort`, `dev.yardsort.mobile`), so it sits beside the development app on the phone, with
+its own sign-in: sign in and pair again. Each build lasts 90 days. It is archived in Xcode on a Mac, with
+no EAS. The first time only, register the app:
+
+1. Run the recipe below once and choose your team in step 2, which registers `dev.yardsort.mobile`.
+2. In [App Store Connect](https://appstoreconnect.apple.com), under **Apps**, **+**, **New App**: iOS,
+   the name `Yardsort` (any other if it is taken: it is only a listing), the bundle ID
+   `dev.yardsort.mobile`, and any SKU, such as `yardsort-mobile`. Then in that app's **TestFlight** tab,
+   add an internal testing group with yourself in it.
+
+Then, for each build:
+
+1. `just mobile-testflight`, from your clone on the Mac. It gives the build a new number from the date
+   and time, and opens it in Xcode. It replaces `ios/`, so `just mobile-ios` builds it again for
+   development afterwards. With `APPLE_TEAM_ID` set, step 2 is done for you.
+2. In Xcode, select the **Yardsort** target, then **Signing & Capabilities**, tick **Automatically manage
+   signing**, and choose the paid team.
+3. Set the destination at the top to **Any iOS Device (arm64)**, then **Product**, **Archive**.
+4. When the Organizer opens, **Distribute App**, **TestFlight Internal Only**, **Distribute**.
+5. Apple takes a few minutes to process it, then the **TestFlight** app on the phone offers it.
+
 ### On Android
 
 `just mobile-android` (here: `bun run android`) builds with the Android SDK, without EAS, onto an

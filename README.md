@@ -126,7 +126,7 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Private by construction.** No account, no telemetry, no keys of ours. Agents use their own
   logins; Yardsort just starts them. It talks to the network to check for new versions, which you
   can switch off — and, only if you switch Assist on and add your own key, to ask Jev about your
-  diffs.
+  diffs, or, only if you turn on [Remote](docs/guide/remote.md), to the server you choose.
 - **A record of what ran.** Yardsort keeps a local note of when each agent started in a
   workspace and how it ended — even if it ended while the window was closed — without reading a
   word the agent printed. Turn it on, and every built-in agent — Claude Code, Codex, OpenCode,

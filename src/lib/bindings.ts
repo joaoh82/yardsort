@@ -2088,8 +2088,6 @@ export type RemoteRequests = {
 };
 
 export type RemoteStatus = {
-	/**  Whether this build shows Remote at all (the preview switch). */
-	available: boolean,
 	/**  This computer as a host, when Remote is on. */
 	host: RemoteHost | null,
 	/**  The devices let in here. */

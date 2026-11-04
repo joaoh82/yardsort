@@ -119,6 +119,12 @@ export const DOCS_NAV: DocSection[] = [
           "Create reusable agent workflows in YAML, inspect their steps, run code reviews and follow workflow runs in Yardsort or through ys.",
       },
       {
+        slug: "guide/remote",
+        title: "Remote",
+        description:
+          "Reach this computer from your phone through a Yardsort server. Still under development, and off until you turn it on.",
+      },
+      {
         slug: "guide/smoke-tests",
         title: "Smoke tests",
         description:

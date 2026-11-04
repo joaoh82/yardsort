@@ -24,7 +24,6 @@ import { useRemoteStore } from "@/stores/remote";
 import { RemoteSettings } from "./RemoteSettings";
 
 const off: RemoteStatus = {
-  available: true,
   host: null,
   devices: [],
   signingIn: false,
@@ -60,6 +59,13 @@ beforeEach(() => {
       { id: "p-2", name: "web", rootPath: "/repos/web" },
     ] as never,
   });
+});
+
+it("says it is under development, and turns on only when asked", async () => {
+  render(<RemoteSettings />);
+  expect(await screen.findByRole("note")).toHaveTextContent("still under development");
+  expect(screen.getByRole("button", { name: "Turn on and sign in" })).toBeInTheDocument();
+  expect(core.remoteEnable).not.toHaveBeenCalled();
 });
 
 it("turns on with the server and name given, then shows this computer", async () => {

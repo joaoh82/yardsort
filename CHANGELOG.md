@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Remote, still under development.** Settings → Remote lets a phone reach this computer's
+  workspaces and terminals through a Yardsort server you sign in to. It stays off, and connects to
+  nothing, until you turn it on, and a device gets in only if you say yes at this computer. Whoever runs
+  the server can see what passes through it. The phone app is not in the app stores yet. See
+  [Remote](docs/guide/remote.md).
+
 - **A Tests view for every project's smoke tests.** **Tests**, in the sidebar, lists every
   project's tests with the verdict of each one's last run, and a **Runs** tab of every run across
   workspaces; filter by project, workspace, verdict or what the machine lacks, and on Runs by who

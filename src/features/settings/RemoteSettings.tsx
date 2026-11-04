@@ -16,12 +16,12 @@ import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
 const POLL_MS = 3000;
 
 /**
- * Remote, a preview: this computer as a host on a Yardsort server, and the devices let in.
+ * Remote, still under development: this computer as a host on a Yardsort server, and the devices
+ * let in.
  *
- * Shown only when the app was started with `YARDSORT_REMOTE_PREVIEW=1`. While Remote is on, the
- * app keeps a link to the server's relay, and paired devices reach this computer through it; there
- * is no phone app yet. Approving a device happens here and nowhere else — not in `ys`, not
- * anywhere an agent could reach.
+ * Off until it is turned on here. While it is on, the app keeps a link to the server's relay, and
+ * paired devices reach this computer through it. Approving a device happens here and nowhere else
+ * — not in `ys`, not anywhere an agent could reach.
  */
 export function RemoteSettings() {
   const [status, setStatus] = useState<RemoteStatus | null>(null);
@@ -105,15 +105,19 @@ export function RemoteSettings() {
     <div className="grid gap-5 p-5">
       <section className="grid gap-2">
         <h3 className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
-          Remote <span className="font-normal normal-case">(preview)</span>
+          Remote
         </h3>
+        <p role="note" className="rounded border border-accent/40 bg-accent/10 px-3 py-2 text-ink">
+          Remote is still under development, and will be until the whole plan for it is finished.
+          Expect it to change. It stays off, and connects to nothing, unless you turn it on below.
+        </p>
         <p className="text-ink-faint">
           Let your phone or another computer reach this one through a Yardsort server you sign in
           to. A device you pair asks first, and gets in only if you say yes here. Agents keep
           running on this computer whatever happens to the connection.
         </p>
         <p className="text-ink-faint">
-          In this preview there is no phone app yet. Whoever runs the server can see what passes
+          The phone app is not in the app stores yet. Whoever runs the server can see what passes
           through it; it is not end-to-end encrypted.
         </p>
       </section>
