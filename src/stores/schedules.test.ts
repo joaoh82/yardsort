@@ -76,6 +76,7 @@ describe("the schedules store", () => {
         schedule("e", { standing: "off" }),
         schedule("f", { standing: "running" }),
         schedule("g", { standing: "done" }),
+        schedule("h", { standing: "missed" }),
       ]),
     ).toBe(3);
   });

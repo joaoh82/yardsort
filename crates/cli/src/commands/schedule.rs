@@ -420,6 +420,7 @@ fn standing_words(standing: ScheduleStanding) -> &'static str {
         ScheduleStanding::NoWorkspace => "no workspace",
         ScheduleStanding::Off => "off",
         ScheduleStanding::Done => "done",
+        ScheduleStanding::Missed => "missed",
     }
 }
 

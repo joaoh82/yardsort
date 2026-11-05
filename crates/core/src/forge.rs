@@ -761,12 +761,16 @@ impl Gh {
     /// Where [`Gh::pull_requests`] is a bounded overview for the sidebar, this is the answer to
     /// "does this branch have one": an older pull request behind fifty newer ones is still
     /// found.
+    ///
+    /// `gh` gets `limit` to answer. Whoever asks this is about to start a run, and one of them
+    /// is the thread that fires every schedule: a network that went away must not hold it.
     pub fn open_pull_requests_for(
         &self,
         root: &Path,
         branch: &str,
+        limit: Duration,
     ) -> ForgeResult<Vec<PullRequest>> {
-        let out = self.run(
+        let out = self.run_within(
             root,
             &[
                 "pr",
@@ -780,6 +784,7 @@ impl Gh {
                 "--json",
                 PULL_REQUEST_FIELDS,
             ],
+            limit,
         )?;
         pull_requests(&out)
     }

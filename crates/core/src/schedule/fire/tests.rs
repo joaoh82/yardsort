@@ -4,8 +4,10 @@
 use chrono::Duration;
 
 use super::*;
-use crate::schedule::tests::{nov, time, Fx};
-use crate::schedule::{set_enabled, IfMissed, ScheduleSpec, ScheduleTarget};
+use crate::schedule::tests::{nov, time, Fx, DEMO, RUNS_THE_TEST};
+use crate::schedule::{
+    set_enabled, standing, IfMissed, ScheduleSpec, ScheduleStanding, ScheduleTarget,
+};
 use crate::store::Store;
 use crate::workflow::runs::Accepting;
 
@@ -186,7 +188,7 @@ fn a_once_fires_and_is_done() {
 }
 
 #[test]
-fn a_once_missed_and_skipped_is_done_without_running() {
+fn a_once_missed_and_skipped_never_runs_and_says_so() {
     let fx = Fx::new();
     let once = ScheduleSpec::Once {
         at: nov(5, 18, 0).timestamp_millis(),
@@ -200,8 +202,15 @@ fn a_once_missed_and_skipped_is_done_without_running() {
         )
         .unwrap();
     assert_eq!(only(fire(&fx, &nov(6, 8, 0))).outcome, "missed");
-    assert!(!fx.schedule(&schedule.id).enabled);
+    let after = fx.schedule(&schedule.id);
+    assert!(!after.enabled);
     assert!(fx.store.active_workflow_runs().unwrap().is_empty());
+    let history = fx.store.schedule_runs(&schedule.id, 1).unwrap();
+    assert_eq!(
+        standing(&after, history.first()),
+        ScheduleStanding::Missed,
+        "not done: it never ran"
+    );
 }
 
 #[test]
@@ -256,6 +265,199 @@ fn a_workflow_that_is_no_longer_there_is_refused() {
     let line = only(fire(&fx, &nov(6, 9, 0)));
     assert_eq!(line.outcome, "refused");
     assert_eq!(line.note.as_deref(), Some("There is no workflow `ping`."));
+}
+
+/// The blocking case: a workflow's `run_test` step with no timeout waits for as long as its
+/// test does, and a test whose file nobody approved waits for a person. Started by a schedule,
+/// the run would never end, and every later time would be skipped behind it.
+#[test]
+fn a_workflow_whose_test_would_wait_for_a_person_is_refused_at_its_time() {
+    let fx = Fx::new();
+    fx.write_workflow("smoke", RUNS_THE_TEST);
+    fx.approve_test();
+    let schedule = fx
+        .try_add_of(
+            ScheduleTarget::Workflow,
+            "smoke",
+            &daily(),
+            IfMissed::default(),
+            &nov(5, 10, 0),
+        )
+        .unwrap();
+
+    // The file changes after the schedule was saved: an agent edited it, or a pull brought a
+    // new version.
+    fx.write_test(&DEMO.replace("--version", "--help"));
+    let mut fired = fire(&fx, &nov(6, 9, 0));
+    assert_eq!(fired.len(), 1);
+    let first = fired.remove(0);
+    assert_eq!(first.run.outcome, "refused");
+    let note = first.run.note.as_deref().unwrap();
+    assert!(note.contains("has changed since you approved it"), "{note}");
+    assert!(
+        fx.store.active_workflow_runs().unwrap().is_empty(),
+        "no run was started to sit waiting"
+    );
+    assert!(fx.store.active_test_runs().unwrap().is_empty());
+    // The user is told, since no run will end to tell them.
+    let notice = first.notice.expect("told");
+    assert_eq!(notice.title, "Smoke could not start");
+    assert_eq!(notice.body, note);
+    assert!(
+        fx.schedule(&schedule.id).enabled,
+        "approving is all it takes"
+    );
+
+    // Still not approved the next day: refused again, and not told again.
+    let mut fired = fire(&fx, &nov(7, 9, 0));
+    let second = fired.remove(0);
+    assert_eq!(second.run.outcome, "refused");
+    assert_eq!(second.notice, None, "once while it lasts");
+
+    // Approved, it goes, and the run knows nobody is watching it.
+    fx.approve_test();
+    let third = only(fire(&fx, &nov(8, 9, 0)));
+    assert_eq!(third.outcome, "started");
+    let run = fx.store.active_workflow_runs().unwrap().remove(0);
+    assert!(crate::workflow::runs::Facts::parse(&run.context).unattended);
+}
+
+#[test]
+fn run_now_is_attended_so_its_workflow_may_wait_for_the_person_who_asked() {
+    let fx = Fx::new();
+    fx.write_workflow("smoke", RUNS_THE_TEST);
+    fx.approve_test();
+    let schedule = fx
+        .try_add_of(
+            ScheduleTarget::Workflow,
+            "smoke",
+            &daily(),
+            IfMissed::default(),
+            &nov(5, 10, 0),
+        )
+        .unwrap();
+    fx.write_test(&DEMO.replace("--version", "--help"));
+
+    let now = nov(5, 12, 0).timestamp_millis();
+    let fired = run_now(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &schedule.id,
+        now,
+    )
+    .unwrap();
+    assert_eq!(fired.run.outcome, "started");
+    let run = fx.store.active_workflow_runs().unwrap().remove(0);
+    assert!(!crate::workflow::runs::Facts::parse(&run.context).unattended);
+}
+
+#[test]
+fn a_refusal_is_told_once_while_it_lasts_and_never_when_the_schedule_says_never() {
+    let fx = Fx::new();
+    let schedule = fx.add(ScheduleTarget::Workflow, &daily(), &nov(5, 10, 0));
+    fx.store
+        .set_workspace_archived(&fx.workspace.id, true)
+        .unwrap();
+    let told = |day| fire(&fx, &nov(day, 9, 0)).remove(0).notice;
+
+    let first = told(6).expect("told the first time");
+    assert_eq!(first.schedule_id, schedule.id);
+    assert_eq!(first.title, "Ping could not start");
+    assert!(first.body.contains("is archived"), "{}", first.body);
+    assert_eq!(told(7), None, "not at every time that comes");
+
+    // It starts again, and is refused again later: that is news.
+    fx.store
+        .set_workspace_archived(&fx.workspace.id, false)
+        .unwrap();
+    assert_eq!(told(8), None, "a run that started has nothing to tell yet");
+    fx.store
+        .set_workspace_archived(&fx.workspace.id, true)
+        .unwrap();
+    assert!(told(9).is_some());
+
+    // A schedule that tells nothing tells nothing.
+    let quiet = Fx::new();
+    let schedule = quiet.add(ScheduleTarget::Workflow, &daily(), &nov(5, 10, 0));
+    let row = quiet.schedule(&schedule.id);
+    quiet
+        .store
+        .update_schedule(
+            &row.id,
+            &crate::store::ScheduleFields {
+                name: &row.name,
+                target_kind: &row.target_kind,
+                target_id: &row.target_id,
+                project_id: &row.project_id,
+                workspace_id: row.workspace_id.as_deref().unwrap(),
+                workspace_name: &row.workspace_name,
+                inputs: &row.inputs,
+                spec: &row.spec,
+                missed: &row.missed,
+                notify: "never",
+                next_at: row.next_at,
+            },
+        )
+        .unwrap();
+    quiet
+        .store
+        .set_workspace_archived(&quiet.workspace.id, true)
+        .unwrap();
+    let mut fired = fire(&quiet, &nov(6, 9, 0));
+    let line = fired.remove(0);
+    assert_eq!(line.run.outcome, "refused");
+    assert_eq!(line.notice, None);
+}
+
+#[test]
+fn a_schedule_whose_next_time_cannot_be_worked_out_stays_on_and_says_it_was_refused() {
+    let fx = Fx::new();
+    let schedule = fx.add(ScheduleTarget::Workflow, &daily(), &nov(5, 10, 0));
+    // What a schedule saved by a later Yardsort, or a cron this one reads differently, looks
+    // like from here.
+    let row = fx.schedule(&schedule.id);
+    fx.store
+        .update_schedule(
+            &row.id,
+            &crate::store::ScheduleFields {
+                name: &row.name,
+                target_kind: &row.target_kind,
+                target_id: &row.target_id,
+                project_id: &row.project_id,
+                workspace_id: row.workspace_id.as_deref().unwrap(),
+                workspace_name: &row.workspace_name,
+                inputs: &row.inputs,
+                spec: r#"{"kind":"cron","expr":"every so often"}"#,
+                missed: &row.missed,
+                notify: &row.notify,
+                next_at: row.next_at,
+            },
+        )
+        .unwrap();
+
+    let mut fired = fire(&fx, &nov(6, 9, 0));
+    let line = fired.remove(0);
+    assert_eq!(line.run.outcome, "refused");
+    let note = line.run.note.as_deref().unwrap();
+    assert!(note.contains("a cron expression here has five"), "{note}");
+    assert!(note.contains("until you edit it"), "{note}");
+    assert!(line.notice.is_some());
+    assert!(
+        fx.store.active_workflow_runs().unwrap().is_empty(),
+        "nothing ran"
+    );
+
+    // Not switched off, which is how a `once` that is done looks.
+    let after = fx.schedule(&schedule.id);
+    assert!(after.enabled);
+    assert_eq!(after.next_at, None);
+    let history = fx.store.schedule_runs(&schedule.id, 1).unwrap();
+    assert_eq!(standing(&after, history.first()), ScheduleStanding::Refused);
+    assert!(
+        fire(&fx, &nov(7, 9, 0)).is_empty(),
+        "and it is not asked every second"
+    );
 }
 
 #[test]

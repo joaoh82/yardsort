@@ -11,9 +11,10 @@ has the downloads and the full commit lists.
   weekdays, monthly, or a cron expression, in this computer's local time, with the next times
   shown as you fill it in. Schedules fire while Yardsort is open: each says whether a time missed
   while it was closed runs once on opening or is skipped. A run that is still going is never
-  joined by a second. A notification tells you when a scheduled run fails, or how every run
-  ends. A smoke test file is approved when you schedule it in the app, and waits for approval
-  again if it changes. `ys schedule` does the same from a terminal. See
+  joined by a second. A notification tells you when a scheduled run fails or could not start,
+  or how every run ends. A smoke test file is approved when you schedule it in the app, and
+  waits for approval again if it changes; a workflow that runs a smoke test is scheduled only
+  when that test can run with nobody there. `ys schedule` does the same from a terminal. See
   [Schedules](docs/guide/schedules.md).
 
 ## 0.21.1

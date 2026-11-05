@@ -72,6 +72,19 @@ steps:
     prompt: Does it look right?
 "#;
 
+/// A workflow that runs the worktree's smoke test, with no timeout: the step would wait for as
+/// long as the test did.
+pub(crate) const RUNS_THE_TEST: &str = r#"id: smoke
+name: Smoke
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: check
+    action: run_test
+    test: demo
+"#;
+
 pub(crate) struct Fx {
     _dir: tempfile::TempDir,
     pub data_dir: PathBuf,
@@ -115,6 +128,25 @@ impl Fx {
         std::fs::write(folder.join("demo.yaml"), text).unwrap();
     }
 
+    /// Put a workflow in the user's folder.
+    pub fn write_workflow(&self, id: &str, text: &str) {
+        let folder = crate::workflow::user_dir(&self.data_dir);
+        std::fs::write(folder.join(format!("{id}.yaml")), text).unwrap();
+    }
+
+    /// Approve the worktree's smoke test file as it is now, the way running it in the app does.
+    pub fn approve_test(&self) {
+        let folder = crate::smoke::dir(std::path::Path::new(&self.workspace.path));
+        let text = std::fs::read_to_string(folder.join("demo.yaml")).unwrap();
+        self.store
+            .approve_test(
+                &self.project_id,
+                "demo",
+                &crate::smoke::runs::content_hash(&text),
+            )
+            .unwrap();
+    }
+
     pub fn try_add(
         &self,
         target: ScheduleTarget,
@@ -126,6 +158,17 @@ impl Fx {
             ScheduleTarget::Workflow => "ping",
             ScheduleTarget::Test => "demo",
         };
+        self.try_add_of(target, target_id, spec, missed, now)
+    }
+
+    pub fn try_add_of(
+        &self,
+        target: ScheduleTarget,
+        target_id: &str,
+        spec: &ScheduleSpec,
+        missed: IfMissed,
+        now: &DateTime<Tz>,
+    ) -> IpcResult<ScheduleRow> {
         add(
             &self.store,
             &self.data_dir,
@@ -281,6 +324,76 @@ fn a_test_with_a_step_a_person_does_cannot_be_scheduled() {
         .unwrap_err();
     assert_eq!(refused.code, "schedule_needs_person");
     assert!(refused.message.contains("`look`"), "{}", refused.message);
+}
+
+#[test]
+fn a_workflow_whose_test_would_wait_for_a_person_cannot_be_scheduled() {
+    let fx = Fx::new();
+    fx.write_workflow("smoke", RUNS_THE_TEST);
+    let try_add = || {
+        fx.try_add_of(
+            ScheduleTarget::Workflow,
+            "smoke",
+            &daily(),
+            IfMissed::default(),
+            &nov(5, 10, 0),
+        )
+    };
+
+    // Nobody has approved the file: its run would wait for that, and the step with it.
+    let refused = try_add().unwrap_err();
+    assert_eq!(refused.code, "schedule_needs_person");
+    assert!(refused.message.contains("`check`"), "{}", refused.message);
+    assert!(
+        refused.message.contains("Run it once in `fix`"),
+        "{}",
+        refused.message
+    );
+
+    // A project that asks before every run asks before this one too.
+    fx.approve_test();
+    let mut settings = fx.store.project_test_settings(&fx.project_id).unwrap();
+    settings.ask_every_time = true;
+    fx.store
+        .set_project_test_settings(&fx.project_id, &settings)
+        .unwrap();
+    let refused = try_add().unwrap_err();
+    assert!(
+        refused.message.contains("asks before every run"),
+        "{}",
+        refused.message
+    );
+    settings.ask_every_time = false;
+    fx.store
+        .set_project_test_settings(&fx.project_id, &settings)
+        .unwrap();
+
+    // A step a person answers, approved or not.
+    fx.write_test(ASKS_A_PERSON);
+    fx.approve_test();
+    let refused = try_add().unwrap_err();
+    assert!(refused.message.contains("`look`"), "{}", refused.message);
+    assert!(
+        fx.store.schedules().unwrap().is_empty(),
+        "a refusal writes nothing"
+    );
+
+    // Approved as it is, with nothing for a person in it, it can be.
+    fx.write_test(DEMO);
+    assert_eq!(try_add().unwrap().name, "Smoke");
+
+    // A test named by a variable is not known until the run: that is the run's to refuse.
+    fx.write_test(ASKS_A_PERSON);
+    fx.write_workflow(
+        "smoke",
+        &RUNS_THE_TEST
+            .replace(
+                "steps:",
+                "inputs:\n  - id: which\n    kind: test\n    default: demo\nsteps:",
+            )
+            .replace("test: demo", "test: \"{{ inputs.which }}\""),
+    );
+    try_add().unwrap();
 }
 
 #[test]
@@ -610,4 +723,55 @@ fn a_once_that_has_fired_is_done() {
         standing(&fx.schedule(&schedule.id), history.first()),
         ScheduleStanding::Done
     );
+}
+
+#[test]
+fn a_once_that_was_missed_or_refused_does_not_say_it_is_done() {
+    use crate::schedule::fire::tick;
+    let stands = |fx: &Fx, id: &str| {
+        let history = fx.store.schedule_runs(id, 1).unwrap();
+        standing(&fx.schedule(id), history.first())
+    };
+    let once = ScheduleSpec::Once {
+        at: nov(5, 18, 0).timestamp_millis(),
+    };
+
+    // Its time passed while nobody was looking, and it skips those: it never ran.
+    let fx = Fx::new();
+    let skipper = fx
+        .try_add(
+            ScheduleTarget::Workflow,
+            &once,
+            IfMissed::Skip,
+            &nov(5, 10, 0),
+        )
+        .unwrap();
+    tick(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &nov(6, 8, 0),
+    )
+    .unwrap();
+    assert!(!fx.schedule(&skipper.id).enabled);
+    assert_eq!(stands(&fx, &skipper.id), ScheduleStanding::Missed);
+    assert!(!stands(&fx, &skipper.id).needs_attention());
+
+    // Its one time came and the run could not start: it never ran either, and that needs
+    // somebody.
+    let fx = Fx::new();
+    let refused = fx.add(ScheduleTarget::Workflow, &once, &nov(5, 10, 0));
+    fx.store
+        .set_workspace_archived(&fx.workspace.id, true)
+        .unwrap();
+    tick(
+        &fx.store,
+        &fx.data_dir,
+        &Accepting::default(),
+        &nov(5, 18, 0),
+    )
+    .unwrap();
+    assert!(!fx.schedule(&refused.id).enabled);
+    assert_eq!(stands(&fx, &refused.id), ScheduleStanding::Refused);
+    assert!(stands(&fx, &refused.id).needs_attention());
 }

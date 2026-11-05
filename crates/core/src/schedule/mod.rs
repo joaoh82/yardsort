@@ -427,6 +427,9 @@ fn check_draft<Tz: TimeZone>(
             let harness = |wanted: &str| look.harness(wanted);
             crate::workflow::runs::check_inputs(workflow, draft.inputs, &harness)
                 .map_err(|why| IpcError::new("workflow_inputs", why))?;
+            if let Some(why) = workflow_needs_a_person(store, &workspace, workflow)? {
+                return Err(IpcError::new("schedule_needs_person", why));
+            }
             workflow.name.clone()
         }
         ScheduleTarget::Test => {
@@ -483,6 +486,38 @@ pub fn needs_a_person(test: &crate::smoke::Test) -> Option<String> {
          there to answer it.",
         test.id, step.id
     ))
+}
+
+/// Why a workflow cannot run with nobody there, as far as can be known before it starts: one
+/// of its `run_test` steps names a smoke test that has a step a person does, or whose file
+/// would wait to be approved. Such a step would wait for a person who is not coming — for ever
+/// when it has no timeout — and every later time of the schedule would find the run still
+/// going.
+///
+/// A step whose test is a `{{ variable }}` cannot be known until it runs. The run a schedule
+/// starts is marked as unattended, and fails that step when its time comes (see
+/// [`crate::smoke::runs::Request::unattended`]).
+pub(crate) fn workflow_needs_a_person(
+    store: &Store,
+    workspace: &WorkspaceRow,
+    workflow: &crate::workflow::Workflow,
+) -> IpcResult<Option<String>> {
+    for step in &workflow.steps {
+        let crate::workflow::Action::RunTest { test, .. } = &step.action else {
+            continue;
+        };
+        if test.contains("{{") {
+            continue;
+        }
+        if let Some(why) = crate::smoke::runs::waits_for_a_person(store, workspace, test)? {
+            return Ok(Some(format!(
+                "`{}` cannot run on a schedule: its step `{}` runs a smoke test that would \
+                 wait for you. {why}",
+                workflow.id, step.id
+            )));
+        }
+    }
+    Ok(None)
 }
 
 fn fields<'a>(draft: &'a Draft<'_>, checked: &'a Checked) -> ScheduleFields<'a> {
@@ -589,6 +624,9 @@ pub enum ScheduleStanding {
     Off,
     /// A `once` that has had its time.
     Done,
+    /// A `once` whose time passed while Yardsort was not running, and that skips those: it
+    /// never ran.
+    Missed,
 }
 
 impl ScheduleStanding {
@@ -620,11 +658,20 @@ pub fn standing(
         };
     }
     if !schedule.enabled {
-        return if schedule.next_at.is_none() {
-            ScheduleStanding::Done
-        } else {
-            ScheduleStanding::Off
+        if schedule.next_at.is_some() {
+            return ScheduleStanding::Off;
+        }
+        // A `once` that has had its time. What became of that time is said, not assumed: one
+        // that was missed or refused never ran.
+        return match last.map(|line| line.outcome.as_str()) {
+            Some("missed") => ScheduleStanding::Missed,
+            Some("refused") => ScheduleStanding::Refused,
+            _ => ScheduleStanding::Done,
         };
+    }
+    // On, with no time to come: its next time could not be worked out when it last fired.
+    if schedule.next_at.is_none() {
+        return ScheduleStanding::Refused;
     }
     match last {
         Some(line) if line.outcome == "refused" => ScheduleStanding::Refused,

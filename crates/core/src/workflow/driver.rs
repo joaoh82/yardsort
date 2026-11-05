@@ -335,7 +335,15 @@ fn move_on(
                 }
                 continue; // The step moved on without us.
             }
-            let change = match carry_out(store, host, hands, &place, effect, &mut typed_to) {
+            let change = match carry_out(
+                store,
+                host,
+                hands,
+                &place,
+                effect,
+                facts.unattended,
+                &mut typed_to,
+            ) {
                 Outcome::Done(outputs) => engine::done(&step, &outputs),
                 Outcome::Queued(outputs) => engine::queued(&step, &outputs),
                 Outcome::Failed(why) => engine::failed(&step, &why),
@@ -426,12 +434,14 @@ fn step_of(effect: &Effect) -> &str {
 }
 
 /// Do what a step asks, and say what it left or why it could not.
+#[allow(clippy::too_many_arguments)]
 fn carry_out(
     store: &Store,
     host: &dyn TerminalHost,
     hands: &dyn Hands,
     place: &Place,
     effect: Effect,
+    unattended: bool,
     typed_to: &mut HashSet<String>,
 ) -> Outcome {
     let done = |result: Result<Outputs, String>| match result {
@@ -493,13 +503,17 @@ fn carry_out(
             // Queue the run in this workspace; the smoke runner, ticking on this same thread,
             // carries it out. The step then waits for the run's row to end. A run that needs the
             // user to approve the file is still queued — it waits in the app, and the step waits
-            // with it until its timeout.
+            // with it until its timeout. Not when a schedule started this run: nobody is there
+            // to approve it or to answer a step, a step with no timeout would wait for ever,
+            // and every later time of the schedule would find this run still going. The door
+            // refuses such a test, and the step fails saying why.
             let request = crate::smoke::runs::Request {
                 test_id: &test,
                 workspace_id: &place.workspace.id,
                 inputs: &inputs,
                 requested_by: "workflow",
                 session_record_id: None,
+                unattended,
             };
             match crate::smoke::runs::queue(store, &request) {
                 Ok(queued) => {

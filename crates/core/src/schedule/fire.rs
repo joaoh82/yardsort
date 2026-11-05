@@ -66,6 +66,17 @@ impl ScheduleOutcome {
 pub struct Fired {
     pub schedule: ScheduleRow,
     pub run: ScheduleRunRow,
+    /// What to tell the user about it now: that the schedule could not start its run, said
+    /// once for as long as it goes on being refused.
+    pub notice: Option<Notice>,
+}
+
+/// Something to tell the user about a schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub schedule_id: String,
+    pub title: String,
+    pub body: String,
 }
 
 /// Act on every schedule whose time has come by `now`. Each time is acted on once, by whoever
@@ -82,27 +93,36 @@ pub fn tick<Tz: TimeZone>(
         let Some(due_at) = schedule.next_at else {
             continue;
         };
-        let spec = ScheduleSpec::parse(&schedule.spec);
         // From now, not from the time that was due: however many times passed while nobody was
         // looking, there is one to act on and the next is still to come.
-        let next_at = spec
-            .as_ref()
-            .and_then(|spec| when::next_after(spec, now, Some(due_at)).ok().flatten())
-            .map(|next| next.timestamp_millis());
-        if !store.claim_schedule(&schedule.id, due_at, next_at)? {
+        let next = match ScheduleSpec::parse(&schedule.spec) {
+            Some(spec) => when::next_after(&spec, now, Some(due_at))
+                .map(|next| next.map(|next| next.timestamp_millis())),
+            None => Err("This Yardsort cannot read when this schedule runs.".to_owned()),
+        };
+        let taken = match &next {
+            Ok(next_at) => store.claim_schedule(&schedule.id, due_at, *next_at)?,
+            // Having no next time is how a `once` ends. This is not that, so it is not switched
+            // off: it stays on with nothing to come, and says it was refused.
+            Err(_) => store.stall_schedule(&schedule.id, due_at)?,
+        };
+        if !taken {
             continue;
         }
         let late = now_ms - due_at > LATE_AFTER_MS;
-        let (outcome, run_id, note) = if spec.is_none() {
+        let (outcome, run_id, note) = if let Err(why) = next {
             (
                 ScheduleOutcome::Refused,
                 None,
-                Some("This Yardsort cannot read when this schedule runs. Edit it.".to_owned()),
+                Some(format!(
+                    "{why} Its next time cannot be worked out, so it fires nothing until you \
+                     edit it."
+                )),
             )
         } else if late && IfMissed::parse(&schedule.missed) == Some(IfMissed::Skip) {
             (ScheduleOutcome::Missed, None, None)
         } else {
-            match ask_for_run(store, data_dir, look, &schedule) {
+            match ask_for_run(store, data_dir, look, &schedule, false) {
                 Ok(run_id) => (ScheduleOutcome::Started, Some(run_id), None),
                 Err(error) if error.code.ends_with("_already_running") => (
                     ScheduleOutcome::Skipped,
@@ -118,6 +138,25 @@ pub fn tick<Tz: TimeZone>(
                 }
             }
         };
+        // A refusal has no run whose ending could be told later, so it is told now — once,
+        // not at every time that comes while its cause is still there.
+        let notice = match &note {
+            Some(why)
+                if outcome == ScheduleOutcome::Refused
+                    && ScheduleNotify::parse(&schedule.notify) != Some(ScheduleNotify::Never)
+                    && !store
+                        .schedule_runs(&schedule.id, 1)?
+                        .first()
+                        .is_some_and(|last| last.outcome == ScheduleOutcome::Refused.as_str()) =>
+            {
+                Some(Notice {
+                    schedule_id: schedule.id.clone(),
+                    title: format!("{} could not start", schedule.name),
+                    body: why.clone(),
+                })
+            }
+            _ => None,
+        };
         let run = store.record_schedule_run(&NewScheduleRun {
             schedule_id: &schedule.id,
             due_at,
@@ -127,7 +166,11 @@ pub fn tick<Tz: TimeZone>(
             run_id: run_id.as_deref(),
             note: note.as_deref(),
         })?;
-        fired.push(Fired { schedule, run });
+        fired.push(Fired {
+            schedule,
+            run,
+            notice,
+        });
     }
     Ok(fired)
 }
@@ -142,7 +185,8 @@ pub fn run_now(
     now_ms: i64,
 ) -> IpcResult<Fired> {
     let schedule = store.schedule(id)?.ok_or_else(not_found)?;
-    let run_id = ask_for_run(store, data_dir, look, &schedule)?;
+    // A person asked, so a person is there: a smoke test the workflow runs may wait for them.
+    let run_id = ask_for_run(store, data_dir, look, &schedule, true)?;
     let run = store.record_schedule_run(&NewScheduleRun {
         schedule_id: &schedule.id,
         due_at: now_ms,
@@ -152,15 +196,21 @@ pub fn run_now(
         run_id: Some(&run_id),
         note: None,
     })?;
-    Ok(Fired { schedule, run })
+    Ok(Fired {
+        schedule,
+        run,
+        notice: None,
+    })
 }
 
 /// Ask for the schedule's run at the door a person would use, and return the run's id.
+/// `attended` is whether a person asked for it just now, rather than the clock.
 fn ask_for_run(
     store: &Store,
     data_dir: &Path,
     look: &dyn Look,
     schedule: &ScheduleRow,
+    attended: bool,
 ) -> IpcResult<String> {
     let Some(workspace_id) = schedule.workspace_id.as_deref() else {
         return Err(IpcError::new(
@@ -174,18 +224,36 @@ fn ask_for_run(
     let inputs: BTreeMap<String, String> =
         serde_json::from_str(&schedule.inputs).unwrap_or_default();
     match ScheduleTarget::parse(&schedule.target_kind) {
-        Some(ScheduleTarget::Workflow) => crate::workflow::runs::queue(
-            store,
-            data_dir,
-            &crate::workflow::runs::Request {
-                workflow_id: &schedule.target_id,
-                workspace_id,
-                inputs: &inputs,
-                // The app is what queues it. Which schedule asked is in the schedule's history.
-                requested_by: "app",
-            },
-            look,
-        ),
+        Some(ScheduleTarget::Workflow) => {
+            if !attended {
+                // A smoke test it runs may have gained a step a person does, or changed, since
+                // the schedule was saved. Whatever is missing or broken is the door's to say.
+                let workflow = crate::workflow::find(data_dir, &schedule.target_id);
+                let workflow = workflow.as_ref().and_then(|entry| entry.workflow.as_ref());
+                if let (Some(workflow), Some(workspace)) =
+                    (workflow, store.workspace(workspace_id)?)
+                {
+                    if let Some(why) = super::workflow_needs_a_person(store, &workspace, workflow)?
+                    {
+                        return Err(IpcError::new("schedule_needs_person", why));
+                    }
+                }
+            }
+            crate::workflow::runs::queue(
+                store,
+                data_dir,
+                &crate::workflow::runs::Request {
+                    workflow_id: &schedule.target_id,
+                    workspace_id,
+                    inputs: &inputs,
+                    // The app is what queues it. Which schedule asked is in the schedule's
+                    // history.
+                    requested_by: "app",
+                    unattended: !attended,
+                },
+                look,
+            )
+        }
         Some(ScheduleTarget::Test) => {
             // The file may have gained a step a person does since the schedule was saved.
             let needs_person = store
@@ -205,6 +273,9 @@ fn ask_for_run(
                     inputs: &inputs,
                     requested_by: "app",
                     session_record_id: None,
+                    // The schedule's own test: a file nobody approved waits in the open, with
+                    // the schedule saying so and the user told (see `settle`).
+                    unattended: false,
                 },
             )
             .map(|queued| queued.id)
@@ -217,14 +288,6 @@ fn ask_for_run(
             ),
         )),
     }
-}
-
-/// Something to tell the user about a schedule.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Notice {
-    pub schedule_id: String,
-    pub title: String,
-    pub body: String,
 }
 
 /// What [`settle`] found.

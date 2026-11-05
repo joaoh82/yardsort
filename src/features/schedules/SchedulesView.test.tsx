@@ -175,6 +175,21 @@ describe("SchedulesView", () => {
     expect(screen.getByRole("button", { name: "Run now" })).toBeDisabled();
   });
 
+  it("says a once that was missed never ran, rather than that it is done", async () => {
+    core.scheduleList.mockResolvedValue([
+      schedule("s4", {
+        name: "Release check",
+        standing: "missed",
+        enabled: false,
+        nextAt: null,
+      }),
+    ]);
+    await opened("Release check");
+    expect(screen.getAllByText("missed").length).toBeGreaterThan(0);
+    expect(screen.queryByText("done")).toBeNull();
+    expect(screen.getByText(/it skips those, so it never ran/)).toBeInTheDocument();
+  });
+
   it("closes from its own button", async () => {
     const user = userEvent.setup();
     render(<SchedulesView />);

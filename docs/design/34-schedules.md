@@ -73,7 +73,14 @@ The design decisions that follow from those, and from the code as it is:
    started by a workflow does, and the existing "is waiting" notification fires. There is no
    flag that approves on the user's behalf.
 8. **A test that needs a person cannot be scheduled.** A test with a `manual` step is refused
-   when the schedule is saved, in words, rather than left to time out every night.
+   when the schedule is saved, in words, rather than left to time out every night. The same
+   holds one level down, for a workflow: a `run_test` step waits for its test, with no timeout
+   unless the file gives one, so a test that waits for a person would hold the workflow's run
+   open for ever and every later time would be skipped behind it. A scheduled workflow whose
+   `run_test` names a test with a `manual` step, or one whose file would wait for approval, is
+   refused when it is saved and again at each time. A test named by an input is not known until
+   the run: the run a schedule starts is marked as unattended, and the door refuses such a test
+   there, so the step fails at once instead of waiting.
 9. **Times are the machine's local wall-clock time.** _Daily at 09:00_ means nine where the
    machine is, summer and winter. On the night the clocks go forward, a time that does not exist
    fires at the next minute that does; on the night they go back, a time that happens twice
@@ -129,7 +136,9 @@ What a schedule holds:
   No seconds field and no `@reboot`. The dialog and `ys schedule show` print the next five
   times beside the expression, which is the reading of it that cannot be wrong.
 - A `once` schedule that has fired is kept, switched off and marked **done**, until the user
-  removes it. A `once` whose time is already past when it is saved is refused.
+  removes it. One whose time was missed and skipped reads **missed**, and one whose run could
+  not start reads **refused**: neither ran, and neither says it did. A `once` whose time is
+  already past when it is saved is refused.
 
 ### A missed time
 
@@ -157,7 +166,9 @@ Each time a schedule comes due leaves one line in its history:
 workflow or the test is no longer there or no longer valid, an input no longer fits, a browser
 step has no browser, a `{{ env.NAME }}` is not set. Nothing is queued, the schedule is shown as
 needing attention, and it tries again at its next time. A schedule whose workspace was deleted
-is paused, since no later time can do better.
+is paused, since no later time can do better. A schedule whose next time cannot be worked out —
+its `when` is one this Yardsort cannot read — is refused too, and is left switched on with no
+time to come: switched off with no time to come is how a `once` that is done looks.
 
 ## The run
 
@@ -171,12 +182,15 @@ store — and then decides: missed and skipped, or queue. Queueing calls
 refusal of "already running" becomes `skipped`, any other becomes `refused`. Then it wakes the
 workflow driver, which carries the run out as it would any other. The thread is its own, not the
 driver's, because queueing a workflow that needs a pull request asks the forge, and a slow forge
-must not stall every run in the profile.
+must not stall every run in the profile. It must not stall every other schedule either, this
+being the one thread that fires them: `gh` gets 20 seconds to answer, and silence is a refusal
+like any other.
 
 **After.** The same thread watches the runs it started. When one ends, the history line takes
 its result, and the schedule's `notify` setting decides whether a notification goes out: the
 schedule's name, the verdict, and for a failure the first reason. A run left _awaiting approval_
-is told once: "needs your approval: the test file changed".
+is told once: "needs your approval: the test file changed". A time that was refused has no run
+to end, so it is told when it happens, once for as long as the schedule goes on being refused.
 
 **The clock is handed in.** The code that decides what is due and what comes next takes the
 time as an argument and never reads it, so every rule above — a missed week, the night the
@@ -284,8 +298,8 @@ runs and in Tests → Runs.
 What building it settled or changed:
 
 - **`refused` does not pause a schedule**, except when its workspace is gone. An archived
-  workspace restored, or a file fixed, is all it takes for the next time to run. It is not
-  notified, only counted on the sidebar row: [open question 3](#open-questions) stays open.
+  workspace restored, or a file fixed, is all it takes for the next time to run. It is counted
+  on the sidebar row and, since the review below, told once while it lasts.
 - **A schedule's standing says a going run first.** A `once` that has fired reads _running_ or
   _waiting for approval_ until its run ends, and only then _done_. Found by looking at the real
   list, where a fired `once` whose test file needed approval read as done and was not counted.
@@ -301,6 +315,23 @@ What building it settled or changed:
   one, not four.
 - **The Run dialog's input fields became a component** (`InputField`), since the schedule dialog
   asks the same questions.
+
+What review of the pull request found, and what was done (2026-11-05):
+
+- **A scheduled workflow could wait for ever for a person, and its schedule never said so.**
+  Only a schedule whose own target was a test was checked for a `manual` step. A workflow's
+  `run_test` queued its test unchecked: an unapproved file left it _awaiting approval_, the
+  step waited with it, with no timeout unless the file gave one, the run stayed active, and
+  every later time was skipped. Now refused at saving and at each time, and failed at the step
+  for a test named by an input (decision 8). The check for the step is inside
+  `smoke::runs::queue`, on the one reading of the file that the run would use, so there is no
+  moment between looking and queueing. **Run now** is a person asking, and is not held to it.
+- **One `gh` that did not answer held every schedule.** The pull request lookup at queueing
+  had no limit. It has 20 seconds now, for every caller, `ys` and the Run dialog included.
+- **A refusal is told**, once while it lasts, which settles open question 3.
+- **A `once` that was missed and skipped read _done_**, as did one that was refused, and a
+  repeating schedule whose next time could not be worked out was switched off and read _done_
+  too. The first two now read _missed_ and _refused_; the last stays on and reads _refused_.
 
 Checked by hand on 2026-11-05, in a development build on Linux with the throwaway profile and
 demo projects `scripts/screenshots.sh` sets up, schedules added with the build's own `ys`:
@@ -340,9 +371,11 @@ tests in CI only.
    sleeps, and it is one run at most. `skip` is the cautious one. To be judged in use.
 2. **Should a schedule be able to follow a branch rather than a workspace** — "whichever
    workspace has `main` checked out"? Not until someone needs it.
-3. **How loud should `refused` be?** A count in the sidebar is proposed. A notification each time
-   would be noise for a schedule firing every ten minutes at an archived workspace; one
-   notification the first time may be right.
+3. ~~**How loud should `refused` be?** A count in the sidebar is proposed. A notification each
+   time would be noise for a schedule firing every ten minutes at an archived workspace; one
+   notification the first time may be right.~~ Settled in review: the count, and one
+   notification when a schedule starts being refused, not again until it has started a run or
+   been skipped or missed in between. A schedule that tells nothing tells nothing.
 
 ## Documentation this touches
 

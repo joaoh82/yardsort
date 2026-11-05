@@ -17,6 +17,8 @@ export function standingWords(standing: Schedule["standing"]): string {
       return "off";
     case "done":
       return "done";
+    case "missed":
+      return "missed";
   }
 }
 

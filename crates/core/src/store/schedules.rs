@@ -254,6 +254,16 @@ impl Store {
         )? > 0)
     }
 
+    /// Take the time `due_at` as [`claim_schedule`](Self::claim_schedule) does, for a schedule
+    /// whose next time could not be worked out. It stays switched on, with no next time: it
+    /// fires nothing until it is edited, and is not mistaken for a `once` that is done.
+    pub fn stall_schedule(&self, id: &str, due_at: i64) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE schedules SET next_at = NULL WHERE id = ? AND enabled = 1 AND next_at = ?",
+            params![id, due_at],
+        )? > 0)
+    }
+
     /// Move a waiting schedule's next time, when the zone it was worked out in changed. Only
     /// while it still has the time it was read with.
     pub fn move_schedule(&self, id: &str, from: i64, to: Option<i64>) -> StoreResult<bool> {

@@ -354,6 +354,7 @@ fn start_run(
             inputs: &inputs,
             requested_by: "cli",
             session_record_id: record.as_deref(),
+            unattended: false,
         },
     )?;
 

@@ -8,7 +8,10 @@
 //! queued would have nobody to carry it out.
 //!
 //! A thread of its own, not the workflow driver's: queueing a workflow that works with a pull
-//! request asks the forge, and a slow forge must not stall every run in the profile.
+//! request asks the forge, and a slow forge must not stall every run in the profile. Nor may
+//! it stall every other schedule for long: that question is given a limit
+//! (`yardsort_core::workflow::runs::PULL_REQUEST_LIMIT`), since this is the only thread that
+//! fires schedules and tells how their runs ended.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, PoisonError};
@@ -103,6 +106,9 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
         match fire::tick(&state.store, &state.data_dir, &AppLook(&state), &now) {
             Ok(fired) => {
                 changed |= !fired.is_empty();
+                for notice in fired.iter().filter_map(|fired| fired.notice.as_ref()) {
+                    tell(handle, notice);
+                }
                 if fired.iter().any(|fired| fired.run.run_id.is_some()) {
                     // A run was queued: its driver should look now, and the window's run lists
                     // are out of date.
@@ -116,16 +122,8 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
         match fire::settle(&state.store) {
             Ok(settled) => {
                 changed |= settled.changed;
-                for notice in settled.notices {
-                    let shown = handle
-                        .notification()
-                        .builder()
-                        .title(&notice.title)
-                        .body(&notice.body)
-                        .show();
-                    if let Err(error) = shown {
-                        eprintln!("schedules: could not show a notification: {error}");
-                    }
+                for notice in &settled.notices {
+                    tell(handle, notice);
                 }
             }
             Err(error) => eprintln!("schedules: cannot read runs: {}", error.message),
@@ -139,5 +137,18 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
         if changed {
             let _ = SchedulesChanged {}.emit(handle);
         }
+    }
+}
+
+/// Show a desktop notification about a schedule.
+fn tell(handle: &AppHandle, notice: &fire::Notice) {
+    let shown = handle
+        .notification()
+        .builder()
+        .title(&notice.title)
+        .body(&notice.body)
+        .show();
+    if let Err(error) = shown {
+        eprintln!("schedules: could not show a notification: {error}");
     }
 }

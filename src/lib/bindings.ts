@@ -2370,7 +2370,12 @@ export type ScheduleStanding =
 /**  Switched off by the user. */
 "off" | 
 /**  A `once` that has had its time. */
-"done";
+"done" | 
+/**
+ *  A `once` whose time passed while Yardsort was not running, and that skips those: it
+ *  never ran.
+ */
+"missed";
 
 /**  What a schedule starts. */
 export type ScheduleTarget = "workflow" | "test";

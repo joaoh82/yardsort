@@ -309,6 +309,12 @@ function ScheduleDetail({
           pick another.
         </p>
       )}
+      {schedule.standing === "missed" && (
+        <p role="status" className="text-ink-faint">
+          Its time passed while Yardsort was not running, and it skips those, so it never ran. Edit
+          it to give it a new time.
+        </p>
+      )}
       {schedule.standing === "awaiting_approval" && (
         <p role="status" className="text-amber-300">
           Its run is waiting for you to approve the test file, which is new or has changed. Open the

@@ -224,6 +224,7 @@ fn start_run(
             workspace_id: &workspace.id,
             inputs: &inputs,
             requested_by: "cli",
+            unattended: false,
         },
         &Looking(ys),
     )?;

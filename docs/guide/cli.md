@@ -552,7 +552,8 @@ Schedules fire while Yardsort is open, so `add`, `list`, `show` and `resume` say
 not. They do not need it open: `ys` writes the schedule, and the app acts on it within a second
 of starting. `run` does need it, as `ys workflow run` does. `ys` cannot approve a smoke test
 file, so `add --test` says when the file has not been approved in the app: its first run will
-wait for you there.
+wait for you there. `add --workflow` is refused when the workflow runs a smoke test that would
+wait for you: see [Schedules](schedules.md#workflows-that-run-a-smoke-test).
 
 ### `ys activity export`
 

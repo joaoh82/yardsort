@@ -325,6 +325,7 @@ pub async fn workflow_start(
                 workspace_id: &workspace_id,
                 inputs: &inputs,
                 requested_by: "app",
+                unattended: false,
             },
             &AppLook(state),
         )

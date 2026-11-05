@@ -38,6 +38,10 @@ pub struct Facts {
     /// harness session, before the run started any of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// A schedule started the run, so nobody is there: a `run_test` step whose test would wait
+    /// for a person fails at once, where a run somebody started waits with them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unattended: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -81,6 +85,8 @@ pub struct Request<'a> {
     pub inputs: &'a BTreeMap<String, String>,
     /// `app` or `cli`.
     pub requested_by: &'a str,
+    /// Nobody is there to watch it: a schedule is asking. See [`Facts::unattended`].
+    pub unattended: bool,
 }
 
 /// Queue a run and return its id.
@@ -130,7 +136,10 @@ pub fn queue(
         }
     }
     // Last, because it asks the forge over the network.
-    let mut facts = Facts::default();
+    let mut facts = Facts {
+        unattended: request.unattended,
+        ..Facts::default()
+    };
     if needs_pull_request(workflow) {
         let found = look
             .pull_request(&workspace)
@@ -191,10 +200,26 @@ pub fn queue(
 /// The open pull request for the branch `workspace` has checked out: the branch as git says,
 /// the pull request as `gh` says when asked about that branch, the newest when there are more.
 /// For [`Look::pull_request`] implementations.
+///
+/// `gh` is given [`PULL_REQUEST_LIMIT`] to answer, and not answering is an error like any
+/// other. Queuing waits on this, and the schedules thread queues: one workflow on a network
+/// that does not answer must not hold every other schedule until their times count as missed.
 pub fn pull_request_of(
     gh: Option<&crate::forge::Gh>,
     git: &crate::git::Git,
     workspace: &WorkspaceRow,
+) -> Result<Option<PullRequest>, String> {
+    pull_request_within(gh, git, workspace, PULL_REQUEST_LIMIT)
+}
+
+/// How long `gh` gets to say whether a workspace has a pull request.
+pub const PULL_REQUEST_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn pull_request_within(
+    gh: Option<&crate::forge::Gh>,
+    git: &crate::git::Git,
+    workspace: &WorkspaceRow,
+    limit: std::time::Duration,
 ) -> Result<Option<PullRequest>, String> {
     let gh = gh.ok_or_else(|| {
         "Finding the workspace's pull request needs the GitHub CLI (`gh`) on your PATH.".to_owned()
@@ -209,19 +234,23 @@ pub fn pull_request_of(
             ))
         }
     };
-    let listed = gh.open_pull_requests_for(root, &branch).map_err(|error| {
-        let asked = format!(
-            "Could not ask GitHub for `{}`'s pull request",
-            workspace.name
-        );
-        match &error {
-            _ if error.is_logged_out() => {
-                format!("{asked}: gh is not logged in. Run `gh auth login`.")
+    let listed = gh
+        .open_pull_requests_for(root, &branch, limit)
+        .map_err(|error| {
+            let asked = format!(
+                "Could not ask GitHub for `{}`'s pull request",
+                workspace.name
+            );
+            match &error {
+                _ if error.is_logged_out() => {
+                    format!("{asked}: gh is not logged in. Run `gh auth login`.")
+                }
+                crate::forge::ForgeError::Failed { stderr, .. } => {
+                    format!("{asked}: gh says {stderr}")
+                }
+                other => format!("{asked}: {other}"),
             }
-            crate::forge::ForgeError::Failed { stderr, .. } => format!("{asked}: gh says {stderr}"),
-            other => format!("{asked}: {other}"),
-        }
-    })?;
+        })?;
     Ok(crate::forge::pull_request_for(&listed, &branch).cloned())
 }
 

@@ -44,7 +44,8 @@ schedule fires, since any of it can change in between.
 
 A schedule runs one thing in one workspace. To run two things, make two schedules, or a workflow
 with two steps. A workflow that runs a smoke test with its `run_test` step is scheduled like any
-other workflow.
+other, as long as the test can run with nobody there: see
+[Workflows that run a smoke test](#workflows-that-run-a-smoke-test).
 
 ### When
 
@@ -66,7 +67,8 @@ other workflow.
   seconds field. Whatever you type, the dialog shows the next times it means, or what is wrong
   with it.
 - **Once** must be in the future. After it fires it stays in the list, marked **done**, until
-  you remove it.
+  you remove it. One that never ran says so instead: **missed** when its time passed while
+  Yardsort was closed and it skips those, **refused** when its run could not start.
 
 On the night the clocks go forward, a time that does not exist that night fires at the next
 minute that does. On the night they go back, a time that happens twice fires once.
@@ -95,7 +97,8 @@ fires, how its last time went, and where it stands:
 | refused              | Its last time could not start a run; the history says why                     |
 | no workspace         | Its workspace was deleted. It fires nothing until you edit it to pick another |
 | off                  | You switched it off                                                           |
-| done                 | A **Once** that has had its time                                              |
+| done                 | A **Once** that has had its time, and ran                                     |
+| missed               | A **Once** whose time passed while Yardsort was closed, and that skips those  |
 
 The number on **Schedules** in the sidebar is how many are _waiting for approval_, _refused_ or
 have _no workspace_: the ones that need you.
@@ -124,8 +127,14 @@ time; nothing piles up.
 
 **Refused** is whatever a run would be refused for at that moment: the workspace is archived,
 the workflow or the test file is gone or no longer valid, an input no longer fits, a test's
-`browser` step has no browser, a value it reads from the project's test environment is not set.
+`browser` step has no browser, a value it reads from the project's test environment is not set,
+a smoke test the workflow runs would wait for you. A workflow that works with the workspace's
+pull request asks GitHub for it first, and is refused when `gh` has not answered in 20 seconds.
 The schedule stays on and tries again at its next time, so fixing the cause is all it takes.
+
+One refusal does not mend itself: Yardsort cannot work out the schedule's next time, which
+takes a schedule written by a newer Yardsort than the one running. It stays on, reads
+**refused**, and fires nothing until you edit it.
 
 ## Being told
 
@@ -136,7 +145,9 @@ desktop notification:
 - **How every run ends** — those, and the ones that passed or were cancelled.
 - **Never.**
 
-A run that waits for your approval is told once, whichever of the first two you chose.
+A run that waits for your approval is told once, whichever of the first two you chose. So is a
+time that was **refused**, since no run will end to tell you about: once when it starts being
+refused, not again at every time that comes while the cause is still there.
 
 ## Smoke tests on a schedule
 
@@ -152,6 +163,24 @@ runs until you have seen it. That holds on a schedule:
 - A project set to **ask every time** asks every time here too.
 - **A test with a `manual` step cannot be scheduled.** A step a person answers would wait for
   nobody. The dialog says so when you save.
+
+### Workflows that run a smoke test
+
+A workflow's `run_test` step waits for its test, and a test that waits for you — for approval,
+or at a `manual` step — would hold the workflow's run open with nobody coming. Every later time
+of the schedule would then be skipped behind it. So a scheduled workflow never waits for a
+person:
+
+- **Saving is refused** when a `run_test` step names a test that has a `manual` step, whose file
+  is not approved as it is now, or whose project asks every time. The message names the step and
+  the test. Run the test once in that workspace to approve it, then save the schedule.
+- **Each time is checked again.** If the file has changed since, that time is **refused**, and
+  you are told. Approve the file by running it, and the next time goes ahead.
+- **A test named by an input** (`test: "{{ inputs.suite }}"`) is not known until the run. The
+  run starts, and that step fails at once with the reason, instead of waiting. The workflow's
+  run ends as failed, and you are told as for any failure.
+
+**Run now** is you asking, so its run may wait for you as a run you start does.
 
 ## Agents on a schedule
 
