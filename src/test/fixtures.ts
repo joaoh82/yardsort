@@ -6,6 +6,8 @@ import type {
   ProjectTasks,
   PullRequest,
   PullRequestSummary,
+  Schedule,
+  ScheduleRun,
   SessionRecord,
   Task,
   TaskDetail,
@@ -329,5 +331,43 @@ export const testReview = (overrides: Partial<TestReview> = {}): TestReview => (
   contentHash: "abc",
   runsAProgram: true,
   environment: ["TEST_PASSWORD", "DATABASE_URL"],
+  ...overrides,
+});
+
+/** A schedule: the workflow `ping`, in `fix-login`, daily at nine, on and waiting, unless
+ *  overridden. */
+export const schedule = (id: string, overrides: Partial<Schedule> = {}): Schedule => ({
+  id,
+  name: "Morning ping",
+  target: "workflow",
+  targetId: "ping",
+  projectId: "p-app",
+  workspaceId: "w-app-fix-login",
+  workspaceName: "fix-login",
+  inputs: {},
+  spec: { kind: "daily", time: { hour: 9, minute: 0 } },
+  when: "Daily at 09:00",
+  missed: "run_once",
+  notify: "failure",
+  enabled: true,
+  nextAt: Date.now() + 3_600_000,
+  standing: "waiting",
+  last: null,
+  createdAt: Date.now() - 86_400_000,
+  ...overrides,
+});
+
+/** One time a schedule came due: it started a run, still going, unless overridden. */
+export const scheduleRun = (id: string, overrides: Partial<ScheduleRun> = {}): ScheduleRun => ({
+  id,
+  scheduleId: "s1",
+  dueAt: Date.now() - 120_000,
+  firedAt: Date.now() - 120_000,
+  outcome: "started",
+  manual: false,
+  runId: `run-${id}`,
+  note: null,
+  result: null,
+  awaitingApproval: false,
   ...overrides,
 });

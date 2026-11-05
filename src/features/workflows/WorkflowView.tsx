@@ -3,6 +3,7 @@ import { errorMessage, ipc, type Step, type WorkflowCheck } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { useProjectsStore } from "@/stores/projects";
 import { NEW_WORKFLOW, TEMPLATE, useWorkflowStore } from "@/stores/workflows";
+import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
 import { DescribeWorkflow } from "./DescribeWorkflow";
 import { RunWorkflowDialog } from "./RunWorkflowDialog";
 import { WorkflowRuns } from "./WorkflowRuns";
@@ -47,6 +48,7 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const runSteps = useWorkflowStore((s) => (selectedRun ? s.steps[selectedRun] : undefined));
   const [running, setRunning] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -216,6 +218,23 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
           {!isNew && (
             <button
               type="button"
+              className={quiet}
+              disabled={!runnable}
+              title={
+                dirty
+                  ? "Save first"
+                  : problems.length
+                    ? "Fix its problems first"
+                    : "Run it at a set time, or again and again"
+              }
+              onClick={() => setScheduling(true)}
+            >
+              Schedule…
+            </button>
+          )}
+          {!isNew && (
+            <button
+              type="button"
               className={primary}
               disabled={!runnable}
               title={dirty ? "Save first" : problems.length ? "Fix its problems first" : undefined}
@@ -295,6 +314,13 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
         )}
       </div>
 
+      {scheduling && (
+        <ScheduleDialog
+          target="workflow"
+          targetId={workflowId}
+          onClose={() => setScheduling(false)}
+        />
+      )}
       {running && (
         <RunWorkflowDialog
           workflowId={workflowId}

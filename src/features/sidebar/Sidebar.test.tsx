@@ -700,6 +700,21 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("offers Schedule… on a workspace, and the dialog starts on that workspace", async () => {
+    core.workflowList.mockResolvedValue([]);
+    core.harnessesList.mockResolvedValue([]);
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Schedule…" }));
+    const dialog = await screen.findByRole("dialog", { name: "New schedule" });
+    expect(within(dialog).getByRole("combobox", { name: "Workspace" })).toHaveValue(
+      "w-alpha-feature",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("forks a workspace into the composer, on a new branch from its branch", async () => {
     core.workspaceFork.mockResolvedValue({
       text: "# Forked from Yardsort",

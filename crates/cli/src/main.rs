@@ -123,6 +123,9 @@ enum Command {
     /// A repository's smoke tests: the files in its `.yardsort/tests`, and checking one.
     #[command(subcommand)]
     Test(commands::test::Command),
+    /// Start a workflow or a smoke test once at a set time, or again and again.
+    #[command(subcommand)]
+    Schedule(commands::schedule::Command),
     /// Put a running session on this terminal. Detaching leaves it running.
     Attach {
         /// Which one: a workspace name, or the start of an id from `ys session list`. With one
@@ -176,6 +179,8 @@ fn main() {
             Command::Task(command) => {
                 Yardsort::open(cli.data_dir).and_then(|ys| commands::task::run(&ys, command, &out))
             }
+            Command::Schedule(command) => Yardsort::open(cli.data_dir)
+                .and_then(|ys| commands::schedule::run(&ys, command, &out)),
             // `validate` needs no profile, so this one opens it only when it has to.
             Command::Workflow(command) => commands::workflow::run(cli.data_dir, command, &out),
             // So do `validate`, `example` and `guide`.

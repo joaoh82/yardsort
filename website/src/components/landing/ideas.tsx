@@ -299,6 +299,10 @@ export function Ideas() {
             or let a workflow do it. <code className={code}>ys test</code> does it all from a
             terminal.
           </p>
+          <p>
+            A test or a workflow can run on a schedule too: once at a time you pick, or on a routine
+            such as every weekday at nine, while Yardsort is open.
+          </p>
         </Idea>
       </div>
     </section>

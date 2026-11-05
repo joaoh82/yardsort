@@ -552,7 +552,10 @@ still to be done, and is the milestone's exit.
 
 - Schedules and forge-event triggers. The roadmap's "automations" item lists the questions those
   raise (a run while the previous one is going, a worktree per run, permission with no one to
-  ask); a manual workflow answers none of them and does not need to.
+  ask); a manual workflow answers none of them and does not need to. **Schedules have since been
+  answered in [34](34-schedules.md)**, and not as a trigger: a schedule is a row of its own that
+  queues a run through the same door, so `kind: manual` is still the only trigger a file has.
+  Forge events are still to come.
 - Editing the chart by hand; per-repository workflow files; conditionals, loops, `if:`; step
   retries; a step that runs a program (it would be a shell string by another name — project
   automation is where commands live, and a `run_automation` step can call it later).

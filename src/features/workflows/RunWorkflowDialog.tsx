@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import {
   errorMessage,
   ipc,
@@ -12,6 +11,7 @@ import { useModalFocus } from "@/lib/useModalFocus";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
 import { useWorkflowStore } from "@/stores/workflows";
+import { InputField } from "./InputField";
 
 const control =
   "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
@@ -223,74 +223,14 @@ export function RunWorkflowDialog({ workflowId, workspace, onClose, onStarted }:
           )}
 
           {inputs.map((input) => (
-            <label key={input.id} className="flex flex-col gap-1.5">
-              <span className={label}>
-                {input.label}
-                {input.required ? "" : " (optional)"}
-              </span>
-              {input.kind === "harness" ? (
-                <span className="relative flex items-center">
-                  <HarnessIcon
-                    id={answers[input.id] ?? ""}
-                    className="pointer-events-none absolute left-2"
-                  />
-                  <select
-                    aria-label={input.label}
-                    className={`${control} pl-7`}
-                    value={answers[input.id] ?? ""}
-                    onChange={(event) => answer(input.id, event.target.value)}
-                  >
-                    {!input.required && <option value="">None</option>}
-                    {harnesses.map((h) => (
-                      <option key={h.id} value={h.id} disabled={!h.resolvedPath}>
-                        {h.label}
-                        {h.resolvedPath ? "" : " — not installed"}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-              ) : input.kind === "choice" ? (
-                <select
-                  aria-label={input.label}
-                  className={control}
-                  value={answers[input.id] ?? ""}
-                  onChange={(event) => answer(input.id, event.target.value)}
-                >
-                  {!input.required && <option value="">None</option>}
-                  {input.options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              ) : input.kind === "test" ? (
-                <select
-                  aria-label={input.label}
-                  className={control}
-                  value={answers[input.id] ?? ""}
-                  onChange={(event) => answer(input.id, event.target.value)}
-                  disabled={!testsLoaded || runnableTests.length === 0}
-                >
-                  {!input.required && <option value="">None</option>}
-                  {chosenWorkspace && !testsLoaded && <option value="">Loading…</option>}
-                  {testsLoaded && runnableTests.length === 0 && (
-                    <option value="">No runnable smoke tests here</option>
-                  )}
-                  {runnableTests.map((test) => (
-                    <option key={test.id} value={test.id}>
-                      {test.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  aria-label={input.label}
-                  className="rounded border border-line bg-canvas px-2 py-1.5 outline-none select-text focus:border-accent"
-                  value={answers[input.id] ?? ""}
-                  onChange={(event) => answer(input.id, event.target.value)}
-                />
-              )}
-            </label>
+            <InputField
+              key={input.id}
+              input={input}
+              value={answers[input.id] ?? ""}
+              onChange={(value) => answer(input.id, value)}
+              tests={testsLoaded ? runnableTests : null}
+              hasWorkspace={!!chosenWorkspace}
+            />
           ))}
 
           {preview?.needsPullRequest &&

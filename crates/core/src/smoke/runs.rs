@@ -207,6 +207,28 @@ pub fn queue_seen(store: &Store, request: &Request<'_>, shown_hash: &str) -> Ipc
     Ok(queued)
 }
 
+/// Approve a test file the way the app's schedule dialog does: the dialog showed its steps, and
+/// saving the schedule is the approval — but, as in [`queue_seen`], only of the file the dialog
+/// showed. The file is read fresh; it is approved only when it still has `shown_hash`. `false`
+/// when it has changed, or is not there: its first scheduled run then waits to be seen.
+pub fn approve_seen(
+    store: &Store,
+    workspace_id: &str,
+    test_id: &str,
+    shown_hash: &str,
+) -> IpcResult<bool> {
+    let Some(workspace) = store.workspace(workspace_id)?.filter(|w| !w.forgotten) else {
+        return Ok(false);
+    };
+    let unchanged = find(std::path::Path::new(&workspace.path), test_id)
+        .filter(|entry| entry.runnable() && content_hash(&entry.text) == shown_hash);
+    let Some(entry) = unchanged else {
+        return Ok(false);
+    };
+    store.approve_test(&workspace.project_id, &entry.id, shown_hash)?;
+    Ok(true)
+}
+
 /// The inputs a run gets: what was given, defaults for the rest. Refuses unknown inputs,
 /// missing required ones and a choice that is not an option.
 pub fn check_inputs(

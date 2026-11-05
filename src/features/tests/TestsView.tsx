@@ -3,6 +3,7 @@ import { timeAgo } from "@/features/terminal/sessionText";
 import { statusColour, statusWords } from "@/features/smoke/words";
 import type { TestListing } from "@/lib/ipc";
 import { recall, useProjectsStore } from "@/stores/projects";
+import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { DescribeTest } from "./DescribeTest";
 import {
@@ -355,6 +356,8 @@ function RunsList({
   now: number;
   onOpen: (workspaceId: string | null, runId: string) => void;
 }) {
+  // The runs a schedule started, to say so on each.
+  const started = useSchedulesStore((s) => s.started);
   if (runs.length === 0) {
     return (
       <p role="status" className="p-4 text-ink-faint">
@@ -382,6 +385,11 @@ function RunsList({
             <div className="flex items-center gap-2 text-[12px] text-ink-faint">
               <span className="truncate">{run.workspaceName}</span>
               <span className="shrink-0 tabular-nums">· {timeAgo(run.createdAt, now)}</span>
+              {scheduleOf(started, run.id) && (
+                <span className="truncate">
+                  · Scheduled · {scheduleOf(started, run.id)?.scheduleName}
+                </span>
+              )}
             </div>
           </button>
         </li>

@@ -54,6 +54,7 @@ vi.mock("./WorkflowChart", () => ({
 }));
 
 import { useProjectsStore } from "@/stores/projects";
+import { useSchedulesStore } from "@/stores/schedules";
 import { NEW_WORKFLOW, useWorkflowStore } from "@/stores/workflows";
 import { WorkflowView } from "./WorkflowView";
 
@@ -115,6 +116,7 @@ describe("WorkflowView", () => {
     });
     useWorkflowStore.setState({ items: [], loaded: true, runs: {}, steps: {}, drafts: {} });
     useProjectsStore.setState({ workflowId: null });
+    useSchedulesStore.setState({ started: [] });
   });
 
   it("shows a built-in read-only, and customizing it copies it to the user's folder", async () => {
@@ -291,13 +293,18 @@ describe("WorkflowView", () => {
         note: "no way",
       },
     ]);
+    // A schedule started this run: the list says so, and the open run says which.
+    useSchedulesStore.setState({
+      started: [{ runId: "run-1", scheduleId: "s1", scheduleName: "Nightly" }],
+    });
     render(<WorkflowView workflowId="demo" />);
     const runs = await screen.findByRole("region", { name: "Runs" });
-    await userEvent
-      .setup()
-      .click(await within(runs).findByRole("button", { name: "Run in fix-login, failed" }));
+    const row = await within(runs).findByRole("button", { name: "Run in fix-login, failed" });
+    expect(row).toHaveTextContent("scheduled");
+    await userEvent.setup().click(row);
     expect(await within(runs).findByText("no way")).toBeInTheDocument();
     expect(within(runs).getByText("Notify you")).toBeInTheDocument();
+    expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
   });
 });

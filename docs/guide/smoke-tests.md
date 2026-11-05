@@ -410,6 +410,13 @@ since the dialog opened, the run waits on the approval card instead, showing the
 what runs is always a version you have seen. A workspace with no tests is told where they go and
 that `ys test guide` tells an agent how to write one.
 
+### Schedule…
+
+Beside **Run…** on a test in the Tests view, and in a workspace's **⋯** menu. It runs the test
+at a set time or on a routine. The dialog shows the file's steps as the Run dialog does, and
+saving approves that file; a file that changes later waits for approval again. A test with a
+`manual` step cannot be scheduled. See [Schedules](schedules.md#smoke-tests-on-a-schedule).
+
 ### Send result to agent
 
 On an ended run's tab. It types what `ys test wait` would have printed — the verdict, the step

@@ -576,6 +576,31 @@ export const commands = {
 	usageTokens: (days: number, utcOffsetMinutes: number) => typedError<UsageReport, IpcError>(__TAURI_INVOKE("usage_tokens", { days, utcOffsetMinutes })),
 	/**  Whether Usage is offered at the foot of the sidebar. */
 	settingsSaveUsage: (showInSidebar: boolean) => typedError<SettingsInfo, IpcError>(__TAURI_INVOKE("settings_save_usage", { showInSidebar })),
+	/**  Every schedule of every project, by name. */
+	scheduleList: () => typedError<Schedule[], IpcError>(__TAURI_INVOKE("schedule_list")),
+	/**  A schedule's history, newest first. */
+	scheduleRuns: (scheduleId: string, limit: number) => typedError<ScheduleRun[], IpcError>(__TAURI_INVOKE("schedule_runs", { scheduleId, limit })),
+	/**  The runs schedules started, for run lists to mark. */
+	scheduleStartedRuns: () => typedError<ScheduledRun[], IpcError>(__TAURI_INVOKE("schedule_started_runs")),
+	/**
+	 *  What a spec comes to: what is wrong with it, what it reads as, and when it would next fire.
+	 *  Nothing is saved.
+	 */
+	schedulePreview: (spec: ScheduleSpec) => typedError<SchedulePreview, IpcError>(__TAURI_INVOKE("schedule_preview", { spec })),
+	/**
+	 *  Add a schedule, or change one. Everything its run would be refused for is refused here, so
+	 *  the person saving it is the one who reads why.
+	 */
+	scheduleSave: (draft: ScheduleDraft) => typedError<Schedule, IpcError>(__TAURI_INVOKE("schedule_save", { draft })),
+	/**
+	 *  Switch a schedule on or off. Switched on, it starts from now: times that passed while it
+	 *  was off are not made up for.
+	 */
+	scheduleSetEnabled: (scheduleId: string, enabled: boolean) => typedError<Schedule, IpcError>(__TAURI_INVOKE("schedule_set_enabled", { scheduleId, enabled })),
+	/**  Remove a schedule and its history. The runs it started stay where they are. */
+	scheduleRemove: (scheduleId: string) => typedError<null, IpcError>(__TAURI_INVOKE("schedule_remove", { scheduleId })),
+	/**  Start a schedule's run now. Its next time stays where it is. */
+	scheduleRunNow: (scheduleId: string) => typedError<ScheduleRun, IpcError>(__TAURI_INVOKE("schedule_run_now", { scheduleId })),
 };
 
 /** Events */
@@ -584,6 +609,7 @@ export const events = {
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
+	schedulesChanged: makeEvent<SchedulesChanged>("schedules-changed"),
 	sessionStarted: makeEvent<SessionStarted>("session-started"),
 	testResultSent: makeEvent<TestResultSent>("test-result-sent"),
 	testRunOutput: makeEvent<TestRunOutput>("test-run-output"),
@@ -1347,6 +1373,11 @@ export type HostEvent =
  *  lets a client tell an agent finishing minutes of work from the echo of a keystroke.
  */
 { type: "quiet"; id: SessionId; busyMs: number };
+
+/**  What to do with a time that passed while Yardsort was not running. */
+export type IfMissed = 
+/**  One run when Yardsort is next open, however many times were missed. */
+"run_once" | "skip";
 
 /**  Something asked of the person starting a run, before it starts. */
 export type Input = {
@@ -2222,6 +2253,141 @@ export type RunPreview = {
 	empty: string[],
 };
 
+/**  A schedule, as the view lists it. */
+export type Schedule = {
+	id: string,
+	name: string,
+	target: ScheduleTarget,
+	targetId: string,
+	projectId: string,
+	/**  `None` once the workspace is deleted; `workspace_name` keeps what it was called. */
+	workspaceId: string | null,
+	workspaceName: string,
+	inputs: { [key in string]: string },
+	/**  `None` for a spec this Yardsort cannot read. */
+	spec: ScheduleSpec | null,
+	/**  The spec in words: "Weekdays at 09:00". */
+	when: string,
+	missed: IfMissed,
+	notify: ScheduleNotify,
+	enabled: boolean,
+	nextAt: number | null,
+	standing: ScheduleStanding,
+	/**  The newest line of its history. */
+	last: ScheduleRun | null,
+	createdAt: number | null,
+};
+
+/**  A schedule as the dialog sends it. */
+export type ScheduleDraft = {
+	/**  The schedule being changed; `None` for a new one. */
+	id: string | null,
+	name: string | null,
+	target: ScheduleTarget,
+	targetId: string,
+	workspaceId: string,
+	inputs: { [key in string]: string },
+	spec: ScheduleSpec,
+	missed: IfMissed,
+	notify: ScheduleNotify,
+	/**
+	 *  For a test: the file's hash when the dialog showed it. Saving approves that file, and
+	 *  only that file.
+	 */
+	contentHash: string | null,
+};
+
+/**  When the user is told how a scheduled run ended. */
+export type ScheduleNotify = "failure" | "always" | "never";
+
+/**  What became of a time. */
+export type ScheduleOutcome = 
+/**  A run was queued. */
+"started" | 
+/**  The previous run was still going. */
+"skipped" | 
+/**  The time passed while Yardsort was not running, and the schedule skips those. */
+"missed" | 
+/**  The run could not be queued. */
+"refused";
+
+/**  What a spec comes to, for the dialog as it is filled in. */
+export type SchedulePreview = {
+	/**  What is wrong with it, or nothing. */
+	problem: string | null,
+	when: string,
+	/**  The next few times it would fire. */
+	next: (number | null)[],
+};
+
+/**  One time a schedule came due. */
+export type ScheduleRun = {
+	id: string,
+	scheduleId: string,
+	dueAt: number | null,
+	firedAt: number | null,
+	outcome: ScheduleOutcome,
+	/**  Asked for with Run now, not by the clock. */
+	manual: boolean,
+	/**  The workflow run's or the smoke test run's id, when one was queued. */
+	runId: string | null,
+	note: string | null,
+	/**  The run's status once it ended; `None` while it is going. */
+	result: string | null,
+	/**  The run waits for the user to approve the test file. */
+	awaitingApproval: boolean,
+};
+
+/**
+ *  When a schedule fires. Kept as the user chose it, so the list reads the way it was written:
+ *  the daily, weekly and monthly kinds are cron underneath (see [`when`]) but are not stored as
+ *  cron.
+ */
+export type ScheduleSpec = 
+/**  Once, at this time: milliseconds since the Unix epoch. */
+{ kind: "once"; at: number | null } | 
+/**  Again every so many minutes, counted from the last time it fired. */
+{ kind: "every"; minutes: number } | { kind: "daily"; time: TimeOfDay } | 
+/**  On these weekdays. At least one. */
+{ kind: "weekly"; days: Weekday[]; time: TimeOfDay } | 
+/**  On this day of the month, 1 to 28, or on its last day when there is none. */
+{ kind: "monthly"; day: number | null; time: TimeOfDay } | 
+/**  Five fields: minute, hour, day of month, month, day of week. */
+{ kind: "cron"; expr: string };
+
+/**  Where a schedule stands, for the list: what a person needs to know at a glance. */
+export type ScheduleStanding = 
+/**  On, with a time to come. */
+"waiting" | 
+/**  Its run is going. */
+"running" | 
+/**  Its run waits for the user to approve the test file. */
+"awaiting_approval" | 
+/**  Its last time could not be queued. */
+"refused" | 
+/**  Its workspace was deleted. */
+"no_workspace" | 
+/**  Switched off by the user. */
+"off" | 
+/**  A `once` that has had its time. */
+"done";
+
+/**  What a schedule starts. */
+export type ScheduleTarget = "workflow" | "test";
+
+/**  A run a schedule started, for marking it in a run list. */
+export type ScheduledRun = {
+	runId: string,
+	scheduleId: string,
+	scheduleName: string,
+};
+
+/**
+ *  Schedules changed: one was added, changed, switched, removed or fired, or a run one started
+ *  ended. The window reloads what it shows of them.
+ */
+export type SchedulesChanged = Record<string, never>;
+
 export type Scope = "uncommitted" | "committed";
 
 /**  Opaque, globally unique session identifier. */
@@ -2707,6 +2873,12 @@ export type ThresholdsDto = {
 	range: [number, number],
 };
 
+/**  A time of day on the machine's own clock. */
+export type TimeOfDay = {
+	hour: number,
+	minute: number,
+};
+
 export type TokenTotals = {
 	/**  Everything: input of every kind, and output. */
 	processed: number | null,
@@ -2768,6 +2940,8 @@ export type UsageReport = {
 	places: PlaceUsage[],
 	limits: AgentLimits[],
 };
+
+export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
 /**  A workflow file, checked and ready to run. */
 export type Workflow = {

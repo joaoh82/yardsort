@@ -88,6 +88,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   screenshot and reason for a failure kept. **Tests**, in the sidebar, lists every test and every
   run. A file from a repository never runs until you have seen it.
   [More below](#smoke-tests-the-ten-minute-check-repeatable).
+- **Schedules: at a set time, or on a routine.** Run a workflow or a smoke test once at a time
+  you pick, or again and again — every weekday at nine, every two hours, a cron expression — in
+  a workspace you already have, while Yardsort is open. A notification tells you when a run
+  fails. [Schedules](docs/guide/schedules.md).
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
   image previews. Edit text files inside Yardsort, with retained drafts and a check before
   overwriting a file changed on disk, or open them in your editor. With an agent reporting,
@@ -401,6 +405,10 @@ it took. An agent writes a test itself, or press **Describe it** and a model wri
 check and save. **Send result to agent** types the verdict into the workspace's agent once it is
 quiet, and a [workflow](docs/guide/workflows.md) can run a test too: the built-in **Smoke test, then
 tell the agent** does both.
+
+A test or a workflow can also run on a [schedule](docs/guide/schedules.md): once at a time you
+pick, or on a routine such as every weekday at nine, in a workspace you already have, while
+Yardsort is open.
 
 ![Tests: every project's smoke tests in one list, each with the verdict of its last run and the workspace it ran in, a Runs tab, filters, and Describe it](docs/images/tests.png)
 
