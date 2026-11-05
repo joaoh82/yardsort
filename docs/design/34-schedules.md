@@ -2,7 +2,7 @@
 
 _Proposal, 2026-11-05, and built the same day. The three questions put to the user are answered
 under [Decisions](#decisions); what was built, what it found and how it was checked is under
-[What shipped](#what-shipped). No screenshot has been taken yet._
+[What shipped](#what-shipped)._
 
 A schedule starts a [workflow](21-workflows.md) or a [smoke test](32-smoke-tests.md) without a
 person pressing **Run**: once, at a time the user picks, or again and again on a routine — every
@@ -349,6 +349,11 @@ Not checked by hand: a notification arriving on screen. The throwaway profile cu
 from the session bus, which is what delivers one on Linux; the history rows show each was asked
 for, through the call a workflow's `notify` step already uses. macOS and Windows have had the
 tests in CI only.
+
+The view's shot (`docs/images/schedules.png`) is taken on the same throwaway profile.
+`scripts/screenshots.sh seed` writes its five schedules and their history into the database, as
+it does the smoke test runs, with times worked out from the moment it is run. They are real
+rows, so an app left open fires them.
 
 ## Not in version one, on purpose
 

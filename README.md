@@ -406,11 +406,13 @@ check and save. **Send result to agent** types the verdict into the workspace's 
 quiet, and a [workflow](docs/guide/workflows.md) can run a test too: the built-in **Smoke test, then
 tell the agent** does both.
 
+![Tests: every project's smoke tests in one list, each with the verdict of its last run and the workspace it ran in, a Runs tab, filters, and Describe it](docs/images/tests.png)
+
 A test or a workflow can also run on a [schedule](docs/guide/schedules.md): once at a time you
 pick, or on a routine such as every weekday at nine, in a workspace you already have, while
 Yardsort is open.
 
-![Tests: every project's smoke tests in one list, each with the verdict of its last run and the workspace it ran in, a Runs tab, filters, and Describe it](docs/images/tests.png)
+![Schedules: every project's schedules in one list, each with what it runs, when, and how its last time went, and one open with its history](docs/images/schedules.png)
 
 From a terminal:
 

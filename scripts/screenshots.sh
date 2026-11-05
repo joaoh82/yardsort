@@ -30,14 +30,15 @@
 #   The pull request the Code tab shows has real commits on a real branch, and the refs the
 #   diff is read from are already there, so nothing is fetched.
 #
-# `seed` writes the three demo projects, and a workspace on the pull request's branch that was
-# started from one of the demo tasks, into the profile's database once the app has created it,
-# so nothing has to be typed into the window.
+# `seed` writes the three demo projects, a workspace on the pull request's branch that was
+# started from one of the demo tasks, a handful of smoke test runs and five schedules with their
+# history into the profile's database once the app has created it, so nothing has to be typed
+# into the window.
 #
 # See AGENTS.md. `shoot` finds the window by the profile behind it, so an ordinary copy of
 # Yardsort left open cannot be captured by mistake. It needs Hyprland, grim and jq; on anything
 # else, size the window to the logical equivalent of 1875x1175 and capture it by hand. `setup`
-# needs python3 and `seed` needs sqlite3.
+# needs python3, and `seed` needs sqlite3 and python3.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo=$(pwd)
@@ -885,8 +886,114 @@ PY
   echo "  repositories for the clone dialog in $DEMO/gh"
 }
 
+# What the Schedules view shows, as SQL: five schedules across the demo projects, in each kind
+# of "when" and in the states the view can show — on, waiting for approval, off — with the
+# history each would have by now. Times are worked out from now, on this machine's clock, so the
+# weekday schedule's lines fall on weekdays at nine whenever the shot is taken.
+#
+# The app fires what is due while it is open, and these are real rows: left open, it will run
+# the tests they name. The one workflow among them comes due on Mondays at eight, and would
+# start a reviewer in the demo worktree; close the app once the shots are taken.
+demo_schedules() {
+  python3 - <<'EOF'
+import json
+from datetime import datetime, timedelta
+
+now = datetime.now().replace(second=0, microsecond=0)
+ms = lambda moment: int(moment.timestamp() * 1000)
+at = lambda day, hour: day.replace(hour=hour, minute=0)
+text = lambda value: "NULL" if value is None else "'" + str(value).replace("'", "''") + "'"
+clock = lambda hour, minute=0: {"hour": hour, "minute": minute}
+
+weekday = lambda day: day.weekday() < 5
+monday = lambda day: day.weekday() == 0
+fortnight = lambda day: day.day in (1, 15)
+
+def before(wanted, hour, count):
+    """The last `count` times a `wanted` day came to `hour` o'clock, newest first."""
+    times, day = [], now
+    while len(times) < count:
+        if wanted(day) and at(day, hour) <= now:
+            times.append(at(day, hour))
+        day -= timedelta(days=1)
+    return times
+
+def after(wanted, hour):
+    """The next time a `wanted` day comes to `hour` o'clock."""
+    day = now
+    while not (wanted(day) and at(day, hour) > now):
+        day += timedelta(days=1)
+    return at(day, hour)
+
+schedules, lines = [], []
+
+def schedule(key, name, kind, target, project, workspace, spec, next_at, *, inputs=None,
+             missed="run_once", notify="failure", enabled=True):
+    place = f"demo-{project}-{'pr' if workspace == 'celsius-fahrenheit' else 'local'}"
+    schedules.append(
+        f"('demo-schedule-{key}', {text(name)}, '{kind}', '{target}', 'demo-{project}', "
+        f"'{place}', '{workspace}', {text(json.dumps(inputs or {}))}, {text(json.dumps(spec))}, "
+        f"'{missed}', '{notify}', {int(enabled)}, {'NULL' if next_at is None else ms(next_at)}, "
+        f"'app', {ms(now)}, {ms(now)})")
+
+def line(key, due, result, *, fired=None, manual=False, run=None, waiting=False):
+    number = len(lines) + 1
+    fired = fired or due
+    # A run's ending is kept on its line after the run itself is pruned, so all but one of
+    # these name runs the profile does not have.
+    lines.append(
+        f"('demo-schedule-line-{number}', 'demo-schedule-{key}', {ms(due)}, {ms(fired)}, "
+        f"'started', {int(manual)}, '{run or f'demo-scheduled-run-{number}'}', NULL, "
+        f"{text(result)}, {'NULL' if result is None else ms(fired)}, {int(waiting)})")
+
+# The one the shot opens: a week and a half of mornings, one of them failed and run again by
+# hand, one caught up on when the app was opened late.
+schedule("morning", "Morning unit tests", "test", "unit-tests", "weather-cli", "local",
+         {"kind": "weekly", "days": ["mon", "tue", "wed", "thu", "fri"], "time": clock(9)},
+         after(weekday, 9))
+for index, due in enumerate(before(weekday, 9, 7)):
+    if index == 2:
+        again = due + timedelta(minutes=24)
+        line("morning", again, "passed", manual=True)
+    late = timedelta(hours=1, minutes=42) if index == 4 else timedelta()
+    line("morning", due, "failed" if index == 2 else "passed", fired=due + late)
+
+schedule("node", "Node version on the branch", "test", "version-check", "weather-cli",
+         "celsius-fahrenheit", {"kind": "every", "minutes": 120}, now + timedelta(hours=1))
+for index in range(4):
+    line("node", now - timedelta(hours=1 + 2 * index), "failed" if index == 0 else "passed")
+
+schedule("readme", "README is there", "test", "readme", "api-gateway", "local",
+         {"kind": "cron", "expr": "0 8 1,15 * *"}, after(fortnight, 8), enabled=False,
+         notify="never")
+for due in before(fortnight, 8, 2):
+    line("readme", due, "passed")
+
+schedule("review", "Review the pull request", "workflow", "code-review", "weather-cli",
+         "celsius-fahrenheit", {"kind": "weekly", "days": ["mon"], "time": clock(8)},
+         after(monday, 8), inputs={"reviewer": "claude", "focus": "The rounding in src/units.js"},
+         missed="skip", notify="always")
+for due in before(monday, 8, 2):
+    line("review", due, "succeeded")
+
+# A `once` whose time came a quarter of an hour ago. Its run is the seeded one that waits for
+# approval, so the schedule reads "waiting for approval" and the sidebar row counts it.
+tried = now - timedelta(minutes=15)
+schedule("branch", "Try the branch's unit tests", "test", "unit-tests", "weather-cli",
+         "celsius-fahrenheit", {"kind": "once", "at": ms(tried)}, None, enabled=False)
+line("branch", tried, None, run="demo-run-5", waiting=True)
+
+print("INSERT INTO schedules (id, name, target_kind, target_id, project_id, workspace_id, "
+      "workspace_name, inputs, spec, missed, notify, enabled, next_at, created_by, created_at, "
+      "updated_at) VALUES\n  " + ",\n  ".join(schedules) + ";")
+print("INSERT INTO schedule_runs (id, schedule_id, due_at, fired_at, outcome, manual, run_id, "
+      "note, result, notified_at, told_waiting) VALUES\n  " + ",\n  ".join(lines) + ";")
+EOF
+}
+
 seed() {
   command -v sqlite3 >/dev/null || { echo "seed needs sqlite3." >&2; exit 1; }
+  command -v python3 >/dev/null || { echo "seed needs python3." >&2; exit 1; }
   local db="$SHOT/data/yardsort.db"
   if [ ! -f "$db" ]; then
     echo "No database at $db yet: start the app with the line 'setup' printed first." >&2
@@ -921,8 +1028,9 @@ INSERT INTO workspace_tasks (workspace_id, source, repo, key, url, title, create
 INSERT OR REPLACE INTO ui_state (key, value) VALUES ('onboarding.welcomeSeen', 'true');
 -- A handful of runs so the Tests view shows real verdicts: two tests in weather-cli (passed,
 -- one of them across its worktree too), one in api-gateway, and one still waiting for approval
--- in the worktree, which is the sidebar row's count. The definition and hash are stand-ins: the
--- view reads the file from the repository for the verdict, the run row only for the status.
+-- in the worktree, which is the sidebar row's count; a schedule started that one (see
+-- demo_schedules). The definition and hash are stand-ins: the view reads the file from the
+-- repository for the verdict, the run row only for the status.
 INSERT INTO test_runs
   (id, project_id, workspace_id, workspace_name, test_id, test_name, definition, content_hash,
    inputs, status, requested_by, created_at, started_at, ended_at) VALUES
@@ -940,8 +1048,9 @@ INSERT INTO test_runs
    '{}', 'passed', 'workflow', $t_6h, $t_6h, $t_6h),
   ('demo-run-5', 'demo-weather-cli', 'demo-weather-cli-pr', 'celsius-fahrenheit',
    'unit-tests', 'The test suite passes', 'id: unit-tests', 'seed5',
-   '{}', 'awaiting_approval', 'cli', $t_15m, NULL, NULL);
+   '{}', 'awaiting_approval', 'app', $t_15m, NULL, NULL);
 EOF
+  demo_schedules | sqlite3 "$db"
   echo "Added weather-cli, api-gateway and docs-site to $db, and marked the welcome tour seen."
   echo "Focus the window to see them."
 }
