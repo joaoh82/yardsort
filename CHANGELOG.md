@@ -3,6 +3,20 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## 0.22.0
+
+- **Schedules: run a workflow or a smoke test at a set time, or on a routine.** **Schedules**, in
+  the sidebar, lists them; **Schedule…** sits beside **Run…** on a workflow and on a test, and in
+  a workspace's menu. Once at a date and time, every so many minutes or hours, daily, on chosen
+  weekdays, monthly, or a cron expression, in this computer's local time, with the next times
+  shown as you fill it in. Schedules fire while Yardsort is open: each says whether a time missed
+  while it was closed runs once on opening or is skipped. A run that is still going is never
+  joined by a second. A notification tells you when a scheduled run fails or could not start,
+  or how every run ends. A smoke test file is approved when you schedule it in the app, and
+  waits for approval again if it changes; a workflow that runs a smoke test is scheduled only
+  when that test can run with nobody there. `ys schedule` does the same from a terminal. See
+  [Schedules](docs/guide/schedules.md).
+
 ## 0.21.1
 
 - **Settings → Remote says when a phone cannot open your terminals, and fixes it.** After updating

@@ -17,6 +17,7 @@ mod preflight;
 mod publish;
 mod quit;
 mod remote;
+mod schedules;
 mod sessions;
 mod smoke;
 mod state;
@@ -229,6 +230,14 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             usage::usage_machine,
             usage::usage_tokens,
             usage::settings_save_usage,
+            schedules::commands::schedule_list,
+            schedules::commands::schedule_runs,
+            schedules::commands::schedule_started_runs,
+            schedules::commands::schedule_preview,
+            schedules::commands::schedule_save,
+            schedules::commands::schedule_set_enabled,
+            schedules::commands::schedule_remove,
+            schedules::commands::schedule_run_now,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,
@@ -240,6 +249,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::TestRunsChanged,
             smoke::TestRunOutput,
             smoke::TestResultSent,
+            schedules::SchedulesChanged,
             remote::RemotePairingRequested
         ])
 }
@@ -467,6 +477,8 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Workflow runs, queued here or by `ys`, are moved on by a thread of their own.
     workflows::start(app.handle(), &data_dir);
+    // Schedules fire in the app that drives runs, and nowhere else.
+    schedules::start(app.handle());
 
     // Remote, when it is on: the link to the server's relay.
     let handle = app.handle().clone();

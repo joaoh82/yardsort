@@ -1145,7 +1145,9 @@ rediscovering later. None of them is committed to; the point is to know what is 
   is looking, and now something is — the daemon already outlives the window and already owns
   session lifetime. The hard parts are not the timer but the answers: what a run does when the
   previous one is still going, what happens to a worktree per run, and how a scheduled agent
-  asks for permission when there is no one to ask.
+  asks for permission when there is no one to ask. **Built as [schedules](34-schedules.md)**
+  for workflows and smoke tests: it answers the first and the third, and leaves the worktree per
+  run, and running with the app closed, for after.
 - ~~**A `yardsort` CLI.**~~ **Done, as `ys` — see M10.** The estimate above was wrong in an
   instructive way: the daemon protocol carries _sessions_, not workspaces, and projects live in
   the SQLite store the app owns. "A second client of the socket with no new core" needed the

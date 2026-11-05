@@ -74,6 +74,7 @@ impl Fixture {
                 workspace_id: &self.workspace.id,
                 inputs: &inputs,
                 requested_by: "cli",
+                unattended: false,
             },
             &self.look,
         )
@@ -459,6 +460,41 @@ fn without_gh_the_pull_request_cannot_be_looked_for_and_it_says_so() {
     let git = crate::git::testing::git();
     let error = pull_request_of(None, &git, &fx.workspace).unwrap_err();
     assert!(error.contains("GitHub CLI (`gh`)"), "{error}");
+}
+
+/// What the schedules thread relies on: asking for a pull request ends, whatever `gh` does.
+#[cfg(unix)]
+#[test]
+fn a_gh_that_never_answers_does_not_hold_whoever_asks_for_the_pull_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = crate::git::testing::git();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git.init(&repo).unwrap();
+    git.initial_commit(&repo).unwrap();
+    let script = dir.path().join("gh");
+    crate::program::testing::executable(&script, "#!/bin/sh\nsleep 30\n");
+    let env = crate::env::ShellEnv {
+        vars: std::env::vars().collect(),
+        source: crate::env::EnvSource::Process,
+        warning: None,
+    };
+    let gh = crate::forge::Gh::at(script, &env);
+    let store = Store::in_memory();
+    store
+        .add_project("app", &repo.display().to_string())
+        .unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+
+    let started = std::time::Instant::now();
+    let limit = std::time::Duration::from_millis(300);
+    let error = pull_request_within(Some(&gh), &git, &workspace, limit).unwrap_err();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "waited {:?}",
+        started.elapsed()
+    );
+    assert!(error.contains("no answer within"), "{error}");
 }
 
 #[test]

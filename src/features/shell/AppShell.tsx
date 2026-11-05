@@ -20,6 +20,7 @@ import { useProjectsStore } from "@/stores/projects";
 import { listenForQuitRequests } from "@/stores/quit";
 import { listenForPairingRequests } from "@/stores/remote";
 import { listenForTestRuns } from "@/stores/smokeTests";
+import { listenForSchedules } from "@/stores/schedules";
 import { listenForWorkflowRuns } from "@/stores/workflows";
 import { useUpdatesStore } from "@/stores/updates";
 import { StatusBar } from "./StatusBar";
@@ -72,11 +73,13 @@ export function AppShell() {
     const listening = listenForQuitRequests();
     const runs = listenForWorkflowRuns();
     const testRuns = listenForTestRuns();
+    const schedules = listenForSchedules();
     const pairing = listenForPairingRequests();
     return () => {
       void listening.then((stop) => stop());
       void runs.then((stop) => stop());
       void testRuns.then((stop) => stop());
+      void schedules.then((stop) => stop());
       void pairing.then((stop) => stop());
     };
   }, []);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { timeAgo } from "@/features/terminal/sessionText";
 import { errorMessage, ipc, type WorkflowRun } from "@/lib/ipc";
+import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
 import { statusColour, useWorkflowStore } from "@/stores/workflows";
 import { ACTION_WORDS } from "./words";
 
@@ -17,6 +18,8 @@ interface Props {
 export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
   const runs = useWorkflowStore((s) => s.runs[workflowId]) ?? EMPTY;
   const steps = useWorkflowStore((s) => (selected ? s.steps[selected] : undefined));
+  // The runs a schedule started, to say so on each.
+  const started = useSchedulesStore((s) => s.started);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,6 +57,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
           {runs.map((run) => {
             const open = run.id === selected;
             const active = run.status === "queued" || run.status === "running";
+            const scheduled = scheduleOf(started, run.id);
             return (
               <li key={run.id} className="mb-1 rounded border border-line bg-canvas/40">
                 <button
@@ -69,12 +73,23 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                     {run.status}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{run.workspaceName}</span>
+                  {scheduled && (
+                    <span
+                      title={`Started by the schedule “${scheduled.scheduleName}”`}
+                      className="shrink-0 text-[11px] text-ink-faint"
+                    >
+                      scheduled
+                    </span>
+                  )}
                   <span className="shrink-0 text-[11px] text-ink-faint">
                     {timeAgo(run.createdAt)}
                   </span>
                 </button>
                 {open && (
                   <div className="border-t border-line px-2.5 py-2">
+                    {scheduled && (
+                      <p className="mb-1.5 text-ink-muted">Scheduled · {scheduled.scheduleName}</p>
+                    )}
                     {run.pullRequest && (
                       <p className="mb-1.5 text-ink-muted">
                         Pull request #{run.pullRequest.number} {run.pullRequest.title}

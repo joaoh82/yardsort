@@ -160,6 +160,10 @@ carries runs out in the background while you keep working:
 ys workflow run fix-tests --workspace fix-login --input fixer=claude
 ```
 
+**Schedule…**, beside **Run…**, runs the workflow at a set time or on a routine instead: see
+[Schedules](schedules.md). A workflow with a `run_test` step can be scheduled only when that
+test can run with nobody there: no `manual` step, and a file you have approved.
+
 `--workspace` takes a workspace's name or id. Run it inside a workspace's folder, or in an
 agent's terminal there, and it can be left out. Give each input as `--input id=value`. `ys`
 checks everything before anything is queued:

@@ -131,6 +131,12 @@ export const DOCS_NAV: DocSection[] = [
           "Smoke tests as YAML files an agent writes and Yardsort runs: typed steps, browser actions, approval before anything runs, the Tests view and ys test.",
       },
       {
+        slug: "guide/schedules",
+        title: "Schedules",
+        description:
+          "Schedule a workflow or a smoke test in Yardsort: once at a set time or on a routine, with presets or cron, missed-time rules, notifications and ys schedule.",
+      },
+      {
         slug: "guide/updates",
         title: "Updates",
         description:

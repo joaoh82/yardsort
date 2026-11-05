@@ -89,6 +89,7 @@ fn a_cancel_during_one_effect_stops_the_effects_after_it() {
             workspace_id: &workspace.id,
             inputs: &BTreeMap::new(),
             requested_by: "cli",
+            unattended: false,
         },
         &crate::workflow::runs::Accepting::default(),
     )
@@ -253,6 +254,7 @@ impl Profile {
                 workspace_id: &self.workspace,
                 inputs: &BTreeMap::new(),
                 requested_by: "cli",
+                unattended: false,
             },
             &look,
         )
@@ -503,6 +505,7 @@ fn a_run_test_step_queues_a_run_marked_as_the_workflows_and_waits_for_it() {
             workspace_id: &workspace.id,
             inputs: &BTreeMap::new(),
             requested_by: "cli",
+            unattended: false,
         },
         &crate::workflow::runs::Accepting::default(),
     )
@@ -531,4 +534,114 @@ fn a_run_test_step_queues_a_run_marked_as_the_workflows_and_waits_for_it() {
         Some(queued.id.as_str()),
         "the step kept the run's id to wait on"
     );
+}
+
+/// What a schedule's run relies on. Nobody is there to approve a file or answer a step, and a
+/// `run_test` step with no timeout would wait with its test for ever, the run active all the
+/// while: so the step fails at once, with nothing queued, and says why.
+#[test]
+fn a_run_test_step_in_a_run_nobody_watches_fails_rather_than_wait_for_a_person() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("app", "/code/app").unwrap();
+    let worktree = dir.path().join("wt");
+    std::fs::create_dir_all(crate::smoke::dir(&worktree)).unwrap();
+    std::fs::write(crate::smoke::dir(&worktree).join("demo.yaml"), SMOKE_DEMO).unwrap();
+    let workspace = store
+        .add_worktree(
+            &project.id,
+            "fix-login",
+            &worktree.to_string_lossy(),
+            None,
+            None,
+        )
+        .unwrap();
+    let folder = crate::workflow::user_dir(dir.path());
+    std::fs::create_dir_all(&folder).unwrap();
+    // The test is named by an input, so nothing could have known which before the run, and
+    // the step has no timeout.
+    let workflow = RUN_A_TEST
+        .replace(
+            "steps:",
+            "inputs:\n  - id: which\n    kind: test\n    default: demo\nsteps:",
+        )
+        .replace("test: demo", "test: \"{{ inputs.which }}\"")
+        .replace("    timeout: 30m\n", "");
+    std::fs::write(folder.join("smoke.yaml"), workflow).unwrap();
+    let start = |unattended: bool| {
+        queue(
+            &store,
+            dir.path(),
+            &Request {
+                workflow_id: "smoke",
+                workspace_id: &workspace.id,
+                inputs: &BTreeMap::new(),
+                requested_by: "app",
+                unattended,
+            },
+            &crate::workflow::runs::Accepting::default(),
+        )
+        .unwrap()
+    };
+    let host = PtyHost::new(Arc::new(|_| {}));
+    let driver = Driver::default();
+
+    // Nobody approved the file.
+    let run = start(true);
+    driver.tick(&store, &host, &NoHands, &git()).unwrap();
+    driver.tick(&store, &host, &NoHands, &git()).unwrap();
+    assert!(
+        store.active_test_runs().unwrap().is_empty(),
+        "no run is left waiting for an approval nobody is there to give"
+    );
+    let steps = store.workflow_steps(&run).unwrap();
+    let step = steps.iter().find(|s| s.step_id == "run").unwrap();
+    assert_eq!(step.status, "failed");
+    let note = step.note.as_deref().unwrap();
+    assert!(
+        note.contains("new, or has changed since you approved it"),
+        "{note}"
+    );
+    let ended = store.workflow_run(&run).unwrap().unwrap();
+    assert_eq!(
+        ended.status, "failed",
+        "the run ends, so the next time can start one"
+    );
+    assert!(ended.error.as_deref().unwrap().contains("`run`"));
+
+    // A step a person answers, approved or not.
+    let manual =
+        format!("{SMOKE_DEMO}  - id: look\n    action: manual\n    prompt: Does it look right?\n");
+    std::fs::write(crate::smoke::dir(&worktree).join("demo.yaml"), &manual).unwrap();
+    store
+        .approve_test(
+            &project.id,
+            "demo",
+            &crate::smoke::runs::content_hash(&manual),
+        )
+        .unwrap();
+    let run = start(true);
+    driver.tick(&store, &host, &NoHands, &git()).unwrap();
+    driver.tick(&store, &host, &NoHands, &git()).unwrap();
+    assert!(store.active_test_runs().unwrap().is_empty());
+    let steps = store.workflow_steps(&run).unwrap();
+    let note = steps[0].note.clone().unwrap();
+    assert!(note.contains("a step a person does (`look`)"), "{note}");
+
+    // Approved, with nothing for a person in it, it is queued like any other.
+    std::fs::write(crate::smoke::dir(&worktree).join("demo.yaml"), SMOKE_DEMO).unwrap();
+    store
+        .approve_test(
+            &project.id,
+            "demo",
+            &crate::smoke::runs::content_hash(SMOKE_DEMO),
+        )
+        .unwrap();
+    let run = start(true);
+    driver.tick(&store, &host, &NoHands, &git()).unwrap();
+    let queued = store.active_test_runs().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].status, "queued");
+    let steps = store.workflow_steps(&run).unwrap();
+    assert_eq!(steps[0].status, "waiting");
 }

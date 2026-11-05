@@ -1,7 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { TestListing, TestRun } from "@/lib/ipc";
-import { testRun } from "@/test/fixtures";
+import { useProjectsStore } from "@/stores/projects";
+import { project, testRun, worktree } from "@/test/fixtures";
 import { TestDetail } from "./TestDetail";
 
 const listing = (over: Partial<TestListing> = {}): TestListing => ({
@@ -52,5 +54,47 @@ describe("TestDetail", () => {
     expect(within(history).getByText("fix-login")).toBeInTheDocument();
     // The other project's `health` run must not leak into this one's history.
     expect(within(history).queryByText("other-ws")).toBeNull();
+  });
+
+  it("offers to schedule the test, in the workspace chosen to run it in", async () => {
+    useProjectsStore.setState({
+      projects: [
+        {
+          ...project("app"),
+          workspaces: [...project("app").workspaces, worktree("app", "fix-login")],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(
+      <TestDetail
+        listing={listing()}
+        catalog={[listing()]}
+        runs={[]}
+        now={Date.now()}
+        onOpenRun={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Schedule…" }));
+    const dialog = await screen.findByRole("dialog", { name: "New schedule" });
+    expect(within(dialog).getByRole("combobox", { name: "What to run" })).toHaveValue("test");
+    expect(within(dialog).getByRole("combobox", { name: "Workspace" })).toHaveValue(
+      "w-app-fix-login",
+    );
+  });
+
+  it("does not offer to schedule a test that cannot run", () => {
+    render(
+      <TestDetail
+        listing={listing({ item: { ...listing().item, runnable: false } })}
+        catalog={[]}
+        runs={[]}
+        now={Date.now()}
+        onOpenRun={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Schedule…" })).toBeDisabled();
   });
 });

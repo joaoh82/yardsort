@@ -27,6 +27,9 @@ pub struct Request<'a> {
     pub requested_by: &'a str,
     /// The agent's conversation record, when the request came from an agent's terminal.
     pub session_record_id: Option<&'a str>,
+    /// Nobody is there to approve the file or answer a step: a workflow a schedule started is
+    /// asking. A run that would wait for a person is refused, and nothing is written.
+    pub unattended: bool,
 }
 
 /// A run that was queued.
@@ -142,6 +145,11 @@ pub fn queue(store: &Store, request: &Request<'_>) -> IpcResult<Queued> {
     let settings = store.project_test_settings(&workspace.project_id)?;
     let approved =
         store.test_approved(&workspace.project_id, &entry.id, &hash)? && !settings.ask_every_time;
+    if request.unattended {
+        if let Some(why) = person_needed(test, &workspace.name, settings.ask_every_time, approved) {
+            return Err(IpcError::new("test_needs_person", why));
+        }
+    }
     let id = uuid::Uuid::new_v4().to_string();
     let inputs_json = serde_json::to_string(&inputs).unwrap_or_else(|_| "{}".to_owned());
     let steps: Vec<(&str, &str, &str)> = test
@@ -184,6 +192,66 @@ pub fn queue(store: &Store, request: &Request<'_>) -> IpcResult<Queued> {
     }
 }
 
+/// Why a run of `test` would wait for a person, when it would: it has a step a person does, the
+/// project asks to see every run, or nobody has approved the file as it is now.
+fn person_needed(
+    test: &Test,
+    workspace_name: &str,
+    ask_every_time: bool,
+    approved: bool,
+) -> Option<String> {
+    if let Some((_, step)) = test
+        .all_steps()
+        .find(|(_, step)| matches!(step.action, Action::Manual { .. }))
+    {
+        return Some(format!(
+            "The smoke test `{}` has a step a person does (`{}`), and nobody is there to answer \
+             it.",
+            test.id, step.id
+        ));
+    }
+    if ask_every_time {
+        return Some(format!(
+            "This project asks before every run of a smoke test, and nobody is there to say yes \
+             to `{}`.",
+            test.id
+        ));
+    }
+    (!approved).then(|| {
+        format!(
+            "The smoke test `{}` is new, or has changed since you approved it. Run it once in \
+             `{workspace_name}` to approve it.",
+            test.id
+        )
+    })
+}
+
+/// Why a run of the test `test_id` in this workspace would wait for a person, when it would.
+/// What an unattended [`queue`] refuses, asked without queueing: for whoever wants to know
+/// before the moment comes. `None` when the run would go straight ahead, and when the file is
+/// not there or not ready, which is the door's to say.
+pub fn waits_for_a_person(
+    store: &Store,
+    workspace: &crate::store::WorkspaceRow,
+    test_id: &str,
+) -> IpcResult<Option<String>> {
+    let Some(entry) = find(std::path::Path::new(&workspace.path), test_id) else {
+        return Ok(None);
+    };
+    let Some(test) = entry.test.as_ref().filter(|_| entry.runnable()) else {
+        return Ok(None);
+    };
+    let settings = store.project_test_settings(&workspace.project_id)?;
+    let approved =
+        store.test_approved(&workspace.project_id, &entry.id, &content_hash(&entry.text))?;
+    Ok(person_needed(
+        test,
+        &workspace.name,
+        settings.ask_every_time,
+        approved,
+    ))
+}
+
 /// Queue a run the way the app's Run dialog does: seeing the dialog's steps and pressing Run is
 /// the approval — but only of the file the dialog showed. `shown_hash` is that file's hash when
 /// the dialog read it. The file is read fresh here, as [`queue`] always does; the run is approved
@@ -205,6 +273,28 @@ pub fn queue_seen(store: &Store, request: &Request<'_>, shown_hash: &str) -> Ipc
         }
     }
     Ok(queued)
+}
+
+/// Approve a test file the way the app's schedule dialog does: the dialog showed its steps, and
+/// saving the schedule is the approval — but, as in [`queue_seen`], only of the file the dialog
+/// showed. The file is read fresh; it is approved only when it still has `shown_hash`. `false`
+/// when it has changed, or is not there: its first scheduled run then waits to be seen.
+pub fn approve_seen(
+    store: &Store,
+    workspace_id: &str,
+    test_id: &str,
+    shown_hash: &str,
+) -> IpcResult<bool> {
+    let Some(workspace) = store.workspace(workspace_id)?.filter(|w| !w.forgotten) else {
+        return Ok(false);
+    };
+    let unchanged = find(std::path::Path::new(&workspace.path), test_id)
+        .filter(|entry| entry.runnable() && content_hash(&entry.text) == shown_hash);
+    let Some(entry) = unchanged else {
+        return Ok(false);
+    };
+    store.approve_test(&workspace.project_id, &entry.id, shown_hash)?;
+    Ok(true)
 }
 
 /// The inputs a run gets: what was given, defaults for the rest. Refuses unknown inputs,

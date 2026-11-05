@@ -224,6 +224,7 @@ fn start_run(
             workspace_id: &workspace.id,
             inputs: &inputs,
             requested_by: "cli",
+            unattended: false,
         },
         &Looking(ys),
     )?;
@@ -267,7 +268,7 @@ fn start_run(
 
 /// What `ys` answers when a run is queued: agents from the settings and `PATH`, the pull
 /// request from `gh`.
-struct Looking<'a>(&'a Yardsort);
+pub(crate) struct Looking<'a>(pub(crate) &'a Yardsort);
 
 impl runs::Look for Looking<'_> {
     fn harness(&self, wanted: &str) -> Result<String, String> {

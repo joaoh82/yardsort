@@ -3088,3 +3088,247 @@ fn a_smoke_test_run_waits_for_approval_which_ys_cannot_give_then_is_carried_out(
     let changed = fx.ys_from(Some(&path), &["test", "run", "demo"]).ok();
     assert!(changed.contains("waiting for you to approve"), "{changed}");
 }
+
+#[test]
+fn a_schedule_is_added_listed_shown_paused_resumed_and_removed() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+
+    let empty = fx.ys(&["schedule", "list"]).ok();
+    assert!(empty.contains("No schedules"), "{empty}");
+
+    let json = fx
+        .ys(&[
+            "schedule",
+            "add",
+            "--workflow",
+            "ping",
+            "--workspace",
+            name,
+            "--input",
+            "note=Hi there",
+            "--weekly",
+            "mon-fri",
+            "9:00",
+            "--json",
+        ])
+        .ok();
+    let added: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(added["name"], "Ping", "named after what it runs");
+    assert_eq!(added["when"], "Weekdays at 09:00");
+    assert_eq!(added["workspace"], name);
+    assert_eq!(added["inputs"]["note"], "Hi there");
+    assert_eq!(added["standing"], "waiting");
+    assert_eq!(added["ifMissed"], "run_once");
+    assert!(added["nextAt"].is_i64(), "{added}");
+
+    let nightly = fx
+        .ys(&[
+            "schedule",
+            "add",
+            "--workflow",
+            "ping",
+            "--workspace",
+            name,
+            "--name",
+            "Nightly",
+            "--cron",
+            "0 3 * * *",
+            "--if-missed",
+            "skip",
+            "--notify",
+            "always",
+        ])
+        .ok();
+    assert!(nightly.contains("Added `Nightly`"), "{nightly}");
+    assert!(nightly.contains("Cron `0 3 * * *`"), "{nightly}");
+    assert!(nightly.contains("Next: "), "{nightly}");
+    assert!(
+        nightly.contains("Yardsort is not running. Schedules fire while it is open."),
+        "{nightly}"
+    );
+
+    let table = fx.ys(&["schedule", "list"]).ok();
+    assert!(
+        table.contains("Nightly") && table.contains("Ping"),
+        "{table}"
+    );
+    assert!(table.contains("workflow ping"), "{table}");
+    assert!(table.contains("Weekdays at 09:00"), "{table}");
+
+    let shown = fx.ys(&["schedule", "show", "nightly"]).ok();
+    assert!(shown.contains("Runs the workflow `ping`"), "{shown}");
+    assert!(shown.contains("skips it"), "{shown}");
+    assert!(shown.contains("how every run ends"), "{shown}");
+    let next = shown.split("Next:").nth(1).expect("its next times");
+    assert_eq!(
+        next.lines().filter(|line| line.contains("03:00")).count(),
+        5,
+        "{shown}"
+    );
+
+    let off = fx.ys(&["schedule", "pause", "Nightly"]).ok();
+    assert!(off.contains("`Nightly` is off"), "{off}");
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["schedule", "list", "--json"]).ok()).unwrap();
+    let paused = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "Nightly")
+        .unwrap();
+    assert_eq!(paused["enabled"], false);
+    assert_eq!(paused["standing"], "off");
+    assert!(
+        paused["nextAt"].is_null(),
+        "off, it has no next time to show"
+    );
+    let on = fx.ys(&["schedule", "resume", "Nightly"]).ok();
+    assert!(on.contains("`Nightly` is on. Next: "), "{on}");
+
+    let history = fx.ys(&["schedule", "runs", "Nightly"]).ok();
+    assert!(history.contains("has not come due yet"), "{history}");
+
+    // By the start of its id, too.
+    let id = paused["id"].as_str().unwrap();
+    let removed = fx.ys(&["schedule", "remove", &id[..8]]).ok();
+    assert!(removed.contains("Removed `Nightly`"), "{removed}");
+    let left: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["schedule", "list", "--json"]).ok()).unwrap();
+    assert_eq!(left.as_array().unwrap().len(), 1);
+    let gone = fx.ys(&["schedule", "show", "Nightly"]).failed();
+    assert!(gone.contains("No schedule called"), "{gone}");
+    assert!(gone.contains("Ping"), "it says which there are: {gone}");
+}
+
+#[test]
+fn a_schedule_is_refused_for_what_is_wrong_with_it_and_nothing_is_written() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let add = |rest: &[&str]| {
+        let mut args = vec!["schedule", "add", "--workspace", name];
+        args.extend_from_slice(rest);
+        fx.ys(&args)
+    };
+
+    let unknown = add(&["--workflow", "nope", "--daily", "09:00"]).failed();
+    assert!(unknown.contains("There is no workflow `nope`"), "{unknown}");
+    let no_test = add(&["--test", "nope", "--daily", "09:00"]).failed();
+    assert!(
+        no_test.contains("There is no smoke test `nope`"),
+        "{no_test}"
+    );
+    let input = add(&[
+        "--workflow",
+        "ping",
+        "--input",
+        "colour=red",
+        "--daily",
+        "09:00",
+    ])
+    .failed();
+    assert!(input.contains("has no input `colour`"), "{input}");
+
+    let time = add(&["--workflow", "ping", "--daily", "nine"]).failed();
+    assert!(time.contains("`nine` is not a time of day"), "{time}");
+    let days = add(&["--workflow", "ping", "--weekly", "funday", "09:00"]).failed();
+    assert!(days.contains("is not days of the week"), "{days}");
+    let day = add(&["--workflow", "ping", "--monthly", "31", "09:00"]).failed();
+    assert!(day.contains("1 to 28"), "{day}");
+    let every = add(&["--workflow", "ping", "--every", "soon"]).failed();
+    assert!(every.contains("is not an interval"), "{every}");
+    let cron = add(&["--workflow", "ping", "--cron", "0 9 * *"]).failed();
+    assert!(cron.contains("has 4 fields"), "{cron}");
+    let past = add(&["--workflow", "ping", "--at", "2020-01-01 09:00"]).failed();
+    assert!(past.contains("That time has already passed"), "{past}");
+
+    // Clap's own: what to run and when are each asked for once. It exits 2, as for any misuse.
+    let nothing = add(&["--daily", "09:00"]);
+    assert_eq!(nothing.code, Some(2), "{}", nothing.stderr);
+    let twice = add(&["--workflow", "ping", "--daily", "09:00", "--every", "1h"]);
+    assert_eq!(twice.code, Some(2), "{}", twice.stderr);
+
+    let listed = fx.ys(&["schedule", "list", "--json"]).ok();
+    assert_eq!(listed.trim(), "[]");
+}
+
+#[test]
+fn a_schedules_run_is_started_now_only_while_the_app_holds_its_lock() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    fx.ys(&[
+        "schedule",
+        "add",
+        "--workflow",
+        "ping",
+        "--workspace",
+        name,
+        "--every",
+        "2h",
+    ])
+    .ok();
+
+    let closed = fx.ys(&["schedule", "run", "Ping"]).failed();
+    assert!(closed.contains("Yardsort is not running"), "{closed}");
+    assert!(closed.contains("Nothing was queued"), "{closed}");
+
+    // This test stands in for the running app. Nothing drives the run, so it stays queued.
+    let _app = yardsort_core::presence::AppLock::take(&fx.data_dir)
+        .unwrap()
+        .expect("nobody else holds it");
+    let json = fx.ys(&["schedule", "run", "Ping", "--json"]).ok();
+    let queued: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let run = queued["run"].as_str().unwrap().to_owned();
+    assert_eq!(queued["target"], "workflow");
+
+    let runs: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["workflow", "runs", "--json"]).ok()).unwrap();
+    assert_eq!(runs[0]["id"], run.as_str());
+    assert_eq!(runs[0]["status"], "queued");
+    assert_eq!(runs[0]["requestedBy"], "app");
+
+    let again = fx.ys(&["schedule", "run", "Ping"]).failed();
+    assert!(again.contains("already running"), "{again}");
+
+    let history = fx.ys(&["schedule", "runs", "Ping"]).ok();
+    assert!(history.contains(&run[..8]), "{history}");
+    assert!(history.contains("running"), "{history}");
+    assert!(history.contains("Run now"), "{history}");
+    let listed = fx.ys(&["schedule", "list"]).ok();
+    assert!(listed.contains("running"), "{listed}");
+    assert!(
+        !listed.contains("Yardsort is not running"),
+        "the app is open: {listed}"
+    );
+}
+
+#[test]
+fn a_test_scheduled_from_ys_says_its_file_still_needs_approving() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+    write_smoke_test(&path, "demo.yaml", SMOKE_TEST_WITH_GIT);
+
+    let added = fx
+        .ys_from(
+            Some(&path),
+            &["schedule", "add", "--test", "demo", "--every", "1d"],
+        )
+        .ok();
+    assert!(added.contains("Every day"), "{added}");
+    assert!(
+        added.contains("`demo` has not been approved in Yardsort"),
+        "{added}"
+    );
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["schedule", "list", "--json"]).ok()).unwrap();
+    assert_eq!(listed[0]["target"], "test");
+    assert_eq!(listed[0]["workspace"], name, "the workspace it was run in");
+}

@@ -7,6 +7,7 @@ import { UsageView } from "@/features/usage/UsageView";
 import { PullRequestsView } from "@/features/pull-requests/PullRequestsView";
 import { TasksView } from "@/features/tasks/TasksView";
 import { TestsView } from "@/features/tests/TestsView";
+import { SchedulesView } from "@/features/schedules/SchedulesView";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
 import { LatencyRunner } from "@/features/terminal/LatencyRunner";
@@ -49,6 +50,7 @@ export function WorkspacePanel() {
   const pullRequestsOpen = useProjectsStore((s) => s.pullRequestsOpen);
   const tasksOpen = useProjectsStore((s) => s.tasksOpen);
   const testsOpen = useProjectsStore((s) => s.testsOpen);
+  const schedulesOpen = useProjectsStore((s) => s.schedulesOpen);
   const runIn =
     selection && selection.workspace.id === composingWorkspaceId ? selection : undefined;
 
@@ -75,6 +77,8 @@ export function WorkspacePanel() {
         <TasksView />
       ) : testsOpen ? (
         <TestsView />
+      ) : schedulesOpen ? (
+        <SchedulesView />
       ) : workflowId ? (
         <WorkflowView key={workflowId} workflowId={workflowId} />
       ) : composingFor ? (

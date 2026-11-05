@@ -759,6 +759,9 @@ the view; all six are fixed here, the last with its edges honestly bounded.
   be, so that `runner: playwright` can come later for projects that have it, without a second
   file format.
 - **Schedules and forge triggers**, which are the workflows' question, answered there when it is.
+  Schedules were answered in [34](34-schedules.md), for tests directly as well as through a
+  workflow: a schedule queues a test run through `runs::queue`, and approval works as it does
+  for a run `ys` asks for.
 - **Running a test on another machine, or in a container**; the [remote proposal](Yardsort-Remote-Mobile-Sync-Spec-2026-10-21.md)
   is where a headless host would run one.
 - **Assertions on screenshots** (visual diffs), and an agent's judgment of a screenshot. A

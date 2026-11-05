@@ -150,6 +150,19 @@ import {
   type OutputChunk as RawOutputChunk,
   type TestSent,
   type TestResultSent,
+  type Schedule as RawSchedule,
+  type ScheduleRun as RawScheduleRun,
+  type ScheduleSpec as RawScheduleSpec,
+  type ScheduleDraft as RawScheduleDraft,
+  type SchedulePreview as RawSchedulePreview,
+  type ScheduledRun,
+  type ScheduleTarget,
+  type ScheduleStanding,
+  type ScheduleOutcome,
+  type ScheduleNotify,
+  type IfMissed,
+  type TimeOfDay,
+  type Weekday,
 } from "./bindings";
 
 export type {
@@ -170,6 +183,14 @@ export type {
   EnvUse,
   TestSent,
   TestResultSent,
+  ScheduledRun,
+  ScheduleTarget,
+  ScheduleStanding,
+  ScheduleOutcome,
+  ScheduleNotify,
+  IfMissed,
+  TimeOfDay,
+  Weekday,
   Described,
   WorkflowItem,
   WorkflowCheck,
@@ -339,6 +360,13 @@ export type UsageReport = Finite<RawUsageReport, "knownCost" | "resetsAt">;
 export type TestRun = Finite<RawTestRun, "startedAt" | "endedAt" | "port">;
 export type TestStepRun = Finite<RawTestStepRun, "startedAt" | "endedAt" | "exit">;
 export type OutputChunk = Finite<RawOutputChunk, never>;
+/** When a schedule fires. A `monthly` with no `day` means the month's last day. */
+export type ScheduleSpec = Finite<RawScheduleSpec, "day">;
+/** A schedule; `nextAt` is null when it has no time to come. */
+export type Schedule = Finite<RawSchedule, "nextAt" | "day">;
+export type ScheduleRun = Finite<RawScheduleRun, never>;
+export type SchedulePreview = Finite<RawSchedulePreview, never>;
+export type ScheduleDraft = Omit<RawScheduleDraft, "spec"> & { spec: ScheduleSpec };
 export type MachineReport = Finite<RawMachineReport, "loadOne">;
 export type AgentLimits = UsageReport["limits"][number];
 export type ModelUsage = UsageReport["models"][number];
@@ -867,6 +895,31 @@ export const ipc = {
   /** A result sent to an agent went in, or never will. */
   onTestResultSent: (handler: (sent: TestResultSent) => void) =>
     events.testResultSent.listen((event) => handler(event.payload)),
+
+  // --- schedules -----------------------------------------------------------------------
+  /** Every schedule of every project, by name, each with the newest line of its history. */
+  scheduleList: (): Promise<Schedule[]> => unwrap(commands.scheduleList()) as Promise<Schedule[]>,
+  /** A schedule's history, newest first: every time it came due and what became of it. */
+  scheduleRuns: (scheduleId: string, limit = 50): Promise<ScheduleRun[]> =>
+    unwrap(commands.scheduleRuns(scheduleId, limit)) as Promise<ScheduleRun[]>,
+  /** The runs schedules started, for a run list to mark. */
+  scheduleStartedRuns: () => unwrap(commands.scheduleStartedRuns()),
+  /** What a spec comes to as it is filled in: what is wrong, how it reads, its next times. */
+  schedulePreview: (spec: ScheduleSpec): Promise<SchedulePreview> =>
+    unwrap(commands.schedulePreview(spec)) as Promise<SchedulePreview>,
+  /** Add a schedule, or change the one `draft.id` names. Rejects with what is wrong with it. */
+  scheduleSave: (draft: ScheduleDraft): Promise<Schedule> =>
+    unwrap(commands.scheduleSave(draft)) as Promise<Schedule>,
+  /** Switch a schedule on, from now, or off. */
+  scheduleSetEnabled: (scheduleId: string, enabled: boolean): Promise<Schedule> =>
+    unwrap(commands.scheduleSetEnabled(scheduleId, enabled)) as Promise<Schedule>,
+  /** Remove a schedule and its history. The runs it started stay. */
+  scheduleRemove: (scheduleId: string) => done(commands.scheduleRemove(scheduleId)),
+  /** Start a schedule's run now, leaving its next time where it is. */
+  scheduleRunNow: (scheduleId: string): Promise<ScheduleRun> =>
+    unwrap(commands.scheduleRunNow(scheduleId)) as Promise<ScheduleRun>,
+  /** A schedule was added, changed, switched, removed or fired, or a run it started ended. */
+  onSchedulesChanged: (handler: () => void) => events.schedulesChanged.listen(() => handler()),
 
   onHostEvent: (handler: (event: HostEvent) => void) =>
     events.ptyHostEvent.listen((event) => handler(event.payload)),

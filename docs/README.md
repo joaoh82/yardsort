@@ -29,6 +29,7 @@ walks through both tabs and explains what the local figures include.
 | [Outcomes](guide/outcomes.md)                                 | What became of each attempt, and each agent's history on your work                                                   |
 | [Workflows](guide/workflows.md)                               | Named, reusable agent work in YAML: the built-in code review, writing and checking your own                          |
 | [Smoke tests](guide/smoke-tests.md)                           | A test file in your repository an agent writes and Yardsort runs: browser steps, approval, the Tests view, `ys test` |
+| [Schedules](guide/schedules.md)                               | Run a workflow or a smoke test once at a set time, or on a routine, while Yardsort is open; `ys schedule` too        |
 | [Remote](guide/remote.md)                                     | Reaching this computer from your phone through a server. Still under development, and off until you turn it on       |
 | [Usage](guide/usage.md)                                       | Tokens your agents spent and what they would cost; CPU and memory per agent, live                                    |
 | [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                                                   |
