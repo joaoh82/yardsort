@@ -403,6 +403,14 @@ describe("terminals in a daemon that cannot share them", () => {
     expect(section.getByRole("button", { name: "Stop everything and restart…" })).toBeEnabled();
   });
 
+  it("leaves out what is not running when it says what it stops", async () => {
+    core.remoteStatus.mockResolvedValue(earlier([], 1));
+    render(<RemoteSettings />);
+    const section = within(await notice());
+    await userEvent.click(section.getByRole("button", { name: "Stop everything and restart…" }));
+    expect(section.getByText(/This stops 1 shell, then restarts/)).toBeInTheDocument();
+  });
+
   it("replaces it on a second yes", async () => {
     core.remoteStatus.mockResolvedValue(earlier(["a-1"], 0));
     core.remoteReplaceDaemon.mockResolvedValue(null);

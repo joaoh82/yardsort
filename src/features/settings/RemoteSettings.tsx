@@ -445,7 +445,6 @@ function Device(props: { device: RemoteDevice; busy: boolean; onRevoke: () => vo
   );
 }
 
-/** Where the link to the relay stands, in a sentence. Nothing while the app keeps none. */
 /**
  * Why a phone cannot open any terminal here, and the one way to change that. Updating does not do
  * it: the daemon is kept for what runs in it, and new terminals join them. Replacing it stops all
@@ -461,6 +460,10 @@ function EarlierDaemon(props: {
   const [asking, setAsking] = useState(false);
   const [going, setGoing] = useState(false);
   const running = daemon.agents.length + daemon.shells;
+  const stopped = [
+    ...(daemon.agents.length > 0 ? [counted(daemon.agents.length, "agent")] : []),
+    ...(daemon.shells > 0 ? [counted(daemon.shells, "shell")] : []),
+  ].join(" and ");
 
   const replace = async () => {
     setGoing(true);
@@ -489,9 +492,8 @@ function EarlierDaemon(props: {
       {asking ? (
         <>
           <p className="text-ink">
-            This stops {counted(daemon.agents.length, "agent")}
-            {daemon.shells > 0 && ` and ${counted(daemon.shells, "shell")}`}, then restarts
-            Yardsort. Files stay on disk, and conversations can be resumed afterwards.
+            This stops {stopped}, then restarts Yardsort. Files stay on disk, and conversations can
+            be resumed afterwards.
           </p>
           {daemon.agents.length > 0 && (
             <ul className="max-h-40 overflow-y-auto rounded bg-canvas p-2 text-[12px]">
@@ -549,6 +551,7 @@ function counted(count: number, what: string): string {
   return `${count} ${what}${count === 1 ? "" : "s"}`;
 }
 
+/** Where the link to the relay stands, in a sentence. Nothing while the app keeps none. */
 function LinkLine({ link }: { link: RemoteLink }) {
   switch (link.kind) {
     case "off":

@@ -175,7 +175,7 @@ function Watching({
             </View>
           )}
           <View style={styles.status}>
-            <Dot kind={refused(sight) ? "bad" : reachDot(reach)} />
+            <Dot kind={stopped(sight) ? "bad" : reachDot(reach)} />
             <Text style={[styles.statusWords, { color: colors.muted }]}>
               {statusLine(sight, describeReach(reach, null), hold.holding)}
             </Text>
@@ -214,7 +214,7 @@ function takeOverTitle(name: string): string {
 }
 
 /** Told why not, and not trying again until the channel is: not on its way, whatever the computer is. */
-function refused(sight: Sight): boolean {
+function stopped(sight: Sight): boolean {
   return sight.problem !== null && !sight.following;
 }
 
@@ -226,7 +226,7 @@ function statusLine(sight: Sight, reach: string, holding: boolean): string {
   }
   if (sight.gone) return "This terminal is no longer on the computer.";
   if (reach !== "Online") return `${reach}. What is on the computer keeps running.`;
-  if (refused(sight)) return "This terminal could not be opened.";
+  if (stopped(sight)) return "Not watching this terminal.";
   if (!sight.following) return "Connecting to the terminal.";
   if (holding) return "You have control. The person at the computer can take it back by typing.";
   return `Watching. ${controlWords(sight.controller)}`;

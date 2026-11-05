@@ -1532,6 +1532,8 @@ describe("A computer", () => {
         await settle();
       }
       expect(await screen.findByText(/could not be followed/)).toBeTruthy();
+      expect(screen.getByText("Not watching this terminal.")).toBeTruthy();
+      expect(screen.queryByText("Connecting to the terminal.")).toBeNull();
       expect(server.attaches).toHaveLength(6);
     });
 
@@ -1644,7 +1646,7 @@ describe("A computer", () => {
       await pageSays({ t: "ready" });
 
       expect(await screen.findByText("Settings on the computer can replace it.")).toBeTruthy();
-      expect(screen.getByText("This terminal could not be opened.")).toBeTruthy();
+      expect(screen.getByText("Not watching this terminal.")).toBeTruthy();
       expect(screen.queryByText("Connecting to the terminal.")).toBeNull();
       expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
     });
