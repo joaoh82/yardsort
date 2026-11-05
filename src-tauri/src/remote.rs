@@ -23,6 +23,7 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
+use pty_host::{SessionInfo, SessionState};
 use remote_client::{Client, ClientError, Session, SIGN_IN_TIMEOUT};
 use remote_host::{Access, AccessError, AccessFuture, Connector, Serving};
 use remote_proto::account::{DeviceKind, NewDevice, Secret};
@@ -45,6 +46,7 @@ use yardsort_core::store::RemoteHostRow;
 
 use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
+use crate::{quit, updates};
 
 /// A directory to keep the host's credential in, instead of the OS credential store.
 pub const CREDENTIALS_DIR_VAR: &str = "YARDSORT_CREDENTIALS_DIR";
@@ -230,9 +232,23 @@ pub struct RemoteStatus {
     pub signing_in: bool,
     /// Where the host's credential is kept: the OS credential store, or a directory.
     pub credentials: String,
+    /// Set while this computer's terminals run in a daemon that cannot share them.
+    pub earlier_daemon: Option<RemoteEarlierDaemon>,
     /// The server and name Remote was last turned on with, to offer again once it is off.
     pub last_server_url: Option<String>,
     pub last_name: Option<String>,
+}
+
+/// A daemon from before leases, kept for the programs running in it, and what replacing it stops.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteEarlierDaemon {
+    /// The Yardsort version that started it.
+    pub version: Option<String>,
+    /// The running agents, as ids the frontend can match to its tabs.
+    pub agents: Vec<String>,
+    /// How many running sessions are not agents.
+    pub shells: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -471,9 +487,34 @@ fn status(state: &AppState) -> IpcResult<RemoteStatus> {
             .map(|s| s.is_some())
             .unwrap_or(false),
         credentials: credentials_label(),
+        earlier_daemon: earlier_daemon(state),
         last_server_url: last.server_url,
         last_name: last.name,
     })
+}
+
+fn earlier_daemon(state: &AppState) -> Option<RemoteEarlierDaemon> {
+    // Without a daemon the terminals are in this process, which shares them.
+    if state.daemon_client.is_none() || state.host.shares_control() {
+        return None;
+    }
+    Some(earlier_daemon_of(
+        state.daemon.version.clone(),
+        &state.host.list(),
+    ))
+}
+
+fn earlier_daemon_of(version: Option<String>, sessions: &[SessionInfo]) -> RemoteEarlierDaemon {
+    let agents = quit::agents_among(sessions);
+    let running = sessions
+        .iter()
+        .filter(|session| matches!(session.state, SessionState::Running))
+        .count();
+    RemoteEarlierDaemon {
+        version,
+        shells: u32::try_from(running - agents.len()).unwrap_or(u32::MAX),
+        agents,
+    }
 }
 
 fn device(grant: LocalGrant) -> RemoteDevice {
@@ -817,6 +858,28 @@ pub async fn remote_answer(
     blocking(app, status).await
 }
 
+/// Stop everything in a daemon that cannot share its terminals, and start Yardsort again, so that
+/// a current daemon takes over. Only ever on the person's word, once told what it stops. A daemon
+/// that does share them is left alone, whatever asked.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_replace_daemon(app: AppHandle) -> IpcResult<()> {
+    let restarting = app.clone();
+    blocking(app, |state| {
+        if earlier_daemon(state).is_none() {
+            return Err(IpcError::new(
+                "remote_daemon_current",
+                "This computer's terminals can already be shared.",
+            ));
+        }
+        quit::stop_everything(state);
+        Ok(())
+    })
+    .await?;
+    quit::past_the_question();
+    updates::restart(&restarting)
+}
+
 /// Take a device's grant away. Refused here at once; the server is told too.
 #[tauri::command]
 #[specta::specta]
@@ -910,6 +973,44 @@ mod tests {
     use remote_proto::RemoteError;
 
     use super::*;
+
+    fn session(id: &str, harness: bool, running: bool) -> SessionInfo {
+        let mut labels = serde_json::Map::new();
+        if harness {
+            labels.insert(crate::terminal::HARNESS_LABEL.to_owned(), "claude".into());
+        }
+        let state = if running {
+            serde_json::json!({ "status": "running" })
+        } else {
+            serde_json::json!({ "status": "exited", "exit": { "code": 0, "success": true } })
+        };
+        serde_json::from_value(serde_json::json!({
+            "id": id, "program": "p", "args": [], "cwd": null, "pid": null,
+            "size": { "cols": 80, "rows": 24 }, "labels": labels, "state": state,
+            "hasOutput": false, "busy": false, "idleMs": 0,
+        }))
+        .unwrap()
+    }
+
+    /// What the person is told replacing the daemon stops: everything still running in it, a
+    /// shell at a prompt too, and nothing that has already ended.
+    #[test]
+    fn replacing_an_earlier_daemon_counts_all_that_it_stops() {
+        let sessions = [
+            session("agent", true, true),
+            session("finished-agent", true, false),
+            session("shell", false, true),
+            session("finished-shell", false, false),
+        ];
+        assert_eq!(
+            earlier_daemon_of(Some("0.20.0".into()), &sessions),
+            RemoteEarlierDaemon {
+                version: Some("0.20.0".into()),
+                agents: vec!["agent".into()],
+                shells: 1,
+            }
+        );
+    }
 
     #[test]
     fn a_refusal_of_this_computers_credential_says_it_was_signed_out() {

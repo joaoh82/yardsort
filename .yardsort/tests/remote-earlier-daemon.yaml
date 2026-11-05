@@ -1,0 +1,103 @@
+id: remote-earlier-daemon
+name: Remote replaces a daemon that cannot share its terminals
+description: >-
+  Runs a real 0.20.2 daemon with an agent and a shell in it, starts this branch's app on it, and
+  works Settings → Remote in the real window: it says why, a no stops nothing, and a yes puts a
+  current daemon in its place. Linux only, since it fetches 0.20.2's AppImage. A window opens while
+  it runs; nothing needs clicking.
+version: 1
+timeout: 30m
+
+setup:
+  - id: fetch_earlier
+    action: shell
+    line: >-
+      gh release download v0.20.2 --repo joaoh82/yardsort --pattern 'Yardsort_0.20.2_amd64.AppImage'
+      --dir "$YS_RUN_DIR" && chmod +x "$YS_RUN_DIR/Yardsort_0.20.2_amd64.AppImage" && cd "$YS_RUN_DIR"
+      && ./Yardsort_0.20.2_amd64.AppImage --appimage-extract > /dev/null
+    timeout: 5m
+  - id: earlier_daemon
+    action: run
+    program: cargo
+    args:
+      - run
+      - -q
+      - -p
+      - pty-ipc
+      - --example
+      - leave_running
+      - --
+      - "{{ run.dir }}/profile"
+      - "{{ run.dir }}/squashfs-root/usr/bin/yardsort"
+    expect:
+      stdout_contains: daemon 0.20.2 protocol 1
+    timeout: 10m
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: open_app
+    action: shell
+    # Not `start`: the app restarts itself here, and a `start` process is not to end.
+    line: >-
+      setsid target/debug/yardsort > "$YS_RUN_DIR/app.log" 2>&1 < /dev/null &
+    env:
+      YARDSORT_DATA_DIR: "{{ run.dir }}/profile"
+      YARDSORT_WORKTREE_ROOT: "{{ run.dir }}/worktrees"
+      WEBKIT_INSPECTOR_HTTP_SERVER: "127.0.0.1:{{ run.port }}"
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+
+steps:
+  - id: earlier_daemon_kept
+    action: shell
+    line: ys doctor --data-dir "$YS_RUN_DIR/profile" | grep daemon
+    expect:
+      stdout_contains: version 0.20.2
+  - id: says_why
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", says-why]
+  - id: a_no_stops_nothing
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", a-no-stops-nothing]
+  - id: still_the_earlier_daemon
+    action: shell
+    line: ys doctor --data-dir "$YS_RUN_DIR/profile" | grep daemon
+    expect:
+      stdout_contains: version 0.20.2
+  - id: replace_it
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", replace]
+  - id: earlier_daemon_gone
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      # The bracket keeps this line from matching itself.
+      - '! pgrep -f "{{ run.dir }}/[s]quashfs-root/usr/bin/yardsort"'
+    timeout: 30s
+  - id: current_daemon
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - ys doctor --data-dir "{{ run.dir }}/profile" | grep -q "running, version 0.21"
+    timeout: 60s
+  - id: app_back_with_no_notice
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", says-nothing-now]
+    timeout: 90s
+
+teardown:
+  - id: close_everything
+    action: shell
+    line: >-
+      for p in $(pgrep yardsort); do grep -qz "YARDSORT_DATA_DIR=$YS_RUN_DIR" /proc/$p/environ 2>/dev/null
+      && kill "$p"; done; pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

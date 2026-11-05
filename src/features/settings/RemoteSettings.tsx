@@ -3,13 +3,16 @@ import {
   errorMessage,
   ipc,
   type RemoteDevice,
+  type RemoteEarlierDaemon,
   type RemoteLink,
   type RemotePairing,
   type RemoteRequest,
   type RemoteStatus,
 } from "@/lib/ipc";
+import { agentPlaces } from "@/features/shell/agentPlaces";
 import { useProjectsStore } from "@/stores/projects";
 import { useRemoteStore } from "@/stores/remote";
+import { useTerminalStore } from "@/stores/terminals";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
 
 /** How often the open section asks the server who is waiting. */
@@ -126,6 +129,13 @@ export function RemoteSettings() {
         <p role="alert" className="text-red-400 select-text">
           {error}
         </p>
+      )}
+
+      {status.earlierDaemon && (
+        <EarlierDaemon
+          daemon={status.earlierDaemon}
+          onFailed={(reason) => setError(errorMessage(reason))}
+        />
       )}
 
       {status.host ? (
@@ -433,6 +443,112 @@ function Device(props: { device: RemoteDevice; busy: boolean; onRevoke: () => vo
       </button>
     </li>
   );
+}
+
+/**
+ * Why a phone cannot open any terminal here, and the one way to change that. Updating does not do
+ * it: the daemon is kept for what runs in it, and new terminals join them. Replacing it stops all
+ * of those, so nothing happens until the person has read which, and said yes a second time.
+ */
+function EarlierDaemon(props: {
+  daemon: RemoteEarlierDaemon;
+  onFailed: (reason: unknown) => void;
+}) {
+  const { daemon } = props;
+  const tabs = useTerminalStore((s) => s.tabs);
+  const projects = useProjectsStore((s) => s.projects);
+  const [asking, setAsking] = useState(false);
+  const [going, setGoing] = useState(false);
+  const running = daemon.agents.length + daemon.shells;
+  const stopped = [
+    ...(daemon.agents.length > 0 ? [counted(daemon.agents.length, "agent")] : []),
+    ...(daemon.shells > 0 ? [counted(daemon.shells, "shell")] : []),
+  ].join(" and ");
+
+  const replace = async () => {
+    setGoing(true);
+    try {
+      await ipc.remoteReplaceDaemon();
+    } catch (reason) {
+      setGoing(false);
+      setAsking(false);
+      props.onFailed(reason);
+    }
+  };
+
+  return (
+    <section
+      aria-label="Terminals cannot be shared yet"
+      className="grid gap-2 rounded border border-amber-400/40 bg-amber-400/10 px-3 py-2"
+    >
+      <p className="font-medium text-ink">A phone cannot open this computer's terminals yet.</p>
+      <p className="text-ink-muted">
+        Every terminal here, new ones too, runs in a background process
+        {daemon.version ? ` from Yardsort ${daemon.version}` : " from an earlier Yardsort"}, which
+        cannot share them. Updating left it running so as not to stop your agents. A current one
+        takes over when Yardsort starts with nothing running in it, and sharing then keeps working
+        through later updates.
+      </p>
+      {asking ? (
+        <>
+          <p className="text-ink">
+            This stops {stopped}, then restarts Yardsort. Files stay on disk, and conversations can
+            be resumed afterwards.
+          </p>
+          {daemon.agents.length > 0 && (
+            <ul className="max-h-40 overflow-y-auto rounded bg-canvas p-2 text-[12px]">
+              {agentPlaces(daemon.agents, tabs, projects).map((agent) => (
+                <li key={agent.id} className="flex gap-2 py-0.5">
+                  <span className="font-medium text-ink">{agent.title}</span>
+                  {agent.place && <span className="text-ink-faint">{agent.place}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              autoFocus
+              disabled={going}
+              onClick={() => setAsking(false)}
+              className={buttonClass}
+            >
+              Keep them running
+            </button>
+            <button
+              type="button"
+              disabled={going}
+              onClick={() => void replace()}
+              className={buttonClass}
+            >
+              Stop them and restart
+            </button>
+          </div>
+        </>
+      ) : running > 0 ? (
+        <div>
+          <button type="button" onClick={() => setAsking(true)} className={buttonClass}>
+            Stop everything and restart…
+          </button>
+        </div>
+      ) : (
+        <div>
+          <button
+            type="button"
+            disabled={going}
+            onClick={() => void replace()}
+            className={buttonClass}
+          >
+            Restart Yardsort
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function counted(count: number, what: string): string {
+  return `${count} ${what}${count === 1 ? "" : "s"}`;
 }
 
 /** Where the link to the relay stands, in a sentence. Nothing while the app keeps none. */
