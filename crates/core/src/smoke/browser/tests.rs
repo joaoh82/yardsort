@@ -5,12 +5,19 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use super::*;
 use crate::smoke::exec::{Stop, Watch};
 use crate::smoke::{BrowserAction as BA, Screenshots};
+
+/// These tests take turns. A browser is slow to start on a slow Windows runner, and four starting
+/// at once have used up a step's whole budget before it could load a page.
+fn one_browser_at_a_time() -> MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+    TURN.lock().unwrap_or_else(|taken| taken.into_inner())
+}
 
 /// A stop signal the test never raises.
 struct NoWatch;
@@ -108,6 +115,7 @@ fn scratch() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
 
 #[test]
 fn a_browser_step_visits_a_page_acts_on_it_and_screenshots_it() {
+    let _turn = one_browser_at_a_time();
     let Some(browser) = find_browser("") else {
         eprintln!(
             "skipped: no Chromium-family browser found ({})",
@@ -206,6 +214,7 @@ fn a_browser_step_visits_a_page_acts_on_it_and_screenshots_it() {
 
 #[test]
 fn a_failed_expectation_fails_the_step_and_shoots_it() {
+    let _turn = one_browser_at_a_time();
     let Some(browser) = find_browser("") else {
         eprintln!(
             "skipped: no Chromium-family browser found ({})",
@@ -256,6 +265,7 @@ fn a_failed_expectation_fails_the_step_and_shoots_it() {
 
 #[test]
 fn a_cancel_ends_a_browser_step() {
+    let _turn = one_browser_at_a_time();
     let Some(browser) = find_browser("") else {
         eprintln!(
             "skipped: no Chromium-family browser found ({})",
@@ -309,6 +319,7 @@ fn a_cancel_ends_a_browser_step() {
 
 #[test]
 fn every_step_screenshots_each_action_and_never_skips_the_failure_shot() {
+    let _turn = one_browser_at_a_time();
     let Some(browser) = find_browser("") else {
         eprintln!(
             "skipped: no Chromium-family browser found ({})",
