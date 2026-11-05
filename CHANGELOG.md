@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.21.1
 
 - **Settings → Remote says when a phone cannot open your terminals, and fixes it.** After updating
   from before 0.21.0, every terminal, new ones too, stays in the earlier background process until
