@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Settings → Remote says when a phone cannot open your terminals, and fixes it.** After updating
+  from before 0.21.0, every terminal, new ones too, stays in the earlier background process until
+  nothing runs in it, and that process cannot share them. Nothing on this computer said so. Settings →
+  Remote now does, and can stop what is running and restart Yardsort, once it has named what stops and
+  you have said yes twice. See [Remote](docs/guide/remote.md#if-a-phone-cannot-open-any-terminal).
+- **The phone no longer says it is connecting when the computer has refused.** The message says that
+  new terminals are affected too and where to fix it, and the status line and its dot agree.
+
 ## 0.21.0
 
 - **Remote, still under development.** Settings → Remote lets a phone reach this computer's

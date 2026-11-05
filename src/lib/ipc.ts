@@ -124,6 +124,7 @@ import {
   type PrFacts,
   type RemoteAnswer,
   type RemoteDevice,
+  type RemoteEarlierDaemon,
   type RemoteLink,
   type RemotePairing,
   type RemoteRequest,
@@ -237,6 +238,7 @@ export type {
   ProjectTasks,
   RemoteAnswer,
   RemoteDevice,
+  RemoteEarlierDaemon,
   RemoteLink,
   RemotePairing,
   RemoteRequest,
@@ -670,6 +672,7 @@ export const ipc = {
    * let in. See `src-tauri/src/remote.rs`.
    */
   remoteStatus: () => unwrap(commands.remoteStatus()),
+  remoteReplaceDaemon: () => unwrap(commands.remoteReplaceDaemon()),
   /** Sign in through the browser and register this computer. Waits for the browser. */
   remoteEnable: (serverUrl: string, name: string) => unwrap(commands.remoteEnable(serverUrl, name)),
   remoteCancel: () => unwrap(commands.remoteCancel()),

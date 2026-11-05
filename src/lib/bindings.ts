@@ -312,6 +312,12 @@ export const commands = {
 	remoteAnswer: (grantId: string, answer: RemoteAnswer) => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_answer", { grantId, answer })),
 	/**  Take a device's grant away. Refused here at once; the server is told too. */
 	remoteRevoke: (grantId: string) => typedError<RemoteStatus, IpcError>(__TAURI_INVOKE("remote_revoke", { grantId })),
+	/**
+	 *  Stop everything in a daemon that cannot share its terminals, and start Yardsort again, so that
+	 *  a current daemon takes over. Only ever on the person's word, once told what it stops. A daemon
+	 *  that does share them is left alone, whatever asked.
+	 */
+	remoteReplaceDaemon: () => typedError<null, IpcError>(__TAURI_INVOKE("remote_replace_daemon")),
 	/**  Assemble the fork packet for a workspace, from the same facts as a handoff. */
 	workspaceFork: (workspaceId: string) => typedError<ForkPacket, IpcError>(__TAURI_INVOKE("workspace_fork", { workspaceId })),
 	memoryGet: (projectId: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_get", { projectId })),
@@ -2016,6 +2022,16 @@ export type RemoteDevice = {
 	approvedAt: number | null,
 };
 
+/**  A daemon from before leases, kept for the programs running in it, and what replacing it stops. */
+export type RemoteEarlierDaemon = {
+	/**  The Yardsort version that started it. */
+	version: string | null,
+	/**  The running agents, as ids the frontend can match to its tabs. */
+	agents: string[],
+	/**  How many running sessions are not agents. */
+	shells: number,
+};
+
 export type RemoteHost = {
 	serverUrl: string,
 	name: string,
@@ -2096,6 +2112,8 @@ export type RemoteStatus = {
 	signingIn: boolean,
 	/**  Where the host's credential is kept: the OS credential store, or a directory. */
 	credentials: string,
+	/**  Set while this computer's terminals run in a daemon that cannot share them. */
+	earlierDaemon: RemoteEarlierDaemon | null,
 	/**  The server and name Remote was last turned on with, to offer again once it is off. */
 	lastServerUrl: string | null,
 	lastName: string | null,

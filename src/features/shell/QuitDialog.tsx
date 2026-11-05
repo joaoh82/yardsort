@@ -3,6 +3,7 @@ import { useModalFocus } from "@/lib/useModalFocus";
 import { useProjectsStore } from "@/stores/projects";
 import { useQuitStore } from "@/stores/quit";
 import { useTerminalStore } from "@/stores/terminals";
+import { agentPlaces } from "./agentPlaces";
 
 /**
  * "Agents are still working." Closing the window leaves them running in the daemon, which is
@@ -27,16 +28,7 @@ export function QuitDialog() {
 
   if (agents === null) return null;
 
-  const where = agents.map((id) => {
-    const tab = tabs.find((t) => t.id === id);
-    const project = projects.find((p) => p.workspaces.some((w) => w.id === tab?.workspaceId));
-    const workspace = project?.workspaces.find((w) => w.id === tab?.workspaceId);
-    return {
-      id,
-      title: tab?.title ?? "agent",
-      place: project && workspace ? `${project.name} / ${workspace.name}` : null,
-    };
-  });
+  const where = agentPlaces(agents, tabs, projects);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[14vh]">

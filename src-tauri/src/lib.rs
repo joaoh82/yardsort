@@ -151,6 +151,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::remote_requests,
             remote::remote_answer,
             remote::remote_revoke,
+            remote::remote_replace_daemon,
             activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,

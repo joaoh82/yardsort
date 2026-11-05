@@ -1632,6 +1632,23 @@ describe("A computer", () => {
       expect(vault.credentials()).toEqual([]);
     });
 
+    test("a computer that cannot share its terminals says so, and nothing says it is connecting", async () => {
+      const server = new FakeServer();
+      server.computer.refuses.set("terminal.attach", "Settings on the computer can replace it.");
+      await paired(new MemoryVault(), server);
+      await fireEvent.press(await open());
+      await fireEvent.press(
+        await screen.findByRole("button", { name: "The login page times out" }),
+      );
+      await screen.findByTestId("terminal");
+      await pageSays({ t: "ready" });
+
+      expect(await screen.findByText("Settings on the computer can replace it.")).toBeTruthy();
+      expect(screen.getByText("This terminal could not be opened.")).toBeTruthy();
+      expect(screen.queryByText("Connecting to the terminal.")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
+    });
+
     test("a refusal the server cannot explain leaves the terminal, and it comes back", async () => {
       const { server, vault } = await watching();
       server.down = true;

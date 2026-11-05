@@ -39,6 +39,19 @@ one is waiting. Nothing but this window can say yes: not `ys`, and not an agent.
 Any number of devices can watch a terminal, but only one can type into it at a time. The phone asks for
 control, and the person at the computer can take it back at any moment just by typing.
 
+## If a phone cannot open any terminal
+
+The phone may say that this computer's terminals run in a process from an earlier version of Yardsort.
+That process, the [daemon](terminals-and-sessions.md#agents-keep-working-when-you-close-the-window), is
+what keeps your agents running when Yardsort closes, so updating Yardsort leaves it running, and new
+terminals start in it too. One from before 0.21.0 cannot share terminals, however recently they started.
+
+**Settings → Remote** says when this is so. **Stop everything and restart…** names what it stops and asks
+again, then stops every terminal and restarts Yardsort, and a current daemon takes over. Files stay on
+disk, and conversations can be [resumed](terminals-and-sessions.md#resume). If you would rather finish
+what is running first, Yardsort does the same by itself when it next starts with nothing running. It only
+has to happen once: as long as a daemon can share terminals, later updates keep that working.
+
 ## The phone app
 
 It is in [`apps/mobile`](https://github.com/joaoh82/yardsort/tree/main/apps/mobile), and is not in the

@@ -1,10 +1,11 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RemoteLink, RemoteStatus } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   remoteStatus: vi.fn(),
+  remoteReplaceDaemon: vi.fn(),
   remoteEnable: vi.fn(),
   remoteCancel: vi.fn(),
   remoteDisable: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@/lib/ipc", async (original) => ({
 
 import { useProjectsStore } from "@/stores/projects";
 import { useRemoteStore } from "@/stores/remote";
+import { useTerminalStore } from "@/stores/terminals";
 import { RemoteSettings } from "./RemoteSettings";
 
 const off: RemoteStatus = {
@@ -28,6 +30,7 @@ const off: RemoteStatus = {
   devices: [],
   signingIn: false,
   credentials: "in this computer's credential store",
+  earlierDaemon: null,
   lastServerUrl: null,
   lastName: null,
 };
@@ -55,10 +58,11 @@ beforeEach(() => {
   useRemoteStore.setState({ asking: [] });
   useProjectsStore.setState({
     projects: [
-      { id: "p-1", name: "api", rootPath: "/repos/api" },
-      { id: "p-2", name: "web", rootPath: "/repos/web" },
+      { id: "p-1", name: "api", rootPath: "/repos/api", workspaces: [] },
+      { id: "p-2", name: "web", rootPath: "/repos/web", workspaces: [] },
     ] as never,
   });
+  useTerminalStore.setState({ tabs: [] });
 });
 
 it("says it is under development, and turns on only when asked", async () => {
@@ -347,4 +351,85 @@ it("says where the link to the relay stands, as the poll brings it", async () =>
   } finally {
     vi.useRealTimers();
   }
+});
+
+describe("terminals in a daemon that cannot share them", () => {
+  const earlier = (agents: string[], shells: number): RemoteStatus => ({
+    ...off,
+    earlierDaemon: { version: "0.20.0", agents, shells },
+  });
+  const notice = () => screen.findByRole("region", { name: "Terminals cannot be shared yet" });
+
+  it("says nothing of it when they can be shared", async () => {
+    render(<RemoteSettings />);
+    await screen.findByRole("button", { name: "Turn on and sign in" });
+    expect(screen.queryByRole("region", { name: /cannot be shared/ })).toBeNull();
+  });
+
+  it("says why, new terminals included, whether Remote is on or not", async () => {
+    core.remoteStatus.mockResolvedValue(earlier(["a-1"], 0));
+    render(<RemoteSettings />);
+    const section = await notice();
+    expect(section).toHaveTextContent("A phone cannot open this computer's terminals yet.");
+    expect(section).toHaveTextContent("new ones too");
+    expect(section).toHaveTextContent("from Yardsort 0.20.0");
+  });
+
+  it("names what it stops, and a no stops nothing", async () => {
+    core.remoteStatus.mockResolvedValue(earlier(["a-1"], 2));
+    useProjectsStore.setState({
+      projects: [
+        {
+          id: "p-1",
+          name: "api",
+          rootPath: "/repos/api",
+          workspaces: [{ id: "w-1", name: "fix" }],
+        },
+      ] as never,
+    });
+    useTerminalStore.setState({
+      tabs: [{ id: "a-1", workspaceId: "w-1", title: "claude" }] as never,
+    });
+    render(<RemoteSettings />);
+    const section = within(await notice());
+    await userEvent.click(section.getByRole("button", { name: "Stop everything and restart…" }));
+    expect(core.remoteReplaceDaemon).not.toHaveBeenCalled();
+    expect(section.getByText(/This stops 1 agent and 2 shells/)).toBeInTheDocument();
+    expect(section.getByText("api / fix")).toBeInTheDocument();
+
+    await userEvent.click(section.getByRole("button", { name: "Keep them running" }));
+    expect(core.remoteReplaceDaemon).not.toHaveBeenCalled();
+    expect(section.queryByText(/This stops/)).toBeNull();
+    expect(section.getByRole("button", { name: "Stop everything and restart…" })).toBeEnabled();
+  });
+
+  it("replaces it on a second yes", async () => {
+    core.remoteStatus.mockResolvedValue(earlier(["a-1"], 0));
+    core.remoteReplaceDaemon.mockResolvedValue(null);
+    render(<RemoteSettings />);
+    const section = within(await notice());
+    await userEvent.click(section.getByRole("button", { name: "Stop everything and restart…" }));
+    await userEvent.click(section.getByRole("button", { name: "Stop them and restart" }));
+    expect(core.remoteReplaceDaemon).toHaveBeenCalledTimes(1);
+  });
+
+  it("has nothing to ask with nothing running", async () => {
+    core.remoteStatus.mockResolvedValue(earlier([], 0));
+    core.remoteReplaceDaemon.mockResolvedValue(null);
+    render(<RemoteSettings />);
+    const section = within(await notice());
+    await userEvent.click(section.getByRole("button", { name: "Restart Yardsort" }));
+    expect(core.remoteReplaceDaemon).toHaveBeenCalledTimes(1);
+  });
+
+  it("says so if it cannot be done", async () => {
+    core.remoteStatus.mockResolvedValue(earlier(["a-1"], 0));
+    core.remoteReplaceDaemon.mockRejectedValue({ code: "x", message: "Could not start again." });
+    render(<RemoteSettings />);
+    const section = within(await notice());
+    await userEvent.click(section.getByRole("button", { name: "Stop everything and restart…" }));
+    await userEvent.click(section.getByRole("button", { name: "Stop them and restart" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not start again.");
+    expect(section.getByRole("button", { name: "Stop everything and restart…" })).toBeEnabled();
+  });
 });

@@ -952,6 +952,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       move earlier than R7, and Settings → Remote is shown to everyone from the next release, off until
       turned on, and marked as still under development. v0.21.0 shipped that, and the first TestFlight
       build was installed on the iPhone the same day, and signed in and paired.
+      2026-11-05: real use found that a computer updated with agents running can open no terminal from
+      the phone, new ones included, since all of them join the daemon kept for those agents, and nothing
+      at the computer said so. Settings → Remote now says so and can replace it, and the phone no
+      longer says it is connecting. `.yardsort/tests/remote-earlier-daemon.yaml` works it in the real
+      window against a real 0.20.2 daemon; it passed on Linux on 2026-11-05. The phone's new wording has
+      a test but has not been seen on a real phone yet.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
