@@ -35,6 +35,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_specta::Event;
 use yardsort_core::remote::host::{self, CredentialStore, FileCredentials, LocalGrant};
 use yardsort_core::remote::serve::Context;
+use yardsort_core::remote::start::{Starter, Starting};
 use yardsort_core::remote::HostIdentity;
 use yardsort_core::settings::SettingsFile;
 use yardsort_core::store::Store;
@@ -58,6 +59,7 @@ pub struct RemoteState {
 struct AppHome {
     app: AppHandle,
     git: OnceLock<Option<yardsort_core::git::Git>>,
+    starting: Arc<AppStarting>,
 }
 
 impl AppHome {
@@ -65,6 +67,7 @@ impl AppHome {
         Self {
             app: app.clone(),
             git: OnceLock::new(),
+            starting: Arc::new(AppStarting(app.clone())),
         }
     }
 
@@ -110,6 +113,7 @@ impl Home for AppHome {
             terminals: state.host.as_ref(),
             host: &HostIdentity { id, name: row.name },
             interactive: state.host.shares_control(),
+            starting: Some(Arc::clone(&self.starting) as Arc<dyn Starting>),
         });
     }
 
@@ -118,6 +122,75 @@ impl Home for AppHome {
             request: request.into(),
         }
         .emit(&self.app);
+    }
+}
+
+/// What a device's channel starts agents with: this app's own settings, worktree folder and
+/// terminals, as the window's composer uses them.
+struct AppStarting(AppHandle);
+
+impl AppStarting {
+    fn with<T>(&self, f: impl FnOnce(&Starter<'_>) -> IpcResult<T>) -> IpcResult<T> {
+        let state = self.0.state::<AppState>();
+        let env = state.env();
+        let settings = state.settings.get();
+        let git = yardsort_core::git::Git::new(&env)?;
+        let worktree_root = state.worktree_root()?;
+        f(&Starter {
+            store: &state.store,
+            git: &git,
+            terminals: state.host.as_ref(),
+            env: &env,
+            settings: &settings,
+            worktree_root: &worktree_root,
+            data_dir: &state.data_dir,
+        })
+    }
+
+    /// An agent was started from a device: the window shows its tab, and the workspace when
+    /// it is new, as for one a workflow started.
+    fn started(&self, workspace_id: &str, session: &SessionInfo) {
+        let state = self.0.state::<AppState>();
+        crate::activity::launched(&state);
+        let _ = crate::workflows::SessionStarted {
+            workspace_id: workspace_id.to_owned(),
+            session_id: session.id.0.clone(),
+        }
+        .emit(&self.0);
+    }
+}
+
+impl Starting for AppStarting {
+    fn harnesses(&self) -> Vec<remote_proto::HarnessSummary> {
+        self.with(|starter| Ok(starter.harnesses()))
+            .unwrap_or_default()
+    }
+
+    fn workspace(
+        &self,
+        project: &str,
+        prompt: &str,
+        harness: &str,
+    ) -> IpcResult<(String, SessionInfo)> {
+        let (workspace, session) =
+            self.with(|starter| starter.workspace(project, prompt, harness))?;
+        self.started(&workspace, &session);
+        Ok((workspace, session))
+    }
+
+    fn session(
+        &self,
+        workspace: &str,
+        harness: &str,
+        prompt: Option<&str>,
+    ) -> IpcResult<SessionInfo> {
+        let session = self.with(|starter| starter.session(workspace, harness, prompt))?;
+        self.started(workspace, &session);
+        Ok(session)
+    }
+
+    fn data_dir(&self) -> std::path::PathBuf {
+        self.0.state::<AppState>().data_dir.clone()
     }
 }
 

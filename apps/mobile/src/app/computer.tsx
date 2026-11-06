@@ -23,6 +23,7 @@ import { useApp } from "../lib/context";
 import { moment } from "../lib/format";
 import type { ObservedComputer, ObservedWorkspaces } from "../lib/observed";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
+import { canStart } from "./start";
 import { Body, Button, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
 
 /** A workspace as this screen shows it, from the computer or from what was last seen. */
@@ -153,6 +154,13 @@ function Computer({ host }: { host: HostId }) {
         <Waiting label={channel ? "Asking the computer" : "Waiting for the computer"} />
       )}
       {shown?.length === 0 && <Body muted>Nothing here this phone may see.</Body>}
+      {canStart(channel) && (
+        <Button
+          title="New workspace"
+          kind="primary"
+          onPress={() => router.push({ pathname: "/start", params: { host } })}
+        />
+      )}
       {projects.map((project) => {
         const here = shown?.filter((workspace) => workspace.project === project.id) ?? [];
         if (here.length === 0) return null;

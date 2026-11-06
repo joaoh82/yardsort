@@ -1,0 +1,10 @@
+{
+  "requestId": "r-11",
+  "result": {
+    "kind": "harnesses",
+    "harnesses": [
+      { "id": "claude", "name": "Claude Code" },
+      { "id": "codex", "name": "Codex" }
+    ]
+  }
+}

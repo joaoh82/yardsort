@@ -21,12 +21,14 @@
  */
 
 import { ClientError, type Client } from "./client.ts";
+import { base64 } from "./crypto.ts";
 import { DecodeError, isObject, utf8Length } from "./decode.ts";
 import { decodeFrame, FrameError, type OutputFrame } from "./frame.ts";
 import {
   MAX_CLIENT_NAME,
   MAX_CONTROL_FRAME,
   MAX_OUTPUT_CHUNK,
+  MAX_UPLOAD_CHUNK,
   OUTPUT_HEADER_LEN,
   PROTOCOL_MAJOR,
 } from "./limits.ts";
@@ -40,6 +42,7 @@ import {
   CURRENT,
   type Cursor,
   EVENTS,
+  type HarnessSummary,
   event as eventDecoder,
   helloReply,
   type HostDescription,
@@ -56,6 +59,8 @@ import {
   response as responseDecoder,
   type SessionListParams,
   type SessionPage,
+  type SessionStartParams,
+  type Started,
   type StreamId,
   type StreamPosition,
   type SubscriptionId,
@@ -65,6 +70,7 @@ import {
   type WorkspaceId,
   type WorkspaceListParams,
   type WorkspacePage,
+  type WorkspaceStartParams,
 } from "./protocol.ts";
 import { closeReason, type CloseReason, closeText, greeting as greetingDecoder } from "./relay.ts";
 import type { Secret } from "./secret.ts";
@@ -302,6 +308,82 @@ export class Channel {
       "memory",
     );
     return page;
+  }
+
+  // --- starting --------------------------------------------------------------------------------
+
+  /** The agents the computer can start, its default first. Minor 5. */
+  async harnesses(): Promise<HarnessSummary[]> {
+    return expect(await this.ask({ op: "harness.list" }), "harnesses").harnesses;
+  }
+
+  /**
+   * A new workspace, named after `prompt`, with an agent given it as its first message. The reply
+   * comes once the agent has started, which can take as long as the project's setup does.
+   */
+  async startWorkspace(params: WorkspaceStartParams): Promise<Started> {
+    const { kind: _, ...started } = expect(
+      await this.ask({ op: "workspace.start", params }),
+      "started",
+    );
+    return started;
+  }
+
+  /** Another agent in a workspace. */
+  async startSession(params: SessionStartParams): Promise<Started> {
+    const { kind: _, ...started } = expect(
+      await this.ask({ op: "session.start", params }),
+      "started",
+    );
+    return started;
+  }
+
+  /**
+   * Put a file on the computer, for an agent in `workspace`: its path there, to paste into a
+   * terminal. Pieces go a few ahead of their replies, in order; the first refused ends it, and
+   * the computer deletes what came. `progress` hears how many bytes were taken.
+   */
+  async upload(
+    workspace: WorkspaceId,
+    name: string,
+    bytes: Uint8Array,
+    progress?: (sent: number) => void,
+  ): Promise<string> {
+    const begun = await this.ask({
+      op: "upload.begin",
+      params: { workspace, name, size: bytes.length },
+    });
+    const { upload } = expect(begun, "upload");
+    const AHEAD = 4;
+    const pieces: Promise<Reply>[] = [];
+    let path: string | null = null;
+    let next = 0;
+    let taken = 0;
+    for (let offset = 0; offset < bytes.length; offset += MAX_UPLOAD_CHUNK) {
+      const piece = bytes.subarray(offset, offset + MAX_UPLOAD_CHUNK);
+      const sent = this.ask({
+        op: "upload.chunk",
+        params: { upload, offset, data: base64(piece) },
+      }).then((reply) => {
+        taken += piece.length;
+        progress?.(taken);
+        return reply;
+      });
+      // Once one is refused, those after it are refused too, and nobody waits on them.
+      sent.catch(() => {});
+      pieces.push(sent);
+      if (pieces.length - next >= AHEAD) {
+        const reply = await (pieces[next] as Promise<Reply>);
+        next += 1;
+        if (reply.kind === "uploaded") path = reply.path;
+      }
+    }
+    for (const sent of pieces.slice(next)) {
+      const reply = await sent;
+      if (reply.kind === "uploaded") path = reply.path;
+    }
+    if (path === null) throw new ClientError("unexpected", "The computer answered something else.");
+    return path;
   }
 
   // --- terminals -------------------------------------------------------------------------------

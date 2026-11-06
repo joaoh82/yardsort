@@ -102,6 +102,25 @@ const FIXTURES: Record<string, (name: string) => void> = {
     // The request decoder also makes the checks a host makes, so reading it is validating it.
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("activity:read");
   },
+  "request-workspace-start.json": (name) => {
+    expect(scopeOf(pinned<Request>(request, name).op)).toBe("terminal:control");
+  },
+  "request-upload-chunk.json": (name) => {
+    expect(scopeOf(pinned<Request>(request, name).op)).toBe("terminal:control");
+  },
+  "response-harnesses.json": (name) => {
+    const listed = result(name);
+    if (listed.kind !== "harnesses") throw new Error("not harnesses");
+    expect(listed.harnesses[0]).toEqual({ id: "claude", name: "Claude Code" });
+  },
+  "response-started.json": (name) => {
+    const started = result(name);
+    expect(started.kind === "started" && started.harness).toBe("claude");
+  },
+  "response-uploaded.json": (name) => {
+    const uploaded = result(name);
+    expect(uploaded.kind === "uploaded" && uploaded.path).toEndWith("-photo.jpg");
+  },
   "hello.json": (name) => {
     expect(negotiate(pinned(hello, name))).toEqual(CURRENT);
   },

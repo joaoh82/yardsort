@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useOutcomesStore } from "@/stores/outcomes";
 import { PanelHeader } from "@/features/shell/PanelHeader";
-import { hasCore } from "@/lib/ipc";
+import { hasCore, ipc } from "@/lib/ipc";
 import { useShortcutLabel } from "@/stores/preferences";
 import { useAppStore } from "@/stores/app";
 import { useLayoutStore } from "@/stores/layout";
@@ -53,7 +53,12 @@ export function Sidebar() {
     // Branches get switched in other tools; catch up whenever the window comes back.
     const onFocus = () => void refresh().then(reviewVanishedWorkspaces);
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    // A phone can start a workspace while nobody is at the window.
+    const unlisten = ipc.onSessionStarted(() => void refresh());
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      void unlisten.then((stop) => stop());
+    };
   }, []);
 
   return (

@@ -1,0 +1,10 @@
+{
+  "requestId": "r-14",
+  "protocol": { "major": 1, "minor": 5 },
+  "op": "upload.chunk",
+  "params": {
+    "upload": 1,
+    "offset": 0,
+    "data": "iVBORw0KGgo="
+  }
+}

@@ -3,6 +3,21 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Remote: start work from your phone.** A phone you let type can start a **New workspace**, with
+  the project, the agent and what it should do, or a **New agent** in a workspace, and opens its
+  terminal. This computer makes it as its composer would, and shows it in the window at once. Needs
+  this version on the computer and a new build of the phone app. See
+  [Remote](docs/guide/remote.md#starting-work-from-the-phone).
+- **Remote: give an agent a picture from your phone.** With control of a terminal, **Image** sends
+  one from the phone's library; this computer keeps it outside every worktree and pastes its path,
+  as dropping a file on a terminal does. See
+  [Remote](docs/guide/remote.md#giving-an-agent-a-picture).
+- **Remote: a terminal's history can be scrolled on the phone again.** A terminal taller than the
+  phone stopped at the top of its screen; a drag now goes on into what scrolled off, and the phone
+  keeps as much of it as this computer does.
+
 ## 0.22.1
 
 - Project settings → Smoke tests: a variable's value field is wide enough to read again; the

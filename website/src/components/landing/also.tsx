@@ -55,7 +55,7 @@ const POINTS = [
   },
   {
     title: "Remote, still under development",
-    body: "Reach this computer's workspaces and terminals from your phone, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you turn it on, and a device gets in only if you say yes at this computer. Whoever runs the server can see what passes through it, and the phone app is not in the app stores yet. Expect it to change until the whole plan is finished.",
+    body: "Reach this computer's workspaces and terminals from your phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you turn it on, and a device gets in only if you say yes at this computer. Whoever runs the server can see what passes through it, and the phone app is not in the app stores yet. Expect it to change until the whole plan is finished.",
   },
   {
     title: "Light",
