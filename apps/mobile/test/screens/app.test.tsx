@@ -1940,6 +1940,28 @@ describe("A computer", () => {
       expect(asked(server, "workspace.start")).toHaveLength(1);
     });
 
+    test("a project whose workspaces are all on a later page can be chosen", async () => {
+      const server = able();
+      server.computer.moreProjects = [{ id: "project-2", name: "site", missing: false }];
+      server.computer.moreWorkspaces = [
+        { ...server.computer.workspaces[0], id: "workspace-9", project: "project-2", name: "site" },
+      ];
+      await paired(new MemoryVault(), server);
+      await open();
+      await fireEvent.press(screen.getByRole("button", { name: "New workspace" }));
+      await fireEvent.press(await screen.findByRole("radio", { name: "site" }));
+      expect(screen.getByRole("radio", { name: "demo" })).toBeTruthy();
+      expect(asked(server, "workspace.list").map((p) => (p as { cursor: unknown }).cursor)).toEqual(
+        expect.arrayContaining([null, "k1.more"]),
+      );
+      await fireEvent.changeText(screen.getByLabelText("What should it do?"), "New page");
+      await fireEvent.press(screen.getByRole("button", { name: "Start workspace" }));
+      await screen.findByTestId("terminal");
+      expect(asked(server, "workspace.start")).toEqual([
+        { project: "project-2", prompt: "New page", harness: "claude" },
+      ]);
+    });
+
     test("another agent joins a workspace, with no message unless one is given", async () => {
       const { server } = await paired(new MemoryVault(), able());
       await fireEvent.press(await open());
@@ -1988,6 +2010,40 @@ describe("A computer", () => {
         expect(server.inputs).toEqual([
           { data: "/home/ana/My\\ Data/uploads/workspace-1/1-photo.jpg ", paste: true },
         ]);
+      });
+
+      test("the picker sending the app to the background keeps the channel and control", async () => {
+        // On Android the picker is another activity, and the app is told it is in the background.
+        const changes: ((state: string) => void)[] = [];
+        jest.spyOn(AppState, "addEventListener").mockImplementation(((
+          _: string,
+          listener: (state: string) => void,
+        ) => {
+          changes.push(listener);
+          return { remove: () => {} };
+        }) as typeof AppState.addEventListener);
+        const server = able();
+        let choose: (picked: { name: string; bytes: Uint8Array }) => void = () => {};
+        await inControl(
+          server,
+          () =>
+            new Promise((resolve) => {
+              choose = resolve;
+            }),
+        );
+        await fireEvent.press(screen.getByRole("button", { name: "Give it a picture" }));
+        await act(async () => changes.forEach((tell) => tell("background")));
+        await act(async () => changes.forEach((tell) => tell("active")));
+        await act(async () => choose({ name: "IMG_1.jpg", bytes: Uint8Array.of(1, 2, 3) }));
+        await waitFor(() => expect(server.inputs).toHaveLength(1));
+        expect(server.releases).toBe(0);
+        expect(server.uploads).toHaveLength(1);
+        expect(server.inputs[0]).toMatchObject({ paste: true });
+        expect(screen.queryByText(/did not reach the computer/)).toBeNull();
+
+        // Once it is closed, the background is the background again.
+        await act(async () => changes.forEach((tell) => tell("background")));
+        await waitFor(() => expect(server.releases).toBe(1));
       });
 
       test("none chosen sends nothing", async () => {

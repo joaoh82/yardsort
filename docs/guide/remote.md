@@ -60,7 +60,8 @@ tab appear in this window at once.
 ## Giving an agent a picture
 
 While a phone has control of a terminal, **Image**, at the start of its row of keys, lets you choose a
-picture. The phone sends it as a JPEG, no larger than 2048 pixels on its longest side, and this computer
+picture. The phone keeps control while its photo picker is open, though leaving the app otherwise
+lets go of it. The phone sends it as a JPEG, no larger than 2048 pixels on its longest side, and this computer
 keeps it in the profile's `uploads` folder, outside every worktree, so no branch picks it up. Its path
 is then pasted into the terminal, as dropping a file on a terminal here does, with nothing after it, so
 you can go on and type the message. Claude Code, for one, reads a pasted path to a picture as the

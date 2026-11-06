@@ -102,6 +102,8 @@ export class FakeServer {
     ],
     /** A second page of workspaces, when set. */
     moreWorkspaces: null as null | Record<string, unknown>[],
+    /** The projects of the second page's workspaces. */
+    moreProjects: [] as Record<string, unknown>[],
     sessions: [
       {
         id: "session-1",
@@ -391,7 +393,12 @@ export class FakeServer {
     switch (op) {
       case "workspace.list":
         return params.cursor
-          ? { kind: "workspaces", projects: [], workspaces: computer.moreWorkspaces, next: null }
+          ? {
+              kind: "workspaces",
+              projects: computer.moreProjects,
+              workspaces: computer.moreWorkspaces,
+              next: null,
+            }
           : {
               kind: "workspaces",
               projects: computer.projects,

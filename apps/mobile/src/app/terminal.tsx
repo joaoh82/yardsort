@@ -33,6 +33,7 @@ import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
 import { Composer } from "../ui/composer";
 import {
   describeReach,
+  inFront,
   NoLongerPaired,
   OfProfile,
   reachDot,
@@ -140,7 +141,7 @@ function Watching({
     if (!channel || !workspace) return;
     setSendProblem(null);
     try {
-      const picked = await pickImage();
+      const picked = await inFront(pickImage);
       if (!picked) return;
       setSending(true);
       const path = await channel.upload(workspace, picked.name, picked.bytes);

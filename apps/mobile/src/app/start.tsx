@@ -14,10 +14,12 @@
 import {
   ChannelClosed,
   type Channel,
+  type Cursor,
   type HarnessSummary,
   type HostId,
   type ProjectId,
   type WorkspaceId,
+  type WorkspacePage,
 } from "@yardsort/remote-client";
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
@@ -25,6 +27,9 @@ import { useCallback, useState } from "react";
 import { messageOf } from "../lib/accounts";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
 import { Body, Button, Field, Group, Problem, Row, Screen, Section, Waiting } from "../ui/parts";
+
+/** How many pages of workspaces are read for the projects: thousands of workspaces. */
+const MOST_PAGES = 40;
 
 /** What a computer answers that can start work: one from before cannot. */
 export function canStart(channel: Channel | null): boolean {
@@ -80,10 +85,19 @@ function Start({
         const detail = await through.workspace(workspace);
         return { harnesses, projects: [], workspaceName: detail.workspace.name };
       }
-      const page = await through.workspaces();
+      // A page names only the projects of its workspaces, and every project has one, its local
+      // workspace: so every page is read, for a project whose workspaces are all on a later one.
+      const projects = new Map<ProjectId, string>();
+      let cursor: Cursor | null = null;
+      for (let pages = 0; pages < MOST_PAGES; pages += 1) {
+        const page: WorkspacePage = await through.workspaces({ cursor });
+        for (const p of page.projects) if (!p.missing) projects.set(p.id, p.name);
+        cursor = page.next;
+        if (!cursor) break;
+      }
       return {
         harnesses,
-        projects: page.projects.filter((p) => !p.missing).map(({ id, name }) => ({ id, name })),
+        projects: [...projects].map(([id, name]) => ({ id, name })),
         workspaceName: null,
       };
     },
