@@ -347,3 +347,22 @@ From the design pass in [32-smoke-tests](32-smoke-tests.md), 2026-10-30.
     proposal; a dev server that logs a line per millisecond for an hour fills a disk.
 47. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
     common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.
+
+## Triggers
+
+From the design pass in [35-triggers](35-triggers.md), 2026-11-06.
+
+48. **Should schedules and triggers share one view?** Both start a workflow or a test without a
+    person, with a history of what each time became. Two sidebar rows are proposed, to keep
+    schedules as they shipped; one **Automations** view with both may read better once there are
+    several of each.
+49. **Is two minutes the right quiet time for reviews?** Review bots post in passes, and a person
+    writing line comments one at a time can take longer than that between them. To be judged on
+    real pull requests.
+50. **Do agents remember to run `ys workspace done`?** Done is the agent's word by design. If
+    agents forget it often, a preset on `agent.settled` with new commits, a clean worktree and a
+    few quiet minutes may be worth offering beside it.
+51. **Should a cap lift itself?** A capped pull request stays quiet until **Reset**. A new review
+    from a person after the agent's last push may be a reason to start counting again.
+52. **Should the phone list triggers, and switch them?** Remote exposes no workflows, tests or
+    runs yet; triggers would follow them.

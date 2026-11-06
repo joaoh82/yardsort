@@ -377,7 +377,7 @@ rows, so an app left open fires them.
   icon, launch at login), or the drivers move into the daemon. The first is smaller and probably
   first. Until then a missed time is handled, not prevented.
 - **Triggers from the forge** — a pull request opened, a review posted. A different producer of
-  queued runs, with its own questions.
+  queued runs, with its own questions. Proposed in [35](35-triggers.md).
 - **Schedules on the phone.** Remote exposes no workflows, tests or runs yet; schedules would
   follow them, not lead.
 - **Schedules in a file.** A schedule names a workspace on this machine, so it is the profile's.
