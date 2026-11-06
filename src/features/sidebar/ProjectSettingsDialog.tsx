@@ -195,7 +195,7 @@ export function ProjectSettingsDialog({
                     )
                   }
                   placeholder="TEST_PASSWORD"
-                  className={`${input} mt-0 w-56`}
+                  className={`${input.replace("w-full", "")} mt-0 w-56 shrink-0`}
                 />
                 <input
                   aria-label={`Variable ${index + 1} value`}
@@ -208,7 +208,7 @@ export function ProjectSettingsDialog({
                       ),
                     )
                   }
-                  className={`${input} mt-0 flex-1`}
+                  className={`${input} mt-0 min-w-0 flex-1`}
                 />
                 <button
                   type="button"

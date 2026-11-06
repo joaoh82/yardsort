@@ -3,6 +3,11 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- Project settings → Smoke tests: a variable's value field is wide enough to read again; the
+  name field had taken the whole row.
+
 ## 0.22.0
 
 - **Schedules: run a workflow or a smoke test at a set time, or on a routine.** **Schedules**, in
