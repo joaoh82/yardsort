@@ -124,10 +124,14 @@ fn run_item(row: ScheduleRunRow) -> ScheduleRun {
     }
 }
 
-fn item(row: ScheduleRow, last: Option<ScheduleRunRow>) -> Schedule {
+fn item(
+    row: ScheduleRow,
+    last: Option<ScheduleRunRow>,
+    going: Option<&ScheduleRunRow>,
+) -> Schedule {
     let spec = ScheduleSpec::parse(&row.spec);
     Schedule {
-        standing: schedule::standing(&row, last.as_ref()),
+        standing: schedule::standing(&row, last.as_ref(), going),
         when: spec
             .as_ref()
             .map(|spec| schedule::describe(spec, &clock::now().timezone()))
@@ -150,10 +154,12 @@ fn item(row: ScheduleRow, last: Option<ScheduleRunRow>) -> Schedule {
     }
 }
 
-/// One schedule with the newest line of its history.
+/// One schedule with the newest line of its history, and where the run it started stands.
 fn one(store: &Store, row: ScheduleRow) -> IpcResult<Schedule> {
     let last = store.schedule_runs(&row.id, 1)?.into_iter().next();
-    Ok(item(row, last))
+    let going = schedule::going_runs(store)?;
+    let going = going.get(&row.id);
+    Ok(item(row, last, going))
 }
 
 /// Tell the window schedules changed, and have the thread look now: one may be due at once.
@@ -175,13 +181,15 @@ pub async fn schedule_list(app: AppHandle) -> IpcResult<Vec<Schedule>> {
             .into_iter()
             .map(|run| (run.schedule_id.clone(), run))
             .collect();
+        let going = schedule::going_runs(&state.store)?;
         Ok(state
             .store
             .schedules()?
             .into_iter()
             .map(|row| {
                 let last = latest.remove(&row.id);
-                item(row, last)
+                let going = going.get(&row.id);
+                item(row, last, going)
             })
             .collect())
     })

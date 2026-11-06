@@ -382,7 +382,11 @@ impl From<&ScheduleRunRow> for Line {
     }
 }
 
-fn listed(row: &ScheduleRow, last: Option<&ScheduleRunRow>) -> Listed {
+fn listed(
+    row: &ScheduleRow,
+    last: Option<&ScheduleRunRow>,
+    going: Option<&ScheduleRunRow>,
+) -> Listed {
     let spec = ScheduleSpec::parse(&row.spec);
     Listed {
         id: row.id.clone(),
@@ -398,9 +402,16 @@ fn listed(row: &ScheduleRow, last: Option<&ScheduleRunRow>) -> Listed {
         notify: row.notify.clone(),
         enabled: row.enabled,
         next_at: row.next_at.filter(|_| row.enabled),
-        standing: schedule::standing(row, last),
+        standing: schedule::standing(row, last, going),
         last: last.map(Line::from),
     }
+}
+
+/// One schedule as it is listed, with its history read for where it stands.
+fn listed_one(ys: &Yardsort, row: &ScheduleRow) -> Result<Listed, Failure> {
+    let last = ys.store.schedule_runs(&row.id, 1)?.into_iter().next();
+    let going = schedule::going_runs(&ys.store)?;
+    Ok(listed(row, last.as_ref(), going.get(&row.id)))
 }
 
 fn words(spec: Option<&ScheduleSpec>) -> String {
@@ -442,9 +453,10 @@ fn list(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
         .into_iter()
         .map(|run| (run.schedule_id.clone(), run))
         .collect();
+    let going = schedule::going_runs(&ys.store)?;
     let all: Vec<Listed> = rows
         .iter()
-        .map(|row| listed(row, latest.get(&row.id)))
+        .map(|row| listed(row, latest.get(&row.id), going.get(&row.id)))
         .collect();
     out.emit(&all, || {
         if rows.is_empty() {
@@ -491,7 +503,8 @@ fn not_running_note(ys: &Yardsort) {
 fn show(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     let row = find(ys, wanted)?;
     let last = ys.store.schedule_runs(&row.id, 1)?.into_iter().next();
-    let item = listed(&row, last.as_ref());
+    let going = schedule::going_runs(&ys.store)?;
+    let item = listed(&row, last.as_ref(), going.get(&row.id));
     let upcoming: Vec<i64> = match (&item.spec, row.enabled) {
         (Some(spec), true) => when::upcoming(spec, &clock::now(), UPCOMING)
             .unwrap_or_default()
@@ -616,7 +629,7 @@ fn add(ys: &Yardsort, asked: Asked, out: &Output) -> Result<(), Failure> {
             None => false,
         }
     };
-    let item = listed(&row, None);
+    let item = listed(&row, None, None);
     out.emit(&item, || {
         sayln!(
             "Added `{}` ({}): {}.",
@@ -641,7 +654,7 @@ fn add(ys: &Yardsort, asked: Asked, out: &Output) -> Result<(), Failure> {
 fn switch(ys: &Yardsort, wanted: &str, enabled: bool, out: &Output) -> Result<(), Failure> {
     let found = find(ys, wanted)?;
     let row = schedule::set_enabled(&ys.store, &found.id, enabled, &clock::now())?;
-    out.emit(&listed(&row, None), || {
+    out.emit(&listed_one(ys, &row)?, || {
         if enabled {
             sayln!(
                 "`{}` is on. Next: {}",
