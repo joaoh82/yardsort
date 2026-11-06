@@ -2,7 +2,7 @@ name: TestFlight
 
 # Builds the phone app's release identity (`Yardsort`, dev.yardsort.mobile) and uploads it to App
 # Store Connect for internal testers, on request only (Actions → TestFlight → Run workflow), from
-# whichever branch it is run from. What `just mobile-testflight` and Xcode's Archive do on a Mac,
+# `main`: the `testflight` environment admits no other branch. What `just mobile-testflight` and Xcode's Archive do on a Mac,
 # with no Xcode account: it signs by hand with a distribution certificate and an App Store profile,
 # and uploads with `altool` and an App Store Connect API key. Those live in the `testflight`
 # environment; the README says how to make them (apps/mobile/README.md#from-github-actions).
