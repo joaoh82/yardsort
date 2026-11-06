@@ -60,11 +60,15 @@ pub struct Remote {
 }
 
 /// Why something failed: a stable code, and words for a person. Signed out at the server is
-/// `remote_signed_out`, whose words say why but not what to do, which is each program's own.
+/// `remote_signed_out`. In the host's own words ([`Failure::signed_out`]) it says why but not what
+/// to do, which is each program's own; in the server's, which [`failed`] passes on, it already
+/// says "Sign in again."
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Failure {
     pub code: &'static str,
     pub message: String,
+    /// The words say why, and leave what to do to the program showing them.
+    says_only_why: bool,
 }
 
 impl Failure {
@@ -72,15 +76,26 @@ impl Failure {
         Self {
             code,
             message: message.into(),
+            says_only_why: false,
         }
     }
 
+    /// Signed out at the server, in the host's own words.
     pub fn signed_out(why: impl Into<String>) -> Self {
-        Self::new(SIGNED_OUT, why)
+        Self {
+            says_only_why: true,
+            ..Self::new(SIGNED_OUT, why)
+        }
     }
 
     pub fn is_signed_out(&self) -> bool {
         self.code == SIGNED_OUT
+    }
+
+    /// Signed out, in words that leave out where to sign in again: the program showing them adds
+    /// its own.
+    pub fn needs_where_to_sign_in(&self) -> bool {
+        self.is_signed_out() && self.says_only_why
     }
 }
 
@@ -739,6 +754,7 @@ mod tests {
         let refused = |code| ClientError::Remote(RemoteError::new(code, "Sign in again."));
         let failure = refused_here(refused(ErrorCode::Unauthenticated));
         assert!(failure.is_signed_out());
+        assert!(failure.needs_where_to_sign_in());
         assert_eq!(
             failure.message,
             "This computer was signed out at the server."
@@ -752,5 +768,9 @@ mod tests {
             refused_here(refused(ErrorCode::NotFound)).code,
             "remote_refused"
         );
+        // The server's own refusal already says what to do.
+        let theirs = failed(refused(ErrorCode::Unauthenticated));
+        assert!(theirs.is_signed_out());
+        assert!(!theirs.needs_where_to_sign_in());
     }
 }

@@ -271,9 +271,10 @@ pub enum RemoteAnswer {
 /// What to do once signed out at the server.
 const AGAIN: &str = "Sign in again in Settings → Remote.";
 
-/// A failure as the window shows it: signed out, it adds where to sign in again.
+/// A failure as the window shows it: signed out in the host's own words, it adds where to sign in
+/// again. The server's own refusal already ends "Sign in again.", and is shown as it is.
 fn ipc(failure: Failure) -> IpcError {
-    if failure.is_signed_out() {
+    if failure.needs_where_to_sign_in() {
         IpcError::new(failure.code, format!("{} {AGAIN}", failure.message))
     } else {
         IpcError::new(failure.code, failure.message)
@@ -638,8 +639,8 @@ mod tests {
         );
     }
 
-    /// Signed out at the server, the window adds where to sign in again; the link's own line,
-    /// which the account module makes, says only why.
+    /// Signed out at the server, the window adds where to sign in again to the host's own words;
+    /// the link's own line, which the account module makes, says only why.
     #[test]
     fn a_refusal_of_this_computers_credential_says_it_was_signed_out() {
         let refused = |code| ClientError::Remote(RemoteError::new(code, "Sign in again."));
@@ -653,5 +654,9 @@ mod tests {
             ipc(account::refused_here(refused(ErrorCode::NotFound))).code,
             "remote_refused"
         );
+        // Refused while signing in, or registering: the server's words, said once.
+        let theirs = ipc(account::failed(refused(ErrorCode::Unauthenticated)));
+        assert_eq!(theirs.code, "remote_signed_out");
+        assert_eq!(theirs.message, "Sign in again.");
     }
 }
