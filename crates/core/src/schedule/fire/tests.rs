@@ -5,9 +5,7 @@ use chrono::Duration;
 
 use super::*;
 use crate::schedule::tests::{nov, time, Fx, DEMO, RUNS_THE_TEST};
-use crate::schedule::{
-    set_enabled, standing, IfMissed, ScheduleSpec, ScheduleStanding, ScheduleTarget,
-};
+use crate::schedule::{set_enabled, IfMissed, ScheduleSpec, ScheduleStanding, ScheduleTarget};
 use crate::store::Store;
 use crate::workflow::runs::Accepting;
 
@@ -97,6 +95,11 @@ fn a_time_that_comes_while_the_last_run_is_still_going_is_skipped() {
         fx.store.active_workflow_runs().unwrap().len(),
         1,
         "nothing piled up"
+    );
+    assert_eq!(
+        fx.stands(&schedule.id),
+        ScheduleStanding::Running,
+        "its run is still going, whatever the newest line says"
     );
 
     // It is not paused for that: the time after is asked again, and by then the run is over.
@@ -205,9 +208,8 @@ fn a_once_missed_and_skipped_never_runs_and_says_so() {
     let after = fx.schedule(&schedule.id);
     assert!(!after.enabled);
     assert!(fx.store.active_workflow_runs().unwrap().is_empty());
-    let history = fx.store.schedule_runs(&schedule.id, 1).unwrap();
     assert_eq!(
-        standing(&after, history.first()),
+        fx.stands(&schedule.id),
         ScheduleStanding::Missed,
         "not done: it never ran"
     );
@@ -452,8 +454,7 @@ fn a_schedule_whose_next_time_cannot_be_worked_out_stays_on_and_says_it_was_refu
     let after = fx.schedule(&schedule.id);
     assert!(after.enabled);
     assert_eq!(after.next_at, None);
-    let history = fx.store.schedule_runs(&schedule.id, 1).unwrap();
-    assert_eq!(standing(&after, history.first()), ScheduleStanding::Refused);
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::Refused);
     assert!(
         fire(&fx, &nov(7, 9, 0)).is_empty(),
         "and it is not asked every second"
@@ -493,6 +494,35 @@ fn a_scheduled_test_nobody_approved_waits_for_approval_and_the_user_is_told_once
     assert!(fx.store.approve_test_run(&run.id).unwrap());
     assert_eq!(settle(&fx.store).unwrap(), Settled::default());
     assert_eq!(fx.store.unsettled_schedule_runs().unwrap().len(), 1);
+}
+
+#[test]
+fn a_run_still_waiting_for_approval_is_said_however_many_times_are_skipped_behind_it() {
+    let fx = Fx::new();
+    let schedule = fx.add(ScheduleTarget::Test, &daily(), &nov(5, 10, 0));
+    let first = only(fire(&fx, &nov(6, 9, 0)));
+    settle(&fx.store).unwrap();
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::AwaitingApproval);
+
+    // Nobody approves it, so each morning after is skipped: the run is in the way. The
+    // schedule goes on saying what it waits for, and goes on being counted as needing the user.
+    for day in [7, 8] {
+        let line = only(fire(&fx, &nov(day, 9, 0)));
+        assert_eq!(line.outcome, "skipped");
+        assert_eq!(settle(&fx.store).unwrap(), Settled::default());
+        let stands = fx.stands(&schedule.id);
+        assert_eq!(stands, ScheduleStanding::AwaitingApproval, "on day {day}");
+        assert!(stands.needs_attention());
+    }
+
+    // Approved and carried out, it is waiting for its next time again.
+    let run_id = first.run_id.unwrap();
+    fx.store.approve_test_run(&run_id).unwrap();
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::AwaitingApproval);
+    fx.store.start_test_run(&run_id, 4000, "/tmp/out").unwrap();
+    fx.store.finish_test_run(&run_id, "passed", None).unwrap();
+    settle(&fx.store).unwrap();
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::Waiting);
 }
 
 #[test]

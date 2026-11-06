@@ -161,7 +161,9 @@ runs until you have seen it. That holds on a schedule:
 - **If the file changes** — an agent edits it, a pull or a rebase brings a new version — the next
   scheduled run waits for approval on the card at the top of its workspace, the schedule shows
   _waiting for approval_, and you are told. Approve it and that run goes; the runs after it go
-  straight ahead again.
+  straight ahead again. Until you do, each time that comes is _skipped_, since that run is in
+  the way, and the schedule goes on showing _waiting for approval_ and being counted on
+  **Schedules** in the sidebar.
 - A project set to **ask every time** asks every time here too.
 - **A test with a `manual` step cannot be scheduled.** A step a person answers would wait for
   nobody. The dialog says so when you save.

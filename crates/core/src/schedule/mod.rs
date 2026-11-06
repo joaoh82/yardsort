@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::error::{IpcError, IpcResult};
-use crate::store::{ScheduleFields, ScheduleRow, Store, WorkspaceRow};
+use crate::store::{ScheduleFields, ScheduleRow, ScheduleRunRow, Store, WorkspaceRow};
 use crate::workflow::runs::Look;
 
 pub mod clock;
@@ -639,17 +639,34 @@ impl ScheduleStanding {
     }
 }
 
-/// Where `schedule` stands, given the newest line of its history.
+/// The run each schedule started that has not ended, by the schedule's id: the newest, should
+/// one have more than one. What [`standing`] is given as `going`.
+pub fn going_runs(store: &Store) -> IpcResult<BTreeMap<String, ScheduleRunRow>> {
+    // Oldest first, so a newer line takes an older one's place.
+    Ok(store
+        .unsettled_schedule_runs()?
+        .into_iter()
+        .map(|line| (line.schedule_id.clone(), line))
+        .collect())
+}
+
+/// Where `schedule` stands, given the newest line of its history and the line of the run it
+/// started that has not ended, from [`going_runs`].
+///
+/// The two are different lines once a later time was skipped because that run was still going.
+/// The run is what counts then: a schedule whose run waits for approval goes on saying so,
+/// however many times have been skipped behind it.
 pub fn standing(
     schedule: &ScheduleRow,
-    last: Option<&crate::store::ScheduleRunRow>,
+    last: Option<&ScheduleRunRow>,
+    going: Option<&ScheduleRunRow>,
 ) -> ScheduleStanding {
     if schedule.workspace_id.is_none() {
         return ScheduleStanding::NoWorkspace;
     }
     // A run that is still going is said first: a `once` that has fired is not done with while
     // its run waits for the user.
-    let going = last.filter(|line| line.outcome == "started" && line.result.is_none());
+    let going = going.filter(|line| line.outcome == "started" && line.result.is_none());
     if let Some(line) = going {
         return if line.told_waiting {
             ScheduleStanding::AwaitingApproval

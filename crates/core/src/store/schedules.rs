@@ -337,7 +337,8 @@ impl Store {
         )?;
         tx.execute(
             "DELETE FROM schedule_runs
-             WHERE schedule_id = ?1 AND id NOT IN (
+             WHERE schedule_id = ?1 AND NOT (outcome = 'started' AND result IS NULL)
+               AND id NOT IN (
                  SELECT id FROM schedule_runs WHERE schedule_id = ?1
                  ORDER BY fired_at DESC, rowid DESC LIMIT ?2)",
             params![new.schedule_id, SCHEDULE_RUNS_KEPT as i64],
@@ -384,7 +385,7 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!(
             "SELECT {SCHEDULE_RUN_COLUMNS} FROM schedule_runs
-             WHERE outcome = 'started' AND result IS NULL ORDER BY fired_at"
+             WHERE outcome = 'started' AND result IS NULL ORDER BY fired_at, rowid"
         ))?;
         let rows = stmt.query_map([], schedule_run_from_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -591,6 +592,40 @@ mod tests {
         assert!(store.schedules().unwrap().is_empty());
         assert!(store.due_schedules(i64::MAX).unwrap().is_empty());
         assert!(store.waiting_schedules().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_run_that_has_not_ended_keeps_its_line_however_many_times_follow() {
+        let (_dir, store, project, workspace) = store_with_workspace();
+        let schedule = store
+            .add_schedule(&fields(&project, &workspace, Some(1_000)), "app")
+            .unwrap();
+        let started = store
+            .record_schedule_run(&NewScheduleRun {
+                run_id: Some("run-1"),
+                ..came_due(&schedule.id, 0, "started")
+            })
+            .unwrap();
+        // Every time after is skipped while the run goes on, far more often than is kept.
+        for at in 1..=(SCHEDULE_RUNS_KEPT as i64 + 5) {
+            store
+                .record_schedule_run(&came_due(&schedule.id, at, "skipped"))
+                .unwrap();
+        }
+        let open = store.unsettled_schedule_runs().unwrap();
+        assert_eq!(open.len(), 1, "the run's line is how its ending is found");
+        assert_eq!(open[0].id, started.id);
+
+        // Once it has ended, the line is as old as it looks.
+        assert!(store
+            .settle_schedule_run(&started.id, "passed", false)
+            .unwrap());
+        store
+            .record_schedule_run(&came_due(&schedule.id, 1_000, "skipped"))
+            .unwrap();
+        let kept = store.schedule_runs(&schedule.id, 1_000).unwrap();
+        assert_eq!(kept.len(), SCHEDULE_RUNS_KEPT);
+        assert!(kept.iter().all(|line| line.id != started.id));
     }
 
     #[test]

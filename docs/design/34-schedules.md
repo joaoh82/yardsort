@@ -333,6 +333,19 @@ What review of the pull request found, and what was done (2026-11-05):
   repeating schedule whose next time could not be worked out was switched off and read _done_
   too. The first two now read _missed_ and _refused_; the last stays on and reads _refused_.
 
+Found the day after it merged, before any release had it (2026-11-06):
+
+- **A schedule forgot its run was waiting once a later time was skipped.** Where a schedule
+  stands was read from the newest line of its history alone. A run still going, or still
+  waiting for approval, makes the next time a _skipped_ line, and from then on the schedule
+  read _on_ and left the sidebar's count, while every time after went on being skipped. It is
+  now read from the run's own line as well: a run that has not ended is said first, however
+  many lines have been written since.
+- **And could lose the run altogether.** A history keeps 200 lines, so a schedule that fires
+  every minute pushed the line of a run waiting for approval out in a little over three hours.
+  With the line went the way to the run: its ending was never copied or told, and its mark in
+  run lists went too. The line of a run that has not ended is now kept whatever its age.
+
 Checked by hand on 2026-11-05, in a development build on Linux with the throwaway profile and
 demo projects `scripts/screenshots.sh` sets up, schedules added with the build's own `ys`:
 

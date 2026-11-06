@@ -201,6 +201,14 @@ impl Fx {
     pub fn schedule(&self, id: &str) -> ScheduleRow {
         self.store.schedule(id).unwrap().unwrap()
     }
+
+    /// Where a schedule stands, read the way a list of schedules reads it: from the newest
+    /// line of its history and from the run it started that has not ended.
+    pub fn stands(&self, id: &str) -> ScheduleStanding {
+        let last = self.store.schedule_runs(id, 1).unwrap();
+        let going = going_runs(&self.store).unwrap();
+        standing(&self.schedule(id), last.first(), going.get(id))
+    }
 }
 
 fn daily() -> ScheduleSpec {
@@ -644,11 +652,7 @@ fn where_a_schedule_stands_follows_its_newest_time() {
     use crate::schedule::fire::{settle, tick};
     let fx = Fx::new();
     let schedule = fx.add(ScheduleTarget::Test, &daily(), &nov(5, 10, 0));
-    let stands = |fx: &Fx| {
-        let row = fx.schedule(&schedule.id);
-        let history = fx.store.schedule_runs(&schedule.id, 1).unwrap();
-        standing(&row, history.first())
-    };
+    let stands = |fx: &Fx| fx.stands(&schedule.id);
     assert_eq!(stands(&fx), ScheduleStanding::Waiting);
 
     // Its time comes; nobody has approved the file.
@@ -708,30 +712,19 @@ fn a_once_that_has_fired_is_done() {
     )
     .unwrap();
     // Fired, and its run still going: that is what it says, not that it is done with.
-    let history = fx.store.schedule_runs(&schedule.id, 1).unwrap();
-    assert_eq!(
-        standing(&fx.schedule(&schedule.id), history.first()),
-        ScheduleStanding::Running
-    );
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::Running);
     let run = fx.store.active_workflow_runs().unwrap().remove(0);
     fx.store
         .finish_workflow_run(&run.id, "succeeded", None)
         .unwrap();
     crate::schedule::fire::settle(&fx.store).unwrap();
-    let history = fx.store.schedule_runs(&schedule.id, 1).unwrap();
-    assert_eq!(
-        standing(&fx.schedule(&schedule.id), history.first()),
-        ScheduleStanding::Done
-    );
+    assert_eq!(fx.stands(&schedule.id), ScheduleStanding::Done);
 }
 
 #[test]
 fn a_once_that_was_missed_or_refused_does_not_say_it_is_done() {
     use crate::schedule::fire::tick;
-    let stands = |fx: &Fx, id: &str| {
-        let history = fx.store.schedule_runs(id, 1).unwrap();
-        standing(&fx.schedule(id), history.first())
-    };
+    let stands = |fx: &Fx, id: &str| fx.stands(id);
     let once = ScheduleSpec::Once {
         at: nov(5, 18, 0).timestamp_millis(),
     };
