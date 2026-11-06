@@ -74,8 +74,8 @@ jobs:
           echo "Build number $build"
           YARDSORT_BUILD_NUMBER="$build" bunx expo prebuild --platform ios --clean
 
-      # A keychain of its own, unlocked for this job only, with the certificate's key usable by
-      # codesign without asking.
+      # A keychain of its own, unlocked for this job only and the default for it, with the
+      # certificate's key usable by codesign without asking.
       - name: Install the certificate
         env:
           IOS_DISTRIBUTION_CERTIFICATE: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE }}
@@ -93,6 +93,7 @@ jobs:
             -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s "$keychain"
           security find-identity -v -p codesigning "$keychain"
 
       - name: Sign with the profile

@@ -74,11 +74,12 @@ describe("readProfile", () => {
 });
 
 describe("exportOptions", () => {
-  test("exports for internal testers only, signed by hand with that profile", () => {
+  test("exports for internal testers only, signed by hand with that profile, keeping the build number", () => {
     const options = exportOptions(readProfile(profile()));
     expect(options).toContain("<key>method</key>\n  <string>app-store-connect</string>");
     expect(options).toContain("<key>destination</key>\n  <string>export</string>");
     expect(options).toContain("<key>testFlightInternalTestingOnly</key>\n  <true/>");
+    expect(options).toContain("<key>manageAppVersionAndBuildNumber</key>\n  <false/>");
     expect(options).toContain("<key>teamID</key>\n  <string>ABCDE12345</string>");
     expect(options).toContain(
       "<key>dev.yardsort.mobile</key>\n    <string>Yardsort App Store &amp; CI</string>",

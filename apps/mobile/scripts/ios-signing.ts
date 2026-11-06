@@ -7,6 +7,7 @@
  * `expo prebuild`. It installs the profile where Xcode looks, sets the app's target (Release only)
  * to sign by hand with it, as EAS does, and writes the options for `xcodebuild -exportArchive`: an
  * App Store Connect build, for internal testers only, exported to a file for `altool` to upload.
+ * Xcode would otherwise give the build a number of its own, and ask for an account to do it.
  *
  * Run with `bun`: `bun scripts/ios-signing.ts <profile.mobileprovision> <ExportOptions.plist>`.
  * Everything it needs is read from the profile, so the team and the profile's name are no secrets
@@ -104,6 +105,8 @@ export function exportOptions(profile: Profile): string {
   <string>export</string>
   <key>testFlightInternalTestingOnly</key>
   <true/>
+  <key>manageAppVersionAndBuildNumber</key>
+  <false/>
   <key>teamID</key>
   <string>${escapeXml(profile.teamId)}</string>
   <key>signingStyle</key>

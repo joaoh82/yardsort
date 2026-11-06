@@ -176,8 +176,14 @@ The **TestFlight** workflow (`.github/workflows/testflight.yml`) does the same w
 **Actions**, **TestFlight**, **Run workflow**, and choose the branch. It generates the release identity,
 signs it by hand with a distribution certificate and an App Store profile, archives it, and uploads it
 for internal testers with an App Store Connect API key. The build number comes from the time in UTC, as
-the recipe's does, so builds from either never go backwards. The run keeps the `.ipa` for a week, and
-step 5 above follows as it does from Xcode. It has not been run yet.
+the recipe's does, so builds from either never go backwards. Builds before 2026-11-06 were numbered in
+local time, so the first one after can be refused as lower than the last until UTC catches up with it.
+The run keeps the `.ipa` for a week, and step 5 above follows as it does from Xcode. It has not been run
+yet.
+
+The workflow runs from whichever branch is picked, and that branch's copy of it receives the secrets. Limit
+the `testflight` environment to `main` (**Deployment branches and tags**), or require a reviewer, so a
+branch cannot change what is done with them.
 
 It needs the app registered (steps 1 to 3 of the first time, above), and once, from a Mac:
 
