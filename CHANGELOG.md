@@ -16,6 +16,12 @@ has the downloads and the full commit lists.
   waits for approval again if it changes; a workflow that runs a smoke test is scheduled only
   when that test can run with nobody there. `ys schedule` does the same from a terminal. See
   [Schedules](docs/guide/schedules.md).
+- **Only one copy of Yardsort runs on a profile.** Starting it again brings up the window it already
+  has. Two copies could get this computer signed out of Remote, since the server takes one sign-in
+  used twice for a stolen one. Development builds on profiles of their own are not affected.
+- **Sign in again, instead of turning Remote off and on.** A computer signed out at the server now
+  offers **Sign in again** in Settings → Remote, and stays the same computer, with its devices still
+  paired. Turning Remote off while signed out no longer leaves a second entry on your phone either.
 
 ## 0.21.1
 

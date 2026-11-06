@@ -90,7 +90,11 @@ too:
 YARDSORT_DATA_DIR=/tmp/ys YARDSORT_WORKTREE_ROOT=/tmp/ys-wt just dev
 ```
 
-Pointing `YARDSORT_DATA_DIR` at the real profile still works, and still upgrades it.
+Pointing `YARDSORT_DATA_DIR` at the real profile still works, and still upgrades it, as long as
+Yardsort is not open on it: one copy runs per profile, and a second brings up the first's window.
+
+A git worktree you make yourself belongs **outside** the worktree root (`~/yardsort` by default).
+Yardsort adopts any worktree it finds under there, and it then shows as a workspace in the sidebar.
 
 `YARDSORT_YS_DIR=/tmp/ys-bin` keeps **Install ys** away from real places too; it otherwise writes to
 `~/.local/bin`, `/usr/local/bin` or the user's `PATH`.

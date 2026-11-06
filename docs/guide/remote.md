@@ -52,6 +52,16 @@ disk, and conversations can be [resumed](terminals-and-sessions.md#resume). If y
 what is running first, Yardsort does the same by itself when it next starts with nothing running. It only
 has to happen once: as long as a daemon can share terminals, later updates keep that working.
 
+## If this computer is signed out
+
+If the server signs this computer out, **Settings → Remote** says so and offers **Sign in again**. It
+stays the same computer on your phone, and your devices stay paired. **Turn off** is for when you want
+Remote off: your devices have to pair again afterwards, though they will still find one computer.
+
+The usual reason is the server seeing this computer's sign-in used twice, which it treats as stolen. A
+second copy of Yardsort used to cause that. Now only one copy runs on a profile, and starting it again
+[brings up the window it already has](troubleshooting.md#yardsort-is-already-open).
+
 ## The phone app
 
 It is in [`apps/mobile`](https://github.com/joaoh82/yardsort/tree/main/apps/mobile), and is not in the

@@ -180,7 +180,7 @@ it("shows where this computer stands when the server refuses it, and nothing fro
     // Signed out at the server: the poll is refused, and the link has not given up yet.
     const refused = {
       code: "remote_signed_out",
-      message: "This computer was signed out at the server. Turn Remote off, then on again.",
+      message: "This computer was signed out at the server. Sign in again in Settings → Remote.",
     };
     core.remoteRequests.mockRejectedValue(refused);
     core.remoteStatus.mockResolvedValue(
@@ -203,7 +203,7 @@ it("shows where this computer stands when the server refuses it, and nothing fro
     await vi.advanceTimersByTimeAsync(3000);
     await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Not connected to the relay: This computer was signed out at the server. Turn Remote off, then on again.",
+      "Not connected to the relay: This computer was signed out at the server.",
     );
     expect(screen.queryByText("Ana's phone")).toBeNull();
     expect(screen.getByText("None can reach this computer now.")).toBeInTheDocument();
@@ -346,7 +346,7 @@ it("says where the link to the relay stands, as the poll brings it", async () =>
     });
     await vi.advanceTimersByTimeAsync(3000);
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Not connected to the relay: This computer was signed out at the server. Turn Remote off, then on again.",
+      "Not connected to the relay: This computer was signed out at the server.",
     );
   } finally {
     vi.useRealTimers();
@@ -440,4 +440,29 @@ describe("terminals in a daemon that cannot share them", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not start again.");
     expect(section.getByRole("button", { name: "Stop everything and restart…" })).toBeEnabled();
   });
+});
+
+it("signed out at the server, signs in again as this computer rather than off and on", async () => {
+  const signedOut: RemoteStatus = {
+    ...on,
+    host: {
+      ...on.host!,
+      link: { kind: "stopped", why: "This computer was signed out at the server." },
+    },
+  };
+  core.remoteStatus.mockResolvedValue(signedOut);
+  core.remoteRequests.mockResolvedValue({ requests: [], status: signedOut });
+  core.remoteEnable.mockResolvedValue(on);
+  render(<RemoteSettings />);
+  await userEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
+  expect(core.remoteEnable).toHaveBeenCalledWith("https://remote.example.com", "Workstation");
+  expect(core.remoteDisable).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Turn Remote off/)).toBeNull();
+});
+
+it("offers signing in again only when it has to", async () => {
+  core.remoteStatus.mockResolvedValue(on);
+  render(<RemoteSettings />);
+  await screen.findByRole("button", { name: "Pair a device" });
+  expect(screen.queryByRole("button", { name: "Sign in again" })).toBeNull();
 });

@@ -958,6 +958,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       longer says it is connecting. `.yardsort/tests/remote-earlier-daemon.yaml` works it in the real
       window against a real 0.20.2 daemon; it passed on Linux on 2026-11-05. The phone's new wording has
       a test but has not been seen on a real phone yet.
+      2026-11-05: real use found the same computer twice on the phone, and pairing to do again. Copies of
+      the app shared one refresh credential, which the server rightly took for a stolen one, and the
+      app's own advice to turn Remote off and on then forgot the host. One copy now runs per profile,
+      and **Sign in again** keeps the host and its devices. `.yardsort/tests/remote-sign-in-again.yaml`
+      works it in the real window against the stand-in server, with a pretend phone. Running it first
+      found the new guard taking `app.lock` beside the workflow driver's own lock, which shut the driver
+      out of its own process with every unit test green, so there is now one lock.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

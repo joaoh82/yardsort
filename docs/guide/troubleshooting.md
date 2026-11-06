@@ -123,6 +123,14 @@ out again. Delete the workspace when asked, or **Keep** the entry — Yardsort w
 that workspace again. If you deleted the branch by mistake, `git reflog` can still point you at the
 commit it was on; recreate the branch, and **Restore from its branch** comes back by itself.
 
+## Yardsort is already open
+
+Only one copy of Yardsort runs on a [profile](settings.md#environment-variables). Starting it again
+brings up the window it already has. If that copy does not answer within about ten seconds, the new
+one says so and does not start. Close the first, or end its process if it will not close, then try
+again. Your agents keep running either way, in the
+[daemon](terminals-and-sessions.md#agents-keep-working-when-you-close-the-window).
+
 ## Agents stopped when I closed Yardsort
 
 They should not: they run in a background process that outlives the window (see

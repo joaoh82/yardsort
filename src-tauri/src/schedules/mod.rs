@@ -55,8 +55,8 @@ impl Scheduler {
     }
 }
 
-/// Start looking, if this app is the one that drives runs. Called after the workflow driver
-/// has taken the profile's lock, or found it taken.
+/// Start looking, if this app is the one that drives runs. Called only in the copy holding the
+/// profile (`one_copy`), after the workflow driver has started.
 pub fn start(app: &AppHandle) {
     if app.try_state::<crate::workflows::Driver>().is_none() {
         eprintln!("schedules: another Yardsort on this profile fires them; not firing here");
