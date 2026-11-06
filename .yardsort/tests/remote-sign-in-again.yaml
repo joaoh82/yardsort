@@ -1,0 +1,155 @@
+id: remote-sign-in-again
+name: A computer signed out of Remote comes back as itself
+description: >-
+  Turns Remote on in the real window against the stand-in server and pairs a pretend phone. Starting
+  Yardsort a second time brings up the first copy. With the sign-in spent behind the app's back, as a
+  second copy used to do, the computer is signed out: Sign in again keeps the one computer and the
+  phone's pairing, and turning off and on keeps the one computer and asks the phone to pair again.
+  Linux only, since it stands in for the browser with xdg-open. A window opens while it runs; nothing
+  needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_stand_in
+    action: run
+    program: cargo
+    args: [build, -q, -p, yardsort-server, --example, stand-in]
+    timeout: 15m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: open_app
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+
+steps:
+  - id: turn_on
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-on, "{{ run.dir }}"]
+    timeout: 90s
+  - id: show_a_code
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", pairing-code, "{{ run.dir }}"]
+  - id: phone_asks
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", ask]
+  - id: let_it_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", let-it-in]
+  - id: phone_reaches_it
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", reaches, Smoke computer]
+    expect:
+      stdout_contains: welcomed by Smoke computer
+
+  - id: a_second_start_gives_way
+    action: shell
+    line: sh .yardsort/tests/support/app.sh again
+    expect:
+      stdout_contains: "the second start exited with 0"
+  - id: only_one_copy
+    action: shell
+    line: sh .yardsort/tests/support/app.sh copies
+    expect:
+      stdout_contains: "copies: 1"
+
+  - id: still_drives_runs
+    action: shell
+    line: sh .yardsort/tests/support/app.sh drives-runs
+    expect:
+      stdout_contains: drives workflow runs
+
+  - id: close_app
+    action: shell
+    line: sh .yardsort/tests/support/app.sh close
+  - id: spend_the_sign_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", spend-sign-in]
+  - id: open_signed_out
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_back
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: says_signed_out
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", says-signed-out]
+    timeout: 90s
+  - id: sign_in_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", sign-in-again]
+    timeout: 90s
+  - id: phone_needs_no_pairing
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", reaches, Smoke computer]
+    expect:
+      stdout_contains: the same computer as before
+
+  - id: close_app_again
+    action: shell
+    line: sh .yardsort/tests/support/app.sh close
+  - id: spend_it_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", spend-sign-in]
+  - id: open_signed_out_again
+    action: shell
+    line: sh .yardsort/tests/support/app.sh open
+  - id: window_back_again
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: says_signed_out_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", says-signed-out]
+    timeout: 90s
+  - id: turn_off
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-off]
+  - id: turn_on_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", turn-on-again]
+    timeout: 90s
+  - id: one_computer_and_pair_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", must-pair-again, Smoke computer]
+    expect:
+      stdout_contains: the same computer as before
+
+teardown:
+  - id: close_everything
+    action: shell
+    line: sh .yardsort/tests/support/app.sh stop-everything

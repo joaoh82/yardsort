@@ -97,6 +97,18 @@ pub struct RemoteSettings {
     pub server_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The host Remote was turned off as, when the server could not be told. Turned on again at
+    /// that server, this computer is that host still, not a second one beside it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left_host: Option<LeftHost>,
+}
+
+/// A host still on a server's books after this computer stopped being it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeftHost {
+    pub server_id: String,
+    pub host_id: String,
+    pub device_id: String,
 }
 
 impl RemoteSettings {
@@ -564,6 +576,11 @@ mod tests {
             s.remote = RemoteSettings {
                 server_url: Some("https://remote.example.com".into()),
                 name: Some("Workstation".into()),
+                left_host: Some(LeftHost {
+                    server_id: "srv".into(),
+                    host_id: "h".into(),
+                    device_id: "d".into(),
+                }),
             }
         })
         .unwrap();
@@ -571,10 +588,9 @@ mod tests {
         assert!(text.contains(
             "[remote]\nserver_url = \"https://remote.example.com\"\nname = \"Workstation\""
         ));
-        assert_eq!(
-            SettingsFile::load(path).get().remote.name.as_deref(),
-            Some("Workstation")
-        );
+        let kept = SettingsFile::load(path).get().remote;
+        assert_eq!(kept.name.as_deref(), Some("Workstation"));
+        assert_eq!(kept.left_host.unwrap().host_id, "h");
     }
 
     #[test]

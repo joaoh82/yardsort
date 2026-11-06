@@ -1,9 +1,9 @@
 // Drive the app's own window through WebKit's inspector, for a smoke test that has no person at it.
 // The app is started with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:<port>.
 //
-//   bun .yardsort/tests/support/window.ts <port> <what to do>
+//   bun .yardsort/tests/support/window.ts <port> <what to do> [run dir]
 
-const [port, doing] = process.argv.slice(2);
+const [port, doing, runDir] = process.argv.slice(2);
 const SECTION = '[aria-label="Terminals cannot be shared yet"]';
 const WAIT_MS = 30_000;
 
@@ -57,6 +57,13 @@ async function until<T>(what: string, look: () => Promise<T>): Promise<T> {
   }
 }
 
+// A socket that opens before the page is listed hears nothing, then or later.
+const listed = () =>
+  fetch(`http://127.0.0.1:${port}/`)
+    .then((answer) => answer.text())
+    .then((list) => list.includes("/socket/1/1/WebPage"))
+    .catch(() => false);
+await until("the window's page", listed);
 const page = await until("the inspector", () => connect().catch(() => null));
 const clicked = (text: string) => `(() => {
   const button = [...document.querySelectorAll("button,[role=tab]")].find(
@@ -87,6 +94,20 @@ const openRemote = async () => {
   );
 };
 
+const everything = () => page(`document.body.textContent`) as Promise<string>;
+const expectToSee = async (wanted: string) => {
+  await until(`"${wanted}"`, async () => (await everything()).includes(wanted));
+  console.log(`saw: ${wanted}`);
+};
+const fill = (placeholder: string, value: string) =>
+  page(`(() => {
+    const input = document.querySelector(${JSON.stringify(`input[placeholder="${placeholder}"]`)});
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return Boolean(input);
+  })()`);
+const connected = () => expectToSee("Connected to the relay.");
+
 switch (doing) {
   case "says-why":
     await openRemote();
@@ -110,6 +131,54 @@ switch (doing) {
     await openRemote();
     if (await notice()) throw new Error("The notice is still there.");
     console.log("saw: Settings → Remote, with no notice");
+    break;
+  case "turn-on": {
+    const stood = await Bun.file(`${runDir}/stand-in.json`).text();
+    await openRemote();
+    await fill("https://remote.example.com", JSON.parse(stood.split("\n")[0]).ready.server);
+    await fill("Workstation", "Smoke computer");
+    await click("Turn on and sign in");
+    await connected();
+    break;
+  }
+  case "pairing-code": {
+    await click("Pair a device");
+    const code = await until("a pairing code", () =>
+      page(`document.querySelector('[aria-label="Pairing code"]')?.textContent`),
+    );
+    await Bun.write(`${runDir}/pairing-code`, String(code));
+    console.log("saw: a pairing code");
+    break;
+  }
+  case "let-it-in":
+    await click("Let it watch and type");
+    await expectToSee("Smoke test phone");
+    await until("the question gone", async () => !(await everything()).includes("Waiting for you"));
+    console.log("saw: the phone let in");
+    break;
+  case "says-signed-out": {
+    await openRemote();
+    await expectToSee("This computer was signed out at the server.");
+    await expectToSee("Sign in again");
+    if ((await everything()).includes("off, then on")) throw new Error("It still says off and on.");
+    console.log("saw: no advice to turn it off and on");
+    break;
+  }
+  case "sign-in-again":
+    await click("Sign in again");
+    await connected();
+    if ((await everything()).includes("None can reach this computer"))
+      throw new Error("It says no device can reach it.");
+    await expectToSee("Smoke test phone");
+    break;
+  case "turn-off":
+    await click("Turn off");
+    await expectToSee("Turn on and sign in");
+    break;
+  case "turn-on-again":
+    await click("Turn on and sign in");
+    await connected();
+    await expectToSee("None yet.");
     break;
   default:
     throw new Error(`Nothing called ${doing}.`);

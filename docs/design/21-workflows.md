@@ -237,8 +237,9 @@ second, which removed the inbox file the proposal had.
 **Presence** (`yardsort_core::presence`, open question 21): the app holds an exclusive OS lock on
 `app.lock` in the data directory for as long as it runs, with the standard library's file
 locking (flock on Unix, `LockFileEx` on Windows). `ys` tries the same lock without waiting. The
-lock dies with the process, so a crash cannot leave a stale "running", and a second app on the
-same profile does not get it, so it does not drive runs.
+lock dies with the process, so a crash cannot leave a stale "running". A second copy on the same
+profile does not get it, and since 0.22.0 gives way to the first rather than starting without driving
+runs.
 
 Rules the engine enforces regardless of what a file says:
 

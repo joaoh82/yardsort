@@ -87,8 +87,8 @@ export function RemoteSettings() {
   if (!status) {
     return error ? <p role="alert">{error}</p> : null;
   }
-  // Signed out at the server, or no longer a host there: nothing here can reach it until Remote is
-  // turned off and on again.
+  // Signed out at the server, or no longer a host there: nothing here can reach it until this
+  // computer signs in again, which it does as the same host, with the same devices.
   const stopped = status.host?.link.kind === "stopped";
 
   const run = async (action: () => Promise<RemoteStatus>) => {
@@ -147,7 +147,21 @@ export function RemoteSettings() {
             </p>
             <p className="text-ink-faint">Its sign-in is kept {status.credentials}.</p>
             <LinkLine link={status.host.link} />
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              {stopped && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!status.host) return;
+                    const { serverUrl, name: named } = status.host;
+                    void run(() => ipc.remoteEnable(serverUrl, named));
+                  }}
+                  className={primaryButtonClass}
+                >
+                  Sign in again
+                </button>
+              )}
               {!stopped && (
                 <button
                   type="button"
@@ -179,6 +193,18 @@ export function RemoteSettings() {
               >
                 Turn off
               </button>
+              {stopped && (status.signingIn || busy) && (
+                <>
+                  <span className="text-ink-faint">Waiting for the browser…</span>
+                  <button
+                    type="button"
+                    onClick={() => void ipc.remoteCancel()}
+                    className={buttonClass}
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
             </div>
           </section>
 
@@ -579,7 +605,7 @@ function LinkLine({ link }: { link: RemoteLink }) {
     case "stopped":
       return (
         <p role="alert" className="text-red-400 select-text">
-          Not connected to the relay: {link.why} Turn Remote off, then on again.
+          Not connected to the relay: {link.why}
         </p>
       );
   }

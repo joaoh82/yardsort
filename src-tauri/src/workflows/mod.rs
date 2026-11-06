@@ -9,7 +9,6 @@
 //! is also how `ys` knows the app is running, and it keeps two apps on one profile from driving
 //! the same run twice.
 
-use std::path::Path;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -22,7 +21,6 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use yardsort_core::forge::Gh;
 use yardsort_core::launch::{HarnessRequest, Launch};
-use yardsort_core::presence::AppLock;
 use yardsort_core::workflow::driver::{self, Hands, PrAsk};
 
 use crate::state::AppState;
@@ -51,7 +49,6 @@ pub struct SessionStarted {
 pub struct Driver {
     wake: Mutex<Sender<()>>,
     driver: driver::Driver,
-    _lock: AppLock,
 }
 
 impl Driver {
@@ -72,25 +69,12 @@ impl Driver {
     }
 }
 
-/// Take the profile's lock and start driving. Without the lock another app on this profile is
-/// already the driver, and this one leaves runs to it.
-pub fn start(app: &AppHandle, data_dir: &Path) {
-    let lock = match AppLock::take(data_dir) {
-        Ok(Some(lock)) => lock,
-        Ok(None) => {
-            eprintln!("workflows: another Yardsort on this profile runs them; not driving here");
-            return;
-        }
-        Err(error) => {
-            eprintln!("workflows: cannot take the app lock, not driving: {error}");
-            return;
-        }
-    };
+/// Start driving. Only for the copy holding the profile (`one_copy`), so that one app drives its runs.
+pub fn start(app: &AppHandle) {
     let (wake, woken) = mpsc::channel();
     app.manage(Driver {
         wake: Mutex::new(wake),
         driver: driver::Driver::default(),
-        _lock: lock,
     });
     // Smoke test runs are carried out under the same lock, from the same thread's ticks.
     crate::smoke::start(app);
