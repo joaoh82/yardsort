@@ -19,6 +19,8 @@ remote-proto = { path = "../remote-proto" }
 # The relay's notices to the host.
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+# The pairing link a QR code holds.
+url = "2"
 
 [dev-dependencies]
 yardsort-core = { path = "../core", features = ["testing"] }
