@@ -967,6 +967,9 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       out of its own process with every unit test green, so there is now one lock. It passed again
       after rebasing onto Schedules, and shipped in 0.22.0 on 2026-11-06 with no change to the phone
       app, so no new TestFlight build was needed.
+      2026-11-06: a TestFlight workflow on GitHub Actions builds and uploads the phone app with no Mac at
+      hand, signed by hand from a distribution certificate and an App Store profile kept as secrets
+      ([the README](../../apps/mobile/README.md#from-github-actions)). It has not been run yet.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
