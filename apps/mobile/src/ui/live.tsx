@@ -44,6 +44,23 @@ export function OfProfile({ children }: { children: ReactNode }) {
   return stays ? children : <Screen>{null}</Screen>;
 }
 
+/** How many things the app opened itself are in front of it now, such as the system's photo picker. */
+let opened = 0;
+
+/**
+ * Do `work`, which shows something of the system's own in front of the app. On Android that is
+ * another activity, and the app is told it went to the background; it has not been left, so
+ * screens stay live, and what the person held, such as control of a terminal, is still theirs.
+ */
+export async function inFront<T>(work: () => Promise<T>): Promise<T> {
+  opened += 1;
+  try {
+    return await work();
+  } finally {
+    opened -= 1;
+  }
+}
+
 /** Whether this screen is the one shown, with the app in the foreground. */
 export function useLive(): boolean {
   const [focused, setFocused] = useState(false);
@@ -57,9 +74,11 @@ export function useLive(): boolean {
   );
 
   useEffect(() => {
-    const watcher = AppState.addEventListener("change", (state) =>
-      setForeground(state !== "background"),
-    );
+    const watcher = AppState.addEventListener("change", (state) => {
+      // The app comes back to the foreground after what it opened, so that ends it.
+      if (state === "background" && opened > 0) return;
+      setForeground(state !== "background");
+    });
     return () => watcher.remove();
   }, []);
 

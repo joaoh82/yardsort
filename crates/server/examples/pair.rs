@@ -556,6 +556,7 @@ mod serving {
                 terminals: &self.terminals,
                 host: &self.identity,
                 interactive: self.terminals.shares_control(),
+                starting: None,
             });
         }
 

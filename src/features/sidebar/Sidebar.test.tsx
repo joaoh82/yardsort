@@ -43,6 +43,7 @@ const core = vi.hoisted(() => ({
   memoryGet: vi.fn(),
   outcomeLabel: vi.fn(),
   onActivityChanged: vi.fn(),
+  onSessionStarted: vi.fn(),
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
   harnessesList: vi.fn(),
@@ -127,6 +128,7 @@ describe("Sidebar", () => {
     core.sessionsList.mockResolvedValue([]);
     core.memoryWaiting.mockResolvedValue([]);
     core.onActivityChanged.mockResolvedValue(() => {});
+    core.onSessionStarted.mockResolvedValue(() => {});
     useMemoryStore.setState({ waiting: {} });
     useOutcomesStore.setState({ asking: null, error: null });
     opener.openUrl.mockResolvedValue(undefined);
@@ -229,6 +231,17 @@ describe("Sidebar", () => {
       }),
     );
     expect(screen.getByRole("button", { name: "Tasks, 1 needs an answer" })).toBeVisible();
+  });
+
+  it("shows a workspace started from a phone without the window coming back", async () => {
+    await renderSidebar("alpha");
+    const started = core.onSessionStarted.mock.calls[0]?.[0] as (workspaceId: string) => void;
+    const alpha = project("alpha");
+    core.projectsList.mockResolvedValue([
+      { ...alpha, workspaces: [...alpha.workspaces, worktree("alpha", "from-phone")] },
+    ]);
+    act(() => started("w-alpha-from-phone"));
+    expect(await screen.findByRole("treeitem", { name: "from-phone" })).toBeVisible();
   });
 
   it("reads tasks once at the start, then only while the Tasks view is open", async () => {

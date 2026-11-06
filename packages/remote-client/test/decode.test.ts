@@ -28,7 +28,7 @@ import {
 } from "../src/index.ts";
 
 const ask = (op: string, params?: unknown) =>
-  decode(request, { requestId: "r", protocol: { major: 1, minor: 4 }, op, params });
+  decode(request, { requestId: "r", protocol: { major: 1, minor: 5 }, op, params });
 
 const session = (title: string) => ({
   kind: "sessions",
@@ -200,7 +200,7 @@ describe("requests are checked as a host checks them", () => {
     expect(() => ask("activity.subscribe", { session: "s" })).toThrow(/without its workspace/);
     expect(ask("activity.subscribe", {})).toEqual({
       requestId: "r",
-      protocol: { major: 1, minor: 4 },
+      protocol: { major: 1, minor: 5 },
       op: "activity.subscribe",
       params: {},
     } as unknown as Request);

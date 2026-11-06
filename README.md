@@ -170,7 +170,7 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   carry out, and `ys test run` a smoke test. `ys workspace delete` removes one when the work is
   done, keeping the branch. Every command takes `--json`.
 - **Remote, still under development.** Reach this computer's workspaces and terminals from your
-  phone, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
+  phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
   turn it on, and a device gets in only if you say yes at this computer. Whoever runs the server
   can see what passes through it, and the phone app is not in the app stores yet. Expect it to
   change until the whole plan is finished. See [Remote](docs/guide/remote.md).

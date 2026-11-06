@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 4, `terminalsLater` in `host.describe`. */
-export const PROTOCOL_MINOR = 4;
+/** The minor this client speaks: 5, starting agents and uploading files. */
+export const PROTOCOL_MINOR = 5;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -46,6 +46,15 @@ export const MAX_TASKS = 8;
 export const MAX_LINK = 512;
 /** The most other terminals one sessions page lists. */
 export const MAX_TERMINALS = 32;
+
+/** Longest first message `workspace.start` or `session.start` carries, in bytes. */
+export const MAX_PROMPT = 16 * 1024;
+/** The largest file one upload carries, in bytes. */
+export const MAX_UPLOAD = 20 * 1024 * 1024;
+/** The most one `upload.chunk` carries, in bytes before base64. */
+export const MAX_UPLOAD_CHUNK = 32 * 1024;
+/** Longest file name an upload gives, in characters. */
+export const MAX_UPLOAD_NAME = 128;
 
 /** Longest one-time code, refresh credential or ticket, in bytes. */
 export const MAX_SECRET_LEN = 256;

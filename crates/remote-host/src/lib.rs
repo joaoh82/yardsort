@@ -25,6 +25,8 @@
 //! the relay names, every request looks it up again, and every [`RECHECK_EVERY`] — or at once,
 //! with [`Connector::recheck`] — a channel whose grant is gone here is closed.
 
+pub mod account;
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;

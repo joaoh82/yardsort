@@ -12,6 +12,7 @@ import { AppProvider } from "../lib/context";
 import {
   appearanceFile,
   nativeEnv,
+  pickImage,
   secureVault,
   suggestedDeviceName,
   systemBrowser,
@@ -26,6 +27,7 @@ const app = {
   browser: systemBrowser,
   deviceName: suggestedDeviceName(),
   incoming,
+  pickImage,
 };
 
 export default function Layout() {

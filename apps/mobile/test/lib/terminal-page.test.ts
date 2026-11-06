@@ -506,6 +506,7 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     await print(Array.from({ length: 200 }, (_, i) => `line-${i}`).join("\r\n"));
     await onScreen("line-199");
 
+    // Few touches to a drag: each can wait for a frame, and frames are slow on some machines.
     const drag = async (from: number, to: number) => {
       const x = 100;
       await tab.send("Input.dispatchTouchEvent", {
@@ -527,5 +528,44 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     expect(back).toContain("line-1");
     await drag(300, 40);
     await until("came forward again", screenText, (text) => text.includes("line-199"));
+  });
+
+  test("taller than the phone, one drag goes up the page and on into what scrolled off", async () => {
+    await load();
+    // A computer's terminal, taller than the phone: the page moves too, as watching one does.
+    await post({ t: "reset", cols: 40, rows: 80 });
+    await print(Array.from({ length: 300 }, (_, i) => `line-${i}`).join("\r\n"));
+    await onScreen("line-299");
+    const top = () => tab.read<number>("document.documentElement.scrollTop");
+    await tab.read("window.scrollTo(0, 1e6), 0");
+    expect(await top()).toBeGreaterThan(0);
+
+    const drag = async (from: number, to: number) => {
+      const x = 100;
+      await tab.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x, y: from }],
+      });
+      const steps = 6;
+      for (let i = 1; i <= steps; i += 1) {
+        await tab.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x, y: from + ((to - from) * i) / steps }],
+        });
+      }
+      // Held still before lifting, so it stops where it is, without gliding on.
+      await Bun.sleep(150);
+      await tab.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+
+    // Each drag is longer than what is left of the page: the rest of it goes into the history.
+    for (let i = 0; i < 4; i += 1) await drag(50, 750);
+    expect(await top()).toBe(0);
+    await until("went back past the screen", screenText, (text) => text.includes("line-100"));
+
+    // And down again: through the history to the bottom, and then the page.
+    for (let i = 0; i < 10; i += 1) await drag(750, 50);
+    await until("came forward again", screenText, (text) => text.includes("line-299"));
+    expect(await top()).toBeGreaterThan(0);
   });
 });

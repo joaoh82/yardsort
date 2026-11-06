@@ -4,26 +4,36 @@
 /**
  * One terminal: watched at the computer's size, scrolling sideways when that is wider than the phone,
  * and typed into once the person takes control. Then it is drawn to fit the phone, until they hand it
- * back or the person at the computer types.
+ * back or the person at the computer types. While it has control, the phone can give the agent a
+ * picture: it goes to the computer, and its path there is pasted in, as a dropped file's is.
  *
  * Coming back to this screen, or the app to the foreground, resumes watching. So does a dropped
  * channel. In none of those is anything sent again, and control is not taken back: leaving lets go of
  * it, and only pressing the button takes it.
  */
 
-import type { Controller, HostId, TerminalId } from "@yardsort/remote-client";
+import {
+  ChannelClosed,
+  type Controller,
+  type HostId,
+  type TerminalId,
+  type WorkspaceId,
+} from "@yardsort/remote-client";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { messageOf } from "../lib/accounts";
+import { pastedPath } from "../lib/attach";
 import { useApp } from "../lib/context";
 import { deviceName, fitted, TerminalControl } from "../lib/control";
 import { type Sight, PageFeed, TerminalWatch } from "../lib/watch";
 import { Composer } from "../ui/composer";
 import {
   describeReach,
+  inFront,
   NoLongerPaired,
   OfProfile,
   reachDot,
@@ -34,7 +44,12 @@ import { Button, Dot, FONTS, Problem, Screen, useColors } from "../ui/parts";
 import { type Room, TerminalView } from "../ui/terminal-view";
 
 export default function TerminalScreen() {
-  const params = useLocalSearchParams<{ host?: string; terminal?: string; label?: string }>();
+  const params = useLocalSearchParams<{
+    host?: string;
+    terminal?: string;
+    label?: string;
+    workspace?: string;
+  }>();
   if (!params.host || !params.terminal) return <Redirect href="/account" />;
   return (
     <OfProfile>
@@ -42,6 +57,7 @@ export default function TerminalScreen() {
         host={params.host as HostId}
         terminal={params.terminal as TerminalId}
         label={params.label || "Terminal"}
+        workspace={(params.workspace as WorkspaceId | undefined) ?? null}
       />
     </OfProfile>
   );
@@ -51,13 +67,16 @@ function Watching({
   host,
   terminal,
   label,
+  workspace,
 }: {
   host: HostId;
   terminal: TerminalId;
   label: string;
+  /** Its workspace, where a picture for it goes. Without one, none can be given. */
+  workspace: WorkspaceId | null;
 }) {
   const colors = useColors();
-  const { accounts } = useApp();
+  const { accounts, pickImage } = useApp();
   const me = accounts.getSnapshot().active?.device ?? null;
   const control = useMemo(() => new TerminalControl(terminal, me), [terminal, me]);
   const hold = useSyncExternalStore(control.subscribe, control.getSnapshot);
@@ -76,6 +95,8 @@ function Watching({
   const [applicationCursor, setApplicationCursor] = useState(false);
   const [cell, setCell] = useState<{ width: number; height: number } | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sendProblem, setSendProblem] = useState<string | null>(null);
   const headerHeight = useHeaderHeight();
 
   const { feed, watch } = useMemo(() => {
@@ -115,6 +136,31 @@ function Watching({
     );
   }
 
+  const canSend = workspace !== null && !!channel?.host.capabilities.includes("upload.begin");
+  const sendPicture = async () => {
+    if (!channel || !workspace) return;
+    setSendProblem(null);
+    try {
+      const picked = await inFront(pickImage);
+      if (!picked) return;
+      setSending(true);
+      const path = await channel.upload(workspace, picked.name, picked.bytes);
+      if (!control.paste(pastedPath(path, channel.host.platform), picked.name)) {
+        setSendProblem(
+          "The picture is on the computer, but control went before it could be given.",
+        );
+      }
+    } catch (error) {
+      setSendProblem(
+        error instanceof ChannelClosed
+          ? "The picture did not reach the computer. Try again."
+          : messageOf(error),
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
   const ended = sight.exit !== null || sight.gone;
   const canTake = channel !== null && sight.following && !ended && !hold.holding;
   const held = sight.controller?.kind === "device" && sight.controller.device !== me;
@@ -146,6 +192,7 @@ function Watching({
           {sight.problem && <Problem>{sight.problem}</Problem>}
           {trouble && <Problem>Something went wrong drawing this terminal.</Problem>}
           {hold.notice && <Problem>{hold.notice}</Problem>}
+          {sendProblem && <Problem>{sendProblem}</Problem>}
           {hold.uncertain && (
             <View style={styles.uncertain}>
               <Problem attention>
@@ -198,6 +245,7 @@ function Watching({
               draft={draft}
               setDraft={setDraft}
               applicationCursor={applicationCursor}
+              {...(canSend ? { attach: { busy: sending, press: () => void sendPicture() } } : {})}
             />
           )}
           {hold.holding && (

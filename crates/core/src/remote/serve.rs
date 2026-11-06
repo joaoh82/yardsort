@@ -24,6 +24,11 @@
 //!   [`POLL_EVERY`] while [`Visitor::following`]. A batch goes only while little waits for the
 //!   device ([`Outbound::activity`]), so catching up never crowds out a terminal's output; what
 //!   did not go is read again at the next poll, because it is on disk, not in a queue.
+//! - **Starting and uploading** (`harness.list`, `workspace.start`, `session.start`,
+//!   `upload.begin`, `upload.chunk`) are answered when the app lends a [`Starting`]: see
+//!   [`start`]. A start runs on a thread of its own, since a workspace's setup can take minutes
+//!   and the channel must go on answering meanwhile; its reply comes when it is done. An upload
+//!   is this channel's, and one it closes on is deleted.
 //! - **Closing the channel** — the device left, its grant went, the relay or the network failed —
 //!   detaches everything it watched and releases every lease it held, and ends its
 //!   subscriptions. The terminals and their programs are untouched: they belong to the daemon,
@@ -44,10 +49,13 @@ use remote_proto::terminal::{
 use remote_proto::{
     ActivityBatch, ActivitySubscribeParams, ActivityUnsubscribeParams, DeviceId, ErrorCode, Event,
     Grant, GrantId, Hello, HelloReply, LeaseId, Operation, Outcome, RemoteError, Reply, Request,
-    Response, SessionRecordId, Subscribed, SubscriptionEnded, SubscriptionId, TermSize,
+    Response, SessionRecordId, Subscribed, SubscriptionEnded, SubscriptionId, TermSize, UploadId,
     WorkspaceId, MAX_OUTPUT_CHUNK, MAX_QUEUED_OUTPUT, MAX_SUBSCRIPTIONS,
 };
 
+mod start;
+
+use super::start::Starting;
 use super::{host, HostFacade, HostIdentity};
 use crate::git::Git;
 use crate::store::Store;
@@ -88,6 +96,9 @@ pub struct Context<'a> {
     pub host: &'a HostIdentity,
     /// The daemon shares control (its protocol 2): the terminal operations are answered.
     pub interactive: bool,
+    /// What starts agents and keeps uploads. Without it, or without `interactive`, those
+    /// operations are not answered.
+    pub starting: Option<Arc<dyn Starting>>,
 }
 
 impl Context<'_> {
@@ -99,6 +110,7 @@ impl Context<'_> {
             host: self.host,
             interactive: self.interactive,
             subscriptions: true,
+            starting: self.interactive && self.starting.is_some(),
             // A channel's daemon that does not share control is one from before leases.
             terminals_later: (!self.interactive).then(super::earlier_daemon),
         }
@@ -118,6 +130,8 @@ pub struct Visitor {
     names: Names,
     next_subscription: AtomicU32,
     subscriptions: Mutex<HashMap<SubscriptionId, Following>>,
+    next_upload: AtomicU32,
+    uploads: Mutex<HashMap<UploadId, start::Uploading>>,
 }
 
 /// One activity subscription: what it follows, and the sequence number of the last event its
@@ -184,6 +198,8 @@ impl Visitor {
                 names: Names::default(),
                 next_subscription: AtomicU32::new(1),
                 subscriptions: Mutex::new(HashMap::new()),
+                next_upload: AtomicU32::new(1),
+                uploads: Mutex::new(HashMap::new()),
             }),
             Ok(None) => Err(CloseReason::Refused),
             Err(_) => Err(CloseReason::Gone),
@@ -258,6 +274,9 @@ impl Visitor {
             operation if is_terminal(operation) && context.interactive => facade
                 .check(&grant, &request)
                 .and_then(|()| self.terminal(context, &facade, &grant, &request)),
+            operation if start::is_start(operation) && facade.starting => facade
+                .check(&grant, &request)
+                .and_then(|()| self.start(context, &facade, &grant, &request)),
             Operation::ActivitySubscribe(params) => facade
                 .check(&grant, &request)
                 .and_then(|()| self.subscribe(context, &facade, &grant, params, &request)),
@@ -351,9 +370,13 @@ impl Visitor {
         }
     }
 
-    /// Detach everything this channel watched, and release every lease it held.
+    /// Detach everything this channel watched, release every lease it held, and delete what
+    /// it was still uploading.
     pub fn close(&self, terminals: &dyn TerminalHost) {
         lock(&self.subscriptions).clear();
+        for (_, upload) in lock(&self.uploads).drain() {
+            upload.abandon();
+        }
         for (_, watch) in lock(&self.streams).drain() {
             let _ = terminals.detach(&watch.session, watch.attachment);
         }

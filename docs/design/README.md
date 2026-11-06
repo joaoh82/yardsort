@@ -39,6 +39,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 32  | [Smoke tests](32-smoke-tests.md)                                        | Proposal, and slice 1 built: a test file in the repository an agent writes and Yardsort checks, approved before it runs        |
 | 33  | [The phone app's design](33-phone-design.md)                            | Built, and its smoke test passed on the iPhone. The look, the icon, Settings and where it differs from the Figma file          |
 | 34  | [Schedules](34-schedules.md)                                            | Built: start a workflow or a smoke test once at a set time or on a routine, in an existing workspace, while the app is open    |
+| 35  | [Remote, R4 and R5](35-remote-r4-r5.md)                                 | Planned: a host with no screen the phone reaches first, then the desktop as a client, then the phone hardened and push         |
 
 ## Vocabulary
 

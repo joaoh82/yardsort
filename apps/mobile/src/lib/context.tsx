@@ -4,6 +4,7 @@
 import { createContext, type ReactNode, useContext, useSyncExternalStore } from "react";
 
 import type { Accounts, Browser, Snapshot } from "./accounts";
+import type { PickImage } from "./attach";
 import type { Incoming } from "./pairing";
 
 interface App {
@@ -13,6 +14,8 @@ interface App {
   deviceName: string;
   /** A pairing link on its way to being used. */
   incoming: Incoming;
+  /** Ask the person for a picture to give an agent. */
+  pickImage: PickImage;
 }
 
 const AppContext = createContext<App | null>(null);

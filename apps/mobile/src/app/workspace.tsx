@@ -25,6 +25,7 @@ import { useApp } from "../lib/context";
 import { moment, stamp } from "../lib/format";
 import type { ObservedWorkspace } from "../lib/observed";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
+import { canStart } from "./start";
 import {
   Body,
   Button,
@@ -111,7 +112,10 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
 
   // Not a conversation's title, which is the person's own words and has no place in a route.
   const watch = (terminal: TerminalSummary, label: string) =>
-    router.push({ pathname: "/terminal", params: { host, terminal: terminal.id, label } });
+    router.push({
+      pathname: "/terminal",
+      params: { host, terminal: terminal.id, label, workspace },
+    });
 
   const name = detail.answer?.workspace.name ?? seen?.name ?? "Workspace";
   const project = detail.answer?.project.id ?? seen?.project;
@@ -166,6 +170,12 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
             onPress={() => {
               if (page.next) void showMore(page.next);
             }}
+          />
+        )}
+        {canStart(channel) && (
+          <Button
+            title="New agent"
+            onPress={() => router.push({ pathname: "/start", params: { host, workspace } })}
           />
         )}
         {page && (

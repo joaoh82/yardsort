@@ -23,7 +23,9 @@
 //! Hosts answer the read side (`host.describe`, `workspace.list`, `workspace.describe`,
 //! `session.list`, `activity.list`, `memory.list`) and, since minor 1, the `terminal.*`
 //! operations: see [`terminal`]. Since minor 3 a client can follow activity as it is recorded,
-//! with `activity.subscribe`: see [`ActivitySubscribeParams`]. A host lists what it answers in
+//! with `activity.subscribe`: see [`ActivitySubscribeParams`]. Since minor 5 a client that may
+//! type into a terminal may also start an agent, in a new workspace or an existing one, and
+//! upload a file for one: see [`start`]. A host lists what it answers in
 //! [`HostDescription::capabilities`].
 
 pub mod account;
@@ -32,6 +34,7 @@ pub mod ids;
 pub mod model;
 pub mod pairing;
 pub mod relay;
+pub mod start;
 pub mod terminal;
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +45,11 @@ pub use ids::{
     RequestId, RunId, ServerId, SessionRecordId, TerminalId, WorkspaceId,
 };
 pub use model::*;
+pub use start::{
+    HarnessList, HarnessSummary, SessionStartParams, Started, Upload, UploadBeginParams,
+    UploadChunkParams, UploadId, Uploaded, WorkspaceStartParams, MAX_PROMPT, MAX_UPLOAD,
+    MAX_UPLOADS, MAX_UPLOAD_CHUNK, MAX_UPLOAD_NAME,
+};
 pub use terminal::{
     AcquireRequest, AttachRequest, AttachStart, Attached, ControlChanged, Controller,
     DetachRequest, Detached, Exited, InputRequest, Lease, LeaseRef, OutputFrame, ProgramExit,
@@ -57,7 +65,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// - 3: `activity.subscribe` and `activity.unsubscribe`, and the `activity.events` and
 ///   `activity.ended` events.
 /// - 4: `terminalsLater` in `host.describe`, saying why terminals are not offered yet.
-pub const PROTOCOL_MINOR: u16 = 4;
+/// - 5: `harness.list`, `workspace.start`, `session.start`, `upload.begin` and `upload.chunk`.
+pub const PROTOCOL_MINOR: u16 = 5;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
 /// parsing. A host keeps its responses within it: a page holds fewer items than asked when they
@@ -363,8 +372,9 @@ pub struct MemoryListParams {
 /// parameters.
 ///
 /// There is deliberately no operation that approves, edits or proposes memory, launches a
-/// process, deletes or archives a workspace, or reads a file. Each of those is its own scoped
-/// increment, if it ever comes.
+/// program the device names, deletes or archives a workspace, or reads a file. Each of those is
+/// its own scoped increment, if it ever comes. Starting one of the host's own harnesses, and
+/// putting a file in the host's uploads folder, came in minor 5 ([`start`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", content = "params")]
 pub enum Operation {
@@ -398,6 +408,16 @@ pub enum Operation {
     ActivitySubscribe(ActivitySubscribeParams),
     #[serde(rename = "activity.unsubscribe")]
     ActivityUnsubscribe(ActivityUnsubscribeParams),
+    #[serde(rename = "harness.list")]
+    HarnessList,
+    #[serde(rename = "workspace.start")]
+    WorkspaceStart(WorkspaceStartParams),
+    #[serde(rename = "session.start")]
+    SessionStart(SessionStartParams),
+    #[serde(rename = "upload.begin")]
+    UploadBegin(UploadBeginParams),
+    #[serde(rename = "upload.chunk")]
+    UploadChunk(UploadChunkParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -417,6 +437,11 @@ pub const OPERATIONS: &[&str] = &[
     "terminal.resize",
     "activity.subscribe",
     "activity.unsubscribe",
+    "harness.list",
+    "workspace.start",
+    "session.start",
+    "upload.begin",
+    "upload.chunk",
 ];
 
 impl Operation {
@@ -437,6 +462,11 @@ impl Operation {
             Self::TerminalResize(_) => 12,
             Self::ActivitySubscribe(_) => 13,
             Self::ActivityUnsubscribe(_) => 14,
+            Self::HarnessList => 15,
+            Self::WorkspaceStart(_) => 16,
+            Self::SessionStart(_) => 17,
+            Self::UploadBegin(_) => 18,
+            Self::UploadChunk(_) => 19,
         };
         OPERATIONS[index]
     }
@@ -446,9 +476,10 @@ impl Operation {
     pub fn scope(&self) -> Option<Scope> {
         Some(match self {
             Self::HostDescribe => return None,
-            Self::WorkspaceList(_) | Self::WorkspaceDescribe(_) | Self::SessionList(_) => {
-                Scope::WorkspaceRead
-            }
+            Self::WorkspaceList(_)
+            | Self::WorkspaceDescribe(_)
+            | Self::SessionList(_)
+            | Self::HarnessList => Scope::WorkspaceRead,
             Self::ActivityList(_) | Self::ActivitySubscribe(_) | Self::ActivityUnsubscribe(_) => {
                 Scope::ActivityRead
             }
@@ -458,7 +489,11 @@ impl Operation {
             | Self::TerminalRenew(_)
             | Self::TerminalRelease(_)
             | Self::TerminalInput(_)
-            | Self::TerminalResize(_) => Scope::TerminalControl,
+            | Self::TerminalResize(_)
+            | Self::WorkspaceStart(_)
+            | Self::SessionStart(_)
+            | Self::UploadBegin(_)
+            | Self::UploadChunk(_) => Scope::TerminalControl,
         })
     }
 
@@ -486,6 +521,10 @@ impl Operation {
             Self::TerminalResize(resize) if resize.size.cols == 0 || resize.size.rows == 0 => {
                 invalid("A terminal needs at least one row and one column.")
             }
+            Self::WorkspaceStart(start) => start.validate(),
+            Self::SessionStart(start) => start.validate(),
+            Self::UploadBegin(upload) => upload.validate(),
+            Self::UploadChunk(chunk) => chunk.validate(),
             _ => Ok(()),
         }
     }
@@ -518,6 +557,14 @@ pub enum Reply {
     Attached(Attached),
     Lease(Lease),
     Subscribed(Subscribed),
+    /// Since minor 5.
+    Harnesses(HarnessList),
+    /// Since minor 5.
+    Started(Started),
+    /// Since minor 5.
+    Upload(Upload),
+    /// Since minor 5.
+    Uploaded(Uploaded),
     Done,
 }
 

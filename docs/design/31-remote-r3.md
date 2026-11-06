@@ -57,7 +57,9 @@ R3 does **not** include:
   Android's generated permissions (§16) still want blocking before any build goes to a store;
 - editing code, Git writes, launching a new agent, approving anything on an agent's behalf, or
   approving memory. The proposal excludes them from the first mobile scope (§3.4). Reading
-  approved memory is in scope, as `memory.list` already serves it.
+  approved memory is in scope, as `memory.list` already serves it. Launching an agent, in a new
+  workspace or an existing one, and giving one a picture, came in after first real use, at the
+  owner's request (§19).
 
 ## 2 · Where it starts
 
@@ -1358,3 +1360,43 @@ To be filled in from the run, with the iPhone's model and iOS version, `claude -
   of coming back to the foreground, and an external keyboard. None has been tried.
 - **A physical Android phone** for the smoke tests and the device run (§7). The owner's to
   provide; R3 cannot close without one.
+
+## 19 · After first real use: scrolling, starting work, pictures
+
+The owner's first days of real use, on 2026-11-06, found one bug and asked for two things.
+
+**A terminal's history could not be reached.** Watching a Claude Code session, the phone went up as
+far as the top of the computer's screen and no further, though the computer kept the lines above it
+(`ys logs` printed them). The page moved by itself while it could, and handed the rest of a drag to
+the terminal's history; but a terminal taller than the phone is a page that moves, and once the
+WebView's own scroll has a drag, the page hears no more of it. The page's test had only a terminal
+shorter than the phone. Now the page moves everything upright itself, the page and then the
+history, carrying on after the finger lifts, and sideways is left to the WebView; a test drags a
+terminal taller than the phone from its bottom into its history and back. The page also keeps
+10,000 lines, as the computer does, where it kept 5,000.
+
+**Starting work, and pictures (protocol minor 5).** `harness.list`, `workspace.start`,
+`session.start`, `upload.begin` and `upload.chunk` (`crates/remote-proto/src/start.rs`). Decisions:
+
+- **Under `terminal:control`.** Starting one of the computer's own agents is no more than a device
+  that may type could do in a shell, so it needs no new scope, and no phone paired before has to
+  pair again. A device names a harness, a project or workspace, and a message; never a program, an
+  argument or a folder. The computer offers only harnesses turned on and found, and starts them as
+  its settings say, through the same `Workspaces::create` and `Launcher::in_workspace` as its window.
+- **A start answers from a thread of its own.** A project's setup can take minutes, and a channel
+  that stops answering for 30 seconds is taken for dead by the phone. A start whose answer is lost
+  is not tried again: the phone says it may have started, and to look before starting again.
+- **A picture goes outside every worktree**, in the profile's `uploads/<workspace>/`, under a name
+  made of the time and the letters and digits of its own, never replacing a file. Pieces of at most
+  32 KB go in order, a few ahead of their answers; a piece out of order, or more than was said,
+  ends the upload and deletes it, as a channel closing does. Files older than seven days go when
+  another comes. The phone sends a JPEG no larger than 2048 pixels, since a photo off the camera is
+  several megabytes of HEIC.
+- **The last piece's answer carries the file's path**, the only answer that carries one: the phone
+  pastes it into the terminal, quoted for the computer's shell, as a file dropped on the desktop's
+  terminal is. Only a device that could type `pwd` is given it.
+- **The window shows what a phone started at once**, through the `SessionStarted` event a workflow's
+  start already sent: its tab, and the sidebar reads the workspaces again.
+
+The picture needs two native modules, `expo-image-picker` and `expo-image-manipulator`, so it reaches
+the iPhone with a new TestFlight build. Not yet seen on a real phone.

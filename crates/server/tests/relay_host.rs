@@ -100,6 +100,7 @@ impl Serving for Here {
             terminals: self.terminals.as_ref(),
             host: &self.identity,
             interactive: true,
+            starting: None,
         });
     }
 }
