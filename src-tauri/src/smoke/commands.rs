@@ -580,6 +580,7 @@ pub async fn test_run_start(
                 inputs: &inputs,
                 requested_by: "app",
                 session_record_id: None,
+                unattended: false,
             },
             &content_hash,
         )?;

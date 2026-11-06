@@ -325,6 +325,7 @@ pub async fn workflow_start(
                 workspace_id: &workspace_id,
                 inputs: &inputs,
                 requested_by: "app",
+                unattended: false,
             },
             &AppLook(state),
         )
@@ -422,7 +423,7 @@ pub async fn workflow_cancel(app: AppHandle, run_id: String) -> IpcResult<bool> 
 
 /// What the app answers when a run is queued: the agents set up here and found on `PATH`, and
 /// the pull request from `gh`.
-struct AppLook<'a>(&'a AppState);
+pub(crate) struct AppLook<'a>(pub(crate) &'a AppState);
 
 impl Look for AppLook<'_> {
     fn harness(&self, wanted: &str) -> Result<String, String> {

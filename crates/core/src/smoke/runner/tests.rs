@@ -100,6 +100,7 @@ impl Fx {
                 inputs: &inputs,
                 requested_by: "cli",
                 session_record_id: None,
+                unattended: false,
             },
         )
         .unwrap();
@@ -929,11 +930,16 @@ steps:
     {meanwhile}
     timeout: 60s
 "#,
-            // 17 MiB at once, then it stays up.
-            server = bun(
-                "process.stdout.write(Buffer.alloc(17 * 1024 * 1024, 120)); setTimeout(() => {}, 60000)"
-            ),
-            meanwhile = bun("setTimeout(() => {}, 15000)"),
+            // 17 MiB at once, once the step has begun, then it stays up. Sooner, and that step is
+            // skipped, not failed.
+            server = bun("const told = setInterval(() => { \
+                    if (!require('fs').existsSync('step-began')) return; \
+                    clearInterval(told); \
+                    process.stdout.write(Buffer.alloc(17 * 1024 * 1024, 120)); \
+                    setTimeout(() => {}, 60000); \
+                }, 20)"),
+            meanwhile =
+                bun("require('fs').writeFileSync('step-began', ''); setTimeout(() => {}, 15000)"),
         ),
     );
     let id = fx.queue("loud", &[]);
@@ -1066,6 +1072,7 @@ fn an_approved_file_runs_unasked_unless_the_project_asks_to_see_every_run() {
                 inputs: &BTreeMap::new(),
                 requested_by: "cli",
                 session_record_id: None,
+                unattended: false,
             },
         )
         .unwrap()
@@ -1119,6 +1126,7 @@ fn the_app_approves_only_the_file_it_showed_not_a_version_edited_since() {
                 inputs: &BTreeMap::new(),
                 requested_by: "app",
                 session_record_id: None,
+                unattended: false,
             },
             hash,
         )

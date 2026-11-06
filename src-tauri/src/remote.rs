@@ -23,6 +23,7 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
+use pty_host::{SessionInfo, SessionState};
 use remote_client::{Client, ClientError, Session, SIGN_IN_TIMEOUT};
 use remote_host::{Access, AccessError, AccessFuture, Connector, Serving};
 use remote_proto::account::{DeviceKind, NewDevice, Secret};
@@ -30,7 +31,9 @@ use remote_proto::pairing::{
     GrantDecision, GrantState, GrantSummary, HostRegistration, OFFER_TTL_MS,
 };
 use remote_proto::relay::HostNotice;
-use remote_proto::{ErrorCode, GrantId, HostId, Platform, ProjectGrant, ProjectId, Scope};
+use remote_proto::{
+    DeviceId, ErrorCode, GrantId, HostId, Platform, ProjectGrant, ProjectId, Scope,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager};
@@ -41,10 +44,12 @@ use yardsort_core::remote::host::{
 };
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::HostIdentity;
+use yardsort_core::settings::LeftHost;
 use yardsort_core::store::RemoteHostRow;
 
 use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
+use crate::{quit, updates};
 
 /// A directory to keep the host's credential in, instead of the OS credential store.
 pub const CREDENTIALS_DIR_VAR: &str = "YARDSORT_CREDENTIALS_DIR";
@@ -230,9 +235,23 @@ pub struct RemoteStatus {
     pub signing_in: bool,
     /// Where the host's credential is kept: the OS credential store, or a directory.
     pub credentials: String,
+    /// Set while this computer's terminals run in a daemon that cannot share them.
+    pub earlier_daemon: Option<RemoteEarlierDaemon>,
     /// The server and name Remote was last turned on with, to offer again once it is off.
     pub last_server_url: Option<String>,
     pub last_name: Option<String>,
+}
+
+/// A daemon from before leases, kept for the programs running in it, and what replacing it stops.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteEarlierDaemon {
+    /// The Yardsort version that started it.
+    pub version: Option<String>,
+    /// The running agents, as ids the frontend can match to its tabs.
+    pub agents: Vec<String>,
+    /// How many running sessions are not agents.
+    pub shells: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -359,7 +378,7 @@ fn failed(error: ClientError) -> IpcError {
 }
 
 /// What to do once signed out at the server.
-const AGAIN: &str = "Turn Remote off, then on again.";
+const AGAIN: &str = "Sign in again in Settings → Remote.";
 
 fn signed_out(why: &str) -> IpcError {
     IpcError::new("remote_signed_out", format!("{why} {AGAIN}"))
@@ -471,9 +490,34 @@ fn status(state: &AppState) -> IpcResult<RemoteStatus> {
             .map(|s| s.is_some())
             .unwrap_or(false),
         credentials: credentials_label(),
+        earlier_daemon: earlier_daemon(state),
         last_server_url: last.server_url,
         last_name: last.name,
     })
+}
+
+fn earlier_daemon(state: &AppState) -> Option<RemoteEarlierDaemon> {
+    // Without a daemon the terminals are in this process, which shares them.
+    if state.daemon_client.is_none() || state.host.shares_control() {
+        return None;
+    }
+    Some(earlier_daemon_of(
+        state.daemon.version.clone(),
+        &state.host.list(),
+    ))
+}
+
+fn earlier_daemon_of(version: Option<String>, sessions: &[SessionInfo]) -> RemoteEarlierDaemon {
+    let agents = quit::agents_among(sessions);
+    let running = sessions
+        .iter()
+        .filter(|session| matches!(session.state, SessionState::Running))
+        .count();
+    RemoteEarlierDaemon {
+        version,
+        shells: u32::try_from(running - agents.len()).unwrap_or(u32::MAX),
+        agents,
+    }
 }
 
 fn device(grant: LocalGrant) -> RemoteDevice {
@@ -559,10 +603,9 @@ pub async fn remote_enable(
 
     let state = app.state::<AppState>();
     let earlier = state.store.remote_host().map_err(store_failed)?;
-    let again = earlier
-        .as_ref()
-        .filter(|h| h.server_id == server.server.as_str())
-        .and_then(|h| HostId::new(h.host_id.clone()).ok());
+    let left = state.settings.get().remote.left_host;
+    let was = host_before(earlier.as_ref(), left.as_ref(), server.server.as_str());
+    let again = was.as_ref().map(|w| w.host.clone());
     let registration = |host| HostRegistration {
         host,
         name: name.clone(),
@@ -586,14 +629,17 @@ pub async fn remote_enable(
             return Err(failed(error));
         }
     };
-    // The device this computer was signed in as before is signed out: it has no use now.
-    if let Some(earlier) = earlier
-        .as_ref()
-        .filter(|h| h.server_id == server.server.as_str())
-    {
-        if let Ok(old) = remote_proto::DeviceId::new(earlier.device_id.clone()) {
-            if old != session.device {
-                let _ = client.revoke_device(&access, &old).await;
+    if let Some(was) = &was {
+        // The device this computer was signed in as before is signed out: it has no use now.
+        if was.device != session.device {
+            let _ = client.revoke_device(&access, &was.device).await;
+        }
+        // Turned off, it let its devices go, though the server could not be told then.
+        if was.turned_off && was.host == registered.id {
+            if let Ok(page) = client.host_grants(&access, &was.host).await {
+                for grant in page.grants {
+                    let _ = client.revoke_grant(&access, &grant.id).await;
+                }
             }
         }
     }
@@ -614,6 +660,7 @@ pub async fn remote_enable(
         s.remote = crate::settings::RemoteSettings {
             server_url: Some(row.server_url.clone()),
             name: Some(row.name.clone()),
+            left_host: None,
         }
     });
     *state.remote.session.lock().await = Some(session);
@@ -664,8 +711,15 @@ pub async fn remote_disable(app: AppHandle) -> IpcResult<RemoteStatus> {
     *state.remote.session.lock().await = None;
     state.store.forget_remote_host().map_err(store_failed)?;
     forget_refresh(&row.device_id).map_err(|e| IpcError::new("remote_credentials", e))?;
+    // Not removed there, so remembered here: turned on again, it picks up where this leaves it.
+    let left = at_server.is_err().then(|| LeftHost {
+        server_id: row.server_id.clone(),
+        host_id: row.host_id.clone(),
+        device_id: row.device_id.clone(),
+    });
+    let _ = state.settings.update(|s| s.remote.left_host = left);
     if let Err(error) = at_server {
-        // Signed out at the server already is as good as removed.
+        // Signed out at the server, there is nothing to tell anyone: it is off, and that is all.
         if error.code != "remote_signed_out" {
             return Err(IpcError::new(
                 "remote_off_here_only",
@@ -817,6 +871,28 @@ pub async fn remote_answer(
     blocking(app, status).await
 }
 
+/// Stop everything in a daemon that cannot share its terminals, and start Yardsort again, so that
+/// a current daemon takes over. Only ever on the person's word, once told what it stops. A daemon
+/// that does share them is left alone, whatever asked.
+#[tauri::command]
+#[specta::specta]
+pub async fn remote_replace_daemon(app: AppHandle) -> IpcResult<()> {
+    let restarting = app.clone();
+    blocking(app, |state| {
+        if earlier_daemon(state).is_none() {
+            return Err(IpcError::new(
+                "remote_daemon_current",
+                "This computer's terminals can already be shared.",
+            ));
+        }
+        quit::stop_everything(state);
+        Ok(())
+    })
+    .await?;
+    quit::past_the_question();
+    updates::restart(&restarting)
+}
+
 /// Take a device's grant away. Refused here at once; the server is told too.
 #[tauri::command]
 #[specta::specta]
@@ -881,6 +957,34 @@ async fn host_grants(state: &AppState, row: &RemoteHostRow) -> IpcResult<Vec<Gra
         .grants)
 }
 
+/// The host this computer already is at a server, about to be signed in to.
+#[derive(Debug, PartialEq, Eq)]
+struct HostBefore {
+    host: HostId,
+    device: DeviceId,
+    /// Turned off since, so its devices were let go here, whatever the server still has.
+    turned_off: bool,
+}
+
+fn host_before(
+    earlier: Option<&RemoteHostRow>,
+    left: Option<&LeftHost>,
+    server: &str,
+) -> Option<HostBefore> {
+    let was = |host: &str, device: &str, turned_off| {
+        Some(HostBefore {
+            host: HostId::new(host.to_owned()).ok()?,
+            device: DeviceId::new(device.to_owned()).ok()?,
+            turned_off,
+        })
+    };
+    match (earlier, left) {
+        (Some(on), _) if on.server_id == server => was(&on.host_id, &on.device_id, false),
+        (None, Some(left)) if left.server_id == server => was(&left.host_id, &left.device_id, true),
+        _ => None,
+    }
+}
+
 /// The session, resumed from the kept refresh credential after a restart.
 async fn ensure<'a>(
     slot: &'a mut Option<Session>,
@@ -911,6 +1015,97 @@ mod tests {
 
     use super::*;
 
+    fn session(id: &str, harness: bool, running: bool) -> SessionInfo {
+        let mut labels = serde_json::Map::new();
+        if harness {
+            labels.insert(crate::terminal::HARNESS_LABEL.to_owned(), "claude".into());
+        }
+        let state = if running {
+            serde_json::json!({ "status": "running" })
+        } else {
+            serde_json::json!({ "status": "exited", "exit": { "code": 0, "success": true } })
+        };
+        serde_json::from_value(serde_json::json!({
+            "id": id, "program": "p", "args": [], "cwd": null, "pid": null,
+            "size": { "cols": 80, "rows": 24 }, "labels": labels, "state": state,
+            "hasOutput": false, "busy": false, "idleMs": 0,
+        }))
+        .unwrap()
+    }
+
+    /// What the person is told replacing the daemon stops: everything still running in it, a
+    /// shell at a prompt too, and nothing that has already ended.
+    #[test]
+    fn replacing_an_earlier_daemon_counts_all_that_it_stops() {
+        let sessions = [
+            session("agent", true, true),
+            session("finished-agent", true, false),
+            session("shell", false, true),
+            session("finished-shell", false, false),
+        ];
+        assert_eq!(
+            earlier_daemon_of(Some("0.20.0".into()), &sessions),
+            RemoteEarlierDaemon {
+                version: Some("0.20.0".into()),
+                agents: vec!["agent".into()],
+                shells: 1,
+            }
+        );
+    }
+
+    const HOST: &str = "7f3c1a2b-0d4e-4f5a-8b6c-1d2e3f4a5b6c";
+    const DEVICE: &str = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+
+    fn on_at(server: &str) -> RemoteHostRow {
+        RemoteHostRow {
+            server_url: "https://remote.example.com".into(),
+            server_id: server.into(),
+            host_id: HOST.into(),
+            device_id: DEVICE.into(),
+            name: "Workstation".into(),
+            enabled_at: 1,
+        }
+    }
+
+    fn left_at(server: &str) -> LeftHost {
+        LeftHost {
+            server_id: server.into(),
+            host_id: HOST.into(),
+            device_id: DEVICE.into(),
+        }
+    }
+
+    /// Signed in again at the same server, a computer is the host it was: a second one beside it
+    /// would mean pairing again, and an entry on the phone that never comes back.
+    #[test]
+    fn signing_in_again_is_the_same_host_and_its_devices_stay_only_if_it_stayed_on() {
+        let host = HostId::new(HOST.to_owned()).unwrap();
+        let device = DeviceId::new(DEVICE.to_owned()).unwrap();
+        let before = |turned_off| {
+            Some(HostBefore {
+                host: host.clone(),
+                device: device.clone(),
+                turned_off,
+            })
+        };
+        // Still on, and signed out: it keeps its devices.
+        assert_eq!(host_before(Some(&on_at("srv")), None, "srv"), before(false));
+        // Turned off with the server not told: the same host, with its devices let go.
+        assert_eq!(
+            host_before(None, Some(&left_at("srv")), "srv"),
+            before(true)
+        );
+        // Still on says more than what was left behind.
+        assert_eq!(
+            host_before(Some(&on_at("srv")), Some(&left_at("srv")), "srv"),
+            before(false)
+        );
+        // Another server has never heard of it.
+        assert_eq!(host_before(Some(&on_at("srv")), None, "other"), None);
+        assert_eq!(host_before(None, Some(&left_at("srv")), "other"), None);
+        assert_eq!(host_before(None, None, "srv"), None);
+    }
+
     #[test]
     fn a_refusal_of_this_computers_credential_says_it_was_signed_out() {
         let refused = |code| ClientError::Remote(RemoteError::new(code, "Sign in again."));
@@ -918,7 +1113,7 @@ mod tests {
         assert_eq!(error.code, "remote_signed_out");
         assert_eq!(
             error.message,
-            "This computer was signed out at the server. Turn Remote off, then on again."
+            "This computer was signed out at the server. Sign in again in Settings → Remote."
         );
         // The link's own line adds what to do.
         assert!(matches!(

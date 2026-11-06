@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { timeAgo } from "@/features/terminal/sessionText";
+import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
 import { RunSmokeTestDialog } from "@/features/smoke/RunSmokeTestDialog";
 import { statusColour, statusWords } from "@/features/smoke/words";
 import type { TestListing, TestRun } from "@/lib/ipc";
@@ -30,6 +31,7 @@ export function TestDetail({
     .map((other) => ({ id: other.workspaceId, name: other.workspaceName }));
   const [runIn, setRunIn] = useState(listing.workspaceId);
   const [running, setRunning] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   // Every run of this test in its project, newest first, whichever workspace it ran in. Test ids
   // are repository-local, so a `health` in one project is not the `health` of another: scope by
   // project id too, or two projects' identical ids would show each other's runs.
@@ -110,6 +112,19 @@ export function TestDetail({
           >
             Run…
           </button>
+          <button
+            type="button"
+            disabled={!listing.item.runnable || places.length === 0}
+            title={
+              listing.item.runnable
+                ? "Run it at a set time, or again and again"
+                : "Fix the problems above first"
+            }
+            onClick={() => setScheduling(true)}
+            className="rounded border border-line px-3 py-1 text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-40"
+          >
+            Schedule…
+          </button>
         </div>
 
         {/* The file, read-only: it lives in the worktree, edited there. */}
@@ -156,6 +171,14 @@ export function TestDetail({
         </div>
       </div>
 
+      {scheduling && (
+        <ScheduleDialog
+          target="test"
+          targetId={listing.item.id}
+          workspaceId={runIn}
+          onClose={() => setScheduling(false)}
+        />
+      )}
       {running && (
         <RunSmokeTestDialog
           workspaceId={runIn}

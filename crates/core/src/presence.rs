@@ -3,8 +3,8 @@
 //! The app holds an exclusive lock on `app.lock` in its data directory for as long as it runs.
 //! `ys` asks by trying to take the same lock without waiting: if it cannot, the app has it. The
 //! operating system drops the lock when the process ends, however it ends, so a crash never
-//! leaves a stale "running" behind — which a file that merely exists would. The lock also means
-//! only one app drives a profile's workflow runs, even if two were started on it.
+//! leaves a stale "running" behind — which a file that merely exists would. It is also what keeps
+//! a second copy of the app from starting on a profile, and so only one drives its workflow runs.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};

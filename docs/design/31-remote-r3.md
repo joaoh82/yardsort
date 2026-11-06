@@ -50,8 +50,9 @@ R3 does **not** include:
   using the app: **internal TestFlight builds**, archived in Xcode with no EAS
   ([the README](../../apps/mobile/README.md#on-testflight)). External testers and listings stay in R7.
   The release identity was first built that day, for Android, and run on the emulator: its code is
-  embedded, it shows no developer tools, and it looked up staging. Android's generated permissions (§16)
-  still want blocking before any build goes to a store;
+  embedded, it shows no developer tools, and it looked up staging. The first TestFlight build followed
+  the same day: archived in Xcode 27, uploaded, installed on the owner's iPhone, signed in and paired.
+  Android's generated permissions (§16) still want blocking before any build goes to a store;
 - editing code, Git writes, launching a new agent, approving anything on an agent's behalf, or
   approving memory. The proposal excludes them from the first mobile scope (§3.4). Reading
   approved memory is in scope, as `memory.list` already serves it.

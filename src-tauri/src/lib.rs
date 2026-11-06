@@ -12,11 +12,13 @@ mod conversations;
 mod display;
 mod draft;
 mod memory;
+mod one_copy;
 mod outcomes;
 mod preflight;
 mod publish;
 mod quit;
 mod remote;
+mod schedules;
 mod sessions;
 mod smoke;
 mod state;
@@ -151,6 +153,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::remote_requests,
             remote::remote_answer,
             remote::remote_revoke,
+            remote::remote_replace_daemon,
             activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,
@@ -228,6 +231,14 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             usage::usage_machine,
             usage::usage_tokens,
             usage::settings_save_usage,
+            schedules::commands::schedule_list,
+            schedules::commands::schedule_runs,
+            schedules::commands::schedule_started_runs,
+            schedules::commands::schedule_preview,
+            schedules::commands::schedule_save,
+            schedules::commands::schedule_set_enabled,
+            schedules::commands::schedule_remove,
+            schedules::commands::schedule_run_now,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,
@@ -239,6 +250,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::TestRunsChanged,
             smoke::TestRunOutput,
             smoke::TestResultSent,
+            schedules::SchedulesChanged,
             remote::RemotePairingRequested
         ])
 }
@@ -259,6 +271,13 @@ pub fn run() {
     // First: everything below, and every process started from here, finds the profile by it.
     #[cfg(debug_assertions)]
     use_a_development_profile();
+
+    // Before anything else is started: a copy that gives way should leave no trace.
+    let mut claim =
+        yardsort_core::paths::data_dir().map(|dir| one_copy::claim(&dir, one_copy::PATIENCE));
+    if matches!(claim, Some(one_copy::Claim::Shown)) {
+        return;
+    }
 
     // Before anything starts GTK or a thread: the backend is read once, when GTK initialises.
     #[cfg(target_os = "linux")]
@@ -296,7 +315,23 @@ pub fn run() {
         })
         .setup(move |app| {
             builder.mount_events(app);
-            if let Err(reason) = start(app) {
+            // Without the profile's lock nothing says this is the one copy, so it drives no runs.
+            let mut drives = false;
+            match claim.take() {
+                Some(one_copy::Claim::Ours(hold)) => {
+                    hold.watch(app.handle().clone());
+                    drives = true;
+                }
+                Some(one_copy::Claim::Stuck) => {
+                    refuse_to_start(app.handle(), one_copy::STUCK);
+                    return Ok(());
+                }
+                Some(one_copy::Claim::Unguarded(why)) => {
+                    eprintln!("could not make sure this is the only copy: {why}");
+                }
+                Some(one_copy::Claim::Shown) | None => {}
+            }
+            if let Err(reason) = start(app, drives) {
                 refuse_to_start(app.handle(), &reason.to_string());
             }
             Ok(())
@@ -304,6 +339,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running Yardsort")
         .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                one_copy::leaving();
+            }
             // A start that failed has no window left, only its dialog. Stay until it is closed.
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..
@@ -337,7 +375,7 @@ fn use_a_development_profile() {
 
 /// Everything the app needs before its window can be used. An error here is shown to the user by
 /// [`refuse_to_start`], so say what failed in words they can act on.
-fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::Error>> {
     // `YARDSORT_DATA_DIR` keeps experiments and tests away from the real database (and
     // settings, which then sit next to it instead of in the OS config directory).
     let profile = legacy::env_var_os("DATA_DIR").map(std::path::PathBuf::from);
@@ -465,7 +503,11 @@ fn start(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Workflow runs, queued here or by `ys`, are moved on by a thread of their own.
-    workflows::start(app.handle(), &data_dir);
+    if drives {
+        workflows::start(app.handle());
+        // Schedules fire in the app that drives runs, and nowhere else.
+        schedules::start(app.handle());
+    }
 
     // Remote, when it is on: the link to the server's relay.
     let handle = app.handle().clone();

@@ -583,6 +583,22 @@ impl Store {
             .optional()?)
     }
 
+    /// The user approved a test file at this hash with no run waiting on it: they were shown
+    /// the file where they scheduled it.
+    pub fn approve_test(
+        &self,
+        project_id: &str,
+        test_id: &str,
+        content_hash: &str,
+    ) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT OR IGNORE INTO test_approvals (project_id, test_id, content_hash, approved_at)
+             VALUES (?, ?, ?, ?)",
+            params![project_id, test_id, content_hash, now_ms()],
+        )?;
+        Ok(())
+    }
+
     /// The user approved a run's file: the approval is recorded for the project, and the run,
     /// if it was waiting, is queued. False when the run was not waiting for approval.
     pub fn approve_test_run(&self, id: &str) -> StoreResult<bool> {

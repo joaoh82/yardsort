@@ -515,6 +515,46 @@ passed. `log` prints what a step's process wrote, or the body an `http` step got
 the file's path and the step's outputs instead. A run can be named by the start of its id, as
 `runs` prints it. See [Smoke tests](smoke-tests.md#running-a-test).
 
+### `ys schedule`
+
+[Schedules](schedules.md): standing instructions to start a workflow or a smoke test, once at a
+set time or again and again.
+
+```sh
+ys schedule list                  # every schedule: what it runs, where, when, next time, last result
+ys schedule add --test login --workspace local --weekly mon-fri 09:00
+ys schedule add --workflow code-review --workspace fix-login --input reviewer=codex --daily 18:30
+ys schedule add --test login --at "2026-11-06 18:00"       # once
+ys schedule add --workflow ping --every 2h                 # 15m, 2h, 1d
+ys schedule add --test login --monthly last 06:00          # a day from 1 to 28, or last
+ys schedule add --workflow nightly --cron "0 3 * * *" --if-missed skip --notify always
+ys schedule show Nightly          # its inputs, its rules, and its next five times
+ys schedule pause Nightly         # off: keeps its place and its history, fires nothing
+ys schedule resume Nightly        # on again, from now
+ys schedule run Nightly           # start its run now; Yardsort must be open
+ys schedule runs Nightly          # its history: every time it came due and what became of it
+ys schedule remove Nightly        # the schedule and its history; the runs it started stay
+```
+
+`add` takes what to run, `--workflow <id>` or `--test <id>`, and exactly one way of saying when:
+`--at`, `--every`, `--daily`, `--weekly`, `--monthly` or `--cron`. Times are this computer's
+local time. `--workspace` takes a workspace's name or id, and can be left out inside a
+workspace's folder or in an agent's terminal there. Give each input as `--input id=value`.
+`--name` names it; otherwise it takes the workflow's or the test's own name. `--if-missed` is
+`run-once` (the default) or `skip`, and `--notify` is `failure` (the default), `always` or
+`never`. Everything a run would be refused for is checked before anything is written, and `add`
+prints when the schedule will first fire.
+
+A schedule is named by its name, its id, or the start of its id, as `list` prints it. `--json`
+works as everywhere.
+
+Schedules fire while Yardsort is open, so `add`, `list`, `show` and `resume` say so when it is
+not. They do not need it open: `ys` writes the schedule, and the app acts on it within a second
+of starting. `run` does need it, as `ys workflow run` does. `ys` cannot approve a smoke test
+file, so `add --test` says when the file has not been approved in the app: its first run will
+wait for you there. `add --workflow` is refused when the workflow runs a smoke test that would
+wait for you: see [Schedules](schedules.md#workflows-that-run-a-smoke-test).
+
 ### `ys activity export`
 
 Every recorded event as **NDJSON** on stdout — one JSON object per line, oldest first, with the

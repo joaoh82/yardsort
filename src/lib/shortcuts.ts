@@ -21,6 +21,7 @@ export const COMMANDS = [
   { id: "pullRequests", label: "Pull requests", key: null },
   { id: "tasks", label: "Tasks", key: null },
   { id: "tests", label: "Tests", key: null },
+  { id: "schedules", label: "Schedules", key: null },
   { id: "startFromLink", label: "Start from a link…", key: null },
   { id: "tour", label: "Take the welcome tour", key: null },
 ] as const;

@@ -212,6 +212,7 @@ impl Fixture {
                 workspace_id: &self.workspace_id,
                 inputs: &inputs,
                 requested_by: "cli",
+                unattended: false,
             },
             &crate::workflow::runs::Accepting::default(),
         )

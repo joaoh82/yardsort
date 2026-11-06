@@ -237,8 +237,9 @@ second, which removed the inbox file the proposal had.
 **Presence** (`yardsort_core::presence`, open question 21): the app holds an exclusive OS lock on
 `app.lock` in the data directory for as long as it runs, with the standard library's file
 locking (flock on Unix, `LockFileEx` on Windows). `ys` tries the same lock without waiting. The
-lock dies with the process, so a crash cannot leave a stale "running", and a second app on the
-same profile does not get it, so it does not drive runs.
+lock dies with the process, so a crash cannot leave a stale "running". A second copy on the same
+profile does not get it, and since 0.22.0 gives way to the first rather than starting without driving
+runs.
 
 Rules the engine enforces regardless of what a file says:
 
@@ -552,7 +553,10 @@ still to be done, and is the milestone's exit.
 
 - Schedules and forge-event triggers. The roadmap's "automations" item lists the questions those
   raise (a run while the previous one is going, a worktree per run, permission with no one to
-  ask); a manual workflow answers none of them and does not need to.
+  ask); a manual workflow answers none of them and does not need to. **Schedules have since been
+  answered in [34](34-schedules.md)**, and not as a trigger: a schedule is a row of its own that
+  queues a run through the same door, so `kind: manual` is still the only trigger a file has.
+  Forge events are still to come.
 - Editing the chart by hand; per-repository workflow files; conditionals, loops, `if:`; step
   retries; a step that runs a program (it would be a shell string by another name — project
   automation is where commands live, and a `run_automation` step can call it later).

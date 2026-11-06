@@ -173,12 +173,13 @@ pub async fn update_install(app: AppHandle, progress: Channel<DownloadProgress>)
 /// user runs a mix of two versions until they start the app afresh. So an AppImage is started
 /// by hand, with the environment the user launched us with (see `without_appimage`). Everything
 /// else restarts as Tauri does it; the macOS app, for one, may have been renamed by the update.
-fn restart(app: &AppHandle) -> IpcResult<()> {
+pub(crate) fn restart(app: &AppHandle) -> IpcResult<()> {
+    crate::one_copy::leaving();
     #[cfg(target_os = "linux")]
     if let Some(appimage) = app.env().appimage.clone() {
         let args = app.env().args_os.into_iter().skip(1);
         relaunch(&appimage, args, std::env::vars().collect())
-            .map_err(|e| failed("start the new version", e))?;
+            .map_err(|e| failed("start Yardsort again", e))?;
         app.exit(0);
         return Ok(());
     }

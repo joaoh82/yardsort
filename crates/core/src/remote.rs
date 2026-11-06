@@ -120,9 +120,9 @@ pub fn earlier_daemon() -> TerminalsLater {
     TerminalsLater {
         reason: TerminalsLaterReason::EarlierDaemon,
         message:
-            "This computer's terminals run under an earlier version of Yardsort, which cannot \
-                  share them. They can be opened from here once the programs running there have \
-                  ended and Yardsort has started again."
+            "Every terminal on this computer, new ones too, runs in a background process from an \
+                  earlier version of Yardsort, which cannot share them. Settings → Remote on the \
+                  computer can replace it."
                 .into(),
     }
 }

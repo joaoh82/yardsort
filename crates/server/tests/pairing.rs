@@ -5,7 +5,7 @@
 mod common;
 
 use common::served::*;
-use remote_proto::account::{Credentials, DeviceKind};
+use remote_proto::account::{Credentials, DeviceKind, TokenRequest};
 use remote_proto::pairing::{
     GrantPage, GrantState, GrantSummary, HostPage, HostSummary, Offer, MAX_OFFER_MISSES,
     OFFER_TTL_MS,
@@ -49,6 +49,7 @@ macro_rules! for_each_store {
 for_each_store!(
     a_phone_pairs_with_a_host_and_the_hosts_person_decides,
     another_account_reaches_none_of_it,
+    a_host_signed_out_for_a_reused_sign_in_comes_back_as_itself,
 );
 
 async fn ok<T: DeserializeOwned>(response: reqwest::Response) -> T {
@@ -335,6 +336,66 @@ async fn a_phone_pairs_with_a_host_and_the_hosts_person_decides(records: impl Re
         .await)
     .await;
     assert_eq!(mine.state, GrantState::Revoked);
+}
+
+/// Two copies of the app on one computer present the same refresh credential, and the server signs
+/// the device out. Signing in again must be the same host: a new one would leave the old one on the
+/// phone for good, and the phone with a pairing to neither.
+async fn a_host_signed_out_for_a_reused_sign_in_comes_back_as_itself(
+    records: impl Records + 'static,
+) {
+    let s = Served::start(records).await;
+    let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
+    let phone = s.sign_in("alice", "Phone", DeviceKind::Phone).await;
+    let registered: HostSummary =
+        ok(register(&s, &host, json!({ "name": "Workstation" })).await).await;
+    let first = offer(&s, &host, &registered).await;
+    let asked: GrantSummary = ok(pair(&s, &phone, secret(&first), &["workspace:read"]).await).await;
+    let approve = format!("v1/grants/{}/approve", asked.id);
+    let body = json!({ "scopes": ["workspace:read"], "projects": { "kind": "all" } });
+    let given: GrantSummary = ok(s.post_as(&host.access, &approve, Some(&body)).await).await;
+    assert_eq!(given.state, GrantState::Approved);
+
+    // Traded in, then presented again once the moment for a retry has been used up.
+    let refresh = TokenRequest::Refresh {
+        refresh: host.refresh.clone(),
+    };
+    for _ in 0..3 {
+        s.token(&refresh).await;
+    }
+    refused(
+        s.post_as(
+            &host.access,
+            &format!("v1/hosts/{}/offers", registered.id),
+            None,
+        )
+        .await,
+        StatusCode::UNAUTHORIZED,
+        ErrorCode::Unauthenticated,
+    )
+    .await;
+
+    let again = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
+    let back: HostSummary = ok(register(
+        &s,
+        &again,
+        json!({ "host": registered.id, "name": "Workstation" }),
+    )
+    .await)
+    .await;
+    assert_eq!(back.id, registered.id);
+    assert!(back.current);
+
+    let seen: HostPage = ok(s.get_as(&phone.access, "v1/hosts").await).await;
+    assert_eq!(seen.hosts.len(), 1, "one computer on the phone, not two");
+    let grant: GrantSummary = ok(s
+        .get_as(&phone.access, &format!("v1/grants/{}", asked.id))
+        .await)
+    .await;
+    assert_eq!(grant.state, GrantState::Approved, "and it is still paired");
+    assert_eq!(host_grants(&s, &again, &back).await.len(), 1);
+    // Offers are this computer's again.
+    offer(&s, &again, &back).await;
 }
 
 async fn another_account_reaches_none_of_it(records: impl Records + 'static) {

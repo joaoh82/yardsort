@@ -300,6 +300,36 @@ export function Ideas() {
             terminal.
           </p>
         </Idea>
+
+        <Idea
+          label="09 · Schedules"
+          title="At a set time, or on a routine"
+          shot={
+            <Shot
+              name="schedules"
+              alt="Schedules: every project's schedules in one list, each with what it runs, when, and how its last time went, and one open with its history"
+            />
+          }
+        >
+          <p>
+            A schedule starts a workflow or a smoke test without you pressing Run: once at a time
+            you pick, or again and again — every weekday at nine, every two hours, a cron
+            expression. It runs in a workspace you already have, and what it starts is an ordinary
+            run, marked as scheduled.
+          </p>
+          <p>
+            Schedules fire while Yardsort is open. A time that comes while it is closed, or while
+            the computer is asleep, is missed, and each schedule says what to do about that: run
+            once when Yardsort next opens, or skip it.
+          </p>
+          <p>
+            <strong className={strong}>Schedules</strong>, in the sidebar, lists every
+            project&apos;s schedules with the next time each fires and how its last time went. A
+            notification tells you when a run fails, and a schedule approves nothing: a smoke test
+            file nobody has approved still waits for you. <code className={code}>ys schedule</code>{" "}
+            does it all from a terminal.
+          </p>
+        </Idea>
       </div>
     </section>
   );

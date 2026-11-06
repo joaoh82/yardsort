@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use pty_host::SessionState;
+use pty_host::{SessionInfo, SessionState};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager};
@@ -63,14 +63,34 @@ fn running_agents(app: &AppHandle) -> Vec<String> {
     let Some(state) = app.try_state::<AppState>() else {
         return Vec::new();
     };
-    state
-        .host
-        .list()
-        .into_iter()
+    agents_among(&state.host.list())
+}
+
+/// Which of these sessions are running harnesses.
+pub(crate) fn agents_among(sessions: &[SessionInfo]) -> Vec<String> {
+    sessions
+        .iter()
         .filter(|session| matches!(session.state, SessionState::Running))
         .filter(|session| session.labels.contains_key(HARNESS_LABEL))
-        .map(|session| session.id.0)
+        .map(|session| session.id.0.clone())
         .collect()
+}
+
+/// Kill everything the daemon runs and stop it.
+pub(crate) fn stop_everything(state: &AppState) {
+    // Kill by hand as well as asking the daemon to: under `YARDSORT_NO_DAEMON` there is no daemon
+    // to ask, and the sessions would otherwise outlive this call by a whisker.
+    for session in state.host.list() {
+        let _ = state.host.kill(&session.id);
+    }
+    if let Some(client) = &state.daemon_client {
+        let _ = client.shutdown(true);
+    }
+}
+
+/// The next close goes straight through: the question has been answered another way.
+pub(crate) fn past_the_question() {
+    ASKED.store(true, Ordering::SeqCst);
 }
 
 /// The user's answer. `stop_agents` kills everything the daemon runs and stops it; otherwise the
@@ -81,20 +101,13 @@ pub async fn app_quit(app: AppHandle, stop_agents: bool) -> IpcResult<()> {
     let quitting = app.clone();
     blocking(app, move |state| {
         if stop_agents {
-            // Kill by hand as well as asking the daemon to: under `YARDSORT_NO_DAEMON` there is
-            // no daemon to ask, and the sessions would otherwise outlive this call by a whisker.
-            for session in state.host.list() {
-                let _ = state.host.kill(&session.id);
-            }
-            if let Some(client) = &state.daemon_client {
-                let _ = client.shutdown(true);
-            }
+            stop_everything(state);
         }
         Ok(())
     })
     .await?;
     // Past the question now: let the close through rather than ask it again.
-    ASKED.store(true, Ordering::SeqCst);
+    past_the_question();
     quitting.exit(0);
     Ok(())
 }

@@ -8,6 +8,36 @@ has the downloads and the full commit lists.
 - Project settings → Smoke tests: a variable's value field is wide enough to read again; the
   name field had taken the whole row.
 
+## 0.22.0
+
+- **Schedules: run a workflow or a smoke test at a set time, or on a routine.** **Schedules**, in
+  the sidebar, lists them; **Schedule…** sits beside **Run…** on a workflow and on a test, and in
+  a workspace's menu. Once at a date and time, every so many minutes or hours, daily, on chosen
+  weekdays, monthly, or a cron expression, in this computer's local time, with the next times
+  shown as you fill it in. Schedules fire while Yardsort is open: each says whether a time missed
+  while it was closed runs once on opening or is skipped. A run that is still going is never
+  joined by a second. A notification tells you when a scheduled run fails or could not start,
+  or how every run ends. A smoke test file is approved when you schedule it in the app, and
+  waits for approval again if it changes; a workflow that runs a smoke test is scheduled only
+  when that test can run with nobody there. `ys schedule` does the same from a terminal. See
+  [Schedules](docs/guide/schedules.md).
+- **Only one copy of Yardsort runs on a profile.** Starting it again brings up the window it already
+  has. Two copies could get this computer signed out of Remote, since the server takes one sign-in
+  used twice for a stolen one. Development builds on profiles of their own are not affected.
+- **Sign in again, instead of turning Remote off and on.** A computer signed out at the server now
+  offers **Sign in again** in Settings → Remote, and stays the same computer, with its devices still
+  paired. Turning Remote off while signed out no longer leaves a second entry on your phone either.
+
+## 0.21.1
+
+- **Settings → Remote says when a phone cannot open your terminals, and fixes it.** After updating
+  from before 0.21.0, every terminal, new ones too, stays in the earlier background process until
+  nothing runs in it, and that process cannot share them. Nothing on this computer said so. Settings →
+  Remote now does, and can stop what is running and restart Yardsort, once it has named what stops and
+  you have said yes twice. See [Remote](docs/guide/remote.md#if-a-phone-cannot-open-any-terminal).
+- **The phone no longer says it is connecting when the computer has refused.** The message says that
+  new terminals are affected too and where to fix it, and the status line and its dot agree.
+
 ## 0.21.0
 
 - **Remote, still under development.** Settings → Remote lets a phone reach this computer's

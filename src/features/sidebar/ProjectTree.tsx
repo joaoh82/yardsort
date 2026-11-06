@@ -21,6 +21,7 @@ import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
 import { RunWorkflowDialog } from "@/features/workflows/RunWorkflowDialog";
 import { RunSmokeTestDialog } from "@/features/smoke/RunSmokeTestDialog";
+import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
 import { useSmokeTestsStore, waitingIn } from "@/stores/smokeTests";
 import { MemoryDialog } from "./MemoryDialog";
 import { OutcomesDialog } from "./OutcomesDialog";
@@ -272,6 +273,7 @@ function WorkspaceNode({
   // The Run dialog: `undefined` closed, `null` to choose a workflow, or the one to run.
   const [runWorkflow, setRunWorkflow] = useState<string | null | undefined>(undefined);
   const [runSmokeTest, setRunSmokeTest] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   // Smoke test runs waiting for approval here: a count on the row, and the card in the panel.
   const testRuns = useSmokeTestsStore((s) => s.runs);
   const waitingRuns = waitingIn(testRuns, workspace.id).length;
@@ -308,6 +310,7 @@ function WorkspaceNode({
           },
           { label: "Run workflow…", disabled, onSelect: () => setRunWorkflow(null) },
           { label: "Run smoke test…", disabled, onSelect: () => setRunSmokeTest(true) },
+          { label: "Schedule…", disabled, onSelect: () => setScheduling(true) },
           {
             // A new workspace on a new branch from this one's, its record going along: a handoff
             // that does not share the worktree.
@@ -496,6 +499,9 @@ function WorkspaceNode({
       )}
       {runSmokeTest && (
         <RunSmokeTestDialog workspaceId={workspace.id} onClose={() => setRunSmokeTest(false)} />
+      )}
+      {scheduling && (
+        <ScheduleDialog workspaceId={workspace.id} onClose={() => setScheduling(false)} />
       )}
     </li>
   );
