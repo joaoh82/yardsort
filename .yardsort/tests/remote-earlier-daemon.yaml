@@ -87,7 +87,8 @@ steps:
     program: sh
     args:
       - -c
-      - ys doctor --data-dir "{{ run.dir }}/profile" | grep -q "running, version 0.21"
+      # Any daemon running but the 0.20.2 one: this build's version moves with each release.
+      - ys doctor --data-dir "{{ run.dir }}/profile" | grep "daemon.*running, version" | grep -vq "version 0\.20\."
     timeout: 60s
   - id: app_back_with_no_notice
     action: run

@@ -12,41 +12,33 @@
 //! owner can read, where there is none). The webview never sees a credential: it sees whether
 //! Remote is on, the pairing code and QR code while one is shown, and the devices let in.
 //!
-//! Only these commands approve a device, and only the desktop calls them. Nothing in `ys`, and
-//! nothing an agent can reach, approves one.
+//! What a host does at its server is [`remote_host::account`], shared with a headless host; this
+//! is the window's side of it. Only these commands approve a device, and only the desktop calls
+//! them. Nothing in `ys`, and nothing an agent can reach, approves one.
 //!
 //! **A device asking is shown at once.** The relay tells the host on its link
 //! ([`HostNotice`]); the app then asks the server, as Settings → Remote does, and tells the window
 //! of the request only if the server has it waiting ([`RemotePairingRequested`]). The window
 //! offers the answer; it never answers by itself.
 
-use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use pty_host::{SessionInfo, SessionState};
-use remote_client::{Client, ClientError, Session, SIGN_IN_TIMEOUT};
-use remote_host::{Access, AccessError, AccessFuture, Connector, Serving};
+use remote_client::SIGN_IN_TIMEOUT;
+use remote_host::account::{self, Answer, Failure, Home, Remote, Request};
 use remote_proto::account::{DeviceKind, NewDevice, Secret};
-use remote_proto::pairing::{
-    GrantDecision, GrantState, GrantSummary, HostRegistration, OFFER_TTL_MS,
-};
-use remote_proto::relay::HostNotice;
-use remote_proto::{
-    DeviceId, ErrorCode, GrantId, HostId, Platform, ProjectGrant, ProjectId, Scope,
-};
+use remote_proto::{Platform, ProjectGrant, Scope};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tauri_specta::Event;
-use yardsort_core::remote::host::{
-    self, refresh_entry, CredentialStore, FileCredentials, LocalGrant,
-};
+use yardsort_core::remote::host::{self, CredentialStore, FileCredentials, LocalGrant};
 use yardsort_core::remote::serve::Context;
 use yardsort_core::remote::start::{Starter, Starting};
 use yardsort_core::remote::HostIdentity;
-use yardsort_core::settings::LeftHost;
-use yardsort_core::store::RemoteHostRow;
+use yardsort_core::settings::SettingsFile;
+use yardsort_core::store::Store;
 
 use crate::error::{IpcError, IpcResult};
 use crate::state::{blocking, AppState};
@@ -56,106 +48,53 @@ use crate::{quit, updates};
 pub const CREDENTIALS_DIR_VAR: &str = "YARDSORT_CREDENTIALS_DIR";
 const KEYRING_SERVICE: &str = "dev.yardsort.app";
 
-/// What viewing gives: everything a device can read, nothing it can type.
-const VIEW: [Scope; 4] = [
-    Scope::WorkspaceRead,
-    Scope::ActivityRead,
-    Scope::MemoryRead,
-    Scope::TerminalRead,
-];
-
-/// The host's session with its server, a sign-in waiting for the browser, and the link to the
-/// server's relay.
+/// The host's session with its server and its sign-in waiting for the browser.
 #[derive(Default)]
-pub struct Remote {
-    session: tokio::sync::Mutex<Option<Session>>,
+pub struct RemoteState {
+    account: Remote,
     signing_in: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-    connector: std::sync::Mutex<Option<Connector>>,
 }
 
-/// Keep a link to the relay, when Remote is on: at start, and once it is turned on. Needs a
-/// Tokio runtime: call it from async code.
-pub fn connect(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let Ok(Some(row)) = state.store.remote_host() else {
-        return;
-    };
-    let Ok(host) = HostId::new(row.host_id) else {
-        return;
-    };
-    let connector = Connector::start(
-        host,
-        Arc::new(AppAccess(app.clone())),
-        Arc::new(AppServing {
-            app: app.clone(),
-            git: OnceLock::new(),
-            starting: Arc::new(AppStarting(app.clone())),
-        }),
-    );
-    // An earlier one stops as it is dropped.
-    let earlier = match state.remote.connector.lock() {
-        Ok(mut slot) => slot.replace(connector),
-        Err(_) => None,
-    };
-    drop(earlier);
-}
-
-/// Close the link, and with it every device's channel.
-async fn disconnect(state: &AppState) {
-    let connector = state
-        .remote
-        .connector
-        .lock()
-        .ok()
-        .and_then(|mut c| c.take());
-    if let Some(connector) = connector {
-        connector.stop().await;
-    }
-}
-
-/// The host's access credential, from its session with the server.
-struct AppAccess(AppHandle);
-
-impl Access for AppAccess {
-    fn access(&self) -> AccessFuture<'_> {
-        Box::pin(async move {
-            let state = self.0.state::<AppState>();
-            let row = state
-                .store
-                .remote_host()
-                .map_err(|e| AccessError::Unavailable(e.to_string()))?
-                .ok_or_else(|| AccessError::SignedOut("Remote is off.".into()))?;
-            let mut session = state.remote.session.lock().await;
-            let session = ensure(&mut session, &row).await.map_err(access_error)?;
-            let secret = access(session).await.map_err(access_error)?;
-            Ok((session.client.clone(), secret))
-        })
-    }
-}
-
-fn access_error(error: IpcError) -> AccessError {
-    if error.code == "remote_signed_out" {
-        // The link's own line says what to do.
-        let why = error
-            .message
-            .strip_suffix(AGAIN)
-            .map_or(error.message.as_str(), str::trim_end);
-        AccessError::SignedOut(why.to_owned())
-    } else {
-        AccessError::Unavailable(error.message)
-    }
-}
-
-/// What a device's channel answers from: this app's records and terminals.
-struct AppServing {
+/// This app as a host: its records and terminals, and the window to tell of a device asking.
+struct AppHome {
     app: AppHandle,
     git: OnceLock<Option<yardsort_core::git::Git>>,
     starting: Arc<AppStarting>,
 }
 
-impl Serving for AppServing {
-    fn with(&self, f: &mut dyn FnMut(&Context<'_>)) {
-        let state = self.app.state::<AppState>();
+impl AppHome {
+    fn new(app: &AppHandle) -> Self {
+        Self {
+            app: app.clone(),
+            git: OnceLock::new(),
+            starting: Arc::new(AppStarting(app.clone())),
+        }
+    }
+
+    fn state(&self) -> &AppState {
+        self.app.state::<AppState>().inner()
+    }
+}
+
+impl Home for AppHome {
+    fn remote(&self) -> &Remote {
+        &self.state().remote.account
+    }
+
+    fn store(&self) -> &Store {
+        &self.state().store
+    }
+
+    fn settings(&self) -> &SettingsFile {
+        &self.state().settings
+    }
+
+    fn credentials(&self) -> account::Result<Box<dyn CredentialStore>> {
+        credentials()
+    }
+
+    fn serve(&self, f: &mut dyn FnMut(&Context<'_>)) {
+        let state = self.state();
         let Some(git) = self
             .git
             .get_or_init(|| yardsort_core::git::Git::new(&state.env()).ok())
@@ -165,7 +104,7 @@ impl Serving for AppServing {
         let Ok(Some(row)) = state.store.remote_host() else {
             return;
         };
-        let Ok(id) = HostId::new(row.host_id) else {
+        let Ok(id) = remote_proto::HostId::new(row.host_id) else {
             return;
         };
         f(&Context {
@@ -178,16 +117,11 @@ impl Serving for AppServing {
         });
     }
 
-    fn told(&self, notice: HostNotice) {
-        let HostNotice::PairingRequested { grant } = notice else {
-            return;
-        };
-        let app = self.app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(error) = asked(&app, &grant).await {
-                eprintln!("remote: a pairing request: {}", error.message);
-            }
-        });
+    fn asked(&self, request: Request) {
+        let _ = RemotePairingRequested {
+            request: request.into(),
+        }
+        .emit(&self.app);
     }
 }
 
@@ -260,41 +194,17 @@ impl Starting for AppStarting {
     }
 }
 
+/// Keep a link to the relay, when Remote is on: at start, and once it is turned on. Needs a
+/// Tokio runtime: call it from async code.
+pub fn connect(app: &AppHandle) {
+    account::connect(&Arc::new(AppHome::new(app)));
+}
+
 /// A device asks to be let in: shown in the window wherever it is, until answered or lapsed.
 #[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]
 pub struct RemotePairingRequested {
     pub request: RemoteRequest,
-}
-
-/// The relay said `grant` asks: tell the window, if the server has it waiting. The notice is only
-/// a hint; what is shown is what the server answers this host.
-async fn asked(app: &AppHandle, grant: &GrantId) -> IpcResult<()> {
-    let state = app.state::<AppState>();
-    let row = enabled(&state)?;
-    let waiting = host_grants(&state, &row)
-        .await?
-        .into_iter()
-        .find(|g| g.id == *grant && g.state == GrantState::Pending);
-    if let Some(waiting) = waiting {
-        let _ = RemotePairingRequested {
-            request: request(waiting),
-        }
-        .emit(app);
-    }
-    Ok(())
-}
-
-fn request(grant: GrantSummary) -> RemoteRequest {
-    RemoteRequest {
-        wants_control: grant.requested.contains(&Scope::TerminalControl),
-        grant_id: grant.id.to_string(),
-        device_name: grant.device_name,
-        expires_in_ms: grant
-            .expires_in_ms
-            .unwrap_or_default()
-            .min(OFFER_TTL_MS as u64) as u32,
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -360,12 +270,8 @@ pub enum RemoteLink {
     },
 }
 
-fn link(state: &AppState) -> RemoteLink {
-    let connector = state.remote.connector.lock();
-    let Some(status) = connector
-        .ok()
-        .and_then(|c| c.as_ref().map(Connector::status))
-    else {
+fn link(app: &AppHandle) -> RemoteLink {
+    let Some(status) = account::link(&AppHome::new(app)) else {
         return RemoteLink::Off;
     };
     match status {
@@ -435,35 +341,16 @@ pub enum RemoteAnswer {
     },
 }
 
-fn failed(error: ClientError) -> IpcError {
-    let code = match error.code() {
-        Some(ErrorCode::Unauthenticated) => "remote_signed_out",
-        Some(ErrorCode::RateLimited) => "remote_rate_limited",
-        Some(_) => "remote_refused",
-        None => match error {
-            ClientError::Invalid(_) => "remote_address",
-            ClientError::TimedOut => "remote_timed_out",
-            ClientError::NotKept(_) => "remote_credentials",
-            _ => "remote_unreachable",
-        },
-    };
-    IpcError::new(code, error.to_string())
-}
-
 /// What to do once signed out at the server.
 const AGAIN: &str = "Sign in again in Settings → Remote.";
 
-fn signed_out(why: &str) -> IpcError {
-    IpcError::new("remote_signed_out", format!("{why} {AGAIN}"))
-}
-
-/// A request made with this computer's own credential. Refused, it was signed out at the server;
-/// the server's own words ("Sign in again.") are for any client.
-fn refused_here(error: ClientError) -> IpcError {
-    if error.code() == Some(ErrorCode::Unauthenticated) {
-        signed_out("This computer was signed out at the server.")
+/// A failure as the window shows it: signed out in the host's own words, it adds where to sign in
+/// again. The server's own refusal already ends "Sign in again.", and is shown as it is.
+fn ipc(failure: Failure) -> IpcError {
+    if failure.needs_where_to_sign_in() {
+        IpcError::new(failure.code, format!("{} {AGAIN}", failure.message))
     } else {
-        failed(error)
+        IpcError::new(failure.code, failure.message)
     }
 }
 
@@ -472,10 +359,10 @@ fn store_failed(error: impl std::fmt::Display) -> IpcError {
 }
 
 /// Where the host's credential is kept.
-fn credentials() -> IpcResult<Box<dyn CredentialStore>> {
+fn credentials() -> account::Result<Box<dyn CredentialStore>> {
     match std::env::var_os(CREDENTIALS_DIR_VAR) {
         Some(dir) => Ok(Box::new(
-            FileCredentials::new(dir).map_err(|e| IpcError::new("remote_credentials", e))?,
+            FileCredentials::new(dir).map_err(|e| Failure::new("remote_credentials", e))?,
         )),
         None => Ok(Box::new(Keyring)),
     }
@@ -516,28 +403,9 @@ impl CredentialStore for Keyring {
     }
 }
 
-fn keep_refresh(device: &str, refresh: &Secret) -> Result<(), String> {
-    credentials()
-        .map_err(|e| e.message)?
-        .set(&refresh_entry(device), refresh)
-}
-
-fn forget_refresh(device: &str) -> Result<(), String> {
-    credentials()
-        .map_err(|e| e.message)?
-        .delete(&refresh_entry(device))
-}
-
-/// An access credential, keeping any new refresh credential under the session's device.
-async fn access(session: &mut Session) -> IpcResult<Secret> {
-    let device = session.device.clone();
-    session
-        .access(|refresh| keep_refresh(device.as_str(), refresh))
-        .await
-        .map_err(refused_here)
-}
-
-fn status(state: &AppState) -> IpcResult<RemoteStatus> {
+fn status(app: &AppHandle) -> IpcResult<RemoteStatus> {
+    let state = app.state::<AppState>();
+    let state = state.inner();
     let last = state.settings.get().remote;
     let host = state.store.remote_host().map_err(store_failed)?;
     let devices = match &host {
@@ -553,7 +421,7 @@ fn status(state: &AppState) -> IpcResult<RemoteStatus> {
             server_url: h.server_url,
             name: h.name,
             since: h.enabled_at as f64,
-            link: link(state),
+            link: link(app),
         }),
         devices,
         signing_in: state
@@ -606,10 +474,26 @@ fn device(grant: LocalGrant) -> RemoteDevice {
     }
 }
 
+impl From<Request> for RemoteRequest {
+    fn from(request: Request) -> Self {
+        Self {
+            grant_id: request.grant_id,
+            device_name: request.device_name,
+            wants_control: request.wants_control,
+            expires_in_ms: request.expires_in_ms,
+        }
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_status(app: AppHandle) -> IpcResult<RemoteStatus> {
-    blocking(app, status).await
+    status_of(app).await
+}
+
+async fn status_of(app: AppHandle) -> IpcResult<RemoteStatus> {
+    let handle = app.clone();
+    blocking(app, move |_| status(&handle)).await
 }
 
 /// Turn Remote on with the server at `server_url`, as `name`: sign in through the browser, then
@@ -623,16 +507,11 @@ pub async fn remote_enable(
     name: String,
 ) -> IpcResult<RemoteStatus> {
     let name = name.trim().to_owned();
-    // Checked before signing in, so a name the server would refuse leaves no device behind.
-    HostRegistration {
-        host: None,
-        name: name.clone(),
-    }
-    .validate()
-    .map_err(|e| IpcError::new("remote_name", e.message))?;
-    let client = Client::new(&server_url).map_err(failed)?;
-    let server = client.describe().await.map_err(failed)?;
-    let sign_in = client.begin_sign_in().await.map_err(failed)?;
+    let (client, server) = account::prepare(&server_url, &name).await.map_err(ipc)?;
+    let sign_in = client
+        .begin_sign_in()
+        .await
+        .map_err(|e| ipc(account::failed(e)))?;
     let (cancel, cancelled) = tokio::sync::oneshot::channel();
     {
         let state = app.state::<AppState>();
@@ -659,7 +538,7 @@ pub async fn remote_enable(
             platform: Platform::current(),
         };
         tokio::select! {
-            credentials = sign_in.finish(&client, device, SIGN_IN_TIMEOUT) => credentials.map_err(failed),
+            credentials = sign_in.finish(&client, device, SIGN_IN_TIMEOUT) => credentials.map_err(|e| ipc(account::failed(e))),
             _ = cancelled => Err(IpcError::new("remote_cancelled", "Signing in was cancelled.")),
         }
     }
@@ -668,77 +547,16 @@ pub async fn remote_enable(
         signing_in.take();
     }
     let signed_in = finished?;
-    // Kept before anything else: from here on, it is the only way back in.
-    keep_refresh(signed_in.device.as_str(), &signed_in.refresh)
-        .map_err(|e| IpcError::new("remote_credentials", e))?;
-    let mut session = Session::new(client.clone(), signed_in);
-    let access = access(&mut session).await?;
-
-    let state = app.state::<AppState>();
-    let earlier = state.store.remote_host().map_err(store_failed)?;
-    let left = state.settings.get().remote.left_host;
-    let was = host_before(earlier.as_ref(), left.as_ref(), server.server.as_str());
-    let again = was.as_ref().map(|w| w.host.clone());
-    let registration = |host| HostRegistration {
-        host,
-        name: name.clone(),
-    };
-    let registered = match client
-        .register_host(&access, &registration(again.clone()))
-        .await
-    {
-        // The host was removed meanwhile, from here or elsewhere: start over as a new one.
-        Err(e) if again.is_some() && e.code() == Some(ErrorCode::NotFound) => {
-            client.register_host(&access, &registration(None)).await
-        }
-        other => other,
-    };
-    let registered = match registered {
-        Ok(registered) => registered,
-        Err(error) => {
-            // Signed in, but not a host: sign that device out again rather than leave it.
-            let _ = client.revoke_device(&access, &session.device).await;
-            let _ = forget_refresh(session.device.as_str());
-            return Err(failed(error));
-        }
-    };
-    if let Some(was) = &was {
-        // The device this computer was signed in as before is signed out: it has no use now.
-        if was.device != session.device {
-            let _ = client.revoke_device(&access, &was.device).await;
-        }
-        // Turned off, it let its devices go, though the server could not be told then.
-        if was.turned_off && was.host == registered.id {
-            if let Ok(page) = client.host_grants(&access, &was.host).await {
-                for grant in page.grants {
-                    let _ = client.revoke_grant(&access, &grant.id).await;
-                }
-            }
-        }
-    }
-    let row = RemoteHostRow {
-        server_url: client.address().as_str().trim_end_matches('/').to_owned(),
-        server_id: server.server.to_string(),
-        host_id: registered.id.to_string(),
-        device_id: session.device.to_string(),
-        name: registered.name,
-        enabled_at: now_ms(),
-    };
-    state.store.set_remote_host(&row).map_err(store_failed)?;
-    if let Some(earlier) = earlier.filter(|h| h.device_id != row.device_id) {
-        let _ = forget_refresh(&earlier.device_id);
-    }
-    // Only a convenience for next time: Remote is on whether or not it could be written.
-    let _ = state.settings.update(|s| {
-        s.remote = crate::settings::RemoteSettings {
-            server_url: Some(row.server_url.clone()),
-            name: Some(row.name.clone()),
-            left_host: None,
-        }
-    });
-    *state.remote.session.lock().await = Some(session);
-    connect(&app);
-    blocking(app, status).await
+    account::enable(
+        &Arc::new(AppHome::new(&app)),
+        client,
+        &server,
+        &name,
+        signed_in,
+    )
+    .await
+    .map_err(ipc)?;
+    status_of(app).await
 }
 
 /// Stop waiting for the browser.
@@ -750,7 +568,7 @@ pub async fn remote_cancel(app: AppHandle) -> IpcResult<RemoteStatus> {
             let _ = cancel.send(());
         }
     }
-    blocking(app, status).await
+    status_of(app).await
 }
 
 /// Turn Remote off: remove this host at the server and sign its device out there, then forget
@@ -758,75 +576,16 @@ pub async fn remote_cancel(app: AppHandle) -> IpcResult<RemoteStatus> {
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_disable(app: AppHandle) -> IpcResult<RemoteStatus> {
-    let state = app.state::<AppState>();
-    let Some(row) = state.store.remote_host().map_err(store_failed)? else {
-        return blocking(app, status).await;
-    };
-    // Every device is let go of first: nothing comes through while Remote goes off.
-    disconnect(&state).await;
-    let at_server = async {
-        let mut session = state.remote.session.lock().await;
-        let session = ensure(&mut session, &row).await?;
-        let access = access(session).await?;
-        let host = HostId::new(row.host_id.clone()).map_err(store_failed)?;
-        session
-            .client
-            .remove_host(&access, &host)
-            .await
-            .map_err(refused_here)?;
-        session
-            .client
-            .revoke_device(&access, &session.device)
-            .await
-            .map_err(refused_here)
-    }
-    .await;
-    *state.remote.session.lock().await = None;
-    state.store.forget_remote_host().map_err(store_failed)?;
-    forget_refresh(&row.device_id).map_err(|e| IpcError::new("remote_credentials", e))?;
-    // Not removed there, so remembered here: turned on again, it picks up where this leaves it.
-    let left = at_server.is_err().then(|| LeftHost {
-        server_id: row.server_id.clone(),
-        host_id: row.host_id.clone(),
-        device_id: row.device_id.clone(),
-    });
-    let _ = state.settings.update(|s| s.remote.left_host = left);
-    if let Err(error) = at_server {
-        // Signed out at the server, there is nothing to tell anyone: it is off, and that is all.
-        if error.code != "remote_signed_out" {
-            return Err(IpcError::new(
-                "remote_off_here_only",
-                format!(
-                    "Remote is off on this computer, but the server could not be told: {}. \
-                     Sign this computer out from another device if it still shows there.",
-                    error.message
-                ),
-            ));
-        }
-    }
-    blocking(app, status).await
+    account::disable(&AppHome::new(&app)).await.map_err(ipc)?;
+    status_of(app).await
 }
 
 /// Make a pairing offer: a code to type, and a QR code, good once for five minutes.
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_pair(app: AppHandle) -> IpcResult<RemotePairing> {
-    let state = app.state::<AppState>();
-    let row = enabled(&state)?;
-    let mut session = state.remote.session.lock().await;
-    let session = ensure(&mut session, &row).await?;
-    let access = access(session).await?;
-    let host = HostId::new(row.host_id.clone()).map_err(store_failed)?;
-    let offer = session
-        .client
-        .offer(&access, &host)
-        .await
-        .map_err(refused_here)?;
-    let mut link = url::Url::parse("yardsort://pair").map_err(store_failed)?;
-    link.query_pairs_mut()
-        .append_pair("server", &row.server_url)
-        .append_pair("secret", offer.secret.expose());
-    let qr = qrcode::QrCode::new(link.as_str().as_bytes())
+    let offer = account::pair(&AppHome::new(&app)).await.map_err(ipc)?;
+    let qr = qrcode::QrCode::new(offer.link.as_bytes())
         .map_err(|e| IpcError::internal(e.to_string()))?;
     let qr_svg = qr
         .render::<qrcode::render::svg::Color<'_>>()
@@ -834,9 +593,9 @@ pub async fn remote_pair(app: AppHandle) -> IpcResult<RemotePairing> {
         .quiet_zone(true)
         .build();
     Ok(RemotePairing {
-        code: offer.code.expose().to_owned(),
+        code: offer.code,
         qr_svg,
-        expires_in_ms: offer.expires_in_ms.min(OFFER_TTL_MS as u64) as u32,
+        expires_in_ms: offer.expires_in_ms,
     })
 }
 
@@ -845,26 +604,15 @@ pub async fn remote_pair(app: AppHandle) -> IpcResult<RemotePairing> {
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_requests(app: AppHandle) -> IpcResult<RemoteRequests> {
-    let state = app.state::<AppState>();
-    let row = enabled(&state)?;
-    let grants = host_grants(&state, &row).await?;
-    let in_force: Vec<String> = grants
-        .iter()
-        .filter(|g| g.state == GrantState::Approved)
-        .map(|g| g.id.to_string())
-        .collect();
-    state
-        .store
-        .retain_remote_grants(&in_force)
-        .map_err(store_failed)?;
-    let requests = grants
+    let requests = account::requests(&AppHome::new(&app))
+        .await
+        .map_err(ipc)?
         .into_iter()
-        .filter(|g| g.state == GrantState::Pending)
-        .map(request)
+        .map(RemoteRequest::from)
         .collect();
     Ok(RemoteRequests {
         requests,
-        status: blocking(app.clone(), status).await?,
+        status: status_of(app).await?,
     })
 }
 
@@ -877,71 +625,14 @@ pub async fn remote_answer(
     grant_id: String,
     answer: RemoteAnswer,
 ) -> IpcResult<RemoteStatus> {
-    let state = app.state::<AppState>();
-    let row = enabled(&state)?;
-    let id =
-        GrantId::new(grant_id).map_err(|_| IpcError::new("remote_refused", "No such request."))?;
-    let asked = host_grants(&state, &row)
-        .await?
-        .into_iter()
-        .find(|g| g.id == id && g.state == GrantState::Pending)
-        .ok_or_else(|| {
-            IpcError::new(
-                "remote_refused",
-                "That device is no longer waiting. Show a new code to pair it.",
-            )
-        })?;
-    let decision = match answer {
-        RemoteAnswer::Deny => None,
-        RemoteAnswer::Allow { control, projects } => {
-            let mut offered: BTreeSet<Scope> = VIEW.into();
-            if control {
-                offered.insert(Scope::TerminalControl);
-            }
-            let scopes: BTreeSet<Scope> = asked.requested.intersection(&offered).copied().collect();
-            if scopes.is_empty() {
-                return Err(IpcError::new(
-                    "remote_refused",
-                    "That device asked for nothing this computer gives.",
-                ));
-            }
-            let projects = match projects {
-                None => ProjectGrant::All,
-                Some(ids) => ProjectGrant::Only(
-                    ids.into_iter()
-                        .map(ProjectId::new)
-                        .collect::<Result<_, _>>()
-                        .map_err(|_| IpcError::new("remote_refused", "Not a project."))?,
-                ),
-            };
-            Some(GrantDecision { scopes, projects })
-        }
+    let answer = match answer {
+        RemoteAnswer::Deny => Answer::Deny,
+        RemoteAnswer::Allow { control, projects } => Answer::Allow { control, projects },
     };
-    let decided = {
-        let mut session = state.remote.session.lock().await;
-        let session = ensure(&mut session, &row).await?;
-        let access = access(session).await?;
-        session
-            .client
-            .decide(&access, &id, decision.as_ref())
-            .await
-            .map_err(refused_here)?
-    };
-    if let (Some(decision), GrantState::Approved) = (&decision, decided.state) {
-        // What this host's person chose, as they chose it: the server's copy is not trusted for
-        // what it says was given.
-        host::keep_approved(
-            &state.store,
-            &decided.id,
-            &decided.device,
-            &decided.device_name,
-            &decision.scopes,
-            &decision.projects,
-            now_ms(),
-        )
-        .map_err(store_failed)?;
-    }
-    blocking(app, status).await
+    account::answer(&AppHome::new(&app), grant_id, answer)
+        .await
+        .map_err(ipc)?;
+    status_of(app).await
 }
 
 /// Stop everything in a daemon that cannot share its terminals, and start Yardsort again, so that
@@ -970,121 +661,16 @@ pub async fn remote_replace_daemon(app: AppHandle) -> IpcResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub async fn remote_revoke(app: AppHandle, grant_id: String) -> IpcResult<RemoteStatus> {
-    let state = app.state::<AppState>();
-    let row = enabled(&state)?;
-    state
-        .store
-        .drop_remote_grant(&grant_id)
-        .map_err(store_failed)?;
-    // Its channel closes now, not at the next check.
-    if let Some(connector) = state
-        .remote
-        .connector
-        .lock()
-        .ok()
-        .as_deref()
-        .and_then(Option::as_ref)
-    {
-        connector.recheck();
-    }
-    let id =
-        GrantId::new(grant_id).map_err(|_| IpcError::new("remote_refused", "No such device."))?;
-    {
-        let mut session = state.remote.session.lock().await;
-        let session = ensure(&mut session, &row).await?;
-        let access = access(session).await?;
-        session
-            .client
-            .revoke_grant(&access, &id)
-            .await
-            .map_err(refused_here)?;
-    }
-    blocking(app, status).await
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
-        .unwrap_or(0)
-}
-
-fn enabled(state: &AppState) -> IpcResult<RemoteHostRow> {
-    state
-        .store
-        .remote_host()
-        .map_err(store_failed)?
-        .ok_or_else(|| IpcError::new("remote_off", "Remote is off on this computer."))
-}
-
-async fn host_grants(state: &AppState, row: &RemoteHostRow) -> IpcResult<Vec<GrantSummary>> {
-    let mut session = state.remote.session.lock().await;
-    let session = ensure(&mut session, row).await?;
-    let access = access(session).await?;
-    let host = HostId::new(row.host_id.clone()).map_err(store_failed)?;
-    Ok(session
-        .client
-        .host_grants(&access, &host)
+    account::revoke(&AppHome::new(&app), grant_id)
         .await
-        .map_err(refused_here)?
-        .grants)
-}
-
-/// The host this computer already is at a server, about to be signed in to.
-#[derive(Debug, PartialEq, Eq)]
-struct HostBefore {
-    host: HostId,
-    device: DeviceId,
-    /// Turned off since, so its devices were let go here, whatever the server still has.
-    turned_off: bool,
-}
-
-fn host_before(
-    earlier: Option<&RemoteHostRow>,
-    left: Option<&LeftHost>,
-    server: &str,
-) -> Option<HostBefore> {
-    let was = |host: &str, device: &str, turned_off| {
-        Some(HostBefore {
-            host: HostId::new(host.to_owned()).ok()?,
-            device: DeviceId::new(device.to_owned()).ok()?,
-            turned_off,
-        })
-    };
-    match (earlier, left) {
-        (Some(on), _) if on.server_id == server => was(&on.host_id, &on.device_id, false),
-        (None, Some(left)) if left.server_id == server => was(&left.host_id, &left.device_id, true),
-        _ => None,
-    }
-}
-
-/// The session, resumed from the kept refresh credential after a restart.
-async fn ensure<'a>(
-    slot: &'a mut Option<Session>,
-    row: &RemoteHostRow,
-) -> IpcResult<&'a mut Session> {
-    if slot.is_none() {
-        let refresh = credentials()?
-            .get(&refresh_entry(&row.device_id))
-            .map_err(|e| IpcError::new("remote_credentials", e))?
-            .ok_or_else(|| signed_out("This computer's sign-in is missing."))?;
-        let client = Client::new(&row.server_url).map_err(failed)?;
-        let session = Session::resume(client, &refresh)
-            .await
-            .map_err(refused_here)?;
-        let session = slot.insert(session);
-        // The kept one is spent now. Should this fail, the session carries on with the new one
-        // until the app quits, and the error says why the next start will be signed out.
-        keep_refresh(&row.device_id, session.refresh_credential())
-            .map_err(|e| IpcError::new("remote_credentials", e))?;
-        return Ok(session);
-    }
-    Ok(slot.as_mut().expect("just filled"))
+        .map_err(ipc)?;
+    status_of(app).await
 }
 
 #[cfg(test)]
 mod tests {
-    use remote_proto::RemoteError;
+    use remote_client::ClientError;
+    use remote_proto::{ErrorCode, RemoteError};
 
     use super::*;
 
@@ -1126,76 +712,24 @@ mod tests {
         );
     }
 
-    const HOST: &str = "7f3c1a2b-0d4e-4f5a-8b6c-1d2e3f4a5b6c";
-    const DEVICE: &str = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
-
-    fn on_at(server: &str) -> RemoteHostRow {
-        RemoteHostRow {
-            server_url: "https://remote.example.com".into(),
-            server_id: server.into(),
-            host_id: HOST.into(),
-            device_id: DEVICE.into(),
-            name: "Workstation".into(),
-            enabled_at: 1,
-        }
-    }
-
-    fn left_at(server: &str) -> LeftHost {
-        LeftHost {
-            server_id: server.into(),
-            host_id: HOST.into(),
-            device_id: DEVICE.into(),
-        }
-    }
-
-    /// Signed in again at the same server, a computer is the host it was: a second one beside it
-    /// would mean pairing again, and an entry on the phone that never comes back.
-    #[test]
-    fn signing_in_again_is_the_same_host_and_its_devices_stay_only_if_it_stayed_on() {
-        let host = HostId::new(HOST.to_owned()).unwrap();
-        let device = DeviceId::new(DEVICE.to_owned()).unwrap();
-        let before = |turned_off| {
-            Some(HostBefore {
-                host: host.clone(),
-                device: device.clone(),
-                turned_off,
-            })
-        };
-        // Still on, and signed out: it keeps its devices.
-        assert_eq!(host_before(Some(&on_at("srv")), None, "srv"), before(false));
-        // Turned off with the server not told: the same host, with its devices let go.
-        assert_eq!(
-            host_before(None, Some(&left_at("srv")), "srv"),
-            before(true)
-        );
-        // Still on says more than what was left behind.
-        assert_eq!(
-            host_before(Some(&on_at("srv")), Some(&left_at("srv")), "srv"),
-            before(false)
-        );
-        // Another server has never heard of it.
-        assert_eq!(host_before(Some(&on_at("srv")), None, "other"), None);
-        assert_eq!(host_before(None, Some(&left_at("srv")), "other"), None);
-        assert_eq!(host_before(None, None, "srv"), None);
-    }
-
+    /// Signed out at the server, the window adds where to sign in again to the host's own words;
+    /// the link's own line, which the account module makes, says only why.
     #[test]
     fn a_refusal_of_this_computers_credential_says_it_was_signed_out() {
         let refused = |code| ClientError::Remote(RemoteError::new(code, "Sign in again."));
-        let error = refused_here(refused(ErrorCode::Unauthenticated));
+        let error = ipc(account::refused_here(refused(ErrorCode::Unauthenticated)));
         assert_eq!(error.code, "remote_signed_out");
         assert_eq!(
             error.message,
             "This computer was signed out at the server. Sign in again in Settings → Remote."
         );
-        // The link's own line adds what to do.
-        assert!(matches!(
-            access_error(error),
-            AccessError::SignedOut(why) if why == "This computer was signed out at the server."
-        ));
         assert_eq!(
-            refused_here(refused(ErrorCode::NotFound)).code,
+            ipc(account::refused_here(refused(ErrorCode::NotFound))).code,
             "remote_refused"
         );
+        // Refused while signing in, or registering: the server's words, said once.
+        let theirs = ipc(account::failed(refused(ErrorCode::Unauthenticated)));
+        assert_eq!(theirs.code, "remote_signed_out");
+        assert_eq!(theirs.message, "Sign in again.");
     }
 }
