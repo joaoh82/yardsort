@@ -20,8 +20,10 @@ import TerminalScreen from "../../src/app/terminal";
 import Pair from "../../src/app/pair";
 import Servers from "../../src/app/servers";
 import Settings from "../../src/app/settings";
+import StartWork from "../../src/app/start";
 import WorkspaceScreen from "../../src/app/workspace";
 import { Accounts, type Browser, type Env } from "../../src/lib/accounts";
+import type { PickImage } from "../../src/lib/attach";
 import { AppProvider } from "../../src/lib/context";
 import { Incoming } from "../../src/lib/pairing";
 import { MemoryVault } from "../lib/memory-vault";
@@ -37,15 +39,17 @@ async function start({
   browser = signedInBrowser,
   env = envFor(server),
   incoming = new Incoming(),
+  pickImage = async () => null,
 }: {
   server?: FakeServer;
   vault?: MemoryVault;
   browser?: Browser;
   env?: Env;
   incoming?: Incoming;
+  pickImage?: PickImage;
 } = {}) {
   const accounts = new Accounts(env, vault);
-  const app = { accounts, browser, deviceName: "iPhone", incoming };
+  const app = { accounts, browser, deviceName: "iPhone", incoming, pickImage };
   void accounts.load();
   await renderRouter(
     {
@@ -66,6 +70,7 @@ async function start({
       workspace: WorkspaceScreen,
       memory: MemoryScreen,
       terminal: TerminalScreen,
+      start: StartWork,
     },
     { initialUrl: "/" },
   );
@@ -847,8 +852,16 @@ describe("Pairing", () => {
 
 describe("A computer", () => {
   /** Signed in, with the computer letting this phone in, and something to keep things on. */
-  async function paired(shelf = new MemoryVault(), server = new FakeServer()) {
-    const app = await start({ server, env: { ...envFor(server), shelf } });
+  async function paired(
+    shelf = new MemoryVault(),
+    server = new FakeServer(),
+    pickImage?: PickImage,
+  ) {
+    const app = await start({
+      server,
+      env: { ...envFor(server), shelf },
+      ...(pickImage ? { pickImage } : {}),
+    });
     await signIn();
     await fireEvent.press(await screen.findByRole("button", { name: "Pair a computer" }));
     await fireEvent.changeText(await screen.findByLabelText("Pairing code"), "ABCD2345");
@@ -1449,6 +1462,8 @@ describe("A computer", () => {
         host: "host-work",
         terminal: "terminal-1",
         label: "claude",
+        // Its workspace's id, for a picture to go to: an id, like the others.
+        workspace: "workspace-1",
       });
     });
 
@@ -1861,6 +1876,133 @@ describe("A computer", () => {
       await waitFor(() => expect(shelf.kept.size).toBeGreaterThan(0));
       await act(async () => accounts.signOut());
       await waitFor(() => expect(shelf.kept.size).toBe(0));
+    });
+  });
+
+  describe("starting work", () => {
+    const START = [
+      "harness.list",
+      "workspace.start",
+      "session.start",
+      "upload.begin",
+      "upload.chunk",
+    ];
+    const able = () => {
+      const server = new FakeServer();
+      server.computer.capabilities = START;
+      return server;
+    };
+    const asked = (server: FakeServer, op: string) =>
+      server.operations.filter((o) => o.op === op).map((o) => o.params);
+
+    test("a computer from before offers nothing to start", async () => {
+      const { server } = await paired();
+      await open();
+      expect(screen.queryByRole("button", { name: "New workspace" })).toBeNull();
+      expect(asked(server, "harness.list")).toEqual([]);
+    });
+
+    test("a new workspace starts with the agent and message chosen, and opens its terminal", async () => {
+      const { server } = await paired(new MemoryVault(), able());
+      await open();
+      await fireEvent.press(screen.getByRole("button", { name: "New workspace" }));
+      // One project: it is the one. The computer's default agent is chosen until another is.
+      const checked = (name: string) =>
+        screen.getByRole("radio", { name }).props.accessibilityState as { checked: boolean };
+      await screen.findByRole("radio", { name: "demo" });
+      expect(checked("demo")).toMatchObject({ checked: true });
+      expect(checked("Claude Code")).toMatchObject({ checked: true });
+      expect(checked("Codex")).toMatchObject({ checked: false });
+      const go = screen.getByRole("button", { name: "Start workspace" });
+      expect(go).toBeDisabled();
+      await fireEvent.press(screen.getByRole("radio", { name: "Codex" }));
+      await fireEvent.changeText(
+        screen.getByLabelText("What should it do?"),
+        "Fix the spacing on small screens",
+      );
+      await fireEvent.press(screen.getByRole("button", { name: "Start workspace" }));
+      await screen.findByTestId("terminal");
+      expect(asked(server, "workspace.start")).toEqual([
+        { project: "project-1", prompt: "Fix the spacing on small screens", harness: "codex" },
+      ]);
+    });
+
+    test("a refusal says why, and nothing opens", async () => {
+      const server = able();
+      server.computer.refuses.set("workspace.start", "That agent is not one it can start.");
+      await paired(new MemoryVault(), server);
+      await open();
+      await fireEvent.press(screen.getByRole("button", { name: "New workspace" }));
+      await fireEvent.changeText(await screen.findByLabelText("What should it do?"), "Do it");
+      await fireEvent.press(screen.getByRole("button", { name: "Start workspace" }));
+      expect(await screen.findByText("That agent is not one it can start.")).toBeTruthy();
+      expect(screen.queryByTestId("terminal")).toBeNull();
+      expect(asked(server, "workspace.start")).toHaveLength(1);
+    });
+
+    test("another agent joins a workspace, with no message unless one is given", async () => {
+      const { server } = await paired(new MemoryVault(), able());
+      await fireEvent.press(await open());
+      await fireEvent.press(await screen.findByRole("button", { name: "New agent" }));
+      expect(await screen.findByText(/^Another agent in fix-login/)).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Start agent" }));
+      await screen.findByTestId("terminal");
+      expect(asked(server, "session.start")).toEqual([
+        { workspace: "workspace-1", harness: "claude" },
+      ]);
+    });
+
+    describe("a picture", () => {
+      const told = () =>
+        (jest.requireMock("react-native-webview") as { told: string[] }).told as string[];
+
+      async function inControl(server: FakeServer, pickImage: PickImage) {
+        told().length = 0;
+        await paired(new MemoryVault(), server, pickImage);
+        await fireEvent.press(await open());
+        await fireEvent.press(
+          await screen.findByRole("button", { name: "The login page times out" }),
+        );
+        await act(async () =>
+          fireEvent(screen.getByTestId("terminal"), "message", {
+            nativeEvent: { data: JSON.stringify({ t: "ready" }) },
+          }),
+        );
+        await fireEvent.press(await screen.findByRole("button", { name: "Take control" }));
+        await screen.findByTestId("composer");
+      }
+
+      test("goes to the computer, and its path there is pasted, quoted, with no Enter", async () => {
+        const server = able();
+        const photo = Uint8Array.from({ length: 100_000 }, (_, n) => n % 251);
+        await inControl(server, async () => ({ name: "IMG_4141.jpg", bytes: photo }));
+        await fireEvent.press(screen.getByRole("button", { name: "Give it a picture" }));
+        await waitFor(() => expect(server.inputs).toHaveLength(1));
+        expect(server.uploads).toHaveLength(1);
+        expect(server.uploads[0]).toMatchObject({
+          workspace: "workspace-1",
+          name: "IMG_4141.jpg",
+          size: photo.length,
+        });
+        expect(Uint8Array.from(server.uploads[0]!.bytes)).toEqual(photo);
+        expect(server.inputs).toEqual([
+          { data: "/home/ana/My\\ Data/uploads/workspace-1/1-photo.jpg ", paste: true },
+        ]);
+      });
+
+      test("none chosen sends nothing", async () => {
+        const server = able();
+        await inControl(server, async () => null);
+        await fireEvent.press(screen.getByRole("button", { name: "Give it a picture" }));
+        await act(async () => {});
+        expect(asked(server, "upload.begin")).toEqual([]);
+        expect(server.inputs).toEqual([]);
+      });
+
+      test("is not offered by a computer that cannot take one", async () => {
+        await inControl(new FakeServer(), async () => null);
+        expect(screen.queryByRole("button", { name: "Give it a picture" })).toBeNull();
+      });
     });
   });
 });

@@ -17,6 +17,7 @@ import {
   array,
   bool,
   byOrder,
+  chars,
   DecodeError,
   type Decoder,
   hasControl,
@@ -45,9 +46,13 @@ import {
   MAX_LINK,
   MAX_NOTE,
   MAX_PAGE,
+  MAX_PROMPT,
   MAX_TASKS,
   MAX_TERMINALS,
   MAX_TEXT,
+  MAX_UPLOAD,
+  MAX_UPLOAD_CHUNK,
+  MAX_UPLOAD_NAME,
   PROTOCOL_MAJOR,
   PROTOCOL_MINOR,
 } from "./limits.ts";
@@ -767,6 +772,25 @@ export interface MemoryListParams {
   limit: number | null;
 }
 
+/** A new workspace, named after its first message, with an agent given it. Minor 5. */
+export interface WorkspaceStartParams {
+  project: ProjectId;
+  /** Not empty, at most {@link MAX_PROMPT} bytes. */
+  prompt: string;
+  /** A harness from `harness.list`. Without one, the computer's default. */
+  harness?: string;
+}
+
+/** Another agent in a workspace, with a first message or none. Minor 5. */
+export interface SessionStartParams {
+  workspace: WorkspaceId;
+  harness?: string;
+  prompt?: string;
+}
+
+/** An upload under way, numbered by the computer within its channel. */
+export type UploadId = number;
+
 export interface LeaseRef {
   terminal: TerminalId;
   lease: LeaseId;
@@ -795,7 +819,12 @@ export type Operation =
     }
   | { op: "terminal.resize"; params: LeaseRef & { size: TermSize } }
   | { op: "activity.subscribe"; params: ActivitySubscribeParams }
-  | { op: "activity.unsubscribe"; params: { subscription: SubscriptionId } };
+  | { op: "activity.unsubscribe"; params: { subscription: SubscriptionId } }
+  | { op: "harness.list" }
+  | { op: "workspace.start"; params: WorkspaceStartParams }
+  | { op: "session.start"; params: SessionStartParams }
+  | { op: "upload.begin"; params: { workspace: WorkspaceId; name: string; size: number } }
+  | { op: "upload.chunk"; params: { upload: UploadId; offset: number; data: string } };
 
 export type OperationName = Operation["op"];
 
@@ -816,6 +845,11 @@ export const OPERATIONS: readonly OperationName[] = [
   "terminal.resize",
   "activity.subscribe",
   "activity.unsubscribe",
+  "harness.list",
+  "workspace.start",
+  "session.start",
+  "upload.begin",
+  "upload.chunk",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -862,12 +896,29 @@ const params: Record<string, Decoder<unknown>> = {
     after: optional(cursor),
   }),
   "activity.unsubscribe": object({ subscription: u32 }),
+  "workspace.start": object({
+    project: id<ProjectId>(),
+    prompt: text(),
+    harness: optional(text()),
+  }),
+  "session.start": object({
+    workspace: id<WorkspaceId>(),
+    harness: optional(text()),
+    prompt: optional(text()),
+  }),
+  "upload.begin": object({ workspace: id<WorkspaceId>(), name: text(), size: u64 }),
+  "upload.chunk": object({ upload: u32, offset: u64, data: text() }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
 export function scopeOf(op: OperationName): Scope | null {
   if (op === "host.describe") return null;
-  if (op === "workspace.list" || op === "workspace.describe" || op === "session.list") {
+  if (
+    op === "workspace.list" ||
+    op === "workspace.describe" ||
+    op === "session.list" ||
+    op === "harness.list"
+  ) {
     return "workspace:read";
   }
   if (op.startsWith("activity.")) return "activity:read";
@@ -891,7 +942,7 @@ export const request: Decoder<Request> = (value, path) => {
   const op = head.op as OperationName;
   if (!OPERATIONS.includes(op)) throw new DecodeError("op", "is not an operation this build knows");
   const out: Record<string, unknown> = { requestId: head.requestId, protocol: head.protocol, op };
-  if (op !== "host.describe") {
+  if (op !== "host.describe" && op !== "harness.list") {
     out.params = (params[op] as Decoder<unknown>)(
       (value as Record<string, unknown>).params,
       "params",
@@ -925,12 +976,77 @@ export function validate(operation: Operation): string | null {
         return "asks for a terminal without a row or a column";
       }
       return null;
+    case "workspace.start":
+      if (operation.params.prompt.trim() === "") return "starts a workspace with no message";
+      return promptTooLong(operation.params.prompt) ?? harnessInvalid(operation.params.harness);
+    case "session.start":
+      return (
+        (operation.params.prompt === undefined ? null : promptTooLong(operation.params.prompt)) ??
+        harnessInvalid(operation.params.harness)
+      );
+    case "upload.begin": {
+      const { name, size } = operation.params;
+      if (size === 0 || size > MAX_UPLOAD) return "uploads a file of no bytes, or over 20 MB";
+      if (name === "" || chars(name) > MAX_UPLOAD_NAME) return "names an upload no file is";
+      return null;
+    }
+    case "upload.chunk":
+      return chunkInvalid(operation.params.data);
     default:
       return null;
   }
 }
 
+function promptTooLong(prompt: string): string | null {
+  return utf8Length(prompt) > MAX_PROMPT ? "carries a longer message than one request may" : null;
+}
+
+function harnessInvalid(harness: string | undefined): string | null {
+  if (harness === undefined) return null;
+  return harness === "" || chars(harness) > MAX_LABEL ? "names no harness" : null;
+}
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** Whether a piece of an upload is padded standard base64 of 1 byte to {@link MAX_UPLOAD_CHUNK}. */
+function chunkInvalid(data: string): string | null {
+  if (data === "" || data.length > Math.ceil(MAX_UPLOAD_CHUNK / 3) * 4) {
+    return "carries a piece of no bytes, or over 32 KB";
+  }
+  if (data.length % 4 !== 0 || !BASE64.test(data)) return "carries a piece that is not base64";
+  return null;
+}
+
 // --- replies -----------------------------------------------------------------------------------
+
+/** An agent the computer can start. */
+export interface HarnessSummary {
+  /** What `workspace.start` and `session.start` name it by. */
+  id: string;
+  name: string;
+}
+
+/** `harness.list`: what the computer can start, its default first. Minor 5. */
+export interface HarnessList {
+  harnesses: HarnessSummary[];
+}
+
+const harnessListFields = {
+  harnesses: array(object({ id: text(MAX_LABEL), name: text(MAX_TEXT) })),
+};
+
+/** Where an agent a device started runs, to watch it. Minor 5. */
+export interface Started {
+  workspace: WorkspaceId;
+  terminal: TerminalId;
+  harness: string;
+}
+
+const startedFields = {
+  workspace: id<WorkspaceId>(),
+  terminal: id<TerminalId>(),
+  harness: text(MAX_LABEL),
+};
 
 /** What a successful request returns, tagged with `kind`. */
 export type Reply =
@@ -943,6 +1059,10 @@ export type Reply =
   | ({ kind: "attached" } & Attached)
   | ({ kind: "lease" } & Lease)
   | ({ kind: "subscribed" } & Subscribed)
+  | ({ kind: "harnesses" } & HarnessList)
+  | ({ kind: "started" } & Started)
+  | { kind: "upload"; upload: UploadId }
+  | { kind: "uploaded"; upload: UploadId; path: string }
   | { kind: "done" };
 
 export const reply: Decoder<Reply> = tagged<Reply>("kind", {
@@ -955,6 +1075,10 @@ export const reply: Decoder<Reply> = tagged<Reply>("kind", {
   attached: variant("kind", "attached", attachedFields),
   lease: variant("kind", "lease", leaseFields),
   subscribed: variant("kind", "subscribed", subscribedFields),
+  harnesses: variant("kind", "harnesses", harnessListFields),
+  started: variant("kind", "started", startedFields),
+  upload: variant("kind", "upload", { upload: u32 }),
+  uploaded: variant("kind", "uploaded", { upload: u32, path: text() }),
   done: variant("kind", "done", {}),
 });
 

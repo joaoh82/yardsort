@@ -5,6 +5,7 @@
  * Typing into a terminal, natively (31 §5): a field for what the system keyboard, dictation or a
  * paste makes, and a row of the keys a phone lacks. Return in the field sends it with Enter, and a
  * paste keeps its lines, which is why the field is a multiline one that returns nothing itself.
+ * Where the computer takes them, a picture can be given too, ahead of the keys.
  */
 
 import { useState } from "react";
@@ -33,6 +34,7 @@ export function Composer({
   draft,
   setDraft,
   applicationCursor,
+  attach,
 }: {
   control: TerminalControl;
   holding: boolean;
@@ -40,6 +42,8 @@ export function Composer({
   draft: string;
   setDraft: (text: string) => void;
   applicationCursor: boolean;
+  /** Giving the agent a picture, when the computer takes one. */
+  attach?: { busy: boolean; press: () => void };
 }) {
   const colors = useColors();
   const [ctrl, setCtrl] = useState(false);
@@ -106,6 +110,27 @@ export function Composer({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.keys}
         >
+          {attach && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Give it a picture"
+              accessibilityState={{ busy: attach.busy, disabled: attach.busy }}
+              disabled={attach.busy}
+              onPress={attach.press}
+              style={({ pressed }) => [
+                styles.key,
+                {
+                  borderColor: colors.line,
+                  backgroundColor: colors.raised,
+                  opacity: attach.busy ? 0.5 : pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Text style={[styles.keyText, { color: colors.ink }]}>
+                {attach.busy ? "Sending…" : "Image"}
+              </Text>
+            </Pressable>
+          )}
           {ROW.map(({ key, label }) => {
             const armed = key === "ctrl" && ctrl;
             return (

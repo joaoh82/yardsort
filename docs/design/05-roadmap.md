@@ -967,6 +967,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       out of its own process with every unit test green, so there is now one lock. It passed again
       after rebasing onto Schedules, and shipped in 0.22.0 on 2026-11-06 with no change to the phone
       app, so no new TestFlight build was needed.
+      2026-11-06: real use found a terminal's history out of reach on the phone, and asked for
+      starting work and giving an agent a picture from it. The page now scrolls everything upright
+      itself; protocol minor 5 starts a workspace or another agent under `terminal:control`, and
+      uploads a picture outside every worktree for its path to be pasted
+      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Not yet
+      seen on a real phone, and the picture needs a new TestFlight build.
 - [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

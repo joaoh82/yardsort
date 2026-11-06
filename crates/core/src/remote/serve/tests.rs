@@ -175,6 +175,7 @@ impl Fixture {
             terminals: &self.host,
             host: &self.identity,
             interactive: true,
+            starting: None,
         }
     }
 
@@ -1269,3 +1270,5 @@ fn a_device_hears_why_terminals_under_an_earlier_daemon_wait() {
         crate::remote::earlier_daemon().message
     );
 }
+
+mod start;

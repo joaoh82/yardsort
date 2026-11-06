@@ -144,7 +144,17 @@ export class FakeServer {
     ],
     /** Operations refused, as a computer refuses what a grant does not reach. */
     refuses: new Map<string, string>(),
+    /** What it says it answers beyond reading and terminals: nothing, as before minor 5. */
+    capabilities: [] as string[],
+    harnesses: [
+      { id: "claude", name: "Claude Code" },
+      { id: "codex", name: "Codex" },
+    ],
+    /** Where an upload lands. */
+    uploadPath: "/home/ana/My Data/uploads/workspace-1/1-photo.jpg",
   };
+  /** What was uploaded, each as it came. */
+  uploads: { workspace: string; name: string; size: number; bytes: number[] }[] = [];
   /** Every operation a computer was asked, in order. */
   operations: { op: string; params: Record<string, unknown> | undefined }[] = [];
   /** The sockets open. */
@@ -329,7 +339,7 @@ export class FakeServer {
                   platform: "linux",
                   appVersion: "0",
                   protocol,
-                  capabilities: [],
+                  capabilities: this.computer.capabilities,
                 },
               },
             });
@@ -471,6 +481,32 @@ export class FakeServer {
         return { kind: "done" };
       case "memory.list":
         return { kind: "memory", notes: computer.notes, next: null };
+      case "harness.list":
+        return { kind: "harnesses", harnesses: computer.harnesses };
+      case "workspace.start":
+      case "session.start":
+        return {
+          kind: "started",
+          workspace: (params.workspace as unknown as string | undefined) ?? "workspace-1",
+          terminal: "terminal-1",
+          harness: (params.harness as unknown as string | undefined) ?? "claude",
+        };
+      case "upload.begin":
+        this.uploads.push({
+          workspace: params.workspace as unknown as string,
+          name: params.name as unknown as string,
+          size: params.size as unknown as number,
+          bytes: [],
+        });
+        return { kind: "upload", upload: this.uploads.length };
+      case "upload.chunk": {
+        const upload = this.uploads[(params.upload as unknown as number) - 1];
+        if (!upload) throw new Error("no such upload");
+        upload.bytes.push(...Buffer.from(params.data as unknown as string, "base64"));
+        return upload.bytes.length < upload.size
+          ? { kind: "done" }
+          : { kind: "uploaded", upload: params.upload, path: computer.uploadPath };
+      }
       default:
         return {
           kind: "host",
@@ -479,7 +515,7 @@ export class FakeServer {
           platform: "linux",
           appVersion: "0",
           protocol: { major: 1, minor: 4 },
-          capabilities: [],
+          capabilities: computer.capabilities,
         };
     }
   }

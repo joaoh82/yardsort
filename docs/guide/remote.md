@@ -5,8 +5,9 @@
 > app stores yet.
 
 Remote lets your phone reach the agents on this computer through a Yardsort server you sign in to. Look
-at a workspace, watch a terminal, or take control of one and type, away from your desk. The agents keep
-running on this computer whatever happens to the connection, and the phone never starts them.
+at a workspace, watch a terminal, or take control of one and type, away from your desk. A phone that may
+type can also start a new workspace or another agent, and give an agent a picture. The agents keep
+running on this computer whatever happens to the connection.
 
 Neither end listens for connections: this computer and your phone each reach out to the server.
 
@@ -38,6 +39,38 @@ one is waiting. Nothing but this window can say yes: not `ys`, and not an agent.
 
 Any number of devices can watch a terminal, but only one can type into it at a time. The phone asks for
 control, and the person at the computer can take it back at any moment just by typing.
+
+## Starting work from the phone
+
+A device you let type can start work here too. It is no more than it could do by typing into a terminal,
+so it needs nothing else from you.
+
+- **New workspace**, on a computer's screen, asks for the project, the agent and what it should do. This
+  computer makes the workspace as its [composer](workspaces.md#starting-one-the-composer) does: a branch
+  named after the message, from the project's default branch, with the project's setup run, and the
+  agent given the message. The model and effort are the agent's own defaults. Its
+  terminal then opens on the phone. Setup that takes a while keeps the phone waiting; it carries on here
+  whatever happens to the connection.
+- **New agent**, in a workspace, starts another agent there, with a first message or none.
+
+The phone offers only the agents this computer has turned on in **Settings → Harnesses** and can find,
+the first of them chosen to begin with, and each starts as those settings say. The workspace and its
+tab appear in this window at once.
+
+## Giving an agent a picture
+
+While a phone has control of a terminal, **Image**, at the start of its row of keys, lets you choose a
+picture. The phone sends it as a JPEG, no larger than 2048 pixels on its longest side, and this computer
+keeps it in the profile's `uploads` folder, outside every worktree, so no branch picks it up. Its path
+is then pasted into the terminal, as dropping a file on a terminal here does, with nothing after it, so
+you can go on and type the message. Claude Code, for one, reads a pasted path to a picture as the
+picture. Pictures are deleted after seven days, when another one comes.
+
+## Scrolling on the phone
+
+Drag down on a terminal to go back through what scrolled off its screen, as far as this computer keeps
+it, and up to come back. A terminal taller than the phone moves first; the history follows on in the same
+drag. A program on its alternate screen, as a full-screen program uses, has no history to scroll.
 
 ## If a phone cannot open any terminal
 

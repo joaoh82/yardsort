@@ -65,6 +65,7 @@ impl Fixture {
             host: &self.identity,
             interactive: false,
             subscriptions: false,
+            starting: false,
             terminals_later: None,
         }
     }

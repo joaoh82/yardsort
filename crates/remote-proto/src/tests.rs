@@ -35,6 +35,12 @@ fn requests_match_their_fixtures() {
     let request: Request = pinned("request-activity-subscribe.json");
     assert_eq!(request.operation.scope(), Some(Scope::ActivityRead));
     assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-workspace-start.json");
+    assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
+    assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-upload-chunk.json");
+    assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
+    assert!(request.operation.validate().is_ok());
     let hello: Hello = pinned("hello.json");
     assert_eq!(negotiate(&hello), Ok(ProtocolVersion::CURRENT));
 }
@@ -51,6 +57,9 @@ fn responses_match_their_fixtures() {
         "response-attached.json",
         "response-attached-resumed.json",
         "response-subscribed.json",
+        "response-harnesses.json",
+        "response-started.json",
+        "response-uploaded.json",
     ] {
         let _: Response = pinned(name);
     }
@@ -253,6 +262,27 @@ fn every_operation_has_the_name_it_is_sent_under() {
         }),
         Operation::ActivitySubscribe(ActivitySubscribeParams::default()),
         Operation::ActivityUnsubscribe(ActivityUnsubscribeParams { subscription: 1 }),
+        Operation::HarnessList,
+        Operation::WorkspaceStart(WorkspaceStartParams {
+            project: ProjectId::new("p").unwrap(),
+            prompt: "Fix it".into(),
+            harness: None,
+        }),
+        Operation::SessionStart(SessionStartParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            harness: None,
+            prompt: None,
+        }),
+        Operation::UploadBegin(UploadBeginParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            name: "photo.jpg".into(),
+            size: 1,
+        }),
+        Operation::UploadChunk(UploadChunkParams {
+            upload: 1,
+            offset: 0,
+            data: "aGk=".into(),
+        }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());
     for operation in all {
@@ -508,4 +538,71 @@ fn every_fixture_is_read_here() {
             "no test reads {name}"
         );
     }
+}
+
+#[test]
+fn starting_and_uploading_are_bounded() {
+    let start = |prompt: &str| {
+        Operation::WorkspaceStart(WorkspaceStartParams {
+            project: ProjectId::new("p").unwrap(),
+            prompt: prompt.into(),
+            harness: None,
+        })
+        .validate()
+    };
+    assert!(start("Fix it").is_ok());
+    assert!(start("  \n").is_err());
+    assert!(start(&"x".repeat(MAX_PROMPT + 1)).is_err());
+    let session = |harness: Option<&str>| {
+        Operation::SessionStart(SessionStartParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            harness: harness.map(str::to_owned),
+            prompt: None,
+        })
+        .validate()
+    };
+    assert!(session(None).is_ok());
+    assert!(session(Some("")).is_err());
+    assert!(session(Some(&"h".repeat(MAX_LABEL + 1))).is_err());
+
+    let begin = |name: &str, size: u64| {
+        Operation::UploadBegin(UploadBeginParams {
+            workspace: WorkspaceId::new("w").unwrap(),
+            name: name.into(),
+            size,
+        })
+        .validate()
+    };
+    assert!(begin("photo.jpg", 1).is_ok());
+    assert!(begin("photo.jpg", MAX_UPLOAD).is_ok());
+    assert!(begin("photo.jpg", 0).is_err());
+    assert!(begin("photo.jpg", MAX_UPLOAD + 1).is_err());
+    assert!(begin("", 10).is_err());
+
+    let chunk = |data: &str| {
+        Operation::UploadChunk(UploadChunkParams {
+            upload: 1,
+            offset: 0,
+            data: data.into(),
+        })
+        .validate()
+    };
+    assert!(chunk("aGk=").is_ok());
+    assert!(chunk("aGk").is_err(), "unpadded");
+    assert!(chunk("a=Gk").is_err(), "padding inside");
+    assert!(chunk("").is_err());
+    let largest = "A".repeat(MAX_UPLOAD_CHUNK.div_ceil(3) * 4);
+    assert!(chunk(&largest).is_ok());
+    assert!(chunk(&format!("{largest}AAAA")).is_err());
+    // The largest piece's request is well within a frame.
+    let request = Request {
+        request_id: RequestId::new("r-1").unwrap(),
+        protocol: ProtocolVersion::CURRENT,
+        operation: Operation::UploadChunk(UploadChunkParams {
+            upload: u32::MAX,
+            offset: MAX_UPLOAD,
+            data: largest,
+        }),
+    };
+    assert!(serde_json::to_vec(&request).unwrap().len() < MAX_CONTROL_FRAME);
 }

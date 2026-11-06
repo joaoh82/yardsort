@@ -61,6 +61,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     [
+      // Before the camera's, whose words for the camera and the microphone are then the ones kept,
+      // and which keeps Android from being given the microphone. The system's picker lends one
+      // picture without access to the library; this is what iOS shows if it ever asks.
+      "expo-image-picker",
+      {
+        photosPermission:
+          "Yardsort sends a picture you choose to an agent on your computer, and nothing else.",
+      },
+    ],
+    [
       "expo-camera",
       {
         cameraPermission: "Yardsort uses the camera to scan the code your computer shows to pair.",

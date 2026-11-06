@@ -2,6 +2,7 @@
 // copy of the app that gets a computer signed out.
 //
 //   bun .yardsort/tests/support/phone.ts <run dir> ask | reaches <name> | must-pair-again <name> | spend-sign-in
+//     | starts <name>
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -114,6 +115,43 @@ switch (doing) {
     const host = await theComputer(phone);
     if ((await letsIn(phone, host)).length !== 0) throw new Error("It still lets this phone in.");
     console.log("no longer paired");
+    break;
+  }
+  case "starts": {
+    // What a phone that may type does: start a workspace with an agent, watch it, give it a picture.
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const offered = await channel.harnesses();
+    if (!offered.some((harness) => harness.id === "sh-agent")) {
+      throw new Error(`Offered only: ${offered.map((harness) => harness.id).join(", ")}`);
+    }
+    console.log("offered the smoke agent");
+    const project = (await channel.workspaces()).projects.find((p) => p.name === "repo");
+    if (!project) throw new Error("The project is not on the phone.");
+    const started = await channel.startWorkspace({
+      project: project.id,
+      harness: "sh-agent",
+      prompt: "echo started-from-the-phone; sleep 60",
+    });
+    console.log(`started ${started.harness}`);
+    let seen = "";
+    const decoder = new TextDecoder();
+    const watching = await channel.attach(started.terminal, {
+      output: (bytes) => (seen += decoder.decode(bytes, { stream: true })),
+    });
+    for (let tries = 0; tries < 100 && !seen.includes("started-from-the-phone"); tries++) {
+      await Bun.sleep(100);
+    }
+    if (!seen.includes("started-from-the-phone")) throw new Error(`It printed: ${seen}`);
+    console.log("the agent printed what it was told to");
+    await watching.detach();
+
+    const photo = Uint8Array.from({ length: 100_000 }, (_, n) => n % 251);
+    const path = await channel.upload(started.workspace, "smoke photo.jpg", photo);
+    if (!Buffer.from(photo).equals(readFileSync(path))) throw new Error("The picture changed.");
+    if (path.startsWith(join(dir, "worktrees"))) throw new Error(`It is in a worktree: ${path}`);
+    console.log("the picture is on the computer, whole, outside every worktree");
+    channel.close();
     break;
   }
   case "spend-sign-in": {

@@ -503,6 +503,9 @@ impl Serving for Here {
             terminals: &self.terminals,
             host: &self.identity,
             interactive: self.terminals.shares_control(),
+            // Its workspace is no repository, and nothing here is an agent: starting is the
+            // core's to test (`remote::serve::tests::start`).
+            starting: None,
         });
     }
 }
