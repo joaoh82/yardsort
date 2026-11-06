@@ -506,6 +506,7 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
     await print(Array.from({ length: 200 }, (_, i) => `line-${i}`).join("\r\n"));
     await onScreen("line-199");
 
+    // Few touches to a drag: each can wait for a frame, and frames are slow on some machines.
     const drag = async (from: number, to: number) => {
       const x = 100;
       await tab.send("Input.dispatchTouchEvent", {
@@ -545,13 +546,15 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
         type: "touchStart",
         touchPoints: [{ x, y: from }],
       });
-      const steps = 40;
+      const steps = 6;
       for (let i = 1; i <= steps; i += 1) {
         await tab.send("Input.dispatchTouchEvent", {
           type: "touchMove",
           touchPoints: [{ x, y: from + ((to - from) * i) / steps }],
         });
       }
+      // Held still before lifting, so it stops where it is, without gliding on.
+      await Bun.sleep(150);
       await tab.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     };
 

@@ -132,6 +132,9 @@ let carried = 0;
 let speed = 0;
 let gliding = 0;
 
+/** The fastest a glide starts, in pixels a millisecond: a hard flick, and no more. */
+const FASTEST = 6;
+
 function lineHeight(): number {
   const rows = document.querySelector(".xterm-rows");
   return rows && terminal.rows > 0 ? rows.getBoundingClientRect().height / terminal.rows : 16;
@@ -229,7 +232,7 @@ document.addEventListener(
     if (event.cancelable) event.preventDefault();
     const elapsed = Math.max(event.timeStamp - finger.at, 1);
     finger = { y: touch.clientY, x: touch.clientX, at: event.timeStamp };
-    speed = 0.8 * (dy / elapsed) + 0.2 * speed;
+    speed = Math.max(-FASTEST, Math.min(FASTEST, 0.8 * (dy / elapsed) + 0.2 * speed));
     move(dy);
   },
   { passive: false },
