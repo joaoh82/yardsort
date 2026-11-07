@@ -1,7 +1,7 @@
 // Drive the app's own window through WebKit's inspector, for a smoke test that has no person at it.
 // The app is started with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:<port>.
 //
-//   bun .yardsort/tests/support/window.ts <port> <what to do> [run dir]
+//   bun .yardsort/tests/support/window.ts <port> <what to do> [run dir | what]
 
 const [port, doing, runDir] = process.argv.slice(2);
 const SECTION = '[aria-label="Terminals cannot be shared yet"]';
@@ -109,6 +109,21 @@ const fill = (placeholder: string, value: string) =>
 const connected = () => expectToSee("Connected to the relay.");
 
 switch (doing) {
+  case "add-project": {
+    // As adding a folder in the window does, without the system's folder picker. The inspector
+    // does not wait for a promise, so its outcome is left on the window and looked for.
+    await page(
+      `void window.__TAURI_INTERNALS__.invoke("project_open", { path: ${JSON.stringify(`${runDir}/repo`)}, initGit: false }).then(() => { window.__added = "added"; }, (e) => { window.__added = JSON.stringify(e); })`,
+    );
+    const added = await until("the project added", () => page(`window.__added ?? ""`));
+    if (added !== "added") throw new Error(`The project was not added: ${String(added)}`);
+    console.log("added the project");
+    break;
+  }
+  case "sees":
+    // Here the last argument is what to look for.
+    await expectToSee(runDir as string);
+    break;
   case "says-why":
     await openRemote();
     await expectIn("A phone cannot open this computer's terminals yet.");

@@ -19,9 +19,11 @@ import {
   encodeFrame,
   type HostId,
   MAX_OUTPUT_CHUNK,
+  MAX_UPLOAD_CHUNK,
   openChannel,
   Secret,
   type TerminalId,
+  type WorkspaceId,
 } from "../src/index.ts";
 
 type Request = { requestId: string; op: string; params?: Record<string, unknown> };
@@ -35,13 +37,13 @@ afterEach(() => {
 
 const WELCOME = {
   welcome: {
-    protocol: { major: 1, minor: 4 },
+    protocol: { major: 1, minor: 5 },
     host: {
       host: "h",
       name: "Pretend",
       platform: "linux",
       appVersion: "0",
-      protocol: { major: 1, minor: 4 },
+      protocol: { major: 1, minor: 5 },
       capabilities: [],
     },
   },
@@ -492,6 +494,68 @@ describe("control", () => {
     const why = await lost;
     expect(why.kind === "lost" && why.error.code).toBe("lease_lost");
     expect(renewals).toBe(3);
+    channel.close();
+  });
+});
+
+describe("uploading", () => {
+  /** A computer that keeps what it is sent, piece by piece, refusing the piece numbered `refuse`. */
+  function keeper(refuse = -1) {
+    const kept: number[] = [];
+    let size = 0;
+    const host: Host = (request, socket) => {
+      const params = request.params as Record<string, unknown>;
+      if (request.op === "upload.begin") {
+        size = params.size as number;
+        return answer(socket, request, { kind: "upload", upload: 3 });
+      }
+      if (request.op !== "upload.chunk") return;
+      const piece = [...Buffer.from(params.data as string, "base64")];
+      if (params.offset !== kept.length || kept.length / MAX_UPLOAD_CHUNK === refuse) {
+        return socket.send(
+          JSON.stringify({
+            requestId: request.requestId,
+            error: { code: "invalid_request", message: "Out of order.", retryable: false },
+          }),
+        );
+      }
+      kept.push(...piece);
+      answer(
+        socket,
+        request,
+        kept.length < size ? { kind: "done" } : { kind: "uploaded", upload: 3, path: "/up/a.jpg" },
+      );
+    };
+    return { kept, host };
+  }
+
+  test("goes in order, a few pieces ahead, and comes back as the computer's path", async () => {
+    const { kept, host } = keeper();
+    const { client, asked } = relay(host);
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const photo = Uint8Array.from({ length: MAX_UPLOAD_CHUNK * 5 + 7 }, (_, n) => n % 251);
+    const progress: number[] = [];
+    const path = await channel.upload("w" as WorkspaceId, "a.jpg", photo, (n) => progress.push(n));
+    expect(path).toBe("/up/a.jpg");
+    expect(Uint8Array.from(kept)).toEqual(photo);
+    expect(asked[0]).toMatchObject({
+      op: "upload.begin",
+      params: { workspace: "w", name: "a.jpg", size: photo.length },
+    });
+    const offsets = asked.filter((r) => r.op === "upload.chunk").map((r) => r.params?.offset);
+    expect(offsets).toEqual([0, 1, 2, 3, 4, 5].map((n) => n * MAX_UPLOAD_CHUNK));
+    expect(progress.at(-1)).toBe(photo.length);
+    channel.close();
+  });
+
+  test("ends at the first piece refused", async () => {
+    const { host } = keeper(2);
+    const { client } = relay(host);
+    const channel = await openChannel(client, access, HOST, { client: "test/1" });
+    const photo = new Uint8Array(MAX_UPLOAD_CHUNK * 6);
+    const failed = await channel.upload("w" as WorkspaceId, "a.jpg", photo).catch((e) => e);
+    expect(failed).toBeInstanceOf(ClientError);
+    expect((failed as ClientError).message).toContain("Out of order.");
     channel.close();
   });
 });

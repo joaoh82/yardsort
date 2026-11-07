@@ -2462,7 +2462,10 @@ export type SessionRef =
 /**  The session an earlier `start_session` step started, by that step's id. */
 { step: string };
 
-/**  A workflow run started a session in a workspace: the window should show it as a tab. */
+/**
+ *  A workflow run, or a device through Remote, started a session in a workspace: the window
+ *  should show it as a tab, and the workspace if it is new.
+ */
 export type SessionStarted = {
 	workspaceId: string,
 	sessionId: string,

@@ -195,6 +195,16 @@ export class TerminalControl {
     return true;
   }
 
+  /**
+   * Paste with no Enter after it, as a terminal does when a file is dropped on it: an agent reads a
+   * pasted path to a picture as the picture. `said` is what to call it, if it may not have arrived.
+   */
+  paste(text: string, said: string): boolean {
+    if (!this.#control || text.length === 0 || this.#tooLong(text)) return false;
+    this.#queue({ said, text: null, pieces: [{ data: text, paste: true }] });
+    return true;
+  }
+
   /** Send what a key or Ctrl and a letter makes, named as the person would name it. */
   press(said: string, data: string): void {
     if (this.#control) this.#queue({ said, text: null, pieces: [{ data }] });

@@ -350,7 +350,7 @@ From the design pass in [32-smoke-tests](32-smoke-tests.md), 2026-10-30.
 
 ## Triggers
 
-From the design pass in [35-triggers](35-triggers.md), 2026-11-06.
+From the design pass in [36-triggers](36-triggers.md), 2026-11-06.
 
 48. **Should schedules and triggers share one view?** Both start a workflow or a test without a
     person, with a history of what each time became. Two sidebar rows are proposed, to keep

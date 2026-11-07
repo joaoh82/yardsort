@@ -967,7 +967,30 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       out of its own process with every unit test green, so there is now one lock. It passed again
       after rebasing onto Schedules, and shipped in 0.22.0 on 2026-11-06 with no change to the phone
       app, so no new TestFlight build was needed.
-- [ ] R4–R7: hardening, headless hosts, sync, managed launch. The server is
+      2026-11-06: real use found a terminal's history out of reach on the phone, and asked for
+      starting work and giving an agent a picture from it. The page now scrolls everything upright
+      itself; protocol minor 5 starts a workspace or another agent under `terminal:control`, and
+      uploads a picture outside every worktree for its path to be pasted
+      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Not yet
+      seen on a real phone, and the picture needs a new TestFlight build.
+      2026-11-06: a TestFlight workflow on GitHub Actions builds and uploads the phone app with no Mac at
+      hand, signed by hand from a distribution certificate and an App Store profile kept as secrets
+      ([the README](../../apps/mobile/README.md#from-github-actions)). It has not been run yet.
+- [ ] R4 and R5: the phone hardened, a host with no screen, and the desktop as a client. Planned
+      together on 2026-11-06 in [35](35-remote-r4-r5.md), in the order the owner asked for: first a
+      headless Linux host the phone reaches through staging (slices 1 to 3: the host runtime moved
+      out of the app, a `yardsort-host` binary signed in by pasting the browser's address back and
+      approving devices at the box, then its tarball, systemd unit and container image), then the
+      desktop app signed in as a client of another computer and showing its terminals (slices 4 and
+      5), then resume and fork in the core and restarts (6), starting an agent from a client (7), and
+      R4's lifecycle and time budgets, external keyboard, leak audit with diagnostics, and generic
+      push through APNs and FCM directly (8 to 11). Push needs the owner's APNs key; both phases'
+      Android checks need an Android phone. Slice 1 was built on 2026-11-06: the host's account at its
+      server, moved out of the app into `remote_host::account` with nothing a person sees changed
+      ([35 §10](35-remote-r4-r5.md#10--what-the-first-slice-adds)). Its local smoke tests passed, once
+      `remote-earlier-daemon` stopped expecting a 0.21 daemon from a 0.22 build, and the owner's
+      phone check against staging passed.
+- [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
       ([30](30-open-source-and-managed.md)).
@@ -1071,7 +1094,7 @@ started; and `ys test validate` has a failing fixture for every error it can rep
 
 ## M29 — Triggers
 
-Proposed in [35-triggers](35-triggers.md), after a four-question design pass on 2026-11-06.
+Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 2026-11-06.
 
 - A trigger starts a workflow or a smoke test when something happens: an agent says it is done
   (`ys workspace done`), a pull request opens, a review or a comment arrives from another
@@ -1178,7 +1201,7 @@ rediscovering later. None of them is committed to; the point is to know what is 
   asks for permission when there is no one to ask. **Built as [schedules](34-schedules.md)**
   for workflows and smoke tests: it answers the first and the third, and leaves the worktree per
   run, and running with the app closed, for after. Reacting to things that happen, rather than
-  to the clock, is [triggers](35-triggers.md), M29.
+  to the clock, is [triggers](36-triggers.md), M29.
 - ~~**A `yardsort` CLI.**~~ **Done, as `ys` — see M10.** The estimate above was wrong in an
   instructive way: the daemon protocol carries _sessions_, not workspaces, and projects live in
   the SQLite store the app owns. "A second client of the socket with no new core" needed the

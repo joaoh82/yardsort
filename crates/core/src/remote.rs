@@ -37,8 +37,10 @@
 //! ([`HostFacade::subscription_start`]) and what came after it ([`HostFacade::recorded_after`]),
 //! under the same rules as `activity.list`.
 //!
-//! Nothing here writes to the store either. In particular there is no route to approve, edit or
-//! propose memory: an agent can reach a terminal, and a terminal could one day reach a remote
+//! Nothing here writes to the store either. Starting an agent, which does, is answered by the
+//! visitor with what the app lends it ([`start::Starting`]), and only to a grant that may type
+//! into a terminal: it is no more than that grant could do in a shell. There is no route to
+//! approve, edit or propose memory: an agent can reach a terminal, and a terminal could one day reach a remote
 //! client, so the only way to approve memory stays the desktop's Memory view.
 
 use pty_host::{SessionInfo, SessionState, TerminalHost};
@@ -88,6 +90,16 @@ pub const TERMINAL_OPERATIONS: &[&str] = &[
 /// device's channel.
 pub const SUBSCRIPTION_OPERATIONS: &[&str] = &["activity.subscribe", "activity.unsubscribe"];
 
+/// Starting agents and uploading files, answered by [`serve::Visitor`] and advertised when the
+/// facade serves a device's channel with something to start them ([`start::Starting`]).
+pub const START_OPERATIONS: &[&str] = &[
+    "harness.list",
+    "workspace.start",
+    "session.start",
+    "upload.begin",
+    "upload.chunk",
+];
+
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
 /// is stored before Remote is enabled, so nothing is created for people who never use it.
 #[derive(Debug, Clone)]
@@ -109,6 +121,8 @@ pub struct HostFacade<'a> {
     /// Activity subscriptions are answered, by [`serve::Visitor`]: the facade is serving a
     /// device's channel.
     pub subscriptions: bool,
+    /// Starting agents and uploading files are answered, by [`serve::Visitor`].
+    pub starting: bool,
     /// Why the terminal operations are not answered, when a device should hear it: they would
     /// be, but for something that passes. Said in `host.describe`, and as their refusal.
     pub terminals_later: Option<TerminalsLater>,
@@ -221,6 +235,17 @@ impl HostFacade<'_> {
                     "Following activity is not available on this host yet.",
                 ))
             }
+            Operation::HarnessList
+            | Operation::WorkspaceStart(_)
+            | Operation::SessionStart(_)
+            | Operation::UploadBegin(_)
+            | Operation::UploadChunk(_) => Err(RemoteError::new(
+                ErrorCode::Unsupported,
+                self.terminals_later.as_ref().map_or(
+                    "Starting agents from here is not available on this host yet.",
+                    |later| later.message.as_str(),
+                ),
+            )),
         }
     }
 
@@ -243,6 +268,7 @@ impl HostFacade<'_> {
                 } else {
                     &[]
                 })
+                .chain(if self.starting { START_OPERATIONS } else { &[] })
                 .map(|&op| op.to_owned())
                 .collect(),
             terminals_later: self.terminals_later.clone(),
@@ -709,7 +735,7 @@ impl HostFacade<'_> {
     }
 
     /// A project on show whose id the grant reaches. Removed projects are not on show.
-    fn reachable_project(&self, grant: &Grant, id: &ProjectId) -> Answer<ProjectRow> {
+    pub(crate) fn reachable_project(&self, grant: &Grant, id: &ProjectId) -> Answer<ProjectRow> {
         if !grant.reaches(id) {
             return Err(RemoteError::not_found());
         }
@@ -723,7 +749,7 @@ impl HostFacade<'_> {
 
     /// A workspace on show, and its project, when the grant reaches that project. Forgotten
     /// workspaces and removed projects' workspaces are not on show, as in the app's sidebar.
-    fn reachable_workspace(
+    pub(crate) fn reachable_workspace(
         &self,
         grant: &Grant,
         id: &WorkspaceId,
@@ -1002,5 +1028,6 @@ fn encoded_len(value: &impl Serialize) -> usize {
 mod activity;
 pub mod host;
 pub mod serve;
+pub mod start;
 #[cfg(test)]
 mod tests;

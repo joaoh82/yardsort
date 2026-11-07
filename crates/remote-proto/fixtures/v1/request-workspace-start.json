@@ -1,0 +1,10 @@
+{
+  "requestId": "r-12",
+  "protocol": { "major": 1, "minor": 5 },
+  "op": "workspace.start",
+  "params": {
+    "project": "0f1e2d3c-4b5a-4968-8776-655443322110",
+    "prompt": "Fix the login page's spacing on small screens",
+    "harness": "claude"
+  }
+}

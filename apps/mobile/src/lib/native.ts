@@ -12,12 +12,15 @@ import Constants from "expo-constants";
 import * as ExpoCrypto from "expo-crypto";
 import * as Device from "expo-device";
 import { File, Paths } from "expo-file-system";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import * as ImagePicker from "expo-image-picker";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { Platform as ReactPlatform } from "react-native";
 
 import type { Browser, Env } from "./accounts";
 import type { ChoiceFile } from "./appearance";
+import { LONGEST_SIDE, type PickImage } from "./attach";
 import type { Shelf } from "./observed";
 import type { Vault } from "./profiles";
 
@@ -108,3 +111,37 @@ export const nativeEnv: Env = {
 export function suggestedDeviceName(): string {
   return Device.deviceName ?? Device.modelName ?? "Phone";
 }
+
+/**
+ * One picture from the phone's library, through the system's own picker, which needs no access to
+ * the rest of the library. Sent as a JPEG no larger than {@link LONGEST_SIDE}: a photo straight off
+ * the camera is several megabytes, and HEIC, which some agents cannot read.
+ */
+export const pickImage: PickImage = async () => {
+  const chosen = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"],
+    allowsMultipleSelection: false,
+    quality: 1,
+  });
+  const asset = chosen.canceled ? undefined : chosen.assets[0];
+  if (!asset) return null;
+  const longest = Math.max(asset.width, asset.height);
+  const resize =
+    longest > LONGEST_SIDE
+      ? [
+          {
+            resize:
+              asset.width >= asset.height ? { width: LONGEST_SIDE } : { height: LONGEST_SIDE },
+          },
+        ]
+      : [];
+  const made = await manipulateAsync(asset.uri, resize, {
+    compress: 0.8,
+    format: SaveFormat.JPEG,
+  });
+  const file = new File(made.uri);
+  const bytes = await file.bytes();
+  if (file.exists) file.delete();
+  const stem = (asset.fileName ?? "photo").replace(/\.[^.]*$/, "");
+  return { name: `${stem}.jpg`, bytes };
+};

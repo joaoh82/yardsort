@@ -1,7 +1,7 @@
 #!/bin/sh
 # The app under test, on this run's profile, with whatever it opens in a browser fetched instead.
 #
-#   sh .yardsort/tests/support/app.sh open | again | close | copies | drives-runs | stop-everything
+#   sh .yardsort/tests/support/app.sh seed | open | again | close | copies | drives-runs | stop-everything
 set -u
 profile="$YS_RUN_DIR/profile"
 
@@ -32,6 +32,25 @@ copies() {
 }
 
 case "$1" in
+  seed)
+    # A repository to start workspaces in, and an agent that is really the shell, whose first
+    # message is what it runs: nothing is asked of a real agent.
+    repo="$YS_RUN_DIR/repo"
+    mkdir -p "$repo" "$profile"
+    git -C "$repo" init -q -b trunk
+    git -C "$repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false \
+      commit -q --allow-empty -m Start
+    cat > "$profile/settings.toml" <<'SETTINGS'
+[[harness]]
+id = "sh-agent"
+builtin = false
+label = "Smoke agent"
+command = "sh"
+prompt_args = ["-c", "{prompt}"]
+session_id_mode = "assigned"
+SETTINGS
+    echo "seeded $repo"
+    ;;
   open)
     environment
     WEBKIT_INSPECTOR_HTTP_SERVER="127.0.0.1:$YS_RUN_PORT" \

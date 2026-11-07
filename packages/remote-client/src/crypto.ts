@@ -27,20 +27,31 @@ export function webCrypto(): Crypto | null {
 }
 
 const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/** Base64url without padding. */
-export function base64url(bytes: Uint8Array): string {
+function encode(bytes: Uint8Array, alphabet: string): string {
   let out = "";
   for (let i = 0; i < bytes.length; i += 3) {
     const a = bytes[i] as number;
     const b = bytes[i + 1];
     const c = bytes[i + 2];
-    out += BASE64URL[a >> 2];
-    out += BASE64URL[((a & 3) << 4) | ((b ?? 0) >> 4)];
-    if (b !== undefined) out += BASE64URL[((b & 15) << 2) | ((c ?? 0) >> 6)];
-    if (c !== undefined) out += BASE64URL[c & 63];
+    out += alphabet[a >> 2];
+    out += alphabet[((a & 3) << 4) | ((b ?? 0) >> 4)];
+    if (b !== undefined) out += alphabet[((b & 15) << 2) | ((c ?? 0) >> 6)];
+    if (c !== undefined) out += alphabet[c & 63];
   }
   return out;
+}
+
+/** Base64url without padding. */
+export function base64url(bytes: Uint8Array): string {
+  return encode(bytes, BASE64URL);
+}
+
+/** Standard base64, padded: as an upload's pieces go. */
+export function base64(bytes: Uint8Array): string {
+  const out = encode(bytes, BASE64);
+  return out.padEnd(Math.ceil(out.length / 4) * 4, "=");
 }
 
 /** 256 random bits as base64url: a verifier of 43 characters. */

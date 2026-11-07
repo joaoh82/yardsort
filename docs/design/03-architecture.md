@@ -696,7 +696,11 @@ remote ever talks to it directly. Instead:
   follow activity (`activity.subscribe`): the channel keeps only each subscription's position,
   looks in the store for more about every second, and sends it through the facade's allowlist,
   holding back while the device has much waiting
-  ([27 §11](27-remote-r2.md#11--what-the-eighth-slice-adds)).
+  ([27 §11](27-remote-r2.md#11--what-the-eighth-slice-adds)). A device that may type can also
+  start one of the host's harnesses, in a new workspace or an existing one, and upload a file for
+  an agent (`remote::start`): the app lends the channel a `Starting` built from its own settings,
+  a start answers from a thread of its own, and an upload goes to the profile's `uploads` folder,
+  outside every worktree ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)).
 
 ## Assist (optional, off by default)
 

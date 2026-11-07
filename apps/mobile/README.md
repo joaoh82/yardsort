@@ -15,35 +15,39 @@ reconnecting, and unpair. See each computer's workspaces, a workspace's conversa
 terminals, its activity as it is recorded, and a project's approved memory, with what was last seen
 shown as such when a computer cannot be reached. Watch a terminal at the computer's size, resuming
 after a drop or the background. Take control of it, type, paste and use the keys a phone lacks, drawn
-to fit the phone, and hand it back, or have the person at the computer take it at any time. Tell a
+to fit the phone, and hand it back, or have the person at the computer take it at any time. Give the
+agent a picture. Start a new workspace with an agent, or another agent in a workspace
+([31 §19](../../docs/design/31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Tell a
 computer that took this phone back or left the account from this phone being signed out, and remove
 a server from the phone. Choose light, dark or automatic in Settings.
 
 ## What is in it
 
-| Path                    | What                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/app/`              | The screens, as Expo Router routes: `index` (where to start), `connect`, `account` (computers, devices, signing out), `settings` (light, dark or automatic), `servers` (one profile in use), `pair`, `computer` (a computer's workspaces), `workspace` (conversations, terminals and activity), `memory`, `terminal`, and `+native-intent`, which takes a pairing link before the router reads it. |
-| `src/lib/accounts.ts`   | Signing in, opening a profile again, signing out. Screens read its snapshot and call it; none builds a request or holds a credential.                                                                                                                                                                                                                                                              |
-| `src/lib/profiles.ts`   | The profiles, kept in the phone's credential store: each server's address, its id, this phone's device there and its refresh credential.                                                                                                                                                                                                                                                           |
-| `src/lib/pairing.ts`    | A pairing link held in memory until used, where it belongs among the profiles, and waiting for the person at the computer.                                                                                                                                                                                                                                                                         |
-| `src/lib/presence.ts`   | Whether each computer can be reached, from a channel held to it while someone is looking.                                                                                                                                                                                                                                                                                                          |
-| `src/lib/activity.ts`   | A workspace's activity followed through a channel, and what each event says. In memory only.                                                                                                                                                                                                                                                                                                       |
-| `src/lib/control.ts`    | Having control of a terminal: asking for it, what is typed going one at a time, what may not have arrived, and letting go.                                                                                                                                                                                                                                                                         |
-| `src/lib/appearance.ts` | Light, dark or as the phone is: the choice, keeping it, and telling the system.                                                                                                                                                                                                                                                                                                                    |
-| `src/lib/keys.ts`       | The keys a phone lacks, as the bytes a terminal would send for them.                                                                                                                                                                                                                                                                                                                               |
-| `src/lib/watch.ts`      | Watching a terminal through whichever channel is open, and holding output back from a page that has not caught up.                                                                                                                                                                                                                                                                                 |
-| `src/lib/bridge.ts`     | The only thing the app and the terminal's page share: typed, bounded messages, each checked by the side reading it.                                                                                                                                                                                                                                                                                |
-| `terminal/`             | The page a terminal is drawn in. `scripts/terminal-page.ts` builds it into `src/ui/terminal-page.generated.ts`: `just mobile-terminal-page` after changing it. A test says when it is out of date.                                                                                                                                                                                                 |
-| `src/lib/observed.ts`   | What was last seen of a profile's computers and workspaces, kept in the cache folder.                                                                                                                                                                                                                                                                                                              |
-| `src/lib/native.ts`     | What only the phone has: SecureStore, the cache folder, the system browser's sign-in session, randomness and SHA-256, the phone's name.                                                                                                                                                                                                                                                            |
-| `src/ui/parts.tsx`      | The few native components the screens are built from, with the colours and fonts of [the design](../../docs/design/33-phone-design.md).                                                                                                                                                                                                                                                            |
-| `src/ui/composer.tsx`   | The field and the row of keys for typing into a terminal.                                                                                                                                                                                                                                                                                                                                          |
-| `src/ui/live.tsx`       | What screens share about being live: a channel held only while on screen, how far a computer can be reached, what was last seen meanwhile, and showing a profile's things only while it is in use.                                                                                                                                                                                                 |
-| `src/ui/leaving.ts`     | What is asked when signing out cannot reach the server.                                                                                                                                                                                                                                                                                                                                            |
-| `assets/`               | The icon and splash screen, as SVG and the PNGs built from them, and the embedded fonts with their licenses.                                                                                                                                                                                                                                                                                       |
-| `test/lib/`             | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use), and the terminal's page in real headless Chromium, skipped where no browser is found.                                                                                                                                                             |
-| `test/screens/`         | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                                                                                                                                                                                                                                                                 |
+| Path                     | What                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/app/`               | The screens, as Expo Router routes: `index` (where to start), `connect`, `account` (computers, devices, signing out), `settings` (light, dark or automatic), `servers` (one profile in use), `pair`, `computer` (a computer's workspaces), `workspace` (conversations, terminals and activity), `memory`, `terminal`, `start` (a new workspace, or another agent in one), and `+native-intent`, which takes a pairing link before the router reads it. |
+| `src/lib/accounts.ts`    | Signing in, opening a profile again, signing out. Screens read its snapshot and call it; none builds a request or holds a credential.                                                                                                                                                                                                                                                                                                                  |
+| `src/lib/profiles.ts`    | The profiles, kept in the phone's credential store: each server's address, its id, this phone's device there and its refresh credential.                                                                                                                                                                                                                                                                                                               |
+| `src/lib/pairing.ts`     | A pairing link held in memory until used, where it belongs among the profiles, and waiting for the person at the computer.                                                                                                                                                                                                                                                                                                                             |
+| `src/lib/presence.ts`    | Whether each computer can be reached, from a channel held to it while someone is looking.                                                                                                                                                                                                                                                                                                                                                              |
+| `src/lib/activity.ts`    | A workspace's activity followed through a channel, and what each event says. In memory only.                                                                                                                                                                                                                                                                                                                                                           |
+| `src/lib/control.ts`     | Having control of a terminal: asking for it, what is typed going one at a time, what may not have arrived, and letting go.                                                                                                                                                                                                                                                                                                                             |
+| `src/lib/appearance.ts`  | Light, dark or as the phone is: the choice, keeping it, and telling the system.                                                                                                                                                                                                                                                                                                                                                                        |
+| `src/lib/attach.ts`      | A picture for an agent: what was chosen, and its path on the computer as a terminal pastes it.                                                                                                                                                                                                                                                                                                                                                         |
+| `src/lib/keys.ts`        | The keys a phone lacks, as the bytes a terminal would send for them.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `src/lib/watch.ts`       | Watching a terminal through whichever channel is open, and holding output back from a page that has not caught up.                                                                                                                                                                                                                                                                                                                                     |
+| `src/lib/bridge.ts`      | The only thing the app and the terminal's page share: typed, bounded messages, each checked by the side reading it.                                                                                                                                                                                                                                                                                                                                    |
+| `terminal/`              | The page a terminal is drawn in. `scripts/terminal-page.ts` builds it into `src/ui/terminal-page.generated.ts`: `just mobile-terminal-page` after changing it. A test says when it is out of date.                                                                                                                                                                                                                                                     |
+| `scripts/ios-signing.ts` | Signs the generated iOS project with an App Store profile and writes the export options, for the [TestFlight workflow](#from-github-actions). A test reads a made-up profile with it.                                                                                                                                                                                                                                                                  |
+| `src/lib/observed.ts`    | What was last seen of a profile's computers and workspaces, kept in the cache folder.                                                                                                                                                                                                                                                                                                                                                                  |
+| `src/lib/native.ts`      | What only the phone has: SecureStore, the cache folder, the system browser's sign-in session, randomness and SHA-256, the phone's name, and the system's picture picker.                                                                                                                                                                                                                                                                               |
+| `src/ui/parts.tsx`       | The few native components the screens are built from, with the colours and fonts of [the design](../../docs/design/33-phone-design.md).                                                                                                                                                                                                                                                                                                                |
+| `src/ui/composer.tsx`    | The field and the row of keys for typing into a terminal.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `src/ui/live.tsx`        | What screens share about being live: a channel held only while on screen, how far a computer can be reached, what was last seen meanwhile, and showing a profile's things only while it is in use.                                                                                                                                                                                                                                                     |
+| `src/ui/leaving.ts`      | What is asked when signing out cannot reach the server.                                                                                                                                                                                                                                                                                                                                                                                                |
+| `assets/`                | The icon and splash screen, as SVG and the PNGs built from them, and the embedded fonts with their licenses.                                                                                                                                                                                                                                                                                                                                           |
+| `test/lib/`              | The logic, under `bun test`, against the real server and its sign-in (`crates/server/examples/stand-in.rs`, as the protocol client's tests use), and the terminal's page in real headless Chromium, skipped where no browser is found.                                                                                                                                                                                                                 |
+| `test/screens/`          | The screens, under Jest with `jest-expo`, through Expo Router's in-memory router and Testing Library, against a small fake server.                                                                                                                                                                                                                                                                                                                     |
 
 Things it holds to:
 
@@ -69,8 +73,11 @@ Things it holds to:
 - **What a profile reaches stays on screen only while that profile is in use.**
 - **What is kept of a computer** is names and branches, each marked with when it was seen: never
   a session title, activity, memory or terminal output. It goes with a computer that took this phone
-  back and with the profile. Taking control of a terminal is the only thing here that changes anything
-  on the computer.
+  back and with the profile. Taking control of a terminal, and what a device that may take control
+  can do besides — start an agent, give one a picture — are the only things here that change
+  anything on the computer.
+- **Nothing is started twice.** A start whose answer was lost is said to be so, and never sent
+  again by itself.
 - **A terminal is drawn, and nothing more.** Its page connects to nothing, goes nowhere, and keeps
   nothing, and no terminal output is written anywhere. A link is `https`, tapped, and asked about
   first. Typing has a native field of its own.
@@ -143,8 +150,8 @@ can use `just server-up` and `http://127.0.0.1:8787`.
 
 A build you can install and keep using, away from the Mac, for internal testers. It is the release
 identity (`Yardsort`, `dev.yardsort.mobile`), so it sits beside the development app on the phone, with
-its own sign-in: sign in and pair again. Each build lasts 90 days. It is archived in Xcode on a Mac, with
-no EAS. The first time only, register the app:
+its own sign-in: sign in and pair again. Each build lasts 90 days. It is archived in Xcode on a Mac, or
+[by GitHub Actions](#from-github-actions), with no EAS. The first time only, register the app:
 
 1. Run the recipe below once and choose your team in step 2, which should register
    `dev.yardsort.mobile`.
@@ -159,7 +166,7 @@ no EAS. The first time only, register the app:
 Then, for each build:
 
 1. `just mobile-testflight`, from your clone on the Mac. It gives the build a new number from the date
-   and time, and opens it in Xcode. It replaces `ios/`, so `just mobile-ios` builds it again for
+   and time in UTC, and opens it in Xcode. It replaces `ios/`, so `just mobile-ios` builds it again for
    development afterwards. With `APPLE_TEAM_ID` set, step 2 is done for you.
 2. In Xcode, select the **Yardsort** target, then **Signing & Capabilities**, tick **Automatically manage
    signing**, and choose the paid team.
@@ -168,6 +175,64 @@ Then, for each build:
 5. Apple then processes it, and until that is done App Store Connect shows no build at all, though the
    Organizer says it was uploaded. A problem with the build comes by email. Once it is ready, the
    **TestFlight** app on the phone offers it.
+
+#### From GitHub Actions
+
+The **TestFlight** workflow (`.github/workflows/testflight.yml`) does the same with no Mac at hand:
+**Actions**, **TestFlight**, **Run workflow**, from `main`. It generates the release identity,
+signs it by hand with a distribution certificate and an App Store profile, archives it, and uploads it
+for internal testers with an App Store Connect API key. The build number comes from the time in UTC, as
+the recipe's does, so builds from either never go backwards. Builds before 2026-11-06 were numbered in
+local time, so the first one after can be refused as lower than the last until UTC catches up with it.
+The run keeps the `.ipa` for a week, and step 5 above follows as it does from Xcode. It has not been run
+yet.
+
+A run uses the picked branch's copy of the workflow, and that copy receives the secrets, so the
+`testflight` environment admits `main` only (**Deployment branches and tags**): a run from any other
+branch stops before it gets them. Merge first to build a branch.
+
+It needs the app registered (steps 1 to 3 of the first time, above), and once, from a Mac:
+
+1. **A distribution certificate you hold the key of.** In Xcode → Settings → Accounts, select the team,
+   then Manage Certificates → **+** → **Apple Distribution**. Xcode's Organizer may have signed earlier
+   builds with a certificate Apple keeps (cloud-managed), which cannot be exported, so make this one.
+   In Keychain Access, under **My Certificates**, export **Apple Distribution: …** as a `.p12`, with a
+   password.
+2. **An App Store profile for it.** In the
+   [Apple Developer site](https://developer.apple.com/account/resources/profiles/list), **Profiles**,
+   **+**, **App Store Connect**, the App ID `dev.yardsort.mobile`, the certificate from step 1, and a
+   name such as `Yardsort TestFlight`. Download it.
+3. **An API key.** In App Store Connect, **Users and Access**, **Integrations**, **App Store Connect
+   API**, **Team Keys**, **+**, with the **App Manager** role. Note its **Key ID** and the **Issuer ID**
+   above the list, and download the `.p8`: Apple offers it once only.
+4. **The secrets**, in a GitHub environment named `testflight` (the repository's **Settings**,
+   **Environments**). The workflow says which are missing before it builds anything:
+
+   | Secret                                  | What                                     |
+   | --------------------------------------- | ---------------------------------------- |
+   | `IOS_DISTRIBUTION_CERTIFICATE`          | The `.p12`, in base64                    |
+   | `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD` | Its password                             |
+   | `IOS_PROVISIONING_PROFILE`              | The `.mobileprovision`, in base64        |
+   | `APP_STORE_CONNECT_KEY_ID`              | The key's ID                             |
+   | `APP_STORE_CONNECT_ISSUER_ID`           | The issuer ID                            |
+   | `APP_STORE_CONNECT_KEY`                 | The `.p8` as it is, `-----BEGIN` and all |
+
+   With the GitHub CLI, from where the files are:
+
+   ```sh
+   base64 -i Certificates.p12 | gh secret set IOS_DISTRIBUTION_CERTIFICATE --env testflight
+   gh secret set IOS_DISTRIBUTION_CERTIFICATE_PASSWORD --env testflight
+   base64 -i Yardsort_TestFlight.mobileprovision | gh secret set IOS_PROVISIONING_PROFILE --env testflight
+   gh secret set APP_STORE_CONNECT_KEY_ID --env testflight
+   gh secret set APP_STORE_CONNECT_ISSUER_ID --env testflight
+   gh secret set APP_STORE_CONNECT_KEY --env testflight < AuthKey_XXXXXXXXXX.p8
+   ```
+
+   The team and the profile's name are read from the profile. Delete the files afterwards.
+
+The certificate lasts a year, and the profile ends with it: the run's **Sign with the profile** step
+says until when. Then make both again and replace the first three secrets. A development or ad hoc
+profile, or one for another app, is refused with what to make instead.
 
 ### On Android
 
