@@ -28,7 +28,7 @@ A trigger is the user's standing instruction to press **Run** when a particular 
 kept by the app while it is open.
 
 Workflows were built so that "triggers other than manual are a matter of adding a producer of
-queued runs" ([21](21-workflows.md#open-questions)), and schedules proved it: a schedule calls
+queued runs" ([21](21-workflows.md#slices)), and schedules proved it: a schedule calls
 the doors a person's click calls, `workflow::runs::queue` and `smoke::runs::queue`, and nothing
 after that changed. A trigger is the third producer. Almost everything in this document is about
 what comes before the door: seeing that something happened, once, and deciding whether it
@@ -68,24 +68,39 @@ Four questions were put to the user on 2026-11-06, and the recommendation was ta
    worktree, and stayed quiet for a few minutes — is offered as an event of its own,
    [`agent.settled`](#events) with filters, for custom triggers. No preset uses it.
 6. **Reviews and comments count when they come from another account.** Every agent and the user
-   post to GitHub as the user's `gh` login. The agent that addresses a review answers each line
-   comment, and GitHub records each such reply as a review of its own by that account. Counting
-   the user's own account would therefore have the agent's answers start the next round of
-   answering. So by default only posts from other accounts count: teammates and review bots.
-   `from: anyone` counts the user's account too, except posts made while a run this trigger
-   started is going, which are the agent's own answers. That GitHub records a reply as a review
-   is to be confirmed against a real pull request in slice 2; the default is right either way.
-   A review that Yardsort's own `code-review` posts is told to the author by that workflow's
-   own last step, so it needs no trigger, and with the default it starts none.
-7. **A burst is one fire.** A review with ten line comments, or three comments posted in a
-   minute, starts one run, not ten. A trigger on reviews and comments waits until nothing new has
-   arrived for its `quiet` time, two minutes by default, and at most ten minutes from the first,
-   then fires once with everything that came. Other events fire at once.
-8. **An event that comes while the trigger's run is going waits for it.** A schedule skips such
-   a time ([34, decision 6](34-schedules.md#decisions)), because the next time will come. A
-   review that arrives while the agent is answering the previous one will not come again. So it
-   is held, and starts one run when the current one ends, however many events piled up meanwhile.
-   One fire waits at most.
+   post to GitHub as the user's `gh` login, and the agent that addresses a review answers each
+   line comment as that account. Counting the user's own account would have the agent's answers
+   start the next round of answering. So by default only posts from other accounts count:
+   teammates and review bots. `from: anyone` counts the user's account too, except posts made
+   while a run this trigger started is going, which are the agent's own answers. A review that
+   Yardsort's own `code-review` posts is told to the author by that workflow's own last step, so
+   it needs no trigger, and with the default it starts none.
+
+   Three kinds of post are watched, from two reads. `gh pr view --json reviews,comments`, which
+   `forge::pr_posts` reads today, has each submitted review — one post, with its line comments
+   inside it — and each comment on the conversation. A reply on a review thread is in neither:
+   it is a line comment with `in_reply_to` (`forge::LineComment`), read through the pull
+   request's comments API, which the `code-review` prompt already names. The watch reads that
+   too, so a teammate who answers on a thread starts the next round, as the usual way a review
+   continues. Whether GitHub also records each reply as a submitted review of its own is checked
+   against a real pull request in slice 2, with a reply on a line, not only a review body; a post
+   is counted once whichever list it shows in, and the default is right either way.
+
+7. **A burst is one fire.** A review with ten line comments is already one post. What the quiet
+   time folds is several posts: two reviews, three comments and a reply posted in a few minutes
+   start one run, not six. A trigger on reviews and comments waits until nothing new has arrived
+   for its `quiet` time, two minutes by default, and at most ten minutes from the first, then
+   fires once with everything that came. Other events fire at once.
+8. **An event that comes while a run is in the way waits for it.** The store allows one active
+   run of a workflow, or of a test, in a workspace, whoever started it
+   (`workflow_runs_one_at_a_time`, and `test_runs_one_at_a_time`, which counts a run awaiting
+   approval as active), and the door refuses a second with `workflow_already_running` and writes
+   nothing. A schedule records that
+   as skipped ([34, decision 6](34-schedules.md#decisions)), because the next time will come. A
+   review that arrives while the agent is answering the previous one will not come again. So a
+   fire that meets that refusal — whether the run in the way is this trigger's, another
+   trigger's, or one a person started — is held as **waiting**, and decided again when that run
+   ends, however many events piled up meanwhile. One fire waits at most.
 9. **A trigger stops itself before it loops.** Three limits, each told to the user once:
    - **Rounds.** At most `cap` runs per subject — per pull request for the `pr.*` events, per
      session for `agent.*`, per workspace for the rest. Three by default. The fire that would be
@@ -96,15 +111,37 @@ Four questions were put to the user on 2026-11-06, and the recommendation was ta
    - **Chains.** A run a trigger started can end in an event another trigger listens for
      (`test.finished`, `workflow.finished`). Each run carries a depth: a person's run is 0, and a
      run started by an event from a run of depth _n_ is _n_ + 1. A fire past depth 3 is refused.
+     Nothing has a depth today. A workflow run's goes in its `Facts`, in `workflow_runs.context`,
+     beside `unattended`. A test run a trigger queued directly has the depth of its fire. A test
+     run a workflow's `run_test` queued has the depth of that workflow run, found through the
+     step's one output, `run`, which is the test run's id.
 10. **Triggers work while Yardsort is open, as schedules do.** A pull request that opened, a
     review that came or checks that failed while the app was closed are found at the first look
     after it opens, and fire once, as one burst. An event older than the trigger itself never
-    fires: a trigger's cursor starts when it is saved.
-11. **A run a trigger starts is unattended**, with every rule a schedule's run has
-    ([34, decision 8](34-schedules.md#decisions)): a smoke test with a `manual` step, or whose
-    file is not approved as it is now, is refused when the trigger is saved and again at each
-    fire, and a test named by an input fails its step at once instead of waiting. Nothing answers
-    an agent's permission prompt on the user's behalf.
+    fires. For the agent events and the done signal, a trigger's cursor starts at the newest row
+    when it is saved. For the `pr.*` events, which are differences from what was seen last, saving
+    the trigger writes its pull request's watch from the forge's answer at that moment, and fires
+    nothing: a pull request already open is not `pr.opened`, and checks already red are not
+    `pr.checks_failed`. That seed is also what makes a later change, made while the app was
+    closed, a real one.
+11. **A trigger's run may wait for the user's approval, and for nothing else a person does.** The
+    doors are called with `unattended: false`, as a schedule's own test is (`ask_for_run` in
+    `schedule::fire`), and not with `true`, as a scheduled workflow is. An agent writes a smoke
+    test on its branch as it works, so the file a "smoke test when done" trigger runs is new or
+    changed nearly every time; refusing an unapproved file, as `smoke::runs::queue` does when
+    unattended, would make that preset refuse every time. So a new or changed file waits on the
+    workspace's card, the trigger reads _waiting for approval_ and is counted on the sidebar, and
+    the user is told once. Two rules keep the wait bounded:
+    - **A test with a `manual` step is refused**, by the trigger's own check of the file, when the
+      trigger is saved and at each fire, for a test it runs directly and for one a workflow's
+      `run_test` names. Nobody is there to press **Pass**.
+    - **A workflow is accepted only if each of its `run_test` steps has a `timeout`.** A test
+      named by an input is not known until the run; if it waits for a person, the step's timeout
+      ends it. So does an approval that does not come.
+
+    A run that waits holds the one-run lock, so the trigger's next events wait behind it
+    (decision 8). Nothing answers an agent's permission prompt on the user's behalf.
+
 12. **The run tables are not touched**, for [schedules' reason](34-schedules.md#decisions): a
     triggered run is queued with `requested_by: app`, and the trigger's own history holds the
     run's id.
@@ -131,16 +168,26 @@ Four questions were put to the user on 2026-11-06, and the recommendation was ta
 | `preset`  | The preset it was made from, if any, so the composer and the list can say so                      |
 
 **A workspace trigger** listens to everything in its workspace. For the `agent.*` events that
-means any agent the user started there; a shell is not an agent, and neither is an agent a
-workflow run started — the reviewer settling must not fire "the agent settled". Its runs'
-`session: origin` is what it always is: the workspace's newest agent session running when the
-run starts.
+means any agent the user started there. A shell is already left out, since only sessions that
+carry `HARNESS_LABEL` are agents (`origin_session` in the driver). An agent a workflow run started
+must be left out too — the reviewer settling must not fire "the agent settled" — and nothing on
+the session says a workflow started it: `agent_runs.launched_by` is `app` or `cli`, and the launch
+labels are the same for every harness launch. The run that started it does say so: a
+`start_session` step leaves the terminal's id as `session` and the agent run's id as `run` in its
+outputs. The matcher skips a session whose terminal or agent run is in a `start_session` output.
+Its runs' `session: origin` is what it always is: the workspace's newest agent session running
+when the run starts.
 
 **A session trigger** belongs to one agent session. The `agent.*` events are that session's only,
-and its runs' `session: origin` is that session, whatever else is running in the workspace; the
-door's request gains an `origin` to say so. It fires only while that session's program runs: an
-event while it does not is recorded as **skipped**, since there is no one to tell. It goes when
-the session's record does.
+and its runs' `session: origin` is that session, whatever else is running in the workspace. That
+needs a change in the driver, not only in the request. Today, when a queued run starts and its
+workflow needs an origin, the driver sets `facts.origin` to the newest live agent session's
+terminal id (`origin_session`), over whatever `queue` stored. So the request gains the session's
+record id, `queue` keeps it in `Facts`, and at start the driver resolves that record to its live
+terminal's id instead of choosing the newest, and does not overwrite it. `Facts`'s description of
+`origin` changes with it. It fires only while that session's program runs: an event while it does
+not is recorded as **skipped**, since there is no one to tell. It goes when the session's record
+does.
 
 ## Events
 
@@ -151,12 +198,12 @@ the session's record does.
 | `agent.exited`      | An agent's program ended                                                     | session            | `exit`: `any`, `failed` (non-zero)                         | `summary`                            |
 | `pr.opened`         | The workspace's branch has an open pull request it did not have before       | pull request       | `draft`: include or not                                    | `url`                                |
 | `pr.review`         | A review was submitted on the workspace's pull request                       | pull request       | `from`: `others` or `anyone`; `state`; `bots`              | `url`, `count`, `authors`, `summary` |
-| `pr.comment`        | A comment was posted on its conversation                                     | pull request       | `from`, `bots`                                             | `url`, `count`, `authors`, `summary` |
+| `pr.comment`        | A comment on its conversation, or a reply on a review thread                 | pull request       | `from`, `bots`                                             | `url`, `count`, `authors`, `summary` |
 | `pr.checks_failed`  | Its checks finished on the newest commit, and one failed                     | pull request, head | none                                                       | `head`, `summary`                    |
 | `pr.checks_passed`  | Its checks finished on the newest commit, and none failed                    | pull request, head | none                                                       | `head`                               |
 | `pr.conflicted`     | GitHub says it conflicts with its base                                       | pull request, head | none                                                       | `head`                               |
-| `pr.merged`         | It was merged                                                                | pull request       | none                                                       | `url`                                |
-| `pr.closed`         | It was closed without merging                                                | pull request       | none                                                       | `url`                                |
+| `pr.merged`         | It was merged                                                                | pull request       | none                                                       | `url`, `number`, `title`             |
+| `pr.closed`         | It was closed without merging                                                | pull request       | none                                                       | `url`, `number`, `title`             |
 | `test.finished`     | A smoke test run in the workspace reached a verdict, or could not            | workspace          | `test`: an id; `verdict`: `passed`, `failed`, `any`        | `verdict`, `summary`                 |
 | `workflow.finished` | A workflow run in the workspace ended                                        | workspace          | `workflow`: an id; `outcome`: `succeeded`, `failed`, `any` | `summary`                            |
 
@@ -166,27 +213,43 @@ Notes on each group:
   pull request for the branch the workspace has checked out. Each is seen once: checks that
   failed on a commit fire once for that commit, and a push that brings a new head can fire again.
   `state` is any of `approved`, `changes_requested` and `commented`. `bots: false` leaves out
-  accounts whose login ends in `[bot]`. A line comment is part of the review it belongs to.
+  accounts whose login ends in `[bot]`. A line comment in a submitted review is part of that
+  review; a reply on a thread is a `pr.comment` of its own ([decision 6](#decisions)).
   `pr.merged` and `pr.closed` end the subject: its count and its cursor go.
-- **`agent.settled`** is the guess decision 5 does not build on. `new_commits` means the
-  worktree's `HEAD` has moved since this trigger last fired, or since the session started.
-  `clean` means nothing is uncommitted. `quiet` means it stayed quiet that long after settling;
-  being busy again in between starts it over. Without filters it fires at every turn, which is
-  what a custom "tell me each time it stops" wants and what a review must not have.
+- **Finished checks are counted, not read off the verdict.** `CheckCounts::verdict` says
+  `Failing` as soon as one check has failed, while others may still be running. `pr.checks_failed`
+  is the rollup on the head with nothing running and at least one failed; `pr.checks_passed` is
+  nothing running, nothing failed and something passed.
+- **Only `CONFLICTING` is a conflict.** `Mergeable::Unknown` is GitHub still working it out, and
+  `publish/conflicts.rs` does not treat it as one either; the watch waits for a definite answer.
+- **`pr.merged` and `pr.closed` are about a pull request that is no longer open**, and
+  `workflow::runs::queue` keeps a workflow's pull request only while it is open. A workflow that
+  uses `{{ pr.* }}` or `wait_pr_activity` would be refused at every such fire, so saving a
+  trigger on them refuses it, saying to use `{{ event.url }}`, `{{ event.number }}` and
+  `{{ event.title }}`, which these two leave.
+- **`agent.settled`** is the guess decision 5 does not build on. One turn is one observation,
+  folded the way the driver folds it for `wait_session`: a session's settled time is the later of
+  a quiet after enough output (`Settled::observe`) and a reported `turn.completed`, and the event
+  is that time moving, not each of the two signals. The quiet half is held in memory, so after a
+  restart only a turn the harness reported can be found; a quiet while the app was closed is not
+  a row anywhere and is not recovered. `new_commits` means the worktree's `HEAD` has moved since
+  this trigger last fired, or since the session started. `clean` means nothing is uncommitted.
+  `quiet` means it stayed quiet that long after settling; being busy again in between starts it
+  over. Without filters it fires at every turn, which is what a custom "tell me each time it
+  stops" wants and what a review must not have.
 - **`workspace.done`** is [the done signal](#the-done-signal). The same signal twice on the same
   commit is one event.
 - **`test.finished` and `workflow.finished`** are read from the run rows when a run ends, as a
-  schedule's history is (`schedule::fire::settle`). A run's depth is the depth of the fire that
-  started it, or 0; a test run a workflow's `run_test` queued has the workflow run's depth, read
-  from that step's outputs.
+  schedule's history is (`schedule::fire::settle`), with the run's depth as
+  [decision 9](#decisions) says.
 
 The events are ones Yardsort already sees, or can see without reading what an agent prints. The
 agent events come from the host's activity, which the workflow driver already follows for
 `wait_session`, and from `agent_events` rows, which a reported turn or an exit already writes.
-The pull request's state, its checks and whether it conflicts are in the forge cache the
-workspace badges read (`publish::Forge`). Reviews and comments are what `wait_pr_activity`
-already asks for, `gh pr view --json url,reviews,comments`, with each post's author and state
-added to `forge::PrPost`.
+The pull request events come from the watch's own reads, [below](#the-app), not from the forge
+cache the badges read: that cache's open list has check counts but no check names, is filled in
+full only while the Pull requests view is showing, and drops a pull request once it is merged or
+closed.
 
 ### Variables
 
@@ -201,9 +264,9 @@ logins.
 - **Run by hand, every `event.*` is empty**, and the Run dialog says so in a note, as it does for
   `{{ workspace.task }}` in a workspace started without a first message. A file is still one
   file whoever starts it.
-- `{{ pr.* }}` is found when the run is queued, as now. A trigger on a `pr.*` event has just seen
-  the pull request, so the lookup cannot come back empty, short of the pull request closing in
-  between, which is a refusal like any other.
+- `{{ pr.* }}` is found when the run is queued, as now. A trigger on any `pr.*` event but merged
+  and closed has just seen the pull request open, so the lookup comes back empty only if it was
+  closed in between, which is a refusal like any other.
 
 ## Presets
 
@@ -244,9 +307,14 @@ way:
 `ys workspace done [--note "…"]`, run in an agent's terminal, says the work in this workspace is
 committed and ready to be looked at. It is known which workspace and which session are asking by
 `YARDSORT_WORKSPACE_ID` and `YARDSORT_SESSION_RECORD_ID`, as for `ys test run`; outside an agent's
-terminal it takes `--workspace`. It writes one `agent_events` row, kind `workspace.done`, with
-the worktree's `HEAD` and the note, and needs the app to be open no more than
-`ys memory propose` does: an app that opens later finds the row.
+terminal it takes `--workspace`. It writes one row with the worktree's `HEAD` and the note, and
+needs the app to be open no more than `ys memory propose` does, which also writes straight to
+the store: an app that opens later finds the row.
+
+The row is not an `agent_events` row. Every row there is `privacy_class` `metadata`, which by
+its migration holds no prompt, command, path or output, and the note is the agent's own words.
+So the signal has a small table of its own, `done_signals`, and the note is copied onto the fire
+it starts, beside the summary the fire already keeps.
 
 The agent is told about it in its first message, in a short section after the memory and the
 smoke tests, **only when an enabled trigger in its workspace listens for `workspace.done`** when
@@ -261,38 +329,42 @@ agent runs a command, as it runs `gh`.
 Everything a trigger does is in four steps, each a function over rows that is handed the time
 and never reads the clock, so that every rule above is a test with a made-up clock:
 
-1. **Seeing.** What happened arrives as observations: the host's quiet and exit events, new
-   `agent_events` rows after the trigger thread's cursor, run rows that ended, and the difference
-   between what the forge says now about a watched pull request and what it said last time. An
-   observation that no enabled trigger matches is dropped; nothing is stored for its own sake.
+1. **Seeing.** What happened arrives as observations: a session's settled time moving (one per
+   turn, [as above](#events)), an agent's exit, new `done_signals` rows, run rows that ended, and
+   the difference between what the forge says now about a watched pull request and what its watch
+   says it said last time. An observation that no enabled trigger matches is dropped; nothing is
+   stored for its own sake.
 2. **Gathering.** A matching observation joins the trigger's open fire for that subject, or opens
    one, due `quiet` after it — moved later by each new observation, never past ten minutes from
    the first. The fire counts what it has gathered, for `{{ event.count }}` and the summary.
 3. **Deciding.** When a fire is due: the trigger is still on; its workspace is there and not
    archived; a session trigger's session is running; the subject's count is under `cap`; the
-   hourly rate is under ten; the depth is at most 3. If the trigger's previous run is still going,
-   the fire is held as **waiting** and decided again when that run ends.
-4. **Queueing.** The door is called with the trigger's workspace, inputs and `origin`, and
-   `unattended: true`. The workflow driver or the smoke runner is woken, and from there the run
-   is the run as it already is.
+   hourly rate is under ten; the depth is at most 3; a test it would run has no `manual` step.
+4. **Queueing.** The door is called with the trigger's workspace, inputs, session record and
+   depth, and `unattended: false` ([decision 11](#decisions)). If it answers that a run of the
+   same workflow or test is already active in the workspace, whoever started it, the fire is
+   held as **waiting** and decided again when that run ends ([decision 8](#decisions)). Otherwise
+   the workflow driver or the smoke runner is woken, and from there the run is the run as it
+   already is.
 
 Each fire leaves one line in the trigger's history:
 
 | Outcome   | Meaning                                                                         |
 | --------- | ------------------------------------------------------------------------------- |
 | `started` | A run was queued. The line links to it, and shows its result once it has one    |
-| `waiting` | The previous run is going; this one starts when it ends                         |
+| `waiting` | A run of the same thing is active there; this one is decided when it ends       |
 | `skipped` | There was no one to run it for: a session trigger whose session was not running |
 | `capped`  | The subject has had `cap` runs. Nothing more fires for it until **Reset**       |
 | `refused` | The door refused, with its reason, or the rate or the depth was over its limit  |
 
-**Told.** The trigger's `notify` decides about runs that end, as a schedule's does. `capped` and
+**Told.** The trigger's `notify` decides about runs that end, as a schedule's does. A run left
+waiting for approval is told once, whatever `notify` says, as a schedule's is. `capped` and
 `refused` have no run to end, so they are told when they happen, once while they last, which is
 what review settled for schedules.
 
 ## Storage
 
-One migration, `0023_triggers.sql`, with three tables:
+One migration, `0023_triggers.sql`, with four tables:
 
 - **`triggers`**, one row per trigger, as [above](#the-trigger), with the events, filters and
   inputs as JSON, the workspace (set to NULL when it is deleted, its name kept), the session
@@ -303,10 +375,15 @@ One migration, `0023_triggers.sql`, with three tables:
   run's id or the reason, the depth, and whether it has been told. The newest 200 per trigger are
   kept, and any fire still open, waiting or with a run that has not ended is kept whatever its
   age — the lesson schedules learnt the day after they shipped.
-- **`pr_watches`**, one row per watched pull request: its head, its checks' state on that head,
-  whether it conflicts, whether it is open, and the newest review and comment seen with their
-  ids. It is what makes "checks failed" an event once rather than a state seen every minute, and
-  what lets an app that was closed find what changed meanwhile.
+- **`pr_watches`**, one row per watched workspace: its pull request's number once there is one
+  (none yet is a state too, so that `pr.opened` is a change), its head, its checks' counts on that
+  head, whether it conflicts, whether it is open, merged or closed, and the ids of the reviews,
+  comments and thread replies seen. It is written when a trigger is saved
+  ([decision 10](#decisions)) and after each look. It is what makes "checks failed" an event once
+  rather than a state seen every minute, and what lets an app that was closed find what changed
+  meanwhile.
+- **`done_signals`**, one row per `ys workspace done`: the workspace, the session record, the
+  `HEAD`, the note and the time.
 
 A removed project's triggers are neither listed nor fired and go with its row; removing a
 trigger removes its history and nothing else.
@@ -315,13 +392,29 @@ trigger removes its history and nothing else.
 
 A `triggers` thread, started only in the app that holds the profile's lock, beside the schedules
 thread, for the reason that one has its own: asking the forge must not stall anything else. It
-ticks once a second. It is given the host's events, as the workflow driver is, reads
-`agent_events` from its cursor, and copies run endings onto history lines. Once a minute, for
-each watched pull request, it reads the forge cache — asking for a fresh project list when the
-cached one is older than the cache's 30 seconds — and asks `gh pr view` for the posts, on a
-thread of its own with the 20-second limit, as `wait_pr_activity`'s questions are. A watched pull
-request that goes away from the cache is looked up once by number, as `Forge::follow_open` does
-for badges, before its watch is dropped.
+ticks once a second. It is given the host's events, as the workflow driver is, keeps each
+session's settled time as the driver does, reads `agent_events` and `done_signals` from its
+cursor, and copies run endings onto history lines.
+
+Once a minute, for each watched workspace, it looks at the pull request itself, on a thread of
+its own with the 20-second limit, as `wait_pr_activity`'s questions are:
+
+- **Until the watch has a number**, it finds the workspace's pull request as a run does
+  (`Look::pull_request`).
+- **From then on it asks by number**, so a merged or closed pull request is still answered for:
+  `gh pr view <number> --json url,title,state,isDraft,headRefOid,mergeable,statusCheckRollup,reviews,comments`.
+  That is one call for the state, the check names and counts, whether it conflicts, the reviews
+  and the conversation's comments. The forge cache is not used for this. Its open list has
+  counts without names and is filled in full only while the Pull requests view is showing, and
+  `Forge::follow_open` returns without asking when that list was never loaded, and stops asking
+  once the list has dropped a merged or closed pull request — which is the change `pr.merged` and
+  `pr.closed` are.
+- **When a trigger listens for `pr.comment`**, it also reads the pull request's line comments
+  through the comments API, for the replies on threads.
+
+The watch keeps the ids seen, so a post is one observation however many looks see it. A watch
+whose pull request was merged or closed is dropped after the look that saw it, and a new pull
+request on the same branch starts a new subject.
 
 ## The command line
 
@@ -345,8 +438,9 @@ ys workspace done --note "Login form validates on blur; tests added."
 `--test`; `--workspace` or `--session` (the workspace the command is run in when both are left
 out); `--input id=value`; and optionally `--name`, `--quiet`, `--cap` and `--notify`. It checks
 everything the dialog checks. It writes rows with the app closed and says that nothing fires
-until the app is open. `ys` cannot approve a test file, so a trigger on a test whose file is not
-approved is refused, saying to run the test once in the app.
+until the app is open. `ys` cannot approve a test file, so a trigger's run of a test whose file
+is not approved waits for approval in the app, as any triggered run does
+([decision 11](#decisions)).
 
 ## The UI
 
@@ -356,8 +450,9 @@ approved is refused, saying to run the test once in the app.
   capped, refused, or with a run waiting for approval.
 - **The Triggers view**: every trigger, with its name, its event in words (_When a review comes
   in on #142_), where (a workspace, or a session's tab), what it runs, its last fire and its
-  badge — on, running, waiting, capped, refused, off, ended. A row opens to its switch, its
-  history with a link to each run, **Edit…**, **Reset** when capped, and **Remove…**.
+  badge — on, running, waiting, waiting for approval, capped, refused, off, ended. A row opens
+  to its switch, its history with a link to each run, **Edit…**, **Reset** when capped, and
+  **Remove…**.
 - **The trigger dialog**, in the order the questions can be answered: where → when (the events,
   then their filters) → run what (a workflow or a test, then its inputs, the Run dialog's own
   fields) → options (quiet, cap, notify) → a name. It shows in words what will happen: _When
@@ -379,12 +474,15 @@ for every `ys` command an agent runs: the PATH a Windows agent's terminal has, w
 
 1. **Core and `ys`, with Yardsort's own events.** The migration, the trigger model and its
    checks at saving, the four steps of firing with a made-up clock, `workspace.done` with its
-   first-message section, `agent.settled`, `agent.exited`, `test.finished`, `workflow.finished`,
-   the `event` namespace in the workflow parser, the app's thread, `ys trigger` and
-   `ys workspace done`. A trigger added from a terminal fires in an open app.
-2. **The forge.** `pr_watches`, the author and state on each post, every `pr.*` event, the three
-   built-in workflows, and the presets. Confirm against a real pull request how GitHub records a
-   reply to a line comment (decision 6).
+   table and first-message section, `agent.settled` folded per turn, `agent.exited`,
+   `test.finished`, `workflow.finished`, the `event` namespace in the workflow parser, the depth
+   and the session record in `Facts`, the driver keeping a stored origin, the matcher leaving out
+   sessions a `start_session` started, the app's thread, `ys trigger` and `ys workspace done`. A
+   trigger added from a terminal fires in an open app.
+2. **The forge.** `pr_watches` and its seed at saving, the look by number with the check rollup,
+   the author and state on each post, thread replies from the comments API, every `pr.*` event,
+   the three built-in workflows, and the presets. Confirm against a real pull request whether
+   GitHub records a reply on a line as a submitted review too (decision 6).
 3. **The app.** The composer's presets, the sidebar row and its count, the view, the dialog, the
    menus, the marks in run lists, and the notifications for capped and refused.
 4. **Custom events.** `ys event emit <name>`, and `on: custom.<name>`: a named event a workflow, a
