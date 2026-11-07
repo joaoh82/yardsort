@@ -3,31 +3,54 @@
 A trigger starts a [workflow](workflows.md) or a [smoke test](smoke-tests.md) when something
 happens in a workspace, instead of when you press **Run** or a [schedule](schedules.md)'s time
 comes: an agent says its work is done, an agent finishes a turn or exits, a smoke test or a
-workflow run ends. What it starts is an ordinary run, in that workspace, with the inputs you gave
-the trigger.
+workflow run ends, or something happens on the workspace's pull request — it opens, a review or a
+comment comes in, its checks fail. What it starts is an ordinary run, in that workspace, with the
+inputs you gave the trigger.
 
-For example: when the agent in `fix-login` says it is done, run a smoke test and tell it how it
-went. Or: when that agent's program exits with an error, tell me.
+For example: when someone reviews the pull request of `fix-login`, tell its agent to address the
+review. Or: when the agent says it is done, have a second agent review the branch.
 
 **This release has triggers from the command line.** `ys trigger` adds, lists and changes them,
 and Yardsort listens and starts their runs while it is open. The runs show in the workflow's runs
-and in **Tests** like any other. The window does not list triggers yet, and the triggers for
-pull requests — one opened, a review posted, the checks failing — are still to come. See
+and in **Tests** like any other. The window does not list triggers yet. See
 [What it does not do yet](#what-it-does-not-do-yet).
 
 Three things to know before you make one:
 
 - **Triggers fire while Yardsort is open.** What happened while it was closed — an agent that ran
-  `ys workspace done`, a run that ended, a turn its agent reported — is found when it next opens,
-  and acted on once.
+  `ys workspace done`, a run that ended, a turn its agent reported, a review posted — is found
+  when it next opens, and acted on once.
 - **Only what happens after you make it counts.** A trigger never fires for something that
   happened before it was saved, or while it was switched off.
 - **A trigger approves nothing.** A smoke test file nobody has approved waits for you, as it does
   when an agent runs it. See [Smoke tests and approval](#smoke-tests-and-approval).
 
+## Ready-made triggers
+
+Five triggers come ready made, each an event and a built-in [workflow](workflows.md#where-workflows-come-from),
+with at most one question:
+
+| Preset               | When                                                                        | Runs              | Asks for                  |
+| -------------------- | --------------------------------------------------------------------------- | ----------------- | ------------------------- |
+| `address-reviews`    | Someone other than you reviews or comments on the pull request, 2 min quiet | `address-review`  |                           |
+| `fix-checks`         | The checks on the pull request's newest commit fail                         | `fix-checks`      |                           |
+| `review-when-opened` | The pull request opens, or a draft is marked ready                          | `code-review`     | `reviewer`: who reviews   |
+| `review-when-done`   | The agent says its work is done                                             | `review-branch`   | `reviewer`: who reviews   |
+| `smoke-when-done`    | The agent says its work is done                                             | `smoke-then-tell` | `suite`: which smoke test |
+
+```sh
+ys trigger presets
+ys trigger add --preset address-reviews --workspace fix-login
+ys trigger add --preset review-when-done --input reviewer=codex --workspace fix-login
+```
+
+A trigger made from one is an ordinary trigger: `--quiet`, `--cap`, `--name` and `--notify`
+change it as they would any other.
+
 ## Making a trigger
 
 ```sh
+ys trigger add --on pr.review --on pr.comment --workflow address-review --workspace fix-login
 ys trigger add --on workspace.done --workflow smoke-then-tell --input suite=login --workspace fix-login
 ys trigger add --on agent.exited --failed-exit --workflow tell-me --workspace fix-login
 ys trigger add --on test.finished --of-test login --verdict failed --workflow fix-it
@@ -40,18 +63,19 @@ there. Everything a run would be refused for is checked before anything is writt
 is there and not archived, the workflow or the test is there and ready, its inputs fit, and the
 filters are ones the events have.
 
-| Option        | What it is                                                                                                     |
-| ------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--on`        | An event, below. More than once for more than one                                                              |
-| `--workflow`  | Run this workflow, or                                                                                          |
-| `--test`      | run this smoke test, from the workspace's `.yardsort/tests`                                                    |
-| `--workspace` | Where. Default: the workspace this is run in                                                                   |
-| `--session`   | Only this agent session's events, by its id or the start of it. See [One agent's trigger](#one-agents-trigger) |
-| `--input`     | `id=value`, for each of the target's inputs                                                                    |
-| `--name`      | What lists call it. Default: the workflow's or the test's own name                                             |
-| `--quiet`     | Wait this long after the last event before starting the run: `30s`, `2m`. Default: none                        |
-| `--cap`       | Runs it may start for one agent session, or for the workspace, before it stops. Default: 3                     |
-| `--notify`    | `failure` (the default), `always` or `never`: when to be told how a run ended                                  |
+| Option        | What it is                                                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `--preset`    | A [ready-made trigger](#ready-made-triggers), in place of `--on` and what to run                                          |
+| `--on`        | An event, below. More than once for more than one                                                                         |
+| `--workflow`  | Run this workflow, or                                                                                                     |
+| `--test`      | run this smoke test, from the workspace's `.yardsort/tests`                                                               |
+| `--workspace` | Where. Default: the workspace this is run in                                                                              |
+| `--session`   | Only this agent session's events, by its id or the start of it. See [One agent's trigger](#one-agents-trigger)            |
+| `--input`     | `id=value`, for each of the target's inputs                                                                               |
+| `--name`      | What lists call it. Default: the workflow's or the test's own name                                                        |
+| `--quiet`     | Wait this long after the last event before starting the run: `30s`, `2m`. Default: 2m for reviews and comments, else none |
+| `--cap`       | Runs it may start for one agent session, one pull request, or the workspace, before it stops. Default: 3                  |
+| `--notify`    | `failure` (the default), `always` or `never`: when to be told how a run ended                                             |
 
 ## What it listens for
 
@@ -62,11 +86,19 @@ filters are ones the events have.
 | `agent.exited`      | An agent's program ended                                                        | `--failed-exit`                                         |
 | `test.finished`     | A smoke test run in the workspace reached a verdict, or could not               | `--of-test <id>`, `--verdict passed` or `failed`        |
 | `workflow.finished` | A workflow run in the workspace ended                                           | `--of-workflow <id>`, `--outcome succeeded` or `failed` |
+| `pr.opened`         | The workspace's branch has an open pull request it did not have before          | `--drafts`                                              |
+| `pr.review`         | A review was submitted on the workspace's pull request                          | `--from`, `--state`, `--no-bots`                        |
+| `pr.comment`        | A comment on its conversation, or a reply on a review thread                    | `--from`, `--no-bots`                                   |
+| `pr.checks_failed`  | Its checks finished on its newest commit, and one failed                        |                                                         |
+| `pr.checks_passed`  | Its checks finished on its newest commit, and none failed                       |                                                         |
+| `pr.conflicted`     | GitHub says it conflicts with its base                                          |                                                         |
+| `pr.merged`         | It was merged                                                                   |                                                         |
+| `pr.closed`         | It was closed without being merged                                              |                                                         |
 
 - **An agent's events** are about the agents you started in the workspace. A shell is not an
   agent, and neither is an agent a workflow run started: the reviewer of a code review finishing
-  its turn sets nothing off. An agent's events and the workspace's cannot share one trigger,
-  since each counts its runs for something different; make two.
+  its turn sets nothing off. An agent's events, the pull request's and the workspace's cannot
+  share one trigger, since each counts its runs for something different; make two.
 - **`agent.settled` fires at every turn**, including a turn where the agent stops to ask you
   something. That is what "tell me each time it stops" wants, and not what "it is finished"
   means. `--new-commits` waits for the branch to have commits it did not have the last time this
@@ -77,6 +109,43 @@ filters are ones the events have.
   without Yardsort hearing how.
 - **`--verdict failed`** includes a run that could not finish; **`--outcome failed`** includes a
   cancelled run.
+- **The pull request's events** are about the open pull request for the branch the workspace has
+  checked out, on GitHub, as `gh` sees it. See [Watching a pull request](#watching-a-pull-request).
+
+## Watching a pull request
+
+While an enabled trigger in a workspace listens for a `pr.*` event, Yardsort looks at that
+workspace's pull request once a minute, with `gh`, and starts what the trigger starts when
+something changed since the last look. Nothing is asked of GitHub for a workspace no trigger
+watches.
+
+- **What is there when you add the trigger is not news.** Adding it reads the pull request as it
+  is: a pull request already open is not `pr.opened`, checks already red are not
+  `pr.checks_failed`, and a review already posted is not `pr.review`. `ys trigger add` says which
+  pull request it is watching, or that there is none yet.
+- **Reviews and comments count when they are someone else's.** You and every agent post to GitHub
+  as your `gh` account, and the agent answering a review answers each comment as you. So by
+  default only posts from other accounts count — a teammate, a review bot. `--from anyone`
+  counts yours too, except what is posted while a run this trigger started is going, which is the
+  agent's own answers. `--no-bots` leaves out accounts whose name ends in `[bot]`. `--state`
+  (`approved`, `changes_requested`, `commented`) narrows `pr.review` to reviews that concluded
+  that.
+- **A reply on a review thread is a comment.** GitHub also records each reply as a review of its
+  own; Yardsort counts it once, as `pr.comment`. A review is the review's verdict and words with
+  the comments on lines made in it.
+- **Reviews and comments come in bursts**, so a trigger on them waits two minutes after the last
+  one by default and starts one run for all of them.
+- **Checks are told once they have all finished**: `pr.checks_failed` when nothing is running and
+  something failed, `pr.checks_passed` when nothing is running and nothing failed. Each is told
+  once per commit, so a push that fails again is news again.
+- **A draft** is `pr.opened` when it is marked ready for review. `--drafts` counts it as soon as
+  it opens instead.
+- **`pr.merged` and `pr.closed`** end that pull request; the next one opened on the branch is
+  `pr.opened` again, and counts its own runs. A workflow that needs the open pull request —
+  `{{ pr.* }}`, `wait_pr_activity` — cannot run on these, and saving says to use `{{ event.url }}`,
+  `{{ event.number }}` and `{{ event.title }}` instead.
+- **GitHub not answering** — no network, `gh` logged out — is no news; the trigger looks again a
+  minute later.
 
 ## The done signal
 
@@ -115,7 +184,7 @@ time, because another time will come; something that happened will not happen ag
 **It stops before it loops.** Three limits, each told to you once:
 
 - **The cap.** At most `--cap` runs — three by default — for one agent session, for an agent's
-  events, or for the workspace, for the rest. The next fire is **capped**, you are told, and the
+  events, for one pull request, for the pull request's, or for the workspace, for the rest. The next fire is **capped**, you are told, and the
   trigger starts nothing more for it until you run `ys trigger reset`.
 - **The rate.** At most ten runs an hour for one trigger, whatever the cap.
 - **Chains.** A run a trigger started can end in an event another trigger listens for. A run a
@@ -128,6 +197,13 @@ time, because another time will come; something that happened will not happen ag
 turns and exits, and its runs' `session: origin` is that agent, whichever agent in the workspace is
 newest. A fire while that agent's program is not running is **skipped**: there is no one to tell.
 The trigger goes when the session's record does. `ys session list` shows the ids.
+
+### No agent to tell
+
+A workflow that tells the workspace's own agent something — `address-review`, `fix-checks`, the
+last step of `review-branch` — has nothing to do when no agent is running there. Such a fire is
+**skipped**, and you are told once, rather than starting a run that skips every step and calls
+that a success. Start an agent in the workspace and the next event reaches it.
 
 ### Smoke tests and approval
 
@@ -149,14 +225,18 @@ Nothing else a person does is waited for:
 
 A workflow a trigger starts can read what set it off as `{{ event.* }}`:
 
-| Variable        | What it is                                                                    |
-| --------------- | ----------------------------------------------------------------------------- |
-| `event.kind`    | The event: `workspace.done`, `agent.settled`, …                               |
-| `event.count`   | How many events the run is for, when a burst was gathered into one            |
-| `event.note`    | `workspace.done`: what the agent passed to `--note`                           |
-| `event.head`    | `workspace.done`, `agent.settled`: the commit the worktree was on             |
-| `event.summary` | `agent.exited`, `test.finished`, `workflow.finished`: how it ended, in a line |
-| `event.verdict` | `test.finished`: `passed`, `failed`, `errored`, …                             |
+| Variable                      | What it is                                                                                                                                                                                                                        |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `event.kind`                  | The event: `workspace.done`, `agent.settled`, …                                                                                                                                                                                   |
+| `event.count`                 | How many events the run is for, when a burst was gathered into one                                                                                                                                                                |
+| `event.note`                  | `workspace.done`: what the agent passed to `--note`                                                                                                                                                                               |
+| `event.head`                  | `workspace.done`, `agent.settled`: the commit the worktree was on                                                                                                                                                                 |
+| `event.summary`               | `agent.exited`, `test.finished`, `workflow.finished`: how it ended, in a line. `pr.review`, `pr.comment`: _2 reviews and 3 comments from alice and coderabbitai[bot]_. `pr.checks_failed`: _2 checks failed: lint, test (ubuntu)_ |
+| `event.verdict`               | `test.finished`: `passed`, `failed`, `errored`, …                                                                                                                                                                                 |
+| `event.head`                  | Also `pr.checks_failed`, `pr.checks_passed`, `pr.conflicted`: the commit the checks were on                                                                                                                                       |
+| `event.url`                   | The `pr.*` events: the pull request, or for a review or comment, the newest one                                                                                                                                                   |
+| `event.number`, `event.title` | The `pr.*` events: the pull request's number and title                                                                                                                                                                            |
+| `event.authors`               | `pr.review`, `pr.comment`: who posted, comma-separated                                                                                                                                                                            |
 
 A trigger whose workflow uses a variable one of its events does not leave is refused when it is
 saved, naming it. Run by hand, every `event.*` is empty, and **Run…** and `ys workflow run` say
@@ -166,25 +246,26 @@ so.
 
 A triggered run has nobody watching it, so the trigger can tell you how it ended, with a desktop
 notification: **when a run fails** (the default), **how every run ends**, or **never**. Unless it
-is set to never, a run waiting for your approval is told once, and so is a trigger that is capped
-or could not start its run, once while it lasts.
+is set to never, a run waiting for your approval is told once, and so is a trigger that is capped,
+could not start its run, or had no agent to tell, once while it lasts.
 
 ## Its history
 
 `ys trigger fires <trigger>` lists every fire, newest first:
 
-| Outcome                            | Meaning                                                                     |
-| ---------------------------------- | --------------------------------------------------------------------------- |
-| running, succeeded, passed, failed | A run was started; this is how it stands, or how it ended                   |
-| waiting for approval               | Its run waits for you to approve the test file                              |
-| waiting                            | A run of the same thing is going there; this one starts when it ends        |
-| skipped                            | Its agent session was not running, so there was no one to tell              |
-| capped                             | It had started as many runs as `--cap` allows. Later events go on this line |
-| refused                            | A run could not be started, with the reason                                 |
+| Outcome                            | Meaning                                                                      |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| running, succeeded, passed, failed | A run was started; this is how it stands, or how it ended                    |
+| waiting for approval               | Its run waits for you to approve the test file                               |
+| waiting                            | A run of the same thing is going there; this one starts when it ends         |
+| skipped                            | Its agent session, or any agent in the workspace, was not running to be told |
+| capped                             | It had started as many runs as `--cap` allows. Later events go on this line  |
+| refused                            | A run could not be started, with the reason                                  |
 
 ## From the command line
 
 ```sh
+ys trigger presets              # the ready-made triggers
 ys trigger list                 # every trigger: what it listens for, what it runs, where, how it stands
 ys trigger show Tell            # its events, filters, inputs, limits and last fire
 ys trigger pause Tell           # off: keeps its history, fires nothing
@@ -199,8 +280,7 @@ See [`ys trigger`](cli.md#ys-trigger).
 
 ## What it does not do yet
 
-- **Pull requests.** A pull request opened, a review or a comment posted, the checks failing.
-  These, and the built-in workflows that answer them, are the next part.
+- **Forges other than GitHub.** The pull request events need `gh`.
 - **The window.** Triggers are listed, made and changed with `ys` for now; the composer's
   ready-made triggers and a view of them come later.
 - **Run while Yardsort is closed.** What happened is found when it next opens.

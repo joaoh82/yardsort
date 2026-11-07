@@ -24,7 +24,8 @@
 #   `gh` on that PATH. It answers what the Pull requests view, the workflow-run shot and the
 #   pull-request badges ask — the list, one pull request in full, the open ones, the comments
 #   on lines — what the Tasks view asks — the open and closed issues, one in full, the
-#   labels and who can be assigned — and what the clone dialog asks of the account — your
+#   labels and who can be assigned — a trigger's watch of one pull request, from
+#   `watch-<number>.json` when there is one — and what the clone dialog asks of the account — your
 #   repositories, a search, the clone protocol — from files `setup` writes under the demo
 #   folder, and refuses everything else, every write among it.
 #   The pull request the Code tab shows has real commits on a real branch, and the refs the
@@ -136,6 +137,8 @@ case "$1 $2" in
       *"issues(states:CLOSED"*) cat "$dir/issues-closed.json" ;;
       *"issues(states:OPEN"*) cat "$dir/issues-open.json" ;;
       *assignableUsers*) cat "$dir/assignees.json" ;;
+      # A trigger's watch of one pull request.
+      *"pullRequest(number:"*) cat "$dir/watch-$(printf '%s\n' "$@" | sed -n 's|^number=\([0-9]*\)$|\1|p').json" ;;
       *) cat "$dir/open.json" ;;
     esac
     ;;

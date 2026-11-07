@@ -1,0 +1,31 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: address-review
+name: Address reviews
+description: >
+  Tell the workspace's own agent, once it is quiet, that its pull request has new reviews or
+  comments, and to address them. The run lasts until the agent has answered, so a trigger
+  that starts it does not start it again for the agent's own replies.
+version: 1
+
+trigger:
+  kind: manual
+  context: workspace
+
+steps:
+  - id: tell
+    action: send_to_session
+    session: origin
+    timeout: 1h
+    prompt: |
+      Pull request #{{ pr.number }} ({{ pr.url }}) has new reviews or comments: {{ event.summary }}.
+      Read the reviews and the conversation with `gh pr view {{ pr.number }} --comments`, and the
+      comments on lines with `gh api repos/{owner}/{repo}/pulls/{{ pr.number }}/comments`. Fix
+      what is right, push, and answer each comment saying what you did or why you did not.
+
+  - id: answered
+    action: wait_session
+    needs: [tell]
+    session: origin
+    until: settled
+    timeout: 2h

@@ -3424,8 +3424,16 @@ fn a_trigger_is_refused_for_what_is_wrong_with_it_and_nothing_is_written() {
         assert!(error.contains(wanted), "{args:?}: {error}");
     };
     refused(
-        &["--on", "pr.opened", "--workflow", "tell"],
-        "There is no event `pr.opened`",
+        &["--on", "pr.approved", "--workflow", "tell"],
+        "There is no event `pr.approved`",
+    );
+    refused(
+        &["--preset", "review-when-done"],
+        "Who reviews? Say with `--input reviewer=…`",
+    );
+    refused(
+        &["--on", "pr.review", "--workflow", "tell"],
+        "`pr.review` does not leave",
     );
     refused(
         &["--on", "workspace.done", "--workflow", "nothing"],
@@ -3507,4 +3515,98 @@ fn done_is_written_down_for_the_app_and_says_whether_anything_listens() {
     assert_eq!(signals.len(), 2);
     assert_eq!(signals[1].note.as_deref(), Some("tests added"));
     assert_eq!(signals[1].head.as_deref(), said["head"].as_str());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_preset_watches_the_pull_request_from_what_is_on_it_when_it_is_added() {
+    let tasks = Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some(
+            "case \"$*\" in\n\
+             *'pr list'*) cat \"$here/list.json\" ;;\n\
+             *graphql*) cat \"$here/look.json\" ;;\nesac",
+        ),
+    );
+    let presets = tasks.ys(None, &["trigger", "presets"]).ok();
+    assert!(
+        presets.contains("address-reviews — Address reviews"),
+        "{presets}"
+    );
+    assert!(presets.contains("--input reviewer=…"), "{presets}");
+
+    let made = make_workspace(&tasks.fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let branch = made["branch"].as_str().unwrap();
+    let here = tasks.bin.path();
+    std::fs::write(
+        here.join("list.json"),
+        serde_json::json!([{
+            "number": 7, "url": "https://github.com/example/widgets/pull/7", "title": "Fix",
+            "headRefName": branch, "state": "OPEN", "isDraft": false, "statusCheckRollup": []
+        }])
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        here.join("look.json"),
+        serde_json::json!({"data": {"repository": {"pullRequest": {
+            "number": 7, "url": "https://github.com/example/widgets/pull/7", "title": "Fix",
+            "state": "OPEN", "isDraft": false, "headRefName": branch, "headRefOid": "abc",
+            "mergeable": "MERGEABLE", "commits": {"nodes": []},
+            "reviews": {"nodes": [{"databaseId": 1, "state": "COMMENTED",
+                "submittedAt": "2026-11-07T07:51:50Z", "body": "Hm.", "url": "r1",
+                "author": {"__typename": "User", "login": "alice"},
+                "comments": {"totalCount": 0, "nodes": []}}]},
+            "comments": {"nodes": []}
+        }}, "viewer": {"login": "me"}}})
+        .to_string(),
+    )
+    .unwrap();
+
+    let added = tasks
+        .ys(
+            None,
+            &[
+                "trigger",
+                "add",
+                "--preset",
+                "address-reviews",
+                "--workspace",
+                name,
+            ],
+        )
+        .ok();
+    assert!(added.contains("Added `Address reviews`"), "{added}");
+    assert!(
+        added.contains("Watching #7: what is there now is not news"),
+        "{added}"
+    );
+    let listed: serde_json::Value =
+        serde_json::from_str(&tasks.ys(None, &["trigger", "list", "--json"]).ok()).unwrap();
+    assert_eq!(
+        listed[0]["events"],
+        serde_json::json!(["pr.review", "pr.comment"])
+    );
+    assert_eq!(
+        listed[0]["quietMs"], 120_000,
+        "two minutes, for a burst of posts"
+    );
+    assert_eq!(listed[0]["target"], "workflow");
+    assert_eq!(listed[0]["targetId"], "address-review");
+
+    let store = Store::open(&tasks.fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = listed[0]["workspaceId"].as_str().unwrap();
+    let watch = store.pr_watch(workspace).unwrap().unwrap();
+    assert!(watch.seeded);
+    assert_eq!(watch.number, Some(7));
+    assert!(watch.seen.contains("review:1"), "{watch:?}");
+    assert!(
+        tasks
+            .asked()
+            .iter()
+            .any(|asked| asked.contains("api graphql")),
+        "{:?}",
+        tasks.asked()
+    );
 }

@@ -286,6 +286,16 @@ impl runs::Look for Looking<'_> {
         let gh = yardsort_core::forge::Gh::find(self.0.env());
         runs::pull_request_of(gh.as_ref(), &git, workspace)
     }
+
+    fn watch_pull_request(
+        &self,
+        workspace: &WorkspaceRow,
+        number: Option<u32>,
+    ) -> Result<Option<yardsort_core::forge::PrLook>, String> {
+        let git = self.0.git().map_err(Failure::into_message)?;
+        let gh = yardsort_core::forge::Gh::find(self.0.env());
+        yardsort_core::trigger::watch::watch_pull_request_of(gh.as_ref(), &git, workspace, number)
+    }
 }
 
 /// The workspace this is run in: the agent's own, from its launch environment, or the folder.

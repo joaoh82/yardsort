@@ -325,3 +325,41 @@ fn a_workflow_reads_event_variables_and_a_run_by_hand_is_told_they_are_empty() {
         "{notes:?}"
     );
 }
+
+#[test]
+fn every_preset_saves_with_its_one_answer() {
+    let tx = Tx::new();
+    for preset in presets::PRESETS {
+        let mut inputs = BTreeMap::new();
+        if let Some((input, _)) = preset.asks {
+            let answer = if input == "suite" { "demo" } else { "claude" };
+            inputs.insert(input.to_owned(), answer.to_owned());
+        }
+        let filters = Filters::default();
+        let draft = Draft {
+            preset: Some(preset.id),
+            quiet_ms: preset.quiet_ms(),
+            ..tx.draft(
+                preset.events,
+                &filters,
+                ScheduleTarget::Workflow,
+                preset.workflow,
+                &inputs,
+            )
+        };
+        let trigger = tx
+            .try_add(&draft)
+            .unwrap_or_else(|e| panic!("{}: {}", preset.id, e.message));
+        assert_eq!(
+            trigger.name,
+            crate::workflow::find(&tx.fx.data_dir, preset.workflow)
+                .unwrap()
+                .name
+        );
+        assert_eq!(trigger.preset.as_deref(), Some(preset.id));
+    }
+    assert_eq!(
+        presets::find("address-reviews").unwrap().quiet_ms(),
+        2 * 60_000
+    );
+}

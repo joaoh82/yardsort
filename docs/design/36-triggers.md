@@ -1,7 +1,8 @@
 # Triggers
 
 _Proposal, 2026-11-06. The questions put to the user that day are answered under
-[Decisions](#decisions). Slice 1 is built: see [Slice 1: what shipped](#slice-1-what-shipped)._
+[Decisions](#decisions). Slices 1 and 2 are built: see [Slice 1](#slice-1-what-shipped) and
+[Slice 2](#slice-2-what-shipped)._
 
 A trigger starts a [workflow](21-workflows.md) or a [smoke test](32-smoke-tests.md) when
 something happens, instead of when a person presses **Run** or a [schedule](34-schedules.md)'s
@@ -82,9 +83,9 @@ Four questions were put to the user on 2026-11-06, and the recommendation was ta
    it is a line comment with `in_reply_to` (`forge::LineComment`), read through the pull
    request's comments API, which the `code-review` prompt already names. The watch reads that
    too, so a teammate who answers on a thread starts the next round, as the usual way a review
-   continues. Whether GitHub also records each reply as a submitted review of its own is checked
-   against a real pull request in slice 2, with a reply on a line, not only a review body; a post
-   is counted once whichever list it shows in, and the default is right either way.
+   continues. GitHub does also record each reply as a submitted review of its own — checked in
+   slice 2 against a real pull request, below — and a post is counted once whichever list it
+   shows in.
 
 7. **A burst is one fire.** A review with ten line comments is already one post. What the quiet
    time folds is several posts: two reviews, three comments and a reply posted in a few minutes
@@ -555,6 +556,84 @@ demo projects `scripts/screenshots.sh` sets up, triggers added with the build's 
 Not checked by hand: an agent's turns and exits through the host, which needs an agent in a
 terminal; the tests cover the folding, the rows and the matching with a real store. macOS and
 Windows have had the tests in CI only.
+
+## Slice 2: what shipped
+
+The forge: every `pr.*` event, the watch, the presets, and the three built-in workflows,
+`address-review`, `fix-checks` and `review-branch`. Still no window.
+
+**The core.** `forge/watch.rs` asks GitHub about one pull request and reads the answer;
+`trigger/watch.rs` keeps what the last look saw (`pr_watches`, migration `0024`) and says what
+is news, as observations for `fire::observe`, by a function of the two looks and the time;
+`trigger/presets.rs` the five presets. `Look` gains `watch_pull_request`, so the app and `ys`
+both seed a watch when a trigger is saved. **The app** has a second thread,
+`trigger-pull-requests`, that looks at each watched pull request once a minute and hands what it
+finds to the trigger thread, which stays the only one that gathers and decides. **`ys trigger
+presets`**, **`--preset`**, and the filters `--drafts`, `--from`, `--state` and `--no-bots`.
+
+What building it settled or changed:
+
+- **A reply on a thread is also a review — confirmed.** On #182 of this repository, each of
+  thirteen replies made with the API's reply endpoint is listed twice: as a line comment with
+  `in_reply_to`, and as a submitted `COMMENTED` review with no body whose one comment is that
+  reply. So a review with no words whose every comment answers another is read as one
+  `pr.comment` per reply and is not a `pr.review`; a review that says something, or comments on
+  a line afresh, is a review, and replies made in it are part of it.
+- **One GraphQL question, not three `gh` calls.** `gh pr view --json` has no replies and does not
+  say whose account `gh` is, and the comments API's review ids are not `gh pr view`'s. One query
+  by number, through `Gh::graphql` as the open list already uses, has the state, the head, the
+  check runs by name and conclusion, whether it conflicts, every review with the comments in it
+  and their `replyTo`, the conversation's comments, and `viewer`. GraphQL names a bot without the
+  `[bot]` the REST answers and the pages put after it, so it is put back from `__typename`.
+- **What a look is checked against is a seeded watch, and a watch already there is never
+  re-seeded.** Saving a trigger seeds its workspace's watch only when there is none: another
+  trigger is watching with it, so it is current, and seeding it again would mark as seen what
+  that trigger has not been told. A trigger switched back on needs nothing: its watch is current,
+  or was dropped while nothing watched. When the forge cannot be asked at saving, the first look
+  seeds the states — opened, checks, conflict — and tells none of them; reviews and comments are
+  news either way when they are newer than the trigger, which `observe` already checks.
+- **Another branch checked out is another pull request**, seeded afresh rather than told.
+- **A draft is `pr.opened` when it is marked ready**, unless the trigger takes drafts, which is
+  told when it opens instead.
+- **A fire with no agent to tell is skipped, and told.** A workflow that needs `session: origin`
+  started in a workspace with no agent running skips every step and succeeds, so with the
+  default `notify` the review it was for would go unanswered without a word. Such a fire is
+  **skipped** instead — the session trigger's rule, for the whole workspace — and the user is
+  told once while it lasts, as for capped and refused. Found in the check by hand.
+- **Reviews and comments gathered into one fire add up**: the summary counts each kind and names
+  each author once, rather than being the newest post's.
+- **The presets' filters are all the defaults** — others' posts, drafts left out — so a preset
+  is an event, a workflow, a quiet time and at most one question.
+- **`review-branch` reads `{{ event.note }}`**, so it can be triggered only by `workspace.done`;
+  a trigger on `agent.settled` with it is refused when saved. Its reviewer's findings reach the
+  author through `ys workspace context`, which needs the project's conversations shared, as they
+  are unless the user turned that off.
+- **The screenshot script's stand-in `gh`** answers the watch's question from
+  `watch-<number>.json` when there is one.
+
+Checked by hand on 2026-11-07, in a development build on Linux with the throwaway profile
+`scripts/screenshots.sh` sets up, its stand-in `gh` answering for a pull request #31 on a new
+workspace's branch, and a stand-in agent — a custom harness that echoes what it is sent and works
+for ten seconds when asked to address something:
+
+- `ys trigger add --preset address-reviews --quiet 20s` and a custom trigger on
+  `pr.checks_failed` running `fix-checks` both said _Watching #31_; the review already there was
+  not news.
+- A comment from `coderabbitai[bot]`, a reply of the user's own, and a review dated before the
+  trigger: one run of `address-review`, given _1 comment from coderabbitai[bot]_. The agent was
+  told, once quiet, with the link and the `gh` commands; the run waited for it to finish
+  answering and succeeded, and the trigger's history took the ending.
+- With the app closed: a review from bob, a comment from alice, another reply of the user's, and
+  a push whose checks failed. At the first look after it opened, one fire of two events, _1
+  review and 1 comment from bob and alice_, and one of `fix-checks`, _1 check failed: test
+  (ubuntu)_ on the new head. Nothing from the first round was told again.
+- Its agent had ended with the first app, and both runs skipped every step and called it a
+  success. That is the skip above; with it, the next comment was **skipped**, _No agent was
+  running in `add-fahrenheit-flag`_, and no run was started.
+
+Not checked by hand: a review from a second real account on a real pull request. The query was
+run against GitHub itself, on #182 and #184, and read as described above; the rest is the
+stand-in's answers in GitHub's shape. macOS and Windows have had the tests in CI only.
 
 ## Not in version one, on purpose
 

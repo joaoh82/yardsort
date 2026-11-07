@@ -559,10 +559,14 @@ wait for you: see [Schedules](schedules.md#workflows-that-run-a-smoke-test).
 
 [Triggers](triggers.md): standing instructions to start a workflow or a smoke test when something
 happens in a workspace — an agent says its work is done, finishes a turn or exits, a test or a
-workflow run ends.
+workflow run ends, or something happens on the workspace's pull request.
 
 ```sh
+ys trigger presets                # the ready-made triggers, and the question each asks
 ys trigger list                   # every trigger: what it listens for, what it runs, where, how it stands
+ys trigger add --preset address-reviews --workspace fix-login
+ys trigger add --preset review-when-done --input reviewer=codex --workspace fix-login
+ys trigger add --on pr.review --from anyone --workflow address-review --cap 5
 ys trigger add --on workspace.done --workflow smoke-then-tell --input suite=login --workspace fix-login
 ys trigger add --on agent.settled --new-commits --clean --quiet 3m --test login --session 4c1e
 ys trigger add --on test.finished --of-test login --verdict failed --workflow fix-it --cap 2
@@ -574,17 +578,24 @@ ys trigger fires Tell             # its history: every fire and what became of i
 ys trigger remove Tell            # the trigger and its history; the runs it started stay
 ```
 
-`add` takes one or more `--on` events — `workspace.done`, `agent.settled`, `agent.exited`,
-`test.finished`, `workflow.finished` — and what to run, `--workflow <id>` or `--test <id>`.
+`add` takes a `--preset` from `presets`, with its one answer as `--input`, or one or more `--on`
+events — `workspace.done`, `agent.settled`, `agent.exited`, `test.finished`,
+`workflow.finished`, `pr.opened`, `pr.review`, `pr.comment`, `pr.checks_failed`,
+`pr.checks_passed`, `pr.conflicted`, `pr.merged`, `pr.closed` — and what to run, `--workflow
+<id>` or `--test <id>`.
 `--workspace` takes a workspace's name or id, and can be left out inside a workspace's folder or
 in an agent's terminal there; `--session <id>` instead makes a trigger that belongs to one agent
 session. Give each input as `--input id=value`. The filters are `--new-commits` and `--clean`
 for `agent.settled`, `--failed-exit` for `agent.exited`, `--of-test <id>` and `--verdict
-passed|failed` for `test.finished`, and `--of-workflow <id>` and `--outcome succeeded|failed` for
-`workflow.finished`. `--quiet 2m` waits that long after the last event before starting the run,
-`--cap` is how many runs it may start before it stops (3 by default), and `--notify` is `failure`
+passed|failed` for `test.finished`, `--of-workflow <id>` and `--outcome succeeded|failed` for
+`workflow.finished`, `--drafts` for `pr.opened`, `--from others|anyone` and `--no-bots` for
+`pr.review` and `pr.comment`, and `--state approved|changes_requested|commented` for
+`pr.review`. `--quiet 2m` waits that long after the last event before starting the run (two
+minutes by default for reviews and comments), `--cap` is how many runs it may start before it
+stops (3 by default), and `--notify` is `failure`
 (the default), `always` or `never`. Everything a run would be refused for is checked before
-anything is written.
+anything is written. A trigger on a `pr.*` event reads the workspace's pull request with `gh` as
+it is saved, so that what is on it already is not news, and says which pull request it watches.
 
 A trigger is named by its name, its id, or the start of its id, as `list` prints it. `--json`
 works as everywhere. Triggers fire while Yardsort is open, so `add`, `list`, `show` and `resume`

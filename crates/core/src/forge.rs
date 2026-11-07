@@ -25,6 +25,9 @@ use crate::env::ShellEnv;
 use crate::git::HeadHistory;
 use crate::program::Program;
 
+mod watch;
+pub use watch::{pr_look, PrLook, WatchPost, WatchPostKind};
+
 #[derive(Debug, thiserror::Error)]
 pub enum ForgeError {
     #[error("gh is not installed, or not on PATH")]
