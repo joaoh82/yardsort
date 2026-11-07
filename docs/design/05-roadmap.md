@@ -1109,6 +1109,12 @@ Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 
 - Bursts become one fire, an event during the trigger's run waits for it, and a cap per pull
   request or session, an hourly rate and a chain depth stop loops.
 - Five slices: core and `ys` with Yardsort's own events; the forge; the app; custom events; docs.
+- [x] Slice 1: migration 0023; the trigger model and its checks at saving; observing, gathering,
+      deciding and settling with a made-up clock; `workspace.done` with its first-message
+      section, `agent.settled` folded per turn, `agent.exited`, `test.finished`,
+      `workflow.finished`; the `event` namespace, the depth and the pinned session in a run's
+      facts; the app's thread; `ys trigger` and `ys workspace done`. Recorded in
+      [36 § slice 1](36-triggers.md#slice-1-what-shipped).
 
 _Exit:_ on all three platforms, a workspace started with **Address reviews** ticked has its agent
 told of a review posted from a second account, once, two minutes after its last comment; the

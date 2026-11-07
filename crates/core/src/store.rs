@@ -32,6 +32,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0020_smoke_test_settings.sql"),
     include_str!("../migrations/0021_smoke_test_browser.sql"),
     include_str!("../migrations/0022_schedules.sql"),
+    include_str!("../migrations/0023_triggers.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -472,6 +473,9 @@ pub use smoke::*;
 
 mod schedules;
 pub use schedules::*;
+
+mod triggers;
+pub use triggers::*;
 
 pub struct Store {
     conn: Mutex<Connection>,

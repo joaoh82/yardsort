@@ -555,6 +555,56 @@ file, so `add --test` says when the file has not been approved in the app: its f
 wait for you there. `add --workflow` is refused when the workflow runs a smoke test that would
 wait for you: see [Schedules](schedules.md#workflows-that-run-a-smoke-test).
 
+### `ys trigger`
+
+[Triggers](triggers.md): standing instructions to start a workflow or a smoke test when something
+happens in a workspace — an agent says its work is done, finishes a turn or exits, a test or a
+workflow run ends.
+
+```sh
+ys trigger list                   # every trigger: what it listens for, what it runs, where, how it stands
+ys trigger add --on workspace.done --workflow smoke-then-tell --input suite=login --workspace fix-login
+ys trigger add --on agent.settled --new-commits --clean --quiet 3m --test login --session 4c1e
+ys trigger add --on test.finished --of-test login --verdict failed --workflow fix-it --cap 2
+ys trigger show Tell              # its events, filters, inputs, limits and last fire
+ys trigger pause Tell             # off: keeps its history, fires nothing
+ys trigger resume Tell            # on again; only what happens from now counts
+ys trigger reset Tell             # lift its cap
+ys trigger fires Tell             # its history: every fire and what became of it
+ys trigger remove Tell            # the trigger and its history; the runs it started stay
+```
+
+`add` takes one or more `--on` events — `workspace.done`, `agent.settled`, `agent.exited`,
+`test.finished`, `workflow.finished` — and what to run, `--workflow <id>` or `--test <id>`.
+`--workspace` takes a workspace's name or id, and can be left out inside a workspace's folder or
+in an agent's terminal there; `--session <id>` instead makes a trigger that belongs to one agent
+session. Give each input as `--input id=value`. The filters are `--new-commits` and `--clean`
+for `agent.settled`, `--failed-exit` for `agent.exited`, `--of-test <id>` and `--verdict
+passed|failed` for `test.finished`, and `--of-workflow <id>` and `--outcome succeeded|failed` for
+`workflow.finished`. `--quiet 2m` waits that long after the last event before starting the run,
+`--cap` is how many runs it may start before it stops (3 by default), and `--notify` is `failure`
+(the default), `always` or `never`. Everything a run would be refused for is checked before
+anything is written.
+
+A trigger is named by its name, its id, or the start of its id, as `list` prints it. `--json`
+works as everywhere. Triggers fire while Yardsort is open, so `add`, `list`, `show` and `resume`
+say so when it is not; `ys` writes the trigger either way, and the app listens within a second
+of starting.
+
+### `ys workspace done`
+
+Says the work in a workspace is committed and ready to be looked at, for a
+[trigger](triggers.md#the-done-signal) on `workspace.done`. An agent runs it in its own terminal;
+elsewhere, run it in the workspace's folder or give `--workspace <name>`.
+
+```sh
+ys workspace done
+ys workspace done --note "Login validates on blur; tests added."
+```
+
+`--note` is passed to what the trigger starts as `{{ event.note }}`. It prints whether a trigger
+there listens for it. `--json` gives `{ workspace, workspaceId, head, note, heard }`.
+
 ### `ys activity export`
 
 Every recorded event as **NDJSON** on stdout — one JSON object per line, oldest first, with the

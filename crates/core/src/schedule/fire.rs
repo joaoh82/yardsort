@@ -250,6 +250,9 @@ fn ask_for_run(
                     // history.
                     requested_by: "app",
                     unattended: !attended,
+                    origin_record: None,
+                    depth: 0,
+                    event: None,
                 },
                 look,
             )

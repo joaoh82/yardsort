@@ -26,6 +26,14 @@ const FIELDS: &[(&str, &[&str])] = &[
         &["name", "branch", "base_branch", "path", "task"],
     ),
     ("pr", &["number", "url", "title"]),
+    // What the event that started the run left. Empty when a person started it.
+    (
+        "event",
+        &[
+            "kind", "note", "head", "summary", "verdict", "url", "number", "title", "count",
+            "authors",
+        ],
+    ),
 ];
 
 /// Variables that are a whole value, with no fields.

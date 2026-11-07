@@ -23,6 +23,7 @@ mod sessions;
 mod smoke;
 mod state;
 mod terminal;
+mod triggers;
 mod updates;
 mod usage;
 mod workflows;
@@ -447,6 +448,10 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
             if let Some(driver) = handle.try_state::<workflows::Driver>() {
                 driver.observe(&event);
             }
+            // And a trigger waiting for an agent to finish a turn, or to go back to work.
+            if let Some(listener) = handle.try_state::<triggers::Listener>() {
+                listener.observe(&event);
+            }
             let _ = terminal::PtyHostEvent(event).emit(&handle);
         }),
     );
@@ -507,6 +512,8 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
         workflows::start(app.handle());
         // Schedules fire in the app that drives runs, and nowhere else.
         schedules::start(app.handle());
+        // So do triggers.
+        triggers::start(app.handle());
     }
 
     // Remote, when it is on: the link to the server's relay.

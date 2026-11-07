@@ -90,6 +90,9 @@ fn a_cancel_during_one_effect_stops_the_effects_after_it() {
             inputs: &BTreeMap::new(),
             requested_by: "cli",
             unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
         },
         &crate::workflow::runs::Accepting::default(),
     )
@@ -255,6 +258,9 @@ impl Profile {
                 inputs: &BTreeMap::new(),
                 requested_by: "cli",
                 unattended: false,
+                origin_record: None,
+                depth: 0,
+                event: None,
             },
             &look,
         )
@@ -506,6 +512,9 @@ fn a_run_test_step_queues_a_run_marked_as_the_workflows_and_waits_for_it() {
             inputs: &BTreeMap::new(),
             requested_by: "cli",
             unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
         },
         &crate::workflow::runs::Accepting::default(),
     )
@@ -578,6 +587,9 @@ fn a_run_test_step_in_a_run_nobody_watches_fails_rather_than_wait_for_a_person()
                 inputs: &BTreeMap::new(),
                 requested_by: "app",
                 unattended,
+                origin_record: None,
+                depth: 0,
+                event: None,
             },
             &crate::workflow::runs::Accepting::default(),
         )

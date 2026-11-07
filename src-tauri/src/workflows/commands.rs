@@ -326,6 +326,9 @@ pub async fn workflow_start(
                 inputs: &inputs,
                 requested_by: "app",
                 unattended: false,
+                origin_record: None,
+                depth: 0,
+                event: None,
             },
             &AppLook(state),
         )

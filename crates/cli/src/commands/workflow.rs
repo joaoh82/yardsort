@@ -225,6 +225,9 @@ fn start_run(
             inputs: &inputs,
             requested_by: "cli",
             unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
         },
         &Looking(ys),
     )?;

@@ -12,30 +12,31 @@ To compare agent tokens and estimated API costs, or find which workspace is usin
 memory, open **Usage** from the sidebar or command palette. The [Usage guide](guide/usage.md)
 walks through both tabs and explains what the local figures include.
 
-| Guide                                                         | What it covers                                                                                                       |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                                                                   |
-| [Projects](guide/projects.md)                                 | Adding, creating, reordering and removing projects; the `local` workspace                                            |
-| [Workspaces](guide/workspaces.md)                             | The composer, branches and worktrees, rename / archive / restore / delete                                            |
-| [Terminals & sessions](guide/terminals-and-sessions.md)       | Tabs, shells, status dots, notifications, resume and fork, handing work on, what agents can read of each other       |
-| [Changes & files](guide/changes-and-files.md)                 | Reviewing what an agent did: changed files and who wrote them, diffs, the file tree                                  |
-| [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row                                               |
-| [Pull requests](guide/pull-requests.md)                       | Every project's pull requests in one view: filter them, start a workspace on one, merge, close                       |
-| [Tasks](guide/tasks.md)                                       | Every project's GitHub issues in one view: which need an answer, what was said; `ys task` too                        |
-| [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor                                                         |
-| [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer                                                  |
-| [Activity](guide/activity.md)                                 | The local record of what ran, what each agent reports, and the experimental timeline                                 |
-| [Memory](guide/memory.md)                                     | Lessons about a project for its agents, approved by you; the switch for sharing conversations between them           |
-| [Outcomes](guide/outcomes.md)                                 | What became of each attempt, and each agent's history on your work                                                   |
-| [Workflows](guide/workflows.md)                               | Named, reusable agent work in YAML: the built-in code review, writing and checking your own                          |
-| [Smoke tests](guide/smoke-tests.md)                           | A test file in your repository an agent writes and Yardsort runs: browser steps, approval, the Tests view, `ys test` |
-| [Schedules](guide/schedules.md)                               | Run a workflow or a smoke test once at a set time, or on a routine, while Yardsort is open; `ys schedule` too        |
-| [Remote](guide/remote.md)                                     | Reaching this computer from your phone through a server. Still under development, and off until you turn it on       |
-| [Usage](guide/usage.md)                                       | Tokens your agents spent and what they would cost; CPU and memory per agent, live                                    |
-| [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                                                   |
-| [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                                                                    |
-| [The `ys` command line](guide/cli.md)                         | Installing it; starting, deleting and handing off workspaces from a terminal or a script                             |
-| [Troubleshooting](guide/troubleshooting.md)                   | "Command not found", blank windows, where your data lives                                                            |
+| Guide                                                         | What it covers                                                                                                        |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| [Quick start](quick-start.md)                                 | Install, add a project, start your first workspace                                                                    |
+| [Projects](guide/projects.md)                                 | Adding, creating, reordering and removing projects; the `local` workspace                                             |
+| [Workspaces](guide/workspaces.md)                             | The composer, branches and worktrees, rename / archive / restore / delete                                             |
+| [Terminals & sessions](guide/terminals-and-sessions.md)       | Tabs, shells, status dots, notifications, resume and fork, handing work on, what agents can read of each other        |
+| [Changes & files](guide/changes-and-files.md)                 | Reviewing what an agent did: changed files and who wrote them, diffs, the file tree                                   |
+| [Commits & pull requests](guide/commits-and-pull-requests.md) | Committing, pushing and opening a pull request; check results on a row                                                |
+| [Pull requests](guide/pull-requests.md)                       | Every project's pull requests in one view: filter them, start a workspace on one, merge, close                        |
+| [Tasks](guide/tasks.md)                                       | Every project's GitHub issues in one view: which need an answer, what was said; `ys task` too                         |
+| [Settings & harnesses](guide/settings.md)                     | Configuring agents, adding your own, worktree folder, editor                                                          |
+| [Assist](guide/assist.md)                                     | Optional AI checks on changed files and suggestions in the composer                                                   |
+| [Activity](guide/activity.md)                                 | The local record of what ran, what each agent reports, and the experimental timeline                                  |
+| [Memory](guide/memory.md)                                     | Lessons about a project for its agents, approved by you; the switch for sharing conversations between them            |
+| [Outcomes](guide/outcomes.md)                                 | What became of each attempt, and each agent's history on your work                                                    |
+| [Workflows](guide/workflows.md)                               | Named, reusable agent work in YAML: the built-in code review, writing and checking your own                           |
+| [Smoke tests](guide/smoke-tests.md)                           | A test file in your repository an agent writes and Yardsort runs: browser steps, approval, the Tests view, `ys test`  |
+| [Schedules](guide/schedules.md)                               | Run a workflow or a smoke test once at a set time, or on a routine, while Yardsort is open; `ys schedule` too         |
+| [Triggers](guide/triggers.md)                                 | Start a workflow or a smoke test when an agent says it is done, finishes a turn or exits, or a run ends; `ys trigger` |
+| [Remote](guide/remote.md)                                     | Reaching this computer from your phone through a server. Still under development, and off until you turn it on        |
+| [Usage](guide/usage.md)                                       | Tokens your agents spent and what they would cost; CPU and memory per agent, live                                     |
+| [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                                                    |
+| [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                                                                     |
+| [The `ys` command line](guide/cli.md)                         | Installing it; starting, deleting and handing off workspaces from a terminal or a script                              |
+| [Troubleshooting](guide/troubleshooting.md)                   | "Command not found", blank windows, where your data lives                                                             |
 
 ## Tutorials and articles
 
