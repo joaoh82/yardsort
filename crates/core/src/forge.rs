@@ -278,13 +278,15 @@ impl CheckCounts {
         }
     }
 
-    /// Count `count` checks that reported `verdict`. A cancelled check is a failure; a skipped
-    /// or neutral one passes, once it has finished.
+    /// Count `count` checks that reported `verdict`. A cancelled check is a failure; a skipped,
+    /// neutral or stale one passes, once it has finished. Stale is GitHub giving up on a check
+    /// that never reported: it will not finish any more than it has, and counted as running it
+    /// would hold the verdict for ever.
     fn add(&mut self, verdict: &str, finished: bool, count: u32) {
         match verdict.to_ascii_uppercase().as_str() {
             "FAILURE" | "ERROR" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED"
             | "STARTUP_FAILURE" => self.failed += count,
-            "SUCCESS" | "NEUTRAL" | "SKIPPED" if finished => self.passed += count,
+            "SUCCESS" | "NEUTRAL" | "SKIPPED" | "STALE" if finished => self.passed += count,
             _ => self.running += count,
         }
     }

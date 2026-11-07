@@ -13,8 +13,9 @@
 //!   they are newer than the trigger, which `observe` sees to.
 //! - **Each change once.** Checks that finished are told once per commit and verdict; a conflict
 //!   once per commit; a post once.
-//! - **A pull request merged or closed ends the watch's subject.** The next one on the branch is
-//!   `pr.opened` again.
+//! - **A pull request merged or closed is told once and kept.** The watch then looks for the
+//!   branch's open pull request: a different one is `pr.opened`, and the same one reopened
+//!   carries on where it was, its reviews and checks already seen.
 //!
 //! Where the looks happen — a thread of the app's, once a minute — is the app's business.
 
@@ -137,7 +138,10 @@ pub fn look_at(
             old = blank(&workspace.id);
         }
     }
-    match look.watch_pull_request(workspace, old.number) {
+    // A closed one is not asked about again: the branch's open pull request is, which is that
+    // one if it was reopened.
+    let asking = if old.closed { None } else { old.number };
+    match look.watch_pull_request(workspace, asking) {
         Ok(found) => {
             let (seen, next) = compare(&old, found.as_ref(), now);
             store.put_pr_watch(&next)?;
@@ -167,6 +171,10 @@ pub fn compare(
     let tell = old.seeded;
     next.seeded = true;
     let Some(pr) = found else {
+        // A closed one is kept for its reopening, however long the branch has none open.
+        if old.closed {
+            return (Vec::new(), next);
+        }
         return (
             Vec::new(),
             PrWatchRow {
@@ -176,6 +184,7 @@ pub fn compare(
             },
         );
     };
+    // The same number after it was closed is it reopened: it carries on where it was.
     let fresh = old.number != Some(pr.number);
     if fresh {
         next = PrWatchRow {
@@ -213,23 +222,20 @@ pub fn compare(
     };
 
     if pr.state != PullRequestState::Open {
-        // One seen open before is news; one that was never seen open is not.
-        if tell && !fresh {
+        // One seen open before is news, once; one that was never seen open is not.
+        if tell && !fresh && !old.closed {
             let event = match pr.state {
                 PullRequestState::Merged => TriggerEvent::PrMerged,
                 _ => TriggerEvent::PrClosed,
             };
             seen.push(news(event, now, &[], None));
         }
-        // Its subject ends here: the next pull request on the branch opens afresh.
-        let ended = PrWatchRow {
-            seeded: true,
-            looked_at: now,
-            branch: next.branch.clone(),
-            ..blank(&old.workspace_id)
-        };
-        return (seen, ended);
+        // The branch's next open pull request is looked for from now on. What was seen of this
+        // one stays: reopened, it is not new, and its reviews are not news again.
+        next.closed = true;
+        return (seen, next);
     }
+    next.closed = false;
 
     if tell && fresh {
         let status = if pr.draft { "draft" } else { "open" };
@@ -253,11 +259,11 @@ pub fn compare(
         if !told {
             if tell {
                 if counts.failed > 0 {
-                    let summary = format!(
-                        "{} failed: {}",
-                        plural(counts.failed, "check"),
-                        pr.failed_checks.join(", ")
-                    );
+                    let mut names = pr.failed_checks.join(", ");
+                    if pr.more_failed {
+                        names.push_str(" and others");
+                    }
+                    let summary = format!("{} failed: {names}", plural(counts.failed, "check"));
                     seen.push(news(
                         TriggerEvent::PrChecksFailed,
                         now,

@@ -32,10 +32,13 @@ pub struct PrLook {
     pub branch: String,
     /// Its newest commit.
     pub head: String,
-    /// What the checks on `head` came to.
+    /// What the checks on `head` came to: every one of them, counted by GitHub by state, however
+    /// many there are.
     pub check_counts: CheckCounts,
-    /// The name of each check on `head` that failed.
+    /// The name of each check on `head` that failed, of the first hundred.
     pub failed_checks: Vec<String>,
+    /// More checks failed than are named in `failed_checks`.
+    pub more_failed: bool,
     pub mergeable: Mergeable,
     /// Every review and comment, oldest first.
     pub posts: Vec<WatchPost>,
@@ -74,7 +77,8 @@ pub struct WatchPost {
 const WATCH_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!){\
 repository(owner:$owner,name:$name){pullRequest(number:$number){\
 number url title state isDraft headRefName headRefOid mergeable \
-commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename \
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){\
+checkRunCountsByState{state count} statusContextCountsByState{state count} nodes{__typename \
 ...on CheckRun{name status conclusion} ...on StatusContext{context state}}}}}}} \
 reviews(last:100){nodes{databaseId state submittedAt body url author{__typename login} \
 comments(first:100){totalCount nodes{databaseId url replyTo{databaseId}}}}} \
@@ -123,15 +127,32 @@ pub fn pr_look(json: &str) -> ForgeResult<PrLook> {
     let url =
         |value: &serde_json::Value| value.get("url").and_then(|v| v.as_str()).map(str::to_owned);
 
-    let mut check_counts = CheckCounts::default();
-    let mut failed_checks = Vec::new();
+    // The verdict is GitHub's own count of every check by state, as the list of open pull
+    // requests reads it: the nodes are one page, and a green first page says nothing of the
+    // second. The nodes are only for the names of the ones that failed.
     let commits = nodes(pr.get("commits"));
     let contexts = commits
         .first()
         .and_then(|node| node.get("commit"))
         .and_then(|commit| commit.get("statusCheckRollup"))
         .and_then(|rollup| rollup.get("contexts"));
-    for check in nodes(contexts) {
+    let mut check_counts = CheckCounts::default();
+    for key in ["checkRunCountsByState", "statusContextCountsByState"] {
+        for by_state in items(contexts.and_then(|contexts| contexts.get(key))) {
+            let state = by_state.get("state").and_then(|s| s.as_str());
+            let count = by_state
+                .get("count")
+                .and_then(|c| c.as_u64())
+                .and_then(|c| u32::try_from(c).ok());
+            if let (Some(state), Some(count)) = (state, count) {
+                check_counts.add(state, true, count);
+            }
+        }
+    }
+    let mut named = CheckCounts::default();
+    let mut failed_checks = Vec::new();
+    // A union's connection can hold nulls; they are no check at all.
+    for check in nodes(contexts).iter().filter(|check| !check.is_null()) {
         let text = |key: &str| check.get(key).and_then(|v| v.as_str());
         // A check run has a status and, once it has finished, a conclusion; a commit status has
         // only a state.
@@ -143,12 +164,13 @@ pub fn pr_look(json: &str) -> ForgeResult<PrLook> {
                 text("status").is_none_or(|status| status.eq_ignore_ascii_case("COMPLETED")),
             ),
         };
-        let failed_before = check_counts.failed;
-        check_counts.add(verdict, finished, 1);
-        if check_counts.failed > failed_before {
+        let failed_before = named.failed;
+        named.add(verdict, finished, 1);
+        if named.failed > failed_before {
             failed_checks.push(name.unwrap_or("Check").to_owned());
         }
     }
+    let more_failed = check_counts.failed as usize > failed_checks.len();
 
     let mut posts = Vec::new();
     for review in nodes(pr.get("reviews")) {
@@ -237,6 +259,7 @@ pub fn pr_look(json: &str) -> ForgeResult<PrLook> {
         head: string_field(pr, "headRefOid"),
         check_counts,
         failed_checks,
+        more_failed,
         mergeable: match pr.get("mergeable").and_then(|m| m.as_str()) {
             Some("MERGEABLE") => Mergeable::Mergeable,
             Some("CONFLICTING") => Mergeable::Conflicting,
@@ -279,7 +302,12 @@ mod tests {
             "number": 142, "url": "https://github.com/acme/tool/pull/142", "title": "Fix login",
             "state": "OPEN", "isDraft": false, "headRefName": "fix-login",
             "headRefOid": "abc123", "mergeable": "CONFLICTING",
-            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": [
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {
+              "checkRunCountsByState": [{"state": "FAILURE", "count": 1},
+                {"state": "SUCCESS", "count": 1}, {"state": "IN_PROGRESS", "count": 1}],
+              "statusContextCountsByState": [{"state": "ERROR", "count": 1}],
+              "nodes": [
+                null,
                 {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED",
                  "conclusion": "FAILURE"},
                 {"__typename": "CheckRun", "name": "test (ubuntu)", "status": "COMPLETED",
@@ -358,12 +386,46 @@ mod tests {
             }
         );
         assert_eq!(look.failed_checks, ["lint", "ci/legacy"]);
+        assert!(!look.more_failed);
         assert_eq!(look.mergeable, Mergeable::Conflicting);
         assert_eq!(
             (look.number, look.head.as_str(), look.branch.as_str()),
             (142, "abc123", "fix-login")
         );
         assert_eq!(look.state, PullRequestState::Open);
+    }
+
+    #[test]
+    fn the_verdict_is_every_check_counted_not_the_first_page() {
+        let mut answer = answer();
+        let contexts = &mut answer["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]
+            ["commit"]["statusCheckRollup"]["contexts"];
+        // A hundred and fifty checks, one of them on a page not read failed, and one stale.
+        contexts["checkRunCountsByState"] = serde_json::json!([
+            {"state": "SUCCESS", "count": 147}, {"state": "FAILURE", "count": 2},
+            {"state": "STALE", "count": 1}]);
+        contexts["statusContextCountsByState"] = serde_json::json!([]);
+        let look = pr_look(&answer.to_string()).unwrap();
+        assert_eq!(
+            look.check_counts,
+            CheckCounts {
+                passed: 148,
+                failed: 2,
+                running: 0
+            },
+            "a stale check has finished"
+        );
+        // The page read names the two that failed, so none is left unnamed.
+        assert_eq!(look.failed_checks, ["lint", "ci/legacy"]);
+        assert!(!look.more_failed);
+        contexts_failed(&mut answer, 5);
+        assert!(pr_look(&answer.to_string()).unwrap().more_failed);
+    }
+
+    fn contexts_failed(answer: &mut serde_json::Value, failed: u32) {
+        answer["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]
+            ["statusCheckRollup"]["contexts"]["checkRunCountsByState"] =
+            serde_json::json!([{"state": "FAILURE", "count": failed}]);
     }
 
     #[test]

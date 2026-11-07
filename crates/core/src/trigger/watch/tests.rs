@@ -23,6 +23,7 @@ fn pr(number: u32) -> PrLook {
         head: "c1".into(),
         check_counts: CheckCounts::default(),
         failed_checks: vec![],
+        more_failed: false,
         mergeable: Mergeable::Unknown,
         posts: vec![],
         viewer: Some("me".into()),
@@ -186,7 +187,7 @@ fn each_post_is_told_once_with_whose_it_is() {
 }
 
 #[test]
-fn merged_ends_the_subject_and_the_next_pull_request_opens_afresh() {
+fn merged_is_told_once_and_the_next_pull_request_opens_afresh() {
     let (_, watch) = compare(&seeded(), Some(&pr(7)), NOW);
     let mut merged = pr(7);
     merged.state = PullRequestState::Merged;
@@ -196,10 +197,57 @@ fn merged_ends_the_subject_and_the_next_pull_request_opens_afresh() {
         seen[0].facts.get("title").map(String::as_str),
         Some("Fix login")
     );
-    assert_eq!(watch.number, None);
-    assert!(watch.seen.is_empty());
-    let (seen, _) = compare(&watch, Some(&pr(8)), NOW + 2);
+    assert!(watch.closed);
+    // The branch has no open one for a while.
+    let (seen, watch) = compare(&watch, None, NOW + 2);
+    assert!(seen.is_empty());
+    assert!(
+        watch.closed,
+        "still waiting for a reopening or the next one"
+    );
+    let (seen, _) = compare(&watch, Some(&pr(8)), NOW + 3);
     assert_eq!(events(&seen), [("pr.opened", Some("open"))]);
+}
+
+#[test]
+fn closed_and_reopened_carries_on_where_it_was() {
+    let mut open = pr(7);
+    open.posts = vec![post("review:1", WatchPostKind::Review, "alice", NOW - 1)];
+    open.check_counts.failed = 1;
+    open.failed_checks = vec!["lint".into()];
+    open.mergeable = Mergeable::Conflicting;
+    let (_, watch) = compare(&seeded(), Some(&open), NOW);
+    let mut closed = open.clone();
+    closed.state = PullRequestState::Closed;
+    let (seen, watch) = compare(&watch, Some(&closed), NOW + 1);
+    assert_eq!(events(&seen), [("pr.closed", None)]);
+    assert_eq!(watch.number, Some(7), "kept, for a reopening");
+    assert!(watch.seen.contains("review:1"));
+
+    // Reopened: the same review, the same red checks, the same conflict are not news, and it
+    // has not opened.
+    let (seen, watch) = compare(&watch, Some(&open), NOW + 2);
+    assert!(seen.is_empty(), "{seen:?}");
+    assert!(!watch.closed);
+    open.posts
+        .push(post("comment:2", WatchPostKind::Comment, "bob", NOW + 3));
+    let (seen, _) = compare(&watch, Some(&open), NOW + 4);
+    assert_eq!(events(&seen), [("pr.comment", None)]);
+}
+
+#[test]
+fn more_failures_than_are_named_say_so() {
+    let mut watch = seeded();
+    watch.number = Some(7);
+    let mut failed = pr(7);
+    failed.check_counts.failed = 150;
+    failed.failed_checks = vec!["lint".into()];
+    failed.more_failed = true;
+    let (seen, _) = compare(&watch, Some(&failed), NOW);
+    assert_eq!(
+        seen[0].facts.get("summary").map(String::as_str),
+        Some("150 checks failed: lint and others")
+    );
 }
 
 #[test]
@@ -238,6 +286,8 @@ fn gathered_posts_add_up_and_name_each_author_once() {
 struct Forge {
     pr: RefCell<Option<PrLook>>,
     down: RefCell<bool>,
+    /// The number each look asked about, `None` for the branch's open one.
+    asked: RefCell<Vec<Option<u32>>>,
 }
 
 impl Forge {
@@ -269,8 +319,9 @@ impl Look for Forge {
     fn watch_pull_request(
         &self,
         _workspace: &WorkspaceRow,
-        _number: Option<u32>,
+        number: Option<u32>,
     ) -> Result<Option<PrLook>, String> {
+        self.asked.borrow_mut().push(number);
         if *self.down.borrow() {
             return Err("GitHub did not answer.".into());
         }
@@ -545,5 +596,31 @@ fn with_no_agent_to_tell_the_fire_is_skipped_and_the_user_told_once() {
             .unwrap(),
         0,
         "a fire with no one to tell is not a round"
+    );
+}
+
+#[test]
+fn a_closed_watch_asks_for_the_branchs_open_pull_request() {
+    let tx = Tx::new();
+    let forge = Forge::default();
+    forge.set(pr(7));
+    tx.on_posts(&forge, &Filters::default());
+    let mut closed = pr(7);
+    closed.state = PullRequestState::Closed;
+    forge.set(closed);
+    forge.asked.borrow_mut().clear();
+    tx.look(&forge, NOW + 60_000);
+    assert!(
+        tx.store()
+            .pr_watch(tx.workspace_id())
+            .unwrap()
+            .unwrap()
+            .closed
+    );
+    tx.look(&forge, NOW + 120_000);
+    assert_eq!(
+        *forge.asked.borrow(),
+        [Some(7), None],
+        "by number while open, then the branch's open one"
     );
 }

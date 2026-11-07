@@ -14,6 +14,8 @@ pub struct PrWatchRow {
     /// The states were read from the forge; until then a look only records them.
     pub seeded: bool,
     pub number: Option<u32>,
+    /// It was merged or closed; `number` and what was seen of it are kept for a reopening.
+    pub closed: bool,
     pub branch: Option<String>,
     pub draft: bool,
     pub head: Option<String>,
@@ -27,24 +29,25 @@ pub struct PrWatchRow {
     pub problem: Option<String>,
 }
 
-const COLUMNS: &str = "workspace_id, seeded, number, branch, draft, head, checks, checks_head, \
-                       conflict_head, seen, looked_at, problem";
+const COLUMNS: &str = "workspace_id, seeded, number, closed, branch, draft, head, checks, \
+                       checks_head, conflict_head, seen, looked_at, problem";
 
 fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrWatchRow> {
-    let seen: String = row.get(9)?;
+    let seen: String = row.get(10)?;
     Ok(PrWatchRow {
         workspace_id: row.get(0)?,
         seeded: row.get(1)?,
         number: row.get(2)?,
-        branch: row.get(3)?,
-        draft: row.get(4)?,
-        head: row.get(5)?,
-        checks: row.get(6)?,
-        checks_head: row.get(7)?,
-        conflict_head: row.get(8)?,
+        closed: row.get(3)?,
+        branch: row.get(4)?,
+        draft: row.get(5)?,
+        head: row.get(6)?,
+        checks: row.get(7)?,
+        checks_head: row.get(8)?,
+        conflict_head: row.get(9)?,
         seen: serde_json::from_str(&seen).unwrap_or_default(),
-        looked_at: row.get(10)?,
-        problem: row.get(11)?,
+        looked_at: row.get(11)?,
+        problem: row.get(12)?,
     })
 }
 
@@ -75,12 +78,13 @@ impl Store {
         self.conn().execute(
             &format!(
                 "INSERT OR REPLACE INTO pr_watches ({COLUMNS})
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             ),
             params![
                 watch.workspace_id,
                 watch.seeded,
                 watch.number,
+                watch.closed,
                 watch.branch,
                 watch.draft,
                 watch.head,
@@ -91,15 +95,6 @@ impl Store {
                 watch.looked_at,
                 watch.problem,
             ],
-        )?;
-        Ok(())
-    }
-
-    /// A look could not be made: say why, and when, keeping what was seen before.
-    pub fn pr_watch_failed(&self, workspace_id: &str, at: i64, problem: &str) -> StoreResult<()> {
-        self.conn().execute(
-            "UPDATE pr_watches SET looked_at = ?, problem = ? WHERE workspace_id = ?",
-            params![at, problem, workspace_id],
         )?;
         Ok(())
     }

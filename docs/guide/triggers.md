@@ -136,12 +136,14 @@ watches.
 - **Reviews and comments come in bursts**, so a trigger on them waits two minutes after the last
   one by default and starts one run for all of them.
 - **Checks are told once they have all finished**: `pr.checks_failed` when nothing is running and
-  something failed, `pr.checks_passed` when nothing is running and nothing failed. Each is told
-  once per commit, so a push that fails again is news again.
+  something failed, `pr.checks_passed` when nothing is running and nothing failed. Every check on
+  the commit is counted, however many there are, and one GitHub has marked stale counts as
+  finished. Each is told once per commit, so a push that fails again is news again.
 - **A draft** is `pr.opened` when it is marked ready for review. `--drafts` counts it as soon as
   it opens instead.
-- **`pr.merged` and `pr.closed`** end that pull request; the next one opened on the branch is
-  `pr.opened` again, and counts its own runs. A workflow that needs the open pull request —
+- **`pr.merged` and `pr.closed`** are told once. A different pull request opened on the branch
+  afterwards is `pr.opened`, and counts its own runs; the same one reopened is not new, and what
+  was already on it is not news again. A workflow that needs the open pull request —
   `{{ pr.* }}`, `wait_pr_activity` — cannot run on these, and saving says to use `{{ event.url }}`,
   `{{ event.number }}` and `{{ event.title }}` instead.
 - **GitHub not answering** — no network, `gh` logged out — is no news; the trigger looks again a
@@ -230,10 +232,9 @@ A workflow a trigger starts can read what set it off as `{{ event.* }}`:
 | `event.kind`                  | The event: `workspace.done`, `agent.settled`, …                                                                                                                                                                                   |
 | `event.count`                 | How many events the run is for, when a burst was gathered into one                                                                                                                                                                |
 | `event.note`                  | `workspace.done`: what the agent passed to `--note`                                                                                                                                                                               |
-| `event.head`                  | `workspace.done`, `agent.settled`: the commit the worktree was on                                                                                                                                                                 |
+| `event.head`                  | `workspace.done`, `agent.settled`: the commit the worktree was on. `pr.checks_failed`, `pr.checks_passed`, `pr.conflicted`: the commit it was about                                                                               |
 | `event.summary`               | `agent.exited`, `test.finished`, `workflow.finished`: how it ended, in a line. `pr.review`, `pr.comment`: _2 reviews and 3 comments from alice and coderabbitai[bot]_. `pr.checks_failed`: _2 checks failed: lint, test (ubuntu)_ |
 | `event.verdict`               | `test.finished`: `passed`, `failed`, `errored`, …                                                                                                                                                                                 |
-| `event.head`                  | Also `pr.checks_failed`, `pr.checks_passed`, `pr.conflicted`: the commit the checks were on                                                                                                                                       |
 | `event.url`                   | The `pr.*` events: the pull request, or for a review or comment, the newest one                                                                                                                                                   |
 | `event.number`, `event.title` | The `pr.*` events: the pull request's number and title                                                                                                                                                                            |
 | `event.authors`               | `pr.review`, `pr.comment`: who posted, comma-separated                                                                                                                                                                            |

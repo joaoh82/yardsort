@@ -216,7 +216,9 @@ Notes on each group:
   `state` is any of `approved`, `changes_requested` and `commented`. `bots: false` leaves out
   accounts whose login ends in `[bot]`. A line comment in a submitted review is part of that
   review; a reply on a thread is a `pr.comment` of its own ([decision 6](#decisions)).
-  `pr.merged` and `pr.closed` end the subject: its count and its cursor go.
+  `pr.merged` and `pr.closed` are told once; the watch keeps that pull request's number and what
+  it saw, so the same one reopened carries on, and a different one on the branch is `pr.opened`.
+  See [slice 2](#slice-2-what-shipped).
 - **Finished checks are counted, not read off the verdict.** `CheckCounts::verdict` says
   `Failing` as soon as one check has failed, while others may still be running. `pr.checks_failed`
   is the rollup on the head with nothing running and at least one failed; `pr.checks_passed` is
@@ -593,6 +595,17 @@ What building it settled or changed:
   seeds the states — opened, checks, conflict — and tells none of them; reviews and comments are
   news either way when they are newer than the trigger, which `observe` already checks.
 - **Another branch checked out is another pull request**, seeded afresh rather than told.
+- **A pull request merged or closed is kept, not forgotten** — found in review. Forgetting it
+  made the same one reopened look new: `pr.opened` again, and every review, comment and check
+  verdict on it told again, against the same cap. The watch keeps its number and what it saw,
+  marked closed, and asks for the branch's open pull request meanwhile: the same number is a
+  reopening and carries on; another is `pr.opened`.
+- **Checks are GitHub's own counts by state**, as the open list reads them, not the nodes of one
+  page — found in review. A hundred contexts to a page meant a green first page could be called
+  passed while a later one failed. The nodes now only name the checks that failed, and a summary
+  with more failures than names says so. A null node is skipped, and `STALE` counts as finished,
+  as a skipped check does; counted as running, one stale check held both events for ever. That is
+  `CheckCounts`, so the badges count a stale check the same way.
 - **A draft is `pr.opened` when it is marked ready**, unless the trigger takes drafts, which is
   told when it opens instead.
 - **A fire with no agent to tell is skipped, and told.** A workflow that needs `session: origin`

@@ -12,6 +12,10 @@ CREATE TABLE pr_watches (
     -- The pull request, once the workspace has one: NULL is a state too, so that one opening
     -- is a change.
     number          INTEGER,
+    -- It was merged or closed. Its number and what was seen of it stay, so that the same one
+    -- reopened carries on where it was rather than looking new; the branch's next open pull
+    -- request is looked for meanwhile.
+    closed          INTEGER NOT NULL DEFAULT 0,
     -- The branch it was found for. Another branch checked out is another pull request.
     branch          TEXT,
     draft           INTEGER NOT NULL DEFAULT 0,
