@@ -971,11 +971,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       starting work and giving an agent a picture from it. The page now scrolls everything upright
       itself; protocol minor 5 starts a workspace or another agent under `terminal:control`, and
       uploads a picture outside every worktree for its path to be pasted
-      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Not yet
-      seen on a real phone, and the picture needs a new TestFlight build.
+      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Shipped
+      in 0.22.2 on 2026-11-07, with a new TestFlight build of the phone app uploaded the same day. Not
+      yet seen on a real phone.
       2026-11-06: a TestFlight workflow on GitHub Actions builds and uploads the phone app with no Mac at
       hand, signed by hand from a distribution certificate and an App Store profile kept as secrets
-      ([the README](../../apps/mobile/README.md#from-github-actions)). It has not been run yet.
+      ([the README](../../apps/mobile/README.md#from-github-actions)). Its first runs, on 2026-11-07,
+      uploaded builds for internal testers, the second one for 0.22.2.
 - [ ] R4 and R5: the phone hardened, a host with no screen, and the desktop as a client. Planned
       together on 2026-11-06 in [35](35-remote-r4-r5.md), in the order the owner asked for: first a
       headless Linux host the phone reaches through staging (slices 1 to 3: the host runtime moved
