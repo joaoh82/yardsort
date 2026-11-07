@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# The owner's test box for Remote: a Linux server with no screen, reached over SSH, where
-# `yardsort-host` runs against staging and a phone pairs with it. See
-# docs/design/35-remote-r4-r5.md §6.
+# A test box for Remote: a Linux server with no screen, reached over SSH, where `yardsort-host`
+# runs and a phone pairs with it. See docs/test-box.md.
 #
 #   scripts/test-box.sh up       # create it, set it up, copy this checkout over and build it
 #   scripts/test-box.sh sync     # copy this checkout over again and rebuild
@@ -28,6 +27,7 @@
 #   TEST_BOX_KEY       public key to log in with (~/.ssh/id_ed25519.pub)
 #   TEST_BOX_REPO      repository the agents work in (<you>/yardsort-box-demo, made private if new)
 #   TEST_BOX_GIT_NAME, TEST_BOX_GIT_EMAIL   git identity on the box (your GitHub profile's)
+#   TEST_BOX_SERVER    the Yardsort server the steps it prints sign in to (the maintainers' staging)
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +36,7 @@ context="${TEST_BOX_CONTEXT:-yardsort}"
 name="${TEST_BOX_NAME:-yardsort-box}"
 type="${TEST_BOX_TYPE:-cx33}"
 location="${TEST_BOX_LOCATION:-fsn1}"
+server="${TEST_BOX_SERVER:-https://remote-staging.yardsort.sh}"
 key="${TEST_BOX_KEY:-$HOME/.ssh/id_ed25519.pub}"
 firewall="ssh-only"
 # GitHub's published ed25519 host key fingerprint
@@ -171,7 +172,7 @@ $name is up: ssh yardsort@$(address)
 Left to you, there:
   claude                                    # sign in
   gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web
-  yardsort-host sign-in https://remote-staging.yardsort.sh --name "Build box"
+  yardsort-host sign-in $server --name "Build box"
   tmux new -s yardsort, then: yardsort-host serve
   ys project add ~/src/demo
   yardsort-host pair                        # from your own SSH login, then the phone

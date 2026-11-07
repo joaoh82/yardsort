@@ -32,6 +32,9 @@ install target/release/yardsort-host target/release/ys ~/.local/bin/
 Run them as an ordinary user, never as root. That user must own, or be able to write to, the
 repositories you add, and its home holds the agents' own sign-ins.
 
+To try it on a throwaway cloud server first, [A test box for Remote](../test-box.md) makes one and
+builds it there for you.
+
 ## Signing in
 
 ```sh

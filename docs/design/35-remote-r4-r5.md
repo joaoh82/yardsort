@@ -381,7 +381,8 @@ never lands in another project. Its first boot is
 [`scripts/test-box/cloud-init.yaml`](../../scripts/test-box/cloud-init.yaml): updates, the build tools, an
 ordinary `yardsort` user that has the login key, password logins off, a firewall that lets in SSH only
 (and a Hetzner firewall in front of it), lingering so `serve` and the agents outlive a logout, and Rust.
-Nothing that box holds is in the repository: no address, no key, no account.
+Nothing that box holds is in the repository: no address, no key, no account. How to use it, for anyone:
+[A test box for Remote](../test-box.md).
 
 | Step                     | What does it                                                                                                                                                                                                                    |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

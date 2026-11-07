@@ -56,5 +56,6 @@ worktree tradeoffs, and comparisons with Superset and Conductor.
 ## Building and contributing
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — set up a dev environment, run the checks, send a change
+- [A test box for Remote](test-box.md) — a throwaway Linux server on Hetzner Cloud for trying the headless host with your phone
 - [Releasing](releasing.md) — how versions are cut and what the release workflow does
 - [Design docs](design/README.md) — vision, architecture, harness model, roadmap, open questions

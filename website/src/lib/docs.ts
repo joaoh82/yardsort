@@ -184,6 +184,12 @@ export const DOCS_NAV: DocSection[] = [
           "Explore the Yardsort roadmap: completed milestones, planned features and open work for parallel coding agents, workspaces and workflows.",
         path: "design/05-roadmap",
       },
+      {
+        slug: "test-box",
+        title: "A test box for Remote",
+        description:
+          "Make a throwaway Linux server on Hetzner Cloud to try Yardsort's headless host with your phone, build your checkout there, and delete it when done.",
+      },
     ],
   },
 ];
