@@ -2,7 +2,9 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. This is the plan for the last two
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. Checked on
+2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
+where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
 code, the slices in the order they are built, and what each slice's smoke test needs. Like
 [31](31-remote-r3.md), it becomes the record of the slices as they are built. The proposal is
@@ -271,6 +273,36 @@ no Secret Service. The guide says where it is and that it is the host's identity
   view-only until **Take control**, which acquires a lease, as on the phone; typing does not acquire
   one by itself, since the person at the host must be able to see who has it.
 
+**Where agents run: on a host, and each workspace belongs to one.** Checked against the code on
+2026-11-08, after the owner set out where Remote is going (several machines an account owns, the
+desktop choosing where a task runs, handover between machines, managed sandboxes). What is built,
+what these slices plan, and what is only proposed:
+
+| What                                                                                                                                                                                                                                                                                                                                                                                                                          | State                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **An account owns any number of hosts.** A host is a machine that runs agents and connects out: the desktop app with Remote on (Linux, macOS, Windows) or `yardsort-host` (Linux). A VM the person runs is a host of the second kind; nothing tells it apart, and nothing needs to. The phone and a desktop signed in as `Computer` are clients: they never run an agent, and what they start runs on the host they asked     | Built (R2, slice 2); the desktop client is slice 4 |
+| **Finding a host is not being let in.** `GET /v1/hosts` lists the account's hosts to any of its devices, with a name, when it was made and when it was last seen, and nothing else. Reaching one takes a grant its own person approved: the server refuses a ticket without one (`relay.rs`, `ticket`), and the host checks the grant again before it answers. Being on the account grants nothing, and no slice changes that | Built (R2)                                         |
+| **Whether a host is online** is known only to a device it let in, from a channel to it being open (`apps/mobile/src/lib/presence.ts`); the server keeps no presence, and a host a device is not paired with shows as not paired, not as online or offline                                                                                                                                                                     | Built (R3); the desktop does the same in slice 4   |
+| **Each workspace and session lives in one host's SQLite and nowhere else.** A client shows it from that host's facade, names the host beside it, and keeps none of it. Local work and a remote host's work are in the same app, under separate headings, never one list                                                                                                                                                       | Planned (slices 4, 5)                              |
+| **Starting work on another host from the desktop**, in that host's view: a new workspace in one of its projects, or another agent in one of its workspaces, choosing the project and the agent by that host's ids, as the phone does since minor 5                                                                                                                                                                            | Planned (slice 7)                                  |
+| **Choosing where a new task runs from the composer**: one task, and a choice of **This computer** or a host it is let into, with each host's state, an offline one shown and not offered                                                                                                                                                                                                                                      | Proposed, after R5 (§9)                            |
+| **Handing a task to another machine**, and **managed sandboxes**                                                                                                                                                                                                                                                                                                                                                              | Proposed, deferred phases (§9)                     |
+
+Three things follow, and they hold for every slice here:
+
+- **The choice of machine in R5 is made by where you start.** Open a host, start work there. That is
+  enough for the gate, and slice 7 is where the desktop gets it. A picker in the composer is not in
+  R5: a local project and a project on another host are unrelated records on two machines, and
+  nothing says they are the same repository. The only mapping planned is R6's explicit linking
+  (proposal §10). A picker without it would guess from a remote URL or a folder name.
+- **Execution access stays a per-host grant.** Nothing coming (a picker, handover, sandboxes) may
+  let in a device because it is on the account, nor let an agent ask for one: a grant is still
+  approved by the host's person (§3, approving a device), and starting work still needs the control
+  a grant gives.
+- **A headless host on macOS does not pair a device in R5.** `yardsort-host` builds there, but its
+  guard reads `/proc`, so `pair` is refused off Linux. A Mac is a host through the desktop app, whose
+  window approves. Pairing a headless Mac needs a guard of its own (§9).
+
 **Push: APNs and FCM directly, behind a provider trait on the server, with no Expo account.** The app
 uses `expo-notifications` only to ask permission and get the phone's own token
 (`getDevicePushTokenAsync`). The server keeps one push route per device, sends with APNs token
@@ -433,6 +465,59 @@ slice 8 covers both. A reminder is due around 2026-11-11.
 - A device authorization grant on the server, if pasting the address proves awkward.
 - A Yardsort-operated push gateway for self-hosted servers (R7).
 - Running agents as a user other than the host's.
+- Pairing a device at a headless host on macOS: a guard that checks the caller without `/proc`.
+
+### Later phases: where a task runs (proposed)
+
+Set out by the owner on 2026-11-08 and only proposed here. None is an R4 or R5 requirement, and none
+changes what slices 1 to 11 build. Each needs its own plan when it comes, with its slices and smoke
+tests, as this one has. The order is the order of what each needs.
+
+**Execution targets, after R5's gate and slice 7.** The desktop's composer offers where a new task
+runs: **This computer**, or a host the desktop is let into with the control a start needs, each
+with its state, an offline one shown and not offered. The task's project has to be the same
+repository there, so it waits on R6's explicit linking of a project across machines, or on a
+narrower mapping of its own decided then (a project's remote URL, confirmed once by the person). What
+it starts uses slice 7's `workspace.start` and `session.start`, by ids. The workspace it makes is the
+other host's, listed under that host, as slice 4 lists them. Nothing is queued for a host that is
+offline. Whether it is a milestone of its own or R6's first slice is decided when R6 is planned.
+
+**Handover between machines, after execution targets.** A task moves by Git and by a packet the
+person reads, never by moving a process:
+
+- Git carries the code. The person pushes the workspace's branch, or confirms a push Yardsort offers.
+  The other host starts a workspace on that branch: `workspace.start` gains a branch to start from, by
+  name, never a path.
+- The packet carries the task's state: the handoff packet that already exists between two agents on
+  one computer (`activity::handoff`, [18](18-agent-events-stage-4-handoff.md)), rendered on the host
+  the work is leaving, shown in the composer to be read and edited, and sent as the new session's
+  prompt. Not a transcript, not a harness's own session files, and nothing the person did not see.
+- The old session stays on its host until it ends or is ended there. Both directions: this computer
+  to a host, a host to this computer, and between two hosts, from a client let into both.
+- It is a person's act from a client. No API an agent is given starts one. The packet crosses the
+  server as typing does, carried and never kept, and is bounded in size.
+
+**Managed sandboxes, after R7.** Proposal §3.4 and §11 put provider-hosted compute out of scope;
+this would reverse that, so it needs the owner's decision before any plan, and a plan of its own. A
+**registered VM** is the person's machine: they run it, pay for it, sign it in, approve every device,
+and it holds their credentials and keeps their work. A **managed sandbox** would be Yardsort's
+machine, made for one task, and gone after it. It needs everything a registered VM leaves to its
+owner:
+
+- Isolation fit for strangers' code side by side: a microVM per task, not a container (proposal §3.2).
+- Provisioning from an image with `git` and the agents, and the repository's setup run as the
+  project's automation already runs it.
+- Credentials scoped to the task: a token for that one repository that expires with it, and an
+  agent's sign-in the person gives for that task or that is metered through Yardsort, never their own
+  account-wide keys.
+- Results by Git and the handover packet back: a pushed branch, or a pull request the person opens.
+- Cleanup that is checked: the sandbox and its disk are destroyed when the task ends, fails or times
+  out, and the account sees that it was.
+- Cost controls: a limit per task and per month, an idle timeout and a hard stop, enforced by the
+  server, with R7's billing.
+- Enrollment of its own: a sandbox would be a host made by the service, not one the person signed
+  in. Who approves its grant, and what a device may do there, is that plan's first decision. The
+  default stays: nothing is let in because it is on the account.
 
 ## 10 · What the first slice adds
 
