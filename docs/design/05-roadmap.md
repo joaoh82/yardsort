@@ -971,11 +971,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       starting work and giving an agent a picture from it. The page now scrolls everything upright
       itself; protocol minor 5 starts a workspace or another agent under `terminal:control`, and
       uploads a picture outside every worktree for its path to be pasted
-      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Not yet
-      seen on a real phone, and the picture needs a new TestFlight build.
+      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Shipped
+      in 0.22.2 on 2026-11-07, with a new TestFlight build of the phone app uploaded the same day. Not
+      yet seen on a real phone.
       2026-11-06: a TestFlight workflow on GitHub Actions builds and uploads the phone app with no Mac at
       hand, signed by hand from a distribution certificate and an App Store profile kept as secrets
-      ([the README](../../apps/mobile/README.md#from-github-actions)). It has not been run yet.
+      ([the README](../../apps/mobile/README.md#from-github-actions)). Its first runs, on 2026-11-07,
+      uploaded builds for internal testers, the second one for 0.22.2.
 - [ ] R4 and R5: the phone hardened, a host with no screen, and the desktop as a client. Planned
       together on 2026-11-06 in [35](35-remote-r4-r5.md), in the order the owner asked for: first a
       headless Linux host the phone reaches through staging (slices 1 to 3: the host runtime moved
@@ -1092,6 +1094,27 @@ why, with the user having approved the file once in the app and watched the run 
 changed file is never run without being shown again; a cancel kills every process the run
 started; and `ys test validate` has a failing fixture for every error it can report.
 
+## M29 — Triggers
+
+Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 2026-11-06.
+
+- A trigger starts a workflow or a smoke test when something happens: an agent says it is done
+  (`ys workspace done`), a pull request opens, a review or a comment arrives from another
+  account, the checks fail, a test or a workflow ends. It belongs to a workspace or to one agent
+  session, is a row in the store, and queues its run through the doors a person's click uses.
+- Presets in the composer — review when done, review the pull request, address reviews, fix
+  failing checks, smoke test when done — remembered per project; custom triggers from any event,
+  filter and target. Three new built-in workflows: `address-review`, `fix-checks`,
+  `review-branch`.
+- Bursts become one fire, an event during the trigger's run waits for it, and a cap per pull
+  request or session, an hourly rate and a chain depth stop loops.
+- Five slices: core and `ys` with Yardsort's own events; the forge; the app; custom events; docs.
+
+_Exit:_ on all three platforms, a workspace started with **Address reviews** ticked has its agent
+told of a review posted from a second account, once, two minutes after its last comment; the
+agent's own answers start no second round; a fourth round is capped and told; and a trigger added
+from `ys` fires in an open app.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.
@@ -1179,7 +1202,8 @@ rediscovering later. None of them is committed to; the point is to know what is 
   previous one is still going, what happens to a worktree per run, and how a scheduled agent
   asks for permission when there is no one to ask. **Built as [schedules](34-schedules.md)**
   for workflows and smoke tests: it answers the first and the third, and leaves the worktree per
-  run, and running with the app closed, for after.
+  run, and running with the app closed, for after. Reacting to things that happen, rather than
+  to the clock, is [triggers](36-triggers.md), M29.
 - ~~**A `yardsort` CLI.**~~ **Done, as `ys` — see M10.** The estimate above was wrong in an
   instructive way: the daemon protocol carries _sessions_, not workspaces, and projects live in
   the SQLite store the app owns. "A second client of the socket with no new core" needed the
