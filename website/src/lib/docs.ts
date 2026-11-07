@@ -125,6 +125,12 @@ export const DOCS_NAV: DocSection[] = [
           "Reach this computer from your phone through a Yardsort server. Still under development, and off until you turn it on.",
       },
       {
+        slug: "guide/headless-host",
+        title: "A computer with no screen",
+        description:
+          "Run yardsort-host on a Linux server as a host your phone reaches: sign in from another browser, pair a device at a terminal, add projects and start agents with ys.",
+      },
+      {
         slug: "guide/smoke-tests",
         title: "Smoke tests",
         description:

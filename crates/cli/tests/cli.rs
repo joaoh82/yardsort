@@ -1812,6 +1812,80 @@ fn a_run_is_refused_while_yardsort_is_closed_and_nothing_is_queued() {
     assert_eq!(listed.trim(), "[]");
 }
 
+/// On a computer with no screen, `yardsort-host` holds the profile, and nothing would carry a run
+/// out: refused, rather than queued for nobody.
+#[test]
+fn nothing_is_queued_while_a_headless_host_holds_the_profile() {
+    use yardsort_core::presence::{AppLock, Holder};
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let _host = AppLock::take_as(&fx.data_dir, Holder::Host)
+        .unwrap()
+        .expect("nobody else holds it");
+    let error = fx
+        .ys(&["workflow", "run", "ping", "--workspace", name])
+        .failed();
+    assert!(
+        error.contains("This host does not run workflows"),
+        "{error}"
+    );
+    assert!(error.contains("Nothing was queued"), "{error}");
+    assert_eq!(fx.ys(&["workflow", "runs", "--json"]).ok().trim(), "[]");
+
+    let added = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "workspace.done",
+            "--workflow",
+            "ping",
+            "--workspace",
+            name,
+        ])
+        .ok();
+    assert!(added.contains("does not fire triggers yet"), "{added}");
+    assert!(!added.contains("Yardsort is not running"), "{added}");
+}
+
+#[test]
+fn a_project_is_added_by_its_folder_and_a_folder_inside_adds_the_repository() {
+    let fx = Fixture::new();
+    let code = tempfile::tempdir().unwrap();
+    let repo = normalize(code.path()).join("widget");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    let git = fx.git();
+    git.init(&repo).unwrap();
+    git.initial_commit(&repo).unwrap();
+
+    let added: serde_json::Value = serde_json::from_str(
+        &fx.ys(&[
+            "project",
+            "add",
+            &repo.join("src").to_string_lossy(),
+            "--json",
+        ])
+        .ok(),
+    )
+    .unwrap();
+    assert_eq!(added["name"], "widget");
+    assert_eq!(added["path"], repo.to_string_lossy().as_ref());
+    assert_eq!(added["already_known"], false);
+    let listed = fx.ys(&["project", "list"]).ok();
+    assert!(listed.contains("widget"), "{listed}");
+
+    let again = fx.ys(&["project", "add", &repo.to_string_lossy()]).ok();
+    assert!(again.contains("already a project"), "{again}");
+
+    let plain = tempfile::tempdir().unwrap();
+    let refused = fx
+        .ys(&["project", "add", &plain.path().to_string_lossy()])
+        .failed();
+    assert!(refused.contains("not a git repository"), "{refused}");
+}
+
 #[test]
 fn a_run_is_queued_followed_and_cancelled_while_the_app_holds_its_lock() {
     let fx = Fixture::new();

@@ -50,6 +50,8 @@ const core = vi.hoisted(() => ({
   workspaceFork: vi.fn(),
   testList: vi.fn(),
   testRuns: vi.fn(),
+  // The schedule dialog previews its times after a pause, which a slow run reaches before Cancel.
+  schedulePreview: vi.fn(() => new Promise(() => {})),
 }));
 const native = vi.hoisted(() => ({
   pickFolder: vi.fn(),

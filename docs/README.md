@@ -32,6 +32,7 @@ walks through both tabs and explains what the local figures include.
 | [Schedules](guide/schedules.md)                               | Run a workflow or a smoke test once at a set time, or on a routine, while Yardsort is open; `ys schedule` too         |
 | [Triggers](guide/triggers.md)                                 | Start a workflow or a smoke test when an agent says it is done, finishes a turn or exits, or a run ends; `ys trigger` |
 | [Remote](guide/remote.md)                                     | Reaching this computer from your phone through a server. Still under development, and off until you turn it on        |
+| [A computer with no screen](guide/headless-host.md)           | `yardsort-host`: a Linux server as a host your phone reaches; signing in, pairing at a terminal, `ys` for projects    |
 | [Usage](guide/usage.md)                                       | Tokens your agents spent and what they would cost; CPU and memory per agent, live                                     |
 | [Updates](guide/updates.md)                                   | How Yardsort finds and installs new versions, and which copies can                                                    |
 | [Keyboard shortcuts](guide/shortcuts.md)                      | Every shortcut, and why they look the way they do                                                                     |

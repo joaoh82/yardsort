@@ -99,6 +99,27 @@ impl std::fmt::Display for Endpoint {
     }
 }
 
+/// Where another of a profile's own sockets, called `name`, may go, by the daemon's rule: the
+/// per-user runtime directory, then the data directory, then the temporary directory, leaving out
+/// any too long to bind. In that order: whoever listens takes the first, and whoever connects tries
+/// each, since the two may not see the same `XDG_RUNTIME_DIR`.
+pub fn socket_candidates(data_dir: &Path, name: &str) -> Vec<PathBuf> {
+    let tag = tag_for(data_dir);
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("yardsort").join(format!("{tag}.{name}.sock")));
+    [
+        runtime,
+        Some(data_dir.join(format!("{name}.sock"))),
+        Some(std::env::temp_dir().join(format!("yardsort-{tag}.{name}.sock"))),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|path| path.as_os_str().len() <= MAX_SOCKET_PATH)
+    .collect()
+}
+
 /// FNV-1a over the directory's bytes. Hand-rolled on purpose: `DefaultHasher` is explicitly not
 /// stable between Rust releases, and an app must compute the same address as a daemon that a
 /// *different build* started, or an update would orphan the agents it is meant to ask about.
@@ -115,6 +136,19 @@ fn tag_for(data_dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_profiles_other_sockets_follow_the_daemons_rule_and_fit() {
+        let short = Path::new("/tmp/ys");
+        let found = socket_candidates(short, "host");
+        assert!(found.contains(&short.join("host.sock")), "{found:?}");
+        let long = PathBuf::from(format!("/tmp/{}", "x".repeat(120)));
+        let found = socket_candidates(&long, "host");
+        assert!(!found.is_empty());
+        assert!(found
+            .iter()
+            .all(|path| path.as_os_str().len() <= MAX_SOCKET_PATH && !path.starts_with(&long)));
+    }
 
     #[test]
     fn each_data_directory_gets_its_own_daemon() {

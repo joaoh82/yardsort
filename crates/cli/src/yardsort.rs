@@ -143,7 +143,7 @@ impl Yardsort {
             [] => Err(Failure::new(format!(
                 "No project called {wanted:?}.{}",
                 match projects.as_slice() {
-                    [] => " There are no projects yet — add one in the app.".to_owned(),
+                    [] => " There are no projects yet: add one in the app, or with `ys project add <path>`.".to_owned(),
                     some => format!(
                         " Known: {}.",
                         some.iter()

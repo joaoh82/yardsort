@@ -8108,6 +8108,7 @@ dependencies = [
  "croner",
  "dunce",
  "libc",
+ "notify",
  "pty-host",
  "pty-ipc",
  "regex",
@@ -8128,6 +8129,25 @@ dependencies = [
  "which",
  "windows-sys 0.59.0",
  "winreg 0.55.0",
+]
+
+[[package]]
+name = "yardsort-host"
+version = "0.22.2"
+dependencies = [
+ "clap",
+ "libc",
+ "pty-host",
+ "pty-ipc",
+ "qrcode",
+ "remote-client",
+ "remote-host",
+ "remote-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "yardsort-core",
 ]
 
 [[package]]

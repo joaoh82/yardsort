@@ -1,0 +1,17 @@
+# headless-host.yaml's profile: a plain shell, told nothing, so what the phone types is all it runs;
+# and the shell as an agent, whose first message is what it runs, as app.sh seeds.
+
+[[harness]]
+id = "sh"
+builtin = false
+label = "Shell"
+command = "sh"
+prompt_args = []
+
+[[harness]]
+id = "sh-agent"
+builtin = false
+label = "Smoke agent"
+command = "sh"
+prompt_args = ["-c", "{prompt}"]
+session_id_mode = "assigned"

@@ -20,6 +20,18 @@ has the downloads and the full commit lists.
   done** and **Smoke test when the work is done**, with three new built-in workflows,
   `address-review`, `fix-checks` and `review-branch`. A fire with no agent in the workspace to
   tell is skipped, and you are told.
+- **Remote on a computer with no screen: `yardsort-host`.** A separate program, for a Linux server
+  you reach over SSH: sign it in from a browser on any other computer by pasting back the address the
+  browser lands on, run `yardsort-host serve`, and pair a phone with `yardsort-host pair` at a
+  terminal of your own, which an agent cannot do. Start agents there with `ys`, or from the phone;
+  stopping the host leaves them running. Build it from source for now. See
+  [A computer with no screen](docs/guide/headless-host.md).
+- **`ys project add <path>`** adds a repository as a project, as the app's Open project does.
+- `ys workflow run`, `ys test run` and `ys schedule run` say so and queue nothing on a profile that
+  `yardsort-host` runs, which does not carry them out yet. The app, started on such a profile, says
+  what has it instead of waiting for a window that never comes.
+- Fixed: started from a terminal, Yardsort could leave that terminal deaf to `Ctrl-C`. Reading
+  your shell's environment, twice at once, handed the terminal to a shell that had already gone.
 
 ## 0.22.2
 

@@ -86,7 +86,18 @@ NAME       WORKSPACES  PATH
 yardsort   3           /home/you/projects/yardsort
 ```
 
-Projects are added in the app; `ys` does not create them.
+### `ys project add <path>`
+
+Adds a git repository as a project, as the app's **Open project** does: a folder inside a repository
+adds the repository's root, and one already known is said and left as it is. A folder that is not a
+repository is refused; `ys` does not make one.
+
+```
+$ ys project add ~/src/my-service
+Added my-service, at /home/you/src/my-service.
+```
+
+It is how a [computer with no screen](headless-host.md) gets its projects.
 
 ### `ys workspace list`
 
@@ -468,7 +479,9 @@ workflow instead of a replacement. `validate` needs no profile, so it works on a
 written. `list` also prints where the `workflows` folder is.
 
 `run` checks the workflow, the workspace and every input before it queues anything, and refuses
-while Yardsort is closed, because the app is what carries runs out. Inside a workspace's folder,
+while Yardsort is closed, because the app is what carries runs out. It refuses on a
+[computer with no screen](headless-host.md#projects-and-agents) too, where `yardsort-host` has the
+profile and carries no runs out yet; so do `ys test run` and `ys schedule run`. Inside a workspace's folder,
 or in an agent's terminal there, `--workspace` can be left out. It prints the run's id and
 returns at once. A workflow that uses the pull request needs the GitHub CLI (`gh`), logged in,
 and an open pull request for the workspace's branch. A run id can be shortened to its first

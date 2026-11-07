@@ -34,6 +34,7 @@ pub mod project_automation;
 pub mod projects;
 pub mod remote;
 pub mod repositories;
+pub mod runtime;
 pub mod schedule;
 pub mod settings;
 pub mod smoke;

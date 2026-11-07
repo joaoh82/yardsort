@@ -494,9 +494,18 @@ fn list(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
 
 /// Said under anything that shows when a schedule will next fire: it will not, with no app.
 fn not_running_note(ys: &Yardsort) {
-    if !presence::app_running(&ys.data_dir) {
-        sayln!();
-        sayln!("Yardsort is not running. Schedules fire while it is open.");
+    match presence::holder(&ys.data_dir) {
+        Some(presence::Holder::App) => {}
+        Some(presence::Holder::Host) => {
+            sayln!();
+            sayln!(
+                "This host does not fire schedules yet: yardsort-host is running it, not the app."
+            );
+        }
+        None => {
+            sayln!();
+            sayln!("Yardsort is not running. Schedules fire while it is open.");
+        }
     }
 }
 
@@ -673,13 +682,11 @@ fn switch(ys: &Yardsort, wanted: &str, enabled: bool, out: &Output) -> Result<()
 
 fn run_now(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     let found = find(ys, wanted)?;
-    // The app carries runs out. Queued with nobody to run it, a run would only sit there.
-    if !presence::app_running(&ys.data_dir) {
-        return Err(Failure::new(
-            "Yardsort is not running. Runs are carried out in the app: open it, then run this \
+    super::someone_carries_it_out(
+        ys,
+        "Yardsort is not running. Runs are carried out in the app: open it, then run this \
              again. Nothing was queued.",
-        ));
-    }
+    )?;
     let fired = fire::run_now(
         &ys.store,
         &ys.data_dir,

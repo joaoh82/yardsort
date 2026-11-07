@@ -1,0 +1,41 @@
+#cloud-config
+# The test box scripts/test-box.sh makes: a server reached over SSH for running yardsort-host.
+# No secrets in here. The SSH key is the one given at creation, and every sign-in is by hand.
+
+package_update: true
+package_upgrade: true
+packages:
+  - build-essential
+  - git
+  - tmux
+  - curl
+  - ca-certificates
+  - ufw
+
+users:
+  - default
+  - name: yardsort
+    shell: /bin/bash
+    lock_passwd: true
+
+ssh_pwauth: false
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-yardsort.conf
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+
+runcmd:
+  # The key chosen in the console lands on root; give the same one to yardsort.
+  - install -d -m 700 -o yardsort -g yardsort /home/yardsort/.ssh
+  - install -m 600 -o yardsort -g yardsort /root/.ssh/authorized_keys /home/yardsort/.ssh/authorized_keys
+  - systemctl reload ssh
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow OpenSSH
+  - ufw --force enable
+  # Terminals and a future user service keep running after logging out.
+  - loginctl enable-linger yardsort
+  - su - yardsort -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"

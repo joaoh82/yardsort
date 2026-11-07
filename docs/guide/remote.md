@@ -5,7 +5,9 @@
 > app stores yet.
 
 Remote lets your phone reach the agents on this computer through a Yardsort server you sign in to. Look
-at a workspace, watch a terminal, or take control of one and type, away from your desk. A phone that may
+at a workspace, watch a terminal, or take control of one and type, away from your desk. A computer with no
+screen, such as a server you reach over SSH, can be a host too: see
+[A computer with no screen](headless-host.md). A phone that may
 type can also start a new workspace or another agent, and give an agent a picture. The agents keep
 running on this computer whatever happens to the connection.
 
@@ -31,7 +33,9 @@ starts.
 Press **Pair a device**. It shows a QR code and a code to type, good for five minutes. Enter it on the
 device. The device then asks, and it gets in only if you say yes here, under **Waiting for you**. You choose
 whether it can only watch or can also type, and which projects it can reach. The status bar tells you when
-one is waiting. Nothing but this window can say yes: not `ys`, and not an agent.
+one is waiting. Nothing but this window can say yes: not `ys`, and not an agent. On a computer with no
+screen, it is [`yardsort-host pair`](headless-host.md#only-a-person-can-pair-a-device), at a terminal of
+your own.
 
 **Devices let in** lists them, and you can take any one back there at any time.
 

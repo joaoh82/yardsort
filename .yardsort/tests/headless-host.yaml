@@ -1,0 +1,193 @@
+id: headless-host
+name: A computer with no screen is a host the phone reaches
+description: >-
+  Runs yardsort-host with no display variables at all, against the stand-in server. Signs it in by
+  pasting the address the browser came back to, adds a project and starts a shell with ys, and
+  pairs a pretend phone at a terminal of the operator's own. The phone types into the shell and
+  reads the answer; typed into that same shell, yardsort-host pair is refused. Restarting serve
+  keeps the shell, and the phone reaches the same computer again, then starts work there and
+  hands it a picture. Linux only. No window opens.
+version: 1
+timeout: 30m
+
+setup:
+  - id: build
+    action: shell
+    # Two builds: naming an example builds only that.
+    line: >-
+      cargo build -q -p yardsort-host -p yardsort-cli && cargo build -q -p yardsort-server --example
+      stand-in
+    timeout: 20m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_and_two_harnesses
+    action: shell
+    # A plain shell, told nothing, whose input is all it runs; and the shell as an agent whose
+    # first message is what it runs, for the phone to start work with.
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: sign_in_by_pasting
+    action: run
+    program: sh
+    args:
+      [
+        .yardsort/tests/support/headless.sh,
+        bun,
+        .yardsort/tests/support/host.ts,
+        "{{ run.dir }}",
+        sign-in,
+        Smoke box,
+      ]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    # Not `start`: it is stopped and started again below.
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh target/debug/yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh target/debug/yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, target/debug/ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: start_a_shell
+    action: run
+    program: sh
+    args:
+      [
+        .yardsort/tests/support/headless.sh,
+        target/debug/ys,
+        workspace,
+        new,
+        repo,
+        smoke,
+        --harness,
+        sh,
+      ]
+    expect:
+      stdout_contains: agent  sh
+  - id: pair_at_the_operators_terminal
+    action: run
+    program: sh
+    args:
+      [
+        .yardsort/tests/support/headless.sh,
+        bun,
+        .yardsort/tests/support/host.ts,
+        "{{ run.dir }}",
+        pair,
+      ]
+    timeout: 90s
+    expect:
+      stdout_contains: Let in.
+  - id: the_phone_types_and_reads_back
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        type,
+        Smoke box,
+        "echo from-the-phone-$((6*7))",
+        from-the-phone-42,
+      ]
+    expect:
+      stdout_contains: "read back: from-the-phone-42"
+  - id: an_agents_terminal_cannot_pair
+    action: shell
+    # Typed into the shell Yardsort started: the host must refuse, whatever the shell's markers.
+    line: >-
+      bun .yardsort/tests/support/phone.ts "$YS_RUN_DIR" type "Smoke box" "env -u YARDSORT_RUN_ID -u
+      YARDSORT_WORKSPACE_ID -u YARDSORT_SESSION_RECORD_ID $PWD/target/debug/yardsort-host --data-dir
+      $YS_RUN_DIR/profile pair" "refused from a terminal Yardsort started"
+    expect:
+      stdout_contains: "read back: refused from a terminal Yardsort started"
+  - id: still_one_device
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, target/debug/yardsort-host, devices]
+    expect:
+      stdout_contains: Smoke test phone  watches and types
+
+  - id: stop_serving
+    action: shell
+    line: kill "$(cat "$YS_RUN_DIR/serve.pid")"
+  - id: stopped
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh target/debug/yardsort-host status | grep -q "Host: not running"'
+    timeout: 30s
+  - id: the_shell_kept_running
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, target/debug/ys, session, list]
+    expect:
+      stdout_contains: running
+  - id: serve_again
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh target/debug/yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked_again
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh target/debug/yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: the_phone_reaches_the_same_computer
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        type,
+        Smoke box,
+        "echo after-restart-$((6*7))",
+        after-restart-42,
+      ]
+    timeout: 90s
+    expect:
+      stdout_contains: the same computer as before
+  - id: the_phone_starts_work_here
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", starts, Smoke box]
+    timeout: 90s
+    expect:
+      stdout_contains: the picture is on the computer, whole, outside every worktree
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true
