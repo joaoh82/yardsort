@@ -977,7 +977,8 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       2026-11-06: a TestFlight workflow on GitHub Actions builds and uploads the phone app with no Mac at
       hand, signed by hand from a distribution certificate and an App Store profile kept as secrets
       ([the README](../../apps/mobile/README.md#from-github-actions)). Its first runs, on 2026-11-07,
-      uploaded builds for internal testers, the second one for 0.22.2.
+      uploaded builds for internal testers, the second one for 0.22.2. Both said 0.1.0: from 2026-11-07
+      each run raises the phone app's own version, kept in `mobile-v` tags, by the part picked.
 - [ ] R4 and R5: the phone hardened, a host with no screen, and the desktop as a client. Planned
       together on 2026-11-06 in [35](35-remote-r4-r5.md), in the order the owner asked for: first a
       headless Linux host the phone reaches through staging (slices 1 to 3: the host runtime moved
