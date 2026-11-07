@@ -130,7 +130,7 @@ mobile-ios:
 # Get a TestFlight build ready on this Mac, and open it in Xcode to archive and upload (apps/mobile/README.md)
 [macos]
 mobile-testflight:
-    cd apps/mobile && bun install --frozen-lockfile && APP_VARIANT=release YARDSORT_BUILD_NUMBER="$(date -u +%y%m%d.%H%M)" bunx expo prebuild --platform ios --clean && open ios/*.xcworkspace
+    cd apps/mobile && bun install --frozen-lockfile && APP_VARIANT=release YARDSORT_VERSION="$(bun scripts/version.ts)" YARDSORT_BUILD_NUMBER="$(date -u +%y%m%d.%H%M)" bunx expo prebuild --platform ios --clean && open ios/*.xcworkspace
 
 # Build the development app onto an Android emulator or a phone over USB. Needs the Android SDK and JDK 17.
 mobile-android:
