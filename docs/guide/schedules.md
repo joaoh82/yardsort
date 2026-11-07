@@ -218,5 +218,5 @@ already approved.
 - **Run while Yardsort is closed.** A missed time is handled, not prevented.
 - **Make a fresh worktree for each run.** It runs in the workspace you chose, on whatever is
   checked out there.
-- **React to things that happen** — a pull request opened, a review posted. A schedule knows
-  only the clock.
+- **React to things that happen.** A schedule knows only the clock; a [trigger](triggers.md)
+  starts a run when an agent says it is done, a test fails, or a run ends.

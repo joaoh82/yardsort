@@ -161,7 +161,9 @@ ys workflow run fix-tests --workspace fix-login --input fixer=claude
 ```
 
 **Schedule…**, beside **Run…**, runs the workflow at a set time or on a routine instead: see
-[Schedules](schedules.md). A workflow with a `run_test` step can be scheduled only when that
+[Schedules](schedules.md). A [trigger](triggers.md) runs it when something happens in a workspace — an
+agent says it is done, a test fails — with `ys trigger add`. A trigger's workflow must give each
+`run_test` step a `timeout`. A workflow with a `run_test` step can be scheduled only when that
 test can run with nobody there: no `manual` step, and a file you have approved.
 
 `--workspace` takes a workspace's name or id. Run it inside a workspace's folder, or in an
@@ -323,6 +325,7 @@ nothing else: no filters, no expressions. Anything else is reported where it is 
 | `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`. The step must be among this step's `needs`.                                                                                                                 |
 | `memory`                                                                                          | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
 | `handoff`                                                                                         | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                            |
+| `event.kind`, `event.count`, `event.note`, `event.head`, `event.summary`, `event.verdict`         | What set off a run a [trigger](triggers.md#what-the-workflow-is-told) started. Empty in a run you started yourself.                                                                                                                                                                                                                                               |
 
 To write `{{` literally, for example in a prompt about a template language, write `\{{`.
 

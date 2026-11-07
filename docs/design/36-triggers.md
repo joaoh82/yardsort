@@ -1,7 +1,7 @@
 # Triggers
 
 _Proposal, 2026-11-06. The questions put to the user that day are answered under
-[Decisions](#decisions). Nothing is built yet._
+[Decisions](#decisions). Slice 1 is built: see [Slice 1: what shipped](#slice-1-what-shipped)._
 
 A trigger starts a [workflow](21-workflows.md) or a [smoke test](32-smoke-tests.md) when
 something happens, instead of when a person presses **Run** or a [schedule](34-schedules.md)'s
@@ -493,6 +493,68 @@ for every `ys` command an agent runs: the PATH a Windows agent's terminal has, w
 
 Each slice ends with a check by hand in a throwaway profile, written down under "what shipped".
 Slice 2's needs a real pull request on a scratch repository, reviewed from a second account.
+
+## Slice 1: what shipped
+
+The core, `ys`, and the app's thread, with Yardsort's own events: `workspace.done`,
+`agent.settled`, `agent.exited`, `test.finished` and `workflow.finished`. No window, no pull
+requests and no presets yet.
+
+**The core** (`crates/core/src/trigger/`, `store/triggers.rs`, migration `0023`). `mod.rs` holds
+what a trigger may be and the checks at saving; `fire.rs` the three steps — `observe`, `tick`,
+`settle`; `sources.rs` where observations come from; `turns.rs` the folding of a quiet and a
+reported turn into one `agent.settled`. **The app** (`src-tauri/src/triggers/`): a `triggers`
+thread, started only in the app that holds the profile's lock, after the schedules thread, given
+every host event, ticking once a second. **`ys trigger`** and **`ys workspace done`**. The
+workflow parser has the `event` namespace, `Facts` the depth, the event and the pinned session,
+and the driver keeps a pinned session as `origin`.
+
+What building it settled or changed:
+
+- **Four tables, not three, and not `pr_watches` yet.** `triggers`, `trigger_fires`,
+  `done_signals`, and `trigger_cursors`: where the thread has read up to in `agent_events` and
+  `done_signals` by sequence number, and in run endings by time. A cursor read for the first time
+  starts at the newest row, so what happened before an upgrade is never news. `pr_watches` comes
+  with slice 2, in a migration of its own, since nothing here would write it.
+- **A trigger's cursor is a time, `since`**, set when it is saved and when it is switched on. An
+  observation older than that is dropped. The thread's cursors are shared by every trigger.
+- **`quiet` is the trigger's, for every event.** The design gave `agent.settled` a filter of its
+  own for staying quiet; it is the same thing as the trigger's quiet time, with one rule more: an
+  agent going back to work lets its gathering fire go, without a line.
+- **A trigger is about one kind of subject.** An agent's events count their runs per session
+  (`session:<record>`), the rest per workspace, so a trigger cannot listen for both kinds; saving
+  one that does is refused, saying to make two.
+- **A capped subject keeps one line.** Events after the cap go onto the capped line's count
+  instead of each writing a line of their own, so a loop that is stopped does not fill the
+  history.
+- **Run endings are read a second behind the clock**, by time, so a run another process ends in
+  the millisecond of the read is not stepped over.
+- **An agent a workflow started is found from the step that started it**: a `start_session`
+  step's `session` or `run` output, by `json_extract`. Nothing needed to change on the session.
+- **The filters' flags are named for what they filter**: `--of-test` and `--of-workflow`, since
+  `--test` and `--workflow` already name what to run, and `--failed-exit`.
+- **The presets wait for slice 2**, so they arrive together; four of the five need a pull request
+  event or `review-branch`.
+- **An agent already running is not told about `ys workspace done`.** `ys trigger add` says so;
+  the dialog's **Tell the agent** is slice 3's.
+- **The `event` namespace lists every field the design names**, including the ones only slice 2's
+  events leave. Saving a trigger refuses a workflow that uses one its events do not leave, so a
+  file can be written for slice 2's events now and be refused only where it would be empty.
+
+Checked by hand on 2026-11-07, in a development build on Linux with the throwaway profile and
+demo projects `scripts/screenshots.sh` sets up, triggers added with the build's own `ys`:
+
+- A trigger on `workspace.done` with a three-second quiet time, and a second on
+  `workflow.finished` of the first's workflow. Two `ys workspace done` a second apart became one
+  run, given `event.count` 2, the newer note and the worktree's commit; its ending started the
+  second trigger's run at depth 1, given the first run's summary. Both histories showed each
+  fire and its result.
+- It found one mistake, fixed before this was recorded: saving refused a workflow that used
+  `{{ event.count }}`, which every fire leaves.
+
+Not checked by hand: an agent's turns and exits through the host, which needs an agent in a
+terminal; the tests cover the folding, the rows and the matching with a real store. macOS and
+Windows have had the tests in CI only.
 
 ## Not in version one, on purpose
 
