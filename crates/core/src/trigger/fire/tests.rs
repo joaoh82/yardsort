@@ -20,6 +20,7 @@ fn done(tx: &Tx, at: i64, note: &str) -> Observation {
         depth: 0,
         target_id: None,
         status: None,
+        post: None,
     }
 }
 
@@ -35,6 +36,7 @@ fn settled(tx: &Tx, record: &str, terminal: &str, at: i64) -> Observation {
         depth: 0,
         target_id: None,
         status: None,
+        post: None,
     }
 }
 
@@ -518,6 +520,7 @@ fn a_finished_test_matches_its_filters() {
         depth: 1,
         target_id: Some(test.to_owned()),
         status: Some(status.to_owned()),
+        post: None,
     };
     assert_eq!(observe(tx.store(), &ended("demo", "passed")).unwrap(), 0);
     assert_eq!(observe(tx.store(), &ended("other", "failed")).unwrap(), 0);

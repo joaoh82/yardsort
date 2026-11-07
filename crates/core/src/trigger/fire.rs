@@ -19,10 +19,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use super::{
-    events_of, not_found, test_of, workflow_waits_for_ever, ExitFilter, Filters, OutcomeFilter,
-    TriggerEvent, VerdictFilter, MOST_DEPTH, MOST_GATHER_MS, RATE_PER_HOUR,
+    events_of, not_found, test_of, workflow_waits_for_ever, ExitFilter, Filters, FromFilter,
+    OutcomeFilter, ReviewStateFilter, Subject, TriggerEvent, VerdictFilter, MOST_DEPTH,
+    MOST_GATHER_MS, RATE_PER_HOUR,
 };
 use crate::error::IpcResult;
+use crate::forge::ReviewState;
 use crate::git::Git;
 use crate::schedule::{ScheduleNotify, ScheduleTarget};
 use crate::store::{FireDecision, NewTriggerFire, Store, TriggerFireRow, TriggerRow};
@@ -45,18 +47,63 @@ pub struct Observation {
     /// The depth a run it starts would have.
     pub depth: i64,
     /// For a run that ended: the workflow's or the test's id, and how it ended. For an exit:
-    /// `exited` or `failed`.
+    /// `exited` or `failed`. For a pull request opening: `open`, `draft`, or `ready` when a
+    /// draft was marked ready.
     pub target_id: Option<String>,
     pub status: Option<String>,
+    /// For a review or a comment: who posted it, and what a review concluded.
+    pub post: Option<Post>,
 }
 
-/// What a trigger counts its runs for: one agent session, or the workspace.
-fn subject_of(seen: &Observation) -> Option<String> {
-    if seen.event.of_a_session() {
-        seen.session_id.as_ref().map(|id| format!("session:{id}"))
-    } else {
-        Some(format!("workspace:{}", seen.workspace_id))
+/// A review or a comment on a pull request, as the filters see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Post {
+    /// By login. `None` for an account that no longer exists.
+    pub author: Option<String>,
+    /// Posted as the account `gh` uses: the user's, and so every agent's.
+    pub mine: bool,
+    pub state: Option<ReviewState>,
+}
+
+impl Post {
+    fn by_a_bot(&self) -> bool {
+        self.author
+            .as_deref()
+            .is_some_and(|login| login.ends_with("[bot]"))
     }
+}
+
+/// What a trigger counts its runs for: one agent session, one pull request, or the workspace.
+fn subject_of(seen: &Observation) -> Option<String> {
+    match seen.event.subject() {
+        Subject::Session => seen.session_id.as_ref().map(|id| format!("session:{id}")),
+        Subject::PullRequest => seen.facts.get("number").map(|n| format!("pr:{n}")),
+        Subject::Workspace => Some(format!("workspace:{}", seen.workspace_id)),
+    }
+}
+
+/// Whether a review or a comment is one the filters let through. Posts from the user's account
+/// under `from: anyone` are checked again in [`observe`], which knows what runs are going.
+fn post_holds(filters: &Filters, event: TriggerEvent, post: Option<&Post>) -> bool {
+    let Some(post) = post else {
+        return false;
+    };
+    if filters.from.unwrap_or_default() == FromFilter::Others && post.mine {
+        return false;
+    }
+    if filters.no_bots && post.by_a_bot() {
+        return false;
+    }
+    if event == TriggerEvent::PrReview && !filters.states.is_empty() {
+        let state = match post.state {
+            Some(ReviewState::Approved) => Some(ReviewStateFilter::Approved),
+            Some(ReviewState::ChangesRequested) => Some(ReviewStateFilter::ChangesRequested),
+            Some(ReviewState::Commented) => Some(ReviewStateFilter::Commented),
+            Some(ReviewState::Dismissed) | None => None,
+        };
+        return state.is_some_and(|state| filters.states.contains(&state));
+    }
+    true
 }
 
 /// Whether the filters a trigger has hold for what was seen. Those that need git — new commits,
@@ -90,8 +137,31 @@ fn holds(filters: &Filters, seen: &Observation) -> bool {
                     _ => true,
                 }
         }
-        TriggerEvent::WorkspaceDone | TriggerEvent::AgentSettled => true,
+        TriggerEvent::PrOpened => match status {
+            Some("draft") => filters.drafts,
+            // A trigger that took drafts was told when it opened.
+            Some("ready") => !filters.drafts,
+            _ => true,
+        },
+        TriggerEvent::PrReview | TriggerEvent::PrComment => {
+            post_holds(filters, seen.event, seen.post.as_ref())
+        }
+        TriggerEvent::WorkspaceDone
+        | TriggerEvent::AgentSettled
+        | TriggerEvent::PrChecksFailed
+        | TriggerEvent::PrChecksPassed
+        | TriggerEvent::PrConflicted
+        | TriggerEvent::PrMerged
+        | TriggerEvent::PrClosed => true,
     }
+}
+
+/// Whether a run `trigger` started for `subject` has not ended yet.
+fn own_run_going(store: &Store, trigger_id: &str, subject: &str) -> IpcResult<bool> {
+    Ok(store
+        .unsettled_trigger_fires()?
+        .iter()
+        .any(|line| line.trigger_id == trigger_id && line.subject == subject))
 }
 
 /// Add what was seen to every enabled trigger in its workspace that listens for it. Returns how
@@ -132,11 +202,23 @@ pub fn observe(store: &Store, seen: &Observation) -> IpcResult<usize> {
         if !holds(&Filters::parse(&trigger.filters), seen) {
             continue;
         }
+        // Under `from: anyone`, what the user's account posts while this trigger's own run is
+        // going is the agent answering.
+        if seen.post.as_ref().is_some_and(|post| post.mine)
+            && own_run_going(store, &trigger.id, &subject)?
+        {
+            continue;
+        }
         let mut facts = seen.facts.clone();
         facts.insert("kind".into(), seen.event.as_str().into());
-        let facts = serde_json::to_string(&facts).unwrap_or_else(|_| "{}".to_owned());
         match store.open_trigger_fire(&trigger.id, &subject)? {
             Some(open) => {
+                if seen.post.is_some() {
+                    let gathered: BTreeMap<String, String> =
+                        serde_json::from_str(&open.facts).unwrap_or_default();
+                    facts = super::watch::gather_posts(&gathered, &facts);
+                }
+                let facts = serde_json::to_string(&facts).unwrap_or_else(|_| "{}".to_owned());
                 // Moved later by every event, but never past the most a fire gathers.
                 let due = (seen.at + trigger.quiet_ms).min(open.first_at + MOST_GATHER_MS);
                 store.gather_into_trigger_fire(
@@ -148,6 +230,7 @@ pub fn observe(store: &Store, seen: &Observation) -> IpcResult<usize> {
                 )?;
             }
             None => {
+                let facts = serde_json::to_string(&facts).unwrap_or_else(|_| "{}".to_owned());
                 store.open_new_trigger_fire(&NewTriggerFire {
                     trigger_id: &trigger.id,
                     subject: &subject,
@@ -182,8 +265,9 @@ pub fn went_busy(store: &Store, session_id: &str) -> IpcResult<usize> {
 pub struct Fired {
     pub trigger: TriggerRow,
     pub fire: TriggerFireRow,
-    /// What to tell the user about it now: that it could not start its run, or that it has
-    /// started all the runs its cap allows. Said once while it lasts.
+    /// What to tell the user about it now: that it could not start its run, that there was no
+    /// one for its run to tell, or that it has started all the runs its cap allows. Said once
+    /// while it lasts.
     pub notice: Option<Notice>,
 }
 
@@ -303,7 +387,7 @@ fn notice_for(
     if ScheduleNotify::parse(&trigger.notify) == Some(ScheduleNotify::Never) {
         return None;
     }
-    if !matches!(outcome, "refused" | "capped") {
+    if !matches!(outcome, "refused" | "capped" | "skipped") {
         return None;
     }
     if previous.is_some_and(|line| line.outcome == outcome) {
@@ -311,6 +395,7 @@ fn notice_for(
     }
     let title = match outcome {
         "capped" => format!("{} has stopped", trigger.name),
+        "skipped" => format!("{} had no one to tell", trigger.name),
         _ => format!("{} could not start", trigger.name),
     };
     Some(Notice {
@@ -441,6 +526,19 @@ fn decide(
                 if let Some(workflow) = entry.workflow.as_ref() {
                     if let Some(why) = workflow_waits_for_ever(&workspace, workflow) {
                         return Ok(refused(why));
+                    }
+                    // A run that talks to the workspace's agent with none running would skip
+                    // every step and call that a success. The event would be lost unseen.
+                    let anyone = store.sessions(&workspace.id)?.iter().any(|s| s.running);
+                    if crate::workflow::runs::needs_origin(workflow) && !anyone {
+                        return Ok(Decision::Decided {
+                            outcome: "skipped",
+                            run_id: None,
+                            note: Some(format!(
+                                "No agent was running in `{}`, so there was no one to tell.",
+                                workspace.name
+                            )),
+                        });
                     }
                 }
             }

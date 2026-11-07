@@ -10,6 +10,11 @@
 //!
 //! A thread of its own, for the schedules thread's reason: queueing a workflow that works with
 //! a pull request asks the forge, and a slow forge must not stall every run in the profile.
+//!
+//! The watched pull requests are looked at by a second thread, once a minute each
+//! (`yardsort_core::trigger::watch`): every look is a question to GitHub that may take up to
+//! its 20-second limit, and the first thread's one-second tick must not wait for it. What a look
+//! finds is handed to the first thread, which is the only one that gathers and decides.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, PoisonError};
@@ -20,8 +25,9 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use yardsort_core::schedule::clock;
+use yardsort_core::trigger::fire::Observation;
 use yardsort_core::trigger::turns::{Change, Turns};
-use yardsort_core::trigger::{fire, sources};
+use yardsort_core::trigger::{fire, sources, watch};
 
 use crate::state::AppState;
 use crate::workflows::commands::AppLook;
@@ -30,12 +36,18 @@ use crate::workflows::commands::AppLook;
 /// be decided.
 const TICK: Duration = Duration::from_secs(1);
 
+/// How often the pull request thread checks which watches are due a look. Each is looked at
+/// once a minute at most (`watch::LOOK_EVERY_MS`).
+const WATCH_TICK: Duration = Duration::from_secs(5);
+
 /// Managed by Tauri while the thread runs.
 pub struct Listener {
     wake: Mutex<Sender<()>>,
     turns: Turns,
     /// What the host said since the last look, with when.
     heard: Mutex<Vec<(Change, i64)>>,
+    /// What looks at pull requests found since the last look.
+    forge: Mutex<Vec<Observation>>,
 }
 
 impl Listener {
@@ -74,6 +86,7 @@ pub fn start(app: &AppHandle) {
         wake: Mutex::new(wake),
         turns: Turns::default(),
         heard: Mutex::new(Vec::new()),
+        forge: Mutex::new(Vec::new()),
     });
     let handle = app.clone();
     let spawned = std::thread::Builder::new()
@@ -81,6 +94,61 @@ pub fn start(app: &AppHandle) {
         .spawn(move || look(&handle, &woken));
     if let Err(error) = spawned {
         eprintln!("triggers: cannot start the thread: {error}");
+    }
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("trigger-pull-requests".into())
+        .spawn(move || watch_pull_requests(&handle));
+    if let Err(error) = spawned {
+        eprintln!("triggers: cannot start the pull request thread: {error}");
+    }
+}
+
+/// Look at each watched pull request once a minute, and hand what changed to the trigger
+/// thread.
+fn watch_pull_requests(handle: &AppHandle) {
+    loop {
+        std::thread::sleep(WATCH_TICK);
+        let (Some(state), Some(listener)) = (
+            handle.try_state::<AppState>(),
+            handle.try_state::<Listener>(),
+        ) else {
+            continue;
+        };
+        let git = match crate::git::Git::new(&state.env()) {
+            Ok(git) => git,
+            Err(error) => {
+                eprintln!("triggers: {error}");
+                continue;
+            }
+        };
+        let store = &state.store;
+        let due = match watch::due(store, clock::now().timestamp_millis()) {
+            Ok(due) => due,
+            Err(error) => {
+                eprintln!("triggers: cannot read the watches: {}", error.message);
+                continue;
+            }
+        };
+        for workspace in due {
+            // The time of this look, not of the tick: a look before it may have taken a while.
+            let now = clock::now().timestamp_millis();
+            match watch::look_at(store, &AppLook(&state), &git, &workspace, now) {
+                Ok(seen) if seen.is_empty() => {}
+                Ok(seen) => {
+                    listener
+                        .forge
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .extend(seen);
+                    listener.wake();
+                }
+                Err(error) => eprintln!(
+                    "triggers: cannot look at {}'s pull request: {}",
+                    workspace.name, error.message
+                ),
+            }
+        }
     }
 }
 
@@ -129,6 +197,12 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
                 eprintln!("triggers: cannot read a session: {}", error.message);
             }
         }
+        seen.extend(std::mem::take(
+            &mut *listener
+                .forge
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        ));
         for read in [
             sources::read_events(store, &listener.turns, &git),
             sources::read_done(store),

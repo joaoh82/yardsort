@@ -25,6 +25,16 @@ pub trait Look {
     /// The workspace's open pull request, `None` when it has none, or why the forge could not
     /// be asked.
     fn pull_request(&self, workspace: &WorkspaceRow) -> Result<Option<PullRequest>, String>;
+    /// The workspace's pull request as a trigger watches it: pull request `number`, or the open
+    /// one for its branch when `None`; `None` when it has none. A door that does not ask the
+    /// forge about this says so.
+    fn watch_pull_request(
+        &self,
+        _workspace: &WorkspaceRow,
+        _number: Option<u32>,
+    ) -> Result<Option<crate::forge::PrLook>, String> {
+        Err("Pull requests are not watched from here.".to_owned())
+    }
 }
 
 /// What a run found out about where it runs, kept with it (`workflow_runs.context`). A run's

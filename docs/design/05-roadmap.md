@@ -1116,6 +1116,12 @@ Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 
       `workflow.finished`; the `event` namespace, the depth and the pinned session in a run's
       facts; the app's thread; `ys trigger` and `ys workspace done`. Recorded in
       [36 § slice 1](36-triggers.md#slice-1-what-shipped).
+- [x] Slice 2: migration 0024 and the watch, seeded at saving; one GraphQL question per look,
+      with a reply on a thread read as a comment (GitHub also lists it as a review, confirmed
+      on a real pull request); every `pr.*` event; `--from`, `--state`, `--no-bots`,
+      `--drafts`; the five presets and `address-review`, `fix-checks`, `review-branch`; the
+      app's pull request thread; a fire with no agent to tell skipped and told. Recorded in
+      [36 § slice 2](36-triggers.md#slice-2-what-shipped).
 
 _Exit:_ on all three platforms, a workspace started with **Address reviews** ticked has its agent
 told of a review posted from a second account, once, two minutes after its last comment; the

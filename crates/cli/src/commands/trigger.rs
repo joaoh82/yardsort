@@ -1,6 +1,6 @@
 //! `ys trigger …` — standing instructions to start a workflow or a smoke test when something
 //! happens in a workspace: an agent says its work is done, finishes a turn or exits, a test or
-//! a workflow run ends.
+//! a workflow run ends, or something happens on the workspace's pull request.
 //!
 //! A trigger is a row; `ys` writes it and the app, when it is open, listens and acts within a
 //! second. See `yardsort_core::trigger` and docs/guide/triggers.md.
@@ -13,8 +13,8 @@ use yardsort_core::presence;
 use yardsort_core::schedule::{clock, ScheduleNotify, ScheduleTarget};
 use yardsort_core::store::{TriggerFireRow, TriggerRow};
 use yardsort_core::trigger::{
-    self, fire, Draft, ExitFilter, Filters, OutcomeFilter, TriggerEvent, TriggerStanding,
-    VerdictFilter,
+    self, fire, presets, Draft, ExitFilter, Filters, FromFilter, OutcomeFilter, ReviewStateFilter,
+    TriggerEvent, TriggerStanding, VerdictFilter,
 };
 
 use super::workflow::Looking;
@@ -27,13 +27,15 @@ const STANDING_FIRES: usize = 20;
 pub enum Command {
     /// Every trigger: what it listens for, where, what it runs, and how its last fire went.
     List,
+    /// The ready-made triggers `add --preset` takes, and the question each asks.
+    Presets,
     /// One trigger: what it listens for and its filters, its inputs, and where it stands.
     Show {
         /// The trigger: its name, its id, or the start of its id.
         trigger: String,
     },
-    /// Add a trigger. Give what to listen for (`--on`, one or more) and what to run
-    /// (`--workflow` or `--test`). Triggers fire while Yardsort is open.
+    /// Add a trigger: a preset (`--preset`), or what to listen for (`--on`, one or more) and
+    /// what to run (`--workflow` or `--test`). Triggers fire while Yardsort is open.
     Add(Box<Add>),
     /// Switch a trigger off. It keeps its history, and fires nothing.
     Pause { trigger: String },
@@ -54,11 +56,16 @@ pub enum Command {
 
 /// What `add` takes.
 #[derive(clap::Args)]
-#[command(group(clap::ArgGroup::new("what").required(true).args(["workflow", "test"])))]
+#[command(group(clap::ArgGroup::new("what").args(["workflow", "test"])))]
 pub struct Add {
+    /// A ready-made trigger, from `ys trigger presets`. Give its one answer with `--input`.
+    #[arg(long, value_name = "PRESET", conflicts_with_all = ["events", "workflow", "test"])]
+    pub preset: Option<String>,
     /// What to listen for. Repeat for more than one: `workspace.done`, `agent.settled`,
-    /// `agent.exited`, `test.finished`, `workflow.finished`.
-    #[arg(long = "on", value_name = "EVENT", required = true)]
+    /// `agent.exited`, `test.finished`, `workflow.finished`, `pr.opened`, `pr.review`,
+    /// `pr.comment`, `pr.checks_failed`, `pr.checks_passed`, `pr.conflicted`, `pr.merged`,
+    /// `pr.closed`.
+    #[arg(long = "on", value_name = "EVENT", required_unless_present = "preset")]
     pub events: Vec<String>,
     /// Run this workflow, from `ys workflow list`.
     #[arg(long, value_name = "ID")]
@@ -80,10 +87,11 @@ pub struct Add {
     #[arg(long)]
     pub name: Option<String>,
     /// How long to wait after the last event before firing, so a burst is one run: 30s, 2m.
+    /// Default: 2m for reviews and comments, none for the rest.
     #[arg(long, value_name = "INTERVAL")]
     pub quiet: Option<String>,
-    /// How many runs it may start for one agent session, or for the workspace, before it
-    /// stops and asks.
+    /// How many runs it may start for one agent session, one pull request, or the workspace,
+    /// before it stops and asks.
     #[arg(long, default_value_t = 3)]
     pub cap: i64,
     /// When to be told how a run ended.
@@ -110,6 +118,33 @@ pub struct Add {
     /// `workflow.finished`: only this outcome.
     #[arg(long, value_enum)]
     pub outcome: Option<OutcomeArg>,
+    /// `pr.opened`: a draft counts as soon as it opens. Without it, once it is marked ready.
+    #[arg(long)]
+    pub drafts: bool,
+    /// `pr.review`, `pr.comment`: whose posts count. Default: accounts other than yours.
+    #[arg(long, value_enum)]
+    pub from: Option<FromArg>,
+    /// `pr.review`: only reviews that concluded this. Repeat for more than one.
+    #[arg(long = "state", value_enum, value_name = "STATE")]
+    pub states: Vec<StateArg>,
+    /// `pr.review`, `pr.comment`: leave out accounts whose login ends in `[bot]`.
+    #[arg(long)]
+    pub no_bots: bool,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum FromArg {
+    /// Accounts other than the one `gh` posts as: yours, and every agent's.
+    Others,
+    /// Yours too, except while a run this trigger started is going.
+    Anyone,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum StateArg {
+    Approved,
+    ChangesRequested,
+    Commented,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -136,6 +171,7 @@ pub enum OutcomeArg {
 pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure> {
     match command {
         Command::List => list(ys, out),
+        Command::Presets => list_presets(out),
         Command::Show { trigger } => show(ys, &trigger, out),
         Command::Add(asked) => add(ys, *asked, out),
         Command::Pause { trigger } => switch(ys, &trigger, false, out),
@@ -417,8 +453,26 @@ fn show(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
                 }
             ));
         }
+        if filters.from == Some(FromFilter::Anyone) {
+            only.push("anyone posts it, you too".to_owned());
+        } else if trigger::events_of(&row)
+            .iter()
+            .any(|event| matches!(event, TriggerEvent::PrReview | TriggerEvent::PrComment))
+        {
+            only.push("someone other than you posts it".to_owned());
+        }
+        if !filters.states.is_empty() {
+            let states: Vec<&str> = filters.states.iter().map(|state| state.as_str()).collect();
+            only.push(format!("the review is {}", states.join(" or ")));
+        }
+        if filters.no_bots {
+            only.push("not a bot".to_owned());
+        }
         if !only.is_empty() {
             sayln!("Only when {}.", only.join(", and "));
+        }
+        if filters.drafts {
+            sayln!("A draft counts as soon as it opens.");
         }
         for (id, value) in &item.inputs {
             sayln!("  {id} = {value}");
@@ -455,8 +509,62 @@ fn show(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     })
 }
 
+/// A preset as `presets` prints it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresetListed {
+    id: &'static str,
+    name: &'static str,
+    does: &'static str,
+    events: Vec<&'static str>,
+    workflow: &'static str,
+    asks: Option<&'static str>,
+}
+
+fn list_presets(out: &Output) -> Result<(), Failure> {
+    let all: Vec<PresetListed> = presets::PRESETS
+        .iter()
+        .map(|preset| PresetListed {
+            id: preset.id,
+            name: preset.name,
+            does: preset.does,
+            events: preset.events.iter().map(|event| event.as_str()).collect(),
+            workflow: preset.workflow,
+            asks: preset.asks.map(|(input, _)| input),
+        })
+        .collect();
+    out.emit(&all, || {
+        for preset in presets::PRESETS {
+            sayln!("{} — {}", preset.id, preset.name);
+            sayln!("  {}", preset.does);
+            match preset.asks {
+                Some((input, question)) => sayln!(
+                    "  Runs `{}`. {question}? --input {input}=…",
+                    preset.workflow
+                ),
+                None => sayln!("  Runs `{}`.", preset.workflow),
+            }
+        }
+    })
+}
+
 fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
-    let mut events = Vec::new();
+    let preset = match asked.preset.as_deref() {
+        Some(id) => Some(presets::find(id).ok_or_else(|| {
+            Failure::new(format!(
+                "There is no preset `{id}`. There are: {}.",
+                presets::PRESETS
+                    .iter()
+                    .map(|preset| preset.id)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?),
+        None => None,
+    };
+    let mut events = preset
+        .map(|preset| preset.events.to_vec())
+        .unwrap_or_default();
     for name in asked.events.iter().flat_map(|name| name.split(',')) {
         let name = name.trim();
         let event = TriggerEvent::parse(name).ok_or_else(|| {
@@ -471,10 +579,11 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
         })?;
         events.push(event);
     }
-    let (target, target_id) = match (&asked.workflow, &asked.test) {
-        (Some(id), _) => (ScheduleTarget::Workflow, id.clone()),
-        (None, Some(id)) => (ScheduleTarget::Test, id.clone()),
-        (None, None) => return Err(Failure::new("Say what to run: --workflow or --test.")),
+    let (target, target_id) = match (preset, &asked.workflow, &asked.test) {
+        (Some(preset), _, _) => (ScheduleTarget::Workflow, preset.workflow.to_owned()),
+        (None, Some(id), _) => (ScheduleTarget::Workflow, id.clone()),
+        (None, None, Some(id)) => (ScheduleTarget::Test, id.clone()),
+        (None, None, None) => return Err(Failure::new("Say what to run: --workflow or --test.")),
     };
     // A session names its workspace; otherwise the one named, or the one this is run in.
     let session = match asked.session.as_deref() {
@@ -495,6 +604,13 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
         };
         inputs.insert(key.trim().to_owned(), value.to_owned());
     }
+    if let Some((input, question)) = preset.and_then(|preset| preset.asks) {
+        if !inputs.contains_key(input) {
+            return Err(Failure::new(format!(
+                "{question}? Say with `--input {input}=…`."
+            )));
+        }
+    }
     let filters = Filters {
         new_commits: asked.new_commits,
         clean: asked.clean,
@@ -509,20 +625,37 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
             OutcomeArg::Succeeded => OutcomeFilter::Succeeded,
             OutcomeArg::Failed => OutcomeFilter::Failed,
         }),
+        drafts: asked.drafts,
+        from: asked.from.map(|from| match from {
+            FromArg::Others => FromFilter::Others,
+            FromArg::Anyone => FromFilter::Anyone,
+        }),
+        states: asked
+            .states
+            .iter()
+            .map(|state| match state {
+                StateArg::Approved => ReviewStateFilter::Approved,
+                StateArg::ChangesRequested => ReviewStateFilter::ChangesRequested,
+                StateArg::Commented => ReviewStateFilter::Commented,
+            })
+            .collect(),
+        no_bots: asked.no_bots,
     };
-    let quiet = asked
-        .quiet
-        .as_deref()
-        .map(quiet_ms)
-        .transpose()?
-        .unwrap_or(0);
+    let quiet = match asked.quiet.as_deref() {
+        Some(text) => quiet_ms(text)?,
+        None => events
+            .iter()
+            .map(|event| event.default_quiet_ms())
+            .max()
+            .unwrap_or(0),
+    };
     let row = trigger::add(
         &ys.store,
         &ys.data_dir,
         &Looking(ys),
         &Draft {
-            name: asked.name.as_deref(),
-            preset: None,
+            name: asked.name.as_deref().or(preset.map(|preset| preset.name)),
+            preset: preset.map(|preset| preset.id),
             workspace_id: &workspace.id,
             session_id: session.as_ref().map(|s| s.id.as_str()),
             events: &events,
@@ -548,6 +681,11 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
             .sessions(&workspace.id)?
             .iter()
             .any(|session| session.running);
+    let watch = if events.iter().any(|event| event.of_a_pull_request()) {
+        ys.store.pr_watch(&workspace.id)?
+    } else {
+        None
+    };
     let item = listed(&row, &[]);
     out.emit(&item, || {
         sayln!(
@@ -556,6 +694,21 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
             memory::short_id(&row.id),
             item.when
         );
+        if let Some(watch) = &watch {
+            match (watch.number, &watch.problem) {
+                (_, Some(problem)) => sayln!(
+                    "Could not look at its pull request yet ({problem}). Yardsort looks again \
+                     when it is open."
+                ),
+                (Some(number), None) => sayln!(
+                    "Watching #{number}: what is there now is not news, only what comes next."
+                ),
+                (None, None) => sayln!(
+                    "{} has no pull request yet. One opening is `pr.opened`.",
+                    workspace.name
+                ),
+            }
+        }
         if untold {
             sayln!(
                 "Note: agents already running in {} were not told about `ys workspace done`. \

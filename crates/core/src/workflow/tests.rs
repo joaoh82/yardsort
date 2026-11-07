@@ -678,13 +678,16 @@ fn a_users_files_are_listed_beside_the_built_ins_by_name() {
     assert_eq!(
         names,
         vec![
+            "Address reviews",
             "Another",
+            "Fix failing checks",
             "Request code review",
+            "Review the branch",
             "Smoke test, then tell the agent"
         ]
     );
     assert!(matches!(
-        &listed[0].source,
+        &listed[1].source,
         Source::File { replaces_built_in: false, path } if path.ends_with("demo.yaml")
     ));
 }

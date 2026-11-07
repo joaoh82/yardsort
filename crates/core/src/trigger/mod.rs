@@ -23,8 +23,10 @@ use crate::store::{Store, TriggerFields, TriggerFireRow, TriggerRow, WorkspaceRo
 use crate::workflow::runs::Look;
 
 pub mod fire;
+pub mod presets;
 pub mod sources;
 pub mod turns;
+pub mod watch;
 
 /// The longest a trigger waits after the last event before it fires.
 pub const MOST_QUIET_MS: i64 = 60 * 60_000;
@@ -62,15 +64,57 @@ pub enum TriggerEvent {
     /// A workflow run in the workspace ended.
     #[serde(rename = "workflow.finished")]
     WorkflowFinished,
+    /// The workspace's branch has an open pull request it did not have before.
+    #[serde(rename = "pr.opened")]
+    PrOpened,
+    /// A review was submitted on the workspace's pull request.
+    #[serde(rename = "pr.review")]
+    PrReview,
+    /// A comment on its conversation, or a reply on a review thread.
+    #[serde(rename = "pr.comment")]
+    PrComment,
+    /// Its checks finished on its newest commit, and one failed.
+    #[serde(rename = "pr.checks_failed")]
+    PrChecksFailed,
+    /// Its checks finished on its newest commit, and none failed.
+    #[serde(rename = "pr.checks_passed")]
+    PrChecksPassed,
+    /// GitHub says it conflicts with its base.
+    #[serde(rename = "pr.conflicted")]
+    PrConflicted,
+    #[serde(rename = "pr.merged")]
+    PrMerged,
+    /// It was closed without being merged.
+    #[serde(rename = "pr.closed")]
+    PrClosed,
+}
+
+/// What a trigger counts its runs for, and so what its events must agree on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Subject {
+    /// One agent session.
+    Session,
+    /// One pull request: a new one on the same branch starts again.
+    PullRequest,
+    /// The workspace.
+    Workspace,
 }
 
 impl TriggerEvent {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 13] = [
         Self::WorkspaceDone,
         Self::AgentSettled,
         Self::AgentExited,
         Self::TestFinished,
         Self::WorkflowFinished,
+        Self::PrOpened,
+        Self::PrReview,
+        Self::PrComment,
+        Self::PrChecksFailed,
+        Self::PrChecksPassed,
+        Self::PrConflicted,
+        Self::PrMerged,
+        Self::PrClosed,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -80,6 +124,14 @@ impl TriggerEvent {
             Self::AgentExited => "agent.exited",
             Self::TestFinished => "test.finished",
             Self::WorkflowFinished => "workflow.finished",
+            Self::PrOpened => "pr.opened",
+            Self::PrReview => "pr.review",
+            Self::PrComment => "pr.comment",
+            Self::PrChecksFailed => "pr.checks_failed",
+            Self::PrChecksPassed => "pr.checks_passed",
+            Self::PrConflicted => "pr.conflicted",
+            Self::PrMerged => "pr.merged",
+            Self::PrClosed => "pr.closed",
         }
     }
 
@@ -95,13 +147,50 @@ impl TriggerEvent {
             Self::AgentExited => "an agent's program ends",
             Self::TestFinished => "a smoke test run ends",
             Self::WorkflowFinished => "a workflow run ends",
+            Self::PrOpened => "the workspace's pull request opens",
+            Self::PrReview => "a review comes in on the pull request",
+            Self::PrComment => "someone comments on the pull request",
+            Self::PrChecksFailed => "the pull request's checks fail",
+            Self::PrChecksPassed => "the pull request's checks pass",
+            Self::PrConflicted => "the pull request conflicts with its base",
+            Self::PrMerged => "the pull request is merged",
+            Self::PrClosed => "the pull request is closed without merging",
         }
     }
 
     /// Whether it is about one agent session, rather than the whole workspace: what its fires'
     /// subject is, and what a session trigger narrows.
     pub fn of_a_session(self) -> bool {
-        matches!(self, Self::AgentSettled | Self::AgentExited)
+        self.subject() == Subject::Session
+    }
+
+    /// Whether it is about the workspace's pull request, which the forge is asked about.
+    pub fn of_a_pull_request(self) -> bool {
+        self.subject() == Subject::PullRequest
+    }
+
+    pub fn subject(self) -> Subject {
+        match self {
+            Self::AgentSettled | Self::AgentExited => Subject::Session,
+            Self::PrOpened
+            | Self::PrReview
+            | Self::PrComment
+            | Self::PrChecksFailed
+            | Self::PrChecksPassed
+            | Self::PrConflicted
+            | Self::PrMerged
+            | Self::PrClosed => Subject::PullRequest,
+            Self::WorkspaceDone | Self::TestFinished | Self::WorkflowFinished => Subject::Workspace,
+        }
+    }
+
+    /// The quiet time a trigger on it has when none is given: two minutes for reviews and
+    /// comments, which come in bursts; none for the rest.
+    pub fn default_quiet_ms(self) -> i64 {
+        match self {
+            Self::PrReview | Self::PrComment => 2 * 60_000,
+            _ => 0,
+        }
     }
 
     /// What it leaves for `{{ event.* }}`, besides `kind` and `count`, which every fire leaves.
@@ -112,7 +201,49 @@ impl TriggerEvent {
             Self::AgentExited => &["summary"],
             Self::TestFinished => &["verdict", "summary"],
             Self::WorkflowFinished => &["summary"],
+            Self::PrOpened | Self::PrMerged | Self::PrClosed => &["url", "number", "title"],
+            Self::PrReview | Self::PrComment => &["url", "number", "title", "authors", "summary"],
+            Self::PrChecksFailed => &["url", "number", "title", "head", "summary"],
+            Self::PrChecksPassed | Self::PrConflicted => &["url", "number", "title", "head"],
         }
+    }
+}
+
+/// Whose reviews and comments count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FromFilter {
+    /// Accounts other than the one `gh` posts as, which is the user's and every agent's: a
+    /// teammate, a review bot.
+    #[default]
+    Others,
+    /// The user's account too, except while a run this trigger started is going: what is posted
+    /// then is the agent's own answers.
+    Anyone,
+}
+
+/// What a review concluded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewStateFilter {
+    Approved,
+    ChangesRequested,
+    Commented,
+}
+
+impl ReviewStateFilter {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::ChangesRequested => "changes_requested",
+            Self::Commented => "commented",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        [Self::Approved, Self::ChangesRequested, Self::Commented]
+            .into_iter()
+            .find(|state| state.as_str() == text)
     }
 }
 
@@ -172,6 +303,19 @@ pub struct Filters {
     /// `workflow.finished`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<OutcomeFilter>,
+    /// `pr.opened`: a draft counts as soon as it opens. Without it a draft counts once it is
+    /// marked ready for review.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drafts: bool,
+    /// `pr.review`, `pr.comment`: whose posts count. Others', when not given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<FromFilter>,
+    /// `pr.review`: only reviews that concluded one of these. Any, when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub states: Vec<ReviewStateFilter>,
+    /// `pr.review`, `pr.comment`: leave out accounts whose login ends in `[bot]`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_bots: bool,
 }
 
 impl Filters {
@@ -184,29 +328,42 @@ impl Filters {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".to_owned())
     }
 
-    /// Each filter given, with the one event it is for.
-    fn given(&self) -> Vec<(&'static str, TriggerEvent)> {
-        let mut given = Vec::new();
+    /// Each filter given, with the events it is for.
+    fn given(&self) -> Vec<(&'static str, &'static [TriggerEvent])> {
+        const POSTS: &[TriggerEvent] = &[TriggerEvent::PrReview, TriggerEvent::PrComment];
+        let mut given: Vec<(&'static str, &'static [TriggerEvent])> = Vec::new();
         if self.new_commits {
-            given.push(("new commits", TriggerEvent::AgentSettled));
+            given.push(("new commits", &[TriggerEvent::AgentSettled]));
         }
         if self.clean {
-            given.push(("clean", TriggerEvent::AgentSettled));
+            given.push(("clean", &[TriggerEvent::AgentSettled]));
         }
         if self.exit.is_some() {
-            given.push(("exit", TriggerEvent::AgentExited));
+            given.push(("exit", &[TriggerEvent::AgentExited]));
         }
         if self.test.is_some() {
-            given.push(("test", TriggerEvent::TestFinished));
+            given.push(("test", &[TriggerEvent::TestFinished]));
         }
         if self.verdict.is_some() {
-            given.push(("verdict", TriggerEvent::TestFinished));
+            given.push(("verdict", &[TriggerEvent::TestFinished]));
         }
         if self.workflow.is_some() {
-            given.push(("workflow", TriggerEvent::WorkflowFinished));
+            given.push(("workflow", &[TriggerEvent::WorkflowFinished]));
         }
         if self.outcome.is_some() {
-            given.push(("outcome", TriggerEvent::WorkflowFinished));
+            given.push(("outcome", &[TriggerEvent::WorkflowFinished]));
+        }
+        if self.drafts {
+            given.push(("drafts", &[TriggerEvent::PrOpened]));
+        }
+        if self.from.is_some() {
+            given.push(("from", POSTS));
+        }
+        if !self.states.is_empty() {
+            given.push(("state", &[TriggerEvent::PrReview]));
+        }
+        if self.no_bots {
+            given.push(("no bots", POSTS));
         }
         given
     }
@@ -294,20 +451,24 @@ fn check_draft(
             "Say what it listens for: at least one event.",
         ));
     }
-    if events.iter().any(|e| e.of_a_session()) && events.iter().any(|e| !e.of_a_session()) {
+    if events.iter().any(|e| e.subject() != events[0].subject()) {
         return Err(IpcError::new(
             "trigger_events",
-            "An agent's events and the workspace's cannot share a trigger: each counts its runs \
-             for something different. Make two triggers.",
+            "An agent's events, the pull request's and the workspace's cannot share a trigger: \
+             each counts its runs for something different. Make two triggers.",
         ));
     }
-    for (filter, event) in draft.filters.given() {
-        if !events.contains(&event) {
+    for (filter, about) in draft.filters.given() {
+        if !about.iter().any(|event| events.contains(event)) {
+            let names: Vec<String> = about
+                .iter()
+                .map(|event| format!("`{}`", event.as_str()))
+                .collect();
             return Err(IpcError::new(
                 "trigger_filters",
                 format!(
-                    "`{filter}` is about `{}`, which this trigger does not listen for.",
-                    event.as_str()
+                    "`{filter}` is about {}, which this trigger does not listen for.",
+                    names.join(" or ")
                 ),
             ));
         }
@@ -345,6 +506,7 @@ fn check_draft(
                 return Err(IpcError::new("trigger_needs_person", why));
             }
             check_event_variables(workflow, &events)?;
+            check_pull_request_gone(workflow, &events)?;
             workflow.name.clone()
         }
         ScheduleTarget::Test => {
@@ -461,6 +623,30 @@ fn check_event_variables(
     Ok(())
 }
 
+/// Refuse a workflow that needs the workspace's open pull request on an event that comes after
+/// it stopped being open: the door would refuse it at every fire.
+fn check_pull_request_gone(
+    workflow: &crate::workflow::Workflow,
+    events: &[TriggerEvent],
+) -> IpcResult<()> {
+    let gone = events
+        .iter()
+        .find(|event| matches!(event, TriggerEvent::PrMerged | TriggerEvent::PrClosed));
+    match gone {
+        Some(event) if crate::workflow::runs::needs_pull_request(workflow) => Err(IpcError::new(
+            "trigger_pull_request_gone",
+            format!(
+                "`{}` needs the workspace's open pull request, with `{{{{ pr.* }}}}` or \
+                 `wait_pr_activity`, and after `{}` there is none. Use `{{{{ event.url }}}}`, \
+                 `{{{{ event.number }}}}` and `{{{{ event.title }}}}` instead.",
+                workflow.id,
+                event.as_str()
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn fields<'a>(draft: &'a Draft<'_>, checked: &'a Checked) -> TriggerFields<'a> {
     TriggerFields {
         name: &checked.name,
@@ -480,7 +666,8 @@ fn fields<'a>(draft: &'a Draft<'_>, checked: &'a Checked) -> TriggerFields<'a> {
     }
 }
 
-/// Add a trigger, switched on. Only what happens from `now` counts.
+/// Add a trigger, switched on. Only what happens from `now` counts. One on a `pr.*` event has
+/// its workspace's pull request watched from what the forge says now (see [`watch::seed`]).
 pub fn add(
     store: &Store,
     data_dir: &Path,
@@ -490,7 +677,9 @@ pub fn add(
     now: i64,
 ) -> IpcResult<TriggerRow> {
     let checked = check_draft(store, data_dir, look, draft)?;
-    Ok(store.add_trigger(&fields(draft, &checked), created_by, now)?)
+    let row = store.add_trigger(&fields(draft, &checked), created_by, now)?;
+    watch_if_asked(store, look, draft, &checked, now)?;
+    Ok(row)
 }
 
 /// Change a trigger. Whether it is on, and what it has seen, stay.
@@ -500,12 +689,27 @@ pub fn change(
     look: &dyn Look,
     id: &str,
     draft: &Draft<'_>,
+    now: i64,
 ) -> IpcResult<TriggerRow> {
     let checked = check_draft(store, data_dir, look, draft)?;
     if !store.update_trigger(id, &fields(draft, &checked))? {
         return Err(not_found());
     }
+    watch_if_asked(store, look, draft, &checked, now)?;
     store.trigger(id)?.ok_or_else(not_found)
+}
+
+fn watch_if_asked(
+    store: &Store,
+    look: &dyn Look,
+    draft: &Draft<'_>,
+    checked: &Checked,
+    now: i64,
+) -> IpcResult<()> {
+    if draft.events.iter().any(|event| event.of_a_pull_request()) {
+        watch::seed(store, look, &checked.workspace, now)?;
+    }
+    Ok(())
 }
 
 /// Switch a trigger on or off. Switched on, only what happens from `now` counts: what happened

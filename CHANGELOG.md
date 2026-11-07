@@ -10,7 +10,16 @@ has the downloads and the full commit lists.
   ends, a trigger starts what you gave it in that workspace, with what set it off as
   `{{ event.* }}`. A burst becomes one run, an event waits for a run in its way, and a cap, an
   hourly limit and a limit on chains stop loops. From the command line for now, as
-  `ys trigger`; pull requests and the window come next. See [Triggers](docs/guide/triggers.md).
+  `ys trigger`; the window comes next. See [Triggers](docs/guide/triggers.md).
+- **Triggers on pull requests.** A workspace's pull request opening, a review or a comment from
+  someone else, its checks failing or passing, a conflict, a merge: Yardsort looks once a minute
+  while a trigger watches, and what was there when the trigger was added is not news. A reply on
+  a review thread counts once, as a comment, and your own posts — the agents' answers — do not
+  count unless you say so. Ready-made triggers, `ys trigger add --preset`: **Address reviews**,
+  **Fix failing checks**, **Review the pull request when it opens**, **Review when the work is
+  done** and **Smoke test when the work is done**, with three new built-in workflows,
+  `address-review`, `fix-checks` and `review-branch`. A fire with no agent in the workspace to
+  tell is skipped, and you are told.
 
 ## 0.22.2
 

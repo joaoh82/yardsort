@@ -113,6 +113,7 @@ pub fn read_done(store: &Store) -> IpcResult<Vec<Observation>> {
                 depth: 0,
                 target_id: None,
                 status: None,
+                post: None,
             }
         })
         .collect();
@@ -164,6 +165,7 @@ pub fn read_endings(store: &Store, now: i64) -> IpcResult<Vec<Observation>> {
             depth: run_depth(store, run.kind, &run.id)? + 1,
             target_id: Some(run.target_id.clone()),
             status: Some(run.status.clone()),
+            post: None,
         });
     }
     store.set_trigger_cursor(ENDINGS, until)?;
@@ -211,6 +213,7 @@ fn settled(store: &Store, git: &Git, run: &RunRow, at: i64) -> IpcResult<Observa
         depth: 0,
         target_id: None,
         status: None,
+        post: None,
     })
 }
 
@@ -245,6 +248,7 @@ fn exited(run: &RunRow, payload: &str, at: i64) -> Observation {
             }
             .to_owned(),
         ),
+        post: None,
     }
 }
 

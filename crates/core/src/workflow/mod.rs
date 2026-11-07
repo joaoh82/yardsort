@@ -254,6 +254,12 @@ pub const BUILT_IN: &[(&str, &str)] = &[
         "smoke-then-tell",
         include_str!("builtin/smoke-then-tell.yaml"),
     ),
+    (
+        "address-review",
+        include_str!("builtin/address-review.yaml"),
+    ),
+    ("fix-checks", include_str!("builtin/fix-checks.yaml")),
+    ("review-branch", include_str!("builtin/review-branch.yaml")),
 ];
 
 /// Where the user's own workflow files live.
