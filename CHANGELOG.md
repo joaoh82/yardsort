@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.22.2
 
 - **Remote: start work from your phone.** A phone you let type can start a **New workspace**, with
   the project, the agent and what it should do, or a **New agent** in a workspace, and opens its
