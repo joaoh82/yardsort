@@ -121,6 +121,19 @@ pub enum Command {
         #[arg(long, value_name = "CHARS", default_value_t = digest::DEFAULT_BUDGET)]
         budget: usize,
     },
+    /// Say the work in this workspace is committed and ready to be looked at.
+    ///
+    /// For an agent to run when its task is done. A trigger listening for it — a review when
+    /// the work is done, say — starts what it starts. Run it once the work is done, not to
+    /// pause or to ask a question.
+    Done {
+        /// The workspace, by name or id. Default: the one this is run in.
+        #[arg(long, value_name = "WORKSPACE")]
+        workspace: Option<String>,
+        /// Anything the next one should know, in a sentence or two.
+        #[arg(long)]
+        note: Option<String>,
+    },
     /// Remove a workspace's folder and forget it. The branch, and its commits, are kept.
     ///
     /// Uncommitted changes and untracked files are refused unless `--force` is given: they live
@@ -199,6 +212,7 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             ys, &workspace, prompt, harness, model, effort, no_agent, print, out,
         ),
         Command::Delete { workspace, force } => delete(ys, &workspace, force, out),
+        Command::Done { workspace, note } => done(ys, workspace.as_deref(), note, out),
         Command::Handoff { workspace } => handoff(ys, &workspace, out),
         Command::Context {
             workspace,
@@ -216,6 +230,76 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             out,
         ),
     }
+}
+
+/// What `done` said.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Said {
+    workspace: String,
+    workspace_id: String,
+    head: Option<String>,
+    note: Option<String>,
+    /// Whether an enabled trigger there listens for it.
+    heard: bool,
+}
+
+fn done(
+    ys: &Yardsort,
+    workspace: Option<&str>,
+    note: Option<String>,
+    out: &Output,
+) -> Result<(), Failure> {
+    let workspace = match workspace {
+        Some(wanted) => find_workspace(ys, wanted)?,
+        None => super::workflow::here(ys)?,
+    };
+    // From an agent's terminal, the launch environment says which conversation said it.
+    let record = std::env::var(yardsort_core::activity::RECORD_ENV)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .filter(|record| {
+            ys.store
+                .session(record)
+                .ok()
+                .flatten()
+                .is_some_and(|session| session.workspace_id == workspace.id)
+        });
+    let head = ys.git().ok().and_then(|git| {
+        git.commit_id(Path::new(&workspace.path), "HEAD")
+            .ok()
+            .flatten()
+    });
+    let note = note.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
+    ys.store.add_done_signal(
+        &workspace.id,
+        record.as_deref(),
+        head.as_deref(),
+        note.as_deref(),
+    )?;
+    let heard = yardsort_core::trigger::listens_for(
+        &ys.store,
+        &workspace.id,
+        yardsort_core::trigger::TriggerEvent::WorkspaceDone,
+    )?;
+    let said = Said {
+        workspace: workspace.name.clone(),
+        workspace_id: workspace.id.clone(),
+        head,
+        note,
+        heard,
+    };
+    out.emit(&said, || {
+        sayln!("Noted: the work in {} is done.", workspace.name);
+        if !heard {
+            sayln!(
+                "No trigger in {} listens for it, so nothing starts.",
+                workspace.name
+            );
+        } else if !yardsort_core::presence::app_running(&ys.data_dir) {
+            sayln!("Yardsort is not running. What listens for it starts when it opens.");
+        }
+    })
 }
 
 /// One turn, whole, as `--json` gives it.

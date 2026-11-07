@@ -10,5 +10,6 @@ pub mod schedule;
 pub mod session;
 pub mod task;
 pub mod test;
+pub mod trigger;
 pub mod workflow;
 pub mod workspace;

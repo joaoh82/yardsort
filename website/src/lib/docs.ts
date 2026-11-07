@@ -137,6 +137,12 @@ export const DOCS_NAV: DocSection[] = [
           "Schedule a workflow or a smoke test in Yardsort: once at a set time or on a routine, with presets or cron, missed-time rules, notifications and ys schedule.",
       },
       {
+        slug: "guide/triggers",
+        title: "Triggers",
+        description:
+          "Start a workflow or a smoke test in Yardsort when something happens: an agent says it is done, finishes a turn or exits, or a run ends, with limits against loops and ys trigger.",
+      },
+      {
         slug: "guide/updates",
         title: "Updates",
         description:

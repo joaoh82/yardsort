@@ -3332,3 +3332,179 @@ fn a_test_scheduled_from_ys_says_its_file_still_needs_approving() {
     assert_eq!(listed[0]["target"], "test");
     assert_eq!(listed[0]["workspace"], name, "the workspace it was run in");
 }
+
+/// Tells the user what the agent said when it was done.
+const TELL: &str = "id: tell
+name: Tell
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: tell
+    action: notify
+    title: \"Done: {{ event.note }}\"
+";
+
+#[test]
+fn a_trigger_is_added_listed_shown_paused_resumed_and_removed() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+
+    let empty = fx.ys(&["trigger", "list"]).ok();
+    assert!(empty.contains("No triggers"), "{empty}");
+
+    let json = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "workspace.done",
+            "--workflow",
+            "tell",
+            "--workspace",
+            name,
+            "--quiet",
+            "30s",
+            "--json",
+        ])
+        .ok();
+    let added: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(added["name"], "Tell", "named after what it runs");
+    assert_eq!(added["events"], serde_json::json!(["workspace.done"]));
+    assert_eq!(added["quietMs"], 30_000);
+    assert_eq!(added["cap"], 3);
+    assert_eq!(added["standing"], "listening");
+    assert_eq!(
+        added["when"],
+        "When an agent says its work is done, run the workflow `tell`"
+    );
+    let id = added["id"].as_str().unwrap().to_owned();
+
+    let table = fx.ys(&["trigger", "list"]).ok();
+    assert!(table.contains("workspace.done"), "{table}");
+    assert!(table.contains("workflow tell"), "{table}");
+    assert!(
+        table.contains("Yardsort is not running. Triggers fire while it is open."),
+        "{table}"
+    );
+
+    let shown = fx.ys(&["trigger", "show", "tell"]).ok();
+    assert!(shown.contains("Waits 30s after the last event"), "{shown}");
+    assert!(shown.contains("It is on."), "{shown}");
+
+    let off = fx.ys(&["trigger", "pause", "Tell"]).ok();
+    assert!(off.contains("is off"), "{off}");
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["trigger", "list", "--json"]).ok()).unwrap();
+    assert_eq!(listed[0]["standing"], "off");
+    let on = fx.ys(&["trigger", "resume", "Tell"]).ok();
+    assert!(on.contains("is on, from now"), "{on}");
+
+    let history = fx.ys(&["trigger", "fires", "Tell"]).ok();
+    assert!(history.contains("has not fired yet"), "{history}");
+
+    let removed = fx.ys(&["trigger", "remove", &id[..8]]).ok();
+    assert!(removed.contains("Removed `Tell`"), "{removed}");
+    let gone = fx.ys(&["trigger", "show", "Tell"]).failed();
+    assert!(gone.contains("There are no triggers"), "{gone}");
+}
+
+#[test]
+fn a_trigger_is_refused_for_what_is_wrong_with_it_and_nothing_is_written() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let refused = |extra: &[&str], wanted: &str| {
+        let mut args = vec!["trigger", "add", "--workspace", name];
+        args.extend_from_slice(extra);
+        let error = fx.ys(&args).failed();
+        assert!(error.contains(wanted), "{args:?}: {error}");
+    };
+    refused(
+        &["--on", "pr.opened", "--workflow", "tell"],
+        "There is no event `pr.opened`",
+    );
+    refused(
+        &["--on", "workspace.done", "--workflow", "nothing"],
+        "There is no workflow `nothing`",
+    );
+    refused(
+        &[
+            "--on",
+            "workspace.done",
+            "--new-commits",
+            "--workflow",
+            "tell",
+        ],
+        "which this trigger does not listen for",
+    );
+    refused(
+        &["--on", "agent.settled", "--workflow", "tell"],
+        "`agent.settled` does not leave",
+    );
+    refused(
+        &[
+            "--on",
+            "agent.settled",
+            "--on",
+            "workspace.done",
+            "--workflow",
+            "tell",
+        ],
+        "cannot share a trigger",
+    );
+    let listed = fx.ys(&["trigger", "list", "--json"]).ok();
+    assert_eq!(listed.trim(), "[]");
+}
+
+#[test]
+fn done_is_written_down_for_the_app_and_says_whether_anything_listens() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+
+    let unheard = fx
+        .ys_from(Some(&path), &["workspace", "done", "--note", "first"])
+        .ok();
+    assert!(
+        unheard.contains(&format!("the work in {name} is done")),
+        "{unheard}"
+    );
+    assert!(unheard.contains("No trigger"), "{unheard}");
+
+    fx.ys(&[
+        "trigger",
+        "add",
+        "--on",
+        "workspace.done",
+        "--workflow",
+        "tell",
+        "--workspace",
+        name,
+    ])
+    .ok();
+    let json = fx
+        .ys_from(
+            Some(&path),
+            &["workspace", "done", "--note", "tests added", "--json"],
+        )
+        .ok();
+    let said: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(said["heard"], true);
+    assert_eq!(said["note"], "tests added");
+    assert!(
+        said["head"].as_str().is_some_and(|h| h.len() == 40),
+        "{said}"
+    );
+
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let signals = store.done_signals_after(0, 10).unwrap();
+    assert_eq!(signals.len(), 2);
+    assert_eq!(signals[1].note.as_deref(), Some("tests added"));
+    assert_eq!(signals[1].head.as_deref(), said["head"].as_str());
+}

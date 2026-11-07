@@ -3,6 +3,15 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Triggers: start a workflow or a smoke test when something happens.** When an agent says its
+  work is done (`ys workspace done`), finishes a turn or exits, or a smoke test or a workflow run
+  ends, a trigger starts what you gave it in that workspace, with what set it off as
+  `{{ event.* }}`. A burst becomes one run, an event waits for a run in its way, and a cap, an
+  hourly limit and a limit on chains stop loops. From the command line for now, as
+  `ys trigger`; pull requests and the window come next. See [Triggers](docs/guide/triggers.md).
+
 ## 0.22.2
 
 - **Remote: start work from your phone.** A phone you let type can start a **New workspace**, with
