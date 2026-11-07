@@ -50,7 +50,8 @@ R3 does **not** include:
   using the app: **internal TestFlight builds**, archived in Xcode with no EAS
   ([the README](../../apps/mobile/README.md#on-testflight)), or, since 2026-11-06, by the TestFlight
   workflow on GitHub Actions, signed by hand from a distribution certificate and an App Store profile
-  held as secrets (not yet run). External testers and listings stay in R7.
+  held as secrets. It first ran on 2026-11-07, with Xcode 26.6, and its build reached the owner's
+  iPhone. External testers and listings stay in R7.
   The release identity was first built that day, for Android, and run on the emulator: its code is
   embedded, it shows no developer tools, and it looked up staging. The first TestFlight build followed
   the same day: archived in Xcode 27, uploaded, installed on the owner's iPhone, signed in and paired.
