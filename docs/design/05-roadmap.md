@@ -1141,6 +1141,11 @@ Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 
       **Triggers…** in the workspace and agent tab menus, _triggered_ in run lists, and **Tell
       the agent**. A lifted cap now reads as lifted. Recorded in
       [36 § slice 3](36-triggers.md#slice-3-what-shipped).
+- [x] Slice 4: custom events. `ys event emit <name>` and a trigger on `custom.<name>`, from
+      `ys trigger add --on` or the dialog's **A custom event**; migration 0025; names checked
+      at saving, and `emit` naming what is listened for when nothing is; one raised by a smoke
+      test's `run` step one deeper than its run. Recorded in
+      [36 § slice 4](36-triggers.md#slice-4-what-shipped).
 
 _Exit:_ on all three platforms, a workspace started with **Address reviews** ticked has its agent
 told of a review posted from a second account, once, two minutes after its last comment; the

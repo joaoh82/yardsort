@@ -64,7 +64,7 @@ pub struct Add {
     /// What to listen for. Repeat for more than one: `workspace.done`, `agent.settled`,
     /// `agent.exited`, `test.finished`, `workflow.finished`, `pr.opened`, `pr.review`,
     /// `pr.comment`, `pr.checks_failed`, `pr.checks_passed`, `pr.conflicted`, `pr.merged`,
-    /// `pr.closed`.
+    /// `pr.closed`, and `custom.<name>` for what `ys event emit <name>` raises.
     #[arg(long = "on", value_name = "EVENT", required_unless_present = "preset")]
     pub events: Vec<String>,
     /// Run this workflow, from `ys workflow list`.
@@ -297,10 +297,7 @@ fn listed(ys: &Yardsort, row: &TriggerRow, fires: &[TriggerFireRow]) -> Result<L
     Ok(Listed {
         id: row.id.clone(),
         name: row.name.clone(),
-        events: trigger::events_of(row)
-            .iter()
-            .map(|event| event.as_str().to_owned())
-            .collect(),
+        events: trigger::event_names(&trigger::events_of(row), &Filters::parse(&row.filters)),
         filters: Filters::parse(&row.filters),
         target: row.target_kind.clone(),
         target_id: row.target_id.clone(),
@@ -574,19 +571,28 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
     let mut events = preset
         .map(|preset| preset.events.to_vec())
         .unwrap_or_default();
+    let mut names = Vec::new();
     for name in asked.events.iter().flat_map(|name| name.split(',')) {
         let name = name.trim();
-        let event = TriggerEvent::parse(name).ok_or_else(|| {
+        if let Some(custom) = name.strip_prefix(trigger::CUSTOM_PREFIX) {
+            if let Some(why) = trigger::custom_name_problem(custom) {
+                return Err(Failure::new(why));
+            }
+        }
+        let (event, custom) = trigger::parse_event(name).ok_or_else(|| {
             Failure::new(format!(
-                "There is no event `{name}`. There are: {}.",
+                "There is no event `{name}`. There are: {}, and `custom.<name>` for what \
+                 `ys event emit <name>` raises.",
                 TriggerEvent::ALL
                     .iter()
+                    .filter(|event| **event != TriggerEvent::Custom)
                     .map(|event| event.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             ))
         })?;
         events.push(event);
+        names.extend(custom);
     }
     let (target, target_id) = match (preset, &asked.workflow, &asked.test) {
         (Some(preset), _, _) => (ScheduleTarget::Workflow, preset.workflow.to_owned()),
@@ -649,6 +655,7 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
             })
             .collect(),
         no_bots: asked.no_bots,
+        names,
     };
     let quiet = match asked.quiet.as_deref() {
         Some(text) => quiet_ms(text)?,

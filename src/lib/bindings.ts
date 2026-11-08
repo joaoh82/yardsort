@@ -1239,6 +1239,8 @@ export type Filters_Deserialize = {
 	states?: ReviewStateFilter[],
 	/**  `pr.review`, `pr.comment`: leave out accounts whose login ends in `[bot]`. */
 	noBots?: boolean,
+	/**  `custom`: the names it listens for, without `custom.`. At least one. */
+	names?: string[],
 };
 
 /**
@@ -1274,6 +1276,8 @@ export type Filters_Serialize = {
 	states?: ReviewStateFilter[],
 	/**  `pr.review`, `pr.comment`: leave out accounts whose login ends in `[bot]`. */
 	noBots?: boolean,
+	/**  `custom`: the names it listens for, without `custom.`. At least one. */
+	names?: string[],
 };
 
 /**  Which forge a host is, as far as the shape of its URLs goes. */
@@ -3163,7 +3167,13 @@ export type TriggerEvent =
 /**  GitHub says it conflicts with its base. */
 "pr.conflicted" | "pr.merged" | 
 /**  It was closed without being merged. */
-"pr.closed";
+"pr.closed" | 
+/**
+ *  Someone ran `ys event emit <name>` in the workspace: an agent, a smoke test's `run`
+ *  step, a script. Which names a trigger listens for are its [`Filters::names`]; it is
+ *  `custom.<name>` wherever a person reads or writes it.
+ */
+"custom";
 
 /**  One fire of a trigger: what it gathered and what became of it. */
 export type TriggerFire = {

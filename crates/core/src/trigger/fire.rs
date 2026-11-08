@@ -65,6 +65,17 @@ pub struct Post {
     pub state: Option<ReviewState>,
 }
 
+impl Observation {
+    /// What it is as a person writes it, and as `{{ event.kind }}` says: `pr.review`, or
+    /// `custom.<name>`.
+    pub fn kind(&self) -> String {
+        match (self.event, self.facts.get("name")) {
+            (TriggerEvent::Custom, Some(name)) => format!("{}{name}", super::CUSTOM_PREFIX),
+            (event, _) => event.as_str().to_owned(),
+        }
+    }
+}
+
 impl Post {
     fn by_a_bot(&self) -> bool {
         self.author
@@ -146,6 +157,10 @@ fn holds(filters: &Filters, seen: &Observation) -> bool {
         TriggerEvent::PrReview | TriggerEvent::PrComment => {
             post_holds(filters, seen.event, seen.post.as_ref())
         }
+        TriggerEvent::Custom => seen
+            .facts
+            .get("name")
+            .is_some_and(|name| filters.names.contains(name)),
         TriggerEvent::WorkspaceDone
         | TriggerEvent::AgentSettled
         | TriggerEvent::PrChecksFailed
@@ -209,8 +224,9 @@ pub fn observe(store: &Store, seen: &Observation) -> IpcResult<usize> {
         {
             continue;
         }
+        let kind = seen.kind();
         let mut facts = seen.facts.clone();
-        facts.insert("kind".into(), seen.event.as_str().into());
+        facts.insert("kind".into(), kind.clone());
         match store.open_trigger_fire(&trigger.id, &subject)? {
             Some(open) => {
                 if seen.post.is_some() {
@@ -223,7 +239,7 @@ pub fn observe(store: &Store, seen: &Observation) -> IpcResult<usize> {
                 let due = (seen.at + trigger.quiet_ms).min(open.first_at + MOST_GATHER_MS);
                 store.gather_into_trigger_fire(
                     &open.id,
-                    seen.event.as_str(),
+                    &kind,
                     due.max(open.first_at),
                     &facts,
                     seen.depth,
@@ -234,7 +250,7 @@ pub fn observe(store: &Store, seen: &Observation) -> IpcResult<usize> {
                 store.open_new_trigger_fire(&NewTriggerFire {
                     trigger_id: &trigger.id,
                     subject: &subject,
-                    event: seen.event.as_str(),
+                    event: &kind,
                     at: seen.at,
                     due_at: seen.at + trigger.quiet_ms,
                     facts: &facts,

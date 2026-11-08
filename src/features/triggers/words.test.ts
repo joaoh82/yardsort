@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { trigger } from "@/test/fixtures";
 import {
+  customNameProblem,
+  customNames,
   defaultQuietMs,
   durationWords,
   sentence,
@@ -75,6 +77,26 @@ describe("what a trigger will do, in words", () => {
     );
   });
 
+  it("names the custom events it listens for", () => {
+    expect(
+      sentence(
+        asking({
+          events: ["custom"],
+          filters: { names: ["deploy", "migration-written"] },
+          targetId: "login",
+          target: "test",
+          quietMs: 0,
+          cap: 1,
+        }),
+      ),
+    ).toBe(
+      "When custom.deploy or custom.migration-written is raised here, run the smoke test login. At most once per workspace.",
+    );
+    expect(sentence(asking({ events: ["custom"], filters: {}, quietMs: 0 }))).toMatch(
+      /^When a custom event is raised here, /,
+    );
+  });
+
   it("says nothing until there is an event and something to run", () => {
     expect(sentence(asking({ events: [] }))).toBe("");
     expect(sentence(asking({ targetId: "" }))).toBe("");
@@ -102,5 +124,22 @@ describe("the rest of a trigger's words", () => {
     expect(standingWords(trigger("t", { sessionId: "s1", sessionRunning: false }))).toBe("ended");
     expect(standingWords(trigger("t", { sessionId: "s1", sessionRunning: true }))).toBe("on");
     expect(standingWords(trigger("t", { standing: "capped" }))).toBe("capped");
+  });
+});
+
+describe("a custom event's names", () => {
+  it("are split at commas and spaces, without custom. in front, each once", () => {
+    expect(customNames(" deploy, custom.migration-written  deploy,")).toEqual([
+      "deploy",
+      "migration-written",
+    ]);
+    expect(customNames("")).toEqual([]);
+  });
+
+  it("are lowercase letters, digits, - and _, as the core says", () => {
+    expect(customNameProblem("db_2-ready")).toBeNull();
+    expect(customNameProblem("Deploy")).toMatch(/deploy would do/);
+    expect(customNameProblem("-x")).toMatch(/cannot be an event's name/);
+    expect(customNameProblem("x".repeat(41))).toMatch(/longer than 40/);
   });
 });

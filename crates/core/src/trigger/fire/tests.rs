@@ -640,3 +640,60 @@ fn new_commits_and_a_clean_worktree_are_looked_at_in_a_real_repository() {
     let facts: BTreeMap<String, String> = serde_json::from_str(&lines[0].facts).unwrap();
     assert_eq!(facts.get("head"), Some(&head));
 }
+
+fn custom(tx: &Tx, name: &str, at: i64) -> Observation {
+    Observation {
+        event: TriggerEvent::Custom,
+        workspace_id: tx.workspace_id().to_owned(),
+        session_id: None,
+        terminal: None,
+        agent_run: None,
+        at,
+        facts: BTreeMap::from([
+            ("name".to_owned(), name.to_owned()),
+            ("note".to_owned(), "0042 adds the column".to_owned()),
+        ]),
+        depth: 0,
+        target_id: None,
+        status: None,
+        post: None,
+    }
+}
+
+#[test]
+fn a_custom_event_starts_only_the_triggers_that_listen_for_its_name() {
+    let tx = Tx::new();
+    let trigger = tx.on_custom(&["migration-written"]);
+    let other = tx.on_custom(&["deploy"]);
+    assert_eq!(
+        observe(tx.store(), &custom(&tx, "migration-writen", NOW + 1)).unwrap(),
+        0,
+        "a name nobody listens for"
+    );
+    assert_eq!(
+        observe(tx.store(), &custom(&tx, "migration-written", NOW + 2)).unwrap(),
+        1
+    );
+    let fired = tick_at(&tx, NOW + 2);
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].trigger.id, trigger.id);
+    // Its history says which, the way a person writes it.
+    assert_eq!(fired[0].fire.event, "custom.migration-written");
+    assert!(fires(&tx, &other.id).is_empty());
+
+    let run = tx
+        .store()
+        .workflow_run(fired[0].fire.run_id.as_deref().unwrap())
+        .unwrap()
+        .unwrap();
+    let facts = Facts::parse(&run.context);
+    let event = |field: &str| facts.event.get(field).map(String::as_str);
+    assert_eq!(event("kind"), Some("custom.migration-written"));
+    assert_eq!(event("name"), Some("migration-written"));
+    assert_eq!(event("note"), Some("0042 adds the column"));
+    // Counted for the workspace, as `workspace.done` is.
+    assert_eq!(
+        fired[0].fire.subject,
+        format!("workspace:{}", tx.workspace_id())
+    );
+}

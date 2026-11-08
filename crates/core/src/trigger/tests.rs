@@ -115,6 +115,18 @@ impl Tx {
         self.try_add(&draft).unwrap()
     }
 
+    /// A trigger on the custom events `names` that runs `tell`.
+    pub fn on_custom(&self, names: &[&str]) -> TriggerRow {
+        let inputs = BTreeMap::new();
+        let filters = Filters {
+            names: names.iter().map(|name| (*name).to_owned()).collect(),
+            ..Filters::default()
+        };
+        let events = [TriggerEvent::Custom];
+        self.try_add(&self.draft(&events, &filters, ScheduleTarget::Workflow, "tell", &inputs))
+            .unwrap()
+    }
+
     /// An agent session in the workspace, running in `terminal`, with its agent run.
     pub fn agent(&self, record: &str, terminal: &str) {
         self.store()
@@ -377,5 +389,155 @@ fn every_preset_saves_with_its_one_answer() {
     assert_eq!(
         presets::find("address-reviews").unwrap().quiet_ms(),
         2 * 60_000
+    );
+}
+
+#[test]
+fn a_custom_event_is_written_custom_dot_its_name() {
+    assert_eq!(
+        parse_event("custom.migration-written"),
+        Some((TriggerEvent::Custom, Some("migration-written".to_owned())))
+    );
+    assert_eq!(
+        parse_event("pr.review"),
+        Some((TriggerEvent::PrReview, None))
+    );
+    // `custom` alone is not something a person can listen for, nor a name that does not fit.
+    assert_eq!(parse_event("custom"), None);
+    assert_eq!(parse_event("custom."), None);
+    assert_eq!(parse_event("custom.Deploy"), None);
+    assert_eq!(parse_event("pr.nothing"), None);
+
+    assert!(custom_name_problem("db_2-ready").is_none());
+    let upper = custom_name_problem("Deploy-Ready").unwrap();
+    assert!(upper.contains("`deploy-ready` would do"), "{upper}");
+    assert!(custom_name_problem("-x").is_some());
+    assert!(custom_name_problem("a b").is_some());
+    assert!(custom_name_problem(&"x".repeat(MOST_CUSTOM_NAME + 1)).is_some());
+}
+
+#[test]
+fn a_trigger_on_a_custom_event_names_it_and_its_names_are_checked() {
+    let tx = Tx::new();
+    let inputs = no_inputs();
+    let events = [TriggerEvent::Custom];
+    let refused = |filters: &Filters| {
+        tx.try_add(&tx.draft(&events, filters, ScheduleTarget::Workflow, "tell", &inputs))
+            .unwrap_err()
+    };
+    let unnamed = refused(&Filters::default());
+    assert_eq!(unnamed.code, "trigger_events");
+    assert!(
+        unnamed.message.contains("custom.<name>"),
+        "{}",
+        unnamed.message
+    );
+    let badly = refused(&Filters {
+        names: vec!["Deploy".to_owned()],
+        ..Filters::default()
+    });
+    assert!(
+        badly.message.contains("`deploy` would do"),
+        "{}",
+        badly.message
+    );
+
+    // Names are for a custom event, as every filter is for its events.
+    let done = [TriggerEvent::WorkspaceDone];
+    let filters = Filters {
+        names: vec!["deploy".to_owned()],
+        ..Filters::default()
+    };
+    let stray = tx
+        .try_add(&tx.draft(&done, &filters, ScheduleTarget::Workflow, "tell", &inputs))
+        .unwrap_err();
+    assert_eq!(stray.code, "trigger_filters");
+
+    // Kept once each, in order, and said the way a person writes them.
+    let trigger = tx.on_custom(&["migration-written", "deploy", "deploy"]);
+    let filters = Filters::parse(&trigger.filters);
+    assert_eq!(filters.names, ["deploy", "migration-written"]);
+    assert_eq!(
+        event_names(&events_of(&trigger), &filters),
+        ["custom.deploy", "custom.migration-written"]
+    );
+    assert_eq!(
+        describe(&trigger),
+        "When `custom.deploy` or `custom.migration-written` is raised, run the workflow `tell`"
+    );
+    // With a done trigger too: both are about the workspace, so they can share one.
+    let both = [TriggerEvent::WorkspaceDone, TriggerEvent::Custom];
+    let filters = Filters {
+        names: vec!["deploy".to_owned()],
+        ..Filters::default()
+    };
+    let shared = tx
+        .try_add(&tx.draft(&both, &filters, ScheduleTarget::Workflow, "tell", &inputs))
+        .unwrap();
+    assert_eq!(
+        describe(&shared),
+        "When an agent says its work is done or `custom.deploy` is raised, run the workflow `tell`"
+    );
+
+    assert_eq!(
+        custom_names_heard(tx.store(), tx.workspace_id())
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        ["deploy", "migration-written"]
+    );
+    // A switched-off trigger hears nothing.
+    set_enabled(tx.store(), &trigger.id, false, NOW).unwrap();
+    assert_eq!(
+        custom_names_heard(tx.store(), tx.workspace_id())
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        ["deploy"]
+    );
+}
+
+#[test]
+fn a_workflow_on_a_custom_event_may_read_its_name_and_note() {
+    let tx = Tx::new();
+    tx.fx.write_workflow(
+        "named",
+        r#"id: named
+name: Named
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: tell
+    action: notify
+    title: "{{ event.name }}: {{ event.note }} at {{ event.head }}"
+"#,
+    );
+    let inputs = no_inputs();
+    let events = [TriggerEvent::Custom];
+    let filters = Filters {
+        names: vec!["deploy".to_owned()],
+        ..Filters::default()
+    };
+    tx.try_add(&tx.draft(
+        &events,
+        &filters,
+        ScheduleTarget::Workflow,
+        "named",
+        &inputs,
+    ))
+    .unwrap();
+    // What a custom event does not leave is refused, as for any event.
+    tx.fx.write_workflow("link", WANTS_A_LINK);
+    let wrong = tx
+        .try_add(&tx.draft(&events, &filters, ScheduleTarget::Workflow, "link", &inputs))
+        .unwrap_err();
+    assert_eq!(wrong.code, "trigger_variables");
+    assert!(
+        wrong
+            .message
+            .contains("which a custom event does not leave"),
+        "{}",
+        wrong.message
     );
 }

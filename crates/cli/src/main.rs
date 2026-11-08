@@ -127,9 +127,12 @@ enum Command {
     #[command(subcommand)]
     Schedule(commands::schedule::Command),
     /// Start a workflow or a smoke test when something happens in a workspace: an agent says
-    /// its work is done, finishes a turn or exits, or a run ends.
+    /// its work is done, finishes a turn or exits, a run ends, or a custom event is raised.
     #[command(subcommand)]
     Trigger(commands::trigger::Command),
+    /// Custom events: a name raised in a workspace, for a trigger on `custom.<name>` there.
+    #[command(subcommand)]
+    Event(commands::event::Command),
     /// Put a running session on this terminal. Detaching leaves it running.
     Attach {
         /// Which one: a workspace name, or the start of an id from `ys session list`. With one
@@ -187,6 +190,9 @@ fn main() {
                 .and_then(|ys| commands::schedule::run(&ys, command, &out)),
             Command::Trigger(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::trigger::run(&ys, command, &out)),
+            Command::Event(command) => {
+                Yardsort::open(cli.data_dir).and_then(|ys| commands::event::run(&ys, command, &out))
+            }
             // `validate` needs no profile, so this one opens it only when it has to.
             Command::Workflow(command) => commands::workflow::run(cli.data_dir, command, &out),
             // So do `validate`, `example` and `guide`.

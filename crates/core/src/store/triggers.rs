@@ -128,6 +128,33 @@ pub struct DoneSignalRow {
     pub at: i64,
 }
 
+/// One `ys event emit`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomEventRow {
+    pub seq: i64,
+    pub id: String,
+    pub workspace_id: String,
+    pub session_id: Option<String>,
+    /// The smoke test run whose `run` step raised it.
+    pub run_id: Option<String>,
+    /// Without `custom.`.
+    pub name: String,
+    pub head: Option<String>,
+    pub note: Option<String>,
+    pub at: i64,
+}
+
+/// What a new custom event holds.
+#[derive(Debug, Clone, Copy)]
+pub struct NewCustomEvent<'a> {
+    pub workspace_id: &'a str,
+    pub session_id: Option<&'a str>,
+    pub run_id: Option<&'a str>,
+    pub name: &'a str,
+    pub head: Option<&'a str>,
+    pub note: Option<&'a str>,
+}
+
 /// A workflow or test run that ended, as the trigger thread reads them: `(kind, id, workspace,
 /// status, ended_at)`, `kind` being `workflow` or `test`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +233,22 @@ fn done_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DoneSignalRow> {
         head: row.get(4)?,
         note: row.get(5)?,
         at: row.get(6)?,
+    })
+}
+
+const CUSTOM_COLUMNS: &str = "seq, id, workspace_id, session_id, run_id, name, head, note, at";
+
+fn custom_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CustomEventRow> {
+    Ok(CustomEventRow {
+        seq: row.get(0)?,
+        id: row.get(1)?,
+        workspace_id: row.get(2)?,
+        session_id: row.get(3)?,
+        run_id: row.get(4)?,
+        name: row.get(5)?,
+        head: row.get(6)?,
+        note: row.get(7)?,
+        at: row.get(8)?,
     })
 }
 
@@ -692,6 +735,51 @@ impl Store {
     pub fn newest_done_signal(&self) -> StoreResult<i64> {
         Ok(self.conn().query_row(
             "SELECT COALESCE(max(seq), 0) FROM done_signals",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    // --- custom events -------------------------------------------------------------------
+
+    /// Record a custom event, as `ys event emit` raised it.
+    pub fn add_custom_event(&self, event: &NewCustomEvent<'_>) -> StoreResult<CustomEventRow> {
+        let id = new_id();
+        self.conn().execute(
+            "INSERT INTO custom_events (id, workspace_id, session_id, run_id, name, head, note, at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                id,
+                event.workspace_id,
+                event.session_id,
+                event.run_id,
+                event.name,
+                event.head,
+                event.note,
+                now_ms()
+            ],
+        )?;
+        Ok(self.conn().query_row(
+            &format!("SELECT {CUSTOM_COLUMNS} FROM custom_events WHERE id = ?"),
+            [&id],
+            custom_from_row,
+        )?)
+    }
+
+    /// Custom events after `seq`, oldest first.
+    pub fn custom_events_after(&self, seq: i64, limit: usize) -> StoreResult<Vec<CustomEventRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {CUSTOM_COLUMNS} FROM custom_events WHERE seq > ? ORDER BY seq LIMIT ?"
+        ))?;
+        let rows = stmt.query_map(params![seq, limit as i64], custom_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The newest custom event's sequence number, or 0.
+    pub fn newest_custom_event(&self) -> StoreResult<i64> {
+        Ok(self.conn().query_row(
+            "SELECT COALESCE(max(seq), 0) FROM custom_events",
             [],
             |row| row.get(0),
         )?)

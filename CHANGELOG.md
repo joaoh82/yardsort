@@ -28,6 +28,11 @@ has the downloads and the full commit lists.
   opens the view on that workspace or agent, and runs a trigger started are marked _triggered_.
   An agent already running when a trigger on `ys workspace done` is added can be told about it
   with **Tell the agent**.
+- **Custom events.** `ys event emit migration-written` raises an event of your own in a
+  workspace — from an agent told to, a smoke test's `run` step, or a script — and a trigger on
+  `custom.migration-written` starts what it starts, with the note as `{{ event.note }}`. Make one
+  with `ys trigger add --on custom.<name>` or **A custom event** in the trigger dialog. `emit`
+  says when nothing listens for the name, and which names are listened for.
 - **Remote on a computer with no screen: `yardsort-host`.** A separate program, for a Linux server
   you reach over SSH: sign it in from a browser on any other computer by pasting back the address the
   browser lands on, run `yardsort-host serve`, and pair a phone with `yardsort-host pair` at a

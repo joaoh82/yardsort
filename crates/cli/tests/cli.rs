@@ -3591,6 +3591,106 @@ fn done_is_written_down_for_the_app_and_says_whether_anything_listens() {
     assert_eq!(signals[1].head.as_deref(), said["head"].as_str());
 }
 
+#[test]
+fn a_custom_event_is_raised_for_the_triggers_that_listen_for_its_name() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+
+    let unheard = fx
+        .ys_from(Some(&path), &["event", "emit", "migration-written"])
+        .ok();
+    assert!(
+        unheard.contains(&format!("Raised `custom.migration-written` in {name}")),
+        "{unheard}"
+    );
+    assert!(unheard.contains("No trigger"), "{unheard}");
+
+    // A name that does not fit is refused when listened for, and when raised.
+    let bad = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "custom.Migration",
+            "--workflow",
+            "tell",
+            "--workspace",
+            name,
+        ])
+        .failed();
+    assert!(bad.contains("`migration` would do"), "{bad}");
+    let bad = fx
+        .ys_from(Some(&path), &["event", "emit", "two words"])
+        .failed();
+    assert!(bad.contains("cannot be an event's name"), "{bad}");
+
+    let added = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "custom.migration-written",
+            "--workflow",
+            "tell",
+            "--workspace",
+            name,
+            "--json",
+        ])
+        .ok();
+    let added: serde_json::Value = serde_json::from_str(&added).unwrap();
+    assert_eq!(
+        added["events"],
+        serde_json::json!(["custom.migration-written"])
+    );
+    assert_eq!(
+        added["when"],
+        "When `custom.migration-written` is raised, run the workflow `tell`"
+    );
+
+    // A typo is told what is listened for instead.
+    let typo = fx
+        .ys_from(Some(&path), &["event", "emit", "migration-writen"])
+        .ok();
+    assert!(
+        typo.contains("They listen for: `custom.migration-written`"),
+        "{typo}"
+    );
+
+    // `custom.` in front is taken too, as a trigger is written.
+    let json = fx
+        .ys_from(
+            Some(&path),
+            &[
+                "event",
+                "emit",
+                "custom.migration-written",
+                "--note",
+                "0042 adds the column",
+                "--json",
+            ],
+        )
+        .ok();
+    let raised: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(raised["heard"], true);
+    assert_eq!(raised["event"], "custom.migration-written");
+    assert!(
+        raised["head"].as_str().is_some_and(|h| h.len() == 40),
+        "{raised}"
+    );
+
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let rows = store.custom_events_after(0, 10).unwrap();
+    assert_eq!(
+        rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+        ["migration-written", "migration-writen", "migration-written"]
+    );
+    assert_eq!(rows[2].note.as_deref(), Some("0042 adds the column"));
+    assert_eq!(rows[2].run_id, None);
+}
+
 #[cfg(unix)]
 #[test]
 fn a_preset_watches_the_pull_request_from_what_is_on_it_when_it_is_added() {

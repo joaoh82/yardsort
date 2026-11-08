@@ -1,8 +1,9 @@
 # Triggers
 
 _Proposal, 2026-11-06. The questions put to the user that day are answered under
-[Decisions](#decisions). Slices 1 to 3 are built: see [Slice 1](#slice-1-what-shipped),
-[Slice 2](#slice-2-what-shipped) and [Slice 3](#slice-3-what-shipped)._
+[Decisions](#decisions). Slices 1 to 4 are built: see [Slice 1](#slice-1-what-shipped),
+[Slice 2](#slice-2-what-shipped), [Slice 3](#slice-3-what-shipped) and
+[Slice 4](#slice-4-what-shipped)._
 
 A trigger starts a [workflow](21-workflows.md) or a [smoke test](32-smoke-tests.md) when
 something happens, instead of when a person presses **Run** or a [schedule](34-schedules.md)'s
@@ -207,6 +208,7 @@ does.
 | `pr.closed`         | It was closed without merging                                                | pull request       | none                                                       | `url`, `number`, `title`             |
 | `test.finished`     | A smoke test run in the workspace reached a verdict, or could not            | workspace          | `test`: an id; `verdict`: `passed`, `failed`, `any`        | `verdict`, `summary`                 |
 | `workflow.finished` | A workflow run in the workspace ended                                        | workspace          | `workflow`: an id; `outcome`: `succeeded`, `failed`, `any` | `summary`                            |
+| `custom.<name>`     | Someone ran `ys event emit <name>` in the workspace                          | workspace          | the names, which are what it listens for                   | `name`, `note`, `head`               |
 
 Notes on each group:
 
@@ -327,6 +329,42 @@ says so and offers **Tell the agent**, which sends the same paragraph by `send_t
 once the agent is quiet, never into a busy one. No harness parses or answers anything here: the
 agent runs a command, as it runs `gh`.
 
+## Custom events
+
+For what no event above covers: a milestone of the user's own. `ys event emit <name>
+[--note "…"] [--workspace …]` raises one in a workspace, and a trigger there on `custom.<name>`
+hears it. Settled when slice 4 was built:
+
+- **One event kind, `custom`, with the names as the trigger's.** `TriggerEvent` stays a closed
+  list; a trigger on custom events stores the event `custom` and its names in the filters
+  (`names`), and is written `custom.<name>` everywhere a person reads or writes it: `--on`, the
+  list, the history, `{{ event.kind }}`. One trigger can listen for several names. `custom`
+  alone, or names on a trigger that does not listen for `custom`, is refused at saving.
+- **A name is lowercase letters, digits, `-` and `_`**, starting with a letter or a digit, up to
+  40 characters, so it reads the same in a file, a flag and a sentence. One that only differs by
+  case is told the lowercase one that would do.
+- **Nothing is declared first.** A typo is the usual mistake with free names, so `ys event emit`
+  says whether an enabled trigger there listens for that name, and when none does, the names they
+  do listen for. The dialog offers the names the project's other triggers use.
+- **A custom event is about the workspace**, as `workspace.done` is: its cap counts per
+  workspace, and it can share a trigger with the workspace's other events. It records the
+  session it was raised in, from an agent's terminal, as the done signal does.
+- **It leaves `name`, `note` and `head`.** No other data: a structured payload would be
+  variables no saving could check, and the note carries what a sentence can.
+- **From a smoke test's `run` step it is one deeper.** `ys` reads `YS_RUN_ID`, which every `run`
+  and `start` process of a test run has, and records that run; a run a trigger starts on it has
+  that run's depth plus one, as a run's ending would. Raised by an agent, or by hand, it is depth
+  0, as `ys workspace done` is: the cap and the rate bound an agent told by a triggered run to
+  raise one.
+- **No workflow step raises one.** A workflow raises one through a smoke test it runs, or its
+  agent; its own ending is `workflow.finished`. A step can come later if a use needs it.
+- **Its own table, `custom_events`** (migration `0025`), for the done signal's reason: the note is
+  someone's own words, which no `agent_events` row may hold. It is read from a cursor, so one
+  raised while the app is closed is heard when it opens, and `ys event emit` says so.
+- **Agents are not told about it.** Yardsort tells an agent about `ys workspace done` because it
+  knows when that is; it cannot know when a user's own event should be raised, so whoever writes
+  the agent's instructions names the command.
+
 ## Firing
 
 Everything a trigger does is in four steps, each a function over rows that is handed the time
@@ -387,6 +425,8 @@ One migration, `0023_triggers.sql`, with four tables:
   meanwhile.
 - **`done_signals`**, one row per `ys workspace done`: the workspace, the session record, the
   `HEAD`, the note and the time.
+- **`custom_events`** (`0025`, slice 4), one row per `ys event emit`: the same, with the name and
+  the smoke test run that raised it.
 
 A removed project's triggers are neither listed nor fired and go with its row; removing a
 trigger removes its history and nothing else.
@@ -435,6 +475,8 @@ ys trigger reset <trigger>      # lift a cap
 ys trigger fires <trigger>
 ys trigger remove <trigger>
 ys workspace done --note "Login form validates on blur; tests added."
+ys trigger add --on custom.migration-written --test migrations
+ys event emit migration-written --note "0042 adds users.last_seen"
 ```
 
 `add` takes `--preset`, or `--on` (repeatable) with the filters as flags and `--workflow` or
@@ -736,6 +778,47 @@ through WebKit's remote inspector:
 
 Not checked by hand: the desktop notifications, which slices 1 and 2 already told; macOS and
 Windows, which have had the tests in CI only.
+
+## Slice 4: what shipped
+
+Custom events, as [Custom events](#custom-events) above has them: `ys event emit`, a trigger on
+`custom.<name>` from `ys trigger add --on` or the dialog, the `custom_events` table (migration
+`0025`) read from its own cursor by the trigger thread, and `{{ event.name }}`.
+
+- **The core** (`crates/core/src/trigger/`): `TriggerEvent::Custom`, `Filters::names`,
+  `custom_name_problem`, `parse_event` and `event_names` for the `custom.<name>` form,
+  `custom_names_heard` for what `ys event emit` says, and `sources::read_custom`, which reads a
+  smoke test run's depth through `run_depth` as run endings do. `Observation::kind` is what the
+  history's event column and `{{ event.kind }}` say.
+- **`ys`**: `ys event emit` (`crates/cli/src/commands/event.rs`); `ys trigger add --on` takes
+  `custom.<name>`, and `list` and `show` print the names.
+- **The window**: **A custom event** under _Something you name_ in the dialog's **When**, with a
+  field for the names that says what is wrong with one as it is typed and offers the names the
+  project's other triggers use. The sentence says _When custom.migration-written is raised
+  here_.
+
+Checked by hand on 2026-11-08, in a development build on Linux with the throwaway profile
+`scripts/screenshots.sh` sets up and the dev `ys` on the agents' `PATH`, the window driven through
+WebKit's remote inspector:
+
+- **New trigger…** on `celsius-fahrenheit`, **A custom event**: every event but the workspace's
+  greyed out; `Migration` typed said _migration would do_ and kept **Add trigger** from saving;
+  `migration-written` with a workflow that notifies `{{ event.kind }}: {{ event.note }}` read
+  _When custom.migration-written is raised here, run the workflow note-it. At most 3 times per
+  workspace_. Saved, the row read _When `custom.migration-written` is raised_. A second trigger,
+  on `custom.seeded`, was added with `ys trigger add`, and **Edit…** on it showed its name and
+  offered `migration-written` from the first.
+- `ys event emit migration-writen` in the worktree said nothing listens for it and named both
+  names that are listened for. `ys event emit migration-written --note …` started one run within
+  a second, which succeeded with `kind`, `name`, `note` and `head` in its event.
+- A smoke test whose `run` step is `ys event emit seeded`, queued with `ys test run` and approved
+  in the window, passed; its event recorded the test run, and the run it started was depth 1.
+  The history line read _custom.seeded_ with the note.
+- With the app closed, `ys event emit` said _Yardsort is not running_; reopened, the app started
+  that run within six seconds.
+
+The check found one mistake, in the smoke tests guide: a `run` step is `action: run` with
+`program: ys`, not `run: ys`.
 
 ## Not in version one, on purpose
 
