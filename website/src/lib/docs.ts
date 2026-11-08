@@ -9,7 +9,15 @@ export const REPO_URL = "https://github.com/joaoh82/yardsort";
 
 // `slug` is the page's address on the site. `path` is its file under docs/, without the
 // extension, when that differs from the slug; the page then takes its title from here too.
-export type DocEntry = { slug: string; title: string; description: string; path?: string };
+// `documentTitle` is the HTML, Open Graph and Twitter title when it should not be
+// `${title} · Yardsort Docs`. The visible heading still comes from `title` when `path` is set.
+export type DocEntry = {
+  slug: string;
+  title: string;
+  description: string;
+  path?: string;
+  documentTitle?: string;
+};
 export type DocSection = { title: string; items: DocEntry[] };
 
 // Sidebar order. Add a page here after adding its file under docs/.
@@ -22,6 +30,14 @@ export const DOCS_NAV: DocSection[] = [
         title: "Quick start",
         description:
           "Install Yardsort on Linux, macOS or Windows, connect a working agent CLI, open a project and start your first task in its own git worktree.",
+      },
+      {
+        slug: "migrate-from-conductor",
+        title: "Migrate from Conductor to Yardsort",
+        description:
+          "Move local Conductor worktrees to Yardsort. Keep branches and files, configure your scripts, and run Claude Code or Codex on Linux, macOS and Windows.",
+        path: "guide/migrate-from-conductor",
+        documentTitle: "Migrate from Conductor to Yardsort | Git Worktrees",
       },
       {
         slug: "guide/questions",

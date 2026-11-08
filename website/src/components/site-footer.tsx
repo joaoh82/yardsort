@@ -16,6 +16,7 @@ export function SiteFooter() {
           <a href={REPO_URL}>GitHub</a>
           <a href={`mailto:${CONTACT_EMAIL}`}>Contact</a>
           <Link href="/docs/">Docs</Link>
+          <Link href="/docs/migrate-from-conductor/">Migrate from Conductor</Link>
           <Link href="/tutorials/">Tutorials</Link>
           <Link href="/blog/">Blog</Link>
           <Link href="/changelog/">Changelog</Link>

@@ -1249,6 +1249,116 @@ mod tests {
         assert!(one.is_dir() && two.is_dir(), "nothing on disk moved");
     }
 
+    /// External worktrees, such as ones another tool already created, stay on their own path and
+    /// branch. Import records them only. Preparation does not run, and Forget does not remove files.
+    #[test]
+    fn importing_an_external_worktree_keeps_files_skips_preparation_and_forget_leaves_them() {
+        use crate::project_automation::{ProjectAutomation, ProjectCommand};
+        let fx = Fixture::new();
+        std::fs::write(fx.repo.join("tracked.txt"), "kept-tracked\n").unwrap();
+        fx.git.run(&fx.repo, &["add", "tracked.txt"]).unwrap();
+        fx.git.run(&fx.repo, &["commit", "-m", "tracked"]).unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let external = normalize(elsewhere.path()).join("feature-notes");
+        fx.git
+            .worktree_add(&fx.repo, &external, "feature-notes", "HEAD")
+            .unwrap();
+        std::fs::write(external.join("notes.txt"), "kept-untracked\n").unwrap();
+        std::fs::write(fx.repo.join(".env"), "SECRET=from-root\n").unwrap();
+        // A copy and a failing setup would change the worktree if import prepared it.
+        ProjectAutomation {
+            copy_files: vec![".env".into()],
+            setup: Some(ProjectCommand {
+                program: "git".into(),
+                args: vec!["not-a-real-command".into()],
+            }),
+            run: None,
+        }
+        .save(&fx.store, &fx.project_id)
+        .unwrap();
+
+        let tracked_before = std::fs::read(external.join("tracked.txt")).unwrap();
+        let notes_before = std::fs::read(external.join("notes.txt")).unwrap();
+        let head_before = fx.git.run(&external, &["rev-parse", "HEAD"]).unwrap();
+        let branch_before = fx
+            .git
+            .run(&external, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .unwrap();
+
+        let imported = import_worktrees(
+            &fx.store,
+            &fx.git,
+            &fx.project_id,
+            &[external.to_string_lossy().into_owned()],
+        )
+        .unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].name, "feature-notes");
+        assert_eq!(imported[0].branch.as_deref(), Some("feature-notes"));
+        assert_eq!(imported[0].base_branch, None);
+        assert_eq!(
+            normalize(Path::new(&imported[0].path)),
+            normalize(&external)
+        );
+        assert!(!fx.store.prepares_workspace(&imported[0].id).unwrap());
+        assert_eq!(
+            std::fs::read(external.join("tracked.txt")).unwrap(),
+            tracked_before
+        );
+        assert_eq!(
+            std::fs::read(external.join("notes.txt")).unwrap(),
+            notes_before
+        );
+        assert!(!external.join(".env").exists(), "files to copy did not run");
+        let git_dir = PathBuf::from(
+            fx.git
+                .run(&external, &["rev-parse", "--absolute-git-dir"])
+                .unwrap(),
+        );
+        assert!(
+            !std::fs::read_dir(&git_dir).unwrap().flatten().any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("yardsort-setup-")
+            })
+        );
+        assert_eq!(
+            fx.git.run(&external, &["rev-parse", "HEAD"]).unwrap(),
+            head_before
+        );
+        assert_eq!(
+            fx.git
+                .run(&external, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .unwrap(),
+            branch_before
+        );
+
+        fx.workspaces().forget(&imported[0].id, true).unwrap();
+        assert_eq!(fx.names(), ["local"]);
+        assert!(external.is_dir());
+        assert_eq!(
+            std::fs::read(external.join("tracked.txt")).unwrap(),
+            tracked_before
+        );
+        assert_eq!(
+            std::fs::read(external.join("notes.txt")).unwrap(),
+            notes_before
+        );
+        assert!(!external.join(".env").exists());
+        assert!(fx.git.branch_exists(&fx.repo, "feature-notes").unwrap());
+        assert_eq!(
+            fx.git.run(&external, &["rev-parse", "HEAD"]).unwrap(),
+            head_before
+        );
+        assert_eq!(
+            fx.git
+                .run(&external, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .unwrap(),
+            branch_before
+        );
+    }
+
     #[test]
     fn forgetting_hides_a_workspace_and_importing_it_again_finds_its_history() {
         let fx = Fixture::new();
