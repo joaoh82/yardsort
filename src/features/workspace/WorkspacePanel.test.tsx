@@ -25,6 +25,9 @@ const core = vi.hoisted(() => ({
   conversationContext: vi.fn(),
   sessionContext: vi.fn(async () => null),
   outcomesAgents: vi.fn(async () => []),
+  // The composer offers the ready-made triggers for a new workspace.
+  triggerPresets: vi.fn(async () => []),
+  testListInProject: vi.fn(async () => []),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),

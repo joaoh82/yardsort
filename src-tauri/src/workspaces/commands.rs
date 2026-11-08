@@ -15,6 +15,7 @@ use crate::projects::{Projects, Workspace};
 use crate::state::{blocking, AppState};
 use crate::tasks::delegate::{self, TaskRef};
 use crate::terminal::{spawn_in_workspace, HarnessRequest, Launch};
+use crate::triggers::commands::PresetPick;
 
 /// A harness definition plus whether its command can be found on this machine.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -117,6 +118,9 @@ pub struct NewWorkspace {
     /// The task this workspace is being started from, when it is: it names the workspace and
     /// is recorded against it. See `crate::tasks::delegate`.
     pub task: Option<TaskRef>,
+    /// The presets ticked in the composer: each becomes a trigger on the new workspace before
+    /// its agent starts, so the agent is told what it needs to know about them.
+    pub presets: Vec<PresetPick>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -124,6 +128,9 @@ pub struct NewWorkspace {
 pub struct CreatedWorkspace {
     pub workspace: Workspace,
     pub session: SessionInfo,
+    /// Why a ticked preset could not be added, one line each. The workspace and its agent
+    /// started all the same.
+    pub refused_presets: Vec<String>,
 }
 
 #[tauri::command]
@@ -353,7 +360,8 @@ pub async fn workspace_create(
     app: AppHandle,
     request: NewWorkspace,
 ) -> IpcResult<CreatedWorkspace> {
-    blocking(app, move |state| {
+    let presets = !request.presets.is_empty();
+    let created = blocking(app.clone(), move |state| {
         // Fail before touching git if the harness cannot possibly start.
         harness::find(&request.harness.id, &state.settings.get().harnesses)
             .filter(|def| def.enabled)
@@ -401,6 +409,9 @@ pub async fn workspace_create(
         if let Some(task) = &request.task {
             state.store.link_task(&row.id, &task.row())?;
         }
+        // Before the agent starts: one on `workspace.done` is what tells it about that.
+        let refused_presets =
+            crate::triggers::commands::add_presets(state, &row.id, &request.presets);
 
         match spawn_in_workspace(
             state,
@@ -415,6 +426,7 @@ pub async fn workspace_create(
                 }
                 .describe_workspace(row),
                 session,
+                refused_presets,
             }),
             Err(error) => Err(IpcError::new(
                 &error.code,
@@ -425,7 +437,11 @@ pub async fn workspace_create(
             )),
         }
     })
-    .await
+    .await;
+    if presets {
+        crate::triggers::commands::changed(&app);
+    }
+    created
 }
 
 /// Remove a workspace's worktree. The branch is kept. Fails with `worktree_dirty` unless `force`.

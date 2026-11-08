@@ -55,6 +55,7 @@ vi.mock("./WorkflowChart", () => ({
 
 import { useProjectsStore } from "@/stores/projects";
 import { useSchedulesStore } from "@/stores/schedules";
+import { useTriggersStore } from "@/stores/triggers";
 import { NEW_WORKFLOW, useWorkflowStore } from "@/stores/workflows";
 import { WorkflowView } from "./WorkflowView";
 
@@ -117,6 +118,7 @@ describe("WorkflowView", () => {
     useWorkflowStore.setState({ items: [], loaded: true, runs: {}, steps: {}, drafts: {} });
     useProjectsStore.setState({ workflowId: null });
     useSchedulesStore.setState({ started: [] });
+    useTriggersStore.setState({ started: [] });
   });
 
   it("shows a built-in read-only, and customizing it copies it to the user's folder", async () => {
@@ -297,14 +299,20 @@ describe("WorkflowView", () => {
     useSchedulesStore.setState({
       started: [{ runId: "run-1", scheduleId: "s1", scheduleName: "Nightly" }],
     });
+    // And a trigger's run is marked with the trigger's name.
+    useTriggersStore.setState({
+      started: [{ runId: "run-1", triggerId: "t1", triggerName: "Address reviews" }],
+    });
     render(<WorkflowView workflowId="demo" />);
     const runs = await screen.findByRole("region", { name: "Runs" });
     const row = await within(runs).findByRole("button", { name: "Run in fix-login, failed" });
     expect(row).toHaveTextContent("scheduled");
+    expect(row).toHaveTextContent("triggered");
     await userEvent.setup().click(row);
     expect(await within(runs).findByText("no way")).toBeInTheDocument();
     expect(within(runs).getByText("Notify you")).toBeInTheDocument();
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
+    expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
   });
 });

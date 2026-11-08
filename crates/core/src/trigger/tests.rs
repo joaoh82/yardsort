@@ -168,6 +168,22 @@ fn a_new_trigger_is_on_named_after_its_target_and_counts_from_now() {
 }
 
 #[test]
+fn a_trigger_on_a_pull_request_names_it_once_it_is_known() {
+    let tx = Tx::new();
+    let mut trigger = tx.on_done(0, 3);
+    trigger.events = r#"["pr.review","pr.checks_failed"]"#.to_owned();
+    assert_eq!(
+        describe_on(&trigger, Some(142)),
+        "When a review comes in on #142 or #142's checks fail, run the workflow `tell`"
+    );
+    assert_eq!(
+        describe_on(&trigger, None),
+        "When a review comes in on the pull request or the pull request's checks fail, run the \
+         workflow `tell`"
+    );
+}
+
+#[test]
 fn an_agents_events_and_the_workspaces_do_not_share_a_trigger() {
     let tx = Tx::new();
     let (filters, inputs) = (Filters::default(), no_inputs());

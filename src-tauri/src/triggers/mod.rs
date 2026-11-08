@@ -25,12 +25,17 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_specta::Event;
 use yardsort_core::schedule::clock;
+use yardsort_core::smoke::deliver::{self, Delivery, Tried};
 use yardsort_core::trigger::fire::Observation;
 use yardsort_core::trigger::turns::{Change, Turns};
 use yardsort_core::trigger::{fire, sources, watch};
 
 use crate::state::AppState;
 use crate::workflows::commands::AppLook;
+
+pub mod commands;
+
+use commands::TriggersChanged;
 
 /// How often it looks when nothing wakes it sooner: how late a fire whose quiet time is up can
 /// be decided.
@@ -48,6 +53,9 @@ pub struct Listener {
     heard: Mutex<Vec<(Change, i64)>>,
     /// What looks at pull requests found since the last look.
     forge: Mutex<Vec<Observation>>,
+    /// **Tell the agent**: what agents are to be told about `ys workspace done`, each once it
+    /// is quiet. Tried at every look, which the host's quiet events wake.
+    tells: Mutex<Vec<Delivery>>,
 }
 
 impl Listener {
@@ -62,6 +70,34 @@ impl Listener {
                 .push((change, now));
             self.wake();
         }
+    }
+
+    /// Tell these agents, each once it is quiet.
+    pub fn tell(&self, deliveries: Vec<Delivery>) {
+        self.tells
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(deliveries);
+        self.wake();
+    }
+
+    /// Type what can be typed now; keep what waits for a busy agent. An agent that ended, or
+    /// that cannot be typed into, is not told.
+    fn deliver(&self, host: &dyn pty_host::TerminalHost) {
+        let waiting =
+            std::mem::take(&mut *self.tells.lock().unwrap_or_else(PoisonError::into_inner));
+        let mut kept = Vec::new();
+        for delivery in waiting {
+            match deliver::try_deliver(host, &delivery) {
+                Tried::Delivered => {}
+                Tried::NotYet => kept.push(delivery),
+                Tried::Gone(why) => eprintln!("triggers: could not tell an agent: {why}"),
+            }
+        }
+        let mut tells = self.tells.lock().unwrap_or_else(PoisonError::into_inner);
+        // Anything asked for while this ran goes behind what is still waiting.
+        kept.append(&mut tells);
+        *tells = kept;
     }
 
     /// Look now rather than at the next tick.
@@ -87,6 +123,7 @@ pub fn start(app: &AppHandle) {
         turns: Turns::default(),
         heard: Mutex::new(Vec::new()),
         forge: Mutex::new(Vec::new()),
+        tells: Mutex::new(Vec::new()),
     });
     let handle = app.clone();
     let spawned = std::thread::Builder::new()
@@ -153,6 +190,9 @@ fn watch_pull_requests(handle: &AppHandle) {
 }
 
 fn look(handle: &AppHandle, woken: &Receiver<()>) {
+    // What the list looked like the last time round, so a trigger `ys` added, switched or
+    // removed reaches the window without waiting for one to fire.
+    let mut stamp = None;
     loop {
         match woken.recv_timeout(TICK) {
             Ok(()) | Err(RecvTimeoutError::Timeout) => {}
@@ -176,6 +216,8 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
         };
         let store = &state.store;
         let now = clock::now().timestamp_millis();
+        let mut changed = false;
+        listener.deliver(state.host.as_ref());
 
         let mut seen = Vec::new();
         let heard = std::mem::take(
@@ -214,13 +256,15 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
             }
         }
         for observation in &seen {
-            if let Err(error) = fire::observe(store, observation) {
-                eprintln!("triggers: cannot gather an event: {}", error.message);
+            match fire::observe(store, observation) {
+                Ok(gathered) => changed |= gathered > 0,
+                Err(error) => eprintln!("triggers: cannot gather an event: {}", error.message),
             }
         }
 
         match fire::tick(store, &state.data_dir, &AppLook(&state), &git, now) {
             Ok(fired) => {
+                changed |= !fired.is_empty();
                 for notice in fired.iter().filter_map(|fired| fired.notice.as_ref()) {
                     tell(handle, notice);
                 }
@@ -236,11 +280,21 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
 
         match fire::settle(store) {
             Ok(settled) => {
+                changed |= settled.changed;
                 for notice in &settled.notices {
                     tell(handle, notice);
                 }
             }
             Err(error) => eprintln!("triggers: cannot read runs: {}", error.message),
+        }
+
+        if let Ok(now) = store.triggers_stamp() {
+            changed |= stamp.is_some_and(|before| before != now);
+            stamp = Some(now);
+        }
+
+        if changed {
+            let _ = TriggersChanged {}.emit(handle);
         }
     }
 }

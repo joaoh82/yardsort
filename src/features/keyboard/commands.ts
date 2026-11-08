@@ -54,7 +54,8 @@ export function commandEnabled(id: CommandId): boolean {
       !projects.pullRequestsOpen &&
       !projects.tasksOpen &&
       !projects.testsOpen &&
-      !projects.schedulesOpen
+      !projects.schedulesOpen &&
+      !projects.triggersOpen
     );
   if (["closeTerminal", "previousTerminal", "nextTerminal"].includes(id))
     return (
@@ -68,7 +69,8 @@ export function commandEnabled(id: CommandId): boolean {
       !projects.pullRequestsOpen &&
       !projects.tasksOpen &&
       !projects.testsOpen &&
-      !projects.schedulesOpen
+      !projects.schedulesOpen &&
+      !projects.triggersOpen
     );
   if (["nextWorkspace", "previousWorkspace"].includes(id)) return availableWorkspaces().length > 0;
   return true;
@@ -103,6 +105,9 @@ export function runCommand(id: CommandId) {
       break;
     case "schedules":
       projects.openSchedules(true);
+      break;
+    case "triggers":
+      projects.openTriggers(true);
       break;
     case "startFromLink":
       projects.openLink(true);

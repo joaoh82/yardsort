@@ -730,6 +730,15 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("offers Triggers… on a workspace, opening the view on that workspace", async () => {
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Triggers…" }));
+    expect(useProjectsStore.getState().triggersOpen).toBe(true);
+    expect(useProjectsStore.getState().triggersFocus).toEqual({ workspaceId: "w-alpha-feature" });
+  });
+
   it("forks a workspace into the composer, on a new branch from its branch", async () => {
     core.workspaceFork.mockResolvedValue({
       text: "# Forked from Yardsort",

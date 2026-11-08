@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistStatus } from "@/lib/ipc";
-import { harness, project, worktree } from "@/test/fixtures";
+import { harness, project, triggerPresets, worktree } from "@/test/fixtures";
 
 type DragHandler = (event: { payload: unknown }) => void;
 const drag = vi.hoisted(() => ({
@@ -30,6 +30,8 @@ const core = vi.hoisted(() => ({
   memoryGet: vi.fn(),
   conversationContext: vi.fn(),
   outcomesAgents: vi.fn(),
+  triggerPresets: vi.fn(),
+  testListInProject: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
@@ -41,6 +43,7 @@ import { useAssistStore } from "@/stores/assist";
 import { useHarnessStore } from "@/stores/harnesses";
 import { useProjectsStore } from "@/stores/projects";
 import { useTerminalStore } from "@/stores/terminals";
+import { useTriggersStore } from "@/stores/triggers";
 import { Composer } from "./Composer";
 
 const assistStatus = (extra: Partial<AssistStatus> = {}): AssistStatus => ({
@@ -101,6 +104,8 @@ describe("Composer", () => {
       harness("grok", { resolvedPath: null }),
     ]);
     core.outcomesAgents.mockResolvedValue([]);
+    core.triggerPresets.mockResolvedValue([]);
+    core.testListInProject.mockResolvedValue([]);
     core.memoryGet.mockResolvedValue({
       projectId: "p-app",
       shared: false,
@@ -120,11 +125,16 @@ describe("Composer", () => {
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
+    useTriggersStore.setState({ presets: [] });
   });
 
   it("starts a workspace with the message on Enter and lands in its terminal", async () => {
     const created = worktree("app", "fix-login");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const user = await renderComposer();
 
     await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the login bug{Enter}");
@@ -136,6 +146,7 @@ describe("Composer", () => {
       harness: { id: "claude", model: null, effort: null, prompt: "Fix the login bug" },
       size: { cols: 100, rows: 30 },
       task: null,
+      presets: [],
     });
     const projects = useProjectsStore.getState();
     expect(projects.projects[0]!.workspaces.map((w) => w.name)).toEqual(["local", "fix-login"]);
@@ -162,7 +173,11 @@ describe("Composer", () => {
       },
     });
     const created = worktree("app", "add-export");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const user = await renderComposer();
 
     expect(screen.getByRole("heading")).toHaveTextContent(
@@ -190,6 +205,7 @@ describe("Composer", () => {
       },
       size: { cols: 100, rows: 30 },
       task: null,
+      presets: [],
     });
   });
 
@@ -210,7 +226,11 @@ describe("Composer", () => {
       },
     });
     const created = worktree("app", "add-export");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const user = await renderComposer();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Branch" }), "new:main");
@@ -241,7 +261,11 @@ describe("Composer", () => {
       },
     });
     const created = worktree("app", "x");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const user = await renderComposer();
 
     expect(screen.getByRole("combobox", { name: "Branch" })).toHaveValue("new:main");
@@ -252,7 +276,11 @@ describe("Composer", () => {
 
   it("passes the chosen harness, model, effort and base branch", async () => {
     const created = worktree("app", "x");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const user = await renderComposer();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Harness" }), "codex");
@@ -271,12 +299,17 @@ describe("Composer", () => {
       harness: "codex",
       model: "gpt-next",
       effort: "medium",
+      presets: {},
     });
   });
 
   it("opens an existing branch instead of creating one, offering only branches nobody has checked out", async () => {
     const created = worktree("app", "kept-earlier");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const user = await renderComposer();
 
     const group = screen.getByRole("group", { name: "Open existing branch" });
@@ -302,7 +335,11 @@ describe("Composer", () => {
 
   it("opens on a pull request's branch when started from one, and says what it is", async () => {
     const created = worktree("app", "kept-earlier");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     useProjectsStore.setState({
       composingBranch: { branch: "ys/kept-earlier", behind: 2, fork: true },
     });
@@ -329,7 +366,11 @@ describe("Composer", () => {
 
   it("starts from a task with its message filled in, and tells the core which task it was", async () => {
     const created = worktree("app", "91-network-drive");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const task = {
       source: "github" as const,
       repo: "github.com/demo/app",
@@ -371,7 +412,11 @@ describe("Composer", () => {
 
   it("starts with a note about the pull request as its first message, when one came with the branch", async () => {
     const created = worktree("app", "kept-earlier");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     useProjectsStore.setState({
       composingBranch: { branch: "ys/kept-earlier", behind: 0, fork: false },
       composingPrompt: "Pull request #8: fold these lines.",
@@ -467,7 +512,11 @@ describe("Composer", () => {
 
   it("drops a file into the message and starts the workspace with that path", async () => {
     const created = worktree("app", "notes");
-    core.workspaceCreate.mockResolvedValue({ workspace: created, session: session(created.id) });
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
     const { container } = render(<Composer project={app} />);
     await screen.findAllByRole("option", { name: "main" });
     await vi.waitFor(() => expect(drag.handler).not.toBeNull());
@@ -867,5 +916,77 @@ describe("Composer with Assist", () => {
     render(<Composer project={app} runIn={app.workspaces[0]} />);
     await screen.findByRole("form", { name: "Run in local" });
     expect(screen.queryByRole("button", { name: "Import worktrees…" })).not.toBeInTheDocument();
+  });
+
+  it("puts the ticked presets on the new workspace, each with its answer, and ticks them again next time", async () => {
+    const created = worktree("app", "fix-login");
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
+    core.triggerPresets.mockResolvedValue(triggerPresets);
+    const user = await renderComposer();
+
+    const presets = await screen.findByRole("group", {
+      name: "When something happens in the new workspace",
+    });
+    // No smoke test in the project: nothing to answer that preset's question with.
+    expect(
+      within(presets).getByRole("checkbox", { name: "Smoke test when the work is done" }),
+    ).toBeDisabled();
+    expect(within(presets).getByText("— no smoke tests here")).toBeInTheDocument();
+    await user.click(
+      within(presets).getByRole("checkbox", { name: "Review when the work is done" }),
+    );
+    await user.selectOptions(
+      within(presets).getByRole("combobox", { name: "Review when the work is done: Who reviews" }),
+      "codex",
+    );
+    await user.click(within(presets).getByRole("checkbox", { name: "Address reviews" }));
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the login bug{Enter}");
+
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        presets: [
+          { id: "review-when-done", answer: "codex" },
+          { id: "address-reviews", answer: null },
+        ],
+      }),
+    );
+    const remembered = JSON.parse(core.uiStateSave.mock.calls.at(-1)![1]);
+    expect(remembered.presets).toEqual({ "review-when-done": "codex", "address-reviews": "" });
+
+    // The next workspace in the project starts ticked the same way.
+    cleanup();
+    useProjectsStore.setState({ ui: { "composer.last.p-app": JSON.stringify(remembered) } });
+    await renderComposer();
+    const again = await screen.findByRole("group", {
+      name: "When something happens in the new workspace",
+    });
+    expect(
+      within(again).getByRole("checkbox", { name: "Review when the work is done" }),
+    ).toBeChecked();
+    expect(within(again).getByRole("checkbox", { name: "Address reviews" })).toBeChecked();
+    expect(
+      within(again).getByRole("combobox", { name: "Review when the work is done: Who reviews" }),
+    ).toHaveValue("codex");
+  });
+
+  it("says which ticked presets were refused once the workspace has started", async () => {
+    const created = worktree("app", "fix-login");
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: ["“Address reviews” was not added: the forge could not be asked."],
+    });
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix it{Enter}");
+    await waitFor(() =>
+      expect(useProjectsStore.getState().error).toBe(
+        "“Address reviews” was not added: the forge could not be asked.",
+      ),
+    );
+    expect(useTerminalStore.getState().active[created.id]).toBe("s1");
   });
 });

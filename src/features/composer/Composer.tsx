@@ -13,6 +13,12 @@ import { describeHistory } from "@/features/sidebar/outcomeWords";
 import { HarnessIcon } from "@/features/harness/HarnessIcon";
 import { ImportWorktreesDialog } from "@/features/sidebar/ImportWorktreesDialog";
 import { ConversationsDialog } from "@/features/terminal/ConversationsDialog";
+import {
+  answered,
+  ComposerPresets,
+  usePresetChoices,
+  type Picks,
+} from "@/features/triggers/ComposerPresets";
 import { useFileDrop } from "@/lib/useFileDrop";
 import { useShortcutLabel } from "@/stores/preferences";
 import { insertDroppedPaths } from "./drop";
@@ -26,6 +32,8 @@ interface LastPicks {
   harness?: string;
   model?: string;
   effort?: string;
+  /** The presets ticked, with their answers: a new workspace's triggers. */
+  presets?: Picks;
 }
 const picksKey = (projectId: string) => `composer.last.${projectId}`;
 
@@ -73,6 +81,9 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
   const [harnessId, setHarnessId] = useState<string | null>(handed);
   const [model, setModel] = useState((lastFits && last.model) || "");
   const [effort, setEffort] = useState((lastFits && last.effort) || "");
+  // A new workspace's triggers, ticked as they were last time in this project.
+  const [picks, setPicks] = useState<Picks>(() => (runIn ? {} : (last.presets ?? {})));
+  const presetChoices = usePresetChoices(project.id, !runIn);
   const [branches, setBranches] = useState<BranchList | null>(null);
   // "new:<branch>" starts a new branch from <branch>; "open:<branch>" opens <branch> itself.
   const [base, setBase] = useState("");
@@ -301,6 +312,8 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         harness: harness.id,
         model: model.trim(),
         effort: effortChoice,
+        // Running in a workspace ticks none, and is not what the next new one should start with.
+        presets: runIn ? (last.presets ?? {}) : picks,
       } satisfies LastPicks);
 
     // Running in a workspace that already exists is an ordinary spawn: the core labels the
@@ -333,6 +346,7 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
       harness: request,
       size: useTerminalStore.getState().lastSize,
       task,
+      presets: answered(picks, presetChoices),
     });
     setBusy(false);
     if ("error" in result) return setError(result.error);
@@ -575,6 +589,15 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
         )}
 
         {harness && <AgentHistoryLine history={histories.find((h) => h.harness === harness.id)} />}
+
+        {!runIn && (
+          <ComposerPresets
+            choices={presetChoices}
+            picks={picks}
+            onChange={setPicks}
+            disabled={busy}
+          />
+        )}
 
         {offersMemory && (
           <div className="mt-2 text-[12px] text-ink-faint">

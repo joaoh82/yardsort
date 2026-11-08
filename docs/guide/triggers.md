@@ -10,10 +10,10 @@ inputs you gave the trigger.
 For example: when someone reviews the pull request of `fix-login`, tell its agent to address the
 review. Or: when the agent says it is done, have a second agent review the branch.
 
-**This release has triggers from the command line.** `ys trigger` adds, lists and changes them,
-and Yardsort listens and starts their runs while it is open. The runs show in the workflow's runs
-and in **Tests** like any other. The window does not list triggers yet. See
-[What it does not do yet](#what-it-does-not-do-yet).
+**Triggers** in the sidebar, under **Schedules**, lists every trigger of every project; the
+composer offers the [ready-made ones](#ready-made-triggers) for each new workspace; and
+`ys trigger` does all of it from a terminal. The runs show in the workflow's runs and in
+**Tests** like any other, marked _triggered_ with the trigger's name.
 
 Three things to know before you make one:
 
@@ -38,16 +38,49 @@ with at most one question:
 | `review-when-done`   | The agent says its work is done                                             | `review-branch`   | `reviewer`: who reviews   |
 | `smoke-when-done`    | The agent says its work is done                                             | `smoke-then-tell` | `suite`: which smoke test |
 
+**In the composer**, under the message, each preset has a box to tick, with its one question
+beside it: _☐ Review when the work is done, by [Codex ▾]_. Each one ticked becomes a trigger on
+the new workspace before its agent starts, so an agent whose workspace listens for
+[`ys workspace done`](#the-done-signal) is told about it in its first message. The composer
+remembers, per project, which were ticked last time and their answers. **Smoke test when the work
+is done** offers the smoke tests in the project's own checkout, and cannot be ticked in a project
+that has none. A preset that cannot be added — its test is not on the new branch, say — is said
+once the workspace has started; the workspace and its agent start all the same.
+
+**In the trigger dialog**, **Start from** fills the dialog in from a preset, to change before
+saving. Left without a name, the trigger is called what the preset is.
+
 ```sh
 ys trigger presets
 ys trigger add --preset address-reviews --workspace fix-login
 ys trigger add --preset review-when-done --input reviewer=codex --workspace fix-login
 ```
 
-A trigger made from one is an ordinary trigger: `--quiet`, `--cap`, `--name` and `--notify`
-change it as they would any other.
+A trigger made from one is an ordinary trigger: its quiet time, cap, name and when you are told
+change as they would any other's.
 
 ## Making a trigger
+
+**New trigger…** at the top of the **Triggers** view opens the trigger dialog. **Triggers…** in a
+workspace's **⋯** menu opens the view on that workspace's triggers, and in an agent tab's menu on
+that agent's own; a new trigger made there starts on it. **Show all** goes back to every trigger.
+
+The dialog asks its questions in the order they can be answered:
+
+- **Where**: the workspace, and whether the trigger listens to any agent in it or only to one
+  (see [One agent's trigger](#one-agents-trigger)).
+- **When**: the [events](#what-it-listens-for), in three groups — the agent, a run, the pull
+  request — then the filters of the ones ticked. A trigger is about one kind of thing, so events
+  of another group are greyed out once one is ticked; make a second trigger for those.
+- **Run**: a workflow or a smoke test, then its inputs, asked as **Run…** asks them.
+- **Quiet time**, **At most** (the cap) and **Tell me**, then an optional name.
+
+As it is filled in, it says what will happen in words: _When someone other than you reviews or
+comments on this workspace's pull request, 2 minutes after the last one, tell the agent to address
+it. At most 3 times per pull request._ **Add trigger** checks everything a run would be refused
+for, as `ys trigger add` does, and says what is wrong without closing.
+
+From a terminal:
 
 ```sh
 ys trigger add --on pr.review --on pr.comment --workflow address-review --workspace fix-login
@@ -166,7 +199,9 @@ one, is there for the workflow as `{{ event.note }}`, and the commit the worktre
 and the smoke tests — when a trigger in its workspace listens for `workspace.done` at the moment
 it starts. It is asked to run it once its work is committed, and not to pause or to ask a
 question. An agent that was already running when you added the trigger was not told; `ys trigger
-add` says so. Agents started from then on are.
+add` says so, and the trigger dialog offers **Tell the agent**: it types the same paragraph into
+each of them, once it is quiet, never into one that is working. Agents started from then on are
+told when they start.
 
 Yardsort reads nothing an agent prints to know it is done: the agent runs a command, as it runs
 `git` or `gh`.
@@ -187,7 +222,8 @@ time, because another time will come; something that happened will not happen ag
 
 - **The cap.** At most `--cap` runs — three by default — for one agent session, for an agent's
   events, for one pull request, for the pull request's, or for the workspace, for the rest. The next fire is **capped**, you are told, and the
-  trigger starts nothing more for it until you run `ys trigger reset`.
+  trigger starts nothing more for it until you press **Reset** on it in the **Triggers** view, or
+  run `ys trigger reset`.
 - **The rate.** At most ten runs an hour for one trigger, whatever the cap.
 - **Chains.** A run a trigger started can end in an event another trigger listens for. A run a
   person or a schedule started is depth 0; a run started by the ending of a run of depth _n_ is
@@ -252,7 +288,16 @@ could not start its run, or had no agent to tell, once while it lasts.
 
 ## Its history
 
-`ys trigger fires <trigger>` lists every fire, newest first:
+In the **Triggers** view each trigger shows its event in words — _When a review comes in on
+#142_ once its pull request is known — where it is, what it runs, how its last fire went, and a
+badge: **on**, **running**, **waiting**, **waiting for approval**, **capped**, **refused**,
+**off**, **no workspace** when its workspace was deleted, or **ended** when the agent it belongs
+to has ended. The number beside **Triggers** in the sidebar counts those that need you: capped,
+refused, waiting for approval, or with no workspace.
+
+A trigger opens to its switch, **Edit…**, **Reset** when it is capped, **Remove…**, what it is
+set to, the pull request it is watching, and its history, newest first, each line with **Open
+run** when it started one. `ys trigger fires <trigger>` lists the same:
 
 | Outcome                            | Meaning                                                                      |
 | ---------------------------------- | ---------------------------------------------------------------------------- |
@@ -282,6 +327,5 @@ See [`ys trigger`](cli.md#ys-trigger).
 ## What it does not do yet
 
 - **Forges other than GitHub.** The pull request events need `gh`.
-- **The window.** Triggers are listed, made and changed with `ys` for now; the composer's
-  ready-made triggers and a view of them come later.
+- **Custom events** that a workflow, a test or an agent raises by name.
 - **Run while Yardsort is closed.** What happened is found when it next opens.

@@ -9,8 +9,7 @@ has the downloads and the full commit lists.
   work is done (`ys workspace done`), finishes a turn or exits, or a smoke test or a workflow run
   ends, a trigger starts what you gave it in that workspace, with what set it off as
   `{{ event.* }}`. A burst becomes one run, an event waits for a run in its way, and a cap, an
-  hourly limit and a limit on chains stop loops. From the command line for now, as
-  `ys trigger`; the window comes next. See [Triggers](docs/guide/triggers.md).
+  hourly limit and a limit on chains stop loops. See [Triggers](docs/guide/triggers.md).
 - **Triggers on pull requests.** A workspace's pull request opening, a review or a comment from
   someone else, its checks failing or passing, a conflict, a merge: Yardsort looks once a minute
   while a trigger watches, and what was there when the trigger was added is not news. A reply on
@@ -20,6 +19,15 @@ has the downloads and the full commit lists.
   done** and **Smoke test when the work is done**, with three new built-in workflows,
   `address-review`, `fix-checks` and `review-branch`. A fire with no agent in the workspace to
   tell is skipped, and you are told.
+- **Triggers in the window.** **Triggers** in the sidebar lists every trigger with its event in
+  words, where it is, what it runs and how its last fire went, and opens each to its history,
+  **Edit…**, **Reset** when it is capped, and **Remove…**; the number beside it counts those that
+  need you. The trigger dialog asks where, when, what to run and how often, and says in a sentence
+  what will happen. The composer offers the ready-made triggers for each new workspace, ticked as
+  they were last time in the project. **Triggers…** in a workspace's menu and an agent tab's menu
+  opens the view on that workspace or agent, and runs a trigger started are marked _triggered_.
+  An agent already running when a trigger on `ys workspace done` is added can be told about it
+  with **Tell the agent**.
 - **Remote on a computer with no screen: `yardsort-host`.** A separate program, for a Linux server
   you reach over SSH: sign it in from a browser on any other computer by pasting back the address the
   browser lands on, run `yardsort-host serve`, and pair a phone with `yardsort-host pair` at a

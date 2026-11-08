@@ -163,6 +163,23 @@ import {
   type IfMissed,
   type TimeOfDay,
   type Weekday,
+  type TriggerItem as RawTriggerItem,
+  type TriggerFire as RawTriggerFire,
+  type TriggerDraft_Deserialize as RawTriggerDraft,
+  type SavedTrigger as RawSavedTrigger,
+  type TriggerPreset,
+  type PresetQuestion,
+  type PresetPick,
+  type TriggeredRun,
+  type TriggerEvent,
+  type TriggerStanding,
+  type Filters_Deserialize as TriggerFilters,
+  type FromFilter,
+  type ReviewStateFilter,
+  type ExitFilter,
+  type VerdictFilter,
+  type OutcomeFilter,
+  type UntoldAgent,
 } from "./bindings";
 
 export type {
@@ -191,6 +208,19 @@ export type {
   IfMissed,
   TimeOfDay,
   Weekday,
+  TriggerPreset,
+  PresetQuestion,
+  PresetPick,
+  TriggeredRun,
+  TriggerEvent,
+  TriggerStanding,
+  TriggerFilters,
+  FromFilter,
+  ReviewStateFilter,
+  ExitFilter,
+  VerdictFilter,
+  OutcomeFilter,
+  UntoldAgent,
   Described,
   WorkflowItem,
   WorkflowCheck,
@@ -367,6 +397,11 @@ export type Schedule = Finite<RawSchedule, "nextAt" | "day">;
 export type ScheduleRun = Finite<RawScheduleRun, never>;
 export type SchedulePreview = Finite<RawSchedulePreview, never>;
 export type ScheduleDraft = Omit<RawScheduleDraft, "spec"> & { spec: ScheduleSpec };
+/** A trigger; `decidedAt` on its last line is null while it is gathering. */
+export type TriggerItem = Finite<RawTriggerItem, "decidedAt">;
+export type TriggerFire = Finite<RawTriggerFire, "decidedAt">;
+export type TriggerDraft = RawTriggerDraft;
+export type SavedTrigger = Finite<RawSavedTrigger, "decidedAt">;
 export type MachineReport = Finite<RawMachineReport, "loadOne">;
 export type AgentLimits = UsageReport["limits"][number];
 export type ModelUsage = UsageReport["models"][number];
@@ -827,6 +862,8 @@ export const ipc = {
   // --- smoke tests ---------------------------------------------------------------------
   /** A workspace's smoke tests: every file in its worktree's `.yardsort/tests`. */
   testList: (workspaceId: string) => unwrap(commands.testList(workspaceId)),
+  /** A project's smoke tests as its own checkout has them, for a workspace not made yet. */
+  testListInProject: (projectId: string) => unwrap(commands.testListInProject(projectId)),
   /** Every test in every workspace on show, with where it lives and how it last ran. */
   testCatalog: (): Promise<TestListing[]> =>
     unwrap(commands.testCatalog()) as Promise<TestListing[]>,
@@ -920,6 +957,34 @@ export const ipc = {
     unwrap(commands.scheduleRunNow(scheduleId)) as Promise<ScheduleRun>,
   /** A schedule was added, changed, switched, removed or fired, or a run it started ended. */
   onSchedulesChanged: (handler: () => void) => events.schedulesChanged.listen(() => handler()),
+
+  // --- triggers ------------------------------------------------------------------------
+  /** Every trigger of every project, by name, each with the newest decided line of its history. */
+  triggerList: (): Promise<TriggerItem[]> =>
+    unwrap(commands.triggerList()) as Promise<TriggerItem[]>,
+  /** A trigger's history, newest first: every fire and what became of it. */
+  triggerFires: (triggerId: string, limit = 50): Promise<TriggerFire[]> =>
+    unwrap(commands.triggerFires(triggerId, limit)) as Promise<TriggerFire[]>,
+  /** The runs triggers started, for a run list to mark. */
+  triggerStartedRuns: () => unwrap(commands.triggerStartedRuns()),
+  /** The ready-made triggers, with the one question each asks. */
+  triggerPresets: (): Promise<TriggerPreset[]> => commands.triggerPresets(),
+  /** Add a trigger, or change the one `draft.id` names. Rejects with what is wrong with it. */
+  triggerSave: (draft: TriggerDraft): Promise<SavedTrigger> =>
+    unwrap(commands.triggerSave(draft)) as Promise<SavedTrigger>,
+  /** Tell these running agents about `ys workspace done`, each once it is quiet. */
+  triggerTellAgents: (sessionIds: string[]) => unwrap(commands.triggerTellAgents(sessionIds)),
+  /** Switch a trigger on, from now, or off. */
+  triggerSetEnabled: (triggerId: string, enabled: boolean): Promise<TriggerItem> =>
+    unwrap(commands.triggerSetEnabled(triggerId, enabled)) as Promise<TriggerItem>,
+  /** Lift a trigger's cap, so it starts runs again. */
+  triggerReset: (triggerId: string): Promise<TriggerItem> =>
+    unwrap(commands.triggerReset(triggerId)) as Promise<TriggerItem>,
+  /** Remove a trigger and its history. The runs it started stay. */
+  triggerRemove: (triggerId: string) => done(commands.triggerRemove(triggerId)),
+  /** A trigger was added, changed, switched or removed, gathered an event or fired, or a run it
+   *  started ended. */
+  onTriggersChanged: (handler: () => void) => events.triggersChanged.listen(() => handler()),
 
   onHostEvent: (handler: (event: HostEvent) => void) =>
     events.ptyHostEvent.listen((event) => handler(event.payload)),
