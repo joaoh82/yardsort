@@ -647,6 +647,18 @@ and the phone no new build.
   `XDG_RUNTIME_DIR` is unset, if that folder is this user's alone, for the daemon's address and the
   host's socket alike. A process that has the variable is unaffected. Tried again the same way: one
   daemon, and the agent still running after a restart and a stop.
+- **Upgrading across that change (review).** The fallback moved the address a shell without
+  `XDG_RUNTIME_DIR` computes, and a daemon slice 2 started from one is still listening at the old
+  place, `<data dir>/daemon.sock`. Looking only at the new address would have started a second
+  daemon: the same bug, caused by the upgrade. `Endpoint::all_for_data_dir` gives the new address and,
+  where it differs, the one the rule before gave; `daemon::connect` and `connect_existing` try each,
+  use whichever answers, and start a new daemon only at the first. Only the earlier rule's own
+  address is added, so nothing is tried that neither release would have used. Tried on this computer:
+  a daemon at the profile's `daemon.sock`, then this build's `serve` and `ys` with no
+  `XDG_RUNTIME_DIR`. One daemon, the agent ran in it, and it was still running after `serve` was
+  stopped and started again.
+- **`status` with a daemon that gave no version** says "from an earlier release" rather than leave a
+  gap; the version is optional from the daemon to the message.
 - **The smoke test** gained an input. `headless-host.yaml` with `--input build=package` builds the
   tarball, unpacks it in the run's folder, and runs every step's `yardsort-host` and `ys` under
   `env -i` with only `HOME`, a `PATH` of the tarball's `bin` and the system's, and the run's profile.

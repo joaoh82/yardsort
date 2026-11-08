@@ -16,7 +16,9 @@ use yardsort_core::presence::{AppLock, Holder};
 use yardsort_core::remote::host;
 use yardsort_core::runtime;
 
-use crate::control::{self, Ask, Device, Line, Project, RemoteStatus, Reply, Status};
+use crate::control::{
+    self, Ask, Device, EarlierDaemon, Line, Project, RemoteStatus, Reply, Status,
+};
 use crate::home::HostHome;
 use crate::profile::Profile;
 
@@ -242,7 +244,9 @@ fn status(home: &HostHome) -> Status {
     // shares no terminal beyond this computer until it is replaced.
     let earlier_daemon = home.terminals.as_ref().and_then(|t| {
         let client = t.client.as_ref()?;
-        (!client.speaks_our_protocol()).then(|| t.status.version.clone().unwrap_or_default())
+        (!client.speaks_our_protocol()).then(|| EarlierDaemon {
+            version: t.status.version.clone(),
+        })
     });
     Status {
         pid: std::process::id(),

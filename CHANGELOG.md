@@ -32,7 +32,7 @@ has the downloads and the full commit lists.
   listening nowhere. The guide covers installing, the service, upgrading and backing up.
 - A shell with no `XDG_RUNTIME_DIR`, such as one from `sudo -iu`, now finds the terminal daemon the
   user's own services started, instead of starting a second one and taking the first one's agents
-  for ended.
+  for ended. A daemon an earlier release started in such a shell is still found where it is.
 - **`ys project add <path>`** adds a repository as a project, as the app's Open project does.
 - `ys workflow run`, `ys test run` and `ys schedule run` say so and queue nothing on a profile that
   `yardsort-host` runs, which does not carry them out yet. The app, started on such a profile, says

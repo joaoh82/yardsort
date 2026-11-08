@@ -265,7 +265,9 @@ paired device loses it. Works whether `serve` is running or not.
 
 Where `XDG_RUNTIME_DIR` is not set, as in a shell from `sudo -iu` or `su`, the sockets are looked for in
 `/run/user/<uid>`, the folder logind keeps for that user, so that such a shell and the systemd service
-reach the same host and the same daemon.
+reach the same host and the same daemon. A daemon that an earlier release started in such a shell is
+listening at `daemon.sock` in the profile; it is still looked for there, and used for as long as it runs,
+so upgrading does not start a second one beside it.
 
 Give `ys` the same profile as `serve`, with the same `YARDSORT_DATA_DIR` or `--data-dir`, or it looks at
 another one.
