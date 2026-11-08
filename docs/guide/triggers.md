@@ -235,11 +235,14 @@ A name is lowercase letters, digits, `-` and `_`, starting with a letter or a di
 characters; `ys event emit custom.migration-written` is taken too. Nothing has to be declared
 first. Instead, `ys event emit` says whether a trigger there listens for that name, and when none
 does, which names they do listen for, so a typo shows at once. One trigger can listen for more
-than one name, with `--on` once for each. A custom event is about the workspace, so it can share
-a trigger with `workspace.done`, `test.finished` and `workflow.finished`, and the cap counts per
-workspace. `--note` is there for the workflow as `{{ event.note }}`, the name as
-`{{ event.name }}`, and the commit the worktree was on as `{{ event.head }}`. Raised while
-Yardsort is closed, it is heard when it next opens.
+than one name, with `--on` once for each. Each name is gathered on its own: two different names
+raised together start two runs, one after the other, each with its own name and note, while the
+same name twice is one run with the newer note, as any burst is. A custom event is about the
+workspace, so it can share a trigger with `workspace.done`, `test.finished` and
+`workflow.finished`, and the cap counts per workspace. `--note` is there for the workflow as
+`{{ event.note }}`, the name as `{{ event.name }}`, and the commit the worktree was on as
+`{{ event.head }}`. Raised while Yardsort is closed, even before it has ever opened, it is heard
+when it next opens, by the triggers that were saved before it was raised.
 
 ## When a run starts
 

@@ -400,21 +400,24 @@ impl Store {
     // --- fires ----------------------------------------------------------------------------
 
     /// The fire of this trigger for this subject that has not been decided yet: gathering, or
-    /// waiting for a run in its way.
+    /// waiting for a run in its way. With `event`, only one of that kind: a custom event's name
+    /// gathers apart from the trigger's other names.
     pub fn open_trigger_fire(
         &self,
         trigger_id: &str,
         subject: &str,
+        event: Option<&str>,
     ) -> StoreResult<Option<TriggerFireRow>> {
         Ok(self
             .conn()
             .query_row(
                 &format!(
                     "SELECT {FIRE_COLUMNS} FROM trigger_fires
-                     WHERE trigger_id = ? AND subject = ? AND outcome IN ('gathering', 'waiting')
+                     WHERE trigger_id = ?1 AND subject = ?2 AND outcome IN ('gathering', 'waiting')
+                       AND (?3 IS NULL OR event = ?3)
                      ORDER BY first_at, rowid LIMIT 1"
                 ),
-                params![trigger_id, subject],
+                params![trigger_id, subject, event],
                 fire_from_row,
             )
             .optional()?)
@@ -774,15 +777,6 @@ impl Store {
         ))?;
         let rows = stmt.query_map(params![seq, limit as i64], custom_from_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
-    }
-
-    /// The newest custom event's sequence number, or 0.
-    pub fn newest_custom_event(&self) -> StoreResult<i64> {
-        Ok(self.conn().query_row(
-            "SELECT COALESCE(max(seq), 0) FROM custom_events",
-            [],
-            |row| row.get(0),
-        )?)
     }
 
     // --- what the trigger thread follows --------------------------------------------------

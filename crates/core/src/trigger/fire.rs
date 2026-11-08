@@ -227,7 +227,10 @@ pub fn observe(store: &Store, seen: &Observation) -> IpcResult<usize> {
         let kind = seen.kind();
         let mut facts = seen.facts.clone();
         facts.insert("kind".into(), kind.clone());
-        match store.open_trigger_fire(&trigger.id, &subject)? {
+        // Each custom name is its own milestone, with its own note: two names in one look
+        // start two runs, not one that knows only the last.
+        let apart = (seen.event == TriggerEvent::Custom).then_some(kind.as_str());
+        match store.open_trigger_fire(&trigger.id, &subject, apart)? {
             Some(open) => {
                 if seen.post.is_some() {
                     let gathered: BTreeMap<String, String> =

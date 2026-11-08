@@ -340,6 +340,11 @@ hears it. Settled when slice 4 was built:
   (`names`), and is written `custom.<name>` everywhere a person reads or writes it: `--on`, the
   list, the history, `{{ event.kind }}`. One trigger can listen for several names. `custom`
   alone, or names on a trigger that does not listen for `custom`, is refused at saving.
+- **Each name gathers on its own.** The subject is the workspace, but an open fire takes only
+  events of its own kind (`open_trigger_fire` is given it for `custom`), so two names in one look
+  are two fires, each with its own name and note, the second waiting for the first's run as any
+  event does. Gathering would otherwise keep only the last name, and a workflow that branches on
+  `{{ event.name }}` would follow it. The same name twice gathers as any event does.
 - **A name is lowercase letters, digits, `-` and `_`**, starting with a letter or a digit, up to
   40 characters, so it reads the same in a file, a flag and a sentence. One that only differs by
   case is told the lowercase one that would do.
@@ -360,7 +365,11 @@ hears it. Settled when slice 4 was built:
   agent; its own ending is `workflow.finished`. A step can come later if a use needs it.
 - **Its own table, `custom_events`** (migration `0025`), for the done signal's reason: the note is
   someone's own words, which no `agent_events` row may hold. It is read from a cursor, so one
-  raised while the app is closed is heard when it opens, and `ys event emit` says so.
+  raised while the app is closed is heard when it opens, and `ys event emit` says so. Unlike the
+  other sources' cursors, its first look starts at the first row, not the newest: every row was
+  raised for a trigger to hear, none comes from before triggers, and a trigger saved afterwards
+  still ignores it by its `since`. Starting at the newest would drop an event raised on a profile
+  whose app had not yet opened this version.
 - **Agents are not told about it.** Yardsort tells an agent about `ys workspace done` because it
   knows when that is; it cannot know when a user's own event should be raised, so whoever writes
   the agent's instructions names the command.
@@ -819,6 +828,12 @@ WebKit's remote inspector:
 
 The check found one mistake, in the smoke tests guide: a `run` step is `action: run` with
 `program: ys`, not `run: ys`.
+
+Review found two more, both fixed before merging. The custom events cursor started at the newest
+row, as the other sources' do, so an event raised on a profile whose app had never ticked this
+version was skipped when it first did; the hand check above reopened an app that had already
+been open, which is the case that worked. And a trigger on several names had one open fire for
+them all, so two names in one look started one run that knew only the last name and note.
 
 ## Not in version one, on purpose
 

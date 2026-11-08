@@ -697,3 +697,56 @@ fn a_custom_event_starts_only_the_triggers_that_listen_for_its_name() {
         format!("workspace:{}", tx.workspace_id())
     );
 }
+
+#[test]
+fn each_custom_name_a_trigger_listens_for_gathers_on_its_own() {
+    let tx = Tx::new();
+    let trigger = tx.on_custom(&["migration-written", "seeded"]);
+    let noted = |name: &str, note: &str, at: i64| {
+        let mut seen = custom(&tx, name, at);
+        seen.facts.insert("note".into(), note.into());
+        seen
+    };
+    // Three emits in one look: two milestones, the first of them twice.
+    for seen in [
+        noted("migration-written", "0042 adds the column", NOW + 1),
+        noted("seeded", "ten rows", NOW + 2),
+        noted("migration-written", "0043 drops the old one", NOW + 3),
+    ] {
+        assert_eq!(observe(tx.store(), &seen).unwrap(), 1);
+    }
+    let open = fires(&tx, &trigger.id);
+    assert_eq!(open.len(), 2, "one fire for each name");
+
+    let event_of = |run_id: &str| {
+        let run = tx.store().workflow_run(run_id).unwrap().unwrap();
+        Facts::parse(&run.context).event
+    };
+    let field = |event: &BTreeMap<String, String>, name: &str| event.get(name).cloned();
+
+    // The first milestone starts its run; the second waits for it, as any event does.
+    let fired = tick_at(&tx, NOW + 3);
+    assert_eq!(fired.len(), 2);
+    let first = &fired[0].fire;
+    assert_eq!(first.event, "custom.migration-written");
+    assert_eq!(first.outcome, "started");
+    // The same name twice is one run, with the newest note, as any event gathers.
+    assert_eq!(first.events_count, 2);
+    let event = event_of(first.run_id.as_deref().unwrap());
+    assert_eq!(field(&event, "name").as_deref(), Some("migration-written"));
+    assert_eq!(
+        field(&event, "note").as_deref(),
+        Some("0043 drops the old one")
+    );
+    assert_eq!(fired[1].fire.event, "custom.seeded");
+    assert_eq!(fired[1].fire.outcome, "waiting");
+
+    finish(&tx, first.run_id.as_deref().unwrap(), "succeeded");
+    let fired = tick_at(&tx, NOW + 4);
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].fire.outcome, "started");
+    assert_eq!(fired[0].fire.events_count, 1);
+    let event = event_of(fired[0].fire.run_id.as_deref().unwrap());
+    assert_eq!(field(&event, "name").as_deref(), Some("seeded"));
+    assert_eq!(field(&event, "note").as_deref(), Some("ten rows"));
+}

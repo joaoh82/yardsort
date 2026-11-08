@@ -11,7 +11,9 @@
 //!   ([`settled_terminal`], [`busy_terminal`]).
 //!
 //! The first time a cursor is read it starts at the newest row: what happened before Yardsort
-//! had triggers is never news.
+//! had triggers is never news. Custom events are the exception: every row was written by
+//! `ys event emit` for a trigger to hear, so they are read from the first, even one raised before
+//! the app ever opened. A trigger saved after one still ignores it, by its `since`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -128,10 +130,8 @@ pub fn read_done(store: &Store) -> IpcResult<Vec<Observation>> {
 /// `ys event emit` since the last look. One raised by a smoke test run's `run` step is one
 /// deeper than that run, so a chain of tests raising each other's events stops.
 pub fn read_custom(store: &Store) -> IpcResult<Vec<Observation>> {
-    let newest = store.newest_custom_event()?;
-    let Some(after) = cursor(store, CUSTOM, newest)? else {
-        return Ok(Vec::new());
-    };
+    // From the first row, not the newest: see the module's note.
+    let after = store.trigger_cursor(CUSTOM)?.unwrap_or(0);
     let rows = store.custom_events_after(after, BATCH)?;
     let mut seen = Vec::new();
     for row in &rows {
@@ -368,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn a_custom_event_is_read_once_and_one_a_test_raised_is_one_deeper_than_it() {
+    fn a_custom_event_is_read_once_from_the_first_and_one_a_test_raised_is_one_deeper_than_it() {
         let tx = Tx::new();
         let raise = |name: &str, run_id: Option<&str>| {
             tx.store()
@@ -382,11 +382,13 @@ mod tests {
                 })
                 .unwrap();
         };
+        // Raised before the trigger thread ever looked: still news.
         raise("before", None);
-        assert!(read_custom(tx.store()).unwrap().is_empty(), "not news");
         raise("deploy", None);
         let seen = read_custom(tx.store()).unwrap();
-        assert_eq!(seen.len(), 1);
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].kind(), "custom.before");
+        let seen = &seen[1..];
         assert_eq!(seen[0].event, TriggerEvent::Custom);
         assert_eq!(seen[0].kind(), "custom.deploy");
         assert_eq!(seen[0].facts.get("note").map(String::as_str), Some("ready"));
