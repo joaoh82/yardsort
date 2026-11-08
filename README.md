@@ -482,7 +482,8 @@ never sees their credentials.
 
 The [quick start guide](docs/quick-start.md) walks through it with pictures, and the
 [documentation](docs/README.md) covers every part of the app. Both are also on the website, at
-[yardsort.sh/docs](https://yardsort.sh/docs/).
+[yardsort.sh/docs](https://yardsort.sh/docs/). Moving local worktrees from Conductor? See
+[Migrate from Conductor](docs/guide/migrate-from-conductor.md).
 
 ## Assist: judgment from Jev, if you want it
 
@@ -544,6 +545,7 @@ says no.
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                                              |
 | [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                                         |
+| [Migrate from Conductor](docs/guide/migrate-from-conductor.md)                                   | Import existing local worktrees and reconfigure scripts by hand                     |
 | [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off, shared conversations |
 | [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                                          |
 | [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                             |
