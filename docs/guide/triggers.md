@@ -1,11 +1,11 @@
 # Triggers
 
-A trigger starts a [workflow](workflows.md) or a [smoke test](smoke-tests.md) when something
-happens in a workspace, instead of when you press **Run** or a [schedule](schedules.md)'s time
-comes: an agent says its work is done, an agent finishes a turn or exits, a smoke test or a
-workflow run ends, something happens on the workspace's pull request — it opens, a review or a
-comment comes in, its checks fail — or something you name happens, which an agent, a smoke test
-or a script says with [`ys event emit`](#custom-events). What it starts is an ordinary run, in that workspace, with the
+A trigger starts a [workflow](workflows.md) or a [smoke test](smoke-tests.md) when something happens
+in a workspace, instead of when you press **Run** or a [schedule](schedules.md)'s time comes: an
+agent says its work is done, an agent finishes a turn or exits, a smoke test or a workflow run ends,
+something happens on the workspace's pull request — it opens, a review or a comment comes in, its
+checks fail — or something you name happens, which an agent, a smoke test or a script says with
+[`ys event emit`](#custom-events). What it starts is an ordinary run, in that workspace, with the
 inputs you gave the trigger.
 
 For example: when someone reviews the pull request of `fix-login`, tell its agent to address the
@@ -16,11 +16,13 @@ composer offers the [ready-made ones](#ready-made-triggers) for each new workspa
 `ys trigger` does all of it from a terminal. The runs show in the workflow's runs and in
 **Tests** like any other, marked _triggered_ with the trigger's name.
 
+![Triggers: every trigger with its event, what it runs and how its last run went, and Address reviews open with its history](../images/triggers.png)
+
 Three things to know before you make one:
 
 - **Triggers fire while Yardsort is open.** What happened while it was closed — an agent that ran
-  `ys workspace done` or `ys event emit`, a run that ended, a turn its agent reported, a review posted — is found
-  when it next opens, and acted on once.
+  `ys workspace done` or `ys event emit`, a run that ended, a turn its agent reported, a review
+  posted — is found when it next opens, and acted on once.
 - **Only what happens after you make it counts.** A trigger never fires for something that
   happened before it was saved, or while it was switched off.
 - **A trigger approves nothing.** A smoke test file nobody has approved waits for you, as it does
@@ -28,8 +30,8 @@ Three things to know before you make one:
 
 ## Ready-made triggers
 
-Five triggers come ready made, each an event and a built-in [workflow](workflows.md#where-workflows-come-from),
-with at most one question:
+Five triggers come ready made, each an event and a built-in
+[workflow](workflows.md#where-workflows-come-from), with at most one question:
 
 | Preset               | When                                                                        | Runs              | Asks for                  |
 | -------------------- | --------------------------------------------------------------------------- | ----------------- | ------------------------- |
@@ -39,15 +41,15 @@ with at most one question:
 | `review-when-done`   | The agent says its work is done                                             | `review-branch`   | `reviewer`: who reviews   |
 | `smoke-when-done`    | The agent says its work is done                                             | `smoke-then-tell` | `suite`: which smoke test |
 
-**In the composer**, under the message, each preset has a box to tick, with its one question
-beside it: _☐ Review when the work is done, by [Codex ▾]_. Each one ticked becomes a trigger on
-the new workspace before its agent starts, so an agent whose workspace listens for
+**In the composer**, under the message, each preset has a box to tick, with its one question beside
+it: _☐ Review when the work is done, by [Codex ▾]_. Each one ticked becomes a trigger on the new
+workspace before its agent starts, so an agent whose workspace listens for
 [`ys workspace done`](#the-done-signal) is told about it in its first message. The composer
-remembers, per project, which were ticked last time and their answers. **Smoke test when the work
-is done** offers the smoke tests in the project's own checkout, and cannot be ticked in a project
-that has none. While those tests are still being read, a ticked one says so and **Start** waits,
-so it is never left out unasked. A preset that cannot be added — its test is not on the new branch, say — is said
-once the workspace has started; the workspace and its agent start all the same.
+remembers, per project, which were ticked last time and their answers. **Smoke test when the work is
+done** offers the smoke tests in the project's own checkout, and cannot be ticked in a project that
+has none. While those tests are still being read, a ticked one says so and **Start** waits, so it is
+never left out unasked. A preset that cannot be added — its test is not on the new branch, say — is
+said once the workspace has started; the workspace and its agent start all the same.
 
 **In the trigger dialog**, **Start from** fills the dialog in from a preset, to change before
 saving. Left without a name, the trigger is called what the preset is.
@@ -259,9 +261,9 @@ time, because another time will come; something that happened will not happen ag
 **It stops before it loops.** Three limits, each told to you once:
 
 - **The cap.** At most `--cap` runs — three by default — for one agent session, for an agent's
-  events, for one pull request, for the pull request's, or for the workspace, for the rest. The next fire is **capped**, you are told, and the
-  trigger starts nothing more for it until you press **Reset** on it in the **Triggers** view, or
-  run `ys trigger reset`.
+  events, for one pull request, for the pull request's, or for the workspace, for the rest. The next
+  fire is **capped**, you are told, and the trigger starts nothing more for it until you press
+  **Reset** on it in the **Triggers** view, or run `ys trigger reset`.
 - **The rate.** At most ten runs an hour for one trigger, whatever the cap.
 - **Chains.** A run a trigger started can end in an event another trigger listens for. A run a
   person or a schedule started is depth 0; a run started by the ending of a run of depth _n_ is
