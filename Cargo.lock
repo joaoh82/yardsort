@@ -4432,6 +4432,7 @@ name = "pty-ipc"
 version = "0.22.2"
 dependencies = [
  "interprocess",
+ "libc",
  "pty-host",
  "serde",
  "serde_json",

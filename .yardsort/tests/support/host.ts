@@ -5,13 +5,13 @@
 //   bun .yardsort/tests/support/host.ts <run dir> sign-in <name>
 //   bun .yardsort/tests/support/host.ts <run dir> pair
 //
-// The profile is the environment's (`YARDSORT_DATA_DIR`, `YARDSORT_CREDENTIALS_DIR`).
+// `yardsort-host` runs through headless.sh: the build headless-build.sh made, on this run's profile.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const [dir, doing, named] = process.argv.slice(2);
-const HOST = "target/debug/yardsort-host";
+const HOST = ["sh", ".yardsort/tests/support/headless.sh", "yardsort-host"];
 const server = JSON.parse(readFileSync(join(dir, "stand-in.json"), "utf8").split("\n")[0]).ready
   .server;
 
@@ -73,7 +73,7 @@ async function signInIn(browser: string): Promise<string> {
 
 switch (doing) {
   case "sign-in": {
-    const signing = Bun.spawn([HOST, "sign-in", server, "--name", named], {
+    const signing = Bun.spawn([...HOST, "sign-in", server, "--name", named], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -95,7 +95,7 @@ switch (doing) {
   }
   case "pair": {
     // A terminal of the operator's own: `script` gives the command one.
-    const pairing = Bun.spawn(["script", "-qefc", `${HOST} pair`, "/dev/null"], {
+    const pairing = Bun.spawn(["script", "-qefc", `${HOST.join(" ")} pair`, "/dev/null"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "inherit",

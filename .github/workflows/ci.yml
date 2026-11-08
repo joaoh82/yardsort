@@ -143,6 +143,83 @@ jobs:
         timeout-minutes: 15
         run: bun scripts/server-dev.mjs e2e
 
+  # The headless host as it ships: the tarball, run with an empty environment, on each
+  # architecture; and on x86_64 the container image, which signs in to the stand-in server, links,
+  # and stops cleanly. The image is tried here only: the local smoke test runs the tarball. See
+  # docs/guide/headless-host.md.
+  host-package:
+    name: Host package (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-22.04
+          - arch: aarch64
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: host-package
+
+      - name: Build the tarball
+        run: echo "TARBALL=$(scripts/host-package.sh)" >> "$GITHUB_ENV"
+
+      - name: Run it with an empty environment
+        run: |
+          mkdir unpacked && tar -xzf "$TARBALL" -C unpacked
+          bin="$(echo unpacked/*/bin)"
+          for program in yardsort-host ys; do
+            env -i HOME="$HOME" PATH=/usr/bin:/bin "$bin/$program" --version
+          done
+          # The newest glibc it needs: the oldest distribution it runs on must have this one.
+          objdump -T "$bin/yardsort-host" "$bin/ys" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.arch == 'x86_64'
+        with:
+          bun-version: 1.4.2
+
+      # Its user is the runner's, as an operator makes it the repositories' owner.
+      - name: Build the image
+        if: matrix.arch == 'x86_64'
+        run: |
+          docker build -f crates/host/Dockerfile --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
+            -t yardsort-host .
+          docker run --rm yardsort-host --version
+          docker run --rm --entrypoint ys yardsort-host --version
+
+      - name: The image signs in to the stand-in, links, and stops cleanly
+        if: matrix.arch == 'x86_64'
+        timeout-minutes: 15
+        env:
+          YS_RUN_DIR: ${{ runner.temp }}/host-image
+          YS_INPUT_BUILD: image
+        run: |
+          cargo build -q -p yardsort-server --example stand-in
+          mkdir -p "$YS_RUN_DIR/profile" && mkdir -m 700 "$YS_RUN_DIR/credentials"
+          (tail -f /dev/null | target/debug/examples/stand-in > "$YS_RUN_DIR/stand-in.json") &
+          until grep -q ready "$YS_RUN_DIR/stand-in.json" 2>/dev/null; do sleep 1; done
+          bun .yardsort/tests/support/host.ts "$YS_RUN_DIR" sign-in "CI box"
+          docker run -d --name host --network host -v "$YS_RUN_DIR/profile:/data" \
+            -v "$YS_RUN_DIR/credentials:/credentials" yardsort-host
+          for _ in $(seq 60); do
+            docker exec host yardsort-host status | tee status.txt | grep -q "Link: connected" && break
+            sleep 1
+          done
+          cat status.txt
+          grep -q "Link: connected" status.txt
+          docker stop host
+          code="$(docker inspect host --format '{{.State.ExitCode}}')"
+          docker logs host
+          [ "$code" = 0 ] || { echo "::error::serve exited $code when stopped"; exit 1; }
+
   # Installers for all three platforms. Only on main (and on demand): these are the slow,
   # expensive jobs — macOS minutes are billed at 10x on private repos.
   website:

@@ -238,10 +238,17 @@ fn status(home: &HostHome) -> Status {
                 .map(|g| g.len())
                 .unwrap_or(0),
         });
+    // Kept after an upgrade because agents run in it (`daemon::connect`): it still runs them, but
+    // shares no terminal beyond this computer until it is replaced.
+    let earlier_daemon = home.terminals.as_ref().and_then(|t| {
+        let client = t.client.as_ref()?;
+        (!client.speaks_our_protocol()).then(|| t.status.version.clone().unwrap_or_default())
+    });
     Status {
         pid: std::process::id(),
         remote,
         terminals,
+        earlier_daemon,
     }
 }
 

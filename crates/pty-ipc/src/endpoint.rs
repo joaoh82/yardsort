@@ -37,10 +37,7 @@ impl Endpoint {
         }
         // A per-user runtime directory is the tidiest home for a socket: it is already private,
         // and the OS clears it when the session ends.
-        let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .filter(|dir| dir.is_absolute())
-            .map(|dir| dir.join("yardsort"));
+        let runtime = runtime_dir().map(|dir| dir.join("yardsort"));
         let candidates = [
             runtime.map(|dir| dir.join(format!("{tag}.sock"))),
             Some(data_dir.join("daemon.sock")),
@@ -105,10 +102,7 @@ impl std::fmt::Display for Endpoint {
 /// each, since the two may not see the same `XDG_RUNTIME_DIR`.
 pub fn socket_candidates(data_dir: &Path, name: &str) -> Vec<PathBuf> {
     let tag = tag_for(data_dir);
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute())
-        .map(|dir| dir.join("yardsort").join(format!("{tag}.{name}.sock")));
+    let runtime = runtime_dir().map(|dir| dir.join("yardsort").join(format!("{tag}.{name}.sock")));
     [
         runtime,
         Some(data_dir.join(format!("{name}.sock"))),
@@ -118,6 +112,36 @@ pub fn socket_candidates(data_dir: &Path, name: &str) -> Vec<PathBuf> {
     .flatten()
     .filter(|path| path.as_os_str().len() <= MAX_SOCKET_PATH)
     .collect()
+}
+
+/// The per-user runtime directory: `XDG_RUNTIME_DIR`, or on Linux, where that is not set, the one
+/// logind makes for this user, `/run/user/<uid>`, if it is there and this user's alone. A shell
+/// from `sudo -iu` or `su` has no `XDG_RUNTIME_DIR` while the user's systemd services do, and
+/// both must still reach the same daemon: one that missed it would start a second, and take the
+/// first one's agents for ended.
+fn runtime_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+    {
+        return Some(dir);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: `geteuid` cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        private_to(&PathBuf::from(format!("/run/user/{uid}")), uid)
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
+/// `dir`, if it is a directory that `uid` owns and nobody else may enter.
+#[cfg(target_os = "linux")]
+fn private_to(dir: &Path, uid: u32) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(dir).ok()?;
+    (meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0).then(|| dir.to_path_buf())
 }
 
 /// FNV-1a over the directory's bytes. Hand-rolled on purpose: `DefaultHasher` is explicitly not
@@ -176,6 +200,21 @@ mod tests {
             "{} is longer than a unix socket path may be",
             path.display()
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn logind_s_runtime_directory_counts_only_when_it_is_this_users_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: `geteuid` cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(private_to(dir.path(), uid), Some(dir.path().to_path_buf()));
+        assert_eq!(private_to(dir.path(), uid + 1), None, "another user's");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(private_to(dir.path(), uid), None, "others may enter it");
+        assert_eq!(private_to(&dir.path().join("gone"), uid), None);
     }
 
     #[cfg(unix)]
