@@ -701,6 +701,14 @@ What building it settled or changed:
   cap is in force, a run started before it still going or not.
 - **A trigger made from a preset in the dialog is called what the preset is**, as `ys` calls it,
   not after its workflow. Found in the check by hand.
+- **Start waits for a ticked preset's question** — found in review. While the project's smoke
+  tests were being read, a ticked **Smoke test when the work is done** had no answer, so pressing
+  **Start** left it out and said nothing, the box still ticked from last time. Start now waits
+  until the presets and the tests a ticked one asks about have been read; no tests at all once
+  they are is still the box that cannot be ticked.
+- **Open run opens that run** — found in review. On a workflow trigger it opened the workflow's
+  view with no run picked; the view now takes the run asked for when it opens
+  (`useWorkflowStore.showRun`), as a smoke test's tab already did.
 
 Checked by hand on 2026-11-08, in a development build on Linux with the throwaway profile
 `scripts/screenshots.sh` sets up, its stand-in `gh` answering the watch for #12 on

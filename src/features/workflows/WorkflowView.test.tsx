@@ -115,7 +115,14 @@ describe("WorkflowView", () => {
         problem: "No agent here can write one.",
       },
     });
-    useWorkflowStore.setState({ items: [], loaded: true, runs: {}, steps: {}, drafts: {} });
+    useWorkflowStore.setState({
+      items: [],
+      loaded: true,
+      runs: {},
+      steps: {},
+      drafts: {},
+      shownRun: {},
+    });
     useProjectsStore.setState({ workflowId: null });
     useSchedulesStore.setState({ started: [] });
     useTriggersStore.setState({ started: [] });
@@ -314,5 +321,45 @@ describe("WorkflowView", () => {
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
     expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
+  });
+
+  it("opens on the run asked for from elsewhere, once", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "succeeded",
+        requestedBy: "trigger",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "tell",
+        action: "notify",
+        status: "succeeded",
+        startedAt: null,
+        endedAt: null,
+        outputs: {},
+        note: "told it",
+      },
+    ]);
+    // Open run, on a trigger's history.
+    useWorkflowStore.getState().showRun("demo", "run-1");
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    expect(await within(runs).findByText("told it")).toBeInTheDocument();
+    expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
+    // Taken: the view opened from the sidebar next time starts with no run picked.
+    expect(useWorkflowStore.getState().shownRun.demo).toBeUndefined();
   });
 });

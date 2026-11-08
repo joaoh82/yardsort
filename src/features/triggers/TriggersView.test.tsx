@@ -60,7 +60,7 @@ beforeEach(() => {
     error: null,
   });
   useSmokeTestsStore.setState({ open: {}, shown: {} });
-  useWorkflowStore.setState({ items: [], loaded: true });
+  useWorkflowStore.setState({ items: [], loaded: true, shownRun: {} });
   useProjectsStore.setState({
     triggersOpen: true,
     triggersFocus: null,
@@ -143,6 +143,8 @@ describe("TriggersView", () => {
     // A workflow's run opens in the workflow's own view.
     await user.click(within(lines[0]!).getByRole("button", { name: "Open run" }));
     expect(useProjectsStore.getState().workflowId).toBe("address-review");
+    // On the run the line is about.
+    expect(useWorkflowStore.getState().shownRun["address-review"]).toBe("run-7");
   });
 
   it("offers Reset on a capped trigger, and says why it stopped", async () => {

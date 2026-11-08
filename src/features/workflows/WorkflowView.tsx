@@ -45,7 +45,17 @@ export function WorkflowView({ workflowId }: { workflowId: string }) {
   const [selection, setSelection] = useState<{ id: string | null } | null>(null);
   // A fresh request also lets a second click jump back to the same step after scrolling away.
   const selectStep = useCallback((id: string | null) => setSelection({ id }), []);
-  const [selectedRun, setSelectedRun] = useState<string | null>(null);
+  // A run asked for from elsewhere, such as a trigger's history, is the one selected. The view
+  // opens anew each time (it is keyed by workflow, and the view asking replaces it), so it is
+  // taken once, on opening.
+  const [selectedRun, setSelectedRun] = useState<string | null>(
+    () => useWorkflowStore.getState().shownRun[workflowId] ?? null,
+  );
+  useEffect(() => {
+    if (useWorkflowStore.getState().shownRun[workflowId]) {
+      useWorkflowStore.getState().showRun(workflowId, null);
+    }
+  }, [workflowId]);
   const runSteps = useWorkflowStore((s) => (selectedRun ? s.steps[selectedRun] : undefined));
   const [running, setRunning] = useState(false);
   const [scheduling, setScheduling] = useState(false);

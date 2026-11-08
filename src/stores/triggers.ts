@@ -19,6 +19,8 @@ interface TriggersState {
   started: TriggeredRun[];
   /** The ready-made triggers. They never change while the app runs. */
   presets: TriggerPreset[];
+  /** The presets were asked for and the answer came, or the asking failed. */
+  presetsLoaded: boolean;
   error: string | null;
 
   load: () => Promise<void>;
@@ -41,6 +43,7 @@ export const useTriggersStore = create<TriggersState>((set, get) => ({
   history: {},
   started: [],
   presets: [],
+  presetsLoaded: false,
   error: null,
 
   async load() {
@@ -66,9 +69,9 @@ export const useTriggersStore = create<TriggersState>((set, get) => ({
   async loadPresets() {
     if (!hasCore() || get().presets.length > 0) return;
     try {
-      set({ presets: await ipc.triggerPresets() });
+      set({ presets: await ipc.triggerPresets(), presetsLoaded: true });
     } catch (error) {
-      set({ error: errorMessage(error) });
+      set({ error: errorMessage(error), presetsLoaded: true });
     }
   },
 

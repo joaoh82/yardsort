@@ -20,6 +20,8 @@ export type Picks = Record<string, string>;
 /** What the presets' questions can be answered with in a project. */
 export interface Choices {
   presets: TriggerPreset[];
+  /** Whether the presets have been read: until then, a remembered tick has no preset yet. */
+  presetsLoaded: boolean;
   /** The agents that can review: enabled and installed. */
   agents: HarnessInfo[];
   /** The project's runnable smoke tests, or `null` while they are being read. */
@@ -29,6 +31,7 @@ export interface Choices {
 /** The presets, and what their questions can be answered with in this project. */
 export function usePresetChoices(projectId: string, wanted: boolean): Choices {
   const presets = useTriggersStore((s) => s.presets);
+  const presetsLoaded = useTriggersStore((s) => s.presetsLoaded);
   const harnesses = useHarnessStore((s) => s.harnesses);
   const agents = useMemo(() => harnesses.filter((h) => h.enabled && h.resolvedPath), [harnesses]);
   const [tests, setTests] = useState<{ project: string; items: TestItem[] } | null>(null);
@@ -54,7 +57,7 @@ export function usePresetChoices(projectId: string, wanted: boolean): Choices {
         : null,
     [tests, projectId],
   );
-  return { presets, agents, tests: runnable };
+  return { presets, presetsLoaded, agents, tests: runnable };
 }
 
 /** The answers a preset's question can have here. */
@@ -72,6 +75,17 @@ function answer(preset: TriggerPreset, picked: string, choices: Choices): string
   if (!preset.asks) return "";
   const can = options(preset, choices);
   return (can.find((option) => option.id === picked) ?? can[0])?.id ?? null;
+}
+
+/** Whether a ticked preset cannot be answered yet: the presets, or the project's smoke tests a
+ *  preset asks about, are still being read. Starting then would leave that preset out, so the
+ *  composer waits. A question with nothing to answer it once they are read is another matter. */
+export function pending(picks: Picks, choices: Choices): boolean {
+  if (Object.keys(picks).length === 0) return false;
+  if (!choices.presetsLoaded) return true;
+  return choices.presets.some(
+    (preset) => preset.id in picks && preset.asks?.input === "suite" && choices.tests === null,
+  );
 }
 
 /** The ticked presets as the core takes them, leaving out one whose question has no answer. */
@@ -141,6 +155,9 @@ export function ComposerPresets({
                     </option>
                   ))}
                 </select>
+              )}
+              {ticked && preset.asks?.input === "suite" && choices.tests === null && (
+                <span>— reading the smoke tests…</span>
               )}
               {none && (
                 <span>

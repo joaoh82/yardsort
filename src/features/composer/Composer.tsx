@@ -16,6 +16,7 @@ import { ConversationsDialog } from "@/features/terminal/ConversationsDialog";
 import {
   answered,
   ComposerPresets,
+  pending,
   usePresetChoices,
   type Picks,
 } from "@/features/triggers/ComposerPresets";
@@ -271,7 +272,11 @@ export function Composer({ project, runIn }: { project: Project; runIn?: Workspa
     setSuggested(null);
   };
 
-  const ready = !busy && !!harness?.resolvedPath && (!!runIn || base !== "");
+  // A ticked preset whose question cannot be answered yet would be left out, so Start waits.
+  const ready =
+    !busy &&
+    !!harness?.resolvedPath &&
+    (!!runIn || (base !== "" && !pending(picks, presetChoices)));
   const [mode, branch] = [base.slice(0, base.indexOf(":")), base.slice(base.indexOf(":") + 1)];
   // The packet tells the agent the forked branch's commits are its history, which is true only
   // when the new branch starts there: picked something else under Branch, or the forked branch

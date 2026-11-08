@@ -44,7 +44,8 @@ the new workspace before its agent starts, so an agent whose workspace listens f
 [`ys workspace done`](#the-done-signal) is told about it in its first message. The composer
 remembers, per project, which were ticked last time and their answers. **Smoke test when the work
 is done** offers the smoke tests in the project's own checkout, and cannot be ticked in a project
-that has none. A preset that cannot be added — its test is not on the new branch, say — is said
+that has none. While those tests are still being read, a ticked one says so and **Start** waits,
+so it is never left out unasked. A preset that cannot be added — its test is not on the new branch, say — is said
 once the workspace has started; the workspace and its agent start all the same.
 
 **In the trigger dialog**, **Start from** fills the dialog in from a preset, to change before
@@ -297,7 +298,8 @@ refused, waiting for approval, or with no workspace.
 
 A trigger opens to its switch, **Edit…**, **Reset** when it is capped, **Remove…**, what it is
 set to, the pull request it is watching, and its history, newest first, each line with **Open
-run** when it started one. `ys trigger fires <trigger>` lists the same:
+run** when it started one: that run, open in the workflow's view or the workspace's smoke tests.
+`ys trigger fires <trigger>` lists the same:
 
 | Outcome                            | Meaning                                                                      |
 | ---------------------------------- | ---------------------------------------------------------------------------- |

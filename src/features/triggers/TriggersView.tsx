@@ -5,6 +5,7 @@ import type { TriggerFire, TriggerItem } from "@/lib/ipc";
 import { useProjectsStore } from "@/stores/projects";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTriggersStore } from "@/stores/triggers";
+import { useWorkflowStore } from "@/stores/workflows";
 import { TriggerDialog } from "./TriggerDialog";
 import {
   durationWords,
@@ -239,6 +240,7 @@ function TriggerDetail({
       useProjectsStore.getState().select(trigger.workspaceId);
       useSmokeTestsStore.getState().openRun(trigger.workspaceId, fire.runId);
     } else {
+      useWorkflowStore.getState().showRun(trigger.targetId, fire.runId);
       useProjectsStore.getState().openWorkflow(trigger.targetId);
     }
   };

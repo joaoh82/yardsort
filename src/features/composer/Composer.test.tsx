@@ -125,7 +125,7 @@ describe("Composer", () => {
       ui: {},
     });
     useTerminalStore.setState({ tabs: [], active: {}, lastSize: { cols: 100, rows: 30 } });
-    useTriggersStore.setState({ presets: [] });
+    useTriggersStore.setState({ presets: [], presetsLoaded: false });
   });
 
   it("starts a workspace with the message on Enter and lands in its terminal", async () => {
@@ -971,6 +971,43 @@ describe("Composer with Assist", () => {
     expect(
       within(again).getByRole("combobox", { name: "Review when the work is done: Who reviews" }),
     ).toHaveValue("codex");
+  });
+
+  it("holds Start while a ticked preset's smoke tests are still being read", async () => {
+    const created = worktree("app", "fix-login");
+    core.workspaceCreate.mockResolvedValue({
+      workspace: created,
+      session: session(created.id),
+      refusedPresets: [],
+    });
+    core.triggerPresets.mockResolvedValue(triggerPresets);
+    let tests: (found: unknown[]) => void = () => {};
+    core.testListInProject.mockReturnValue(new Promise((resolve) => (tests = resolve)));
+    // Ticked last time in the project.
+    useProjectsStore.setState({
+      ui: { "composer.last.p-app": JSON.stringify({ presets: { "smoke-when-done": "login" } }) },
+    });
+    const user = await renderComposer();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "Fix the login bug");
+    const presets = await screen.findByRole("group", {
+      name: "When something happens in the new workspace",
+    });
+    expect(
+      within(presets).getByRole("checkbox", { name: "Smoke test when the work is done" }),
+    ).toBeChecked();
+    expect(within(presets).getByText("— reading the smoke tests…")).toBeInTheDocument();
+    const start = screen.getByRole("button", { name: "Start" });
+    expect(start).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: /work on/ }), "{Enter}");
+    expect(core.workspaceCreate).not.toHaveBeenCalled();
+
+    const login = { id: "login", name: "login", runnable: true, browserMissing: false };
+    tests([login]);
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.click(start);
+    expect(core.workspaceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ presets: [{ id: "smoke-when-done", answer: "login" }] }),
+    );
   });
 
   it("says which ticked presets were refused once the workspace has started", async () => {
