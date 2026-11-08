@@ -3,8 +3,9 @@
 A trigger starts a [workflow](workflows.md) or a [smoke test](smoke-tests.md) when something
 happens in a workspace, instead of when you press **Run** or a [schedule](schedules.md)'s time
 comes: an agent says its work is done, an agent finishes a turn or exits, a smoke test or a
-workflow run ends, or something happens on the workspace's pull request — it opens, a review or a
-comment comes in, its checks fail. What it starts is an ordinary run, in that workspace, with the
+workflow run ends, something happens on the workspace's pull request — it opens, a review or a
+comment comes in, its checks fail — or something you name happens, which an agent, a smoke test
+or a script says with [`ys event emit`](#custom-events). What it starts is an ordinary run, in that workspace, with the
 inputs you gave the trigger.
 
 For example: when someone reviews the pull request of `fix-login`, tell its agent to address the
@@ -18,7 +19,7 @@ composer offers the [ready-made ones](#ready-made-triggers) for each new workspa
 Three things to know before you make one:
 
 - **Triggers fire while Yardsort is open.** What happened while it was closed — an agent that ran
-  `ys workspace done`, a run that ended, a turn its agent reported, a review posted — is found
+  `ys workspace done` or `ys event emit`, a run that ended, a turn its agent reported, a review posted — is found
   when it next opens, and acted on once.
 - **Only what happens after you make it counts.** A trigger never fires for something that
   happened before it was saved, or while it was switched off.
@@ -70,9 +71,11 @@ The dialog asks its questions in the order they can be answered:
 
 - **Where**: the workspace, and whether the trigger listens to any agent in it or only to one
   (see [One agent's trigger](#one-agents-trigger)).
-- **When**: the [events](#what-it-listens-for), in three groups — the agent, a run, the pull
-  request — then the filters of the ones ticked. A trigger is about one kind of thing, so events
-  of another group are greyed out once one is ticked; make a second trigger for those.
+- **When**: the [events](#what-it-listens-for), in four groups — the agent, a run, the pull
+  request, something you name — then the filters of the ones ticked. A trigger is about one kind
+  of thing — an agent, the pull request, or the workspace — so events about another are greyed
+  out once one is ticked; make a second trigger for those. **A custom event** asks for the
+  [names](#custom-events) it listens for, and offers the ones the project's other triggers use.
 - **Run**: a workflow or a smoke test, then its inputs, asked as **Run…** asks them.
 - **Quiet time**, **At most** (the cap) and **Tell me**, then an optional name.
 
@@ -88,6 +91,7 @@ ys trigger add --on pr.review --on pr.comment --workflow address-review --worksp
 ys trigger add --on workspace.done --workflow smoke-then-tell --input suite=login --workspace fix-login
 ys trigger add --on agent.exited --failed-exit --workflow tell-me --workspace fix-login
 ys trigger add --on test.finished --of-test login --verdict failed --workflow fix-it
+ys trigger add --on custom.migration-written --test migrations --workspace fix-login
 ```
 
 `--on` says what to listen for; give it more than once for more than one event. `--workflow` or
@@ -128,6 +132,7 @@ filters are ones the events have.
 | `pr.conflicted`     | GitHub says it conflicts with its base                                          |                                                         |
 | `pr.merged`         | It was merged                                                                   |                                                         |
 | `pr.closed`         | It was closed without being merged                                              |                                                         |
+| `custom.<name>`     | Someone ran [`ys event emit <name>`](#custom-events) in the workspace           |                                                         |
 
 - **An agent's events** are about the agents you started in the workspace. A shell is not an
   agent, and neither is an agent a workflow run started: the reviewer of a code review finishing
@@ -207,6 +212,38 @@ told when they start.
 Yardsort reads nothing an agent prints to know it is done: the agent runs a command, as it runs
 `git` or `gh`.
 
+## Custom events
+
+```sh
+ys event emit migration-written
+ys event emit migration-written --note "0042 adds users.last_seen"
+```
+
+A custom event is for what no event above covers: a milestone of your own, said in your own
+words. `ys event emit <name>` raises it in the workspace it is run in, and a trigger there on
+`custom.<name>` starts what it starts. It can come from:
+
+- **An agent**, when its instructions say to run it — your `AGENTS.md`, the first message, or
+  the message a workflow sends it. Yardsort tells an agent about `ys workspace done`, but not
+  about your own events: it cannot know when yours should be raised.
+- **A smoke test's `run` step**, as a command like any other. A run a trigger on it starts counts
+  as one step further along a chain, as the end of a run does, so tests that raise each other's
+  events stop (see [Chains](#when-a-run-starts)).
+- **A script, a git hook, or you**, in the workspace's folder, or anywhere with `--workspace`.
+
+A name is lowercase letters, digits, `-` and `_`, starting with a letter or a digit, up to 40
+characters; `ys event emit custom.migration-written` is taken too. Nothing has to be declared
+first. Instead, `ys event emit` says whether a trigger there listens for that name, and when none
+does, which names they do listen for, so a typo shows at once. One trigger can listen for more
+than one name, with `--on` once for each. Each name is gathered on its own: two different names
+raised together start two runs, one after the other, each with its own name and note, while the
+same name twice is one run with the newer note, as any burst is. A custom event is about the
+workspace, so it can share a trigger with `workspace.done`, `test.finished` and
+`workflow.finished`, and the cap counts per workspace. `--note` is there for the workflow as
+`{{ event.note }}`, the name as `{{ event.name }}`, and the commit the worktree was on as
+`{{ event.head }}`. Raised while Yardsort is closed, even before it has ever opened, it is heard
+when it next opens, by the triggers that were saved before it was raised.
+
 ## When a run starts
 
 **A burst is one run.** With `--quiet 2m`, the trigger waits until nothing new has happened for two
@@ -228,7 +265,10 @@ time, because another time will come; something that happened will not happen ag
 - **The rate.** At most ten runs an hour for one trigger, whatever the cap.
 - **Chains.** A run a trigger started can end in an event another trigger listens for. A run a
   person or a schedule started is depth 0; a run started by the ending of a run of depth _n_ is
-  _n_ + 1. A fire past depth 3 is refused.
+  _n_ + 1, and so is one started by a custom event a smoke test run of depth _n_ raised from its
+  `run` step. A fire past depth 3 is refused. An event an agent raises is depth 0, as
+  `ys workspace done` is: an agent told to raise one by a triggered run is held back by the cap
+  and the rate.
 
 ### One agent's trigger
 
@@ -266,10 +306,11 @@ A workflow a trigger starts can read what set it off as `{{ event.* }}`:
 
 | Variable                      | What it is                                                                                                                                                                                                                        |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `event.kind`                  | The event: `workspace.done`, `agent.settled`, …                                                                                                                                                                                   |
+| `event.kind`                  | The event: `workspace.done`, `agent.settled`, `custom.migration-written`, …                                                                                                                                                       |
 | `event.count`                 | How many events the run is for, when a burst was gathered into one                                                                                                                                                                |
-| `event.note`                  | `workspace.done`: what the agent passed to `--note`                                                                                                                                                                               |
-| `event.head`                  | `workspace.done`, `agent.settled`: the commit the worktree was on. `pr.checks_failed`, `pr.checks_passed`, `pr.conflicted`: the commit it was about                                                                               |
+| `event.note`                  | `workspace.done`, `custom.<name>`: what was passed to `--note`                                                                                                                                                                    |
+| `event.name`                  | `custom.<name>`: the name, without `custom.`                                                                                                                                                                                      |
+| `event.head`                  | `workspace.done`, `agent.settled`, `custom.<name>`: the commit the worktree was on. `pr.checks_failed`, `pr.checks_passed`, `pr.conflicted`: the commit it was about                                                              |
 | `event.summary`               | `agent.exited`, `test.finished`, `workflow.finished`: how it ended, in a line. `pr.review`, `pr.comment`: _2 reviews and 3 comments from alice and coderabbitai[bot]_. `pr.checks_failed`: _2 checks failed: lint, test (ubuntu)_ |
 | `event.verdict`               | `test.finished`: `passed`, `failed`, `errored`, …                                                                                                                                                                                 |
 | `event.url`                   | The `pr.*` events: the pull request, or for a review or comment, the newest one                                                                                                                                                   |
@@ -329,5 +370,6 @@ See [`ys trigger`](cli.md#ys-trigger).
 ## What it does not do yet
 
 - **Forges other than GitHub.** The pull request events need `gh`.
-- **Custom events** that a workflow, a test or an agent raises by name.
+- **A workflow step that raises a custom event.** A workflow raises one through a smoke test it
+  runs, or by asking its agent to; its own ending is `workflow.finished`.
 - **Run while Yardsort is closed.** What happened is found when it next opens.

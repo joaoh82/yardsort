@@ -90,6 +90,62 @@ pub enum TriggerEvent {
     /// It was closed without being merged.
     #[serde(rename = "pr.closed")]
     PrClosed,
+    /// Someone ran `ys event emit <name>` in the workspace: an agent, a smoke test's `run`
+    /// step, a script. Which names a trigger listens for are its [`Filters::names`]; it is
+    /// `custom.<name>` wherever a person reads or writes it.
+    #[serde(rename = "custom")]
+    Custom,
+}
+
+/// What a custom event's name is written after: `custom.migration-written`.
+pub const CUSTOM_PREFIX: &str = "custom.";
+
+/// The longest a custom event's name may be.
+pub const MOST_CUSTOM_NAME: usize = 40;
+
+/// Why `name` cannot be a custom event's name, when it cannot: lowercase letters, digits, `-`
+/// and `_`, starting with a letter or a digit, so it reads the same in a file, a flag and a
+/// sentence.
+pub fn custom_name_problem(name: &str) -> Option<String> {
+    let fits = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_';
+    if name.is_empty() {
+        return Some("Name the event: `custom.<name>`.".to_owned());
+    }
+    if name.len() > MOST_CUSTOM_NAME {
+        return Some(format!(
+            "`{name}` is longer than {MOST_CUSTOM_NAME} characters, the most an event's name may be."
+        ));
+    }
+    let first = name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if first && name.chars().all(fits) {
+        return None;
+    }
+    let lower = name.to_ascii_lowercase();
+    let hint = if lower != name && custom_name_problem(&lower).is_none() {
+        format!(" `{lower}` would do.")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "`{name}` cannot be an event's name: lowercase letters, digits, `-` and `_`, starting \
+         with a letter or a digit.{hint}"
+    ))
+}
+
+/// What a person writes for an event: `pr.review`, or `custom.<name>` for a custom one.
+/// `None` for one this Yardsort does not know, or a custom one with no name or a bad one.
+pub fn parse_event(text: &str) -> Option<(TriggerEvent, Option<String>)> {
+    match text.strip_prefix(CUSTOM_PREFIX) {
+        Some(name) => custom_name_problem(name)
+            .is_none()
+            .then(|| (TriggerEvent::Custom, Some(name.to_owned()))),
+        None => TriggerEvent::parse(text)
+            .filter(|event| *event != TriggerEvent::Custom)
+            .map(|event| (event, None)),
+    }
 }
 
 /// What a trigger counts its runs for, and so what its events must agree on.
@@ -104,7 +160,7 @@ pub enum Subject {
 }
 
 impl TriggerEvent {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::WorkspaceDone,
         Self::AgentSettled,
         Self::AgentExited,
@@ -118,6 +174,7 @@ impl TriggerEvent {
         Self::PrConflicted,
         Self::PrMerged,
         Self::PrClosed,
+        Self::Custom,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -135,6 +192,7 @@ impl TriggerEvent {
             Self::PrConflicted => "pr.conflicted",
             Self::PrMerged => "pr.merged",
             Self::PrClosed => "pr.closed",
+            Self::Custom => "custom",
         }
     }
 
@@ -158,6 +216,7 @@ impl TriggerEvent {
             Self::PrConflicted => "the pull request conflicts with its base",
             Self::PrMerged => "the pull request is merged",
             Self::PrClosed => "the pull request is closed without merging",
+            Self::Custom => "a custom event is raised",
         }
     }
 
@@ -183,7 +242,9 @@ impl TriggerEvent {
             | Self::PrConflicted
             | Self::PrMerged
             | Self::PrClosed => Subject::PullRequest,
-            Self::WorkspaceDone | Self::TestFinished | Self::WorkflowFinished => Subject::Workspace,
+            Self::WorkspaceDone | Self::TestFinished | Self::WorkflowFinished | Self::Custom => {
+                Subject::Workspace
+            }
         }
     }
 
@@ -208,6 +269,7 @@ impl TriggerEvent {
             Self::PrReview | Self::PrComment => &["url", "number", "title", "authors", "summary"],
             Self::PrChecksFailed => &["url", "number", "title", "head", "summary"],
             Self::PrChecksPassed | Self::PrConflicted => &["url", "number", "title", "head"],
+            Self::Custom => &["name", "note", "head"],
         }
     }
 }
@@ -319,6 +381,9 @@ pub struct Filters {
     /// `pr.review`, `pr.comment`: leave out accounts whose login ends in `[bot]`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_bots: bool,
+    /// `custom`: the names it listens for, without `custom.`. At least one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
 }
 
 impl Filters {
@@ -368,8 +433,27 @@ impl Filters {
         if self.no_bots {
             given.push(("no bots", POSTS));
         }
+        if !self.names.is_empty() {
+            given.push(("names", &[TriggerEvent::Custom]));
+        }
         given
     }
+}
+
+/// The events a trigger listens for as a person writes them, in order: `pr.review`, and
+/// `custom.<name>` for each name a custom one has.
+pub fn event_names(events: &[TriggerEvent], filters: &Filters) -> Vec<String> {
+    events
+        .iter()
+        .flat_map(|event| match event {
+            TriggerEvent::Custom => filters
+                .names
+                .iter()
+                .map(|name| format!("{CUSTOM_PREFIX}{name}"))
+                .collect(),
+            event => vec![event.as_str().to_owned()],
+        })
+        .collect()
 }
 
 /// The events a row holds, in order, leaving out any this Yardsort does not know.
@@ -461,6 +545,22 @@ fn check_draft(
              each counts its runs for something different. Make two triggers.",
         ));
     }
+    if events.contains(&TriggerEvent::Custom) {
+        if draft.filters.names.is_empty() {
+            return Err(IpcError::new(
+                "trigger_events",
+                "Name the custom event it listens for: `custom.<name>`.",
+            ));
+        }
+        if let Some(why) = draft
+            .filters
+            .names
+            .iter()
+            .find_map(|name| custom_name_problem(name))
+        {
+            return Err(IpcError::new("trigger_events", why));
+        }
+    }
     for (filter, about) in draft.filters.given() {
         if !about.iter().any(|event| events.contains(event)) {
             let names: Vec<String> = about
@@ -529,11 +629,14 @@ fn check_draft(
         .map(str::to_owned)
         .unwrap_or(target_name);
     let names: Vec<&str> = events.iter().map(|event| event.as_str()).collect();
+    let mut filters = draft.filters.clone();
+    filters.names.sort();
+    filters.names.dedup();
     Ok(Checked {
         name,
         workspace,
         events: serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_owned()),
-        filters: draft.filters.to_json(),
+        filters: filters.to_json(),
         inputs: serde_json::to_string(draft.inputs).unwrap_or_else(|_| "{}".to_owned()),
     })
 }
@@ -613,12 +716,15 @@ fn check_event_variables(
             continue;
         }
         if let Some(event) = events.iter().find(|event| !event.leaves().contains(&field)) {
+            let which = match event {
+                TriggerEvent::Custom => "a custom event".to_owned(),
+                event => format!("`{}`", event.as_str()),
+            };
             return Err(IpcError::new(
                 "trigger_variables",
                 format!(
-                    "`{}` uses `{{{{ event.{field} }}}}`, which `{}` does not leave.",
-                    workflow.id,
-                    event.as_str()
+                    "`{}` uses `{{{{ event.{field} }}}}`, which {which} does not leave.",
+                    workflow.id
                 ),
             ));
         }
@@ -741,6 +847,17 @@ pub fn listens_for(store: &Store, workspace_id: &str, event: TriggerEvent) -> Ip
         .any(|trigger| events_of(trigger).contains(&event)))
 }
 
+/// The custom events enabled triggers in the workspace listen for, by name: what tells
+/// `ys event emit` whether anything heard it, and what a mistyped name may have meant.
+pub fn custom_names_heard(store: &Store, workspace_id: &str) -> IpcResult<BTreeSet<String>> {
+    Ok(store
+        .workspace_triggers(workspace_id)?
+        .iter()
+        .filter(|trigger| events_of(trigger).contains(&TriggerEvent::Custom))
+        .flat_map(|trigger| Filters::parse(&trigger.filters).names)
+        .collect())
+}
+
 /// What the first message of an agent in a workspace with a trigger on `workspace.done` is
 /// told. A command to run, never anything its output is read for.
 pub const DONE_SECTION: &str = "## When you are done\n\n\
@@ -853,9 +970,21 @@ pub fn describe(trigger: &TriggerRow) -> String {
 /// [`describe`], naming the pull request it watches when it has one: "When a review comes in
 /// on #142, …".
 pub fn describe_on(trigger: &TriggerRow, pull_request: Option<u32>) -> String {
+    let filters = Filters::parse(&trigger.filters);
     let events: Vec<String> = events_of(trigger)
         .iter()
         .map(|event| match pull_request {
+            _ if *event == TriggerEvent::Custom => {
+                let names: Vec<String> = event_names(&[*event], &filters)
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect();
+                match names.as_slice() {
+                    [] => event.words().to_owned(),
+                    [one] => format!("{one} is raised"),
+                    [rest @ .., last] => format!("{} or {last} is raised", rest.join(", ")),
+                }
+            }
             Some(number) => event
                 .words()
                 .replace("the workspace's pull request", &format!("#{number}"))

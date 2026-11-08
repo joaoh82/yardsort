@@ -248,6 +248,7 @@ fn look(handle: &AppHandle, woken: &Receiver<()>) {
         for read in [
             sources::read_events(store, &listener.turns, &git),
             sources::read_done(store),
+            sources::read_custom(store),
             sources::read_endings(store, now),
         ] {
             match read {

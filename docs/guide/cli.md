@@ -572,7 +572,8 @@ wait for you: see [Schedules](schedules.md#workflows-that-run-a-smoke-test).
 
 [Triggers](triggers.md): standing instructions to start a workflow or a smoke test when something
 happens in a workspace — an agent says its work is done, finishes a turn or exits, a test or a
-workflow run ends, or something happens on the workspace's pull request.
+workflow run ends, something happens on the workspace's pull request, or a custom event is
+raised.
 
 ```sh
 ys trigger presets                # the ready-made triggers, and the question each asks
@@ -583,6 +584,7 @@ ys trigger add --on pr.review --from anyone --workflow address-review --cap 5
 ys trigger add --on workspace.done --workflow smoke-then-tell --input suite=login --workspace fix-login
 ys trigger add --on agent.settled --new-commits --clean --quiet 3m --test login --session 4c1e
 ys trigger add --on test.finished --of-test login --verdict failed --workflow fix-it --cap 2
+ys trigger add --on custom.migration-written --test migrations --workspace fix-login
 ys trigger show Tell              # its events, filters, inputs, limits and last fire
 ys trigger pause Tell             # off: keeps its history, fires nothing
 ys trigger resume Tell            # on again; only what happens from now counts
@@ -594,8 +596,8 @@ ys trigger remove Tell            # the trigger and its history; the runs it sta
 `add` takes a `--preset` from `presets`, with its one answer as `--input`, or one or more `--on`
 events — `workspace.done`, `agent.settled`, `agent.exited`, `test.finished`,
 `workflow.finished`, `pr.opened`, `pr.review`, `pr.comment`, `pr.checks_failed`,
-`pr.checks_passed`, `pr.conflicted`, `pr.merged`, `pr.closed` — and what to run, `--workflow
-<id>` or `--test <id>`.
+`pr.checks_passed`, `pr.conflicted`, `pr.merged`, `pr.closed`, and `custom.<name>` for what
+[`ys event emit`](#ys-event-emit) raises — and what to run, `--workflow <id>` or `--test <id>`.
 `--workspace` takes a workspace's name or id, and can be left out inside a workspace's folder or
 in an agent's terminal there; `--session <id>` instead makes a trigger that belongs to one agent
 session. Give each input as `--input id=value`. The filters are `--new-commits` and `--clean`
@@ -628,6 +630,24 @@ ys workspace done --note "Login validates on blur; tests added."
 
 `--note` is passed to what the trigger starts as `{{ event.note }}`. It prints whether a trigger
 there listens for it. `--json` gives `{ workspace, workspaceId, head, note, heard }`.
+
+### `ys event emit`
+
+Raises a [custom event](triggers.md#custom-events) in a workspace, for a trigger on
+`custom.<name>` there. An agent, a smoke test's `run` step, a script or you run it in the
+workspace's folder; elsewhere, give `--workspace <name>`.
+
+```sh
+ys event emit migration-written
+ys event emit migration-written --note "0042 adds users.last_seen"
+```
+
+A name is lowercase letters, digits, `-` and `_`, starting with a letter or a digit;
+`custom.migration-written` is taken too. `--note` is passed to what the trigger starts as
+`{{ event.note }}`. It prints whether a trigger there listens for that name, and when none does,
+the names they listen for. Run from a smoke test's `run` step, a run it starts counts one step
+further along a chain. `--json` gives
+`{ event, workspace, workspaceId, head, note, heard, listenedFor }`.
 
 ### `ys activity export`
 
