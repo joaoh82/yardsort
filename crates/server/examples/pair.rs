@@ -664,18 +664,18 @@ async fn through_relay(
     relay: Relay,
     wait_for_revoke: bool,
 ) -> Result<(), String> {
-    use remote_client::Incoming;
-    use remote_proto::relay::TicketRequest;
-    use serde_json::{json, Value};
-
-    let request = TicketRequest::Device {
-        host: grant.host.clone(),
+    use remote_client::channel::{AttachmentEnd, Followed, Watched};
+    use remote_client::Channel;
+    use remote_proto::{
+        ActivitySubscribeParams, AttachStart, SessionListParams, TerminalActivity,
+        WorkspaceListParams,
     };
+
     // A host a moment from connecting is offline for that moment.
     let mut tries = 0;
-    let link = loop {
-        match client.open_relay(access, &request).await {
-            Ok(link) => break link,
+    let channel = loop {
+        match Channel::open(client, access, &grant.host, "pairing-tool/1").await {
+            Ok(channel) => break channel,
             Err(e) if e.code() == Some(remote_proto::ErrorCode::HostOffline) && tries < 10 => {
                 tries += 1;
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -683,308 +683,189 @@ async fn through_relay(
             Err(e) => return Err(format!("the relay: {e}")),
         }
     };
-    let (mut reader, mut writer) = (link.reader, link.writer);
     println!("Connected to {} through the relay.", grant.host_name);
-    let hello = json!({"client": "pairing-tool/1", "protocols": [1]});
-    writer
-        .text(hello.to_string())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let mut heard: Vec<String> = Vec::new();
-    let mut items: Vec<u64> = Vec::new();
-    // What the program drew after the snapshot.
-    let mut drawn: Vec<u8> = Vec::new();
-    let mut stream = None;
-    // The next text message, keeping count of output frames on the way.
-    macro_rules! next_text {
-        () => {
-            loop {
-                match reader.next().await {
-                    Ok(Incoming::Text(text)) => {
-                        let value: Value =
-                            serde_json::from_str(&text).map_err(|e| e.to_string())?;
-                        let ours = Some(&value["stream"]) == stream.as_ref();
-                        if value["event"] == "terminal.resized" && ours {
-                            items.push(value["position"]["seq"].as_u64().unwrap_or_default());
-                            continue;
-                        }
-                        if value["event"] == "terminal.control" && ours {
-                            let controller = &value["controller"];
-                            println!(
-                                "Control is now {}{}.",
-                                controller["kind"].as_str().unwrap_or("unknown"),
-                                controller["name"]
-                                    .as_str()
-                                    .filter(|name| !name.is_empty())
-                                    .map(|name| format!(" ({name})"))
-                                    .unwrap_or_default()
-                            );
-                            continue;
-                        }
-                        if value["event"] == "terminal.exited" && ours {
-                            println!("The program ended, with code {}.", value["exit"]["code"]);
-                            continue;
-                        }
-                        if value["event"] == "activity.events" {
-                            for event in value["events"].as_array().into_iter().flatten() {
-                                let kind = event["kind"].as_str().unwrap_or("?").to_owned();
-                                let detail = &event["detail"];
-                                println!(
-                                    "Activity: {kind}{}{}.",
-                                    detail["program"]
-                                        .as_str()
-                                        .map(|p| format!(", {p}"))
-                                        .unwrap_or_default(),
-                                    detail["exitCode"]
-                                        .as_i64()
-                                        .map(|c| format!(", code {c}"))
-                                        .unwrap_or_default()
-                                );
-                                heard.push(kind);
-                            }
-                            continue;
-                        }
-                        if value["event"] == "activity.ended" {
-                            println!("Stopped following activity: {}", value["error"]["message"]);
-                            continue;
-                        }
-                        break value;
-                    }
-                    Ok(Incoming::Binary(frame)) => {
-                        let frame = remote_proto::OutputFrame::decode(&frame).ok().filter(|f| {
-                            stream.as_ref().and_then(Value::as_u64) == Some(f.stream.into())
-                        });
-                        if let Some(frame) = frame {
-                            if items.last() != Some(&frame.position.seq) {
-                                items.push(frame.position.seq);
-                            }
-                            if items.first() != Some(&frame.position.seq) {
-                                drawn.extend_from_slice(frame.bytes);
-                            }
-                        }
-                    }
-                    Err(reason) => {
-                        return Err(format!(
-                            "the relay closed the socket: {}",
-                            reader.describe(reason)
-                        ))
-                    }
-                }
-            }
-        };
+    let host = channel.host();
+    println!("Welcomed by {} ({:?}).", host.name, host.platform);
+    if let Some(later) = &host.terminals_later {
+        println!("Its terminals wait: {}", later.message);
     }
-    let welcome = next_text!();
-    let Some(host) = welcome.get("welcome") else {
-        return Err(format!("not welcomed: {welcome}"));
-    };
-    println!(
-        "Welcomed by {} ({}).",
-        host["host"]["name"].as_str().unwrap_or("?"),
-        host["host"]["platform"].as_str().unwrap_or("?")
-    );
-    if let Some(why) = host["host"]["terminalsLater"]["message"].as_str() {
-        println!("Its terminals wait: {why}");
-    }
-    let mut asked = 0;
-    let mut ask = |op: &str, params: Value| {
-        asked += 1;
-        let id = format!("r{asked}");
-        let request = json!({"requestId": id, "protocol": {"major": 1, "minor": 4}, "op": op, "params": params});
-        (id, request.to_string())
-    };
 
     // Everything this device may see, from now on.
-    let follows = host["host"]["capabilities"]
-        .as_array()
-        .is_some_and(|c| c.iter().any(|op| op == "activity.subscribe"));
-    if follows {
-        let (id, request) = ask("activity.subscribe", json!({}));
-        writer.text(request).await.map_err(|e| e.to_string())?;
-        let subscribed = loop {
-            let reply = next_text!();
-            if reply["requestId"] == id {
-                break reply;
+    let heard = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    if host
+        .capabilities
+        .iter()
+        .any(|op| op == "activity.subscribe")
+    {
+        match channel.subscribe(ActivitySubscribeParams::default()).await {
+            Ok(mut subscription) => {
+                println!("Following the host's activity.");
+                let heard = Arc::clone(&heard);
+                tokio::spawn(async move {
+                    while let Some(followed) = subscription.next().await {
+                        match followed {
+                            Followed::Events(batch) => {
+                                for event in batch.events {
+                                    println!("Activity: {}.", event.kind);
+                                    heard.lock().unwrap().push(event.kind);
+                                }
+                            }
+                            Followed::Ended(why) => {
+                                println!("Stopped following activity: {why:?}");
+                            }
+                        }
+                    }
+                });
             }
-        };
-        match subscribed["error"]["message"].as_str() {
-            None => println!("Following the host's activity."),
-            Some(why) => println!("Could not follow the host's activity: {why}"),
+            Err(why) => println!("Could not follow the host's activity: {why}"),
         }
     } else {
         println!("This host does not offer activity as it happens.");
     }
 
     // A running terminal in a workspace this device may see.
-    let (id, request) = ask("workspace.list", json!({}));
-    writer.text(request).await.map_err(|e| e.to_string())?;
-    let page = loop {
-        let reply = next_text!();
-        if reply["requestId"] == id {
-            break reply;
-        }
-    };
+    let page = channel
+        .workspaces(WorkspaceListParams::default())
+        .await
+        .map_err(|e| e.to_string())?;
     let mut terminal = None;
-    for workspace in page["result"]["workspaces"]
-        .as_array()
-        .into_iter()
-        .flatten()
-    {
-        let (id, request) = ask("session.list", json!({"workspace": workspace["id"]}));
-        writer.text(request).await.map_err(|e| e.to_string())?;
-        let sessions = loop {
-            let reply = next_text!();
-            if reply["requestId"] == id {
-                break reply;
-            }
-        };
-        let running = |t: &Value| t["activity"] != "exited" && t["id"].is_string();
-        let found = sessions["result"]["sessions"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|s| {
-                (
-                    s["title"].as_str().unwrap_or("a conversation").to_owned(),
-                    s["terminal"].clone(),
-                )
+    for workspace in &page.workspaces {
+        let sessions = channel
+            .sessions(SessionListParams {
+                workspace: workspace.id.clone(),
+                include_ended: false,
+                cursor: None,
+                limit: None,
             })
+            .await
+            .map_err(|e| e.to_string())?;
+        let running = |activity: TerminalActivity| activity != TerminalActivity::Exited;
+        let found = sessions
+            .sessions
+            .iter()
+            .filter_map(|s| s.terminal.as_ref().map(|t| (s.title.clone(), t)))
             .chain(
-                sessions["result"]["terminals"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(|t| {
-                        (
-                            t["program"].as_str().unwrap_or("a program").to_owned(),
-                            t["terminal"].clone(),
-                        )
-                    }),
+                sessions
+                    .terminals
+                    .iter()
+                    .map(|t| (t.program.clone(), &t.terminal)),
             )
-            .find(|(_, t)| running(t));
+            .find(|(_, t)| running(t.activity));
         if let Some((what, t)) = found {
-            println!(
-                "Watching {what:?} in {}.",
-                workspace["name"].as_str().unwrap_or("?")
-            );
-            terminal = Some(t["id"].clone());
+            println!("Watching {what:?} in {}.", workspace.name);
+            terminal = Some(t.id.clone());
             break;
         }
     }
     let terminal = terminal.ok_or("no running terminal in any workspace this device may see")?;
 
-    let (id, request) = ask("terminal.attach", json!({"terminal": terminal}));
-    writer.text(request).await.map_err(|e| e.to_string())?;
-    let attached = loop {
-        let reply = next_text!();
-        if reply["requestId"] == id {
-            break reply;
-        }
-    };
-    let result = &attached["result"];
-    if result.is_null() {
-        return Err(format!(
-            "could not watch it: {}",
-            attached["error"]["message"]
-        ));
-    }
-    stream = Some(result["stream"].clone());
+    let mut attachment = channel
+        .attach(terminal.clone(), None)
+        .await
+        .map_err(|e| format!("could not watch it: {e}"))?;
+    let attached = attachment.attached();
     println!(
         "Attached at item {}, {}x{}; controlled by {}.",
-        result["position"]["seq"],
-        result["size"]["cols"],
-        result["size"]["rows"],
-        result["controller"]["kind"]
+        attached.position.seq,
+        attached.size.cols,
+        attached.size.rows,
+        controller(&attached.controller)
     );
 
     if let Some(text) = relay.typed {
-        let (id, request) = ask("terminal.acquire", json!({"terminal": terminal}));
-        writer.text(request).await.map_err(|e| e.to_string())?;
-        let lease = loop {
-            let reply = next_text!();
-            if reply["requestId"] == id {
-                break reply;
-            }
-        };
-        if lease["result"].is_null() {
-            println!("Could not take control: {}", lease["error"]["message"]);
-        } else {
-            let held = json!({"terminal": terminal, "lease": lease["result"]["id"], "generation": lease["result"]["generation"]});
-            let mut input = held.clone();
-            input["seq"] = 1.into();
-            input["data"] = format!("{text}\r").into();
-            let (id, request) = ask("terminal.input", input);
-            writer.text(request).await.map_err(|e| e.to_string())?;
-            let typed = loop {
-                let reply = next_text!();
-                if reply["requestId"] == id {
-                    break reply;
+        match channel.acquire(terminal.clone(), false).await {
+            Err(why) => println!("Could not take control: {why}"),
+            Ok(control) => {
+                let generation = control.lease().generation;
+                match control.input(&format!("{text}\r"), false).await {
+                    Ok(()) => {
+                        println!("Typed {text:?} and Enter, under lease generation {generation}.")
+                    }
+                    Err(why) => println!("Not typed: {why}"),
                 }
-            };
-            match typed["error"]["message"].as_str() {
-                None => println!(
-                    "Typed {text:?} and Enter, under lease generation {}.",
-                    lease["result"]["generation"]
-                ),
-                Some(why) => println!("Not typed: {why}"),
+                let _ = control.release().await;
             }
-            let (_, request) = ask("terminal.release", held);
-            writer.text(request).await.map_err(|e| e.to_string())?;
         }
     }
+
+    // The items seen, and what the program drew after the snapshot, until `stop`.
+    let mut items: Vec<u64> = Vec::new();
+    let mut drawn: Vec<u8> = Vec::new();
+    let mut snapshot = Some(attached.position.seq);
+    let watch = |watched: Watched,
+                 items: &mut Vec<u64>,
+                 drawn: &mut Vec<u8>,
+                 snapshot: &mut Option<u64>|
+     -> Option<String> {
+        match watched {
+            Watched::Output { position, bytes } => {
+                if items.last() != Some(&position.seq) {
+                    items.push(position.seq);
+                }
+                if *snapshot != Some(position.seq) {
+                    *snapshot = None;
+                    drawn.extend_from_slice(&bytes);
+                }
+            }
+            Watched::Resized { position, .. } => items.push(position.seq),
+            Watched::Control(who) => println!("Control is now {}.", controller(&who)),
+            Watched::Exited(exit) => println!("The program ended, with code {}.", exit.code),
+            Watched::Ended(AttachmentEnd::Detached(error)) => {
+                return Some(format!("detached: {error}"))
+            }
+            Watched::Ended(why) => return Some(format!("stopped watching: {why:?}")),
+        }
+        None
+    };
+    // What came with the snapshot, briefly.
+    let _ = tokio::time::timeout(Duration::from_secs(1), async {
+        while let Some(watched) = attachment.next().await {
+            if let Some(why) = watch(watched, &mut items, &mut drawn, &mut snapshot) {
+                return Err::<(), String>(why);
+            }
+        }
+        Ok(())
+    })
+    .await;
 
     // Away and back: let go of the stream, and attach again from the last item drawn, as a
     // phone does after losing its connection.
-    let left_at = items.last().copied().unwrap_or_default();
-    let (id, request) = ask(
-        "terminal.detach",
-        json!({"terminal": terminal, "stream": stream}),
-    );
-    writer.text(request).await.map_err(|e| e.to_string())?;
-    while next_text!()["requestId"] != id {}
-    let (id, request) = ask(
-        "terminal.attach",
-        json!({"terminal": terminal, "resumeAfter": {"epoch": 0, "seq": left_at}}),
-    );
-    writer.text(request).await.map_err(|e| e.to_string())?;
-    let again = loop {
-        let reply = next_text!();
-        if reply["requestId"] == id {
-            break reply;
-        }
-    };
-    let result = &again["result"];
-    if result.is_null() {
-        return Err(format!(
-            "could not watch it again: {}",
-            again["error"]["message"]
-        ));
-    }
-    stream = Some(result["stream"].clone());
-    if result["start"] == "resumed" {
+    let left_at = attachment.drawn();
+    attachment.detach().await.map_err(|e| e.to_string())?;
+    let mut attachment = channel
+        .attach(terminal, left_at)
+        .await
+        .map_err(|e| format!("could not watch it again: {e}"))?;
+    let again = attachment.attached();
+    let left = left_at.map_or("nothing".to_owned(), |p| format!("item {}", p.seq));
+    if again.start == AttachStart::Resumed {
         println!(
-            "Came back after item {left_at}: resumed from there; controlled by {}.",
-            result["controller"]["kind"]
+            "Came back after {left}: resumed from there; controlled by {}.",
+            controller(&again.controller)
         );
     } else {
         println!(
-            "Came back after item {left_at}: sent a snapshot at item {} instead.",
-            result["position"]["seq"]
+            "Came back after {left}: sent a snapshot at item {} instead.",
+            again.position.seq
         );
         items.clear();
+        snapshot = Some(again.position.seq);
     }
 
     let watching = async {
-        loop {
-            let event = next_text!();
-            if event["event"] == "terminal.detached" {
-                return Err::<(), String>(format!("detached: {}", event["error"]["message"]));
+        while let Some(watched) = attachment.next().await {
+            if let Some(why) = watch(watched, &mut items, &mut drawn, &mut snapshot) {
+                return Err::<(), String>(why);
             }
         }
+        Ok(())
     };
     let ended = if wait_for_revoke {
         println!("Watching until the relay closes the socket: revoke this device at the host.");
-        watching.await
+        tokio::select! {
+            ended = watching => ended,
+            end = channel.ended() => Err(format!("the relay closed the socket: {end}")),
+        }
     } else {
         tokio::time::timeout(Duration::from_secs(10), watching)
             .await
@@ -1006,16 +887,25 @@ async fn through_relay(
         "After the snapshot the program drew {:?}.",
         String::from_utf8_lossy(&drawn)
     );
+    let heard = heard.lock().unwrap().clone();
     println!(
         "Heard of {} events as they were recorded: {heard:?}.",
         heard.len()
     );
-    writer.close().await;
+    channel.close();
     match ended {
         Err(why) if wait_for_revoke => {
             println!("{why}");
             Ok(())
         }
         other => other,
+    }
+}
+
+fn controller(controller: &remote_proto::Controller) -> String {
+    match controller {
+        remote_proto::Controller::Nobody => "nobody".into(),
+        remote_proto::Controller::Local => "the person at the host".into(),
+        remote_proto::Controller::Device { name, .. } => format!("device ({name})"),
     }
 }

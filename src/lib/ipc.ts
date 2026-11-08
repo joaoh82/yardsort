@@ -122,6 +122,14 @@ import {
   type Problem,
   type Source,
   type PrFacts,
+  type OtherComputers,
+  type OtherHost,
+  type OtherHostView,
+  type OtherLink,
+  type OtherPairing,
+  type OtherSession,
+  type OtherTerminal,
+  type OtherWorkspace,
   type RemoteAnswer,
   type RemoteDevice,
   type RemoteEarlierDaemon,
@@ -287,6 +295,14 @@ export type {
   Project,
   ProjectPullRequests,
   ProjectTasks,
+  OtherComputers,
+  OtherHost,
+  OtherHostView,
+  OtherLink,
+  OtherPairing,
+  OtherSession,
+  OtherTerminal,
+  OtherWorkspace,
   RemoteAnswer,
   RemoteDevice,
   RemoteEarlierDaemon,
@@ -750,6 +766,23 @@ export const ipc = {
   /** The relay told this host a device asks to be let in, and the server has it waiting. */
   onRemotePairingRequested: (handler: (request: RemoteRequest) => void) =>
     events.remotePairingRequested.listen((event) => handler(event.payload.request)),
+
+  /**
+   * Remote the other way round: this computer as a client of other hosts, a device of its own at
+   * the server, apart from this computer as a host. What a host shows is read-only and carries no
+   * paths. See `src-tauri/src/computers.rs`.
+   */
+  otherComputers: () => unwrap(commands.otherComputers()),
+  otherComputersSignIn: (serverUrl: string, name: string) =>
+    unwrap(commands.otherComputersSignIn(serverUrl, name)),
+  otherComputersCancel: () => unwrap(commands.otherComputersCancel()),
+  otherComputersSignOut: () => unwrap(commands.otherComputersSignOut()),
+  otherComputersPair: (code: string) => unwrap(commands.otherComputersPair(code)),
+  otherComputersForget: (grantId: string) => unwrap(commands.otherComputersForget(grantId)),
+  otherHost: (hostId: string) => unwrap(commands.otherHost(hostId)),
+  /** The list, a host's link or what one shows changed. */
+  onOtherComputersChanged: (handler: () => void) =>
+    events.otherComputersChanged.listen(() => handler()),
 
   /** Assist: whether a TypeSafe key is in force and which features are on. */
   assistStatus: () => unwrap(commands.assistStatus()),

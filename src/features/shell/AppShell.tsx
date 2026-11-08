@@ -19,6 +19,7 @@ import { useLayoutStore, type SidePanel } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { listenForQuitRequests } from "@/stores/quit";
 import { listenForPairingRequests } from "@/stores/remote";
+import { listenForOtherComputers } from "@/stores/otherComputers";
 import { listenForTestRuns } from "@/stores/smokeTests";
 import { listenForSchedules } from "@/stores/schedules";
 import { listenForTriggers } from "@/stores/triggers";
@@ -42,6 +43,7 @@ export function AppShell() {
   const updateOpen = useUpdatesStore((s) => s.open);
   useUpdateChecks();
   const setSettingsOpen = useLayoutStore((s) => s.setSettingsOpen);
+  const remoteHostOpen = useProjectsStore((s) => s.remoteHostId !== null);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "yardsort.shell",
@@ -77,6 +79,7 @@ export function AppShell() {
     const schedules = listenForSchedules();
     const triggers = listenForTriggers();
     const pairing = listenForPairingRequests();
+    const others = listenForOtherComputers();
     return () => {
       void listening.then((stop) => stop());
       void runs.then((stop) => stop());
@@ -84,6 +87,7 @@ export function AppShell() {
       void schedules.then((stop) => stop());
       void triggers.then((stop) => stop());
       void pairing.then((stop) => stop());
+      void others.then((stop) => stop());
     };
   }, []);
 
@@ -127,7 +131,7 @@ export function AppShell() {
           onResize={syncFromPanel("right")}
         >
           <div data-navigation="Changes" tabIndex={-1} className="h-full">
-            <ChangesPanel />
+            {remoteHostOpen ? <NoChangesHere /> : <ChangesPanel />}
           </div>
         </Panel>
       </Group>
@@ -141,5 +145,14 @@ export function AppShell() {
       <WelcomeTour />
       <QuitDialog />
     </div>
+  );
+}
+
+/** In place of Changes while another computer is open: its files are not this computer's. */
+function NoChangesHere() {
+  return (
+    <aside aria-label="Changes" className="h-full bg-surface p-4 text-ink-faint">
+      Changes and files are not shown for another computer&apos;s workspaces.
+    </aside>
   );
 }

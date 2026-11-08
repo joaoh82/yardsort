@@ -107,6 +107,18 @@ const fill = (placeholder: string, value: string) =>
     return Boolean(input);
   })()`);
 const connected = () => expectToSee("Connected to the relay.");
+/** `fill`, within Settings → Remote → Other computers, whose fields look like the host's. */
+const fillOther = (placeholder: string, value: string) =>
+  page(`(() => {
+    const input = document.querySelector(${JSON.stringify(`section[aria-label="Other computers"] input[placeholder="${placeholder}"]`)});
+    if (!input) return false;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+/** The text of what matches `selector`, or "" when nothing does. */
+const textOf = (selector: string) =>
+  page(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? ""`) as Promise<string>;
 
 switch (doing) {
   case "add-project": {
@@ -195,6 +207,56 @@ switch (doing) {
     await connected();
     await expectToSee("None yet.");
     break;
+  case "client-sign-in": {
+    const stood = await Bun.file(`${runDir}/stand-in.json`).text();
+    await openRemote();
+    const server = JSON.parse(stood.split("\n")[0]).ready.server;
+    await until("the client's server field", () => fillOther("https://remote.example.com", server));
+    await until("the client's name field", () => fillOther("Laptop", "Smoke laptop"));
+    await click("Sign in to reach other computers");
+    await expectToSee("Signed in as Smoke laptop");
+    break;
+  }
+  case "enter-code": {
+    const code = (await Bun.file(`${runDir}/pairing-code`).text()).trim();
+    await openRemote();
+    await until("the pairing code field", () => fillOther("ABCD-EFGH", code));
+    await click("Pair");
+    await expectToSee("waiting for its answer");
+    break;
+  }
+  case "sees-the-host": {
+    // Here the last argument is the host's name.
+    const name = runDir as string;
+    const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
+    await until(`${name} online in the sidebar`, async () => {
+      const said = await textOf(row);
+      return said.includes(name) && said.includes("online");
+    });
+    console.log(`saw: ${name}, online, under Other computers`);
+    await page(clicked("Done"));
+    await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
+    const view = `section[aria-label="${name}, another computer"]`;
+    await until("its page", async () =>
+      (await textOf(view)).includes(`${name} · another computer`),
+    );
+    console.log(`saw: ${name} named across the top`);
+    await until("its workspace and its shell", async () => {
+      const said = await textOf(view);
+      return said.includes("smoke") && said.includes("sh");
+    });
+    console.log("saw: the workspace smoke and its shell");
+    const buttons = await page(
+      `[...document.querySelectorAll(${JSON.stringify(`${view} button`)})].map((b) => b.textContent.trim()).join(",")`,
+    );
+    if (buttons !== "Close") throw new Error(`It offers more than Close: ${String(buttons)}`);
+    console.log("saw: nothing to press but Close");
+    const changes = await textOf(`[data-navigation="Changes"]`);
+    if (!changes.includes("Changes and files are not shown for another computer"))
+      throw new Error(`The Changes panel shows: ${changes}`);
+    console.log("saw: no Changes panel for it");
+    break;
+  }
   default:
     throw new Error(`Nothing called ${doing}.`);
 }

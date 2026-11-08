@@ -1006,6 +1006,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       now finds the daemon the user's services started. Its local smoke test, from the tarball
       with an empty environment, passed, and so did the owner's run of it as a user service on
       the box: the phone reconnected to the same agent after a restart.
+      Slice 4 was built on 2026-11-08 ([35 §13](35-remote-r4-r5.md#13--what-the-fourth-slice-adds)):
+      the channel layer in Rust, with the pairing tool moved onto it; the desktop signed in as a
+      client, a device of its own, paired by a host's code under Settings → Remote → Other
+      computers; and the hosts it reaches in the sidebar, each opening read-only with its name across
+      the top. Its local smoke test passed.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator

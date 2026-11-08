@@ -3,6 +3,16 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Reach another computer from the desktop app, read-only for now.** Under **Settings → Remote →
+  Other computers**, sign this computer in as a client, a device of its own apart from it being a
+  host, and pair it by the code another computer shows, from its own Settings → Remote or
+  `yardsort-host pair`. Once let in there, the other computer shows under **Other computers** in the
+  sidebar, online or offline since when, and opens to its workspaces, agents and recent activity,
+  named across the top, with no Changes panel or Git action. Watching and typing into its terminals
+  come next. See [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+
 ## 0.23.0
 
 - **A guide for moving local Conductor worktrees to Yardsort.**

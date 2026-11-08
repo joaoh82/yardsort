@@ -26,8 +26,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1", features = ["io-util", "macros", "net", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 url = "2"
 
 [dev-dependencies]
+# A stand-in relay and host, served over a real socket, for the channel's tests.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }

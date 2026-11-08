@@ -7,6 +7,7 @@ mod activity;
 mod assist;
 mod changes;
 mod commands;
+mod computers;
 mod conversations;
 #[cfg(target_os = "linux")]
 mod display;
@@ -155,6 +156,13 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::remote_answer,
             remote::remote_revoke,
             remote::remote_replace_daemon,
+            computers::other_computers,
+            computers::other_computers_sign_in,
+            computers::other_computers_cancel,
+            computers::other_computers_sign_out,
+            computers::other_computers_pair,
+            computers::other_computers_forget,
+            computers::other_host,
             activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,
@@ -263,7 +271,8 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::TestResultSent,
             schedules::SchedulesChanged,
             triggers::commands::TriggersChanged,
-            remote::RemotePairingRequested
+            remote::RemotePairingRequested,
+            computers::OtherComputersChanged
         ])
 }
 
@@ -495,6 +504,9 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
     // Remote, when it is on: the link to the server's relay.
     let handle = app.handle().clone();
     tauri::async_runtime::spawn(async move { remote::connect(&handle) });
+    // And the other computers this one reaches as a client, when it is signed in as one.
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move { computers::start(&handle) });
 
     // Warm the login-shell environment now, so the first terminal doesn't wait for it.
     // Then bring a `ys` an older version installed up to this one. Not from a development

@@ -26,6 +26,7 @@
 //! with [`Connector::recheck`] — a channel whose grant is gone here is closed.
 
 pub mod account;
+pub mod computer;
 
 use std::collections::HashMap;
 use std::future::Future;

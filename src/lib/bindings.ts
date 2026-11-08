@@ -318,6 +318,31 @@ export const commands = {
 	 *  that does share them is left alone, whatever asked.
 	 */
 	remoteReplaceDaemon: () => typedError<null, IpcError>(__TAURI_INVOKE("remote_replace_daemon")),
+	/**  This computer as a client of other hosts, and the hosts it asked to reach. */
+	otherComputers: () => typedError<OtherComputers, IpcError>(__TAURI_INVOKE("other_computers")),
+	/**  Sign in as a client: a device apart from this computer's host device, through the browser. */
+	otherComputersSignIn: (serverUrl: string, name: string) => typedError<OtherComputers, IpcError>(__TAURI_INVOKE("other_computers_sign_in", { serverUrl, name })),
+	/**  Stop waiting for the browser. */
+	otherComputersCancel: () => typedError<OtherComputers, IpcError>(__TAURI_INVOKE("other_computers_cancel")),
+	/**  Sign the client out, here and at the server. This computer as a host is left as it is. */
+	otherComputersSignOut: () => typedError<OtherComputers, IpcError>(__TAURI_INVOKE("other_computers_sign_out")),
+	/**  Ask the host showing `code` to let this computer watch it. Its person answers there. */
+	otherComputersPair: (code: string) => typedError<OtherComputers, IpcError>(__TAURI_INVOKE("other_computers_pair", { code })),
+	/**  Stop reaching a host: the pairing is taken back at the server. */
+	otherComputersForget: (grantId: string) => typedError<OtherComputers, IpcError>(__TAURI_INVOKE("other_computers_forget", { grantId })),
+	/**  What a host shows, as this computer last read it; `None` for a host it may not reach. */
+	otherHost: (hostId: string) => typedError<{
+	hostId: string,
+	name: string,
+	link: OtherLink,
+	/**  When it was last read; `None` until it has been. */
+	readAt: number | null,
+	platform: string | null,
+	appVersion: string | null,
+	projects: OtherProject[],
+	/**  The newest first. */
+	activity: OtherActivity[],
+} | null, IpcError>(__TAURI_INVOKE("other_host", { hostId })),
 	/**  Assemble the fork packet for a workspace, from the same facts as a handoff. */
 	workspaceFork: (workspaceId: string) => typedError<ForkPacket, IpcError>(__TAURI_INVOKE("workspace_fork", { workspaceId })),
 	memoryGet: (projectId: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_get", { projectId })),
@@ -636,6 +661,7 @@ export const commands = {
 /** Events */
 export const events = {
 	activityChanged: makeEvent<ActivityChanged>("activity-changed"),
+	otherComputersChanged: makeEvent<OtherComputersChanged>("other-computers-changed"),
 	ptyHostEvent: makeEvent<PtyHostEvent>("pty-host-event"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	remotePairingRequested: makeEvent<RemotePairingRequested>("remote-pairing-requested"),
@@ -1747,6 +1773,107 @@ export type ObservedMatch = {
 export type ObservedWrite = {
 	at: number | null,
 	matches: ObservedMatch[],
+};
+
+export type OtherActivity = {
+	id: string,
+	kind: string,
+	occurredAt: number | null,
+	workspace: string,
+};
+
+export type OtherClient = {
+	serverUrl: string,
+	name: string,
+	since: number | null,
+};
+
+export type OtherComputers = {
+	/**  This computer as a client, when it is signed in as one. */
+	client: OtherClient | null,
+	/**  A sign-in is waiting for the browser. */
+	signingIn: boolean,
+	/**  The hosts it asked to reach, by the server's word, by name. */
+	hosts: OtherHost[],
+	/**  Why they could not be listed just now, in words for a person. */
+	problem: string | null,
+	/**  Signed out at the server: signing in again is the way back. */
+	signedOut: boolean,
+	/**  What to offer when signing in: the server this computer is a host on, and its name. */
+	suggestedServerUrl: string | null,
+	suggestedName: string | null,
+};
+
+/**  Something about the other computers changed: the list, a link, or what one shows. */
+export type OtherComputersChanged = Record<string, never>;
+
+/**  A host this computer asked to reach. */
+export type OtherHost = {
+	grantId: string,
+	hostId: string,
+	name: string,
+	pairing: OtherPairing,
+	/**  While let in: how its link stands. */
+	link: OtherLink | null,
+};
+
+/**  What a host shows, as this computer last read it. Read-only: nothing here acts on it. */
+export type OtherHostView = {
+	hostId: string,
+	name: string,
+	link: OtherLink,
+	/**  When it was last read; `None` until it has been. */
+	readAt: number | null,
+	platform: string | null,
+	appVersion: string | null,
+	projects: OtherProject[],
+	/**  The newest first. */
+	activity: OtherActivity[],
+};
+
+export type OtherLink = { kind: "connecting" } | { kind: "online" } | { kind: "offline"; since: number | null; why: string };
+
+export type OtherPairing = 
+/**  Waiting for the person at that computer. */
+"waiting" | 
+/**  Let in, to watch. */
+"paired" | "refused" | 
+/**  Nobody answered in time. */
+"lapsed" | 
+/**  Taken back, there or here. */
+"revoked";
+
+export type OtherProject = {
+	id: string,
+	name: string,
+	workspaces: OtherWorkspace[],
+};
+
+export type OtherSession = {
+	id: string,
+	/**  What its tab is called there. It may quote the first message: shown, never logged. */
+	title: string,
+	harness: string,
+	/**  `starting`, `busy`, `quiet` or `exited`, while its terminal is there; `ended` otherwise. */
+	state: string,
+	startedAt: number | null,
+};
+
+export type OtherTerminal = {
+	id: string,
+	program: string,
+	/**  `shell`, `run`, `agent` or `program`. */
+	purpose: string,
+	state: string,
+};
+
+export type OtherWorkspace = {
+	id: string,
+	name: string,
+	branch: string | null,
+	archived: boolean,
+	sessions: OtherSession[],
+	terminals: OtherTerminal[],
 };
 
 /**  How a workflow run must have ended. */

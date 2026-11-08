@@ -35,7 +35,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use url::Url;
 
+pub mod channel;
 mod relay;
+pub use channel::{Channel, ChannelEnd, ChannelError};
 pub use relay::{Incoming, LinkReader, LinkWriter, RelayLink};
 
 /// How long one request may take.

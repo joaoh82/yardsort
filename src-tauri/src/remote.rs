@@ -359,7 +359,7 @@ fn store_failed(error: impl std::fmt::Display) -> IpcError {
 }
 
 /// Where the host's credential is kept.
-fn credentials() -> account::Result<Box<dyn CredentialStore>> {
+pub(crate) fn credentials() -> account::Result<Box<dyn CredentialStore>> {
     match std::env::var_os(CREDENTIALS_DIR_VAR) {
         Some(dir) => Ok(Box::new(
             FileCredentials::new(dir).map_err(|e| Failure::new("remote_credentials", e))?,

@@ -199,6 +199,10 @@ and what it asks for, and asks you: **Allow viewing**, **allow viewing and typin
 more than one project, it then asks which ones it may reach, all of them if you just press Enter.
 Nothing is let in without your answer.
 
+The device can be a phone, or the desktop app on another computer, signed in under **Settings → Remote →
+Other computers** ([Reaching another computer](remote.md#reaching-another-computer)). The app asks only
+to watch, so `pair` asks only **allow viewing** or **deny**.
+
 `pair` is refused from any terminal Yardsort started, and from anything an agent runs: the host checks
 who is at the other end of its socket, and refuses a process that carries a launched session's
 markers, descends from the terminal daemon, or types at one of the daemon's terminals, and one whose

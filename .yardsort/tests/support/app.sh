@@ -2,20 +2,24 @@
 # The app under test, on this run's profile, with whatever it opens in a browser fetched instead.
 #
 #   sh .yardsort/tests/support/app.sh seed | open | again | close | copies | drives-runs | stop-everything
+#
+# Its profile, worktrees, sign-ins and stand-in browser are in the run's folder, or in
+# $YS_APP_DIR when a test runs another program there on a profile of its own.
 set -u
-profile="$YS_RUN_DIR/profile"
+app="${YS_APP_DIR:-$YS_RUN_DIR}"
+profile="$app/profile"
 
 environment() {
-  mkdir -p "$YS_RUN_DIR/bin"
-  cat > "$YS_RUN_DIR/bin/xdg-open" <<'BROWSER'
+  mkdir -p "$app/bin"
+  cat > "$app/bin/xdg-open" <<'BROWSER'
 #!/bin/sh
 exec curl -fsSL --max-time 30 -o /dev/null "$1"
 BROWSER
-  chmod +x "$YS_RUN_DIR/bin/xdg-open"
-  export PATH="$YS_RUN_DIR/bin:$PATH"
+  chmod +x "$app/bin/xdg-open"
+  export PATH="$app/bin:$PATH"
   export YARDSORT_DATA_DIR="$profile"
-  export YARDSORT_WORKTREE_ROOT="$YS_RUN_DIR/worktrees"
-  export YARDSORT_CREDENTIALS_DIR="$YS_RUN_DIR/credentials"
+  export YARDSORT_WORKTREE_ROOT="$app/worktrees"
+  export YARDSORT_CREDENTIALS_DIR="$app/credentials"
 }
 
 # On this profile: the daemon too, which is the same program.
