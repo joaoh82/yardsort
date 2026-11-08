@@ -999,6 +999,13 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       into the core; `ys project add`; `ys` refuses to queue runs on a host's profile. Its local smoke
       test passed, and so did the owner's run on a real box through staging, which found `Ctrl-C`
       lost to a shell probe and had it fixed.
+      Slice 3 was built on 2026-11-08 ([35 §12](35-remote-r4-r5.md#12--what-the-third-slice-adds)):
+      the host's tarball for x86_64 and aarch64 on each release, with a systemd user unit that leaves
+      the agents running; a container image and compose example, built and tried in CI; the guide's
+      install, service, container, upgrade and backup sections. A shell without `XDG_RUNTIME_DIR`
+      now finds the daemon the user's services started. Its local smoke test, from the tarball
+      with an empty environment, passed, and so did the owner's run of it as a user service on
+      the box: the phone reconnected to the same agent after a restart.
 - [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

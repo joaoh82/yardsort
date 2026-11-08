@@ -1,5 +1,6 @@
-# What `docker build` sends: only what Cargo needs to build the server (crates/server/Dockerfile).
-# Everything else, the frontend, target/ and any local secrets among it, stays behind.
+# What `docker build` sends: only what Cargo needs to build the server (crates/server/Dockerfile)
+# and the headless host (crates/host/Dockerfile). Everything else, the frontend, target/ and any
+# local secrets among it, stays behind.
 *
 !Cargo.toml
 !Cargo.lock

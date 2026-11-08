@@ -90,7 +90,8 @@ pub struct Connected {
 /// `YARDSORT_NO_DAEMON` keeps the host in this process instead — for debugging, and so the tests
 /// do not each need a second process.
 pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
-    let endpoint = Endpoint::for_data_dir(data_dir);
+    let endpoints = Endpoint::all_for_data_dir(data_dir);
+    let endpoint = endpoints[0].clone();
     let log_path = data_dir.join("daemon.log");
     // Where a daemon started here keeps exits for a client that is gone; see `activity`.
     let spool_dir = crate::activity::spool_dir(data_dir);
@@ -113,8 +114,9 @@ pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
         return in_process(None);
     }
 
-    let client = match connect_or_start(&endpoint, &log_path, &spool_dir, &events) {
-        Ok(client) => Arc::new(client),
+    // Where it answered, which is not always where a new one would go.
+    let (endpoint, client) = match connect_or_start(&endpoints, &log_path, &spool_dir, &events) {
+        Ok((endpoint, client)) => (endpoint, Arc::new(client)),
         Err(error) => {
             // Falling back keeps the app usable: terminals work, they just will not outlive it.
             // The status bar says so, and `daemon.log` says why.
@@ -158,8 +160,8 @@ pub fn connect(data_dir: &Path, events: EventSink) -> Connected {
         Verdict::Replace => {
             let _ = client.shutdown(false);
             drop(client);
-            return match replace_daemon(&endpoint, &log_path, &spool_dir, &events) {
-                Ok(client) => connected_to(client, endpoint, log_path),
+            return match replace_daemon(&endpoint, &endpoints, &log_path, &spool_dir, &events) {
+                Ok((endpoint, client)) => connected_to(client, endpoint, log_path),
                 Err(error) => in_process(Some(error.to_string())),
             };
         }
@@ -204,8 +206,7 @@ pub fn endpoint_for(data_dir: &Path) -> String {
 /// For clients that only want to report what is there — a listing that started a daemon would be
 /// answering its own question, and would leave a process behind on a machine that had none.
 pub fn connect_existing(data_dir: &Path, events: EventSink) -> Option<DaemonClient> {
-    let endpoint = Endpoint::for_data_dir(data_dir);
-    attach(&endpoint, &events).ok()
+    attach_any(&Endpoint::all_for_data_dir(data_dir), &events).map(|(_, client)| client)
 }
 
 fn connected_to(
@@ -229,17 +230,19 @@ fn connected_to(
     }
 }
 
-/// Start a daemon of *this* version where an older one has just stood down, and connect to it.
+/// Start a daemon of *this* version once the older one at `old` has stood down, and connect to
+/// it.
 fn replace_daemon(
-    endpoint: &Endpoint,
+    old: &Endpoint,
+    endpoints: &[Endpoint],
     log_path: &Path,
     spool_dir: &Path,
     events: &EventSink,
-) -> std::io::Result<Arc<DaemonClient>> {
+) -> std::io::Result<(Endpoint, Arc<DaemonClient>)> {
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
         // The old daemon has to let go of the socket before a new one can take it.
-        if attach(endpoint, events).is_err() {
+        if attach(old, events).is_err() {
             break;
         }
         if Instant::now() >= deadline {
@@ -249,9 +252,9 @@ fn replace_daemon(
         }
         std::thread::sleep(START_POLL);
     }
-    let client = Arc::new(connect_or_start(endpoint, log_path, spool_dir, events)?);
+    let (endpoint, client) = connect_or_start(endpoints, log_path, spool_dir, events)?;
     if client.speaks_our_protocol() {
-        Ok(client)
+        Ok((endpoint, Arc::new(client)))
     } else {
         Err(std::io::Error::other(
             "a daemon of the wrong version keeps taking the socket",
@@ -259,22 +262,24 @@ fn replace_daemon(
     }
 }
 
-/// Connect to a listening daemon, or start one and connect to that.
+/// Connect to a daemon listening at any of `endpoints`, or start one at the first and connect to
+/// that. Says which answered.
 fn connect_or_start(
-    endpoint: &Endpoint,
+    endpoints: &[Endpoint],
     log_path: &Path,
     spool_dir: &Path,
     events: &EventSink,
-) -> std::io::Result<DaemonClient> {
-    if let Ok(client) = attach(endpoint, events) {
-        return Ok(client);
+) -> std::io::Result<(Endpoint, DaemonClient)> {
+    if let Some(found) = attach_any(endpoints, events) {
+        return Ok(found);
     }
     // Nobody answered. Two copies of Yardsort starting at once would both get here, and must not
     // both start a daemon: only whoever holds the lock spawns, and the other waits for theirs.
     let ours = Lock::take(&log_path.with_extension("lock"));
-    if let Ok(client) = attach(endpoint, events) {
-        return Ok(client);
+    if let Some(found) = attach_any(endpoints, events) {
+        return Ok(found);
     }
+    let endpoint = &endpoints[0];
     if ours.is_some() {
         spawn_daemon(endpoint, log_path, spool_dir)?;
     }
@@ -282,11 +287,20 @@ fn connect_or_start(
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
         match attach(endpoint, events) {
-            Ok(client) => return Ok(client),
+            Ok(client) => return Ok((endpoint.clone(), client)),
             Err(error) if Instant::now() >= deadline => return Err(error),
             Err(_) => std::thread::sleep(START_POLL),
         }
     }
+}
+
+/// The first of `endpoints` a daemon answers at.
+fn attach_any(endpoints: &[Endpoint], events: &EventSink) -> Option<(Endpoint, DaemonClient)> {
+    endpoints.iter().find_map(|endpoint| {
+        attach(endpoint, events)
+            .ok()
+            .map(|client| (endpoint.clone(), client))
+    })
 }
 
 fn attach(endpoint: &Endpoint, events: &EventSink) -> std::io::Result<DaemonClient> {
@@ -494,6 +508,45 @@ mod tests {
             racer.join().unwrap();
         }
         assert_eq!(peak.load(Ordering::SeqCst), 1, "two apps spawned at once");
+    }
+
+    /// A daemon an earlier release started at another of the profile's addresses is the one to
+    /// use: starting a second would take its agents for ended.
+    #[cfg(unix)]
+    #[test]
+    fn a_daemon_at_an_earlier_address_is_found_and_none_is_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoints = [
+            Endpoint::Path(dir.path().join("run").join("now.sock")),
+            Endpoint::Path(dir.path().join("daemon.sock")),
+        ];
+        let earlier = endpoints[1].clone();
+        std::thread::spawn(move || {
+            pty_ipc::serve(&earlier, "earlier", Duration::from_secs(60)).unwrap();
+        });
+        let events: EventSink = Arc::new(|_| {});
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while attach(&endpoints[1], &events).is_err() {
+            assert!(
+                Instant::now() < deadline,
+                "the stand-in daemon never listened"
+            );
+            std::thread::sleep(START_POLL);
+        }
+
+        let (found, client) = connect_or_start(
+            &endpoints,
+            &dir.path().join("daemon.log"),
+            &dir.path().join("spool"),
+            &events,
+        )
+        .unwrap();
+        assert_eq!(found, endpoints[1]);
+        assert_eq!(client.daemon_info().version, "earlier");
+        let Endpoint::Path(now) = &endpoints[0] else {
+            unreachable!()
+        };
+        assert!(!now.exists(), "a second daemon was started");
     }
 
     /// The log is replaced, not appended to, so a data directory cannot fill up with old runs.

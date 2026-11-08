@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -232,8 +232,8 @@ no Secret Service. The guide says where it is and that it is the host's identity
   `loginctl enable-linger` keeps the user's services up with nobody logged in. Shutdown: `SIGTERM`
   closes the relay link and the control socket and exits; the daemon and the agents stay. Stopping
   the agents is `ys` or the box's own shutdown.
-- The container image (`crates/host/Dockerfile`): Debian slim with `git`, non-root (a fixed UID
-  that an operator can change with `--user` to match the repositories' owner), the host as PID 1's
+- The container image (`crates/host/Dockerfile`): Debian slim with `git`, non-root (a UID set when
+  it is built, `--build-arg UID=… GID=…`, 1000 by default, to match the repositories' owner), the host as PID 1's
   child under `tini` so the daemon's children are reaped. Mounts: the data directory, the worktree
   root, the repositories, and the credentials directory, each its own volume. No harness is in the
   image, and none of its credentials: an operator builds `FROM` it to add the harnesses they are
@@ -243,7 +243,9 @@ no Secret Service. The guide says where it is and that it is the host's identity
 - Upgrades: replace the binary or the image and restart the service. A daemon of the same protocol
   is reused; one from an earlier protocol keeps running its agents until they end, as on the desktop
   (27 §21), and `yardsort-host status` says so.
-- Backup: the data directory (the store and settings) and the credentials directory. The credential
+- Backup: the data directory (the store) and `settings.toml`, which on Linux is in the config
+  directory unless the profile is named by `--data-dir` or `YARDSORT_DATA_DIR`; not the
+  credentials directory. The credential
   is the host's identity; a restored copy that is older than the last rotation is a spent credential,
   which the server takes for a stolen one and signs the host out. `yardsort-host sign-in` again keeps
   the same host and its devices (0.22.0's **Sign in again**). The guide says so rather than pretending
@@ -607,3 +609,75 @@ shell's environment starts an interactive shell, which takes the terminal and on
 back to whoever held it when it began; two probes at once left it with the first, already gone.
 The probe now runs in a session of its own, with no terminal, as it does when the app is opened
 from the desktop (`env.rs`, with a test that its shell's session is not ours).
+
+## 12 · What the third slice adds
+
+Built on 2026-11-08, on Linux. Nothing changed on the server or the phone, so staging needs no deploy
+and the phone no new build.
+
+- **The tarball** (`scripts/host-package.sh`): `yardsort-host-<version>-linux-<arch>.tar.gz`, holding
+  `bin/yardsort-host`, `bin/ys`, `systemd/yardsort-host.service`, a README and the licence; the same
+  bytes for the same build. The release workflow's **host** job builds it for x86_64 on `ubuntu-22.04`
+  and for aarch64 on `ubuntu-22.04-arm`, runs both programs with an empty environment, and attaches it;
+  the release is published only once both are attached. CI's **Host package** job builds both on every
+  pull request and prints the newest glibc symbol they need.
+- **The systemd user unit** (`crates/host/packaging/yardsort-host.service`): `Type=exec`,
+  `ExecStart=%h/.local/bin/yardsort-host serve`, `KillMode=process`, `Restart=on-failure`. No network
+  dependency: a user unit cannot wait for the system's network, and `serve` retries the link itself.
+  `loginctl enable-linger` is the guide's step, not the unit's.
+- **The image and the compose example** (`crates/host/Dockerfile`, `crates/host/compose.yaml`). The
+  server's pinned Rust build stage; `debian:trixie-slim` pinned by digest, with `git`, `openssh-client`,
+  `ca-certificates` and `tini`; a `yardsort` user whose ids are build arguments; `/data`, `/credentials`
+  and `/worktrees` set by `YARDSORT_DATA_DIR`, `YARDSORT_CREDENTIALS_DIR` and `YARDSORT_WORKTREE_ROOT`;
+  `tini -- yardsort-host` as the entry point and `serve` as the command. No `EXPOSE`, no published port,
+  no Docker socket. CI builds it, runs `--version` for both programs, signs in to the stand-in by
+  pasting (`headless.sh` with `YS_INPUT_BUILD=image` runs the image), runs `serve` until the link is
+  connected, and checks that `docker stop` ends it with status 0. No image is published.
+- **`yardsort-host status` names a daemon from an earlier release**, kept after an upgrade for the
+  agents in it, and says phones cannot watch its terminals until it is replaced, once they end and
+  `serve` restarts. §3 promised it; slice 2's `status` did not say it.
+- **The guide**: installing from the tarball, the service with linger, the container (the UID, the
+  volumes, no agents in the image, no port, no Docker socket, a restart ending the agents), upgrading,
+  backing up (the profile and `settings.toml`; not the sign-in, with signing in again after a restore),
+  and the sockets' places.
+- **Found on the way.** Under systemd, `serve` has `XDG_RUNTIME_DIR`; a shell from `sudo -iu` or `su`
+  does not. Each computed its own daemon address, so `ys` in such a shell started a second daemon, and
+  `serve`, after a restart, took the first one's running agents for ended. Tried on this computer with a
+  transient user unit and an `env -i` shell. `pty_ipc` now falls back to `/run/user/<uid>` when
+  `XDG_RUNTIME_DIR` is unset, if that folder is this user's alone, for the daemon's address and the
+  host's socket alike. A process that has the variable is unaffected. Tried again the same way: one
+  daemon, and the agent still running after a restart and a stop.
+- **Upgrading across that change (review).** The fallback moved the address a shell without
+  `XDG_RUNTIME_DIR` computes, and a daemon slice 2 started from one is still listening at the old
+  place, `<data dir>/daemon.sock`. Looking only at the new address would have started a second
+  daemon: the same bug, caused by the upgrade. `Endpoint::all_for_data_dir` gives the new address and,
+  where it differs, the one the rule before gave; `daemon::connect` and `connect_existing` try each,
+  use whichever answers, and start a new daemon only at the first. Only the earlier rule's own
+  address is added, so nothing is tried that neither release would have used. Tried on this computer:
+  a daemon at the profile's `daemon.sock`, then this build's `serve` and `ys` with no
+  `XDG_RUNTIME_DIR`. One daemon, the agent ran in it, and it was still running after `serve` was
+  stopped and started again.
+- **`status` with a daemon that gave no version** says "from an earlier release" rather than leave a
+  gap; the version is optional from the daemon to the message.
+- **The smoke test** gained an input. `headless-host.yaml` with `--input build=package` builds the
+  tarball, unpacks it in the run's folder, and runs every step's `yardsort-host` and `ys` under
+  `env -i` with only `HOME`, a `PATH` of the tarball's `bin` and the system's, and the run's profile.
+  `build=debug`, the default, is slice 2's test as it was.
+- **Tests that fail without it.** The unit stops `serve` alone and installs where the README says; the
+  image runs as `yardsort` under `tini`, pinned, with no port, no privilege and no Docker socket
+  (`crates/host/tests/packaging.rs`); the runtime folder counts only when it is this user's alone
+  (`pty-ipc`).
+- **Not in it**: a published image, packages for distributions, and macOS. The earlier-daemon line has
+  no test of its own: making an earlier daemon needs the fake one in `pty-ipc`'s tests, which the host
+  cannot reach.
+
+**Its smoke test.** `headless-host.yaml` with `--input build=package`, locally: passed on 2026-11-08,
+20 of 20 steps in 14 s, every `yardsort-host` and `ys` the unpacked tarball's under `env -i`. The image's
+check runs in CI's **Host package** job.
+
+**On the box against staging**: passed on 2026-11-08, by the owner. The tarball built here, copied to
+the test box (Ubuntu 24.04, linger on), installed in `~/.local/bin` with the unit in
+`~/.config/systemd/user`, in place of slice 2's `serve` under `tmux`, with Claude left running.
+`systemctl --user enable --now yardsort-host` linked to `https://remote-staging.yardsort.sh`, the iPhone
+watched and typed, and after `systemctl --user restart yardsort-host` the phone reconnected to the same
+agent.

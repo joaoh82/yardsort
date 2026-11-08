@@ -56,6 +56,7 @@ workflow_) and give it an existing tag.
 | Linux (x86_64)                           | `.AppImage`, `.deb`, `.rpm`; `yardsort-bin` on the AUR | —                                                                                      |
 | macOS (universal: Apple Silicon + Intel) | `.dmg`, `.app.tar.gz`                                  | Signed and notarized when the Apple secrets below are set; otherwise an unsigned build |
 | Windows (x86_64)                         | `-setup.exe` (NSIS), `.msi`                            | Not signed yet — users see a SmartScreen warning                                       |
+| Linux headless host (x86_64, aarch64)    | `yardsort-host-<version>-linux-<arch>.tar.gz`          | —                                                                                      |
 
 Each platform first builds **`ys`**, the [command-line client](guide/cli.md), with
 `scripts/sidecar.mjs`, which puts it in `src-tauri/binaries/` under its target triple.
@@ -80,6 +81,14 @@ signature, the team and both architectures before attaching it, and asks Apple f
 failed ticket lookup is a warning, not a failed release. A ticket cannot be stapled to a bare
 executable, so Gatekeeper looks it up online the first time a quarantined copy runs. Without the
 Apple secrets the archive carries the unsigned build, as the app does.
+
+**The headless host** gets a tarball per architecture, `yardsort-host-<version>-linux-x86_64.tar.gz`
+and `yardsort-host-<version>-linux-aarch64.tar.gz`: `yardsort-host`, `ys`, the systemd user service and
+a README, made by `scripts/host-package.sh`. Its own job builds each on Ubuntu 22.04, the oldest
+runner there is, on that architecture's own runner, so the glibc it needs is 22.04's. The job runs
+both programs with an empty environment before attaching the tarball, and the release is published
+only once both are attached. Pull requests build the same tarballs, and the container image, in CI's
+**Host package** job. No image is published.
 
 `scripts/notarization-ticket.py <file>…` asks the same question from any system, with nothing but
 Python: it prints each architecture's signer and whether Apple holds a ticket for it. Run it on

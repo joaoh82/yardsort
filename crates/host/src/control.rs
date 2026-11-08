@@ -77,6 +77,15 @@ pub struct Status {
     pub remote: Option<RemoteStatus>,
     /// Sessions running in the daemon.
     pub terminals: usize,
+    /// Set when the daemon is from an earlier release, kept for the agents in it.
+    #[serde(default)]
+    pub earlier_daemon: Option<EarlierDaemon>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EarlierDaemon {
+    /// Its release, when it said.
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -130,6 +130,19 @@ mod cli {
         1
     }
 
+    /// After an upgrade, while the terminal daemon of the release before still runs agents.
+    fn earlier_daemon(version: Option<&str>) -> String {
+        let release = match version {
+            Some(version) => format!("Yardsort {version}"),
+            None => "an earlier release".into(),
+        };
+        format!(
+            "The terminal daemon is from {release}, kept for the agents running in it. \
+             Phones cannot watch its terminals, new ones included, until it is replaced: once \
+             those agents have ended, restart `serve`."
+        )
+    }
+
     async fn devices(profile: &Profile) -> Result<(), String> {
         let Reply::Devices { devices } = control::ask_once(profile, Ask::Devices).await? else {
             return Err("The host answered something else.".into());
@@ -191,6 +204,20 @@ mod cli {
             }
         }
         println!("Terminals: {}", status.terminals);
+        if let Some(earlier) = status.earlier_daemon {
+            println!("{}", earlier_daemon(earlier.version.as_deref()));
+        }
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn an_earlier_daemon_that_gave_no_version_is_still_named() {
+            assert!(earlier_daemon(Some("0.22.2")).contains("from Yardsort 0.22.2, kept"));
+            assert!(earlier_daemon(None).contains("from an earlier release, kept"));
+        }
     }
 }
