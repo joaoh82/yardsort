@@ -15,7 +15,9 @@ GTK. Nothing it runs listens on the network: it reaches out to the server, as th
 
 - **Linux.** It builds on macOS too, but pairing a device needs Linux, where it can check who is asking
   (see [Only a person can pair a device](#only-a-person-can-pair-a-device)). There is none for Windows.
-- **A Yardsort server** you can sign in to, and a browser on any other computer to sign in with.
+- **A Yardsort server** you can sign in to, and a browser on any other computer to sign in with. To run
+  one of your own, see the
+  [self-host recipe](https://github.com/joaoh82/yardsort/tree/main/crates/server/self-host).
 - **`git`**, and the agents you want to run, installed and signed in on that computer as the user who
   runs `yardsort-host`. Installing them, their sign-ins and their licences are yours to see to: none
   comes with Yardsort.
