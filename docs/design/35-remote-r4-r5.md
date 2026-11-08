@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -695,3 +695,68 @@ the test box (Ubuntu 24.04, linger on), installed in `~/.local/bin` with the uni
 `systemctl --user enable --now yardsort-host` linked to `https://remote-staging.yardsort.sh`, the iPhone
 watched and typed, and after `systemctl --user restart yardsort-host` the phone reconnected to the same
 agent.
+
+## 13 · What the fourth slice adds
+
+Built on 2026-11-08, on Linux. Nothing changed on the server or the phone, so staging needs no deploy
+and the phone no new build. Milestone B's first half: the desktop signs in as a client and shows a host
+on another computer, read-only. Watching and typing into its terminals are slice 5.
+
+- **The channel layer in Rust** (`remote_client::channel`): `Hello` and the welcome, requests matched to
+  their replies, typed helpers for `host.describe`, `workspace.list`, `workspace.describe`,
+  `session.list` and `activity.list`, an `Attachment` whose items are checked to come numbered without a
+  gap (a split piece is whole once a shorter frame or the next item comes, and `drawn` says where to
+  resume from), a `Control` whose lease is renewed while held and lost on `lease_lost`, with input
+  numbered within the lease and never sent twice, and a `Subscription` for activity. Events and frames a
+  newer host sends are passed over; anything no host sends closes the channel as broken. Liveness is
+  the relay's pings, as the host's link already had it, so there is no probe as the TypeScript one has.
+  All of it is in now, though slice 4 only reads: slice 5 needs the rest, and the pairing tool already
+  uses it.
+- **The pairing tool's device moved onto it** (`crates/server/examples/pair.rs`, `phone --relay`): run
+  against the stand-in, it signed in, was let in, watched the shell, typed and read the echo, and came
+  back resuming after the last item drawn, numbered without a gap.
+- **The desktop's `Computer` device** (`remote_host::computer`): signing in as a second device of kind
+  `computer`, apart from the host device, with its refresh credential under
+  `remote-computer-refresh-<device>` in the same store; migration `0026_remote_computer.sql` keeps the
+  sign-in and the pairings forgotten here, and nothing else. The hosts it is paired with are the server's grants, one per host (the one
+  in force, else the newest), listed again every 3 s while a pairing waits for the host's person,
+  whose answer nothing else brings, every minute otherwise, and at most every 10 s when the window
+  looks. It asks only to
+  watch (`workspace:read`, `activity:read`, `memory:read`, `terminal:read`). One link per approved host,
+  opened again with waits up to a minute; through each, what the host shows is read when its activity
+  moves and every 20 s, and kept in memory with the link's state, online, connecting or offline since
+  when. What a host last showed stays shown while it is away. A grant taken back ends the link and the
+  list says so.
+- **In the window** (`src-tauri/src/computers.rs`, `src/features/remote/`): **Settings → Remote → Other
+  computers** signs in through the browser, offering the server this computer is a host on; pairs by
+  code; lists every pairing, waiting, refused and revoked ones too, each with **Forget**, which takes
+  back one still in force and hides it here, since the server goes on listing what it took back or
+  refused (a new pairing with the host is a new grant, and shows); and signs out,
+  leaving the host as it is. **Other computers** in the sidebar, below the projects, lists the hosts
+  paired with or waiting, by name, with their link. One opens in the center panel with its name across
+  the top: its projects' workspaces with their branches, each agent with its harness and state, the
+  workspace's other terminals, and recent activity. Nothing on it acts: its only button is **Close**,
+  and the Changes panel says it shows nothing for another computer.
+- **Tests that fail without it.** The channel against a relay and host played by the test, from the
+  fixtures (`crates/remote-client/tests/channel.rs`, 8 tests); the computer against the real server
+  and a real host (`crates/server/tests/computer.rs`): it signs in as its own device, a wrong code is
+  refused, the right one waits for the host's person, once approved it shows the host's workspace and
+  its program, and when the host revokes it, it reaches it no more while the program runs on, and
+  once forgotten it is not listed again; the host
+  and the client sign-ins leave each other be (`store`); the sidebar, the page and Settings
+  (`src/features/remote/OtherComputers.test.tsx`), and the center panel taken and given back
+  (`projects.test.ts`).
+- **Not in it**: attaching to a remote terminal, taking control, and the source interface behind
+  `TerminalView` (slice 5); a host's memory, which the grant allows but nothing shows yet.
+
+**Its smoke test.** `desktop-client.yaml`, locally: passed on 2026-11-08, 16 of 16 steps in 80 s. A
+`yardsort-host` on the stand-in, signed in by pasting and serving a shell started with `ys`; the real
+window, on a profile of its own, signed in as a client, paired by the code `pair` showed and was let
+watch there; the host then showed under Other computers, online, and opened with its name across the
+top, its workspace and its shell, nothing to press but Close, and no Changes panel. `yardsort-host
+devices` listed it as `Smoke laptop  watches`. The first run found that nothing asked the server
+again while a pairing waited, so the approval was never seen; the lister now asks every 3 s while one
+waits, and the end-to-end test waits on that rather than asking itself. Against staging and the box,
+the owner found that a pairing the box revoked stayed under **Paired with**, and **Forget** left it
+there: it revoked again a grant already revoked, and the server still listed it. Forget now hides it
+here as well, and the end-to-end test forgets the revoked pairing and lists again.

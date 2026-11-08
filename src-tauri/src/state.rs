@@ -39,6 +39,9 @@ pub struct AppState {
     pub usage: crate::usage::Usage,
     /// Remote: the host's session with its server. See `crate::remote`.
     pub remote: crate::remote::RemoteState,
+    /// Remote, the other way round: this computer as a client of other hosts. See
+    /// `crate::computers`.
+    pub computers: crate::computers::ComputersState,
     env: Mutex<Option<Arc<ShellEnv>>>,
 }
 
@@ -64,6 +67,7 @@ impl AppState {
             inbox_watcher: Mutex::new(None),
             usage: crate::usage::Usage::default(),
             remote: crate::remote::RemoteState::default(),
+            computers: crate::computers::ComputersState::default(),
             env: Mutex::new(None),
         }
     }

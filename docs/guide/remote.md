@@ -9,7 +9,8 @@ at a workspace, watch a terminal, or take control of one and type, away from you
 screen, such as a server you reach over SSH, can be a host too: see
 [A computer with no screen](headless-host.md). A phone that may
 type can also start a new workspace or another agent, and give an agent a picture. The agents keep
-running on this computer whatever happens to the connection.
+running on this computer whatever happens to the connection. This computer can also reach another one
+the same way, read-only for now: see [Reaching another computer](#reaching-another-computer).
 
 Neither end listens for connections: this computer and your phone each reach out to the server.
 
@@ -76,6 +77,36 @@ picture. Pictures are deleted after seven days, when another one comes.
 Drag down on a terminal to go back through what scrolled off its screen, as far as this computer keeps
 it, and up to come back. A terminal taller than the phone moves first; the history follows on in the same
 drag. A program on its alternate screen, as a full-screen program uses, has no history to scroll.
+
+## Reaching another computer
+
+The desktop app can reach another computer running Yardsort too, as your phone does: one with the app
+and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). For now it shows that
+computer's workspaces, agents and activity, and does not open its terminals or type into them.
+
+1. In **Settings → Remote**, under **Other computers**, give the server the other computer is signed in
+   to and a name for this one, then press **Sign in to reach other computers**, which opens your
+   browser. The server is filled in for you when this computer is a host on one.
+2. On the other computer, show a code: **Pair a device** in its **Settings → Remote**, or
+   `yardsort-host pair` on one with no screen.
+3. Type the code under **Pairing code** here and press **Pair**. The other computer's person is asked
+   there, and lets this one watch or refuses. Until then the pairing says _waiting for its answer_.
+
+Once let in, the other computer is listed under **Other computers** in the sidebar, below your projects,
+by its name: _online_, _connecting_, or _offline_ since when. Click it to open its page in the middle of
+the window, with its name across the top. It lists each of its projects' workspaces with their branches,
+the agents in each with what they are doing, the workspace's other terminals, and its recent activity,
+and updates as it changes. Nothing on that page acts on either computer: there is no Changes panel, no
+Git action and no file for another computer's workspace, and nothing of it is mixed into your own
+projects. While the other computer is away, the page keeps what it last showed, and says when that was.
+
+**This is a device of its own.** Signing in here makes a second device at the server, apart from this
+computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other
+computers leaves this computer's host as it is. Its sign-in is kept in the same credential store. The
+other computer lists it among its devices let in, where it can be revoked. A pairing it revoked or
+refused stays under **Pairings**, saying so, until you press **Forget**. **Forget** on one still in
+force takes it back from this side. Either way it is no longer listed here; pairing with that computer
+again makes a new pairing, which shows.
 
 ## If a phone cannot open any terminal
 

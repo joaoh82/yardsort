@@ -35,6 +35,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0023_triggers.sql"),
     include_str!("../migrations/0024_pr_watches.sql"),
     include_str!("../migrations/0025_custom_events.sql"),
+    include_str!("../migrations/0026_remote_computer.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -65,6 +66,16 @@ pub struct RemoteHostRow {
     pub device_id: String,
     pub name: String,
     pub enabled_at: i64,
+}
+
+/// This machine as a client of other hosts. See `migrations/0026_remote_computer.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteComputerRow {
+    pub server_url: String,
+    pub server_id: String,
+    pub device_id: String,
+    pub name: String,
+    pub signed_in_at: i64,
 }
 
 /// A device this host's person let in. `scopes` and `projects` are JSON, as on the wire.
@@ -2255,6 +2266,75 @@ impl Store {
         Ok(())
     }
 
+    /// This machine as a client of other hosts, when it is signed in as one.
+    pub fn remote_computer(&self) -> StoreResult<Option<RemoteComputerRow>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT server_url, server_id, device_id, name, signed_in_at FROM remote_computer",
+                [],
+                |r| {
+                    Ok(RemoteComputerRow {
+                        server_url: r.get(0)?,
+                        server_id: r.get(1)?,
+                        device_id: r.get(2)?,
+                        name: r.get(3)?,
+                        signed_in_at: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn set_remote_computer(&self, computer: &RemoteComputerRow) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT INTO remote_computer
+                 (singleton, server_url, server_id, device_id, name, signed_in_at)
+             VALUES (1, ?, ?, ?, ?, ?)
+             ON CONFLICT(singleton) DO UPDATE SET
+                 server_url = excluded.server_url, server_id = excluded.server_id,
+                 device_id = excluded.device_id, name = excluded.name,
+                 signed_in_at = excluded.signed_in_at",
+            params![
+                computer.server_url,
+                computer.server_id,
+                computer.device_id,
+                computer.name,
+                computer.signed_in_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Sign out as a client: the pairings forgotten go too, in one step.
+    pub fn forget_remote_computer(&self) -> StoreResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM remote_computer_forgotten", [])?;
+        tx.execute("DELETE FROM remote_computer", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The grants this machine, as a client, was told to forget: not shown, whatever the server
+    /// lists.
+    pub fn forgotten_remote_pairings(&self) -> StoreResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT grant_id FROM remote_computer_forgotten")?;
+        let ids = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(ids)
+    }
+
+    pub fn forget_remote_pairing(&self, grant_id: &str) -> StoreResult<()> {
+        self.conn().execute(
+            "INSERT OR IGNORE INTO remote_computer_forgotten (grant_id) VALUES (?)",
+            [grant_id],
+        )?;
+        Ok(())
+    }
+
     /// The devices this host's person let in, oldest first.
     pub fn remote_grants(&self) -> StoreResult<Vec<RemoteGrantRow>> {
         let conn = self.conn();
@@ -2525,6 +2605,45 @@ mod tests {
             .into_iter()
             .map(|p| p.name)
             .collect()
+    }
+
+    /// This computer as a host and as a client of other hosts are two devices: turning Remote
+    /// off as a host leaves the client signed in, and the other way round.
+    #[test]
+    fn signing_in_as_a_client_and_turning_the_host_off_leave_each_other_be() {
+        let store = Store::in_memory();
+        let host = RemoteHostRow {
+            server_url: "https://remote.example.com".into(),
+            server_id: "server-1".into(),
+            host_id: "host-1".into(),
+            device_id: "device-host".into(),
+            name: "Workstation".into(),
+            enabled_at: 1,
+        };
+        let computer = RemoteComputerRow {
+            server_url: "https://remote.example.com".into(),
+            server_id: "server-1".into(),
+            device_id: "device-client".into(),
+            name: "Workstation".into(),
+            signed_in_at: 2,
+        };
+        store.set_remote_host(&host).unwrap();
+        store.set_remote_computer(&computer).unwrap();
+        store.forget_remote_host().unwrap();
+        assert_eq!(store.remote_computer().unwrap(), Some(computer.clone()));
+
+        store.forget_remote_pairing("grant-1").unwrap();
+        store.forget_remote_pairing("grant-1").unwrap();
+        assert_eq!(store.forgotten_remote_pairings().unwrap(), ["grant-1"]);
+
+        store.set_remote_host(&host).unwrap();
+        store.forget_remote_computer().unwrap();
+        assert_eq!(store.remote_computer().unwrap(), None);
+        assert_eq!(
+            store.forgotten_remote_pairings().unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(store.remote_host().unwrap(), Some(host));
     }
 
     #[test]

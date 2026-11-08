@@ -59,6 +59,21 @@ describe("projects store", () => {
     expect(store().composingProjectId).toBe("p-app");
   });
 
+  it("another computer takes the center panel like any view, and gives it back to a workspace", () => {
+    store().select("w-app");
+    store().openUsage(true);
+    store().openRemoteHost("h-1");
+    expect(store().remoteHostId).toBe("h-1");
+    expect(store().usageOpen).toBe(false);
+    expect(store().selectedWorkspaceId).toBe("w-app");
+
+    store().openTasks(true);
+    expect(store().remoteHostId).toBeNull();
+    store().openRemoteHost("h-1");
+    store().select("w-app");
+    expect(store().remoteHostId).toBeNull();
+  });
+
   it("restores selection, collapsed projects and the last parent folder", async () => {
     core.projectsList.mockResolvedValue([project("a"), project("b")]);
     core.uiStateLoad.mockResolvedValue({

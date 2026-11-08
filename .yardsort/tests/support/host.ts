@@ -3,14 +3,17 @@
 // a terminal of their own.
 //
 //   bun .yardsort/tests/support/host.ts <run dir> sign-in <name>
-//   bun .yardsort/tests/support/host.ts <run dir> pair
+//   bun .yardsort/tests/support/host.ts <run dir> pair [window <port>]
+//
+// With `window`, the app's window is the device that asks, through its inspector on `port`: it
+// asks only to watch, and is let watch.
 //
 // `yardsort-host` runs through headless.sh: the build headless-build.sh made, on this run's profile.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const [dir, doing, named] = process.argv.slice(2);
+const [dir, doing, named, port] = process.argv.slice(2);
 const HOST = ["sh", ".yardsort/tests/support/headless.sh", "yardsort-host"];
 const server = JSON.parse(readFileSync(join(dir, "stand-in.json"), "utf8").split("\n")[0]).ready
   .server;
@@ -104,13 +107,18 @@ switch (doing) {
     const out = reading(pairing.stdout);
     const [, code] = await out.until(/^ {2}([A-Z0-9-]{6,})\s*$/m);
     writeFileSync(join(dir, "pairing-code"), code);
-    const asking = Bun.spawnSync(["bun", ".yardsort/tests/support/phone.ts", dir, "ask"], {
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    if (asking.exitCode !== 0) throw new Error("The phone could not ask.");
-    await out.until(/Allow \[v\]iewing, allow viewing and \[t\]yping, or \[d\]eny\?/);
-    pairing.stdin.write("t\n");
+    const window = named === "window";
+    const asker = window
+      ? ["bun", ".yardsort/tests/support/window.ts", port, "enter-code", dir]
+      : ["bun", ".yardsort/tests/support/phone.ts", dir, "ask"];
+    const asking = Bun.spawnSync(asker, { stdout: "inherit", stderr: "inherit" });
+    if (asking.exitCode !== 0) throw new Error("The device could not ask.");
+    await out.until(
+      window
+        ? /Allow \[v\]iewing, or \[d\]eny\?/
+        : /Allow \[v\]iewing, allow viewing and \[t\]yping, or \[d\]eny\?/,
+    );
+    pairing.stdin.write(window ? "v\n" : "t\n");
     await pairing.stdin.flush();
     await out.until(/Let in\./);
     pairing.kill();

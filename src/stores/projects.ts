@@ -91,6 +91,9 @@ interface ProjectsState {
   schedulesOpen: boolean;
   /** The Triggers view is open in the center panel, which it takes over the same way. */
   triggersOpen: boolean;
+  /** Another computer this one reaches as a client, open read-only in the center panel, which it
+   *  takes over the same way. Its id at the server. */
+  remoteHostId: string | null;
   /** What the Triggers view was opened on: one workspace's triggers, or one agent session's.
    *  `null` shows every trigger. */
   triggersFocus: TriggersFocus | null;
@@ -162,6 +165,8 @@ interface ProjectsState {
   openWorkflow: (workflowId: string | null) => void;
   /** Show the Usage view in the center panel, or close it. */
   openUsage: (open: boolean) => void;
+  /** Show another computer's workspaces, or close that with `null`. */
+  openRemoteHost: (hostId: string | null) => void;
   /** Show the Pull requests view in the center panel, or close it. */
   openPullRequests: (open: boolean) => void;
   /** Show the Tasks view in the center panel, or close it. */
@@ -266,6 +271,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     testsOpen: false,
     schedulesOpen: false,
     triggersOpen: false,
+    remoteHostId: null,
     triggersFocus: null,
     ui: {},
     collapsed: [],
@@ -452,6 +458,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           testsOpen: false,
           schedulesOpen: false,
           triggersOpen: false,
+          remoteHostId: null,
         });
       }
       set({
@@ -470,6 +477,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
       });
       save(KEYS.selected, workspaceId);
     },
@@ -490,6 +498,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
@@ -504,6 +513,27 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+        composingTask: null,
+        composingHarness: null,
+        composingFork: null,
+      });
+    },
+
+    openRemoteHost(hostId) {
+      set({
+        remoteHostId: hostId,
+        usageOpen: false,
+        pullRequestsOpen: false,
+        tasksOpen: false,
+        testsOpen: false,
+        schedulesOpen: false,
+        triggersOpen: false,
+        workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
@@ -522,6 +552,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -540,6 +571,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
         usageOpen: false,
         workflowId: null,
         composingProjectId: null,
@@ -558,6 +590,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
         pullRequestsOpen: false,
         usageOpen: false,
         workflowId: null,
@@ -576,6 +609,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: open,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
         tasksOpen: false,
         pullRequestsOpen: false,
         usageOpen: false,
@@ -594,6 +628,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({
         schedulesOpen: open,
         triggersOpen: false,
+        remoteHostId: null,
         testsOpen: false,
         tasksOpen: false,
         pullRequestsOpen: false,
@@ -612,6 +647,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     openTriggers(open, focus) {
       set({
         triggersOpen: open,
+        remoteHostId: null,
         triggersFocus: (open && focus) || null,
         schedulesOpen: false,
         testsOpen: false,
@@ -646,6 +682,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
       });
       save(KEYS.selected, workspace.id);
     },
@@ -685,6 +722,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         testsOpen: false,
         schedulesOpen: false,
         triggersOpen: false,
+        remoteHostId: null,
         collapsed: state.collapsed.filter((id) => id !== workspace.projectId),
       }));
       return true;

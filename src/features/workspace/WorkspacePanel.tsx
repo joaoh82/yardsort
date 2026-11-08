@@ -9,6 +9,7 @@ import { TasksView } from "@/features/tasks/TasksView";
 import { TestsView } from "@/features/tests/TestsView";
 import { SchedulesView } from "@/features/schedules/SchedulesView";
 import { TriggersView } from "@/features/triggers/TriggersView";
+import { OtherHostView } from "@/features/remote/OtherHostView";
 import { GettingStarted } from "@/features/onboarding/GettingStarted";
 import { BenchRunner } from "@/features/terminal/BenchRunner";
 import { LatencyRunner } from "@/features/terminal/LatencyRunner";
@@ -53,6 +54,7 @@ export function WorkspacePanel() {
   const testsOpen = useProjectsStore((s) => s.testsOpen);
   const schedulesOpen = useProjectsStore((s) => s.schedulesOpen);
   const triggersOpen = useProjectsStore((s) => s.triggersOpen);
+  const remoteHostId = useProjectsStore((s) => s.remoteHostId);
   const runIn =
     selection && selection.workspace.id === composingWorkspaceId ? selection : undefined;
 
@@ -71,7 +73,9 @@ export function WorkspacePanel() {
   }
   return (
     <main aria-label="Workspace" className="flex h-full flex-col bg-canvas">
-      {usageOpen ? (
+      {remoteHostId ? (
+        <OtherHostView hostId={remoteHostId} />
+      ) : usageOpen ? (
         <UsageView />
       ) : pullRequestsOpen ? (
         <PullRequestsView />
