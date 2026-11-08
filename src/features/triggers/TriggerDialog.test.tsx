@@ -183,6 +183,49 @@ describe("TriggerDialog", () => {
     );
   });
 
+  it("listens for custom events by name, offering the names the project already uses", async () => {
+    core.triggerSave.mockResolvedValue({ trigger: trigger("t-new"), untold: [] });
+    useTriggersStore.setState({
+      items: [
+        trigger("t-other", {
+          events: ["custom"],
+          filters: { names: ["deploy"] },
+          projectId: fixLogin.projectId,
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<TriggerDialog workspaceId={fixLogin.id} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("checkbox", { name: "A custom event" }));
+    // About the workspace, as `workspace.done` is: the pull request's events are another kind.
+    expect(screen.getByRole("checkbox", { name: "Says its work is done" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "A review comes in" })).toBeDisabled();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workflow" }), "address-review");
+    const add = screen.getByRole("button", { name: "Add trigger" });
+    // Not without a name.
+    expect(add).toBeDisabled();
+    expect(screen.getByText(/Used in this project: deploy/)).toBeInTheDocument();
+
+    const names = screen.getByRole("combobox", { name: "Custom event names" });
+    await user.type(names, "Migration");
+    expect(names).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/migration would do/)).toBeInTheDocument();
+    expect(add).toBeDisabled();
+
+    await user.clear(names);
+    await user.type(names, "custom.migration-written, deploy");
+    expect(screen.getByLabelText("What it will do")).toHaveTextContent(
+      "When custom.migration-written or custom.deploy is raised here, tell the agent to address it. At most 3 times per workspace.",
+    );
+    await user.click(add);
+    expect(core.triggerSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: ["custom"],
+        filters: { names: ["migration-written", "deploy"] },
+      }),
+    );
+  });
+
   it("offers to tell an agent already running about `ys workspace done`", async () => {
     core.sessionsList.mockResolvedValue([
       record("rec-1", { running: true, ptySessionId: "pty-1" }),

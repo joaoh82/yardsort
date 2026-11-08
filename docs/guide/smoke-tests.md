@@ -165,6 +165,11 @@ So `line: curl -s "http://localhost:$YS_RUN_PORT/health" | jq .status` is right,
 `line: curl localhost:{{ run.port }}` is reported. Prefer `run` where there is no pipe: it works
 the same on every platform.
 
+**A step can raise a [custom event](triggers.md#custom-events)** for a trigger to hear:
+`action: run`, `program: ys`, `args: [event, emit, seeded]`. `ys` knows the run from
+`YS_RUN_ID`, so it is raised in the run's workspace, and a run the trigger starts counts as one
+step further along a chain, which keeps tests that set each other off from looping.
+
 ### Expectations
 
 Under `expect`, for `run` and `shell`:

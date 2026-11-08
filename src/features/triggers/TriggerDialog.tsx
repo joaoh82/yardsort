@@ -18,7 +18,15 @@ import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTriggersStore } from "@/stores/triggers";
 import { useWorkflowStore } from "@/stores/workflows";
-import { defaultQuietMs, EVENTS, sentence, subjectOf } from "./words";
+import {
+  CUSTOM_PREFIX,
+  customNameProblem,
+  customNames,
+  defaultQuietMs,
+  EVENTS,
+  sentence,
+  subjectOf,
+} from "./words";
 
 const control =
   "h-8 w-full rounded border border-line bg-canvas px-2 text-ink outline-none focus:border-accent disabled:opacity-50";
@@ -73,12 +81,15 @@ export function TriggerDialog(props: Props) {
   const presets = useTriggersStore((s) => s.presets);
   const allHarnesses = useHarnessStore((s) => s.harnesses);
   const sessionsByWorkspace = useSessionsStore((s) => s.byWorkspace);
+  const triggers = useTriggersStore((s) => s.items);
 
   const [preset, setPreset] = useState<string | null>(trigger?.preset ?? null);
   const [workspaceId, setWorkspaceId] = useState(trigger?.workspaceId ?? props.workspaceId ?? "");
   const [sessionId, setSessionId] = useState(trigger?.sessionId ?? props.sessionId ?? "");
   const [events, setEvents] = useState<TriggerEvent[]>(trigger?.events ?? []);
   const [filters, setFilters] = useState<TriggerFilters>(trigger?.filters ?? {});
+  // A custom event's names, as typed: `migration-written, deploy`.
+  const [namesText, setNamesText] = useState((trigger?.filters.names ?? []).join(", "));
   const [target, setTarget] = useState<ScheduleTarget>(trigger?.target ?? "workflow");
   const [targetId, setTargetId] = useState(trigger?.targetId ?? "");
   const [answers, setAnswers] = useState<Record<string, string>>(trigger?.inputs ?? {});
@@ -118,6 +129,15 @@ export function TriggerDialog(props: Props) {
       .map((w) => ({ id: w.id, name: `${project.name} / ${w.name}` })),
   );
   const workspaceName = workspaces.find((w) => w.id === workspaceId)?.name ?? "";
+  // The custom events the project's other triggers listen for, to pick from rather than retype.
+  const projectId = projects.find((p) => p.workspaces.some((w) => w.id === workspaceId))?.id;
+  const namesInUse = [
+    ...new Set(
+      triggers
+        .filter((item) => item.projectId === projectId && item.id !== trigger?.id)
+        .flatMap((item) => item.filters.names ?? []),
+    ),
+  ].sort();
   // A session trigger belongs to an agent; one that has ended can still be the one it was.
   const agents = (sessionsByWorkspace[workspaceId] ?? []).filter(
     (record) => record.running || record.id === sessionId,
@@ -180,12 +200,26 @@ export function TriggerDialog(props: Props) {
   const optionsOk =
     Number.isFinite(quietMs) && quietMs >= 0 && Number.isInteger(capNumber) && capNumber >= 1;
 
-  const chosen = target === "workflow" ? !!workflow : !!test?.runnable;
-  const ready =
-    chosen && !!workspaceId && events.length > 0 && missing.length === 0 && optionsOk && !busy;
-
   // Only the filters of the events ticked: the core refuses one given for an event it is not.
   const has = (event: TriggerEvent) => events.includes(event);
+  const names = customNames(namesText);
+  const namesProblem = has("custom")
+    ? names.length === 0
+      ? null
+      : (names.map(customNameProblem).find(Boolean) ?? null)
+    : null;
+  const namesOk = !has("custom") || (names.length > 0 && !namesProblem);
+
+  const chosen = target === "workflow" ? !!workflow : !!test?.runnable;
+  const ready =
+    chosen &&
+    !!workspaceId &&
+    events.length > 0 &&
+    namesOk &&
+    missing.length === 0 &&
+    optionsOk &&
+    !busy;
+
   const posts = has("pr.review") || has("pr.comment");
   const sent: TriggerFilters = {
     ...(has("agent.settled") && filters.newCommits ? { newCommits: true } : {}),
@@ -199,6 +233,7 @@ export function TriggerDialog(props: Props) {
     ...(posts && filters.from === "anyone" ? { from: "anyone" as const } : {}),
     ...(has("pr.review") && filters.states?.length ? { states: filters.states } : {}),
     ...(posts && filters.noBots ? { noBots: true } : {}),
+    ...(has("custom") && names.length > 0 ? { names } : {}),
   };
   const inputsSent = Object.fromEntries(Object.entries(given).filter(([, value]) => value.trim()));
   const words = sentence({
@@ -581,6 +616,35 @@ export function TriggerDialog(props: Props) {
                   <option value="passed">Only when it passes</option>
                   <option value="failed">Only when it fails</option>
                 </select>
+              </div>
+            )}
+            {has("custom") && (
+              <div className="flex flex-col gap-1">
+                <input
+                  aria-label="Custom event names"
+                  aria-invalid={!!namesProblem}
+                  aria-describedby={`${titleId}-names`}
+                  className={control}
+                  list={`${titleId}-names-in-use`}
+                  placeholder="migration-written"
+                  value={namesText}
+                  onChange={(event) => {
+                    setPreset(null);
+                    setNamesText(event.target.value);
+                  }}
+                />
+                <datalist id={`${titleId}-names-in-use`}>
+                  {namesInUse.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+                <p
+                  id={`${titleId}-names`}
+                  className={`text-[12px] ${namesProblem ? "text-red-400" : "text-ink-faint"}`}
+                >
+                  {namesProblem ??
+                    `Raised in the workspace with ys event emit <name>, by an agent, a smoke test's run step or a script; it listens for ${CUSTOM_PREFIX}<name>. More than one: separate them with commas.${namesInUse.length > 0 ? ` Used in this project: ${namesInUse.join(", ")}.` : ""}`}
+                </p>
               </div>
             )}
             {has("workflow.finished") && (

@@ -4,13 +4,16 @@
 //! - **`agent_events`**: `turn.completed` (a harness reported a finished turn) and
 //!   `process.exited`, by sequence number.
 //! - **`done_signals`**: `ys workspace done`, by sequence number.
+//! - **`custom_events`**: `ys event emit`, by sequence number.
 //! - **Run endings**: workflow and test runs that ended, by time. Read a second behind, so a run
 //!   another process ends in the same millisecond as the read is not stepped over.
 //! - **The host**: a quiet after real work, and a session starting to work again
 //!   ([`settled_terminal`], [`busy_terminal`]).
 //!
 //! The first time a cursor is read it starts at the newest row: what happened before Yardsort
-//! had triggers is never news.
+//! had triggers is never news. Custom events are the exception: every row was written by
+//! `ys event emit` for a trigger to hear, so they are read from the first, even one raised before
+//! the app ever opened. A trigger saved after one still ignores it, by its `since`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -30,6 +33,7 @@ const ENDINGS_LAG_MS: i64 = 1_000;
 
 const EVENTS: &str = "agent_events";
 const DONE: &str = "done_signals";
+const CUSTOM: &str = "custom_events";
 const ENDINGS: &str = "run_endings";
 
 /// Where `source` was read up to, or `None` the first time, when the cursor is put at `newest`
@@ -119,6 +123,46 @@ pub fn read_done(store: &Store) -> IpcResult<Vec<Observation>> {
         .collect();
     if let Some(last) = rows.last() {
         store.set_trigger_cursor(DONE, last.seq)?;
+    }
+    Ok(seen)
+}
+
+/// `ys event emit` since the last look. One raised by a smoke test run's `run` step is one
+/// deeper than that run, so a chain of tests raising each other's events stops.
+pub fn read_custom(store: &Store) -> IpcResult<Vec<Observation>> {
+    // From the first row, not the newest: see the module's note.
+    let after = store.trigger_cursor(CUSTOM)?.unwrap_or(0);
+    let rows = store.custom_events_after(after, BATCH)?;
+    let mut seen = Vec::new();
+    for row in &rows {
+        let mut facts = BTreeMap::new();
+        facts.insert("name".to_owned(), row.name.clone());
+        if let Some(head) = &row.head {
+            facts.insert("head".to_owned(), head.clone());
+        }
+        if let Some(note) = &row.note {
+            facts.insert("note".to_owned(), note.clone());
+        }
+        let depth = match row.run_id.as_deref() {
+            Some(run) if store.test_run(run)?.is_some() => run_depth(store, "test", run)? + 1,
+            _ => 0,
+        };
+        seen.push(Observation {
+            event: TriggerEvent::Custom,
+            workspace_id: row.workspace_id.clone(),
+            session_id: row.session_id.clone(),
+            terminal: None,
+            agent_run: None,
+            at: row.at,
+            facts,
+            depth,
+            target_id: None,
+            status: None,
+            post: None,
+        });
+    }
+    if let Some(last) = rows.last() {
+        store.set_trigger_cursor(CUSTOM, last.seq)?;
     }
     Ok(seen)
 }
@@ -321,6 +365,85 @@ mod tests {
         assert_eq!(seen[0].facts.get("note").map(String::as_str), Some("after"));
         assert_eq!(seen[0].facts.get("head").map(String::as_str), Some("abc"));
         assert!(read_done(tx.store()).unwrap().is_empty(), "read once");
+    }
+
+    #[test]
+    fn a_custom_event_is_read_once_from_the_first_and_one_a_test_raised_is_one_deeper_than_it() {
+        let tx = Tx::new();
+        let raise = |name: &str, run_id: Option<&str>| {
+            tx.store()
+                .add_custom_event(&crate::store::NewCustomEvent {
+                    workspace_id: tx.workspace_id(),
+                    session_id: None,
+                    run_id,
+                    name,
+                    head: Some("abc"),
+                    note: Some("ready"),
+                })
+                .unwrap();
+        };
+        // Raised before the trigger thread ever looked: still news.
+        raise("before", None);
+        raise("deploy", None);
+        let seen = read_custom(tx.store()).unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].kind(), "custom.before");
+        let seen = &seen[1..];
+        assert_eq!(seen[0].event, TriggerEvent::Custom);
+        assert_eq!(seen[0].kind(), "custom.deploy");
+        assert_eq!(seen[0].facts.get("note").map(String::as_str), Some("ready"));
+        assert_eq!(seen[0].facts.get("head").map(String::as_str), Some("abc"));
+        assert_eq!(seen[0].depth, 0);
+        assert!(read_custom(tx.store()).unwrap().is_empty(), "read once");
+
+        // A smoke test a trigger started at depth 2 raises one from its `run` step.
+        let events = [TriggerEvent::WorkspaceDone];
+        let filters = crate::trigger::Filters::default();
+        let inputs = BTreeMap::new();
+        tx.try_add(&tx.draft(
+            &events,
+            &filters,
+            crate::schedule::ScheduleTarget::Test,
+            "demo",
+            &inputs,
+        ))
+        .unwrap();
+        let at = crate::trigger::tests::NOW + 1;
+        let mut done = read_done_as(&tx, at);
+        done.depth = 2;
+        super::super::fire::observe(tx.store(), &done).unwrap();
+        let git = crate::git::testing::git();
+        let fired = super::super::fire::tick(
+            tx.store(),
+            &tx.fx.data_dir,
+            &crate::workflow::runs::Accepting::default(),
+            &git,
+            at,
+        )
+        .unwrap();
+        let test_run = fired[0].fire.run_id.clone().unwrap();
+        raise("deploy", Some(&test_run));
+        // A run id that is not a test's counts for nothing.
+        raise("deploy", Some("not-a-run"));
+        let seen = read_custom(tx.store()).unwrap();
+        assert_eq!(seen.iter().map(|s| s.depth).collect::<Vec<_>>(), [3, 0]);
+    }
+
+    /// `ys workspace done`, as `read_done` would see it at `at`.
+    fn read_done_as(tx: &Tx, at: i64) -> Observation {
+        Observation {
+            event: TriggerEvent::WorkspaceDone,
+            workspace_id: tx.workspace_id().to_owned(),
+            session_id: None,
+            terminal: None,
+            agent_run: None,
+            at,
+            facts: BTreeMap::new(),
+            depth: 0,
+            target_id: None,
+            status: None,
+            post: None,
+        }
     }
 
     #[test]

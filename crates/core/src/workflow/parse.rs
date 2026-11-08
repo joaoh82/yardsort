@@ -31,7 +31,7 @@ const FIELDS: &[(&str, &[&str])] = &[
         "event",
         &[
             "kind", "note", "head", "summary", "verdict", "url", "number", "title", "count",
-            "authors",
+            "authors", "name",
         ],
     ),
 ];

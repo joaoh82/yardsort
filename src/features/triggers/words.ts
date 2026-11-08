@@ -24,7 +24,36 @@ export const EVENTS: { id: TriggerEvent; group: string; label: string }[] = [
   { id: "pr.conflicted", group: "The pull request", label: "It conflicts with its base" },
   { id: "pr.merged", group: "The pull request", label: "It is merged" },
   { id: "pr.closed", group: "The pull request", label: "It is closed without merging" },
+  { id: "custom", group: "Something you name", label: "A custom event" },
 ];
+
+/** What a custom event's name is written after: `custom.migration-written`. */
+export const CUSTOM_PREFIX = "custom.";
+
+/** The longest a custom event's name may be: the core's own rule. */
+const MOST_CUSTOM_NAME = 40;
+
+/** The names typed for a custom event, as the core keeps them: split at commas and spaces,
+ *  without `custom.` in front, each once. */
+export function customNames(text: string): string[] {
+  const names = text
+    .split(/[\s,]+/)
+    .map((name) => (name.startsWith(CUSTOM_PREFIX) ? name.slice(CUSTOM_PREFIX.length) : name))
+    .filter(Boolean);
+  return [...new Set(names)];
+}
+
+/** Why `name` cannot be a custom event's name, when it cannot: lowercase letters, digits, `-`
+ *  and `_`, starting with a letter or a digit. The core says the same when it is saved. */
+export function customNameProblem(name: string): string | null {
+  if (name.length > MOST_CUSTOM_NAME) {
+    return `${name} is longer than ${MOST_CUSTOM_NAME} characters.`;
+  }
+  if (/^[a-z0-9][a-z0-9_-]*$/.test(name)) return null;
+  const lower = name.toLowerCase();
+  const hint = lower !== name && customNameProblem(lower) === null ? ` ${lower} would do.` : "";
+  return `${name} cannot be an event's name: lowercase letters, digits, - and _, starting with a letter or a digit.${hint}`;
+}
 
 export function subjectOf(event: TriggerEvent): Subject {
   if (event === "agent.settled" || event === "agent.exited") return "session";
@@ -199,6 +228,14 @@ export function sentence(asking: Asking): string {
   if (has("pr.conflicted")) whens.push(`${pr} conflicts with its base`);
   if (has("pr.merged")) whens.push(`${pr} is merged`);
   if (has("pr.closed")) whens.push(`${pr} is closed without merging`);
+  if (has("custom")) {
+    const names = (filters.names ?? []).map((name) => `${CUSTOM_PREFIX}${name}`);
+    whens.push(
+      names.length === 0
+        ? "a custom event is raised here"
+        : `${names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`} is raised here`,
+    );
+  }
 
   const when =
     whens.length === 1 ? whens[0] : `${whens.slice(0, -1).join(", ")} or ${whens.at(-1)}`;
