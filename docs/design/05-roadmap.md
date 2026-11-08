@@ -1150,6 +1150,10 @@ Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 
       at saving, and `emit` naming what is listened for when nothing is; one raised by a smoke
       test's `run` step one deeper than its run. Recorded in
       [36 § slice 4](36-triggers.md#slice-4-what-shipped).
+- [x] Slice 5: the documentation, finished. The README's highlight and section, the landing
+      page's section and command, the Triggers screenshot and the composer's retaken, and five
+      triggers with their history in `scripts/screenshots.sh seed`. The exit below still wants
+      macOS and Windows by hand. Recorded in [36 § slice 5](36-triggers.md#slice-5-what-shipped).
 
 _Exit:_ on all three platforms, a workspace started with **Address reviews** ticked has its agent
 told of a review posted from a second account, once, two minutes after its last comment; the

@@ -32,8 +32,8 @@
 #   diff is read from are already there, so nothing is fetched.
 #
 # `seed` writes the three demo projects, a workspace on the pull request's branch that was
-# started from one of the demo tasks, a handful of smoke test runs and five schedules with their
-# history into the profile's database once the app has created it, so nothing has to be typed
+# started from one of the demo tasks, a handful of smoke test runs, and five schedules and five
+# triggers with their history into the profile's database once the app has created it, so nothing has to be typed
 # into the window.
 #
 # See AGENTS.md. `shoot` finds the window by the profile behind it, so an ordinary copy of
@@ -605,6 +605,42 @@ def open_node(p):
     node["commits"] = {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}
     return node
 
+def watch_node(p):
+    """What a trigger's watch of the pull request is answered (crates/core/src/forge/watch.rs)."""
+    tally = {state: 0 for state in counts}
+    for c in p["statusCheckRollup"]:
+        tally[c["conclusion"] or "IN_PROGRESS"] += 1
+    reviews = [{
+        "databaseId": 5000 + index,
+        "state": r["state"],
+        "submittedAt": r["submittedAt"],
+        "body": r["body"],
+        "url": f"{p['url']}#pullrequestreview-{5000 + index}",
+        "author": {"__typename": "User", "login": r["author"]["login"]},
+        "comments": {"totalCount": 0, "nodes": []},
+    } for index, r in enumerate(p["reviews"])]
+    comments = [{
+        "databaseId": 6000 + index,
+        "createdAt": c["createdAt"],
+        "url": c["url"],
+        "author": {"__typename": "User", "login": c["author"]["login"]},
+    } for index, c in enumerate(p["comments"])]
+    return {"data": {
+        "viewer": {"login": "ada"},
+        "repository": {"pullRequest": {
+            **{k: p[k] for k in ("number", "url", "title", "state", "isDraft", "headRefName",
+                                 "headRefOid", "mergeable")},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {
+                "checkRunCountsByState": [{"state": s, "count": tally[s]} for s in counts],
+                "statusContextCountsByState": [],
+                "nodes": [{k: c[k] for k in ("__typename", "name", "status", "conclusion")}
+                          for c in p["statusCheckRollup"]],
+            }}}}]},
+            "reviews": {"nodes": reviews},
+            "comments": {"nodes": comments},
+        }},
+    }}
+
 line_comments = {
     ("weather-cli", 12): [
         {"id": 1201, "in_reply_to_id": None, "login": "grace", "path": "src/units.js",
@@ -631,6 +667,9 @@ for repo, prs in repos.items():
     for p in prs:
         with open(os.path.join(out, f"view-{p['number']}.json"), "w") as f:
             json.dump(p, f, indent=1)
+        if p["state"] == "OPEN":
+            with open(os.path.join(out, f"watch-{p['number']}.json"), "w") as f:
+                json.dump(watch_node(p), f, indent=1)
     opened = [open_node(p) for p in prs if p["state"] == "OPEN"]
     with open(os.path.join(out, "open.json"), "w") as f:
         json.dump({"data": {
@@ -994,6 +1033,125 @@ print("INSERT INTO schedule_runs (id, schedule_id, due_at, fired_at, outcome, ma
 EOF
 }
 
+# What the Triggers view shows, as SQL: five triggers across the demo projects — three of the
+# presets on the pull request's workspace, a custom event in weather-cli, and one switched off in
+# api-gateway — with the history each would have by now. "Fix failing checks" has had its three
+# runs on pull request #12 and stopped, so it reads "needs you" and the sidebar row counts it.
+#
+# These are real rows, like the schedules: the app watches #12 through the stand-in `gh` while it
+# is open. Its watch is written as already having seen what the stand-in answers, since the
+# review and the comment there are newer than the triggers and would otherwise be news at the
+# first look; so nothing here fires on its own. A `ys workspace done` in the worktree would; close
+# the app once the shots are taken.
+demo_triggers() {
+  DEMO="$DEMO" python3 - <<'EOF'
+import json, os
+from datetime import datetime, timedelta
+
+now = datetime.now().replace(second=0, microsecond=0)
+ms = lambda moment: int(moment.timestamp() * 1000)
+text = lambda value: "NULL" if value is None else "'" + str(value).replace("'", "''") + "'"
+ago = lambda **delta: now - timedelta(**delta)
+pr = {"number": "12", "url": "https://github.com/yardsort-demo/weather-cli/pull/12",
+      "title": "Add a Celsius/Fahrenheit converter and imperial output"}
+
+triggers, fires = [], []
+
+def trigger(key, name, events, target_kind, target, project, workspace, *, preset=None,
+            filters=None, inputs=None, quiet_ms=0, cap=3, notify="failure", enabled=True,
+            created_by="app", saved=None):
+    place = f"demo-{project}-{'pr' if workspace == 'celsius-fahrenheit' else 'local'}"
+    saved = ms(saved or ago(days=9))
+    triggers.append(
+        f"('demo-trigger-{key}', {text(name)}, {text(preset)}, 'demo-{project}', '{place}', "
+        f"'{workspace}', NULL, {text(json.dumps(events))}, {text(json.dumps(filters or {}))}, "
+        f"'{target_kind}', '{target}', {text(json.dumps(inputs or {}))}, {quiet_ms}, {cap}, "
+        f"'{notify}', {int(enabled)}, {saved}, '{created_by}', {saved}, {saved})")
+
+def fire(key, subject, event, first, outcome, *, count=1, quiet=timedelta(), took=timedelta(),
+         facts=None, result=None, note=None, counted=None, run=True):
+    number = len(fires) + 1
+    decided = first + quiet
+    facts = {"kind": event, **(facts or {})}
+    # As with the schedules, a line keeps its run's ending after the run itself is pruned, so
+    # these name runs the profile does not have.
+    run_id = f"demo-triggered-run-{number}" if run and outcome == "started" else None
+    counted = outcome == "started" if counted is None else counted
+    fires.append(
+        f"('demo-trigger-fire-{number}', 'demo-trigger-{key}', '{subject}', '{event}', {count}, "
+        f"{ms(first)}, {ms(decided)}, {ms(decided)}, '{outcome}', {text(json.dumps(facts))}, 0, "
+        f"{text(run_id)}, {text(note)}, {int(counted)}, {text(result)}, "
+        f"{'NULL' if result is None and outcome == 'started' else ms(decided + took)}, 0)")
+
+on_pr = "pr:12"
+here = "workspace:demo-weather-cli-pr"
+
+# The one the shot opens: reviews from others, each burst two minutes quiet before one run.
+trigger("reviews", "Address reviews", ["pr.review", "pr.comment"], "workflow",
+        "address-review", "weather-cli", "celsius-fahrenheit", preset="address-reviews",
+        quiet_ms=120_000)
+fire("reviews", on_pr, "pr.comment", ago(hours=1, minutes=24), "started", count=3,
+     quiet=timedelta(minutes=2), took=timedelta(minutes=11), result="succeeded",
+     facts={**pr, "reviews": "1", "comments": "2", "authors": "grace",
+            "summary": "1 review and 2 comments from grace"})
+fire("reviews", on_pr, "pr.review", ago(days=1, hours=3), "started",
+     quiet=timedelta(minutes=2), took=timedelta(minutes=7), result="succeeded",
+     facts={**pr, "comments": "1", "authors": "hedy", "summary": "1 comment from hedy"})
+
+# Three rounds of failing checks on #12, then it stopped to ask.
+trigger("checks", "Fix failing checks", ["pr.checks_failed"], "workflow", "fix-checks",
+        "weather-cli", "celsius-fahrenheit", preset="fix-checks")
+for index, (hours, result) in enumerate([(30, "succeeded"), (26, "failed"), (8, "succeeded")]):
+    fire("checks", on_pr, "pr.checks_failed", ago(hours=hours), "started",
+         took=timedelta(minutes=9 + index * 4), result=result,
+         facts={**pr, "summary": "1 check failed: package (macOS)"})
+fire("checks", on_pr, "pr.checks_failed", ago(hours=2, minutes=40), "capped", counted=False,
+     facts={**pr, "summary": "1 check failed: package (macOS)"},
+     note="It has started 3 runs for this, as many as it may. Reset it to let it go on.")
+
+trigger("smoke", "Smoke test when the work is done", ["workspace.done"], "workflow",
+        "smoke-then-tell", "weather-cli", "celsius-fahrenheit", preset="smoke-when-done",
+        inputs={"suite": "unit-tests"})
+fire("smoke", here, "workspace.done", ago(hours=5, minutes=12), "started",
+     took=timedelta(minutes=3), result="succeeded",
+     facts={"note": "Converter and --units imperial done, tests added"})
+fire("smoke", here, "workspace.done", ago(days=2, hours=1), "started",
+     took=timedelta(minutes=4), result="failed",
+     facts={"note": "First pass at the converter"})
+
+# A custom event, raised by the agent from the instructions in AGENTS.md.
+trigger("units", "Unit tests when the units table changes", ["custom"], "test", "unit-tests",
+        "weather-cli", "local", filters={"names": ["units-table"]}, created_by="cli",
+        notify="always")
+fire("units", "workspace:demo-weather-cli-local", "custom.units-table", ago(hours=3, minutes=5),
+     "started", took=timedelta(seconds=40), result="passed",
+     facts={"name": "units-table", "note": "Added knots and Beaufort"})
+
+trigger("gateway", "Review when the work is done", ["workspace.done"], "workflow",
+        "review-branch", "api-gateway", "local", preset="review-when-done",
+        inputs={"reviewer": "codex"}, enabled=False, notify="never")
+fire("gateway", "workspace:demo-api-gateway-local", "workspace.done", ago(days=6), "started",
+     took=timedelta(minutes=14), result="succeeded",
+     facts={"note": "Rate limit per key, with tests"})
+
+# The pull request's watch, as a look at it a minute ago left it.
+answer = json.load(open(os.path.join(os.environ["DEMO"], "gh", "weather-cli", "watch-12.json")))
+look = answer["data"]["repository"]["pullRequest"]
+seen = sorted([f"review:{r['databaseId']}" for r in look["reviews"]["nodes"]]
+              + [f"comment:{c['databaseId']}" for c in look["comments"]["nodes"]])
+print("INSERT INTO pr_watches (workspace_id, seeded, number, closed, branch, draft, head, seen, "
+      f"looked_at) VALUES ('demo-weather-cli-pr', 1, 12, 0, {text(look['headRefName'])}, 0, "
+      f"{text(look['headRefOid'])}, {text(json.dumps(seen))}, {ms(ago(minutes=1))});")
+print("INSERT INTO triggers (id, name, preset, project_id, workspace_id, workspace_name, "
+      "session_id, events, filters, target_kind, target_id, inputs, quiet_ms, cap, notify, "
+      "enabled, since, created_by, created_at, updated_at) VALUES\n  "
+      + ",\n  ".join(triggers) + ";")
+print("INSERT INTO trigger_fires (id, trigger_id, subject, event, events_count, first_at, due_at, "
+      "decided_at, outcome, facts, depth, run_id, note, counted, result, notified_at, "
+      "told_waiting) VALUES\n  " + ",\n  ".join(fires) + ";")
+EOF
+}
+
 seed() {
   command -v sqlite3 >/dev/null || { echo "seed needs sqlite3." >&2; exit 1; }
   command -v python3 >/dev/null || { echo "seed needs python3." >&2; exit 1; }
@@ -1054,6 +1212,7 @@ INSERT INTO test_runs
    '{}', 'awaiting_approval', 'app', $t_15m, NULL, NULL);
 EOF
   demo_schedules | sqlite3 "$db"
+  demo_triggers | sqlite3 "$db"
   echo "Added weather-cli, api-gateway and docs-site to $db, and marked the welcome tour seen."
   echo "Focus the window to see them."
 }

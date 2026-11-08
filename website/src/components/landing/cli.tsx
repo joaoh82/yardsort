@@ -43,6 +43,10 @@ const LINES: { command: string; note: string }[] = [
     note: "run a smoke test and read its verdict with ys test wait",
   },
   {
+    command: "ys trigger add --preset address-reviews",
+    note: "in a workspace's folder: its agent answers every review on the pull request",
+  },
+  {
     command: "ys workspace delete fix-the-flaky-login-test",
     note: "the folder goes; the branch stays",
   },

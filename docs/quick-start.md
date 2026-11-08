@@ -123,6 +123,10 @@ Pick the agent, optionally a model and effort level, and press **Enter**. Yardso
 The first time an agent sees a new folder it may ask whether you trust it; answer in the terminal
 as you normally would.
 
+The boxes under the message are [ready-made triggers](guide/triggers.md#ready-made-triggers):
+tick one to have, say, a second agent review the work when the first says it is done. Leave them
+unticked for now if you like; they can be added to a workspace later.
+
 ## 6. Watch, review, repeat
 
 ![Yardsort at work](images/overview.png)

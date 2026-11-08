@@ -1,9 +1,9 @@
 # Triggers
 
 _Proposal, 2026-11-06. The questions put to the user that day are answered under
-[Decisions](#decisions). Slices 1 to 4 are built: see [Slice 1](#slice-1-what-shipped),
-[Slice 2](#slice-2-what-shipped), [Slice 3](#slice-3-what-shipped) and
-[Slice 4](#slice-4-what-shipped)._
+[Decisions](#decisions). All five slices are built: see [Slice 1](#slice-1-what-shipped),
+[Slice 2](#slice-2-what-shipped), [Slice 3](#slice-3-what-shipped),
+[Slice 4](#slice-4-what-shipped) and [Slice 5](#slice-5-what-shipped)._
 
 A trigger starts a [workflow](21-workflows.md) or a [smoke test](32-smoke-tests.md) when
 something happens, instead of when a person presses **Run** or a [schedule](34-schedules.md)'s
@@ -863,3 +863,31 @@ does not do" points here); `docs/guide/workspaces.md` (the composer's presets);
 `docs/guide/pull-requests.md`; `README.md` and the landing page; `CHANGELOG.md`;
 [03-architecture](03-architecture.md) (the third producer of runs); [05-roadmap](05-roadmap.md)
 (M29); [06-open-questions](06-open-questions.md) (48–52); [08](08-manual-checklist.md).
+
+## Slice 5: what shipped
+
+The documentation, finished. The guide, the command-line guide, the workflows, schedules,
+workspaces and smoke tests guides, and the changelog had each been brought along with the slice
+that changed them, so this slice was what the earlier ones left:
+
+- **The README**: a highlight, a _Triggers: when something happens_ section with a screenshot and
+  two commands, and rows for Schedules and Triggers in the documentation table, which had neither.
+- **The site**: a _10 · Triggers_ section on the landing page, `ys trigger add --preset` among its
+  commands, and the guide's description in `website/src/lib/docs.ts` naming the pull request and
+  custom events.
+- **Screenshots**: `docs/images/triggers.png`, the view with **Address reviews** open on its
+  history, in the README, the guide and the landing page; and `composer.png` retaken, since it was
+  from 0.9.1 and showed none of the presets.
+- **The seed**: `scripts/screenshots.sh seed` adds five triggers with their history — three
+  presets on the pull request's workspace, one of them capped so the sidebar counts it, a custom
+  event in weather-cli, and one switched off in api-gateway — and the stand-in `gh` answers a
+  watch's question for every open demo pull request.
+- The paragraphs the slices had left over 100 columns, reflowed.
+
+Taking the shot found one thing, in the seed: with no watch row, the app's first look at #12 told
+the review and the comment there, since they are newer than the seeded triggers, and **Address
+reviews** fired and was skipped for want of an agent. The seed now writes the watch as having
+seen them, and a fresh profile, seeded and left open past a look, fired nothing.
+
+**M29's exit is not met yet.** It asks for all three platforms by hand, and macOS and Windows have
+had the tests in CI only.

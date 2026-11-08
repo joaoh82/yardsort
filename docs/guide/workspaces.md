@@ -41,9 +41,9 @@ done, address reviews, fix failing checks, and the rest — each with a box to t
 question beside it, such as who reviews. Each one ticked becomes a trigger on the new workspace
 before its agent starts. They are not offered when running in a workspace that already exists.
 
-Your last choices are remembered per project, the ticked triggers among them. With [Assist](assist.md) switched on, a line under
-the pickers may offer a harness and an effort for what you are typing; **Use** applies it, and
-ignoring it does nothing.
+Your last choices are remembered per project, the ticked triggers among them. With
+[Assist](assist.md) switched on, a line under the pickers may offer a harness and an effort for what
+you are typing; **Use** applies it, and ignoring it does nothing.
 
 **Drop a file on the composer** to put its path in the message, at the cursor, so the agent starts
 already pointed at it. Drop several and each path is added, separated by spaces. The composer is

@@ -162,7 +162,7 @@ export const DOCS_NAV: DocSection[] = [
         slug: "guide/triggers",
         title: "Triggers",
         description:
-          "Start a workflow or a smoke test in Yardsort when something happens: an agent says it is done, finishes a turn or exits, or a run ends, with limits against loops and ys trigger.",
+          "Start a workflow or a smoke test in Yardsort when something happens: an agent says it is done, a pull request gets a review or failing checks, a run ends, or a custom event, with presets, limits against loops and ys trigger.",
       },
       {
         slug: "guide/updates",
