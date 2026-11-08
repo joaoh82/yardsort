@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use super::*;
 use crate::schedule::ScheduleNotify;
 use crate::trigger::tests::{Tx, NOW, RUNS_THE_TEST_IN_TIME};
-use crate::trigger::{standing, Draft, Filters, TriggerStanding};
+use crate::trigger::{cap_in_force, standing, standing_now, Draft, Filters, TriggerStanding};
 use crate::workflow::runs::{Accepting, Facts};
 
 fn done(tx: &Tx, at: i64, note: &str) -> Observation {
@@ -105,6 +105,11 @@ fn a_done_signal_starts_the_workflow_with_what_the_agent_said() {
     assert_eq!(
         standing(&row, &fires(&tx, &trigger.id)),
         TriggerStanding::Running
+    );
+    // Run lists mark it with the trigger that started it.
+    assert_eq!(
+        tx.store().triggered_runs().unwrap(),
+        vec![(run.id.clone(), trigger.id.clone(), trigger.name.clone())]
     );
 }
 
@@ -232,8 +237,15 @@ fn after_its_cap_it_stops_says_so_once_and_reset_lets_it_go_on() {
     assert_eq!(lines[0].events_count, 2);
     let row = tx.store().trigger(&trigger.id).unwrap().unwrap();
     assert_eq!(standing(&row, &lines), TriggerStanding::Capped);
+    assert!(cap_in_force(tx.store(), &row, &lines).unwrap());
 
     assert_eq!(reset(tx.store(), &trigger.id).unwrap(), 2);
+    // The capped line is still the newest, and holds nothing.
+    assert_eq!(
+        standing_now(tx.store(), &row, &lines).unwrap(),
+        TriggerStanding::Listening
+    );
+    assert!(!cap_in_force(tx.store(), &row, &lines).unwrap());
     observe(tx.store(), &done(&tx, NOW + 50, "fifth")).unwrap();
     assert_eq!(tick_at(&tx, NOW + 50)[0].fire.outcome, "started");
 }

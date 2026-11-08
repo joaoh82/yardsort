@@ -240,6 +240,16 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             schedules::commands::schedule_set_enabled,
             schedules::commands::schedule_remove,
             schedules::commands::schedule_run_now,
+            triggers::commands::trigger_list,
+            triggers::commands::trigger_fires,
+            triggers::commands::trigger_started_runs,
+            triggers::commands::trigger_presets,
+            triggers::commands::trigger_save,
+            triggers::commands::trigger_tell_agents,
+            triggers::commands::trigger_set_enabled,
+            triggers::commands::trigger_reset,
+            triggers::commands::trigger_remove,
+            smoke::commands::test_list_in_project,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,
@@ -252,6 +262,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::TestRunOutput,
             smoke::TestResultSent,
             schedules::SchedulesChanged,
+            triggers::commands::TriggersChanged,
             remote::RemotePairingRequested
         ])
 }

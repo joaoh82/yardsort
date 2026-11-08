@@ -17,6 +17,7 @@ import { TasksRow } from "@/features/tasks/TasksRow";
 import { useTaskPolling } from "@/features/tasks/useTaskPolling";
 import { TestsRow } from "@/features/tests/TestsRow";
 import { SchedulesRow } from "@/features/schedules/SchedulesRow";
+import { TriggersRow } from "@/features/triggers/TriggersRow";
 
 /** Left panel: projects and their workspaces. */
 export function Sidebar() {
@@ -68,6 +69,7 @@ export function Sidebar() {
       <WorkflowsSection />
       <TestsRow />
       <SchedulesRow />
+      <TriggersRow />
       <PanelHeader
         title="Projects"
         search={

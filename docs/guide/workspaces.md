@@ -35,7 +35,13 @@ it can read them — as background context for Claude Code and Codex, otherwise 
 
 Under the pickers, the composer also shows your history with the agent you picked, across your projects — _kept 3 of 5_, or _too few to say yet_ — from the [outcomes](outcomes.md) you have recorded. It is shown, never used to choose for you.
 
-Your last choices are remembered per project. With [Assist](assist.md) switched on, a line under
+Under those, **When something happens in the new workspace** lists the
+[ready-made triggers](triggers.md#ready-made-triggers) — review the work when the agent says it is
+done, address reviews, fix failing checks, and the rest — each with a box to tick and its one
+question beside it, such as who reviews. Each one ticked becomes a trigger on the new workspace
+before its agent starts. They are not offered when running in a workspace that already exists.
+
+Your last choices are remembered per project, the ticked triggers among them. With [Assist](assist.md) switched on, a line under
 the pickers may offer a harness and an effort for what you are typing; **Use** applies it, and
 ignoring it does nothing.
 
@@ -131,6 +137,12 @@ Run one of the worktree's [smoke tests](smoke-tests.md#run-smoke-test) here: the
 them with their readiness, asks the chosen test's inputs, and shows its steps in words before
 **Run**, which is also the approval a new or changed file needs. The run opens as a tab beside
 the terminals. The dialog lists the workspace's recent runs too, to open any again.
+
+### Triggers…
+
+Opens the [Triggers](triggers.md) view on this workspace's triggers, where **New trigger…** makes
+one that starts here: a workflow or a smoke test that starts when the agent says it is done, a
+review comes in, the checks fail.
 
 ### Fork into new workspace…
 

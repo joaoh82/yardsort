@@ -322,6 +322,12 @@ A **copy** of the conversation that goes its own way, in a new tab. The original
 Use it to try a different approach without losing the first. You can fork an ended session from
 the list or the bar, and a running one by right-clicking its tab.
 
+### Its triggers
+
+**Triggers…** in an agent tab's right-click menu opens the [Triggers](triggers.md) view on that
+agent's own triggers. One made there [belongs to that agent](triggers.md#one-agents-trigger): it
+hears its turns and exits, and its runs talk to it.
+
 ### Forget
 
 **×** on a previous session removes it from Yardsort's list. The agent's own saved conversation

@@ -4,6 +4,7 @@ import { ContextMenu, type MenuItem } from "@/features/sidebar/ContextMenu";
 import { runActivity, statusWords } from "@/features/smoke/words";
 import type { TestRun } from "@/lib/ipc";
 import { useShortcutLabel } from "@/stores/preferences";
+import { useProjectsStore } from "@/stores/projects";
 import { useSessionsStore } from "@/stores/sessions";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
@@ -138,6 +139,13 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
             label: "Fork this conversation",
             disabled: !record?.forkable,
             onSelect: () => void fork(tab.recordId!),
+          },
+          {
+            label: "Triggers…",
+            onSelect: () =>
+              useProjectsStore
+                .getState()
+                .openTriggers(true, { workspaceId: tab.workspaceId, sessionId: tab.recordId! }),
           },
         ]
       : []),

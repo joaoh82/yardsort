@@ -1135,6 +1135,12 @@ Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 
       `--drafts`; the five presets and `address-review`, `fix-checks`, `review-branch`; the
       app's pull request thread; a fire with no agent to tell skipped and told. Recorded in
       [36 § slice 2](36-triggers.md#slice-2-what-shipped).
+- [x] Slice 3: the window. **Triggers** in the sidebar with a count of those that need you, the
+      view with each trigger's history, switch, **Reset** and **Remove**, the trigger dialog
+      with a sentence of what it will do, the composer's presets remembered per project,
+      **Triggers…** in the workspace and agent tab menus, _triggered_ in run lists, and **Tell
+      the agent**. A lifted cap now reads as lifted. Recorded in
+      [36 § slice 3](36-triggers.md#slice-3-what-shipped).
 
 _Exit:_ on all three platforms, a workspace started with **Address reviews** ticked has its agent
 told of a review posted from a second account, once, two minutes after its last comment; the

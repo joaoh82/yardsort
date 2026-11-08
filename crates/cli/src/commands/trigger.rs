@@ -92,7 +92,7 @@ pub struct Add {
     pub quiet: Option<String>,
     /// How many runs it may start for one agent session, one pull request, or the workspace,
     /// before it stops and asks.
-    #[arg(long, default_value_t = 3)]
+    #[arg(long, default_value_t = trigger::DEFAULT_CAP)]
     pub cap: i64,
     /// When to be told how a run ended.
     #[arg(long, value_enum, default_value_t = NotifyArg::Failure)]
@@ -293,8 +293,8 @@ impl From<&TriggerFireRow> for Line {
     }
 }
 
-fn listed(row: &TriggerRow, fires: &[TriggerFireRow]) -> Listed {
-    Listed {
+fn listed(ys: &Yardsort, row: &TriggerRow, fires: &[TriggerFireRow]) -> Result<Listed, Failure> {
+    Ok(Listed {
         id: row.id.clone(),
         name: row.name.clone(),
         events: trigger::events_of(row)
@@ -313,17 +313,17 @@ fn listed(row: &TriggerRow, fires: &[TriggerFireRow]) -> Listed {
         notify: row.notify.clone(),
         enabled: row.enabled,
         when: trigger::describe(row),
-        standing: trigger::standing(row, fires),
+        standing: trigger::standing_now(&ys.store, row, fires)?,
         last: fires
             .iter()
             .find(|fire| fire.outcome != "gathering")
             .map(Line::from),
-    }
+    })
 }
 
 fn listed_one(ys: &Yardsort, row: &TriggerRow) -> Result<Listed, Failure> {
     let fires = ys.store.trigger_fires(&row.id, STANDING_FIRES)?;
-    Ok(listed(row, &fires))
+    listed(ys, row, &fires)
 }
 
 /// Where a trigger stands, in a word or two.
@@ -415,7 +415,7 @@ fn list(ys: &Yardsort, out: &Output) -> Result<(), Failure> {
 fn show(ys: &Yardsort, wanted: &str, out: &Output) -> Result<(), Failure> {
     let row = find(ys, wanted)?;
     let fires = ys.store.trigger_fires(&row.id, STANDING_FIRES)?;
-    let item = listed(&row, &fires);
+    let item = listed(ys, &row, &fires)?;
     out.emit(&item, || {
         sayln!("{} ({})", row.name, memory::short_id(&row.id));
         sayln!("{}, in {}.", item.when, row.workspace_name);
@@ -695,7 +695,7 @@ fn add(ys: &Yardsort, asked: Add, out: &Output) -> Result<(), Failure> {
     } else {
         None
     };
-    let item = listed(&row, &[]);
+    let item = listed(ys, &row, &[])?;
     out.emit(&item, || {
         sayln!(
             "Added `{}` ({}): {}.",

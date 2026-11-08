@@ -4,6 +4,7 @@ import { statusColour, statusWords } from "@/features/smoke/words";
 import type { TestListing } from "@/lib/ipc";
 import { recall, useProjectsStore } from "@/stores/projects";
 import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
+import { triggerOf, useTriggersStore } from "@/stores/triggers";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { DescribeTest } from "./DescribeTest";
 import {
@@ -358,6 +359,8 @@ function RunsList({
 }) {
   // The runs a schedule started, to say so on each.
   const started = useSchedulesStore((s) => s.started);
+  // And the runs a trigger started.
+  const triggered = useTriggersStore((s) => s.started);
   if (runs.length === 0) {
     return (
       <p role="status" className="p-4 text-ink-faint">
@@ -388,6 +391,11 @@ function RunsList({
               {scheduleOf(started, run.id) && (
                 <span className="truncate">
                   · Scheduled · {scheduleOf(started, run.id)?.scheduleName}
+                </span>
+              )}
+              {triggerOf(triggered, run.id) && (
+                <span className="truncate">
+                  · Triggered · {triggerOf(triggered, run.id)?.triggerName}
                 </span>
               )}
             </div>

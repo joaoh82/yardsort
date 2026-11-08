@@ -601,6 +601,36 @@ export const commands = {
 	scheduleRemove: (scheduleId: string) => typedError<null, IpcError>(__TAURI_INVOKE("schedule_remove", { scheduleId })),
 	/**  Start a schedule's run now. Its next time stays where it is. */
 	scheduleRunNow: (scheduleId: string) => typedError<ScheduleRun, IpcError>(__TAURI_INVOKE("schedule_run_now", { scheduleId })),
+	/**  Every trigger of every project, by name. */
+	triggerList: () => typedError<TriggerItem_Serialize[], IpcError>(__TAURI_INVOKE("trigger_list")),
+	/**  A trigger's history, newest first. */
+	triggerFires: (triggerId: string, limit: number) => typedError<TriggerFire[], IpcError>(__TAURI_INVOKE("trigger_fires", { triggerId, limit })),
+	/**  The runs triggers started, for run lists to mark. */
+	triggerStartedRuns: () => typedError<TriggeredRun[], IpcError>(__TAURI_INVOKE("trigger_started_runs")),
+	/**  The ready-made triggers, as `ys trigger presets` lists them. */
+	triggerPresets: () => __TAURI_INVOKE<TriggerPreset[]>("trigger_presets"),
+	/**
+	 *  Add a trigger, or change one. Everything its fires would be refused for is refused here, so
+	 *  the person saving it is the one who reads why.
+	 */
+	triggerSave: (draft: TriggerDraft_Deserialize) => typedError<SavedTrigger_Serialize, IpcError>(__TAURI_INVOKE("trigger_save", { draft })),
+	/**
+	 *  **Tell the agent**: type what an agent is told about `ys workspace done` at its start into
+	 *  these running agents, each once it is quiet and never into a busy one, as `send_to_session`
+	 *  does. An agent that ends first is not told.
+	 */
+	triggerTellAgents: (sessionIds: string[]) => typedError<number, IpcError>(__TAURI_INVOKE("trigger_tell_agents", { sessionIds })),
+	/**  Switch a trigger on or off. Switched on, only what happens from now counts. */
+	triggerSetEnabled: (triggerId: string, enabled: boolean) => typedError<TriggerItem_Serialize, IpcError>(__TAURI_INVOKE("trigger_set_enabled", { triggerId, enabled })),
+	/**  Lift a trigger's cap: the runs it started stop counting against it. */
+	triggerReset: (triggerId: string) => typedError<TriggerItem_Serialize, IpcError>(__TAURI_INVOKE("trigger_reset", { triggerId })),
+	/**  Remove a trigger and its history. The runs it started stay where they are. */
+	triggerRemove: (triggerId: string) => typedError<null, IpcError>(__TAURI_INVOKE("trigger_remove", { triggerId })),
+	/**
+	 *  A project's smoke tests as its own checkout has them: what the composer offers a workspace
+	 *  that does not exist yet, which starts from that repository.
+	 */
+	testListInProject: (projectId: string) => typedError<TestItem[], IpcError>(__TAURI_INVOKE("test_list_in_project", { projectId })),
 };
 
 /** Events */
@@ -614,6 +644,7 @@ export const events = {
 	testResultSent: makeEvent<TestResultSent>("test-result-sent"),
 	testRunOutput: makeEvent<TestRunOutput>("test-run-output"),
 	testRunsChanged: makeEvent<TestRunsChanged>("test-runs-changed"),
+	triggersChanged: makeEvent<TriggersChanged>("triggers-changed"),
 	workflowRunsChanged: makeEvent<WorkflowRunsChanged>("workflow-runs-changed"),
 	workspaceFilesChanged: makeEvent<WorkspaceFilesChanged>("workspace-files-changed"),
 };
@@ -947,6 +978,11 @@ export type CreatedTask = {
 export type CreatedWorkspace = {
 	workspace: Workspace,
 	session: SessionInfo,
+	/**
+	 *  Why a ticked preset could not be added, one line each. The workspace and its agent
+	 *  started all the same.
+	 */
+	refusedPresets: string[],
 };
 
 /**  What the app ended up talking to, as the status bar and a bug report want it. */
@@ -1108,6 +1144,11 @@ export type Excerpt = {
 	text: string,
 };
 
+/**  How an agent's program must have ended. */
+export type ExitFilter = "any" | 
+/**  With a code that is not 0, or a signal. */
+"failed";
+
 export type ExitInfo = {
 	code: number,
 	success: boolean,
@@ -1159,6 +1200,82 @@ export type FileReview = {
 	told: string | null,
 };
 
+/**
+ *  What the events a trigger listens for must also be. Each applies to some of the events;
+ *  one given for an event the trigger does not listen for is refused when it is saved.
+ */
+export type Filters = Filters_Serialize | Filters_Deserialize;
+
+/**
+ *  What the events a trigger listens for must also be. Each applies to some of the events;
+ *  one given for an event the trigger does not listen for is refused when it is saved.
+ */
+export type Filters_Deserialize = {
+	/**
+	 *  `agent.settled`: the worktree's HEAD moved since this trigger last started a run for
+	 *  the session — or, before it ever has, the branch has commits its base does not.
+	 */
+	newCommits?: boolean,
+	/**  `agent.settled`: nothing in the worktree is uncommitted. */
+	clean?: boolean,
+	/**  `agent.exited`. */
+	exit?: ExitFilter | null,
+	/**  `test.finished`: only this test. */
+	test?: string | null,
+	/**  `test.finished`. */
+	verdict?: VerdictFilter | null,
+	/**  `workflow.finished`: only this workflow. */
+	workflow?: string | null,
+	/**  `workflow.finished`. */
+	outcome?: OutcomeFilter | null,
+	/**
+	 *  `pr.opened`: a draft counts as soon as it opens. Without it a draft counts once it is
+	 *  marked ready for review.
+	 */
+	drafts?: boolean,
+	/**  `pr.review`, `pr.comment`: whose posts count. Others', when not given. */
+	from?: FromFilter | null,
+	/**  `pr.review`: only reviews that concluded one of these. Any, when empty. */
+	states?: ReviewStateFilter[],
+	/**  `pr.review`, `pr.comment`: leave out accounts whose login ends in `[bot]`. */
+	noBots?: boolean,
+};
+
+/**
+ *  What the events a trigger listens for must also be. Each applies to some of the events;
+ *  one given for an event the trigger does not listen for is refused when it is saved.
+ */
+export type Filters_Serialize = {
+	/**
+	 *  `agent.settled`: the worktree's HEAD moved since this trigger last started a run for
+	 *  the session — or, before it ever has, the branch has commits its base does not.
+	 */
+	newCommits?: boolean,
+	/**  `agent.settled`: nothing in the worktree is uncommitted. */
+	clean?: boolean,
+	/**  `agent.exited`. */
+	exit?: ExitFilter | null,
+	/**  `test.finished`: only this test. */
+	test?: string | null,
+	/**  `test.finished`. */
+	verdict?: VerdictFilter | null,
+	/**  `workflow.finished`: only this workflow. */
+	workflow?: string | null,
+	/**  `workflow.finished`. */
+	outcome?: OutcomeFilter | null,
+	/**
+	 *  `pr.opened`: a draft counts as soon as it opens. Without it a draft counts once it is
+	 *  marked ready for review.
+	 */
+	drafts?: boolean,
+	/**  `pr.review`, `pr.comment`: whose posts count. Others', when not given. */
+	from?: FromFilter | null,
+	/**  `pr.review`: only reviews that concluded one of these. Any, when empty. */
+	states?: ReviewStateFilter[],
+	/**  `pr.review`, `pr.comment`: leave out accounts whose login ends in `[bot]`. */
+	noBots?: boolean,
+};
+
 /**  Which forge a host is, as far as the shape of its URLs goes. */
 export type ForgeKind = "github" | "gitlab" | "bitbucket" | 
 /**
@@ -1182,6 +1299,19 @@ export type ForkPacket = {
 	/**  Files changed and not committed there: a fork starts from the commits, so these stay. */
 	uncommitted: number,
 };
+
+/**  Whose reviews and comments count. */
+export type FromFilter = 
+/**
+ *  Accounts other than the one `gh` posts as, which is the user's and every agent's: a
+ *  teammate, a review bot.
+ */
+"others" | 
+/**
+ *  The user's account too, except while a run this trigger started is going: what is posted
+ *  then is the agent's own answers.
+ */
+"anyone";
 
 export type GitStatus = {
 	path: string | null,
@@ -1592,6 +1722,11 @@ export type NewWorkspace = {
 	 *  is recorded against it. See `crate::tasks::delegate`.
 	 */
 	task: TaskRef | null,
+	/**
+	 *  The presets ticked in the composer: each becomes a trigger on the new workspace before
+	 *  its agent starts, so the agent is told what it needs to know about them.
+	 */
+	presets: PresetPick[],
 };
 
 /**  One tool call that was executing when the file was last written. */
@@ -1609,6 +1744,11 @@ export type ObservedWrite = {
 	at: number | null,
 	matches: ObservedMatch[],
 };
+
+/**  How a workflow run must have ended. */
+export type OutcomeFilter = "any" | "succeeded" | 
+/**  Failed or cancelled. */
+"failed";
 
 /**  A piece of a step's output, from where the last piece ended. */
 export type OutputChunk = {
@@ -1664,6 +1804,19 @@ export type PreparedBranch = {
 	 *  request rather than a branch of this project's remote. Yardsort will not push it.
 	 */
 	fork: boolean,
+};
+
+/**  A preset ticked in the composer, with the answer to its one question. */
+export type PresetPick = {
+	id: string,
+	answer: string | null,
+};
+
+export type PresetQuestion = {
+	/**  The workflow's input it answers: `reviewer`, `suite`. */
+	input: string,
+	/**  "Who reviews". */
+	question: string,
 };
 
 /**  One thing wrong with a file, where it is. */
@@ -2002,6 +2155,18 @@ export type PullRequestSummary = {
 	posts: PullRequestPost[],
 };
 
+/**  A workspace's pull request as the watch last saw it. */
+export type PullRequestWatch = {
+	/**  `None` until the branch has one. */
+	number: number | null,
+	/**  It was merged or closed; the branch's next one is looked for. */
+	closed: boolean,
+	/**  Why the last look could not be made. */
+	problem: string | null,
+	/**  When it was last looked at; 0 for never. */
+	lookedAt: number | null,
+};
+
 /**  Asks the webview to put the question to the user. It answers with [`app_quit`]. */
 export type QuitRequested = {
 	/**  The harness sessions still running, as ids the frontend can match to its tabs. */
@@ -2225,6 +2390,9 @@ export type ReviewRequest = {
 
 export type ReviewState = "approved" | "changesRequested" | "commented" | "dismissed";
 
+/**  What a review concluded. */
+export type ReviewStateFilter = "approved" | "changes_requested" | "commented";
+
 /**  What a run is about. A workspace run knows the workspace, its branch and its pull request. */
 export type RunContext = "workspace";
 
@@ -2251,6 +2419,29 @@ export type RunPreview = {
 	needsOrigin: boolean,
 	/**  Variables the run will render as nothing, and why. A run still goes ahead. */
 	empty: string[],
+};
+
+/**  What saving a trigger came to. */
+export type SavedTrigger = SavedTrigger_Serialize | SavedTrigger_Deserialize;
+
+/**  What saving a trigger came to. */
+export type SavedTrigger_Deserialize = {
+	trigger: TriggerItem_Deserialize,
+	/**
+	 *  Agents already running that were not told about `ys workspace done` when they started,
+	 *  for a trigger that newly listens for it: what **Tell the agent** offers to tell.
+	 */
+	untold: UntoldAgent[],
+};
+
+/**  What saving a trigger came to. */
+export type SavedTrigger_Serialize = {
+	trigger: TriggerItem_Serialize,
+	/**
+	 *  Agents already running that were not told about `ys workspace done` when they started,
+	 *  for a trigger that newly listens for it: what **Tell the agent** offers to tell.
+	 */
+	untold: UntoldAgent[],
 };
 
 /**  A schedule, as the view lists it. */
@@ -2905,12 +3096,254 @@ export type Trigger = {
 	context: RunContext,
 };
 
+/**  A trigger as the dialog sends it. */
+export type TriggerDraft = TriggerDraft_Serialize | TriggerDraft_Deserialize;
+
+/**  A trigger as the dialog sends it. */
+export type TriggerDraft_Deserialize = {
+	/**  The trigger being changed; `None` for a new one. */
+	id: string | null,
+	name: string | null,
+	preset: string | null,
+	workspaceId: string,
+	sessionId: string | null,
+	events: TriggerEvent[],
+	filters: Filters_Deserialize,
+	target: ScheduleTarget,
+	targetId: string,
+	inputs: { [key in string]: string },
+	quietMs: number,
+	cap: number,
+	notify: ScheduleNotify,
+};
+
+/**  A trigger as the dialog sends it. */
+export type TriggerDraft_Serialize = {
+	/**  The trigger being changed; `None` for a new one. */
+	id: string | null,
+	name: string | null,
+	preset: string | null,
+	workspaceId: string,
+	sessionId: string | null,
+	events: TriggerEvent[],
+	filters: Filters_Serialize,
+	target: ScheduleTarget,
+	targetId: string,
+	inputs: { [key in string]: string },
+	quietMs: number,
+	cap: number,
+	notify: ScheduleNotify,
+};
+
+/**  What a trigger listens for. */
+export type TriggerEvent = 
+/**  An agent ran `ys workspace done`. */
+"workspace.done" | 
+/**
+ *  An agent went quiet after real work, or its harness reported a finished turn. One per
+ *  turn.
+ */
+"agent.settled" | 
+/**  An agent's program ended. */
+"agent.exited" | 
+/**  A smoke test run in the workspace reached a verdict, or could not. */
+"test.finished" | 
+/**  A workflow run in the workspace ended. */
+"workflow.finished" | 
+/**  The workspace's branch has an open pull request it did not have before. */
+"pr.opened" | 
+/**  A review was submitted on the workspace's pull request. */
+"pr.review" | 
+/**  A comment on its conversation, or a reply on a review thread. */
+"pr.comment" | 
+/**  Its checks finished on its newest commit, and one failed. */
+"pr.checks_failed" | 
+/**  Its checks finished on its newest commit, and none failed. */
+"pr.checks_passed" | 
+/**  GitHub says it conflicts with its base. */
+"pr.conflicted" | "pr.merged" | 
+/**  It was closed without being merged. */
+"pr.closed";
+
+/**  One fire of a trigger: what it gathered and what became of it. */
+export type TriggerFire = {
+	id: string,
+	triggerId: string,
+	/**  `session:<record>`, `pr:<number>` or `workspace:<id>`: what its runs are counted for. */
+	subject: string,
+	/**  The newest event it gathered. */
+	event: string,
+	/**  How many events it gathered. */
+	events: number,
+	firstAt: number | null,
+	dueAt: number | null,
+	decidedAt: number | null,
+	/**  `gathering`, `waiting`, `started`, `skipped`, `capped` or `refused`. */
+	outcome: string,
+	runId: string | null,
+	/**  Why it was refused or skipped. */
+	note: string | null,
+	/**  What it gathered, in words: "1 review and 2 comments from bob", the agent's note. */
+	summary: string | null,
+	/**  The run's status once it ended; `None` while it is going. */
+	result: string | null,
+	/**  The run waits for the user to approve the test file. */
+	awaitingApproval: boolean,
+	depth: number,
+};
+
+/**  A trigger, as the view lists it. Not `Trigger`: a workflow file's `trigger:` has that name. */
+export type TriggerItem = TriggerItem_Serialize | TriggerItem_Deserialize;
+
+/**  A trigger, as the view lists it. Not `Trigger`: a workflow file's `trigger:` has that name. */
+export type TriggerItem_Deserialize = {
+	id: string,
+	name: string,
+	/**  The preset it was made from, if it was. */
+	preset: string | null,
+	projectId: string,
+	/**  `None` once the workspace is deleted; `workspace_name` keeps what it was called. */
+	workspaceId: string | null,
+	workspaceName: string,
+	/**  The agent session it belongs to, for one that listens to one agent only. */
+	sessionId: string | null,
+	/**  That session's title, while it has a record. */
+	sessionTitle: string | null,
+	/**
+	 *  Whether that session's agent is running: a session trigger whose agent ended has no one
+	 *  to listen to.
+	 */
+	sessionRunning: boolean,
+	events: TriggerEvent[],
+	filters: Filters_Deserialize,
+	target: ScheduleTarget,
+	targetId: string,
+	inputs: { [key in string]: string },
+	quietMs: number,
+	cap: number,
+	notify: ScheduleNotify,
+	enabled: boolean,
+	/**
+	 *  The trigger in words: "When a review comes in on the pull request, run the workflow
+	 *  `address-review`".
+	 */
+	when: string,
+	standing: TriggerStanding,
+	/**
+	 *  Its newest line is a cap still in force, which **Reset** lifts — whether or not a run it
+	 *  started before is still going.
+	 */
+	capped: boolean,
+	/**  The newest line of its history that was decided. */
+	last: TriggerFire | null,
+	/**  What it knows of its workspace's pull request, for one on a `pr.*` event. */
+	watch: PullRequestWatch | null,
+	createdAt: number | null,
+};
+
+/**  A trigger, as the view lists it. Not `Trigger`: a workflow file's `trigger:` has that name. */
+export type TriggerItem_Serialize = {
+	id: string,
+	name: string,
+	/**  The preset it was made from, if it was. */
+	preset: string | null,
+	projectId: string,
+	/**  `None` once the workspace is deleted; `workspace_name` keeps what it was called. */
+	workspaceId: string | null,
+	workspaceName: string,
+	/**  The agent session it belongs to, for one that listens to one agent only. */
+	sessionId: string | null,
+	/**  That session's title, while it has a record. */
+	sessionTitle: string | null,
+	/**
+	 *  Whether that session's agent is running: a session trigger whose agent ended has no one
+	 *  to listen to.
+	 */
+	sessionRunning: boolean,
+	events: TriggerEvent[],
+	filters: Filters_Serialize,
+	target: ScheduleTarget,
+	targetId: string,
+	inputs: { [key in string]: string },
+	quietMs: number,
+	cap: number,
+	notify: ScheduleNotify,
+	enabled: boolean,
+	/**
+	 *  The trigger in words: "When a review comes in on the pull request, run the workflow
+	 *  `address-review`".
+	 */
+	when: string,
+	standing: TriggerStanding,
+	/**
+	 *  Its newest line is a cap still in force, which **Reset** lifts — whether or not a run it
+	 *  started before is still going.
+	 */
+	capped: boolean,
+	/**  The newest line of its history that was decided. */
+	last: TriggerFire | null,
+	/**  What it knows of its workspace's pull request, for one on a `pr.*` event. */
+	watch: PullRequestWatch | null,
+	createdAt: number | null,
+};
+
 /**  Only a person starts a run in this version. Schedules and forge events come later. */
 export type TriggerKind = "manual";
+
+/**  A ready-made trigger, for the composer and the dialog. */
+export type TriggerPreset = {
+	id: string,
+	name: string,
+	does: string,
+	events: TriggerEvent[],
+	/**  The built-in workflow it runs. */
+	workflow: string,
+	/**  The one input it asks for, if any. */
+	asks: PresetQuestion | null,
+	quietMs: number,
+};
+
+/**  Where a trigger stands, for the list: what a person needs to know at a glance. */
+export type TriggerStanding = 
+/**  On, listening. */
+"listening" | 
+/**  A run it started is going. */
+"running" | 
+/**  A run it started waits for the user to approve a test file. */
+"awaiting_approval" | 
+/**  It has gathered events and waits for a run in its way to end. */
+"waiting" | 
+/**  A subject has had its runs. Nothing more fires for it until Reset. */
+"capped" | 
+/**  Its last fire could not start a run. */
+"refused" | 
+/**  Its workspace was deleted. */
+"no_workspace" | 
+/**  Switched off by the user. */
+"off";
+
+/**  A run a trigger started, for marking it in a run list. */
+export type TriggeredRun = {
+	runId: string,
+	triggerId: string,
+	triggerName: string,
+};
+
+/**
+ *  Triggers changed: one was added, changed, switched, reset or removed, an event was gathered,
+ *  a fire was decided, or a run one started ended. The window reloads what it shows of them.
+ */
+export type TriggersChanged = Record<string, never>;
 
 export type Until = 
 /**  Quiet, or a finished turn where the harness reports turns. */
 "settled" | "exited";
+
+/**  An agent running in a workspace, by its session record. */
+export type UntoldAgent = {
+	sessionId: string,
+	title: string,
+};
 
 /**
  *  A worktree git knows about that is not a workspace: made by hand, by another tool, or
@@ -2948,6 +3381,11 @@ export type UsageReport = {
 	places: PlaceUsage[],
 	limits: AgentLimits[],
 };
+
+/**  How a smoke test run must have ended. */
+export type VerdictFilter = "any" | "passed" | 
+/**  Failed, or could not finish. */
+"failed";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 

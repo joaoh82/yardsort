@@ -614,6 +614,19 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Every run a trigger started, newest first, as `(run, trigger, trigger's name)`: what run
+    /// lists mark.
+    pub fn triggered_runs(&self) -> StoreResult<Vec<(String, String, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT fire.run_id, trigger.id, trigger.name
+             FROM trigger_fires AS fire JOIN triggers AS trigger ON trigger.id = fire.trigger_id
+             WHERE fire.run_id IS NOT NULL ORDER BY fire.first_at DESC, fire.rowid DESC",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Fires that started a run whose ending has not been copied here yet.
     pub fn unsettled_trigger_fires(&self) -> StoreResult<Vec<TriggerFireRow>> {
         let conn = self.conn();

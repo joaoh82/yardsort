@@ -316,6 +316,26 @@ pub async fn test_list(app: AppHandle, workspace_id: String) -> IpcResult<Vec<Te
     .await
 }
 
+/// A project's smoke tests as its own checkout has them: what the composer offers a workspace
+/// that does not exist yet, which starts from that repository.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_list_in_project(app: AppHandle, project_id: String) -> IpcResult<Vec<TestItem>> {
+    blocking(app, move |state| {
+        let project = state
+            .store
+            .project(&project_id)?
+            .ok_or_else(|| IpcError::new("unknown_project", "That project no longer exists."))?;
+        let browser =
+            smoke::browser::find_browser(&state.store.project_test_settings(&project.id)?.browser);
+        Ok(smoke::catalog(Path::new(&project.root_path))
+            .into_iter()
+            .map(|entry| item_from(entry, browser.is_some()))
+            .collect())
+    })
+    .await
+}
+
 /// Every test in every workspace on show, for the Tests view: each file with where it lives, the
 /// env names the project has not set that it needs, and how its last run here went. The window
 /// reads this on opening the view and on Refresh, the way Tasks reads the forge. Archived

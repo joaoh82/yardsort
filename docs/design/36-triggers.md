@@ -1,8 +1,8 @@
 # Triggers
 
 _Proposal, 2026-11-06. The questions put to the user that day are answered under
-[Decisions](#decisions). Slices 1 and 2 are built: see [Slice 1](#slice-1-what-shipped) and
-[Slice 2](#slice-2-what-shipped)._
+[Decisions](#decisions). Slices 1 to 3 are built: see [Slice 1](#slice-1-what-shipped),
+[Slice 2](#slice-2-what-shipped) and [Slice 3](#slice-3-what-shipped)._
 
 A trigger starts a [workflow](21-workflows.md) or a [smoke test](32-smoke-tests.md) when
 something happens, instead of when a person presses **Run** or a [schedule](34-schedules.md)'s
@@ -647,6 +647,95 @@ for ten seconds when asked to address something:
 Not checked by hand: a review from a second real account on a real pull request. The query was
 run against GitHub itself, on #182 and #184, and read as described above; the rest is the
 stand-in's answers in GitHub's shape. macOS and Windows have had the tests in CI only.
+
+## Slice 3: what shipped
+
+The window: the composer's presets, **Triggers** in the sidebar with its count, the view, the
+dialog, **Triggers…** in a workspace's menu and an agent tab's, the marks in run lists, and **Tell
+the agent**.
+
+**The app** (`src-tauri/src/triggers/commands.rs`): the commands the view and the dialog call,
+in the shape of the schedules' — the list, a trigger's fires, the runs triggers started, the
+presets, save, switch, reset, remove — and `trigger_tell_agents`. `TriggersChanged` tells the
+window to read again; the trigger thread sends it when an event was gathered, a fire decided, a
+run's ending copied, or the list changed under it from `ys`. **The window**
+(`src/features/triggers/`, `src/stores/triggers.ts`).
+
+What building it settled or changed:
+
+- **The composer's presets are added by `workspace_create`**, after the worktree is made and
+  before the agent starts, so an agent whose workspace now listens for `workspace.done` is told
+  about it in its first message. A preset that is refused — its test not on the new branch, say —
+  does not stop the workspace; the reasons come back with it and are shown once it has started.
+- **A preset's smoke test is chosen from the project's own checkout**, the only one there is
+  before the worktree exists (`test_list_in_project`). The new branch usually starts from it; when
+  it does not have the test, saving says so as above.
+- **The list names the pull request**: _When a review comes in on #142_, once the watch knows
+  the number and it is open (`trigger::describe_on`). A closed one's number is not where the next
+  review will come in, so it reads _the pull request_ again.
+- **Tell the agent comes from saving.** The save answers with the agents running in the
+  workspace — or only the trigger's own, for a session trigger — when nothing there listened for
+  `workspace.done` before this save, so they were not told when they started. The dialog then
+  asks; **Tell the agent** has the trigger thread type the same paragraph into each, by smoke
+  tests' **Send result to agent** rule: once it is quiet, never into a busy one, never over
+  someone else's control, and not at all into one that ended first.
+- **The dialog greys out events of another kind** once one is ticked, rather than letting the
+  save be refused for mixing subjects. Filters are sent only for the events ticked, so a filter
+  left from an event unticked is not refused.
+- **The dialog approves nothing**, unlike the schedule dialog, which approves the test it
+  shows. An agent changes a test on its branch as it works, so an approval at saving would cover
+  the first run at most; a triggered run of a new or changed file waits, as decision 11 says.
+- **_Ended_ is the window's word, not a standing.** A session trigger whose agent is not running
+  reads _ended_ in place of _on_; the core's standing is about the trigger's own rows.
+- **The view is not `Trigger`.** The bindings already have a type of that name, a workflow
+  file's `trigger:`, so the list's item is `TriggerItem`.
+- **Notifications for capped and refused needed nothing new**: the trigger thread has told them
+  since slice 1, and skipped since slice 2.
+- **The default cap is the core's** (`trigger::DEFAULT_CAP`), which `ys`, the composer and the
+  dialog share.
+- **A lifted cap reads as lifted** — found in the check by hand. Where a trigger stands came from
+  its newest decided line alone, and **Reset** leaves the capped line as it was, so a trigger read
+  _capped_, in the window and in `ys trigger list`, until it next fired. `trigger::standing_now`
+  reads a capped line as in force only while its subject's counted runs still reach the cap
+  (`cap_in_force`), which also covers a cap raised by an edit. **Reset** is offered whenever the
+  cap is in force, a run started before it still going or not.
+- **A trigger made from a preset in the dialog is called what the preset is**, as `ys` calls it,
+  not after its workflow. Found in the check by hand.
+- **Start waits for a ticked preset's question** — found in review. While the project's smoke
+  tests were being read, a ticked **Smoke test when the work is done** had no answer, so pressing
+  **Start** left it out and said nothing, the box still ticked from last time. Start now waits
+  until the presets and the tests a ticked one asks about have been read; no tests at all once
+  they are is still the box that cannot be ticked.
+- **Open run opens that run** — found in review. On a workflow trigger it opened the workflow's
+  view with no run picked; the view now takes the run asked for when it opens
+  (`useWorkflowStore.showRun`), as a smoke test's tab already did.
+
+Checked by hand on 2026-11-08, in a development build on Linux with the throwaway profile
+`scripts/screenshots.sh` sets up, its stand-in `gh` answering the watch for #12 on
+`celsius-fahrenheit`, and a stand-in agent that echoes what it is sent, the window driven
+through WebKit's remote inspector:
+
+- **Triggers** with none said what a trigger is. **New trigger…**, **Start from** _Address
+  reviews_ on `celsius-fahrenheit`, a quiet time of ten seconds: the dialog said _When someone
+  other than you reviews or comments on this workspace's pull request, 10 seconds after the last
+  one, tell the agent to address it. At most 3 times per pull request_; saved, the row read _When
+  a review comes in on #12_ and the trigger _Watching #12_.
+- A review from bob on #12: one run of `address-review`, the row _running_ and its line _1
+  review from bob_ with **Open run**; the agent was told; the run succeeded, and the workflow's
+  runs marked it _triggered_, _Triggered · Address reviews_.
+- The composer listed the five presets, the reviewers from the agents set up and the smoke tests
+  from the project's checkout. With **Review when the work is done** by the stand-in and **Fix
+  failing checks** ticked, the new workspace had both triggers, its agent's first message had
+  _When you are done_, and the project remembered the picks.
+- **Triggers…** on `celsius-fahrenheit` opened the view on it, and **New trigger…** started
+  there. A done trigger, capped at one, offered **Tell the agent** for the agent already running;
+  pressed, the agent got the paragraph once it was quiet.
+- Two `ys workspace done`: one run, then _capped_. That found the two mistakes above, and the
+  sentence _the agent … in celsius-fahrenheit was already running_, which left a gap for an agent
+  with no title; all three were fixed before this was recorded.
+
+Not checked by hand: the desktop notifications, which slices 1 and 2 already told; macOS and
+Windows, which have had the tests in CI only.
 
 ## Not in version one, on purpose
 

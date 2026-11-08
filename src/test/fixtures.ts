@@ -14,6 +14,9 @@ import type {
   TestReview,
   TestRun,
   TestStepRun,
+  TriggerFire,
+  TriggerItem,
+  TriggerPreset,
   Workspace,
   RemoteRepository,
   Repositories,
@@ -371,3 +374,83 @@ export const scheduleRun = (id: string, overrides: Partial<ScheduleRun> = {}): S
   awaitingApproval: false,
   ...overrides,
 });
+
+/** A trigger: the preset Address reviews, in `fix-login`, on and listening, unless overridden. */
+export const trigger = (id: string, overrides: Partial<TriggerItem> = {}): TriggerItem => ({
+  id,
+  name: "Address reviews",
+  preset: "address-reviews",
+  projectId: "p-app",
+  workspaceId: "w-app-fix-login",
+  workspaceName: "fix-login",
+  sessionId: null,
+  sessionTitle: null,
+  sessionRunning: false,
+  events: ["pr.review", "pr.comment"],
+  filters: {},
+  target: "workflow",
+  targetId: "address-review",
+  inputs: {},
+  quietMs: 120_000,
+  cap: 3,
+  notify: "failure",
+  enabled: true,
+  when: "When a review comes in on the pull request or someone comments on the pull request, run the workflow `address-review`",
+  standing: "listening",
+  capped: false,
+  last: null,
+  watch: { number: 142, closed: false, problem: null, lookedAt: Date.now() - 30_000 },
+  createdAt: Date.now() - 86_400_000,
+  ...overrides,
+});
+
+/** One fire of a trigger: two posts gathered into a run, still going, unless overridden. */
+export const triggerFire = (id: string, overrides: Partial<TriggerFire> = {}): TriggerFire => ({
+  id,
+  triggerId: "t1",
+  subject: "pr:142",
+  event: "pr.review",
+  events: 2,
+  firstAt: Date.now() - 300_000,
+  dueAt: Date.now() - 180_000,
+  decidedAt: Date.now() - 180_000,
+  outcome: "started",
+  runId: `run-${id}`,
+  note: null,
+  summary: "1 review and 1 comment from bob",
+  result: null,
+  awaitingApproval: false,
+  depth: 0,
+  ...overrides,
+});
+
+/** The presets, as the core lists them. */
+export const triggerPresets: TriggerPreset[] = [
+  {
+    id: "review-when-done",
+    name: "Review when the work is done",
+    does: "When the agent says its work is done, a second agent reviews the branch and the first is told what it found.",
+    events: ["workspace.done"],
+    workflow: "review-branch",
+    asks: { input: "reviewer", question: "Who reviews" },
+    quietMs: 0,
+  },
+  {
+    id: "address-reviews",
+    name: "Address reviews",
+    does: "When someone other than you reviews or comments on the workspace's pull request, two minutes after the last one, the agent is told to address it.",
+    events: ["pr.review", "pr.comment"],
+    workflow: "address-review",
+    asks: null,
+    quietMs: 120_000,
+  },
+  {
+    id: "smoke-when-done",
+    name: "Smoke test when the work is done",
+    does: "When the agent says its work is done, a smoke test runs and the agent is told how it went.",
+    events: ["workspace.done"],
+    workflow: "smoke-then-tell",
+    asks: { input: "suite", question: "Which smoke test" },
+    quietMs: 0,
+  },
+];

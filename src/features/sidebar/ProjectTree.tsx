@@ -312,6 +312,12 @@ function WorkspaceNode({
           { label: "Run smoke test…", disabled, onSelect: () => setRunSmokeTest(true) },
           { label: "Schedule…", disabled, onSelect: () => setScheduling(true) },
           {
+            label: "Triggers…",
+            disabled,
+            onSelect: () =>
+              useProjectsStore.getState().openTriggers(true, { workspaceId: workspace.id }),
+          },
+          {
             // A new workspace on a new branch from this one's, its record going along: a handoff
             // that does not share the worktree.
             label: "Fork into new workspace…",

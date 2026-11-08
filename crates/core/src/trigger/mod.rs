@@ -37,6 +37,9 @@ pub const MOST_GATHER_MS: i64 = 10 * 60_000;
 /// The most runs a trigger may start for one subject before it stops and asks.
 pub const MOST_CAP: i64 = 100;
 
+/// How many runs a trigger may start for one subject when it is not told otherwise.
+pub const DEFAULT_CAP: i64 = 3;
+
 /// How many runs a trigger may start in an hour, whatever their subjects: what backs the cap
 /// up.
 pub const RATE_PER_HOUR: i64 = 10;
@@ -811,9 +814,55 @@ pub fn standing(trigger: &TriggerRow, fires: &[TriggerFireRow]) -> TriggerStandi
     }
 }
 
+/// Whether `trigger`'s newest decided line is a cap still in force: its subject's runs still
+/// reach the cap. After **Reset**, or a cap raised by an edit, the capped line stays the newest
+/// until the next fire, but nothing is held by it. A run started before the cap may still be
+/// going.
+pub fn cap_in_force(
+    store: &Store,
+    trigger: &TriggerRow,
+    fires: &[TriggerFireRow],
+) -> IpcResult<bool> {
+    match fires.iter().find(|fire| fire.outcome != "gathering") {
+        Some(line) if line.outcome == "capped" => {
+            Ok(store.counted_trigger_runs(&trigger.id, &line.subject)? >= trigger.cap)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// [`standing`], with a cap that was lifted read as lifted.
+pub fn standing_now(
+    store: &Store,
+    trigger: &TriggerRow,
+    fires: &[TriggerFireRow],
+) -> IpcResult<TriggerStanding> {
+    Ok(match standing(trigger, fires) {
+        TriggerStanding::Capped if !cap_in_force(store, trigger, fires)? => {
+            TriggerStanding::Listening
+        }
+        standing => standing,
+    })
+}
+
 /// A trigger in words: "When an agent says its work is done, run the workflow `review`".
 pub fn describe(trigger: &TriggerRow) -> String {
-    let events: Vec<&str> = events_of(trigger).iter().map(|e| e.words()).collect();
+    describe_on(trigger, None)
+}
+
+/// [`describe`], naming the pull request it watches when it has one: "When a review comes in
+/// on #142, …".
+pub fn describe_on(trigger: &TriggerRow, pull_request: Option<u32>) -> String {
+    let events: Vec<String> = events_of(trigger)
+        .iter()
+        .map(|event| match pull_request {
+            Some(number) => event
+                .words()
+                .replace("the workspace's pull request", &format!("#{number}"))
+                .replace("the pull request", &format!("#{number}")),
+            None => event.words().to_owned(),
+        })
+        .collect();
     let what = ScheduleTarget::parse(&trigger.target_kind).map_or("run", ScheduleTarget::words);
     let when = match events.as_slice() {
         [] => "When something this Yardsort does not know happens".to_owned(),
