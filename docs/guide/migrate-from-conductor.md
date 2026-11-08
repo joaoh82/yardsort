@@ -10,21 +10,21 @@ Importing an existing Git worktree keeps its folder, branch and files, skips pre
 
 ## What maps to what?
 
-| In Conductor | In Yardsort |
-| --- | --- |
-| Project opened from a local repository | Project opened from that same repository folder |
-| Workspace on its own branch and Git worktree | Workspace backed by an ordinary Git worktree |
-| Existing local worktree | **Import worktrees…**, which keeps the folder and branch |
-| One workspace per independent Claude Code or Codex task | One workspace per independent task, with the CLI agent you choose |
-| Multiple chats in one workspace, sharing that branch | Multiple agent tabs in one workspace, sharing its files |
-| Files to copy, and a setup script | Project settings: **Files to copy**, **Setup executable** and **Setup arguments** |
-| Run actions, including several named actions | One **Run executable** and **Run arguments**, started with **▶ Run** |
-| `CONDUCTOR_ROOT_PATH` and `CONDUCTOR_WORKSPACE_PATH` in setup | `YARDSORT_PROJECT` and `YARDSORT_WORKSPACE`. Set for setup only |
-| Allocated `CONDUCTOR_PORT` range | Configure distinct ports yourself. Nothing is assigned for you |
-| Archive script | No archive script. Clean up external resources yourself |
-| Diff review and pull request flow | **Changes**, then commit, push and open a pull request. GitHub checks use your existing `gh` login |
-| Notes in a workspace `.context` folder | The files stay in the imported folder. They are not converted into [project memory](memory.md) |
-| Conductor Cloud or the phone app | Not a finished replacement. [Remote](remote.md) is still under development |
+| In Conductor                                                  | In Yardsort                                                                                        |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Project opened from a local repository                        | Project opened from that same repository folder                                                    |
+| Workspace on its own branch and Git worktree                  | Workspace backed by an ordinary Git worktree                                                       |
+| Existing local worktree                                       | **Import worktrees…**, which keeps the folder and branch                                           |
+| One workspace per independent Claude Code or Codex task       | One workspace per independent task, with the CLI agent you choose                                  |
+| Multiple chats in one workspace, sharing that branch          | Multiple agent tabs in one workspace, sharing its files                                            |
+| Files to copy, and a setup script                             | Project settings: **Files to copy**, **Setup executable** and **Setup arguments**                  |
+| Run actions, including several named actions                  | One **Run executable** and **Run arguments**, started with **▶ Run**                               |
+| `CONDUCTOR_ROOT_PATH` and `CONDUCTOR_WORKSPACE_PATH` in setup | `YARDSORT_PROJECT` and `YARDSORT_WORKSPACE`. Set for setup only                                    |
+| Allocated `CONDUCTOR_PORT` range                              | Configure distinct ports yourself. Nothing is assigned for you                                     |
+| Archive script                                                | No archive script. Clean up external resources yourself                                            |
+| Diff review and pull request flow                             | **Changes**, then commit, push and open a pull request. GitHub checks use your existing `gh` login |
+| Notes in a workspace `.context` folder                        | The files stay in the imported folder. They are not converted into [project memory](memory.md)     |
+| Conductor Cloud or the phone app                              | Not a finished replacement. [Remote](remote.md) is still under development                         |
 
 ## 1. Protect your current work
 
