@@ -143,13 +143,14 @@ paired device loses it. Works whether `serve` is running or not.
 
 ## Where things are
 
-| What                     | Where                                                                                                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The profile              | `--data-dir`, else `YARDSORT_DATA_DIR`, else `~/.local/share/dev.yardsort.app`: the database, `settings.toml`, the daemon's log, the activity inbox and spool |
-| The sign-in              | `YARDSORT_CREDENTIALS_DIR`, else `credentials` in the profile                                                                                                 |
-| Worktrees                | `~/yardsort`, or `YARDSORT_WORKTREE_ROOT`, or the setting in `settings.toml`, as for the app                                                                  |
-| `serve`'s control socket | `$XDG_RUNTIME_DIR/yardsort/<tag>.host.sock`, else `host.sock` in the profile; only its user can reach it                                                      |
-| The terminal daemon's    | `$XDG_RUNTIME_DIR/yardsort/<tag>.sock`, else `daemon.sock` in the profile                                                                                     |
+| What                     | Where                                                                                                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The profile              | `--data-dir`, else `YARDSORT_DATA_DIR`, else `~/.local/share/dev.yardsort.app`: the database, the daemon's log, the activity inbox and spool                                        |
+| `settings.toml`          | In the profile when `--data-dir` or `YARDSORT_DATA_DIR` is set. Otherwise, on Linux, `$XDG_CONFIG_HOME/dev.yardsort.app`, else `~/.config/dev.yardsort.app`; elsewhere, the profile |
+| The sign-in              | `YARDSORT_CREDENTIALS_DIR`, else `credentials` in the profile                                                                                                                       |
+| Worktrees                | `~/yardsort`, or `YARDSORT_WORKTREE_ROOT`, or the setting in `settings.toml`, as for the app                                                                                        |
+| `serve`'s control socket | `$XDG_RUNTIME_DIR/yardsort/<tag>.host.sock`, else `host.sock` in the profile; only its user can reach it                                                                            |
+| The terminal daemon's    | `$XDG_RUNTIME_DIR/yardsort/<tag>.sock`, else `daemon.sock` in the profile                                                                                                           |
 
 Give `ys` the same profile as `serve`, with the same `YARDSORT_DATA_DIR` or `--data-dir`, or it looks at
 another one.
