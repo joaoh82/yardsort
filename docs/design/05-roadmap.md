@@ -1004,7 +1004,8 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       the agents running; a container image and compose example, built and tried in CI; the guide's
       install, service, container, upgrade and backup sections. A shell without `XDG_RUNTIME_DIR`
       now finds the daemon the user's services started. Its local smoke test, from the tarball
-      with an empty environment, passed.
+      with an empty environment, passed, and so did the owner's run of it as a user service on
+      the box: the phone reconnected to the same agent after a restart.
 - [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

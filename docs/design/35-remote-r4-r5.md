@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, passed. Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -661,5 +661,11 @@ and the phone no new build.
 
 **Its smoke test.** `headless-host.yaml` with `--input build=package`, locally: passed on 2026-11-08,
 20 of 20 steps in 14 s, every `yardsort-host` and `ys` the unpacked tarball's under `env -i`. The image's
-check runs in CI's **Host package** job. The owner's run on the box, the tarball installed as the user
-service, is in §6's outline; its result is recorded here when it comes.
+check runs in CI's **Host package** job.
+
+**On the box against staging**: passed on 2026-11-08, by the owner. The tarball built here, copied to
+the test box (Ubuntu 24.04, linger on), installed in `~/.local/bin` with the unit in
+`~/.config/systemd/user`, in place of slice 2's `serve` under `tmux`, with Claude left running.
+`systemctl --user enable --now yardsort-host` linked to `https://remote-staging.yardsort.sh`, the iPhone
+watched and typed, and after `systemctl --user restart yardsort-host` the phone reconnected to the same
+agent.
