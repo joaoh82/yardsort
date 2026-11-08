@@ -1006,6 +1006,10 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       now finds the daemon the user's services started. Its local smoke test, from the tarball
       with an empty environment, passed, and so did the owner's run of it as a user service on
       the box: the phone reconnected to the same agent after a restart.
+      Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
+      toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
+      Registry on each release beside the tarballs; the other harnesses installed by the operator
+      with `yardsort-host install-agent`.
 - [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
