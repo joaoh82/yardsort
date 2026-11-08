@@ -173,7 +173,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
   turn it on, and a device gets in only if you say yes at this computer. Whoever runs the server
   can see what passes through it, and the phone app is not in the app stores yet. Expect it to
-  change until the whole plan is finished. See [Remote](docs/guide/remote.md).
+  change until the whole plan is finished. See [Remote](docs/guide/remote.md). A Linux computer with
+  no screen, such as a server you reach over SSH, can be one your phone reaches too, with
+  `yardsort-host`: see [A computer with no screen](docs/guide/headless-host.md).
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>
@@ -554,6 +556,7 @@ says no.
 | [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own                         |
 | [Smoke tests](docs/guide/smoke-tests.md)                                                         | A file an agent writes and Yardsort runs: steps, browser, approval, the Tests view   |
 | [Remote](docs/guide/remote.md)                                                                   | Your phone, through a server. Still under development, and off until you turn it on  |
+| [A computer with no screen](docs/guide/headless-host.md)                                         | `yardsort-host`: a Linux server your phone reaches. Still under development          |
 | [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                                |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                           |
 | [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                                       |
