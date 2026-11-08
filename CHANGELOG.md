@@ -3,9 +3,12 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.23.0
 
-- **A guide for moving local Conductor worktrees to Yardsort.** [Migrate from Conductor](docs/guide/migrate-from-conductor.md) covers importing existing worktrees, what you reconfigure by hand, and what is not imported: Conductor scripts, chats, port allocation and Cloud.
+- **A guide for moving local Conductor worktrees to Yardsort.**
+  [Migrate from Conductor](docs/guide/migrate-from-conductor.md) covers importing existing
+  worktrees, what you reconfigure by hand, and what is not imported: Conductor scripts, chats, port
+  allocation and Cloud.
 - **Triggers: start a workflow or a smoke test when something happens.** When an agent says its
   work is done (`ys workspace done`), finishes a turn or exits, or a smoke test or a workflow run
   ends, a trigger starts what you gave it in that workspace, with what set it off as
