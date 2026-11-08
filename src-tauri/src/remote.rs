@@ -547,15 +547,11 @@ pub async fn remote_enable(
         signing_in.take();
     }
     let signed_in = finished?;
-    account::enable(
-        &Arc::new(AppHome::new(&app)),
-        client,
-        &server,
-        &name,
-        signed_in,
-    )
-    .await
-    .map_err(ipc)?;
+    let home = Arc::new(AppHome::new(&app));
+    account::enable(&home, client, &server, &name, signed_in)
+        .await
+        .map_err(ipc)?;
+    account::connect(&home);
     status_of(app).await
 }
 

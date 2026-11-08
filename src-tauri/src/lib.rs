@@ -323,6 +323,10 @@ pub fn run() {
                     hold.watch(app.handle().clone());
                     drives = true;
                 }
+                Some(one_copy::Claim::Headless) => {
+                    refuse_to_start(app.handle(), one_copy::HEADLESS);
+                    return Ok(());
+                }
                 Some(one_copy::Claim::Stuck) => {
                     refuse_to_start(app.handle(), one_copy::STUCK);
                     return Ok(());
@@ -428,19 +432,7 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
             // Settle the record first, so a client reacting to the event reads the truth.
             if let pty_host::HostEvent::Exited { id, exit } = &event {
                 if let Some(state) = handle.try_state::<state::AppState>() {
-                    let _ = state
-                        .store
-                        .end_session_by_pty(&id.0, Some(i64::from(exit.code)));
-                    yardsort_core::activity::record_exit(
-                        &state.store,
-                        &id.0,
-                        &yardsort_core::activity::ExitFacts::from(exit),
-                        yardsort_core::activity::Via::Live,
-                    );
-                    // The daemon kept this exit for us too; take it out of the spool
-                    // now rather than find it as a duplicate at the next start. And
-                    // an agent's last hooks ran just before it exited.
-                    yardsort_core::activity::import_spool(&state.store, &spool_root);
+                    yardsort_core::runtime::exited(&state.store, &spool_root, &id.0, exit);
                     activity::drain_inbox(&handle, &state.store, &spool_root);
                 }
             }
@@ -455,41 +447,14 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
             let _ = terminal::PtyHostEvent(event).emit(&handle);
         }),
     );
-    // What agents reported while no window was open.
-    let inbox = yardsort_core::activity::import_inbox(&store, &data_dir);
-    if inbox.imported > 0 || inbox.unlinked > 0 || inbox.unreadable > 0 || inbox.dropped > 0 {
-        eprintln!(
-            "activity inbox: {} imported, {} duplicate, {} unlinked, {} unreadable, {} dropped",
-            inbox.imported, inbox.duplicates, inbox.unlinked, inbox.unreadable, inbox.dropped
-        );
-    }
-    // Exits the daemon kept while no window was open come first: a conversation that
-    // ended cleanly in the meantime must keep its exit code rather than be counted as
-    // interrupted below.
-    let imported = yardsort_core::activity::import_spool(&store, &data_dir);
-    if imported.imported > 0 || imported.unreadable > 0 || imported.dropped > 0 {
-        eprintln!(
-            "exit spool: {} imported, {} duplicate, {} unmatched, {} unreadable, {} dropped",
-            imported.imported,
-            imported.duplicates,
-            imported.unmatched,
-            imported.unreadable,
-            imported.dropped
-        );
-    }
-    // Rows still marked running whose process is *not* among these died with the
-    // previous run; the rest are conversations that never stopped.
+    // What happened while no window was open, and what died with the previous run.
     let alive: Vec<String> = connected
         .host
         .list()
         .into_iter()
         .map(|session| session.id.0)
         .collect();
-    store
-        .end_interrupted_sessions(&alive)
-        .map_err(|e| format!("cannot tidy session records: {e}"))?;
-    yardsort_core::activity::end_interrupted(&store, &alive);
-    yardsort_core::activity::prune(&store);
+    yardsort_core::runtime::settle_at_start(&store, &data_dir, &alive)?;
 
     app.manage(state::AppState::new(
         data_dir.clone(),

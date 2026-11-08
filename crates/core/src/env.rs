@@ -317,14 +317,29 @@ mod platform {
     const TIMEOUT: Duration = Duration::from_secs(8);
 
     pub(super) fn from_login_shell() -> Result<Option<BTreeMap<String, String>>, String> {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        from_shell(&std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()))
+    }
+
+    pub(super) fn from_shell(shell: &str) -> Result<Option<BTreeMap<String, String>>, String> {
         let exe =
             std::env::current_exe().map_err(|e| format!("cannot locate own executable: {e}"))?;
         let exe = exe.to_str().ok_or("own executable path is not UTF-8")?;
         // Single-quote the path; this quoting is understood by sh, bash, zsh and fish alike.
         let script = format!("'{}' {PRINT_ENV_FLAG}", exe.replace('\'', r"'\''"));
 
-        let mut command = Command::new(&shell);
+        let mut command = Command::new(shell);
+        // In a session of its own, with no controlling terminal. An interactive shell started
+        // from a terminal takes it over, and on leaving hands it back to whoever held it when it
+        // began; two probes at once leave it with the first, gone, and `Ctrl-C` in the terminal
+        // `yardsort-host serve` (or `just dev`) runs in then reaches nobody.
+        // Safety: `setsid` is async-signal-safe, and this runs between the fork and the exec.
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
         // The shell's startup files run in what we hand it, and version managers record what
         // they found there, so it starts from the cleaned environment too — not just its output.
         let original: BTreeMap<String, String> = std::env::vars_os()
@@ -717,6 +732,34 @@ mod tests {
         assert_eq!(env.source, EnvSource::Process);
         assert_eq!(env.warning.as_deref(), Some("shell timed out"));
         assert!(!env.vars.is_empty());
+    }
+
+    /// What `Ctrl-C` in the terminal running `yardsort-host serve` depends on: the probe's
+    /// shell is in a session of its own, so it cannot take that terminal.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_shell_probed_is_kept_away_from_our_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        let seen = dir.path().join("session");
+        let shell = dir.path().join("shell");
+        std::fs::write(
+            &shell,
+            format!(
+                "#!/bin/sh\ncut -d' ' -f6 /proc/$$/stat > '{}'\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&shell, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+
+        assert!(platform::from_shell(shell.to_str().unwrap()).is_err());
+        let session: i32 = std::fs::read_to_string(&seen)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert_ne!(session, unsafe { libc::getsid(0) });
     }
 
     #[cfg(unix)]

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
-use yardsort_core::presence::AppLock;
+use yardsort_core::presence::{holder, AppLock, Holder};
 
 /// How long a new copy waits to be answered, or for a copy on its way out to go. A restart starts
 /// the new copy first, and that one is in no hurry to give up.
@@ -28,6 +28,11 @@ pub const PATIENCE: Duration = Duration::from_secs(10);
 pub const STUCK: &str =
     "Yardsort is already open on this profile, and is not answering. Close it, \
                          or end its process if it will not close, then start Yardsort again.";
+
+/// What is said when `yardsort-host serve`, which has no window to show, has the profile.
+pub const HEADLESS: &str = "yardsort-host serve is running on this profile. Stop it, then start \
+                            Yardsort again: two programs on one profile share a Remote sign-in, \
+                            and the server signs this computer out for it.";
 
 /// How often the first copy looks for a request, and a new one for its answer.
 const LOOK_EVERY: Duration = Duration::from_millis(200);
@@ -50,6 +55,8 @@ pub enum Claim {
     Shown,
     /// Another copy has it, and did not answer.
     Stuck,
+    /// `yardsort-host serve` has it, which has no window to show.
+    Headless,
     /// The lock could not be tried: an unusual file system, say. Refusing to start over that would
     /// be worse than what it guards against.
     Unguarded(String),
@@ -77,6 +84,7 @@ pub fn claim(data_dir: &Path, patience: Duration) -> Claim {
                     request,
                 });
             }
+            Ok(None) if holder(data_dir) == Some(Holder::Host) => return Claim::Headless,
             Ok(None) => {}
             Err(error) => return Claim::Unguarded(error.to_string()),
         }
@@ -155,6 +163,20 @@ mod tests {
         assert!(yardsort_core::presence::app_running(dir.path()));
         drop(first);
         assert!(!yardsort_core::presence::app_running(dir.path()));
+    }
+
+    /// `yardsort-host serve` has no window to bring up: the app says what has the profile, at once.
+    #[test]
+    fn a_headless_host_on_the_profile_is_named_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let _host = AppLock::take_as(dir.path(), Holder::Host).unwrap().unwrap();
+        let asked = Instant::now();
+        assert!(matches!(
+            claim(dir.path(), Duration::from_secs(5)),
+            Claim::Headless
+        ));
+        assert!(asked.elapsed() < Duration::from_secs(1));
+        assert!(!dir.path().join("app.show").exists(), "nothing was asked");
     }
 
     #[test]

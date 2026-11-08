@@ -1,7 +1,8 @@
 # Remote, R4 and R5: a computer with no screen, the desktop as a client, and the phone hardened
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
-built the same day (§10); its local smoke tests and the owner's phone check against staging passed. This is the plan for the last two
+built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
 code, the slices in the order they are built, and what each slice's smoke test needs. Like
 [31](31-remote-r3.md), it becomes the record of the slices as they are built. The proposal is
@@ -372,6 +373,32 @@ the address the browser lands on back into the SSH session, start `yardsort-host
 `yardsort-host pair` in a second SSH session, scan its code on the iPhone, approve at the box, add a
 repository with `ys project add`, start Claude with `ys workspace new`, and watch and type from the phone.
 
+### The test box
+
+Milestone A's box is a Hetzner Cloud server in a project of its own, made and removed by
+[`scripts/test-box.sh`](../../scripts/test-box.sh) through an `hcloud` context of the same name, so it
+never lands in another project. Its first boot is
+[`scripts/test-box/cloud-init.yaml`](../../scripts/test-box/cloud-init.yaml): updates, the build tools, an
+ordinary `yardsort` user that has the login key, password logins off, a firewall that lets in SSH only
+(and a Hetzner firewall in front of it), lingering so `serve` and the agents outlive a logout, and Rust.
+Nothing that box holds is in the repository: no address, no key, no account. How to use it, for anyone:
+[A test box for Remote](../test-box.md).
+
+| Step                     | What does it                                                                                                                                                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/test-box.sh up` | Creates the firewall and the server, waits for its setup, installs `gh` and Claude Code, makes the box an SSH key on the owner's GitHub account, clones the demo repository, copies this checkout over and builds both programs |
+| By hand, about 5 minutes | Signing in Claude Code, `gh auth login`, `yardsort-host sign-in`, and pairing the phone: each is the owner's own                                                                                                                |
+| `sync`                   | Copies the checkout again and rebuilds, for each slice's run; a running `serve` keeps the old build until restarted                                                                                                             |
+| `down`                   | Shows work there that is not pushed and asks; signs the host out at the server (or the phone keeps a computer that never comes back), signs `gh` out, removes the box's key from GitHub, then deletes the server                |
+
+**Cost.** The CX33 (4 vCPU, 8 GB, 80 GB) is €0.0136 an hour, at most €8.49 a month, plus its IPv4
+address, as of 2026-11-07. Hetzner bills a server while it exists, powered off or not; only `down` stops
+it. **When:** made on 2026-11-07 for slice 2, kept for the rest of milestone A, since each slice's run is
+then a `sync` and a restart, and taken down when milestone A is done or the slices pause for more than
+a couple of weeks. No snapshots or backups: either would hold the owner's sign-ins, and `up` rebuilds
+it in about fifteen minutes. `sync` and `status` were run against the box; `up` and `down` as a whole
+were not run again since it was made by hand with the same steps.
+
 ## 7 · Risks
 
 - **The guard on approval is not a boundary** (§3). A same-user process on a headless box holds the
@@ -437,3 +464,61 @@ above. `just check` and `just bindings-check` pass. Not run here: Windows and ma
 **On the iPhone against staging** (passed, 2026-11-06, run by the owner): a development build of the app from this branch, signed in to
 staging, with the phone already paired, still lists this computer, watches a shell, takes control, types,
 and lets go; and a new pairing is approved at the window.
+
+## 11 · What the second slice adds
+
+Built on 2026-11-07, on Linux. Nothing changed on the server or the phone, so staging needs no deploy
+and the phone no new build.
+
+- **The runtime in the core** (`yardsort_core::runtime`): settling the records at start
+  (`settle_at_start`), on each exit (`exited`), and the inbox watcher that drains hooks' reports as they
+  land (`watch_inbox`, `drain`), with its tests. The app calls them; it keeps only telling its window.
+- **`yardsort-host`** (`crates/host`, GPL-3.0-only, Linux; it builds on macOS and is a stub on Windows).
+  It handles `--yardsort-daemon`, `--yardsort-hook` and `--yardsort-print-env` first, so its daemon is
+  its own build. Commands: `sign-in`, `serve`, `pair`, `devices`, `revoke`, `status`, `sign-out`. Its
+  `Home` keeps the credential in `<data dir>/credentials` unless `YARDSORT_CREDENTIALS_DIR` says
+  otherwise. Since #180 it also answers a device's `workspace.start` and `session.start`, with the same
+  `Starter` the app uses, so the phone can start work on a computer with no screen.
+- **Signing in by pasting.** `remote_client::SignIn` now splits into `returned` (the browser came back),
+  `pasted` (the address copied out of a browser elsewhere; only this sign-in's own loopback address, port
+  and path are taken) and `redeem`. `sign-in` waits for either. `account::enable` no longer starts the
+  link itself: the app does, and `sign-in` does not, since `serve` will.
+- **One program per profile.** The lock now says which program holds it (`presence::Holder`, in
+  `app.holder` beside `app.lock`, since Windows will not let a locked file be read). `serve`, `sign-in`
+  and a `sign-out` with nothing serving all take it. `ys workflow run`, `ys test run` and
+  `ys schedule run` refuse on a host's profile, and the schedule list says schedules do not fire there.
+  The app on such a profile says that `yardsort-host serve` has it, at once, instead of waiting ten
+  seconds for a window that will never answer.
+- **The control socket and the guard.** `serve` listens on a Unix socket made `0600` under a `0177`
+  umask. `pair` is refused unless the peer (`SO_PEERCRED`) is this user, carries none of the session
+  markers, has a terminal on standard input that is not one of the daemon's children's, and does not
+  descend from the daemon. A guard, not a boundary, as §3 says and the guide repeats.
+- **`ys project add <path>`**, with `Projects::open`'s checks, and no `git init`.
+- **Found on the way.** `<data dir>/host.sock` is too long for a Unix socket in deep data directories
+  (a smoke run's is): a Unix socket's path
+  may be at most 108 bytes. The socket follows the daemon's rule instead,
+  `$XDG_RUNTIME_DIR/yardsort/<tag>.host.sock`, then `<data dir>/host.sock`, then the temporary
+  directory (`pty_ipc::socket_candidates`), and a command tries each, since `serve` under systemd and an
+  SSH login may not see the same `XDG_RUNTIME_DIR`. A smoke harness that is `sh` given the agent's first
+  message runs the project-memory briefing as shell input; the test's plain shell takes no prompt.
+- **Tests that fail without it.** The pasted address (`remote-client`); the holder (`presence`); `ys`
+  refusing on a host's profile and `ys project add` (`crates/cli/tests`); the app naming a headless
+  holder (`one_copy`); the socket's mode, the protocol's shape and the guard's parsing (`crates/host`).
+- **Not in it**, as planned: packaging (slice 3), workflows, smoke tests and schedules on a headless host
+  (§9), and resume and fork (slice 6).
+
+**Its smoke test.** `headless-host.yaml`, locally, with no display variables at all: passed on
+2026-11-07, 20 of 20 steps in 15 s.
+
+**On the box against staging**: passed on 2026-11-07, by the owner (§6). A Hetzner CX33 with Ubuntu
+24.04 reached over SSH, with `git`, `gh` and Claude Code installed and signed in as an ordinary user.
+Both programs built there from the branch, signed in to `https://remote-staging.yardsort.sh` by
+pasting, `serve` under `tmux`, a repository added with `ys project add`, Claude started with
+`ys workspace new`, the iPhone paired with `yardsort-host pair`; it watched, took control and typed.
+`serve` stopped and started again: the agent still there, and so was the pairing.
+
+It found one bug: `Ctrl-C` did nothing in the terminal `serve` ran in. The probe of the login
+shell's environment starts an interactive shell, which takes the terminal and on leaving hands it
+back to whoever held it when it began; two probes at once left it with the first, already gone.
+The probe now runs in a session of its own, with no terminal, as it does when the app is opened
+from the desktop (`env.rs`, with a test that its shell's session is not ours).

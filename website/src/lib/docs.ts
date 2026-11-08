@@ -125,6 +125,12 @@ export const DOCS_NAV: DocSection[] = [
           "Reach this computer from your phone through a Yardsort server. Still under development, and off until you turn it on.",
       },
       {
+        slug: "guide/headless-host",
+        title: "A computer with no screen",
+        description:
+          "Run yardsort-host on a Linux server as a host your phone reaches: sign in from another browser, pair a device at a terminal, add projects and start agents with ys.",
+      },
+      {
         slug: "guide/smoke-tests",
         title: "Smoke tests",
         description:
@@ -177,6 +183,12 @@ export const DOCS_NAV: DocSection[] = [
         description:
           "Explore the Yardsort roadmap: completed milestones, planned features and open work for parallel coding agents, workspaces and workflows.",
         path: "design/05-roadmap",
+      },
+      {
+        slug: "test-box",
+        title: "A test box for Remote",
+        description:
+          "Make a throwaway Linux server on Hetzner Cloud to try Yardsort's headless host with your phone, build your checkout there, and delete it when done.",
       },
     ],
   },

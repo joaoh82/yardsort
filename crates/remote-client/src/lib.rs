@@ -318,9 +318,47 @@ impl SignIn {
         device: NewDevice,
         timeout: Duration,
     ) -> Result<Credentials> {
-        let code = tokio::time::timeout(timeout, returned(&self.listener, RETURN_READ_TIMEOUT))
+        let code = self.returned(timeout).await?;
+        self.redeem(client, device, code).await
+    }
+
+    /// Wait for the browser to come back to the loopback address, and take its code.
+    pub async fn returned(&self, timeout: Duration) -> Result<String> {
+        tokio::time::timeout(timeout, returned(&self.listener, RETURN_READ_TIMEOUT))
             .await
-            .map_err(|_| ClientError::TimedOut)??;
+            .map_err(|_| ClientError::TimedOut)?
+    }
+
+    /// The code in the address the browser was sent back to, copied out of its address bar: for a
+    /// computer with no browser, signed in from another one, where that address went nowhere. Only
+    /// this sign-in's own loopback address is taken. The code is worth nothing without this
+    /// sign-in's verifier, which never leaves the process.
+    pub fn pasted(&self, address: &str) -> Result<String> {
+        let not_it = || {
+            ClientError::Invalid(format!(
+                "That is not the address this sign-in waits for. Copy the whole address the \
+                 browser shows once signed in: it starts http://127.0.0.1:{}/signed-in?",
+                self.redirect_port()
+            ))
+        };
+        let url = Url::parse(address.trim()).map_err(|_| not_it())?;
+        let ours = url.scheme() == "http"
+            && url.host() == Some(url::Host::Ipv4(std::net::Ipv4Addr::LOCALHOST))
+            && url.port() == Some(self.redirect_port())
+            && url.path() == "/signed-in";
+        if !ours {
+            return Err(not_it());
+        }
+        came_back(&url).unwrap_or_else(|| Err(not_it()))
+    }
+
+    /// Redeem the code the browser brought back as `device`.
+    pub async fn redeem(
+        self,
+        client: &Client,
+        device: NewDevice,
+        code: String,
+    ) -> Result<Credentials> {
         let request = TokenRequest::SignIn {
             code: Secret::new(code),
             verifier: self.verifier,
@@ -433,21 +471,12 @@ async fn returned(listener: &TcpListener, read_timeout: Duration) -> Result<Stri
                 .await;
             continue;
         }
-        let query = |key: &str| {
-            url.query_pairs()
-                .find(|(k, _)| k == key)
-                .map(|(_, v)| v.into_owned())
+        let Some(outcome) = came_back(&url) else {
+            continue;
         };
-        let (body, outcome) = match (query("code"), query("error")) {
-            (Some(code), _) => ("Signed in. You can close this window.", Ok(code)),
-            (None, Some(error)) => (
-                "Not signed in. You can close this window.",
-                Err(ClientError::Remote(RemoteError::new(
-                    ErrorCode::Unauthenticated,
-                    format!("The sign-in was not completed ({}).", clip(&error)),
-                ))),
-            ),
-            (None, None) => continue,
+        let body = match outcome {
+            Ok(_) => "Signed in. You can close this window.",
+            Err(_) => "Not signed in. You can close this window.",
         };
         let _ = socket
             .write_all(
@@ -460,6 +489,24 @@ async fn returned(listener: &TcpListener, read_timeout: Duration) -> Result<Stri
             )
             .await;
         return outcome;
+    }
+}
+
+/// What the browser brought back to `/signed-in`: a code, or the provider's error. `None` for
+/// neither, which is not a return at all.
+fn came_back(url: &Url) -> Option<Result<String>> {
+    let query = |key: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+    };
+    match (query("code"), query("error")) {
+        (Some(code), _) => Some(Ok(code)),
+        (None, Some(error)) => Some(Err(ClientError::Remote(RemoteError::new(
+            ErrorCode::Unauthenticated,
+            format!("The sign-in was not completed ({}).", clip(&error)),
+        )))),
+        (None, None) => None,
     }
 }
 
@@ -571,6 +618,41 @@ mod tests {
             .unwrap();
         browser.await.unwrap();
         assert_eq!(code, "the-code");
+    }
+
+    /// Signed in on another computer, the address the browser was sent back to is pasted here:
+    /// only this sign-in's own, with its code or the provider's error.
+    #[tokio::test]
+    async fn the_address_pasted_back_gives_its_code_and_nothing_else_is_taken() {
+        let client = Client::new("http://127.0.0.1:9").unwrap();
+        let sign_in = client.begin_sign_in().await.unwrap();
+        let port = sign_in.redirect_port();
+        let ours = |rest: &str| format!("http://127.0.0.1:{port}{rest}");
+        assert_eq!(
+            sign_in
+                .pasted(&format!("  {}\n", ours("/signed-in?code=the-code")))
+                .unwrap(),
+            "the-code"
+        );
+        let refused = sign_in
+            .pasted(&ours("/signed-in?error=access_denied"))
+            .unwrap_err();
+        assert_eq!(refused.code(), Some(ErrorCode::Unauthenticated));
+        for other in [
+            format!("http://127.0.0.1:{}/signed-in?code=x", port.wrapping_add(1)),
+            format!("http://localhost:{port}/signed-in?code=x"),
+            format!("https://127.0.0.1:{port}/signed-in?code=x"),
+            format!("http://example.com:{port}/signed-in?code=x"),
+            ours("/elsewhere?code=x"),
+            ours("/signed-in"),
+            "the-code".to_owned(),
+        ] {
+            let error = sign_in.pasted(&other).unwrap_err();
+            assert!(
+                matches!(&error, ClientError::Invalid(why) if why.contains("/signed-in?")),
+                "{other}: {error}"
+            );
+        }
     }
 
     #[tokio::test]

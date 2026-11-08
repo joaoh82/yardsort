@@ -993,6 +993,12 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       ([35 §10](35-remote-r4-r5.md#10--what-the-first-slice-adds)). Its local smoke tests passed, once
       `remote-earlier-daemon` stopped expecting a 0.21 daemon from a 0.22 build, and the owner's
       phone check against staging passed.
+      Slice 2 was built on 2026-11-07 ([35 §11](35-remote-r4-r5.md#11--what-the-second-slice-adds)):
+      `yardsort-host`, which signs in by pasting back the browser's address, serves with no display,
+      and pairs a device only at the operator's own terminal; the runtime the app and it share moved
+      into the core; `ys project add`; `ys` refuses to queue runs on a host's profile. Its local smoke
+      test passed, and so did the owner's run on a real box through staging, which found `Ctrl-C`
+      lost to a shell probe and had it fixed.
 - [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface

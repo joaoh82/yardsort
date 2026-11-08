@@ -352,9 +352,18 @@ fn outcome_words(fire: &TriggerFireRow) -> String {
 
 /// Said under anything about what a trigger will do: nothing, with no app.
 fn not_running_note(ys: &Yardsort) {
-    if !presence::app_running(&ys.data_dir) {
-        sayln!();
-        sayln!("Yardsort is not running. Triggers fire while it is open.");
+    match presence::holder(&ys.data_dir) {
+        Some(presence::Holder::App) => {}
+        Some(presence::Holder::Host) => {
+            sayln!();
+            sayln!(
+                "This host does not fire triggers yet: yardsort-host is running it, not the app."
+            );
+        }
+        None => {
+            sayln!();
+            sayln!("Yardsort is not running. Triggers fire while it is open.");
+        }
     }
 }
 

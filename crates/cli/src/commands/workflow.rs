@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 use yardsort_core::memory;
-use yardsort_core::presence;
 use yardsort_core::store::{WorkflowRunRow, WorkspaceRow};
 use yardsort_core::workflow::{self, runs, Entry, Problem, Source};
 
@@ -209,13 +208,11 @@ fn start_run(
         };
         inputs.insert(key.trim().to_owned(), value.to_owned());
     }
-    // The app carries runs out. Queued with nobody to run it, a run would only sit there.
-    if !presence::app_running(&ys.data_dir) {
-        return Err(Failure::new(
-            "Yardsort is not running. Workflows run in the app: open it, then run this again. \
+    super::someone_carries_it_out(
+        ys,
+        "Yardsort is not running. Workflows run in the app: open it, then run this again. \
              Nothing was queued.",
-        ));
-    }
+    )?;
     let run_id = runs::queue(
         &ys.store,
         &ys.data_dir,
