@@ -18,7 +18,6 @@ const core = vi.hoisted(() => ({
   pullRequestSummary: vi.fn(),
   trackedPullRequestSummary: vi.fn(),
   trackedPullRequestMerge: vi.fn(),
-  trackedPullRequestsForget: vi.fn(),
   trackedPullRequestClose: vi.fn(),
   trackedPullRequestReopen: vi.fn(),
   trackedPullRequestComment: vi.fn(),
@@ -134,7 +133,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
   core.uiStateSave.mockResolvedValue(undefined);
-  core.trackedPullRequestsForget.mockResolvedValue(undefined);
   core.projectPullRequests.mockImplementation(async (id: string) => answers()[id]);
   core.pullRequestSummary.mockImplementation(async (id: string, number: number) =>
     pullRequestSummary(answers()[id]!.pullRequests.find((pr) => pr.number === number)!),
@@ -364,7 +362,7 @@ describe("when there is nothing to show, or not everything", () => {
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("alpha: `gh pr list` failed: HTTP 504");
     await user.click(within(alert).getByRole("button", { name: "Retry" }));
-    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true);
+    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true, true);
     expect(core.projectPullRequests).toHaveBeenCalledTimes(1);
   });
 
@@ -398,11 +396,8 @@ describe("when there is nothing to show, or not everything", () => {
     const user = show();
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalledTimes(2));
-    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true);
-    expect(core.projectPullRequests).toHaveBeenCalledWith(beta.id, true, true);
-    // Someone asked: pull requests elsewhere are read again too, merged and closed ones as well.
-    expect(core.trackedPullRequestsForget).toHaveBeenCalledWith(alpha.id, null);
-    expect(core.trackedPullRequestsForget).toHaveBeenCalledWith(beta.id, null);
+    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true, true);
+    expect(core.projectPullRequests).toHaveBeenCalledWith(beta.id, true, true, true);
   });
 });
 
@@ -526,7 +521,7 @@ describe("merging, closing and reopening", () => {
       expect(message).toContain("No branch is deleted.");
       expect(options).toEqual({ title: "Merge pull request", okLabel: label });
       await waitFor(() =>
-        expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true),
+        expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true, false),
       );
       expect(await screen.findByRole("status")).toHaveTextContent("Merge request sent.");
     },
@@ -587,7 +582,7 @@ describe("merging, closing and reopening", () => {
     expect(message).toContain("Its branch is kept");
     expect(options).toEqual({ title: "Close pull request", okLabel: "Close pull request" });
     await waitFor(() =>
-      expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true),
+      expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true, false),
     );
   });
 
@@ -623,7 +618,7 @@ describe("merging, closing and reopening", () => {
     await user.click(row(/Add a retry/));
     await merge(user, "Squash and merge");
     expect(await screen.findByRole("alert")).toHaveTextContent("required checks");
-    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true);
+    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true, false);
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

@@ -86,6 +86,9 @@ pub async fn workspace_publish_state(
 /// `full` reads every open pull request as well as the newest fifty: what the Pull requests
 /// view lists. It is several questions to the forge on a busy repository, so only that view
 /// asks for it.
+///
+/// `asked` is a person pressing **Refresh**, as against the window's own poll, which refreshes
+/// too: then the pull requests tracked elsewhere are all read again, merged and closed ones too.
 #[tauri::command]
 #[specta::specta]
 pub async fn project_pull_requests(
@@ -93,6 +96,7 @@ pub async fn project_pull_requests(
     project_id: String,
     refresh: bool,
     full: bool,
+    asked: bool,
 ) -> IpcResult<ProjectPullRequests> {
     blocking(app, move |state| {
         let mut found = look(state, &project_id, refresh, full);
@@ -130,7 +134,7 @@ pub async fn project_pull_requests(
             }
         }
         found.workspaces = owned;
-        found.tracked = super::tracked::of_project(state, &project_id, refresh);
+        found.tracked = super::tracked::of_project(state, &project_id, refresh, asked);
         Ok(found)
     })
     .await

@@ -116,8 +116,8 @@ checkout as a working folder. Measured: 0.5 s for one pull request.
   list; a **merged or closed** one is reused for ten minutes — they are final, or nearly —
   whatever a look's `refresh` says, since the window's own poll asks with `refresh` every
   minute. A person pressing **Refresh** in the view or **Refresh pull request** in the toolbar
-  is the exception: `tracked_pull_requests_forget` drops the project's reads first (or the one
-  pull request's), and they are read at once.
+  is the exception: that look is `asked` (`project_pull_requests`'s flag for it), and reads them
+  all again; one whose read then fails keeps what was known, as always.
 - **At most 20 per project per look**, newest tracked first, **four at a time**, each stopped
   after 20 s. One that two workspaces track is read once. A pull request that cannot be read
   keeps what was last read of it, with the reason beside it; past the twenty, a row says it was
@@ -518,7 +518,7 @@ The rows are [08 § 28](08-manual-checklist.md#28--pull-requests-in-other-reposi
   confirmed by name, a real Claude Code reviewing it in a worktree of the clone and the run
   seeing the review by link, and **Stop tracking** from two places. All passed. Found: **Refresh
   pull request** did not read a merged or closed one again within its ten minutes — fixed
-  since, by `tracked_pull_requests_forget`.
+  since: a look a person asked for (`asked`) reads them all.
 - **Still to do:** every row on macOS and Windows, which this machine cannot do, and the window's
   rows against real GitHub pull requests.
 

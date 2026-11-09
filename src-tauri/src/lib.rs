@@ -106,7 +106,6 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             publish::tracked::workspace_track_pull_request,
             publish::tracked::workspace_untrack_pull_request,
             publish::tracked::tracked_pull_request_summary,
-            publish::tracked::tracked_pull_requests_forget,
             publish::tracked::tracked_pull_request_merge,
             publish::tracked::tracked_pull_request_close,
             publish::tracked::tracked_pull_request_reopen,

@@ -10,7 +10,6 @@ const core = vi.hoisted(() => ({
   workspaceResolveConflicts: vi.fn(),
   workspaceUntrackPullRequest: vi.fn(),
   trackedPullRequestMerge: vi.fn(),
-  trackedPullRequestsForget: vi.fn(),
 }));
 const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -72,7 +71,6 @@ beforeEach(() => {
   usePublishStore.setState({ workspaceId: null, state: null, byProject: { alpha: found() } });
   core.projectPullRequests.mockResolvedValue(found());
   core.workspaceMergePullRequest.mockResolvedValue(undefined);
-  core.trackedPullRequestsForget.mockResolvedValue(undefined);
   opener.openUrl.mockResolvedValue(undefined);
   clipboard.writeText.mockResolvedValue(undefined);
 });
@@ -129,7 +127,7 @@ it.each([
       method,
     ),
   );
-  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false);
+  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, false);
   expect(await screen.findByRole("status")).toHaveTextContent("Merge request sent");
 });
 it("offers copy and refresh, and reports merge errors", async () => {
@@ -139,7 +137,9 @@ it("offers copy and refresh, and reports merge errors", async () => {
   await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(pr.url));
   await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
   await user.click(screen.getByRole("menuitem", { name: "Refresh pull request" }));
-  await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false));
+  await waitFor(() =>
+    expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, true),
+  );
   native.confirm.mockResolvedValue(true);
   core.workspaceMergePullRequest.mockRejectedValue(new Error("Branch protection requires review"));
   await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
@@ -312,7 +312,7 @@ it("asks the agent and shows the tab it is in", async () => {
     "Asked Claude Code to resolve the conflicts in #85.",
   );
   expect(useTerminalStore.getState().active["w-alpha-feature"]).toBe("pty-7");
-  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false);
+  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, false);
 });
 
 it("says why when the agent cannot be asked", async () => {
@@ -398,13 +398,8 @@ describe("a pull request tracked in another repository", () => {
     core.projectPullRequests.mockClear();
     await user.click(screen.getByRole("menuitem", { name: "Refresh pull request" }));
     await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalled());
-    expect(core.trackedPullRequestsForget).toHaveBeenCalledWith(
-      "alpha",
-      "https://github.com/demo/lib/pull/7",
-    );
-    expect(core.trackedPullRequestsForget.mock.invocationCallOrder[0]).toBeLessThan(
-      core.projectPullRequests.mock.invocationCallOrder[0]!,
-    );
+    // Someone asked: read again, merged or closed as it may be.
+    expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, true);
   });
 
   it("can stop being tracked, and the toolbar goes back to the workspace's own", async () => {

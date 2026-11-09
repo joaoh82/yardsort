@@ -112,8 +112,11 @@ export const commands = {
 	 *  `full` reads every open pull request as well as the newest fifty: what the Pull requests
 	 *  view lists. It is several questions to the forge on a busy repository, so only that view
 	 *  asks for it.
+	 * 
+	 *  `asked` is a person pressing **Refresh**, as against the window's own poll, which refreshes
+	 *  too: then the pull requests tracked elsewhere are all read again, merged and closed ones too.
 	 */
-	projectPullRequests: (projectId: string, refresh: boolean, full: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh, full })),
+	projectPullRequests: (projectId: string, refresh: boolean, full: boolean, asked: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh, full, asked })),
 	/**
 	 *  Follow the pull request at `url` with the workspace. Resolves to whether it is new: tracking
 	 *  one twice changes nothing.
@@ -126,13 +129,6 @@ export const commands = {
 	 *  project's own: by its link.
 	 */
 	trackedPullRequestSummary: (workspaceId: string, id: string, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("tracked_pull_request_summary", { workspaceId, id, refresh })),
-	/**
-	 *  Read a project's tracked pull requests afresh on the next look — only the one at `url`, when
-	 *  given — and their summaries: someone pressed **Refresh**. A merged or closed one is otherwise
-	 *  reused for [`FINAL_FOR`] whatever a look's `refresh` says, since the window's own poll asks
-	 *  with `refresh` every minute and a final one rarely moves; a person asking is the exception.
-	 */
-	trackedPullRequestsForget: (projectId: string, url: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("tracked_pull_requests_forget", { projectId, url })),
 	/**
 	 *  Merge a tracked pull request, as [`super::pull_requests::pull_request_merge`] merges a
 	 *  project's own: only if it is still open, not a draft, and at the head the user confirmed.
