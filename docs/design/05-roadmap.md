@@ -1165,6 +1165,27 @@ told of a review posted from a second account, once, two minutes after its last 
 agent's own answers start no second round; a fourth round is capped and told; and a trigger added
 from `ys` fires in an open app.
 
+## M30 — Floor Manager
+
+Proposed in [37-floor-manager](37-floor-manager.md), from an idea captured on 2026-11-07 (YARD-1):
+one agent with every project in view, opened from the lower-right corner, that answers across
+projects and starts work when the user agrees.
+
+- [x] Slice 1: the agent and its reach. The coordinator in `<data dir>/coordinator` with its
+      `AGENTS.md` and `CLAUDE.md`, this copy's `ys` first on `PATH` and the profile named; one
+      at a time, labelled and in no workspace; the status bar's **Floor Manager**, **Mod+J** and
+      the panel, with **Stop** asking first and an ended one's last screen kept; the quit dialog
+      naming it. `ys pr list` with the view's review filters and `--attention`, and
+      `ys pr checkout`, for which `prepare_branch` moved into the core. Recorded in
+      [37](37-floor-manager.md).
+- [ ] Resume its conversation after it ends, and start it with a question from elsewhere in the
+      window.
+- [ ] Settle the name, and whether the lines it is told are enough (questions 53–55).
+
+_Exit:_ on all three platforms, asking the Floor Manager to review the open pull requests nobody
+has reviewed ends with one reviewer per pull request posting on GitHub, every one of them proposed
+first and started only after a yes.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

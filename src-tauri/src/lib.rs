@@ -9,6 +9,7 @@ mod changes;
 mod commands;
 mod computers;
 mod conversations;
+mod coordinator;
 #[cfg(target_os = "linux")]
 mod display;
 mod draft;
@@ -197,6 +198,9 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             commands::daemon_status,
             quit::app_quit,
             quit::quit_cancelled,
+            coordinator::coordinator_status,
+            coordinator::coordinator_start,
+            coordinator::coordinator_stop,
             terminal::pty_spawn,
             terminal::pty_attach,
             terminal::pty_detach,

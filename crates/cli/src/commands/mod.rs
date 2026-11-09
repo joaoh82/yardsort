@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod event;
 pub mod logs;
 pub mod memory;
+pub mod pr;
 pub mod project;
 pub mod schedule;
 pub mod session;

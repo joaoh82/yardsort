@@ -246,6 +246,10 @@ Tasks view's, described in [Tasks](tasks.md#starting-from-a-link).
 it. Pick the agent, say what you want — _review this_, _fix the failing test_ — and start. Until
 you press **Start** no worktree exists; cancelling leaves only the branch.
 
+From a terminal, [`ys pr checkout`](cli.md#ys-pr) does the same in one step: it opens the
+workspace on the branch and starts nothing in it. [`ys pr list`](cli.md#ys-pr) lists what this
+view lists, open pull requests only, with the same review filters.
+
 What it does to the repository depends on where the branch is:
 
 - **You already have the branch locally** — it is opened exactly as it is. Yardsort never moves

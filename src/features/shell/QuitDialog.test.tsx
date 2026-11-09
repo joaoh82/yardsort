@@ -9,6 +9,7 @@ vi.mock("@/lib/ipc", async (original) => ({
   ipc: core,
 }));
 
+import { useCoordinatorStore } from "@/stores/coordinator";
 import { useProjectsStore } from "@/stores/projects";
 import { useQuitStore } from "@/stores/quit";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
@@ -72,6 +73,23 @@ describe("closing the window while agents are working", () => {
     expect(screen.getByText("1 agent is still working")).toBeInTheDocument();
     expect(screen.getByText("claude")).toBeInTheDocument();
     expect(screen.getByText("yardsort / fix-the-pty-leak")).toBeInTheDocument();
+  });
+
+  it("calls the Floor Manager by its name, though it has no tab", () => {
+    useCoordinatorStore.setState({
+      status: {
+        session: { id: "pty-9" } as never,
+        harness: "claude",
+        folder: "/profile/coordinator",
+        hasYs: true,
+      },
+    });
+    useQuitStore.getState().asked(["pty-1", "pty-9"]);
+    render(<QuitDialog />);
+
+    expect(screen.getByText("2 agents are still working")).toBeInTheDocument();
+    expect(screen.getByText("Floor Manager")).toBeInTheDocument();
+    useCoordinatorStore.setState({ status: null });
   });
 
   it("leaves them running by default, and does not stop anything", async () => {

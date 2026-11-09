@@ -15,6 +15,7 @@ pub mod assist;
 pub mod changes;
 pub mod code_note;
 pub mod conflicts;
+pub mod coordinator;
 pub mod daemon;
 pub mod draft;
 pub mod env;

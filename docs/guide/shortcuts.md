@@ -20,6 +20,7 @@ Open **Shortcuts** in the bottom bar, or **Settings → Keyboard**, for the in-a
 | Mod+B         | `Ctrl+Shift+B`       | `⌘B`        | Toggle the left panel                                                                               |
 | Mod+Alt+B     | `Ctrl+Shift+Alt+B`   | `⌥⌘B`       | Toggle the right panel                                                                              |
 | Mod+,         | `Ctrl+Shift+,`       | `⌘,`        | Settings                                                                                            |
+| Mod+J         | `Ctrl+Shift+J`       | `⌘J`        | Open or close the [Floor Manager](floor-manager.md)                                                 |
 | Mod+C / Mod+V | `Ctrl+Shift+C` / `V` | `⌘C` / `⌘V` | Copy the selection / paste, in a terminal ([more ways](terminals-and-sessions.md#copy-paste-links)) |
 
 On a [smoke test's approval card](smoke-tests.md#the-approval-card), while it has the keyboard:

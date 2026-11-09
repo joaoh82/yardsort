@@ -33,7 +33,7 @@ it("preserves saved choices over newly introduced defaults", async () => {
   const older: Partial<typeof DEFAULT_BINDINGS> = {
     ...DEFAULT_BINDINGS,
     toggleLeft: "ArrowRight",
-    toggleRight: "j",
+    toggleRight: "u",
     tour: null,
   };
   delete older.nextTerminal;
@@ -41,6 +41,19 @@ it("preserves saved choices over newly introduced defaults", async () => {
   expect(result.bindings).toEqual({ ...older, nextTerminal: null });
   expect(result.notice).toContain("Next terminal tab was left unassigned");
   expect(bindingError(result.bindings)).toBeNull();
+});
+it("keeps a saved J from before the Floor Manager, which then goes without", async () => {
+  const { readBindings, DEFAULT_BINDINGS, bindingError } = await import("./shortcuts");
+  const older: Partial<typeof DEFAULT_BINDINGS> = { ...DEFAULT_BINDINGS, toggleRight: "j" };
+  delete older.floorManager;
+  const result = readBindings(JSON.stringify(older));
+  expect(result.bindings.toggleRight).toBe("j");
+  expect(result.bindings.floorManager).toBeNull();
+  expect(result.notice).toContain("Floor Manager was left unassigned");
+  expect(bindingError(result.bindings)).toBeNull();
+  // Without the clash it gets its own.
+  delete older.toggleRight;
+  expect(readBindings(JSON.stringify(older)).bindings.floorManager).toBe("j");
 });
 it("recovers bad entries individually and keeps unrelated customisations", async () => {
   const { readBindings, bindingError } = await import("./shortcuts");

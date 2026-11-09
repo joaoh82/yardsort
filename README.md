@@ -127,6 +127,12 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   label and assign it from the same view. `ys task` does all of it from a terminal, so an agent
   can tell you what is open and file an issue when you ask. Everything goes through `gh`.
   [More below](#your-issues-where-the-agents-are).
+- **One agent that sees everything.** The [Floor Manager](docs/guide/floor-manager.md), in the
+  bottom bar's corner or **Mod+J**, is an agent you pick that has every project in view through
+  `ys`. Ask what is running, which pull requests nobody has reviewed or which need attention, or
+  to start a task. It suggests a workflow, opens workspaces on other people's pull requests and
+  starts reviewers on them, each only after you say yes. It never deletes, merges or closes
+  anything.
 - **Start from a repository or a link.** **Clone a repository** lists the repositories your `gh`
   account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from
   GitHub, GitLab, Bitbucket, Gitea, Forgejo or a host of your own. **Start from a link…** takes
@@ -173,7 +179,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   up with, `ys workspace handoff` prints the next agent's first message, `ys workspace fork`
   starts the next feature on a new branch from a workspace's, `ys workspace context` prints what
   its other agents were asked and answered, `ys workflow run` queues a workflow for the open app to
-  carry out, and `ys test run` a smoke test. `ys workspace delete` removes one when the work is
+  carry out, `ys test run` a smoke test, and `ys pr list` lists every project's open pull
+  requests with what needs attention. `ys workspace delete` removes one when the work is
   done, keeping the branch. Every command takes `--json`.
 - **Remote, still under development.** Reach this computer's workspaces and terminals from your
   phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you

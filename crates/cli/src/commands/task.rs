@@ -492,7 +492,7 @@ const LOGGED_OUT: &str = "Nobody is logged in to the GitHub CLI. Run `gh auth lo
 
 /// The project a command is about: `--project` when given; otherwise the one the agent
 /// running it was launched in, or the folder it is run in.
-fn project_of(ys: &Yardsort, wanted: Option<&str>) -> Result<ProjectRow, Failure> {
+pub(super) fn project_of(ys: &Yardsort, wanted: Option<&str>) -> Result<ProjectRow, Failure> {
     let (id, _) = super::memory::locate(ys, wanted)?;
     ys.store
         .project(&id)?
