@@ -134,7 +134,7 @@ impl Hands for ScriptHands {
         None
     }
 
-    fn pr_posts(&self, _workspace_id: &str, _number: u32) -> PrAsk {
+    fn pr_posts(&self, _workspace_id: &str, _pr: &crate::workflow::runs::PrFacts) -> PrAsk {
         Box::new(|| Ok(Vec::new()))
     }
 }
@@ -216,6 +216,7 @@ impl Fixture {
                 origin_record: None,
                 depth: 0,
                 event: None,
+                tracked: None,
             },
             &crate::workflow::runs::Accepting::default(),
         )
@@ -605,6 +606,7 @@ fn a_run_asked_for_on_behalf_of_one_agent_tells_that_one_and_not_the_newest() {
             origin_record: Some("record-older"),
             depth: 1,
             event: Some(&event),
+            tracked: None,
         },
         &crate::workflow::runs::Accepting::default(),
     )

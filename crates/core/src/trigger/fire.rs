@@ -580,6 +580,7 @@ fn decide(
                     origin_record: trigger.session_id.as_deref(),
                     depth: fire.depth,
                     event: Some(&facts),
+                    tracked: None,
                 },
                 look,
             );

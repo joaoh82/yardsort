@@ -874,15 +874,20 @@ impl Gh {
     /// The reviews and comments on pull request `number`, oldest first.
     /// `limit` is how long `gh` may take; after that it is stopped and this is an error.
     pub fn pr_posts(&self, root: &Path, number: u32, limit: Duration) -> ForgeResult<Vec<PrPost>> {
+        self.pr_posts_of(root, &number.to_string(), limit)
+    }
+
+    /// [`Gh::pr_posts`] of the pull request `selector` names: a number in the repository `cwd`
+    /// is in, or a link to one in any repository.
+    pub fn pr_posts_of(
+        &self,
+        cwd: &Path,
+        selector: &str,
+        limit: Duration,
+    ) -> ForgeResult<Vec<PrPost>> {
         let out = self.run_within(
-            root,
-            &[
-                "pr",
-                "view",
-                &number.to_string(),
-                "--json",
-                "url,reviews,comments",
-            ],
+            cwd,
+            &["pr", "view", selector, "--json", "url,reviews,comments"],
             limit,
         )?;
         pr_posts(&out)
@@ -1800,6 +1805,8 @@ mod tests {
             .line_comments_in(dir.path(), &repo, 7)
             .unwrap()
             .is_empty());
+        // What a workflow waiting on its review asks; the stand-in's answer is not the point.
+        let _ = gh.pr_posts_of(dir.path(), url, Duration::from_secs(10));
         let asked = std::fs::read_to_string(&asked).unwrap();
         assert_eq!(
             asked.lines().collect::<Vec<_>>(),
@@ -1810,6 +1817,7 @@ mod tests {
                 format!("pr comment {url} --body-file -"),
                 "api --hostname github.example.com --paginate --slurp repos/o/lib/pulls/7/comments"
                     .to_owned(),
+                format!("pr view {url} --json url,reviews,comments"),
             ]
         );
         assert_eq!(std::fs::read_to_string(&body).unwrap(), "Looks right.");

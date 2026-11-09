@@ -62,6 +62,15 @@ impl Fixture {
     }
 
     fn queue(&self, workflow: &str, inputs: &[(&str, &str)]) -> IpcResult<String> {
+        self.queue_on(workflow, inputs, None)
+    }
+
+    fn queue_on(
+        &self,
+        workflow: &str,
+        inputs: &[(&str, &str)],
+        tracked: Option<&PrFacts>,
+    ) -> IpcResult<String> {
         let inputs: BTreeMap<String, String> = inputs
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
@@ -78,6 +87,7 @@ impl Fixture {
                 origin_record: None,
                 depth: 0,
                 event: None,
+                tracked,
             },
             &self.look,
         )
@@ -238,11 +248,80 @@ fn a_workflow_that_uses_the_pull_request_needs_one_open_and_keeps_it() {
             number: 7,
             url: "https://github.com/o/r/pull/7".into(),
             title: "Fix the login".into(),
+            elsewhere: None,
         })
     );
     let var = |path: &str| facts.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
     assert_eq!(var("pr.number").as_deref(), Some("7"));
     assert_eq!(var("pr.title").as_deref(), Some("Fix the login"));
+}
+
+/// A pull request the workspace tracks in another repository: its run is about that one, read
+/// by the caller, and the workspace's own is not asked for.
+#[test]
+fn a_tracked_pull_requests_review_is_about_that_one_and_only_that_one() {
+    let fx = Fixture::new();
+    let elsewhere = PrFacts {
+        number: 7,
+        url: "https://github.com/o/lib/pull/7".into(),
+        title: "Bump the client".into(),
+        elsewhere: Some(Elsewhere {
+            repo: "o/lib".into(),
+            clone: Some("/code/app/lib".into()),
+        }),
+    };
+    let id = fx
+        .queue_on(
+            "code-review-elsewhere",
+            &[("reviewer", "claude")],
+            Some(&elsewhere),
+        )
+        .unwrap();
+    assert_eq!(
+        fx.look.asked.get(),
+        0,
+        "the workspace's own is not looked for"
+    );
+    let facts = Facts::parse(&fx.store.workflow_run(&id).unwrap().unwrap().context);
+    assert_eq!(facts.pr.as_ref(), Some(&elsewhere));
+    let var = |path: &str| facts.var(&path.split('.').map(str::to_owned).collect::<Vec<_>>());
+    assert_eq!(var("pr.repo").as_deref(), Some("o/lib"));
+    assert_eq!(var("pr.clone").as_deref(), Some("/code/app/lib"));
+    assert_eq!(
+        facts.pr.as_ref().unwrap().selector(),
+        "https://github.com/o/lib/pull/7",
+        "asked about by its link"
+    );
+
+    // Without one, it is not started; and one is not given to a workflow about the workspace's.
+    let missing = fx
+        .queue("code-review-elsewhere", &[("reviewer", "claude")])
+        .unwrap_err();
+    assert_eq!(missing.code, "pull_request_missing");
+    assert!(
+        missing.message.contains("Pull requests view"),
+        "{}",
+        missing.message
+    );
+    let wrong = fx
+        .queue_on("code-review", &[("reviewer", "claude")], Some(&elsewhere))
+        .unwrap_err();
+    assert_eq!(wrong.code, "workflow_not_for_tracked");
+
+    // The workspace's own is asked about by its number, as before.
+    let own = PrFacts {
+        elsewhere: None,
+        ..elsewhere
+    };
+    assert_eq!(own.selector(), "7");
+    assert_eq!(
+        Facts {
+            pr: Some(own),
+            ..Facts::default()
+        }
+        .var(&["pr".into(), "repo".into()]),
+        None
+    );
 }
 
 #[test]

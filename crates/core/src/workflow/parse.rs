@@ -25,7 +25,7 @@ const FIELDS: &[(&str, &[&str])] = &[
         "workspace",
         &["name", "branch", "base_branch", "path", "task"],
     ),
-    ("pr", &["number", "url", "title"]),
+    ("pr", &["number", "url", "title", "repo", "clone"]),
     // What the event that started the run left. Empty when a person started it.
     (
         "event",
@@ -294,20 +294,24 @@ impl Checker<'_> {
                 ),
             );
         }
-        if let Some(context) = &raw.context {
-            if context.value != "workspace" {
+        let context = match raw.context.as_ref().map(|c| c.value.as_str()) {
+            None | Some("workspace") => RunContext::Workspace,
+            Some("tracked_pull_request") => RunContext::TrackedPullRequest,
+            Some(other) => {
+                let context = raw.context.as_ref().expect("matched above");
                 self.problem(
                     &context.referenced,
                     format!(
-                        "`{}` is not a context this Yardsort has. Only `workspace` for now.",
-                        context.value
+                        "`{other}` is not a context this Yardsort has: `workspace`, or \
+                         `tracked_pull_request`."
                     ),
                 );
+                RunContext::Workspace
             }
-        }
+        };
         Trigger {
             kind: TriggerKind::Manual,
-            context: RunContext::Workspace,
+            context,
         }
     }
 

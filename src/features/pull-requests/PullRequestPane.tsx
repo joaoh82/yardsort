@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
+import { RunWorkflowDialog } from "@/features/workflows/RunWorkflowDialog";
 import { selectWorkspace } from "@/features/keyboard/commands";
 import { errorMessage, type MergeMethod } from "@/lib/ipc";
 import { untrackPullRequest } from "@/stores/publish";
@@ -161,6 +162,7 @@ function Actions({ row }: { row: Row }) {
   const store = usePullRequestsStore.getState();
   const [untracking, setUntracking] = useState(false);
   const [untrackError, setUntrackError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   // Last on the line, for any pull request, wherever it is.
   const links = (
     <>
@@ -220,7 +222,25 @@ function Actions({ row }: { row: Row }) {
           Stop tracking
         </button>
         <Lifecycle target={target} />
+        {workspace && pr.state === "open" && (
+          <button
+            type="button"
+            title="A second agent reviews it, in the project's clone of its repository, and posts the review on GitHub"
+            onClick={() => setReviewing(true)}
+            className={button}
+          >
+            Request code review…
+          </button>
+        )}
         {links}
+        {reviewing && workspace && (
+          <RunWorkflowDialog
+            workflowId="code-review-elsewhere"
+            workspace={workspace}
+            tracked={tracked}
+            onClose={() => setReviewing(false)}
+          />
+        )}
         {untrackError && (
           <p role="alert" className="w-full text-red-400 select-text">
             {untrackError}

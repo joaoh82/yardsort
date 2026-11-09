@@ -492,7 +492,7 @@ fn every_variable_names_something_that_exists() {
         ("{{ workspace.brnch }}", "`workspace` has no `brnch`"),
         (
             "{{ pr }}",
-            "`{{ pr }}` needs a field: `pr.number`, `pr.url`, `pr.title`.",
+            "`{{ pr }}` needs a field: `pr.number`, `pr.url`, `pr.title`, `pr.repo`, `pr.clone`.",
         ),
         ("{{ memory.entries }}", "`memory` is used whole"),
         (
@@ -682,6 +682,7 @@ fn a_users_files_are_listed_beside_the_built_ins_by_name() {
             "Another",
             "Fix failing checks",
             "Request code review",
+            "Request code review elsewhere",
             "Review the branch",
             "Smoke test, then tell the agent"
         ]

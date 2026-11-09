@@ -466,6 +466,7 @@ mod tests {
                 origin_record: None,
                 depth: facts.depth,
                 event: None,
+                tracked: None,
             },
             &crate::workflow::runs::Accepting::default(),
         )

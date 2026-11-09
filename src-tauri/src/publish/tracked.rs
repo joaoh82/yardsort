@@ -594,6 +594,59 @@ pub async fn tracked_pull_request_line_comments(
     .await
 }
 
+/// A tracked pull request as a workflow run is about it (`code-review-elsewhere`): read now by
+/// its link, open, and with the project's nested clone of its repository, which the reviewer
+/// runs the checks in — a review without one would not be one. With it, the conversation that
+/// opened it, which `session: origin` is told about the review.
+pub(crate) fn for_a_run(
+    state: &AppState,
+    workspace_id: &str,
+    id: &str,
+) -> IpcResult<(yardsort_core::workflow::runs::PrFacts, Option<String>)> {
+    let (_, _, row, pr) = fresh(state, workspace_id, id)?;
+    if pr.state != PullRequestState::Open {
+        return Err(IpcError::new(
+            "pull_request_missing",
+            format!("{} is not open.", name_of(&row)),
+        ));
+    }
+    let git = Git::new(&state.env())?;
+    let clone = clone_for(state, &git, workspace_id, &row).map_err(|_| {
+        IpcError::new(
+            "no_clone",
+            format!(
+                "This project's folder holds no clone of {} for a reviewer to run its checks in. \
+                 Clone it there first.",
+                repo_name(&row)
+            ),
+        )
+    })?;
+    Ok((
+        yardsort_core::workflow::runs::PrFacts {
+            number: pr.number,
+            url: pr.url,
+            title: pr.title,
+            elsewhere: Some(yardsort_core::workflow::runs::Elsewhere {
+                repo: repo_name(&row),
+                clone: Some(clone.to_string_lossy().into_owned()),
+            }),
+        },
+        row.session_id,
+    ))
+}
+
+/// `owner/name` of a tracked row's repository.
+fn repo_name(row: &TrackedPullRequestRow) -> String {
+    crate::tracked::repo_from_key(&row.repo)
+        .map(|repo| format!("{}/{}", repo.owner, repo.name))
+        .unwrap_or_else(|| row.repo.clone())
+}
+
+/// `owner/name#7`.
+fn name_of(row: &TrackedPullRequestRow) -> String {
+    format!("{}#{}", repo_name(row), row.number)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

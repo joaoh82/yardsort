@@ -1224,7 +1224,12 @@ requests that no project's list has.
 - [x] Slice 4: merge, close, reopen and the reply box by link — in the Pull requests view, and
       the merges in the session toolbar — and **Code** from the nested clone, with its line
       comments. Recorded in [38 § slice 4](38-pull-requests-elsewhere.md#slice-4-what-shipped).
-- [ ] Slice 5: _Request code review_ on a tracked pull request, in the nested clone.
+- [x] Slice 5: **Request code review…** on a tracked pull request: the built-in
+      `code-review-elsewhere`, a `tracked_pull_request` run context with `pr.repo` and
+      `pr.clone`, the checks run in a worktree of the nested clone, the review waited on by link
+      and told to the agent that opened it. Recorded in
+      [38 § slice 5](38-pull-requests-elsewhere.md#slice-5-what-shipped).
+- [ ] The hands-on pass: a real agent in a real parent project, on Linux, macOS and Windows.
 
 _Exit:_ on all three platforms, an agent in a parent project's workspace opens a pull request in a
 nested clone and it appears on the workspace's row with its checks without anyone typing its

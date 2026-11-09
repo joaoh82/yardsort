@@ -129,15 +129,15 @@ branch, in the first built-in.
 
 ### Schema
 
-| Key           | Rule                                                                                                                                                                     |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`          | `[a-z0-9-]+`, unique across built-ins and user files; the file name should match                                                                                         |
-| `name`        | Required, shown in the sidebar                                                                                                                                           |
-| `description` | Optional, shown under the name                                                                                                                                           |
-| `version`     | The schema version, `1`. A file with a higher version than the app knows is listed, not runnable                                                                         |
-| `trigger`     | `kind: manual` only in v1; `context: workspace`, the default and the only value in v1, says what the run is about and which variables exist                              |
-| `inputs[]`    | `id`, `kind` (`harness`, `text`, `choice` with `options`), `label`, `required` (default `false`), `default`. Collected before the run starts, in the app or as `--input` |
-| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. A step id is `[a-z0-9_-]+`                                                                               |
+| Key           | Rule                                                                                                                                                                                                                                                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`          | `[a-z0-9-]+`, unique across built-ins and user files; the file name should match                                                                                                                                                                                                                                       |
+| `name`        | Required, shown in the sidebar                                                                                                                                                                                                                                                                                         |
+| `description` | Optional, shown under the name                                                                                                                                                                                                                                                                                         |
+| `version`     | The schema version, `1`. A file with a higher version than the app knows is listed, not runnable                                                                                                                                                                                                                       |
+| `trigger`     | `kind: manual` only in v1; `context: workspace`, the default, says what the run is about and which variables exist. `context: tracked_pull_request` (since [38 § slice 5](38-pull-requests-elsewhere.md#slice-5-what-shipped)) is a run about a pull request a workspace tracks in another repository, started from it |
+| `inputs[]`    | `id`, `kind` (`harness`, `text`, `choice` with `options`), `label`, `required` (default `false`), `default`. Collected before the run starts, in the app or as `--input`                                                                                                                                               |
+| `steps[]`     | `id`, `action`, `needs` (step ids), then the action's own keys. A step id is `[a-z0-9_-]+`                                                                                                                                                                                                                             |
 
 ### Actions in v1
 
@@ -160,15 +160,15 @@ is ignored. A `{{` that is not a known variable is a validation error, so a typo
 agent as literal text. `\{{` writes a literal `{{`. Names are checked when the file is loaded,
 against the namespaces the trigger's `context` allows:
 
-| Namespace   | Fields                                                                                                          | Available            |
-| ----------- | --------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `project`   | `name`, `root`                                                                                                  | always               |
-| `workspace` | `name`, `branch`, `base_branch`, `path`, `task` (its first message, as outcomes record it)                      | `context: workspace` |
-| `pr`        | `number`, `url`, `title` — the open pull request whose head is the workspace's branch; a run needs one to start | `context: workspace` |
-| `inputs`    | One field per declared input, by `id`. An optional input with no value renders empty                            | always               |
-| `steps`     | `<step id>.<produced field>`; only steps named in `needs`, transitively                                         | always               |
-| `memory`    | The project's approved memory, rendered as the launcher renders it, or empty when the project does not share it | always               |
-| `handoff`   | The workspace's handoff packet, as `ys workspace handoff` prints it                                             | `context: workspace` |
+| Namespace   | Fields                                                                                                                                                                                                                                  | Available                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `project`   | `name`, `root`                                                                                                                                                                                                                          | always                                       |
+| `workspace` | `name`, `branch`, `base_branch`, `path`, `task` (its first message, as outcomes record it)                                                                                                                                              | `context: workspace`                         |
+| `pr`        | `number`, `url`, `title` — the open pull request whose head is the workspace's branch; a run needs one to start. For `tracked_pull_request`, the tracked one, with `repo` (`owner/name`) and `clone` (the project's nested clone of it) | `context: workspace`, `tracked_pull_request` |
+| `inputs`    | One field per declared input, by `id`. An optional input with no value renders empty                                                                                                                                                    | always                                       |
+| `steps`     | `<step id>.<produced field>`; only steps named in `needs`, transitively                                                                                                                                                                 | always                                       |
+| `memory`    | The project's approved memory, rendered as the launcher renders it, or empty when the project does not share it                                                                                                                         | always                                       |
+| `handoff`   | The workspace's handoff packet, as `ys workspace handoff` prints it                                                                                                                                                                     | `context: workspace`                         |
 
 A step's `session` is not a variable but a reference: `origin`, the workspace's most recent live
 harness session, or exactly `{{ steps.<id>.session }}` for an earlier `start_session` step among

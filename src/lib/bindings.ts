@@ -550,13 +550,13 @@ export const commands = {
 	/**  Delete one of the user's workflow files. The window asks first. */
 	workflowRemove: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("workflow_remove", { path })),
 	/**  Runs, newest first: of one workflow, or of all. */
-	workflowRuns: (workflowId: string | null, limit: number) => typedError<WorkflowRun[], IpcError>(__TAURI_INVOKE("workflow_runs", { workflowId, limit })),
+	workflowRuns: (workflowId: string | null, limit: number) => typedError<WorkflowRun_Serialize[], IpcError>(__TAURI_INVOKE("workflow_runs", { workflowId, limit })),
 	/**  A run's steps, in file order. */
 	workflowRunSteps: (runId: string) => typedError<WorkflowStepRun[], IpcError>(__TAURI_INVOKE("workflow_run_steps", { runId })),
 	/**  What a run of `workflowId` in `workspaceId` would find, for the Run dialog to show. */
-	workflowPreview: (workflowId: string, workspaceId: string) => typedError<RunPreview, IpcError>(__TAURI_INVOKE("workflow_preview", { workflowId, workspaceId })),
+	workflowPreview: (workflowId: string, workspaceId: string, trackedId: string | null) => typedError<RunPreview_Serialize, IpcError>(__TAURI_INVOKE("workflow_preview", { workflowId, workspaceId, trackedId })),
 	/**  Start a run. The same checks as `ys workflow run`; the driver picks it up at once. */
-	workflowStart: (workflowId: string, workspaceId: string, inputs: { [key in string]: string }) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_start", { workflowId, workspaceId, inputs })),
+	workflowStart: (workflowId: string, workspaceId: string, inputs: { [key in string]: string }, trackedId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("workflow_start", { workflowId, workspaceId, inputs, trackedId })),
 	/**  Cancel a run. Agents it started keep running. */
 	workflowCancel: (runId: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workflow_cancel", { runId })),
 	/**
@@ -1190,6 +1190,14 @@ export type DraftStatus = {
 export type DraftedPullRequest = {
 	title: string,
 	body: string,
+};
+
+/**  Where a tracked pull request is: its repository, and the project's nested clone of it. */
+export type Elsewhere = {
+	/**  `owner/name`. */
+	repo: string,
+	/**  The nested clone of it in the project's checkout, when there is one. */
+	clone: string | null,
 };
 
 /**  One workflow as the catalog lists it: runnable, or not, and why. */
@@ -1988,10 +1996,22 @@ export type PlaceUsage = {
 
 export type PrActivity = "review" | "comment" | "any";
 
-export type PrFacts = {
+export type PrFacts = PrFacts_Serialize | PrFacts_Deserialize;
+
+export type PrFacts_Deserialize = {
 	number: number,
 	url: string,
 	title: string,
+	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
+	elsewhere?: Elsewhere | null,
+};
+
+export type PrFacts_Serialize = {
+	number: number,
+	url: string,
+	title: string,
+	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
+	elsewhere?: Elsewhere | null,
 };
 
 export type Preflight = {
@@ -2632,8 +2652,13 @@ export type ReviewState = "approved" | "changesRequested" | "commented" | "dismi
 /**  What a review concluded. */
 export type ReviewStateFilter = "approved" | "changes_requested" | "commented";
 
-/**  What a run is about. A workspace run knows the workspace, its branch and its pull request. */
-export type RunContext = "workspace";
+/**
+ *  What a run is about. A workspace run knows the workspace, its branch and its pull request.
+ *  A tracked pull request's run is about one the workspace follows in another repository
+ *  (docs/design/38-pull-requests-elsewhere.md): `pr.*` is that one, and the run is started from
+ *  it, never from the workspace's own list of workflows.
+ */
+export type RunContext = "workspace" | "tracked_pull_request";
 
 /**  One of the workspace's agent runs and how it was asked to report, or `None` if it was not. */
 export type RunCoverage = {
@@ -2647,11 +2672,28 @@ export type RunCoverage = {
 };
 
 /**  What the Run dialog shows before starting: what the run would find. */
-export type RunPreview = {
+export type RunPreview = RunPreview_Serialize | RunPreview_Deserialize;
+
+/**  What the Run dialog shows before starting: what the run would find. */
+export type RunPreview_Deserialize = {
 	/**  The workflow works with the workspace's pull request. */
 	needsPullRequest: boolean,
 	/**  Found: the workspace's open pull request. */
-	pullRequest: PrFacts | null,
+	pullRequest: PrFacts_Deserialize | null,
+	/**  Why there is none to use, when one is needed. */
+	pullRequestProblem: string | null,
+	/**  The workflow talks to the workspace's own agent. */
+	needsOrigin: boolean,
+	/**  Variables the run will render as nothing, and why. A run still goes ahead. */
+	empty: string[],
+};
+
+/**  What the Run dialog shows before starting: what the run would find. */
+export type RunPreview_Serialize = {
+	/**  The workflow works with the workspace's pull request. */
+	needsPullRequest: boolean,
+	/**  Found: the workspace's open pull request. */
+	pullRequest: PrFacts_Serialize | null,
 	/**  Why there is none to use, when one is needed. */
 	pullRequestProblem: string | null,
 	/**  The workflow talks to the workspace's own agent. */
@@ -3693,7 +3735,10 @@ export type WorkflowItem = {
 } & Entry;
 
 /**  One run, as the view lists it. */
-export type WorkflowRun = {
+export type WorkflowRun = WorkflowRun_Serialize | WorkflowRun_Deserialize;
+
+/**  One run, as the view lists it. */
+export type WorkflowRun_Deserialize = {
 	id: string,
 	workflowId: string,
 	workflowName: string,
@@ -3705,7 +3750,26 @@ export type WorkflowRun = {
 	requestedBy: string,
 	error: string | null,
 	inputs: { [key in string]: string },
-	pullRequest: PrFacts | null,
+	pullRequest: PrFacts_Deserialize | null,
+	createdAt: number | null,
+	startedAt: number | null,
+	endedAt: number | null,
+};
+
+/**  One run, as the view lists it. */
+export type WorkflowRun_Serialize = {
+	id: string,
+	workflowId: string,
+	workflowName: string,
+	workspaceId: string | null,
+	workspaceName: string,
+	/**  `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
+	status: string,
+	/**  `app` or `cli`. */
+	requestedBy: string,
+	error: string | null,
+	inputs: { [key in string]: string },
+	pullRequest: PrFacts_Serialize | null,
 	createdAt: number | null,
 	startedAt: number | null,
 	endedAt: number | null,

@@ -64,10 +64,14 @@ pub enum TriggerKind {
 }
 
 /// What a run is about. A workspace run knows the workspace, its branch and its pull request.
+/// A tracked pull request's run is about one the workspace follows in another repository
+/// (docs/design/38-pull-requests-elsewhere.md): `pr.*` is that one, and the run is started from
+/// it, never from the workspace's own list of workflows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum RunContext {
     Workspace,
+    TrackedPullRequest,
 }
 
 /// Something asked of the person starting a run, before it starts.
@@ -250,6 +254,10 @@ impl Entry {
 /// The workflows that ship with Yardsort, as text.
 pub const BUILT_IN: &[(&str, &str)] = &[
     ("code-review", include_str!("builtin/code-review.yaml")),
+    (
+        "code-review-elsewhere",
+        include_str!("builtin/code-review-elsewhere.yaml"),
+    ),
     (
         "smoke-then-tell",
         include_str!("builtin/smoke-then-tell.yaml"),

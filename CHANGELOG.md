@@ -23,7 +23,9 @@ has the downloads and the full commit lists.
   `lib#7`, in its toolbar's menu, and in the Pull requests view with its Summary — checks,
   reviewers and conversation — read by its link. It can be merged, closed, reopened and replied to from Yardsort, by its link, each
   confirmation naming its repository, and its **Code** is read in the project's nested clone of
-  that repository. **Stop tracking** takes it off again. See
+  that repository. **Request code review…** has a second agent review it, running its checks in
+  a worktree of that clone, and tells the agent that opened it when the review is on GitHub.
+  **Stop tracking** takes it off again. See
   [Commits & pull requests](docs/guide/commits-and-pull-requests.md#pull-requests-in-other-repositories).
 - **Reach another computer from the desktop app, read-only for now.** Under **Settings → Remote →
   Other computers**, sign this computer in as a client, a device of its own apart from it being a

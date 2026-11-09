@@ -43,11 +43,12 @@ pub trait Hands {
     fn notify(&self, title: &str, body: Option<&str>) -> Result<(), String>;
     /// The workspace's handoff packet, as `ys workspace handoff` prints it.
     fn handoff(&self, workspace_id: &str) -> Option<String>;
-    /// A job that asks the forge for the reviews and comments on the workspace's pull request
-    /// `number`. Called on the driver's thread, so it must return at once: the job it returns is
-    /// what does the asking, on a thread of its own, and must give up by itself — the app's
-    /// stops `gh` after [`FORGE_LIMIT`].
-    fn pr_posts(&self, workspace_id: &str, number: u32) -> PrAsk;
+    /// A job that asks the forge for the reviews and comments on the run's pull request `pr`:
+    /// the workspace's own by its number, or one it tracks elsewhere by its link
+    /// ([`super::runs::PrFacts::selector`]). Called on the driver's thread, so it must return at
+    /// once: the job it returns is what does the asking, on a thread of its own, and must give
+    /// up by itself — the app's stops `gh` after [`FORGE_LIMIT`].
+    fn pr_posts(&self, workspace_id: &str, pr: &super::runs::PrFacts) -> PrAsk;
 }
 
 /// Asking the forge, as a job for a thread of its own.
@@ -591,9 +592,9 @@ impl World for Seen<'_> {
     }
 
     fn pr_activity(&self, kind: PrActivity) -> Option<PrSeen> {
-        let number = self.facts.pr.as_ref()?.number;
+        let pr = self.facts.pr.as_ref()?;
         let posts = self.driver.pr_posts(self.run_id, || {
-            self.hands.pr_posts(&self.place.workspace.id, number)
+            self.hands.pr_posts(&self.place.workspace.id, pr)
         })?;
         // The forge keeps whole seconds; a post in the second the run started counts.
         let since = self.started_at - self.started_at.rem_euclid(1000);

@@ -338,10 +338,11 @@ From the design pass in [38-pull-requests-elsewhere](38-pull-requests-elsewhere.
     to it today, and tracking would tie it. Slice 1 refuses it: the project's list already has
     it, and tracking it would list it twice. Lean: allow it once the view can show one row for
     both.
-57. **Should the launch section reach an agent started from the tab bar?** Like the smoke-test
-    pointer it goes only with a first message, so an agent started with none hears of
-    `ys pr track` only if it reads the project's instructions. The adapters (slices 2–3) make
-    the question smaller. Lean: leave it until they are built.
+57. ~~**Should the launch section reach an agent started from the tab bar?**~~ **Settled
+    2026-11-09: no, left as it is.** Like the smoke-test pointer it goes only with a first
+    message. Since slices 2–3 every built-in agent's adapter sees a pull request being opened
+    with its reporting on, so an agent started with no first message is covered that way, and
+    `ys pr track` stays in reach through the project's instructions for the rest.
 
 ## Smoke tests
 

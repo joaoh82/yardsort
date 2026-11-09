@@ -78,6 +78,30 @@ pub struct PrFacts {
     pub number: u32,
     pub url: String,
     pub title: String,
+    /// Set when it is one the workspace tracks in another repository: asked about by its link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elsewhere: Option<Elsewhere>,
+}
+
+/// Where a tracked pull request is: its repository, and the project's nested clone of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Elsewhere {
+    /// `owner/name`.
+    pub repo: String,
+    /// The nested clone of it in the project's checkout, when there is one.
+    pub clone: Option<String>,
+}
+
+impl PrFacts {
+    /// What `gh pr …` is given to name it: its number in the workspace's repository, or the
+    /// link to one elsewhere, which needs no repository around it.
+    pub fn selector(&self) -> String {
+        match &self.elsewhere {
+            Some(_) => self.url.clone(),
+            None => self.number.to_string(),
+        }
+    }
 }
 
 impl Facts {
@@ -102,6 +126,8 @@ impl Facts {
                 "number" => Some(pr.number.to_string()),
                 "url" => Some(pr.url.clone()),
                 "title" => Some(pr.title.clone()),
+                "repo" => pr.elsewhere.as_ref().map(|e| e.repo.clone()),
+                "clone" => pr.elsewhere.as_ref().and_then(|e| e.clone.clone()),
                 _ => None,
             },
             _ => None,
@@ -126,6 +152,9 @@ pub struct Request<'a> {
     pub depth: i64,
     /// What the event that asked for it left. See [`Facts::event`].
     pub event: Option<&'a BTreeMap<String, String>>,
+    /// The pull request a `tracked_pull_request` workflow is about, as the caller read it by its
+    /// link: one the workspace follows in another repository. `None` for every other run.
+    pub tracked: Option<&'a PrFacts>,
 }
 
 /// Queue a run and return its id.
@@ -182,7 +211,31 @@ pub fn queue(
         event: request.event.cloned().unwrap_or_default(),
         ..Facts::default()
     };
-    if needs_pull_request(workflow) {
+    let elsewhere = workflow.trigger.context == super::RunContext::TrackedPullRequest;
+    match (elsewhere, request.tracked) {
+        (true, Some(tracked)) => facts.pr = Some(tracked.clone()),
+        (true, None) => {
+            return Err(IpcError::new(
+                "pull_request_missing",
+                format!(
+                    "`{}` is about a pull request a workspace tracks in another repository. Start \
+                     it from that pull request, in the Pull requests view.",
+                    workflow.id
+                ),
+            ))
+        }
+        (false, Some(_)) => {
+            return Err(IpcError::new(
+                "workflow_not_for_tracked",
+                format!(
+                    "`{}` is about the workspace's own pull request, not one it tracks elsewhere.",
+                    workflow.id
+                ),
+            ))
+        }
+        (false, None) => {}
+    }
+    if needs_pull_request(workflow) && !elsewhere {
         let found = look
             .pull_request(&workspace)
             .map_err(|why| IpcError::new("pull_request_unknown", why))?;
@@ -202,6 +255,7 @@ pub fn queue(
             number: pr.number,
             url: pr.url,
             title: pr.title,
+            elsewhere: None,
         });
     }
 

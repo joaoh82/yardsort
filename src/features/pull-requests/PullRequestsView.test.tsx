@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectPullRequests } from "@/lib/ipc";
 import {
+  harness,
   project,
   pullRequest,
   pullRequestsOf,
@@ -23,6 +24,9 @@ const core = vi.hoisted(() => ({
   trackedPullRequestChanges: vi.fn(),
   trackedPullRequestLineComments: vi.fn(),
   pullRequestLineComment: vi.fn(),
+  workflowPreview: vi.fn(),
+  workflowList: vi.fn(),
+  harnessList: vi.fn(),
   workspaceUntrackPullRequest: vi.fn(),
   pullRequestChanges: vi.fn(),
   pullRequestMerge: vi.fn(),
@@ -49,6 +53,8 @@ import { usePublishStore } from "@/stores/publish";
 import { usePullRequestsStore } from "@/stores/pullRequests";
 import { useSessionsStore } from "@/stores/sessions";
 import { useTerminalStore } from "@/stores/terminals";
+import { useHarnessStore } from "@/stores/harnesses";
+import { useWorkflowStore } from "@/stores/workflows";
 import { FILTERS_KEY } from "./filters";
 import { PullRequestsView } from "./PullRequestsView";
 
@@ -772,6 +778,55 @@ describe("a pull request a workspace tracks in another repository", () => {
     expect(core.trackedPullRequestChanges).toHaveBeenCalledWith(feature.id, "t-7");
     expect(core.trackedPullRequestLineComments).toHaveBeenCalledWith(feature.id, "t-7");
     expect(core.pullRequestChanges).not.toHaveBeenCalled();
+  });
+
+  it("can have its code reviewed, from the project's clone of its repository", async () => {
+    useWorkflowStore.setState({
+      loaded: true,
+      items: [
+        {
+          id: "code-review-elsewhere",
+          name: "Request code review elsewhere",
+          description: null,
+          source: { kind: "builtIn" },
+          problems: [],
+          text: "",
+          activeRuns: 0,
+          workflow: {
+            id: "code-review-elsewhere",
+            name: "Request code review elsewhere",
+            description: null,
+            version: 1,
+            trigger: { kind: "manual", context: "tracked_pull_request" },
+            inputs: [],
+            steps: [],
+          },
+        },
+      ],
+    });
+    useHarnessStore.setState({ loaded: true, harnesses: [harness("claude")] });
+    core.harnessList.mockResolvedValue([harness("claude")]);
+    core.workflowPreview.mockResolvedValue({
+      needsPullRequest: true,
+      pullRequest: {
+        number: 7,
+        url: elsewhere.url,
+        title: "Bump the client",
+        elsewhere: { repo: "demo/lib", clone: "/code/alpha/lib" },
+      },
+      pullRequestProblem: null,
+      needsOrigin: true,
+      empty: [],
+    });
+    const user = show(withTracked());
+    await user.click(row(/Bump the client/));
+    await user.click(screen.getByRole("button", { name: "Request code review…" }));
+    expect(
+      screen.getByRole("heading", { name: "Run “Request code review elsewhere”" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(core.workflowPreview).toHaveBeenCalledWith("code-review-elsewhere", feature.id, "t-7"),
+    );
   });
 
   it("is never given a comment on lines by its number", async () => {
