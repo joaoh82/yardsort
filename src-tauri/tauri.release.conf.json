@@ -1,4 +1,7 @@
 {
+  "build": {
+    "beforeBundleCommand": "bun scripts/split-debug.mjs"
+  },
   "bundle": {
     "createUpdaterArtifacts": true
   }

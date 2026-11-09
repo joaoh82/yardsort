@@ -281,6 +281,34 @@ branches and worktrees are not touched.
 Yardsort version (status bar, bottom right), the agent and its version, and what you did. If
 the app misbehaves at startup, running it from a terminal shows its log.
 
+### When Yardsort crashes on Linux
+
+The Linux builds keep their symbols, so a crash's backtrace says where in Yardsort it happened.
+On a system that keeps core dumps (systemd's `coredumpctl`, as most do), find the crash and print
+its backtrace:
+
+```sh
+coredumpctl list yardsort        # each crash, with its PID
+coredumpctl info <PID>           # the stack trace of the thread that crashed
+```
+
+Paste that stack trace into the issue; Yardsort's own functions show in it in Rust's mangled form
+(`_RNv…`), which is fine. For readable names, file names and line numbers, download
+`yardsort-<version>-linux-x86_64.debug` from the [release](https://github.com/joaoh82/yardsort/releases)
+of the version that crashed, and give it to gdb with the binary and the core:
+
+```sh
+coredumpctl dump <PID> --output=yardsort.core
+gdb -batch /usr/bin/yardsort yardsort.core \
+  -ex 'symbol-file yardsort-<version>-linux-x86_64.debug' -ex 'thread apply all bt' > backtrace.txt
+```
+
+With an AppImage, the binary lives inside it: take it out first with
+`./Yardsort_<version>_amd64.AppImage --appimage-extract usr/bin/yardsort`, and use
+`squashfs-root/usr/bin/yardsort` in place of `/usr/bin/yardsort`. Attach `backtrace.txt`, never
+the core itself: a core is a copy of the app's memory, and can hold anything it had open. Delete
+`yardsort.core` when you are done.
+
 Please report a security problem privately instead — GitHub's
 [Report a vulnerability](https://github.com/joaoh82/yardsort/security/advisories/new) form, as
 described in [SECURITY.md](../../SECURITY.md).

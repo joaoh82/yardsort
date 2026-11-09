@@ -130,6 +130,14 @@ jobs:
             } >> "$GITHUB_ENV"
           done
 
+      # On Linux the binaries keep their symbol tables, so a crash's backtrace — `coredumpctl
+      # info`, or gdb on the core — names the functions it went through, where a stripped one
+      # shows bare addresses. It costs `ys` 170 KB and the app 0.5 MB, compressed. macOS and
+      # Windows stay as `[profile.release]` has them: stripped. See docs/releasing.md.
+      - name: Keep symbols on Linux
+        if: runner.os == 'Linux'
+        run: echo "CARGO_PROFILE_RELEASE_STRIP=debuginfo" >> "$GITHUB_ENV"
+
       # `ys`, the command-line client. A separate binary because the app's has no console on
       # Windows, and because a CLI has no business carrying a webview. It is built first because
       # every bundle carries it next to the app (`tauri.bundle.conf.json` names it as a sidecar):
@@ -153,6 +161,16 @@ jobs:
             cp src-tauri/binaries/ys-x86_64-unknown-linux-gnu ys
           fi
 
+      # The Linux app is built with line tables too, so a backtrace can name files and lines. In
+      # the binary they would take the .deb from 15 MB to 53, so `scripts/split-debug.mjs` — the
+      # release config's `beforeBundleCommand` — moves them into `yardsort.debug` before anything
+      # is bundled, and they are attached to the release on their own below.
+      - name: Build the Linux app with line tables
+        if: runner.os == 'Linux'
+        run: |
+          echo "CARGO_PROFILE_RELEASE_DEBUG=line-tables-only" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_STRIP=false" >> "$GITHUB_ENV"
+
       # `tauri.release.conf.json` switches on updater artifacts: each self-updating bundle is signed
       # with the update key, and a `latest.json` describing them is attached to the release — that
       # is what installed copies read to find out about this version. See docs/releasing.md.
@@ -168,6 +186,18 @@ jobs:
           args: --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.bundle.conf.json ${{ matrix.args }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      # Matched to the binary by its build ID. How to use it: docs/guide/troubleshooting.md.
+      - name: Attach the Linux app's debug information to the release
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          name="yardsort-${TAG#v}-linux-x86_64.debug"
+          cp target/release/yardsort.debug "$name"
+          gh release upload "$TAG" "$name" --clobber
+          echo "attached $name"
 
       # The macOS archive carries the copy of `ys` from inside the app, not the one built above.
       # Tauri signs it with the bundle, and Apple's notary service issues a ticket for every

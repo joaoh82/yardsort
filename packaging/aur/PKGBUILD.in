@@ -15,7 +15,8 @@ optdepends=('libnotify: desktop notifications when an agent finishes'
             'xdg-desktop-portal: native folder picker on Wayland')
 provides=('yardsort')
 conflicts=('yardsort')
-# The binary is stripped upstream; stripping again gains nothing and debug packages would be empty.
+# The binaries come with their symbols and without debug information (that is a separate release
+# asset), so a crash backtrace names functions. Stripping would lose the symbols for nothing.
 options=('!strip' '!debug')
 source=("yardsort-${pkgver}.deb::https://github.com/joaoh82/yardsort/releases/download/v@VERSION@/Yardsort_@VERSION@_amd64.deb"
         "LICENSE-${pkgver}::https://raw.githubusercontent.com/joaoh82/yardsort/v@VERSION@/LICENSE")
