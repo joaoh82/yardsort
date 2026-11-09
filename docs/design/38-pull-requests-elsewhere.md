@@ -323,9 +323,20 @@ they were: they cover the switch off, and every other agent until slice 3.
   untracked since is not tracked again. Without `git` nothing is tracked and
   `pull_request_seen_no_git` is counted; a link `track` refuses for another reason counts
   `pull_request_seen_refused`.
-- **The window hears of it at once.** The app emits `TrackedPullRequestsChanged` with the
-  projects whose workspaces gained one, and the window asks those projects' pull requests again
-  instead of waiting for the next minute's look.
+- **The window hears of it at once** — when the app drained it. The app emits
+  `TrackedPullRequestsChanged` with the projects whose workspaces gained one, and the window
+  asks those projects' pull requests again instead of waiting for the next minute's look. The
+  tracking runs on a thread of its own, since it runs git and the drain after an exit is on the
+  daemon's event thread. When `ys` drained first — an agent ran a `ys` command right after — the
+  window finds it at its next look, within a minute or on focus.
+- **What `gh pr create` printed ends with its link**, so a command's output gives its _last_
+  pull request link: `cat notes.md; gh pr create` must not track a pull request the notes name.
+  The shell's own words and the common runners in front of `gh` leave it in command position:
+  `if`, `then`, `!`, `nice -n 10`, `xargs`, and `timeout 60`.
+- **Known gaps.** Without `git`, a seen link is counted and dropped, as is one the store would
+  not take: its event is recorded, and is never handed on again. A fork whose parent repository
+  is known only to `gh`'s own configuration, with no remote for it, can have its own pull request
+  tracked as elsewhere.
 
 How it was checked: the adapter against both recordings and against hand-made payloads for a
 version without `gitOperation`, a `gh pr view`, a failed call and a full GitHub answer; the

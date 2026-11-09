@@ -221,21 +221,34 @@ pub fn launch_section(project_root: &Path) -> Option<String> {
 /// branch's "open a pull request" link (`/pull/new/<branch>`) and an API address
 /// (`/repos/…/pulls/7`) are not one.
 pub fn link_in(text: &str) -> Option<String> {
+    links_in(text).next()
+}
+
+/// The last such link: what a command printed ends with the link `gh pr create` printed, after
+/// whatever the commands before it in the same call printed — notes that name other pull
+/// requests, say.
+pub fn last_link_in(text: &str) -> Option<String> {
+    links_in(text).last()
+}
+
+fn links_in(text: &str) -> impl Iterator<Item = String> + '_ {
     let mut rest = text;
-    while let Some(at) = rest.find("http") {
-        let candidate = &rest[at..];
-        let end = candidate
-            .find(|c: char| c.is_whitespace() || "\"'`<>()[]{},\\".contains(c))
-            .unwrap_or(candidate.len());
-        let link = candidate[..end].trim_end_matches(['.', ';', ':', '!', '?']);
-        if link.starts_with("https://") || link.starts_with("http://") {
-            if let Ok(found) = parse(link) {
-                return Some(found.url);
+    std::iter::from_fn(move || {
+        while let Some(at) = rest.find("http") {
+            let candidate = &rest[at..];
+            let end = candidate
+                .find(|c: char| c.is_whitespace() || "\"'`<>()[]{},\\".contains(c))
+                .unwrap_or(candidate.len());
+            rest = &candidate[end.max(4)..];
+            let link = candidate[..end].trim_end_matches(['.', ';', ':', '!', '?']);
+            if link.starts_with("https://") || link.starts_with("http://") {
+                if let Ok(found) = parse(link) {
+                    return Some(found.url);
+                }
             }
         }
-        rest = &candidate[end.max(4)..];
-    }
-    None
+        None
+    })
 }
 
 /// Whether a shell command runs `gh pr create`, as a command of its own anywhere in it: after a
@@ -244,20 +257,45 @@ pub fn link_in(text: &str) -> Option<String> {
 /// neither is text in quotes or in a here-document, whatever separators it holds.
 pub fn runs_pr_create(command: &str) -> bool {
     /// Programs that run the command after them, and so leave it in command position.
-    const WRAPPERS: &[&str] = &["command", "exec", "env", "time", "sudo", "nohup"];
+    const WRAPPERS: &[&str] = &[
+        "command", "exec", "env", "time", "sudo", "nohup", "nice", "timeout", "xargs",
+    ];
+    /// Words of the shell's own that a command follows: `if gh pr create; then …`, `! gh …`.
+    const RESERVED: &[&str] = &["if", "then", "elif", "else", "do", "while", "until", "!"];
     simple_commands(command).iter().any(|part| {
         let mut words = part.iter().map(String::as_str).peekable();
-        let mut wrapped = false;
+        // The wrapper the words now belong to, and whether `timeout` has had its duration.
+        let mut wrapper: Option<&str> = None;
+        let mut timed = false;
         while let Some(&word) = words.peek() {
             let assignment = !word.starts_with('-') && word.contains('=');
-            if assignment || WRAPPERS.contains(&word) || (wrapped && word.starts_with('-')) {
-                wrapped |= WRAPPERS.contains(&word);
-                // `env -u NAME`, `sudo -u user`: the flag's value is not the command.
-                let valued = wrapped && matches!(word, "-u" | "--unset" | "-C" | "--chdir" | "-g");
+            if RESERVED.contains(&word) || assignment {
                 words.next();
+            } else if WRAPPERS.contains(&word) {
+                wrapper = Some(word);
+                timed = false;
+                words.next();
+            } else if let (Some(by), true) = (wrapper, word.starts_with('-')) {
+                words.next();
+                // `env -u NAME`, `sudo -u user`, `nice -n 10`: the flag's value is not the
+                // command.
+                let valued = match by {
+                    "env" => matches!(word, "-u" | "--unset" | "-C" | "--chdir" | "-S"),
+                    "sudo" => matches!(word, "-u" | "-g" | "-C" | "-D" | "-h" | "-p" | "-U"),
+                    "nice" => word == "-n",
+                    "timeout" => matches!(word, "-s" | "--signal" | "-k" | "--kill-after"),
+                    "xargs" => {
+                        matches!(word, "-I" | "-n" | "-L" | "-P" | "-d" | "-E" | "-s" | "-a")
+                    }
+                    _ => false,
+                };
                 if valued {
                     words.next();
                 }
+            } else if wrapper == Some("timeout") && !timed {
+                // `timeout 60 gh …`: the duration first.
+                timed = true;
+                words.next();
             } else {
                 break;
             }
@@ -685,6 +723,13 @@ mod tests {
             "C:/tools/gh.exe pr create",
             "env -u GH_TOKEN gh pr create",
             "sudo -E gh pr create",
+            "if gh pr create --fill; then echo ok; fi",
+            "! gh pr create --fill",
+            "timeout 60 gh pr create --fill",
+            "timeout -k 5 60s gh pr create --fill",
+            "nice -n 10 gh pr create",
+            "sudo -n gh pr create",
+            "while true; do gh pr create --fill && break; done",
             // Separators in quotes are the title's, not the shell's.
             "gh pr create --title 'Bump; then | more' --body \"a && b\"",
             "gh pr \\\n  create --fill",
@@ -709,9 +754,25 @@ mod tests {
             "cat <<'EOF'\nRun: gh pr create --body https://github.com/o/lib/pull/7\nEOF",
             "cat <<EOF\nfirst\ngh pr create --fill\nEOF\necho done",
             "git status # then; gh pr create",
+            "timeout 60 echo gh pr create",
+            "if echo gh pr create; then :; fi",
         ] {
             assert!(!runs_pr_create(no), "{no}");
         }
+    }
+
+    #[test]
+    fn what_a_command_printed_ends_with_the_link_it_created() {
+        let printed = "Follows https://github.com/o/lib/pull/3\n\nCreating pull request\n\nhttps://github.com/o/lib/pull/41\n";
+        assert_eq!(
+            last_link_in(printed).as_deref(),
+            Some("https://github.com/o/lib/pull/41")
+        );
+        assert_eq!(
+            link_in(printed).as_deref(),
+            Some("https://github.com/o/lib/pull/3")
+        );
+        assert_eq!(last_link_in("nothing here"), None);
     }
 
     #[test]

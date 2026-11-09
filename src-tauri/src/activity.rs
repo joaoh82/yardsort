@@ -35,11 +35,9 @@ pub struct TrackedPullRequestsChanged {
 /// handed to the watcher, which looks again on its own clock: nothing else would.
 pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
     let report = yardsort_core::activity::import_inbox(store, data_dir);
-    let gained = yardsort_core::runtime::track_seen(store, &report.pull_requests, || {
-        let state = handle.try_state::<AppState>()?;
-        crate::git::Git::new(&state.env()).ok()
-    });
-    tracked(handle, store, gained);
+    // This runs on the daemon's event thread; telling the project's own repository apart runs
+    // git, which the next terminal event should not wait for.
+    track_on_a_thread(handle, report.pull_requests);
     changed(handle, report.workspaces);
     // The watcher's thread also reads the session directories of harnesses that keep their
     // own — Grok's — and an exit is the moment their last lines land; so it is woken here
@@ -50,10 +48,15 @@ pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
 }
 
 /// Track the pull requests agents were seen creating while the app was closed, which the start
-/// took out of the inbox. On a thread of its own: finding `git` may mean asking the login shell,
-/// which the window should not wait for.
+/// took out of the inbox.
 pub fn track_settled(handle: &AppHandle, settled: yardsort_core::runtime::Settled) {
-    if settled.pull_requests.is_empty() {
+    track_on_a_thread(handle, settled.pull_requests);
+}
+
+/// Track pull requests agents were seen creating, and say so, on a thread of its own: finding
+/// `git` may mean asking the login shell, and each link runs git once.
+fn track_on_a_thread(handle: &AppHandle, seen: Vec<yardsort_core::tracked::Seen>) {
+    if seen.is_empty() {
         return;
     }
     let handle = handle.clone();
@@ -61,10 +64,9 @@ pub fn track_settled(handle: &AppHandle, settled: yardsort_core::runtime::Settle
         let Some(state) = handle.try_state::<AppState>() else {
             return;
         };
-        let gained =
-            yardsort_core::runtime::track_seen(&state.store, &settled.pull_requests, || {
-                crate::git::Git::new(&state.env()).ok()
-            });
+        let gained = yardsort_core::runtime::track_seen(&state.store, &seen, || {
+            crate::git::Git::new(&state.env()).ok()
+        });
         tracked(&handle, &state.store, gained);
     });
 }
