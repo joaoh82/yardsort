@@ -119,7 +119,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   description, its checks, the conversation and its diff, with every comment beside the lines it
   is about; reply, or select lines and send a note about them to the agent working on it. Start
   a workspace on one, merge it, close it or reopen it from there, each confirmed first and naming
-  whose it is. It reads GitHub through `gh`; Yardsort still holds no credential.
+  whose it is. A pull request an agent opens in another repository — a nested clone of a parent
+  project — is listed too, with the workspace it came from, and is merged, replied to, read and
+  [reviewed](docs/guide/workflows.md#a-pull-request-in-another-repository) the same way. It reads
+  GitHub through `gh`; Yardsort still holds no credential.
   [More below](#every-pull-request-in-one-place).
 - **Your issues, where the agents are.** **Tasks**, in the sidebar, lists every project's open
   GitHub issues and counts the ones that need an answer — where the last person to speak was

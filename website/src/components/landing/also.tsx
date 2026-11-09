@@ -27,7 +27,11 @@ const POINTS = [
   },
   {
     title: "Every pull request in one place",
-    body: "One list of the pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks, reviewers and size, filtered by project, author and review status. Open one to read its description, its checks, the conversation and its diff, with every comment beside the lines it is about; reply, or select lines and send a note about them to the agent working on it. Start a workspace on one, merge it, close it or reopen it, each confirmed first. It reads GitHub through gh; Yardsort still holds no credential.",
+    body: "One list of the pull requests of every project on GitHub — yours, a teammate's, an agent's — with their checks, reviewers and size, filtered by project, author and review status. Open one to read its description, its checks, the conversation and its diff, with every comment beside the lines it is about; reply, or select lines and send a note about them to the agent working on it. Start a workspace on one, merge it, close it or reopen it, each confirmed first. One an agent opens in another repository — a nested clone of a parent project — is listed too, with its workspace, and can be merged, replied to, read and given a second agent's review the same way. It reads GitHub through gh; Yardsort still holds no credential.",
+  },
+  {
+    title: "One agent that sees everything",
+    body: "The Floor Manager, in the bottom bar's corner or Mod+J, is an agent you pick with every project in view through ys. Ask what is running, which pull requests nobody has reviewed or which need attention, or to start a task. It suggests a workflow, opens workspaces on other people's pull requests and starts reviewers on them, each only after you say yes. It never deletes, merges or closes anything.",
   },
   {
     title: "Your issues, where the agents are",
