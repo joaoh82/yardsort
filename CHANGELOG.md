@@ -44,6 +44,11 @@ has the downloads and the full commit lists.
   any agent was busy. The dot is now still, and a count beside it says how long the agent has been
   at it (**12s**, **4m**, **1h 5m**), changing once a second at most. See
   [Status dots](docs/guide/terminals-and-sessions.md#status-dots).
+- **Linux crashes can be traced.** The Linux builds keep their symbols, so a crash's backtrace
+  names the functions it went through instead of bare addresses, for under a megabyte more
+  download. Each release also carries `yardsort-<version>-linux-x86_64.debug`, which adds file
+  names and line numbers. See
+  [When Yardsort crashes on Linux](docs/guide/troubleshooting.md#when-yardsort-crashes-on-linux).
 
 ## 0.23.0
 

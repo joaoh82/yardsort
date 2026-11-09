@@ -68,6 +68,16 @@ Homebrew cask links the macOS one onto `PATH`; elsewhere the app offers to
 app's has no console on Windows — built from the same commit in the same job. `just build` and
 `just bundle` do the same locally.
 
+On Linux the binaries keep their **symbols** (`CARGO_PROFILE_RELEASE_STRIP=debuginfo`), where
+`[profile.release]` strips them everywhere else, so that a crash's backtrace names functions
+rather than addresses. The app is also built with line tables, and
+`scripts/split-debug.mjs` — the `beforeBundleCommand` in `src-tauri/tauri.release.conf.json` —
+moves them out of the binary into `yardsort.debug` before Tauri bundles it, leaving a
+`.gnu_debuglink` to it and the build ID that gdb checks it against. That file is attached to the
+release as `yardsort-<version>-linux-x86_64.debug`. Kept in the binary, the line tables would make
+the `.deb` 53 MB instead of 15; the symbols alone add 0.7 MB to it, compressed.
+[Troubleshooting](guide/troubleshooting.md#when-yardsort-crashes-on-linux) says how to use them.
+
 The same binary is also attached as a plain archive: `ys-<version>-linux-x86_64.tar.gz`,
 `ys-<version>-macos-universal.tar.gz` and `ys-<version>-windows-x86_64.zip`. The macOS one is
 `lipo`'d from both architectures.
