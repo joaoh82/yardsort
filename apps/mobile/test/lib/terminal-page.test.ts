@@ -520,6 +520,10 @@ describe.skipIf(!browserPath)("the terminal's page", () => {
           touchPoints: [{ x, y: from + ((to - from) * i) / steps }],
         });
       }
+      // Held still before lifting, so neither drag glides on. A glide's length follows the speed
+      // the touches arrived at, which a slow runner varies: the way back could glide further than
+      // the way forward, and leave the last lines a few rows off the screen.
+      await Bun.sleep(150);
       await tab.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     };
 
