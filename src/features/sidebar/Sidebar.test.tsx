@@ -11,6 +11,7 @@ import {
   repository,
   task,
   tasksOf,
+  trackedOf,
   worktree,
 } from "@/test/fixtures";
 import type { ResolvedLink } from "@/lib/ipc";
@@ -32,6 +33,7 @@ const core = vi.hoisted(() => ({
   workspaceRestore: vi.fn(),
   workspaceRename: vi.fn(),
   workspaceForget: vi.fn(),
+  workspaceTrackPullRequest: vi.fn(),
   projectUntrackedWorktrees: vi.fn(),
   workspacesImport: vi.fn(),
   sessionsList: vi.fn(),
@@ -141,6 +143,7 @@ describe("Sidebar", () => {
       problem: null,
       loggedOut: false,
       workspaces: {},
+      tracked: [],
     });
     core.projectTasks.mockResolvedValue(tasksOf([]));
     core.forgeRepositories.mockResolvedValue(repositoriesOf([]));
@@ -531,6 +534,7 @@ describe("Sidebar", () => {
       problem: null,
       loggedOut: false,
       workspaces: {},
+      tracked: [],
     });
     await renderWithWorktree();
 
@@ -570,6 +574,7 @@ describe("Sidebar", () => {
       problem: null,
       loggedOut: false,
       workspaces: { "w-alpha-feature": [43, 42, 30] },
+      tracked: [],
     });
     await renderWithWorktree();
 
@@ -604,6 +609,7 @@ describe("Sidebar", () => {
       problem: null,
       loggedOut: false,
       workspaces: {},
+      tracked: [],
     });
     await renderWithWorktree();
 
@@ -622,6 +628,7 @@ describe("Sidebar", () => {
       gh: true,
       loggedOut: false,
       workspaces: {},
+      tracked: [],
       problem: null,
       pullRequests: [
         {
@@ -801,6 +808,7 @@ describe("Sidebar", () => {
           loggedOut: status === "logged out",
           problem: status === "forge error" ? "Network unavailable" : null,
           workspaces: {},
+          tracked: [],
         });
       await renderWithWorktree();
       await userEvent.setup().hover(rowButton("feature"));
@@ -937,6 +945,7 @@ describe("Sidebar", () => {
       problem: null,
       loggedOut: false,
       workspaces: {},
+      tracked: [],
     });
     await renderWithWorktree();
     const row = await screen.findByRole("treeitem", { name: "feature" });
@@ -950,6 +959,7 @@ describe("Sidebar", () => {
       problem: null,
       loggedOut: false,
       workspaces: {},
+      tracked: [],
     });
     await renderWithWorktree();
     // No badge on any row. The Pull requests row at the top is still there, without a count.
@@ -1791,6 +1801,52 @@ describe("Sidebar", () => {
       expect(core.workspaceRename).toHaveBeenCalledWith("w-app-fix-login", "Login fix");
       expect(await screen.findByRole("treeitem", { name: "Login fix" })).toBeInTheDocument();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("tracks a pull request from another repository, and shows it on the row by its repository", async () => {
+      const user = await withWorktree();
+      const elsewhere = trackedOf("w-app-fix-login", pullRequest(7, { title: "Bump the client" }));
+      core.workspaceTrackPullRequest.mockResolvedValue(true);
+      await openMenu(user);
+      await user.click(screen.getByRole("menuitem", { name: "Track pull request…" }));
+      const dialog = screen.getByRole("dialog", { name: "Track pull request" });
+      expect(within(dialog).getByRole("button", { name: "Track" })).toBeDisabled();
+
+      core.projectPullRequests.mockResolvedValue(pullRequestsOf([], { tracked: [elsewhere] }));
+      await user.type(
+        within(dialog).getByLabelText("Pull request link"),
+        "https://github.com/demo/lib/pull/7{Enter}",
+      );
+      expect(core.workspaceTrackPullRequest).toHaveBeenCalledWith(
+        "w-app-fix-login",
+        "https://github.com/demo/lib/pull/7",
+      );
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      // Asked again, so it shows at once: `lib#7`, never a bare #7 that reads as the project's.
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-app", true, false);
+      const row = screen.getByRole("treeitem", { name: "fix-login" });
+      const badge = await within(row).findByRole("button", {
+        name: /Pull request #7 in demo\/lib/,
+      });
+      expect(badge).toHaveTextContent("lib#7");
+    });
+
+    it("keeps the track dialog open with the reason when the core refuses", async () => {
+      const user = await withWorktree();
+      core.workspaceTrackPullRequest.mockRejectedValue({
+        code: "own_pull_request",
+        message: "demo/app is this project's own repository",
+      });
+      await openMenu(user);
+      await user.click(screen.getByRole("menuitem", { name: "Track pull request…" }));
+      const dialog = screen.getByRole("dialog", { name: "Track pull request" });
+      await user.type(
+        within(dialog).getByLabelText("Pull request link"),
+        "https://github.com/demo/app/pull/3{Enter}",
+      );
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "this project's own repository",
+      );
     });
 
     it("keeps the rename dialog open with the reason when the core refuses", async () => {

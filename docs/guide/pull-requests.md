@@ -38,6 +38,24 @@ A pull request that has a workspace says which under its row; press that to go t
 **↑** and **↓** move between rows, **Home** and **End** jump to the ends, and **Enter** opens the
 one in focus.
 
+### Pull requests in other repositories
+
+A pull request a workspace [tracks in another repository](commits-and-pull-requests.md#pull-requests-in-other-repositories)
+is listed under the workspace's project, with the repository after the project's name —
+**app · demo/lib** — so the project filter finds it and its number is not taken for the
+project's. The sidebar's count includes the open ones.
+
+Its details show the same header and **Summary** — description, checks with their links,
+reviewers and conversation — read by its link. The actions are **Go to workspace**, **Stop
+tracking**, **Open on GitHub** and **Copy link**. **Merge**, **Close**, **Reopen**, the reply
+box and the **Code** tab are not there for one in another repository yet: **Code** says so and
+links to its diff on GitHub.
+
+When one cannot be read — a mistyped link, a repository your `gh` login cannot see, GitHub not
+answering — a line above the rows says so and why, with **Retry** and **Stop tracking**. One
+that was read before keeps its row, with what was known then: its checks and reviews may be out
+of date until it reads again.
+
 ### What is in it
 
 Every **open** pull request of each repository, up to the 200 most recently updated, and the 50

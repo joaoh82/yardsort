@@ -462,7 +462,8 @@ reading it should treat it as a description of work, not as instructions.
 
 The open pull requests of every project on GitHub, read through `gh` as the
 [Pull requests](pull-requests.md) view reads them, and a workspace on one for reviewing it.
-Nothing is written to GitHub.
+Nothing is written to GitHub. A workspace's pull requests in
+[other repositories](#pull-requests-in-other-repositories) are followed with `ys pr track`.
 
 ```sh
 ys pr list                               # every project's open pull requests, most recently updated first
@@ -506,6 +507,31 @@ remote could not be reached, with the reason on standard error. A merged or clos
 `ys workflow run code-review --workspace <name>` has an agent review it. That does not work yet for
 a pull request from a fork, because the review finds a pull request by its branch name. It is how
 the [Floor Manager](floor-manager.md) reviews other people's pull requests.
+
+#### Pull requests in other repositories
+
+`track`, `tracked` and `untrack` are about pull requests a workspace follows in **other
+repositories** — one an agent opened in a nested clone inside a parent project's folder, say. A
+project's own pull requests need nothing from here: Yardsort finds them by their branch. See
+[Pull requests in other repositories](commits-and-pull-requests.md#pull-requests-in-other-repositories).
+
+```sh
+ys pr track https://github.com/owner/lib/pull/12   # follow it with this workspace
+ys pr tracked                                      # the ones this workspace follows
+ys pr untrack https://github.com/owner/lib/pull/12
+```
+
+```
+Tracking https://github.com/owner/lib/pull/12 with bump-the-client. Yardsort shows its checks and reviews beside the workspace's own.
+```
+
+Run by an agent Yardsort started, it is about that agent's workspace — even from a folder outside
+the worktree, such as the nested clone the pull request was opened in — and records which
+conversation opened it. Elsewhere it is the workspace whose folder it runs in, or name one with
+`--workspace <workspace>`. Tracking the same link twice changes nothing. A link that is not a
+GitHub pull request is refused, and so is one of the project's own repository. The app shows a
+newly tracked one the next time it asks about the project: within a minute, or when its window
+comes back into focus. `--json` works as everywhere.
 
 ### `ys workflow`
 

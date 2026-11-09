@@ -113,6 +113,7 @@ describe("PublishBar", () => {
       problem: null,
       loggedOut: false,
       workspaces: {},
+      tracked: [],
     });
     seed();
   });

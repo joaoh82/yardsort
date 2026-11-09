@@ -8,6 +8,7 @@ import {
   type PullRequest,
   type PullRequestChanges,
   type PullRequestSummary,
+  type TrackedPullRequest,
 } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { useProjectsStore } from "./projects";
@@ -21,6 +22,11 @@ export interface Target {
   pr: PullRequest;
   /** Who `gh` is logged in as, so a confirmation can say when the pull request is not yours. */
   viewer: string | null;
+  /**
+   * Set for one a workspace tracks in another repository. It is read by its link; its number
+   * names nothing in `projectId`, so the actions that go by number are not offered for it.
+   */
+  tracked?: TrackedPullRequest | null;
 }
 
 /** One pull request read in full, or the reading of it. */
@@ -209,11 +215,14 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
       try {
         // The first look may use what the core read a moment ago; anything after it is because
         // something changed, and must not be answered from before the change.
-        const summary = await ipc.pullRequestSummary(
-          target.projectId,
-          target.pr.number,
-          force || before !== undefined,
-        );
+        const refresh = force || before !== undefined;
+        const summary = target.tracked
+          ? await ipc.trackedPullRequestSummary(
+              target.tracked.workspaceId,
+              target.tracked.id,
+              refresh,
+            )
+          : await ipc.pullRequestSummary(target.projectId, target.pr.number, refresh);
         if (asked.get(key) === request) patch(key, { summary, loading: false });
       } catch (error) {
         if (asked.get(key) === request) patch(key, { loading: false, error: errorMessage(error) });

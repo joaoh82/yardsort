@@ -19,6 +19,7 @@ pub mod commands;
 pub mod conflicts;
 pub mod pull_requests;
 pub mod tasks;
+pub mod tracked;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -91,6 +92,9 @@ pub struct ProjectPullRequests {
     pub open_total: Option<u32>,
     /// Why the open pull requests could not all be read, when the recent ones could.
     pub open_problem: Option<String>,
+    /// Pull requests the project's workspaces follow in other repositories: see
+    /// [`tracked`]. Each says which workspace it is shown with.
+    pub tracked: Vec<tracked::TrackedPullRequest>,
 }
 
 /// Where a workspace stands: what it can commit, push and open, and what happened to it.
@@ -277,6 +281,8 @@ pub struct Forge {
     summaries: Mutex<HashMap<(String, u32), (Instant, PullRequestSummary)>>,
     /// Counts every [`forget`](Self::forget), so a summary read before one is not kept after.
     forgotten: AtomicU64,
+    /// Pull requests tracked in other repositories, as last read, by link.
+    tracked: Mutex<tracked::TrackedReads>,
 }
 
 /// A project's open pull requests and when they were read. `at` is `None` once something has

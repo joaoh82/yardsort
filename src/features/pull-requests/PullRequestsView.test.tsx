@@ -7,6 +7,7 @@ import {
   pullRequest,
   pullRequestsOf,
   pullRequestSummary,
+  trackedOf,
   worktree,
 } from "@/test/fixtures";
 
@@ -14,6 +15,8 @@ const core = vi.hoisted(() => ({
   uiStateSave: vi.fn(),
   projectPullRequests: vi.fn(),
   pullRequestSummary: vi.fn(),
+  trackedPullRequestSummary: vi.fn(),
+  workspaceUntrackPullRequest: vi.fn(),
   pullRequestChanges: vi.fn(),
   pullRequestMerge: vi.fn(),
   pullRequestClose: vi.fn(),
@@ -645,5 +648,104 @@ describe("workspaces", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("already checked out");
     expect(useProjectsStore.getState().composingProjectId).toBeNull();
     expect(useProjectsStore.getState().pullRequestsOpen).toBe(true);
+  });
+});
+
+describe("a pull request a workspace tracks in another repository", () => {
+  // The same number as alpha's own #7, in another repository: neither may stand for the other.
+  const client = pullRequest(7, {
+    title: "Bump the client",
+    author: "ada",
+    branch: "ys/bump",
+    details: { updatedAt: "2026-10-01T10:00:00Z" },
+  });
+  const elsewhere = trackedOf(feature.id, client);
+  const withTracked = (): Record<string, ProjectPullRequests> => ({
+    ...answers(),
+    [alpha.id]: { ...answers()[alpha.id]!, tracked: [elsewhere] },
+  });
+
+  beforeEach(() => {
+    core.projectPullRequests.mockImplementation(async (id: string) => withTracked()[id]);
+    core.trackedPullRequestSummary.mockResolvedValue(
+      pullRequestSummary(elsewhere.pullRequest!, { body: "Moves to the new client." }),
+    );
+    core.workspaceUntrackPullRequest.mockResolvedValue(undefined);
+  });
+
+  it("is listed under its workspace's project, named by its repository, beside the project's own #7", () => {
+    show(withTracked());
+    const tracked = row(/Bump the client/);
+    expect(tracked).toHaveTextContent("alpha · demo/lib");
+    expect(tracked).toHaveTextContent("#7");
+    expect(row(/Fix the login redirect/)).toHaveTextContent("#7");
+    expect(titles()[0]).toBe("Bump the client");
+    expect(screen.getAllByRole("button", { name: "feature" })).toHaveLength(2);
+  });
+
+  it("reads its Summary by its link, and offers only what works for it", async () => {
+    const user = show(withTracked());
+    await user.click(row(/Bump the client/));
+    const pane = screen.getByRole("region", { name: "Pull request #7" });
+    expect(await within(pane).findByText("Moves to the new client.")).toBeVisible();
+    expect(core.trackedPullRequestSummary).toHaveBeenCalledWith(feature.id, "t-7", false);
+    expect(core.pullRequestSummary).not.toHaveBeenCalled();
+    expect(pane).toHaveTextContent("in demo/lib");
+    for (const name of [/^Merge/, /^Close$/, /^Reopen$/, /^Start workspace$/]) {
+      expect(within(pane).queryByRole("button", { name })).toBeNull();
+    }
+    expect(within(pane).queryByRole("form", { name: "Reply" })).toBeNull();
+    expect(within(pane).queryByLabelText("Your comment")).toBeNull();
+
+    await user.click(within(pane).getByRole("tab", { name: "Code" }));
+    expect(core.pullRequestChanges).not.toHaveBeenCalled();
+    await user.click(within(pane).getByRole("button", { name: /Its diff on GitHub/ }));
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/demo/lib/pull/7/files");
+  });
+
+  it("says so when one could never be read, and offers to stop tracking it", async () => {
+    const unread = trackedOf(feature.id, client, {
+      pullRequest: null,
+      problem: "Could not resolve to a PullRequest with the number of 7.",
+    });
+    const user = show({ ...answers(), [alpha.id]: { ...answers()[alpha.id]!, tracked: [unread] } });
+    expect(screen.queryByRole("button", { name: /Bump the client/ })).toBeNull();
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent(
+      "alpha: demo/lib#7, tracked with feature, could not be read: Could not resolve",
+    );
+    await user.click(within(notice).getByRole("button", { name: "Stop tracking" }));
+    expect(core.workspaceUntrackPullRequest).toHaveBeenCalledWith(feature.id, "t-7");
+  });
+
+  it("says so when one read before could not be read again, beside what was known", async () => {
+    const user = show(withTracked());
+    expect(row(/Bump the client/)).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    core.projectPullRequests.mockImplementation(async (id: string) =>
+      id === alpha.id
+        ? { ...answers()[alpha.id]!, tracked: [{ ...elsewhere, problem: "HTTP 502" }] }
+        : answers()[id],
+    );
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(
+      "alpha: demo/lib#7, tracked with feature, could not be read again, so what shows is from the last time it was: HTTP 502",
+    );
+    expect(row(/Bump the client/)).toBeVisible();
+  });
+
+  it("can stop being tracked from its details", async () => {
+    const user = show(withTracked());
+    await user.click(row(/Bump the client/));
+    core.projectPullRequests.mockImplementation(async (id: string) => answers()[id]);
+    await user.click(screen.getByRole("button", { name: "Stop tracking" }));
+    await waitFor(() =>
+      expect(core.workspaceUntrackPullRequest).toHaveBeenCalledWith(feature.id, "t-7"),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Bump the client/ })).toBeNull(),
+    );
+    expect(screen.queryByRole("region", { name: "Pull request #7" })).toBeNull();
   });
 });

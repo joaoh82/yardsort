@@ -7,6 +7,7 @@ pub mod event;
 pub mod logs;
 pub mod memory;
 pub mod pr;
+pub mod pr_tracked;
 pub mod project;
 pub mod schedule;
 pub mod session;

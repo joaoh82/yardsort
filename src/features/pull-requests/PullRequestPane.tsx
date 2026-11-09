@@ -3,7 +3,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { selectWorkspace } from "@/features/keyboard/commands";
-import type { MergeMethod } from "@/lib/ipc";
+import { errorMessage, type MergeMethod } from "@/lib/ipc";
+import { untrackPullRequest } from "@/stores/publish";
 import { usePullRequestsStore, type DetailTab, type Target } from "@/stores/pullRequests";
 import { Code } from "./Code";
 import { Summary } from "./Summary";
@@ -56,6 +57,14 @@ export function PullRequestPane({
         <div className="flex items-center gap-2">
           <p className="min-w-0 flex-1 truncate text-ink-muted">
             <span className="text-ink">{project.name}</span>
+            {row.tracked && (
+              <>
+                {" · in "}
+                <span className="text-ink">
+                  {row.tracked.repo.owner}/{row.tracked.repo.name}
+                </span>
+              </>
+            )}
             {" · "}
             {pr.author ?? "ghost"}
             {pr.createdAt !== null && <> opened it {age(pr.createdAt, now)} ago</>}
@@ -127,6 +136,21 @@ export function PullRequestPane({
         <div className="min-h-0 flex-1 overflow-y-auto p-4 select-text">
           <Summary row={row} now={now} />
         </div>
+      ) : row.tracked ? (
+        // Its commits are in another repository, which this project's checkout does not have.
+        <div className="min-h-0 flex-1 p-4 text-ink-muted">
+          <p>
+            This pull request is in {row.tracked.repo.owner}/{row.tracked.repo.name}, not in{" "}
+            {project.name}&rsquo;s repository, so its diff is not read here yet.
+          </p>
+          <button
+            type="button"
+            onClick={() => void openUrl(`${pr.url}/files`).catch(console.error)}
+            className="mt-3 text-ink underline hover:text-accent"
+          >
+            Its diff on GitHub <span aria-hidden>↗</span>
+          </button>
+        </div>
       ) : (
         // Keyed by the pull request: the file in view belongs to it, not to the next one.
         <div className="min-h-0 flex-1">
@@ -149,9 +173,73 @@ function Actions({ row }: { row: Row }) {
     projectId: row.project.id,
     pr,
     viewer: row.viewer,
+    tracked: row.tracked,
   };
   const store = usePullRequestsStore.getState();
   const blocked = mergeBlocked(pr);
+  const [untracking, setUntracking] = useState(false);
+  const [untrackError, setUntrackError] = useState<string | null>(null);
+
+  if (row.tracked) {
+    const tracked = row.tracked;
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {workspace && (
+          <button
+            type="button"
+            title={`Go to the workspace ${workspace.name}`}
+            onClick={() => selectWorkspace(workspace.id)}
+            className={button}
+          >
+            Go to workspace
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={untracking}
+          title="Stop following it with its workspace. The pull request is left as it is."
+          onClick={() => {
+            setUntracking(true);
+            setUntrackError(null);
+            untrackPullRequest(row.project.id, tracked).then(
+              () => store.select(null),
+              (reason: unknown) => {
+                setUntrackError(errorMessage(reason));
+                setUntracking(false);
+              },
+            );
+          }}
+          className={button}
+        >
+          Stop tracking
+        </button>
+        <button
+          type="button"
+          onClick={() => void openUrl(pr.url).catch(console.error)}
+          className={`${button} ml-auto`}
+        >
+          Open on GitHub <span aria-hidden>↗</span>
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            void writeText(pr.url).then(
+              () => setCopied(true),
+              (reason: unknown) => console.error(reason),
+            )
+          }
+          className={button}
+        >
+          {copied ? "Copied" : "Copy link"}
+        </button>
+        {untrackError && (
+          <p role="alert" className="w-full text-red-400 select-text">
+            {untrackError}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">

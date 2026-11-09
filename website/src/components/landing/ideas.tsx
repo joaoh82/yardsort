@@ -147,9 +147,10 @@ export function Ideas() {
           <p>
             When it looks right, the foot of the same panel commits it, pushes it and opens the pull
             request — whose number and check results then sit on the workspace row, with any other
-            pull requests the workspace opened beside it. If it later conflicts with its base, the
-            agent that opened it can be asked to resolve that. It stays an ordinary git branch
-            throughout, and Yardsort holds no forge credentials: the{" "}
+            pull requests the workspace opened beside it, including those opened in other
+            repositories, like a parent project&apos;s nested clones, once they are tracked. If it
+            later conflicts with its base, the agent that opened it can be asked to resolve that. It
+            stays an ordinary git branch throughout, and Yardsort holds no forge credentials: the{" "}
             <code className={code}>gh</code> you already use opens the pull request, or your browser
             does.
           </p>

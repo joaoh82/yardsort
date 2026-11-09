@@ -13,6 +13,7 @@ import type {
   TaskDetail,
   TestReview,
   TestRun,
+  TrackedPullRequest,
   TestStepRun,
   TriggerFire,
   TriggerItem,
@@ -162,6 +163,27 @@ export const pullRequest = (
   };
 };
 
+/**
+ * A pull request a workspace tracks in another repository, `demo/lib` unless said otherwise,
+ * already read: `pr` is what `gh` said about it.
+ */
+export const trackedOf = (
+  workspaceId: string,
+  pr: PullRequest,
+  overrides: Partial<TrackedPullRequest> = {},
+): TrackedPullRequest => ({
+  id: `t-${pr.number}`,
+  workspaceId,
+  sessionId: null,
+  repo: { host: "github.com", owner: "demo", name: "lib", kind: "github" },
+  number: pr.number,
+  url: `https://github.com/demo/lib/pull/${pr.number}`,
+  trackedBy: "cli",
+  pullRequest: { ...pr, url: `https://github.com/demo/lib/pull/${pr.number}` },
+  problem: null,
+  ...overrides,
+});
+
 /** What the core says about one project's pull requests: `gh` there, logged in as `ada`. */
 export const pullRequestsOf = (
   pullRequests: PullRequest[],
@@ -176,6 +198,7 @@ export const pullRequestsOf = (
   viewer: "ada",
   openTotal: pullRequests.filter((pr) => pr.state === "open").length,
   openProblem: null,
+  tracked: [],
   ...overrides,
 });
 

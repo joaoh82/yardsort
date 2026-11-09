@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Follow pull requests an agent opens in another repository.** A project whose folder holds
+  other repositories as nested clones — a parent repository — has agents that open pull requests
+  in those clones, and Yardsort could not see them. Now a workspace can **track** them: an agent
+  runs `ys pr track <url>` (agents in such a project are told to; `ys pr tracked` lists them), or you choose **Track pull
+  request…** in the workspace's menu. A tracked pull request shows on the workspace's row as
+  `lib#7`, in its toolbar's menu, and in the Pull requests view with its Summary — checks,
+  reviewers and conversation — read by its link. **Stop tracking** takes it off again. Merging it
+  and its diff are still on GitHub for now. See
+  [Commits & pull requests](docs/guide/commits-and-pull-requests.md#pull-requests-in-other-repositories).
 - **Reach another computer from the desktop app, read-only for now.** Under **Settings → Remote →
   Other computers**, sign this computer in as a client, a device of its own apart from it being a
   host, and pair it by the code another computer shows, from its own Settings → Remote or

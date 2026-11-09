@@ -107,8 +107,10 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
 - **Send it on without leaving.** Commit what an agent wrote, push it, and open the pull request
   from the panel you reviewed it in — the title written from the commits. With the
   [GitHub CLI](https://cli.github.com) the pull request opens from here and its number and check
-  results appear on the workspace row, with any others the workspace opened beside it; one that
-  conflicts with its base can be handed back to the agent that opened it to resolve. Without
+  results appear on the workspace row, with any others the workspace opened beside it — those
+  opened in other repositories too, like the nested clones of a parent project, once an agent or
+  you track them; one that conflicts with its base can be handed back to the agent that opened it
+  to resolve. Without
   `gh`, your browser opens the forge's own form, on GitHub, GitLab, Bitbucket or Gitea alike. See
   [Commits & pull requests](docs/guide/commits-and-pull-requests.md).
 - **Every pull request in one place.** **Pull requests**, at the top of the sidebar, lists the

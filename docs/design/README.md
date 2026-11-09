@@ -42,6 +42,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 35  | [Remote, R4 and R5](35-remote-r4-r5.md)                                 | Planned: a host with no screen the phone reaches first, then the desktop as a client, then the phone hardened and push           |
 | 36  | [Triggers](36-triggers.md)                                              | Proposal: start a workflow or a smoke test when something happens — the agent is done, a PR opens, a review arrives, checks fail |
 | 37  | [Floor Manager](37-floor-manager.md)                                    | First slice built: one agent that sees every project through `ys`, in a panel; `ys pr list` and `ys pr checkout`                 |
+| 38  | [Pull requests in other repositories](38-pull-requests-elsewhere.md)    | Slice 1 built: a workspace tracks pull requests opened in nested clones, by `ys pr track` or by hand, and follows them by link   |
 
 ## Vocabulary
 

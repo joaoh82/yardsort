@@ -89,6 +89,8 @@ import {
   type PullRequestPost,
   type PullRequestReview,
   type PullRequestSummary,
+  type TrackedPullRequest,
+  type Repo,
   type ReviewRequest,
   type ReviewState,
   type ConflictHelper,
@@ -340,6 +342,8 @@ export type {
   PullRequestPost,
   PullRequestReview,
   PullRequestSummary,
+  TrackedPullRequest,
+  Repo,
   ReviewRequest,
   ReviewState,
   ConflictHelper,
@@ -649,6 +653,17 @@ export const ipc = {
    *  view's question, and several round trips on a busy repository. */
   projectPullRequests: (projectId: string, refresh = false, full = false) =>
     unwrap(commands.projectPullRequests(projectId, refresh, full)),
+  /** Follow a pull request in another repository with a workspace. Resolves to whether it is
+   *  new: tracking one twice changes nothing. Refused for a link that is not a GitHub pull
+   *  request, and for one of the project's own repository. */
+  workspaceTrackPullRequest: (workspaceId: string, url: string) =>
+    unwrap(commands.workspaceTrackPullRequest(workspaceId, url)),
+  /** Stop following one. Only Yardsort's note of it goes; the pull request is left as it is. */
+  workspaceUntrackPullRequest: (workspaceId: string, id: string) =>
+    unwrap(commands.workspaceUntrackPullRequest(workspaceId, id)),
+  /** A tracked pull request in full, read by its link. */
+  trackedPullRequestSummary: (workspaceId: string, id: string, refresh = false) =>
+    unwrap(commands.trackedPullRequestSummary(workspaceId, id, refresh)),
   /** One pull request in full: description, checks with links, reviewers, conversation. */
   pullRequestSummary: (projectId: string, number: number, refresh = false) =>
     unwrap(commands.pullRequestSummary(projectId, number, refresh)),

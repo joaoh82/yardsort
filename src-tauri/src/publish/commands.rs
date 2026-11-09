@@ -130,6 +130,7 @@ pub async fn project_pull_requests(
             }
         }
         found.workspaces = owned;
+        found.tracked = super::tracked::of_project(state, &project_id, refresh);
         Ok(found)
     })
     .await

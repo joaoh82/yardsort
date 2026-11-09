@@ -6,6 +6,7 @@ import {
   type PublishState,
   type PullRequest,
   type PullRequestOpened,
+  type TrackedPullRequest,
   type Workspace,
 } from "@/lib/ipc";
 import { useProjectsStore } from "./projects";
@@ -23,6 +24,7 @@ const NO_PULL_REQUESTS: ProjectPullRequests = {
   viewer: null,
   openTotal: null,
   openProblem: null,
+  tracked: [],
 };
 
 interface PublishStore {
@@ -89,6 +91,53 @@ export function pullRequestsFor(
     .map((number) => found.pullRequests.find((pr) => pr.number === number))
     .filter((pr) => pr !== undefined);
   return current ? [current, ...others] : others;
+}
+
+/** A pull request a workspace shows: its project's own, or one it follows in another repository. */
+export interface ShownPullRequest {
+  /** Unique among a workspace's: `#7` for the project's own, its link for one elsewhere — two
+   *  hosts can each have an `owner/name#7`. */
+  key: string;
+  pr: PullRequest;
+  /** Set for one tracked in another repository: its number means nothing without it. */
+  tracked: TrackedPullRequest | null;
+}
+
+/** The tracked one's canonical link, or `#7` for the project's own. */
+export const shownKey = (pr: PullRequest, tracked: TrackedPullRequest | null) =>
+  tracked ? tracked.url : `#${pr.number}`;
+
+/**
+ * The pull requests a workspace follows in other repositories that have been read, newest
+ * tracked first. One `gh` could not read yet has nothing to show on a row.
+ */
+export function trackedFor(
+  found: ProjectPullRequests | undefined,
+  workspaceId: string,
+): { pr: PullRequest; tracked: TrackedPullRequest }[] {
+  if (!found) return [];
+  return found.tracked
+    .filter((tracked) => tracked.workspaceId === workspaceId)
+    .flatMap((tracked) => (tracked.pullRequest ? [{ pr: tracked.pullRequest, tracked }] : []));
+}
+
+/** Everything a workspace shows: its own pull requests (`pullRequestsFor`), then those elsewhere. */
+export function shownFor(
+  found: ProjectPullRequests | undefined,
+  workspace: Pick<Workspace, "id" | "head">,
+): ShownPullRequest[] {
+  return [
+    ...pullRequestsFor(found, workspace).map((pr) => ({
+      key: shownKey(pr, null),
+      pr,
+      tracked: null,
+    })),
+    ...trackedFor(found, workspace.id).map(({ pr, tracked }) => ({
+      key: shownKey(pr, tracked),
+      pr,
+      tracked,
+    })),
+  ];
 }
 
 export const usePublishStore = create<PublishStore>((set, get) => {
@@ -216,4 +265,27 @@ function projectOf(workspaceId: string | null): string | null {
     project.workspaces.some((workspace) => workspace.id === workspaceId),
   );
   return owner?.id ?? null;
+}
+
+/**
+ * Follow the pull request at `url` with a workspace, then ask about its project again so it
+ * shows. Resolves to whether it is new; rejects with the core's reason when it is refused.
+ */
+export async function trackPullRequest(
+  projectId: string,
+  workspaceId: string,
+  url: string,
+): Promise<boolean> {
+  const added = await ipc.workspaceTrackPullRequest(workspaceId, url.trim());
+  await usePublishStore.getState().loadProject(projectId, true);
+  return added;
+}
+
+/** Stop following one, then ask about its project again so it is gone from everywhere. */
+export async function untrackPullRequest(
+  projectId: string,
+  tracked: Pick<TrackedPullRequest, "workspaceId" | "id">,
+): Promise<void> {
+  await ipc.workspaceUntrackPullRequest(tracked.workspaceId, tracked.id);
+  await usePublishStore.getState().loadProject(projectId, true);
 }

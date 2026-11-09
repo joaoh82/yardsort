@@ -115,6 +115,18 @@ export const commands = {
 	 */
 	projectPullRequests: (projectId: string, refresh: boolean, full: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh, full })),
 	/**
+	 *  Follow the pull request at `url` with the workspace. Resolves to whether it is new: tracking
+	 *  one twice changes nothing.
+	 */
+	workspaceTrackPullRequest: (workspaceId: string, url: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("workspace_track_pull_request", { workspaceId, url })),
+	/**  Stop following one. The pull request is left as it is; only Yardsort's note of it goes. */
+	workspaceUntrackPullRequest: (workspaceId: string, id: string) => typedError<null, IpcError>(__TAURI_INVOKE("workspace_untrack_pull_request", { workspaceId, id })),
+	/**
+	 *  A tracked pull request in full, as [`super::pull_requests::pull_request_summary`] reads a
+	 *  project's own: by its link.
+	 */
+	trackedPullRequestSummary: (workspaceId: string, id: string, refresh: boolean) => typedError<PullRequestSummary, IpcError>(__TAURI_INVOKE("tracked_pull_request_summary", { workspaceId, id, refresh })),
+	/**
 	 *  One pull request in full: its description, every check with its link, its reviewers and
 	 *  the conversation. What the Pull requests view's Summary shows, read when a row is opened.
 	 */
@@ -2071,6 +2083,11 @@ export type ProjectPullRequests = {
 	openTotal: number | null,
 	/**  Why the open pull requests could not all be read, when the recent ones could. */
 	openProblem: string | null,
+	/**
+	 *  Pull requests the project's workspaces follow in other repositories: see
+	 *  [`tracked`]. Each says which workspace it is shown with.
+	 */
+	tracked: TrackedPullRequest[],
 };
 
 /**  What a project's source says about its tasks. */
@@ -3246,6 +3263,23 @@ export type TokenTotals = {
 	output: number | null,
 	/**  What reading from the cache saved against paying full input price for the same tokens. */
 	cacheSavings: number | null,
+};
+
+/**  A pull request in another repository that a workspace follows, as the window sees it. */
+export type TrackedPullRequest = {
+	id: string,
+	workspaceId: string,
+	/**  The conversation that opened it, when that is known. */
+	sessionId: string | null,
+	repo: Repo,
+	number: number,
+	url: string,
+	/**  `app`, `cli` or `hook`. */
+	trackedBy: string,
+	/**  What `gh` last said about it. `None` until it has been read, or when it never could be. */
+	pullRequest: PullRequest | null,
+	/**  Why the last read failed. What was read before stays in `pull_request`. */
+	problem: string | null,
 };
 
 /**  What starts a run, and what a run is about. */

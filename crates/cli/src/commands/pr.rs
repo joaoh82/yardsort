@@ -8,7 +8,8 @@
 //!
 //! It is how the Floor Manager answers "which code reviews need attention", and how it gets a
 //! pull request somebody else opened into a workspace a review can run in. Nothing here writes
-//! to GitHub.
+//! to GitHub. `ys pr track` and its two neighbours, in `pr_tracked`, follow pull requests a
+//! workspace opened in other repositories.
 
 use std::path::Path;
 use std::time::Duration;
@@ -89,6 +90,32 @@ pub enum Command {
         #[arg(long, value_name = "PROJECT")]
         project: Option<String>,
     },
+    /// Follow a pull request in another repository with this workspace: its checks and reviews
+    /// show in Yardsort beside the workspace's own.
+    ///
+    /// For a pull request opened in a repository other than the project's — a nested clone
+    /// inside a parent project's checkout — which Yardsort cannot find by its branch.
+    Track {
+        /// The pull request's link, like https://github.com/owner/repo/pull/12.
+        url: String,
+        /// The workspace, by name or id. Default: the one this is run in.
+        #[arg(long, value_name = "WORKSPACE")]
+        workspace: Option<String>,
+    },
+    /// The pull requests this workspace follows in other repositories.
+    Tracked {
+        /// The workspace, by name or id. Default: the one this is run in.
+        #[arg(long, value_name = "WORKSPACE")]
+        workspace: Option<String>,
+    },
+    /// Stop following one. The pull request itself is left as it is.
+    Untrack {
+        /// Its link.
+        url: String,
+        /// The workspace, by name or id. Default: the one this is run in.
+        #[arg(long, value_name = "WORKSPACE")]
+        workspace: Option<String>,
+    },
 }
 
 pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure> {
@@ -113,6 +140,13 @@ pub fn run(ys: &Yardsort, command: Command, out: &Output) -> Result<(), Failure>
             out,
         ),
         Command::Checkout { number, project } => checkout(ys, &number, project.as_deref(), out),
+        Command::Track { url, workspace } => {
+            super::pr_tracked::track(ys, &url, workspace.as_deref(), out)
+        }
+        Command::Tracked { workspace } => super::pr_tracked::list(ys, workspace.as_deref(), out),
+        Command::Untrack { url, workspace } => {
+            super::pr_tracked::untrack(ys, &url, workspace.as_deref(), out)
+        }
     }
 }
 

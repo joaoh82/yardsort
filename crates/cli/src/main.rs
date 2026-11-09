@@ -117,7 +117,8 @@ enum Command {
     /// What is waiting to be done in a project: its GitHub issues.
     #[command(subcommand)]
     Task(commands::task::Command),
-    /// Open pull requests across every project, and a workspace on one for reviewing it.
+    /// Open pull requests across every project, a workspace on one for reviewing it, and those a
+    /// workspace follows in other repositories.
     #[command(subcommand)]
     Pr(commands::pr::Command),
     /// Named sequences of agent work, written in YAML: the built-in ones and yours.
