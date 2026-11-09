@@ -160,12 +160,19 @@ one more section:
 ```text
 ## Other repositories
 
-This project's checkout holds other git repositories: flotta, flotta-cloud (in
-/home/…/flotta_parent). When you open a pull request in one of them, run
-`ys pr track <its url>` so Yardsort follows it with this workspace.
+This project's checkout holds other git repositories, which are not in this workspace's
+folder: `/home/…/flotta_parent/flotta`, `/home/…/flotta_parent/flotta-cloud`. Every workspace of
+the project shares them, so to work on a branch of one, make a worktree of it for yourself
+(`git -C <the clone> worktree add <a new folder outside it> -b <branch>`) rather than changing
+the clone's own checkout. When you open a pull request in one of them, run `ys pr track <its url>`
+so Yardsort follows it with this workspace.
 ```
 
-Like the smoke-test section, only for a fresh first message: a handoff and a fork carry what
+Each clone is named by its whole path, and said to be outside the workspace's folder unless
+the workspace is the project's own checkout, its local one. The worktree advice is because the
+clones are one checkout each, shared by every workspace of the project: two agents switching
+branches in one would undo each other's work. Like the smoke-test section, only for a fresh
+first message: a handoff and a fork carry what
 the conversation already knew. At most ten are named. The note is the fallback once the adapters
 see pull requests being created, and stays: an agent that opens one in some other way — the
 browser, an API call — is still pointed at the command.
@@ -486,6 +493,23 @@ Testing Library — only the workflows about one offered, previewed and started 
 id, the agent that opened it named, and refused without a clone — and the button in the Pull
 requests view opening it. Not yet done: a real review run on a real tracked pull request, and the
 three systems' hands-on pass.
+
+## The hands-on pass
+
+The rows are [08 § 28](08-manual-checklist.md#28--pull-requests-in-other-repositories).
+
+- **Linux, 2026-11-09, without the window.** A real Claude Code (2.1.319), started by
+  `ys workspace new` in a parent project with a nested clone, under a throwaway profile kept by
+  `yardsort-host serve`, with a stand-in `gh`: it ran `gh pr create` in the clone and the host's
+  drain tracked the pull request by `hook`, linked to its conversation, keeping only the link.
+  **Found:** the launch section named the clone as `lib (in <parent>)`, and the agent went looking
+  for `lib` in its own worktree — a worktree of the parent, which has none of them. It now names
+  each clone by its whole path, says they are outside the workspace's folder (unless it is the
+  project's local one), and points at a worktree of the clone rather than its shared checkout.
+  Run again on that build, the agent went to the clone by itself and its pull request was
+  tracked the same way.
+- **Still to do:** the window's rows on Linux against real pull requests, and every row on macOS
+  and Windows — none of which this machine can do.
 
 ## Documentation this touches
 
