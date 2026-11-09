@@ -3,7 +3,7 @@
 //! link and keeps the answer. See `docs/design/36-pull-requests-elsewhere.md`.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
@@ -13,14 +13,13 @@ use tauri::AppHandle;
 
 use super::commands::{failed, project_root};
 use super::Forge;
-use crate::changes::commands::workspace;
 use crate::error::{IpcError, IpcResult};
 use crate::forge::{
     ForgeError, ForgeResult, Gh, PullRequest, PullRequestState, PullRequestSummary, Repo,
 };
 use crate::git::Git;
 use crate::state::{blocking, AppState};
-use crate::store::TrackedPullRequestRow;
+use crate::store::{Store, TrackedPullRequestRow};
 use crate::tracked::TrackedBy;
 
 /// How many of a project's tracked pull requests are read on each look, newest tracked first.
@@ -211,8 +210,11 @@ pub(super) fn of_project(
 
 /// The tracked row `id` of the workspace, or the error that says it is gone.
 fn row_of(state: &AppState, workspace_id: &str, id: &str) -> IpcResult<TrackedPullRequestRow> {
-    state
-        .store
+    row_in(&state.store, workspace_id, id)
+}
+
+fn row_in(store: &Store, workspace_id: &str, id: &str) -> IpcResult<TrackedPullRequestRow> {
+    store
         .tracked_pull_requests(workspace_id)?
         .into_iter()
         .find(|row| row.id == id)
@@ -277,25 +279,38 @@ pub async fn tracked_pull_request_summary(
     refresh: bool,
 ) -> IpcResult<PullRequestSummary> {
     blocking(app, move |state| {
-        let row = row_of(state, &workspace_id, &id)?;
-        let (workspace_row, _) = workspace(state, &workspace_id)?;
         let gh = Gh::find(&state.env()).ok_or_else(|| failed(ForgeError::NotInstalled))?;
-        let root = project_root(state, &workspace_row.project_id)?;
-        let cwd = if Path::new(&root).is_dir() {
-            root
-        } else {
-            std::env::temp_dir()
-        };
-        // Kept apart from the project's own summaries, whose numbers this one's would collide
-        // with: the key is the link.
-        state
-            .forge
-            .summary(&format!("tracked:{}", row.url), row.number, refresh, || {
-                gh.pull_request_summary_at(&cwd, &row.url, super::pull_requests::SUMMARY_LIMIT)
-            })
-            .map_err(failed)
+        summary_of(&state.store, &state.forge, &gh, &workspace_id, &id, refresh)
     })
     .await
+}
+
+/// [`tracked_pull_request_summary`] without the app around it. The workspace's folder is not
+/// needed — archiving removes it, and the link is all `gh` asks for — so only its row is read.
+fn summary_of(
+    store: &Store,
+    forge: &Forge,
+    gh: &Gh,
+    workspace_id: &str,
+    id: &str,
+    refresh: bool,
+) -> IpcResult<PullRequestSummary> {
+    let row = row_in(store, workspace_id, id)?;
+    let workspace = store
+        .workspace(workspace_id)?
+        .ok_or_else(|| IpcError::new("unknown_workspace", "That workspace no longer exists."))?;
+    let root = store
+        .project(&workspace.project_id)?
+        .map(|project| PathBuf::from(project.root_path))
+        .filter(|root| root.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
+    // Kept apart from the project's own summaries, whose numbers this one's would collide with:
+    // the key is the link.
+    forge
+        .summary(&format!("tracked:{}", row.url), row.number, refresh, || {
+            gh.pull_request_summary_at(&root, &row.url, super::pull_requests::SUMMARY_LIMIT)
+        })
+        .map_err(failed)
 }
 
 #[cfg(test)]
@@ -413,5 +428,79 @@ mod tests {
         let last = listed.last().unwrap();
         assert!(last.pull_request.is_none());
         assert!(last.problem.as_deref().unwrap().contains("at most"));
+    }
+
+    /// Archiving removes a workspace's folder and keeps its row, and its tracked pull requests
+    /// still show; reading one must not need the folder.
+    #[cfg(unix)]
+    #[test]
+    fn an_archived_workspace_s_tracked_pull_request_can_still_be_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+        let checkout = dir.path().join("app");
+        std::fs::create_dir(&checkout).unwrap();
+        let project = store
+            .add_project("app", checkout.to_str().unwrap())
+            .unwrap();
+        let folder = dir.path().join("wt-fix");
+        std::fs::create_dir(&folder).unwrap();
+        let workspace = store
+            .add_worktree(
+                &project.id,
+                "fix",
+                folder.to_str().unwrap(),
+                Some("ys/fix"),
+                Some("main"),
+            )
+            .unwrap();
+        let url = "https://github.com/o/lib/pull/7";
+        let (tracked, _) = store
+            .track_pull_request(&crate::store::NewTrackedPullRequest {
+                workspace_id: &workspace.id,
+                session_id: None,
+                repo: "github.com/o/lib",
+                number: 7,
+                url,
+                tracked_by: "cli",
+            })
+            .unwrap();
+        // What archiving leaves: the row, marked so, and no folder.
+        std::fs::remove_dir(&folder).unwrap();
+        assert!(store.set_workspace_archived(&workspace.id, true).unwrap());
+
+        let script = dir.path().join("gh");
+        let asked = dir.path().join("asked");
+        let answer = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/core/fixtures/gh/2.102.0/pr-view.json");
+        yardsort_core::program::testing::executable(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{}'\ncat '{}'\n",
+                asked.display(),
+                answer.display()
+            ),
+        );
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let gh = Gh::at(script, &env);
+
+        let summary = summary_of(
+            &store,
+            &Forge::default(),
+            &gh,
+            &workspace.id,
+            &tracked.id,
+            false,
+        )
+        .unwrap();
+        assert!(summary.pull_request.number > 0);
+        let asked = std::fs::read_to_string(&asked).unwrap();
+        assert!(
+            asked.starts_with(&format!("pr view {url} --json ")),
+            "{asked}"
+        );
     }
 }

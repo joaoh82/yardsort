@@ -95,16 +95,17 @@ export function pullRequestsFor(
 
 /** A pull request a workspace shows: its project's own, or one it follows in another repository. */
 export interface ShownPullRequest {
-  /** Unique among a workspace's: `#7` for the project's own, `owner/name#7` for one elsewhere. */
+  /** Unique among a workspace's: `#7` for the project's own, its link for one elsewhere — two
+   *  hosts can each have an `owner/name#7`. */
   key: string;
   pr: PullRequest;
   /** Set for one tracked in another repository: its number means nothing without it. */
   tracked: TrackedPullRequest | null;
 }
 
-/** `owner/name#7`, or `#7` for the project's own. */
+/** The tracked one's canonical link, or `#7` for the project's own. */
 export const shownKey = (pr: PullRequest, tracked: TrackedPullRequest | null) =>
-  tracked ? `${tracked.repo.owner}/${tracked.repo.name}#${pr.number}` : `#${pr.number}`;
+  tracked ? tracked.url : `#${pr.number}`;
 
 /**
  * The pull requests a workspace follows in other repositories that have been read, newest

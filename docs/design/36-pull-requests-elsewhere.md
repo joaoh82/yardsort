@@ -138,9 +138,11 @@ checkout as a working folder. Measured: 0.5 s for one pull request.
   in slice 4; until then **Code** says so and links to the diff on GitHub.
 - **Track pull request…** is in the workspace's menu in the sidebar: a link, and **Track**. A
   refusal stays in the dialog.
-- **One that was never read** has no row to show it on, so the Pull requests view says so above
-  the rows — `alpha: demo/lib#7, tracked with feature, could not be read: …` — with **Retry**
-  and **Stop tracking**.
+- **One that could not be read** is said so above the Pull requests view's rows, with **Retry**
+  and **Stop tracking**:
+  `alpha: demo/lib#7, tracked with feature, could not be read: …`. One that was never read has
+  no row to show it on; one read before keeps its row, with what was known then, and the line
+  says that is what shows.
 
 Outcomes and workflows still see only the project's own. A workflow that waits on a review
 (`wait_pr_activity`) waits on the workspace's own pull request; slice 5 is the one about that.
@@ -245,9 +247,9 @@ Built 2026-11-09, as proposed above, with these differences and findings:
 - **The project's own list is untouched.** A tracked pull request is not folded into
   `ProjectPullRequests::pull_requests` or the `workspaces` map, whose numbers every action takes
   as the project's: it travels beside them in `tracked`, and the window puts the two together
-  (`shownFor` in `src/stores/publish.ts`), keying one elsewhere as `owner/name#7`. So nothing
-  that merges, closes or resolves conflicts by number can be handed one by mistake; the toolbar's
-  merge returns early for one as well.
+  (`shownFor` in `src/stores/publish.ts`), keying one elsewhere by its link, since two hosts can
+  each have an `owner/name#7`. So nothing that merges, closes or resolves conflicts by number
+  can be handed one by mistake; the toolbar's merge returns early for one as well.
 - **Read by link, with no `-R`.** `gh pr view <url>` was checked against a real pull request in
   a nested clone's repository, from a folder that is not a repository at all: every field the
   list asks for, 0.5 s. So the reader is `Gh::pull_request_at`, and the Summary is
@@ -256,7 +258,10 @@ Built 2026-11-09, as proposed above, with these differences and findings:
 - **Its Summary is kept apart.** `Forge::summary` is keyed by project and number; a tracked one is
   kept under `tracked:<link>` so a #7 elsewhere is never served as the project's #7.
 - **A link that cannot be read** needed somewhere to say so, since every surface draws a row from
-  a pull request as read — the notice line above the view's rows.
+  a pull request as read — the notice line above the view's rows. A refresh that fails after a
+  read that worked says so there too: the row's checks and reviews are then the old ones.
+- **Its Summary needs no folder.** Archiving removes a workspace's folder and keeps its row, and
+  its tracked pull requests still show, so the Summary reads the workspace's row, not its folder.
 - **The CLI looks at the launch environment first.** An agent that opened its pull request in a
   nested clone is standing outside its worktree — in the project's main checkout, which is the
   `local` workspace's folder — so the folder would name the wrong workspace. The run or workspace
@@ -269,9 +274,10 @@ How it was checked: the store, the link rules, the refusals and the launch secti
 tests against real repositories; `ys pr` end to end with the real binary and a real database;
 the cache with unit tests; the window through Testing Library — the row's badge, the dialog and
 its refusal, the toolbar's menu without merge, the view's row beside the project's own #7, the
-Summary read by link, **Code**'s link to GitHub, the unread notice and **Stop tracking** from
-each place. Not yet done: the app by hand against a real nested clone, and the three systems'
-hands-on pass.
+Summary read by link — also once the workspace is archived — **Code**'s link to GitHub, the
+unread notice, before and after a first read, two hosts with the same `owner/name#7` in the
+toolbar, and **Stop tracking** from each place. Not yet done: the app by hand against a real
+nested clone, and the three systems' hands-on pass.
 
 ## Documentation this touches
 

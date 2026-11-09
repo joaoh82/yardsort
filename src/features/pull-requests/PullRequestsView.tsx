@@ -401,17 +401,21 @@ function Notices({
     }
     return [];
   }
-  /** A pull request a workspace tracks that `gh` has never managed to read: a mistyped link, or
-   *  a repository this login cannot see. It has no row to say so on. */
+  /** A pull request a workspace tracks that `gh` could not read on the last look. Never read — a
+   *  mistyped link, or a repository this login cannot see — it has no row to say so on. Read
+   *  before, its row shows what was known then, and nothing on it says that is old. */
   function unreadTracked(project: Project, found: ProjectPullRequests) {
     return found.tracked
-      .filter((tracked) => !tracked.pullRequest && tracked.problem)
+      .filter((tracked) => tracked.problem)
       .map((tracked) => {
         const workspace = project.workspaces.find((w) => w.id === tracked.workspaceId);
         return (
           <Notice key={tracked.id} alert>
             <b>{project.name}</b>: {tracked.repo.owner}/{tracked.repo.name}#{tracked.number}
-            {workspace ? `, tracked with ${workspace.name},` : ""} could not be read:{" "}
+            {workspace ? `, tracked with ${workspace.name},` : ""}{" "}
+            {tracked.pullRequest
+              ? "could not be read again, so what shows is from the last time it was:"
+              : "could not be read:"}{" "}
             <span className="select-text">{tracked.problem}</span>
             <button
               type="button"

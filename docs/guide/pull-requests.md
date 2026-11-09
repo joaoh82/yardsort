@@ -51,6 +51,11 @@ tracking**, **Open on GitHub** and **Copy link**. **Merge**, **Close**, **Reopen
 box and the **Code** tab are not there for one in another repository yet: **Code** says so and
 links to its diff on GitHub.
 
+When one cannot be read — a mistyped link, a repository your `gh` login cannot see, GitHub not
+answering — a line above the rows says so and why, with **Retry** and **Stop tracking**. One
+that was read before keeps its row, with what was known then: its checks and reviews may be out
+of date until it reads again.
+
 ### What is in it
 
 Every **open** pull request of each repository, up to the 200 most recently updated, and the 50

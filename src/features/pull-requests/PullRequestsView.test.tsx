@@ -718,6 +718,23 @@ describe("a pull request a workspace tracks in another repository", () => {
     expect(core.workspaceUntrackPullRequest).toHaveBeenCalledWith(feature.id, "t-7");
   });
 
+  it("says so when one read before could not be read again, beside what was known", async () => {
+    const user = show(withTracked());
+    expect(row(/Bump the client/)).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    core.projectPullRequests.mockImplementation(async (id: string) =>
+      id === alpha.id
+        ? { ...answers()[alpha.id]!, tracked: [{ ...elsewhere, problem: "HTTP 502" }] }
+        : answers()[id],
+    );
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(
+      "alpha: demo/lib#7, tracked with feature, could not be read again, so what shows is from the last time it was: HTTP 502",
+    );
+    expect(row(/Bump the client/)).toBeVisible();
+  });
+
   it("can stop being tracked from its details", async () => {
     const user = show(withTracked());
     await user.click(row(/Bump the client/));

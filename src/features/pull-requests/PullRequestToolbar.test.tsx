@@ -380,6 +380,35 @@ describe("a pull request tracked in another repository", () => {
     ).toBeInTheDocument();
   });
 
+  it("tells apart two with the same name and number on different hosts", async () => {
+    const enterprise = trackedOf(
+      "w-alpha-feature",
+      { ...pr, number: 7, title: "Bump the client on Enterprise" },
+      {
+        id: "t-ent",
+        repo: { host: "github.example.com", owner: "demo", name: "lib", kind: "github" },
+        url: "https://github.example.com/demo/lib/pull/7",
+      },
+    );
+    enterprise.pullRequest!.url = enterprise.url;
+    const both = { ...found(), tracked: [elsewhere, enterprise] };
+    usePublishStore.setState({ byProject: { alpha: both } });
+    core.projectPullRequests.mockResolvedValue(both);
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: /Actions for pull request #85 — 2 more/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /on Enterprise/ }));
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    expect(screen.getByRole("menuitemradio", { name: /on Enterprise/ })).toBeChecked();
+    await user.click(screen.getByRole("menuitem", { name: "View on GitHub" }));
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.example.com/demo/lib/pull/7");
+
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Stop tracking" }));
+    await waitFor(() =>
+      expect(core.workspaceUntrackPullRequest).toHaveBeenCalledWith("w-alpha-feature", "t-ent"),
+    );
+  });
+
   it("is shown alone when the workspace has nothing of its own", async () => {
     usePublishStore.setState({ byProject: { alpha: { ...found([]), tracked: [elsewhere] } } });
     setup();
