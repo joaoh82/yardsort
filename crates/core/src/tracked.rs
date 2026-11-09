@@ -5,7 +5,7 @@
 //! other repositories — nested clones its agents go into and open pull requests from — has pull
 //! requests that leave no such trace, so they are written down: by an agent through
 //! `ys pr track`, by the user in the app, or (later) by an adapter that saw one being created.
-//! See `docs/design/36-pull-requests-elsewhere.md`.
+//! See `docs/design/38-pull-requests-elsewhere.md`.
 
 use std::path::Path;
 

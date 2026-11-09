@@ -55,6 +55,13 @@ export type ComposingFork = {
   uncommitted: number;
 };
 
+/** What the Triggers view is opened on: a workspace's triggers, or one agent session's. */
+export type TriggersFocus = {
+  workspaceId: string;
+  /** The session record, for an agent tab's own triggers. */
+  sessionId?: string;
+};
+
 /** Outcome of trying to add a folder that may not be a repository yet. */
 export type OpenResult = { status: "added" } | { status: "needs-git" } | { status: "failed" };
 
@@ -82,6 +89,14 @@ interface ProjectsState {
   testsOpen: boolean;
   /** The Schedules view is open in the center panel, which it takes over the same way. */
   schedulesOpen: boolean;
+  /** The Triggers view is open in the center panel, which it takes over the same way. */
+  triggersOpen: boolean;
+  /** Another computer this one reaches as a client, open read-only in the center panel, which it
+   *  takes over the same way. Its id at the server. */
+  remoteHostId: string | null;
+  /** What the Triggers view was opened on: one workspace's triggers, or one agent session's.
+   *  `null` shows every trigger. */
+  triggersFocus: TriggersFocus | null;
   /** The branch the composer should open rather than start from: a pull request's, got ready
    *  by the core. Cleared with the composer. */
   composingBranch: PreparedBranch | null;
@@ -150,6 +165,8 @@ interface ProjectsState {
   openWorkflow: (workflowId: string | null) => void;
   /** Show the Usage view in the center panel, or close it. */
   openUsage: (open: boolean) => void;
+  /** Show another computer's workspaces, or close that with `null`. */
+  openRemoteHost: (hostId: string | null) => void;
   /** Show the Pull requests view in the center panel, or close it. */
   openPullRequests: (open: boolean) => void;
   /** Show the Tasks view in the center panel, or close it. */
@@ -157,6 +174,9 @@ interface ProjectsState {
   openTests: (open: boolean) => void;
   /** Show the Schedules view in the center panel, or close it. */
   openSchedules: (open: boolean) => void;
+  /** Show the Triggers view in the center panel, on one workspace or session if given, or
+   *  close it. */
+  openTriggers: (open: boolean, focus?: TriggersFocus) => void;
   /** Compose a run inside a workspace that already exists, rather than a new one. */
   composeIn: (workspace: Workspace, prompt?: string, harness?: string) => void;
   /** Compose a new workspace forked from `workspace`: a new branch from its branch, in a new
@@ -250,6 +270,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     tasksOpen: false,
     testsOpen: false,
     schedulesOpen: false,
+    triggersOpen: false,
+    remoteHostId: null,
+    triggersFocus: null,
     ui: {},
     collapsed: [],
     lastParentDir: null,
@@ -434,6 +457,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           tasksOpen: false,
           testsOpen: false,
           schedulesOpen: false,
+          triggersOpen: false,
+          remoteHostId: null,
         });
       }
       set({
@@ -451,6 +476,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: false,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
       });
       save(KEYS.selected, workspaceId);
     },
@@ -470,6 +497,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: false,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
         // Composing inside a collapsed project would hide where the workspace will appear.
         collapsed: state.collapsed.filter((id) => id !== projectId),
       }));
@@ -483,6 +512,28 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: false,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+        composingTask: null,
+        composingHarness: null,
+        composingFork: null,
+      });
+    },
+
+    openRemoteHost(hostId) {
+      set({
+        remoteHostId: hostId,
+        usageOpen: false,
+        pullRequestsOpen: false,
+        tasksOpen: false,
+        testsOpen: false,
+        schedulesOpen: false,
+        triggersOpen: false,
+        workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
         composingPrompt: null,
@@ -500,6 +551,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: false,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
         workflowId: null,
         composingProjectId: null,
         composingWorkspaceId: null,
@@ -517,6 +570,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: false,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
         usageOpen: false,
         workflowId: null,
         composingProjectId: null,
@@ -534,6 +589,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: open,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
         pullRequestsOpen: false,
         usageOpen: false,
         workflowId: null,
@@ -551,6 +608,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
       set({
         testsOpen: open,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
         tasksOpen: false,
         pullRequestsOpen: false,
         usageOpen: false,
@@ -568,6 +627,29 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
     openSchedules(open) {
       set({
         schedulesOpen: open,
+        triggersOpen: false,
+        remoteHostId: null,
+        testsOpen: false,
+        tasksOpen: false,
+        pullRequestsOpen: false,
+        usageOpen: false,
+        workflowId: null,
+        composingProjectId: null,
+        composingWorkspaceId: null,
+        composingPrompt: null,
+        composingBranch: null,
+        composingTask: null,
+        composingHarness: null,
+        composingFork: null,
+      });
+    },
+
+    openTriggers(open, focus) {
+      set({
+        triggersOpen: open,
+        remoteHostId: null,
+        triggersFocus: (open && focus) || null,
+        schedulesOpen: false,
         testsOpen: false,
         tasksOpen: false,
         pullRequestsOpen: false,
@@ -599,6 +681,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: false,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
       });
       save(KEYS.selected, workspace.id);
     },
@@ -637,6 +721,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
         tasksOpen: false,
         testsOpen: false,
         schedulesOpen: false,
+        triggersOpen: false,
+        remoteHostId: null,
         collapsed: state.collapsed.filter((id) => id !== workspace.projectId),
       }));
       return true;
@@ -644,7 +730,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
 
     async createWorkspace(request) {
       try {
-        const { workspace, session } = await ipc.workspaceCreate(request);
+        const { workspace, session, refusedPresets } = await ipc.workspaceCreate(request);
         set((state) => ({
           projects: state.projects.map((project) =>
             project.id === workspace.projectId
@@ -653,6 +739,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => {
           ),
           selectedWorkspaceId: workspace.id,
           composingProjectId: null,
+          // The workspace and its agent started; a ticked preset that was refused is said.
+          ...(refusedPresets.length > 0 ? { error: refusedPresets.join(" ") } : {}),
         }));
         save(KEYS.selected, workspace.id);
         return session;

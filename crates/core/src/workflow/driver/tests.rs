@@ -213,6 +213,9 @@ impl Fixture {
                 inputs: &inputs,
                 requested_by: "cli",
                 unattended: false,
+                origin_record: None,
+                depth: 0,
+                event: None,
             },
             &crate::workflow::runs::Accepting::default(),
         )
@@ -523,6 +526,107 @@ fn the_workspaces_own_agent_is_told_not_a_shell_and_not_the_runs_own_reviewer() 
         !fx.hands.kept.exists(),
         "the reviewer the run started, the newest agent of all, was not told either"
     );
+}
+
+/// Tells the workspace's own agent, and nothing else.
+const TELL_ORIGIN: &str = r#"id: tell-origin
+name: Tell origin
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: tell
+    action: send_to_session
+    session: origin
+    prompt: "{{ event.note }}"
+    timeout: 1m
+"#;
+
+/// A session trigger asks on behalf of one agent: that agent is `origin`, though a newer one
+/// is running in the same workspace.
+#[test]
+fn a_run_asked_for_on_behalf_of_one_agent_tells_that_one_and_not_the_newest() {
+    let fx = Fixture::new();
+    let folder = crate::workflow::user_dir(fx.dir.path());
+    std::fs::write(folder.join("tell-origin.yaml"), TELL_ORIGIN).unwrap();
+    let agent = |record: &str, heard: &std::path::Path| {
+        let session = fx
+            .host
+            .spawn(LaunchPlan {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), LISTENER.into()],
+                cwd: None,
+                env: vec![("HEARD".into(), heard.display().to_string())],
+                clear_env: false,
+                size: TermSize { cols: 80, rows: 24 },
+                labels: [
+                    (WORKSPACE_LABEL, fx.workspace_id.as_str()),
+                    (crate::launch::HARNESS_LABEL, "claude"),
+                    (crate::launch::RECORD_LABEL, record),
+                ]
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+                prompt: None,
+            })
+            .unwrap();
+        fx.store
+            .add_session(&crate::store::NewSession {
+                id: record,
+                workspace_id: &fx.workspace_id,
+                harness_id: "claude",
+                model: None,
+                effort: None,
+                harness_session_id: None,
+                title: record,
+                forked_from: None,
+                pty_session_id: &session.id.0,
+                prompt: None,
+            })
+            .unwrap();
+        session
+    };
+    let older_heard = fx.dir.path().join("older.txt");
+    let older = agent("record-older", &older_heard);
+    std::thread::sleep(Duration::from_millis(5));
+    let newer_heard = fx.dir.path().join("newer.txt");
+    agent("record-newer", &newer_heard);
+
+    let event = BTreeMap::from([("note".to_owned(), "your review is in".to_owned())]);
+    let run = queue(
+        &fx.store,
+        fx.dir.path(),
+        &Request {
+            workflow_id: "tell-origin",
+            workspace_id: &fx.workspace_id,
+            inputs: &BTreeMap::new(),
+            requested_by: "app",
+            unattended: false,
+            origin_record: Some("record-older"),
+            depth: 1,
+            event: Some(&event),
+        },
+        &crate::workflow::runs::Accepting::default(),
+    )
+    .unwrap();
+    let mut fx = fx;
+    fx.until("the run ends", |fx| {
+        !fx.store.workflow_run(&run).unwrap().unwrap().active()
+    });
+    assert_eq!(
+        fx.run_status(&run),
+        "succeeded",
+        "{:?}",
+        fx.store.workflow_steps(&run)
+    );
+    let facts = Facts::parse(&fx.store.workflow_run(&run).unwrap().unwrap().context);
+    assert_eq!(facts.origin.as_deref(), Some(older.id.0.as_str()));
+    assert_eq!(facts.depth, 1);
+    assert_eq!(
+        std::fs::read_to_string(&older_heard).unwrap(),
+        "your review is in"
+    );
+    assert!(!newer_heard.exists(), "the newer agent was not told");
 }
 
 /// A workflow's message is not the person here typing: it never takes control from someone

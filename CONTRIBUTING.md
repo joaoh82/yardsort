@@ -136,6 +136,10 @@ server yourself is [crates/server/self-host/README.md](crates/server/self-host/R
 slice of the server ends with a smoke test a person runs, locally and on staging:
 [27 §19](docs/design/27-remote-r2.md#19--smoke-tests).
 
+To try the headless host on a real Linux server, with your phone, `scripts/test-box.sh` makes a
+throwaway one on Hetzner Cloud, builds your checkout there, and deletes it when you are done:
+[A test box for Remote](docs/test-box.md).
+
 ## Making a change
 
 1. Branch from `main`.

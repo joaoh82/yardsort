@@ -1,6 +1,6 @@
 //! Pull requests a workspace follows in other repositories, read and kept beside the project's
 //! own. What is tracked is the store's (`yardsort_core::tracked`); this reads each one by its
-//! link and keeps the answer. See `docs/design/36-pull-requests-elsewhere.md`.
+//! link and keeps the answer. See `docs/design/38-pull-requests-elsewhere.md`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -1812,6 +1812,80 @@ fn a_run_is_refused_while_yardsort_is_closed_and_nothing_is_queued() {
     assert_eq!(listed.trim(), "[]");
 }
 
+/// On a computer with no screen, `yardsort-host` holds the profile, and nothing would carry a run
+/// out: refused, rather than queued for nobody.
+#[test]
+fn nothing_is_queued_while_a_headless_host_holds_the_profile() {
+    use yardsort_core::presence::{AppLock, Holder};
+    let fx = Fixture::new();
+    write_workflow(&fx, "ping.yaml", PING);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let _host = AppLock::take_as(&fx.data_dir, Holder::Host)
+        .unwrap()
+        .expect("nobody else holds it");
+    let error = fx
+        .ys(&["workflow", "run", "ping", "--workspace", name])
+        .failed();
+    assert!(
+        error.contains("This host does not run workflows"),
+        "{error}"
+    );
+    assert!(error.contains("Nothing was queued"), "{error}");
+    assert_eq!(fx.ys(&["workflow", "runs", "--json"]).ok().trim(), "[]");
+
+    let added = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "workspace.done",
+            "--workflow",
+            "ping",
+            "--workspace",
+            name,
+        ])
+        .ok();
+    assert!(added.contains("does not fire triggers yet"), "{added}");
+    assert!(!added.contains("Yardsort is not running"), "{added}");
+}
+
+#[test]
+fn a_project_is_added_by_its_folder_and_a_folder_inside_adds_the_repository() {
+    let fx = Fixture::new();
+    let code = tempfile::tempdir().unwrap();
+    let repo = normalize(code.path()).join("widget");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    let git = fx.git();
+    git.init(&repo).unwrap();
+    git.initial_commit(&repo).unwrap();
+
+    let added: serde_json::Value = serde_json::from_str(
+        &fx.ys(&[
+            "project",
+            "add",
+            &repo.join("src").to_string_lossy(),
+            "--json",
+        ])
+        .ok(),
+    )
+    .unwrap();
+    assert_eq!(added["name"], "widget");
+    assert_eq!(added["path"], repo.to_string_lossy().as_ref());
+    assert_eq!(added["already_known"], false);
+    let listed = fx.ys(&["project", "list"]).ok();
+    assert!(listed.contains("widget"), "{listed}");
+
+    let again = fx.ys(&["project", "add", &repo.to_string_lossy()]).ok();
+    assert!(again.contains("already a project"), "{again}");
+
+    let plain = tempfile::tempdir().unwrap();
+    let refused = fx
+        .ys(&["project", "add", &plain.path().to_string_lossy()])
+        .failed();
+    assert!(refused.contains("not a git repository"), "{refused}");
+}
+
 #[test]
 fn a_run_is_queued_followed_and_cancelled_while_the_app_holds_its_lock() {
     let fx = Fixture::new();
@@ -3377,7 +3451,7 @@ fn an_agent_tracks_a_pull_request_it_opened_in_another_repository() {
     assert!(again.contains("tracked with"), "{again}");
 
     let listed: serde_json::Value =
-        serde_json::from_str(&as_agent(&["pr", "list", "--json"]).ok()).unwrap();
+        serde_json::from_str(&as_agent(&["pr", "tracked", "--json"]).ok()).unwrap();
     assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
     assert_eq!(listed[0]["repo"], "github.com/o/lib");
     assert_eq!(listed[0]["number"], 7);
@@ -3413,7 +3487,656 @@ fn an_agent_tracks_a_pull_request_it_opened_in_another_repository() {
     as_agent(&["pr", "untrack", "https://github.com/o/lib/pull/7"]).ok();
     let gone = as_agent(&["pr", "untrack", "https://github.com/o/lib/pull/7"]).failed();
     assert!(gone.contains("is not tracked with"), "{gone}");
-    let left = as_agent(&["pr", "list"]).ok();
+    let left = as_agent(&["pr", "tracked"]).ok();
     assert!(left.contains("https://github.com/o/lib/pull/8"), "{left}");
     assert!(!left.contains("/pull/7"), "{left}");
+}
+
+/// Tells the user what the agent said when it was done.
+const TELL: &str = "id: tell
+name: Tell
+version: 1
+trigger:
+  kind: manual
+steps:
+  - id: tell
+    action: notify
+    title: \"Done: {{ event.note }}\"
+";
+
+#[test]
+fn a_trigger_is_added_listed_shown_paused_resumed_and_removed() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+
+    let empty = fx.ys(&["trigger", "list"]).ok();
+    assert!(empty.contains("No triggers"), "{empty}");
+
+    let json = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "workspace.done",
+            "--workflow",
+            "tell",
+            "--workspace",
+            name,
+            "--quiet",
+            "30s",
+            "--json",
+        ])
+        .ok();
+    let added: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(added["name"], "Tell", "named after what it runs");
+    assert_eq!(added["events"], serde_json::json!(["workspace.done"]));
+    assert_eq!(added["quietMs"], 30_000);
+    assert_eq!(added["cap"], 3);
+    assert_eq!(added["standing"], "listening");
+    assert_eq!(
+        added["when"],
+        "When an agent says its work is done, run the workflow `tell`"
+    );
+    let id = added["id"].as_str().unwrap().to_owned();
+
+    let table = fx.ys(&["trigger", "list"]).ok();
+    assert!(table.contains("workspace.done"), "{table}");
+    assert!(table.contains("workflow tell"), "{table}");
+    assert!(
+        table.contains("Yardsort is not running. Triggers fire while it is open."),
+        "{table}"
+    );
+
+    let shown = fx.ys(&["trigger", "show", "tell"]).ok();
+    assert!(shown.contains("Waits 30s after the last event"), "{shown}");
+    assert!(shown.contains("It is on."), "{shown}");
+
+    let off = fx.ys(&["trigger", "pause", "Tell"]).ok();
+    assert!(off.contains("is off"), "{off}");
+    let listed: serde_json::Value =
+        serde_json::from_str(&fx.ys(&["trigger", "list", "--json"]).ok()).unwrap();
+    assert_eq!(listed[0]["standing"], "off");
+    let on = fx.ys(&["trigger", "resume", "Tell"]).ok();
+    assert!(on.contains("is on, from now"), "{on}");
+
+    let history = fx.ys(&["trigger", "fires", "Tell"]).ok();
+    assert!(history.contains("has not fired yet"), "{history}");
+
+    let removed = fx.ys(&["trigger", "remove", &id[..8]]).ok();
+    assert!(removed.contains("Removed `Tell`"), "{removed}");
+    let gone = fx.ys(&["trigger", "show", "Tell"]).failed();
+    assert!(gone.contains("There are no triggers"), "{gone}");
+}
+
+#[test]
+fn a_trigger_is_refused_for_what_is_wrong_with_it_and_nothing_is_written() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let refused = |extra: &[&str], wanted: &str| {
+        let mut args = vec!["trigger", "add", "--workspace", name];
+        args.extend_from_slice(extra);
+        let error = fx.ys(&args).failed();
+        assert!(error.contains(wanted), "{args:?}: {error}");
+    };
+    refused(
+        &["--on", "pr.approved", "--workflow", "tell"],
+        "There is no event `pr.approved`",
+    );
+    refused(
+        &["--preset", "review-when-done"],
+        "Who reviews? Say with `--input reviewer=…`",
+    );
+    refused(
+        &["--on", "pr.review", "--workflow", "tell"],
+        "`pr.review` does not leave",
+    );
+    refused(
+        &["--on", "workspace.done", "--workflow", "nothing"],
+        "There is no workflow `nothing`",
+    );
+    refused(
+        &[
+            "--on",
+            "workspace.done",
+            "--new-commits",
+            "--workflow",
+            "tell",
+        ],
+        "which this trigger does not listen for",
+    );
+    refused(
+        &["--on", "agent.settled", "--workflow", "tell"],
+        "`agent.settled` does not leave",
+    );
+    refused(
+        &[
+            "--on",
+            "agent.settled",
+            "--on",
+            "workspace.done",
+            "--workflow",
+            "tell",
+        ],
+        "cannot share a trigger",
+    );
+    let listed = fx.ys(&["trigger", "list", "--json"]).ok();
+    assert_eq!(listed.trim(), "[]");
+}
+
+#[test]
+fn done_is_written_down_for_the_app_and_says_whether_anything_listens() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+
+    let unheard = fx
+        .ys_from(Some(&path), &["workspace", "done", "--note", "first"])
+        .ok();
+    assert!(
+        unheard.contains(&format!("the work in {name} is done")),
+        "{unheard}"
+    );
+    assert!(unheard.contains("No trigger"), "{unheard}");
+
+    fx.ys(&[
+        "trigger",
+        "add",
+        "--on",
+        "workspace.done",
+        "--workflow",
+        "tell",
+        "--workspace",
+        name,
+    ])
+    .ok();
+    let json = fx
+        .ys_from(
+            Some(&path),
+            &["workspace", "done", "--note", "tests added", "--json"],
+        )
+        .ok();
+    let said: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(said["heard"], true);
+    assert_eq!(said["note"], "tests added");
+    assert!(
+        said["head"].as_str().is_some_and(|h| h.len() == 40),
+        "{said}"
+    );
+
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let signals = store.done_signals_after(0, 10).unwrap();
+    assert_eq!(signals.len(), 2);
+    assert_eq!(signals[1].note.as_deref(), Some("tests added"));
+    assert_eq!(signals[1].head.as_deref(), said["head"].as_str());
+}
+
+#[test]
+fn a_custom_event_is_raised_for_the_triggers_that_listen_for_its_name() {
+    let fx = Fixture::new();
+    write_workflow(&fx, "tell.yaml", TELL);
+    let made = make_workspace(&fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+
+    let unheard = fx
+        .ys_from(Some(&path), &["event", "emit", "migration-written"])
+        .ok();
+    assert!(
+        unheard.contains(&format!("Raised `custom.migration-written` in {name}")),
+        "{unheard}"
+    );
+    assert!(unheard.contains("No trigger"), "{unheard}");
+
+    // A name that does not fit is refused when listened for, and when raised.
+    let bad = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "custom.Migration",
+            "--workflow",
+            "tell",
+            "--workspace",
+            name,
+        ])
+        .failed();
+    assert!(bad.contains("`migration` would do"), "{bad}");
+    let bad = fx
+        .ys_from(Some(&path), &["event", "emit", "two words"])
+        .failed();
+    assert!(bad.contains("cannot be an event's name"), "{bad}");
+
+    let added = fx
+        .ys(&[
+            "trigger",
+            "add",
+            "--on",
+            "custom.migration-written",
+            "--workflow",
+            "tell",
+            "--workspace",
+            name,
+            "--json",
+        ])
+        .ok();
+    let added: serde_json::Value = serde_json::from_str(&added).unwrap();
+    assert_eq!(
+        added["events"],
+        serde_json::json!(["custom.migration-written"])
+    );
+    assert_eq!(
+        added["when"],
+        "When `custom.migration-written` is raised, run the workflow `tell`"
+    );
+
+    // A typo is told what is listened for instead.
+    let typo = fx
+        .ys_from(Some(&path), &["event", "emit", "migration-writen"])
+        .ok();
+    assert!(
+        typo.contains("They listen for: `custom.migration-written`"),
+        "{typo}"
+    );
+
+    // `custom.` in front is taken too, as a trigger is written.
+    let json = fx
+        .ys_from(
+            Some(&path),
+            &[
+                "event",
+                "emit",
+                "custom.migration-written",
+                "--note",
+                "0042 adds the column",
+                "--json",
+            ],
+        )
+        .ok();
+    let raised: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(raised["heard"], true);
+    assert_eq!(raised["event"], "custom.migration-written");
+    assert!(
+        raised["head"].as_str().is_some_and(|h| h.len() == 40),
+        "{raised}"
+    );
+
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let rows = store.custom_events_after(0, 10).unwrap();
+    assert_eq!(
+        rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+        ["migration-written", "migration-writen", "migration-written"]
+    );
+    assert_eq!(rows[2].note.as_deref(), Some("0042 adds the column"));
+    assert_eq!(rows[2].run_id, None);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_preset_watches_the_pull_request_from_what_is_on_it_when_it_is_added() {
+    let tasks = Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some(
+            "case \"$*\" in\n\
+             *'pr list'*) cat \"$here/list.json\" ;;\n\
+             *graphql*) cat \"$here/look.json\" ;;\nesac",
+        ),
+    );
+    let presets = tasks.ys(None, &["trigger", "presets"]).ok();
+    assert!(
+        presets.contains("address-reviews — Address reviews"),
+        "{presets}"
+    );
+    assert!(presets.contains("--input reviewer=…"), "{presets}");
+
+    let made = make_workspace(&tasks.fx, "task");
+    let name = made["name"].as_str().unwrap();
+    let branch = made["branch"].as_str().unwrap();
+    let here = tasks.bin.path();
+    std::fs::write(
+        here.join("list.json"),
+        serde_json::json!([{
+            "number": 7, "url": "https://github.com/example/widgets/pull/7", "title": "Fix",
+            "headRefName": branch, "state": "OPEN", "isDraft": false, "statusCheckRollup": []
+        }])
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        here.join("look.json"),
+        serde_json::json!({"data": {"repository": {"pullRequest": {
+            "number": 7, "url": "https://github.com/example/widgets/pull/7", "title": "Fix",
+            "state": "OPEN", "isDraft": false, "headRefName": branch, "headRefOid": "abc",
+            "mergeable": "MERGEABLE", "commits": {"nodes": []},
+            "reviews": {"nodes": [{"databaseId": 1, "state": "COMMENTED",
+                "submittedAt": "2026-11-07T07:51:50Z", "body": "Hm.", "url": "r1",
+                "author": {"__typename": "User", "login": "alice"},
+                "comments": {"totalCount": 0, "nodes": []}}]},
+            "comments": {"nodes": []}
+        }}, "viewer": {"login": "me"}}})
+        .to_string(),
+    )
+    .unwrap();
+
+    let added = tasks
+        .ys(
+            None,
+            &[
+                "trigger",
+                "add",
+                "--preset",
+                "address-reviews",
+                "--workspace",
+                name,
+            ],
+        )
+        .ok();
+    assert!(added.contains("Added `Address reviews`"), "{added}");
+    assert!(
+        added.contains("Watching #7: what is there now is not news"),
+        "{added}"
+    );
+    let listed: serde_json::Value =
+        serde_json::from_str(&tasks.ys(None, &["trigger", "list", "--json"]).ok()).unwrap();
+    assert_eq!(
+        listed[0]["events"],
+        serde_json::json!(["pr.review", "pr.comment"])
+    );
+    assert_eq!(
+        listed[0]["quietMs"], 120_000,
+        "two minutes, for a burst of posts"
+    );
+    assert_eq!(listed[0]["target"], "workflow");
+    assert_eq!(listed[0]["targetId"], "address-review");
+
+    let store = Store::open(&tasks.fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = listed[0]["workspaceId"].as_str().unwrap();
+    let watch = store.pr_watch(workspace).unwrap().unwrap();
+    assert!(watch.seeded);
+    assert_eq!(watch.number, Some(7));
+    assert!(watch.seen.contains("review:1"), "{watch:?}");
+    assert!(
+        tasks
+            .asked()
+            .iter()
+            .any(|asked| asked.contains("api graphql")),
+        "{:?}",
+        tasks.asked()
+    );
+}
+
+/// On GitHub, with a `gh` that has the recorded open pull requests, two pages of them.
+#[cfg(unix)]
+fn pull_requests() -> Tasks {
+    Tasks::new(
+        Some("git@github.com:example/widgets.git"),
+        Some(
+            "case \"$*\" in\n\
+             *pullRequests*after=*) cat \"$fixtures/open-page-2.json\" ;;\n\
+             *pullRequests*) cat \"$fixtures/open-page-1.json\" ;;\n\
+             *) echo \"not recorded: $*\" >&2; exit 1 ;;\nesac",
+        ),
+    )
+}
+
+#[cfg(unix)]
+fn numbers(json: &str) -> Vec<u64> {
+    let parsed: serde_json::Value = serde_json::from_str(json).expect("valid JSON");
+    parsed
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|pr| pr["number"].as_u64().unwrap())
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn open_pull_requests_are_listed_from_every_page_with_what_needs_attention() {
+    let prs = pull_requests();
+    let table = prs.ys(None, &["pr", "list"]).ok();
+    let lines: Vec<&str> = table.lines().collect();
+    assert!(lines[0].starts_with("PROJECT  PR"), "{table}");
+    assert_eq!(lines.len(), 8, "a heading and seven pull requests: {table}");
+    assert!(
+        table.contains("#13506  open   changes requested"),
+        "{table}"
+    );
+    let asked = prs.asked();
+    assert_eq!(asked.len(), 2, "two pages: {asked:?}");
+    assert!(asked[1].contains("after="), "{asked:?}");
+
+    // Failing checks, conflicts, changes asked for, a review asked of you, or none at all.
+    let json = prs.ys(None, &["pr", "list", "--attention", "--json"]).ok();
+    assert_eq!(numbers(&json), [14572, 13506, 13947]);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed[0]["attention"], serde_json::json!(["unreviewed"]));
+    assert_eq!(
+        parsed[1]["attention"],
+        serde_json::json!(["changesRequested"])
+    );
+    assert_eq!(parsed[2]["attention"], serde_json::json!(["conflicts"]));
+    assert_eq!(parsed[0]["viewer"], "ada");
+}
+
+#[cfg(unix)]
+#[test]
+fn pull_requests_are_narrowed_by_the_pull_request_views_review_rules() {
+    let prs = pull_requests();
+    let list = |args: &[&str]| {
+        let mut all = vec!["pr", "list", "--json"];
+        all.extend_from_slice(args);
+        numbers(&prs.ys(None, &all).ok())
+    };
+    assert_eq!(list(&["--reviews", "none"]), [14572, 14044]);
+    assert_eq!(list(&["--reviews", "approved"]), [13665]);
+    assert_eq!(list(&["--reviews", "changes"]), [13506]);
+    // "ada" is who gh is logged in as: her own pull request is not one she failed to review.
+    assert_eq!(
+        list(&["--reviews", "not-by-me"]),
+        [14578, 14572, 14044, 13665, 13506, 14017]
+    );
+    assert_eq!(list(&["--author", "@me"]), [13947]);
+    assert_eq!(list(&["--author", "Frances"]), [13506]);
+    assert_eq!(list(&["--no-drafts"]), [14572, 13665, 13506]);
+    assert_eq!(list(&["--limit", "2"]), [14578, 14572]);
+    let none = prs
+        .ys(None, &["pr", "list", "--reviews", "awaiting-me"])
+        .ok();
+    assert_eq!(none.trim(), "No open pull requests match.");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pull_request_with_a_workspace_says_which() {
+    let prs = pull_requests();
+    let fx = &prs.fx;
+    fx.git().run(&fx.repo, &["branch", "branch-14572"]).unwrap();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let project = store.projects().unwrap().remove(0);
+    let git = fx.git();
+    let settings = WorkspaceSettings::default();
+    Workspaces {
+        env: &ShellEnv {
+            vars: std::env::vars().collect(),
+            source: EnvSource::Process,
+            warning: None,
+        },
+        store: &store,
+        git: &git,
+        worktree_root: &fx.worktree_root,
+        settings: &settings,
+    }
+    .open_branch(&project.id, "branch-14572")
+    .unwrap();
+
+    let table = prs.ys(None, &["pr", "list"]).ok();
+    assert!(
+        table.contains("Add a retry to the uploader (in branch-14572)"),
+        "{table}"
+    );
+    let json = prs.ys(None, &["pr", "list", "--json"]).ok();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed[1]["workspace"], "branch-14572");
+    assert_eq!(parsed[0]["workspace"], serde_json::Value::Null);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_project_not_on_github_is_said_and_the_rest_still_listed() {
+    let prs = Tasks::new(None, Some("echo \"not asked: $*\" >&2; exit 1"));
+    let run = prs.ys(None, &["pr", "list"]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(run.stdout.trim(), "No open pull requests.");
+    assert!(
+        run.stderr.contains("Demo: no remote on GitHub"),
+        "{}",
+        run.stderr
+    );
+    assert!(
+        prs.asked().is_empty(),
+        "gh was not asked: {:?}",
+        prs.asked()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn listing_pull_requests_without_gh_says_how_to_get_it() {
+    let prs = Tasks::new(Some("git@github.com:example/widgets.git"), None);
+    let refused = prs.ys(None, &["pr", "list"]).failed();
+    assert!(refused.contains("https://cli.github.com"), "{refused}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pull_request_is_checked_out_into_a_workspace_once() {
+    let remote = tempfile::tempdir().unwrap();
+    let git = git();
+    git.run(remote.path(), &["init", "--bare", "-q"]).unwrap();
+    let prs = Tasks::new(
+        Some(&remote.path().to_string_lossy()),
+        Some(
+            "case \"$*\" in\n\
+             'pr view 13665 '*) cat \"$fixtures/pr-view.json\" ;;\n\
+             *) echo \"not recorded: $*\" >&2; exit 1 ;;\nesac",
+        ),
+    );
+    let fx = &prs.fx;
+    // Their branch is on the remote and not here.
+    git.run(
+        &fx.repo,
+        &["push", "-q", "origin", "HEAD:refs/heads/branch-13665"],
+    )
+    .unwrap();
+    assert!(!git.branch_exists(&fx.repo, "branch-13665").unwrap());
+
+    let json = prs
+        .ys(
+            None,
+            &["pr", "checkout", "#13665", "--project", "Demo", "--json"],
+        )
+        .ok();
+    let made: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(made["existing"], false);
+    assert_eq!(made["fork"], false);
+    assert_eq!(made["branch"], "branch-13665");
+    assert_eq!(made["pullRequest"], 13665);
+    let path = PathBuf::from(made["path"].as_str().unwrap());
+    assert!(
+        path.join(".git").exists(),
+        "a worktree at {}",
+        path.display()
+    );
+    assert_eq!(
+        git.run(&path, &["branch", "--show-current"])
+            .unwrap()
+            .trim(),
+        "branch-13665"
+    );
+
+    // Asked again, the same workspace, and nothing new is made.
+    let again = prs
+        .ys(None, &["pr", "checkout", "13665", "--project", "Demo"])
+        .ok();
+    assert!(
+        again.starts_with("#13665 is already in branch-13665"),
+        "{again}"
+    );
+    assert!(
+        again.contains("ys workflow run code-review --workspace branch-13665"),
+        "{again}"
+    );
+    let listed = fx.ys(&["workspace", "list", "--json"]).ok();
+    let listed: serde_json::Value = serde_json::from_str(&listed).unwrap();
+    assert_eq!(worktrees_in(&listed).len(), 1);
+    assert!(!again.contains("behind"), "{again}");
+
+    // The pull request moves on. The workspace is left as it is, and said to be behind, so a
+    // second review is not quietly run on the old code.
+    let before = git.run(&path, &["rev-parse", "HEAD"]).unwrap();
+    let pushed = git
+        .run(
+            &fx.repo,
+            &["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "One more"],
+        )
+        .unwrap();
+    git.run(
+        &fx.repo,
+        &[
+            "push",
+            "-q",
+            "origin",
+            &format!("{}:refs/heads/branch-13665", pushed.trim()),
+        ],
+    )
+    .unwrap();
+    let moved = prs
+        .ys(
+            None,
+            &["pr", "checkout", "13665", "--project", "Demo", "--json"],
+        )
+        .ok();
+    let moved: serde_json::Value = serde_json::from_str(&moved).unwrap();
+    assert_eq!(moved["existing"], true);
+    assert_eq!(moved["behind"], 1);
+    assert_eq!(git.run(&path, &["rev-parse", "HEAD"]).unwrap(), before);
+    let said = prs
+        .ys(None, &["pr", "checkout", "13665", "--project", "Demo"])
+        .ok();
+    assert!(
+        said.contains("The workspace is 1 commit behind the pull request"),
+        "{said}"
+    );
+
+    // With the remote out of reach the workspace is still handed back, and how far behind it is
+    // is said to be unknown rather than none.
+    let gone = remote.path().join("gone");
+    git.run(
+        &fx.repo,
+        &["remote", "set-url", "origin", &gone.to_string_lossy()],
+    )
+    .unwrap();
+    let unreachable = prs.ys(
+        None,
+        &["pr", "checkout", "13665", "--project", "Demo", "--json"],
+    );
+    let stderr = unreachable.stderr.clone();
+    let unreachable: serde_json::Value = serde_json::from_str(&unreachable.ok()).unwrap();
+    assert_eq!(unreachable["existing"], true);
+    assert_eq!(unreachable["behind"], serde_json::Value::Null);
+    assert!(
+        stderr.contains("Could not check whether branch-13665 is behind #13665"),
+        "{stderr}"
+    );
+
+    let refused = prs
+        .ys(None, &["pr", "checkout", "twelve", "--project", "Demo"])
+        .failed();
+    assert!(refused.contains("not a pull request number"), "{refused}");
 }

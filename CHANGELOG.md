@@ -8,12 +8,86 @@ has the downloads and the full commit lists.
 - **Follow pull requests an agent opens in another repository.** A project whose folder holds
   other repositories as nested clones — a parent repository — has agents that open pull requests
   in those clones, and Yardsort could not see them. Now a workspace can **track** them: an agent
-  runs `ys pr track <url>` (agents in such a project are told to), or you choose **Track pull
+  runs `ys pr track <url>` (agents in such a project are told to; `ys pr tracked` lists them), or you choose **Track pull
   request…** in the workspace's menu. A tracked pull request shows on the workspace's row as
   `lib#7`, in its toolbar's menu, and in the Pull requests view with its Summary — checks,
   reviewers and conversation — read by its link. **Stop tracking** takes it off again. Merging it
   and its diff are still on GitHub for now. See
   [Commits & pull requests](docs/guide/commits-and-pull-requests.md#pull-requests-in-other-repositories).
+- **Reach another computer from the desktop app, read-only for now.** Under **Settings → Remote →
+  Other computers**, sign this computer in as a client, a device of its own apart from it being a
+  host, and pair it by the code another computer shows, from its own Settings → Remote or
+  `yardsort-host pair`. Once let in there, the other computer shows under **Other computers** in the
+  sidebar, online or offline since when, and opens to its workspaces, agents and recent activity,
+  named across the top, with no Changes panel or Git action. Watching and typing into its terminals
+  come next. See [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **The Floor Manager: one agent that sees every project.** **Floor Manager** in the bottom
+  bar's lower-right corner, or **Mod+J**, opens a panel with an agent you pick, started in a
+  folder of its own and told how to use `ys`. Ask it what projects there are and what is
+  running, which pull requests are not reviewed or need attention, or to start a task. It
+  suggests a workflow and proposes exactly what it will run, then waits for your yes before it
+  starts an agent, a workspace or a review, or writes to GitHub. Closing the panel leaves it
+  running. _Floor Manager_ is a working name. See [Floor Manager](docs/guide/floor-manager.md).
+- **`ys pr list`**: every project's open pull requests from the command line, with the Pull
+  requests view's review filters (`--reviews none`, `not-by-me`, `awaiting-me`…) and
+  `--attention` for failing checks, conflicts, changes requested, a review asked of you, or no
+  review at all. **`ys pr checkout <n>`** opens a workspace on a pull request's branch, so
+  `ys workflow run code-review` can review someone else's pull request. See
+  [`ys pr`](docs/guide/cli.md#ys-pr).
+
+## 0.23.0
+
+- **A guide for moving local Conductor worktrees to Yardsort.**
+  [Migrate from Conductor](docs/guide/migrate-from-conductor.md) covers importing existing
+  worktrees, what you reconfigure by hand, and what is not imported: Conductor scripts, chats, port
+  allocation and Cloud.
+- **Triggers: start a workflow or a smoke test when something happens.** When an agent says its
+  work is done (`ys workspace done`), finishes a turn or exits, or a smoke test or a workflow run
+  ends, a trigger starts what you gave it in that workspace, with what set it off as
+  `{{ event.* }}`. A burst becomes one run, an event waits for a run in its way, and a cap, an
+  hourly limit and a limit on chains stop loops. See [Triggers](docs/guide/triggers.md).
+- **Triggers on pull requests.** A workspace's pull request opening, a review or a comment from
+  someone else, its checks failing or passing, a conflict, a merge: Yardsort looks once a minute
+  while a trigger watches, and what was there when the trigger was added is not news. A reply on
+  a review thread counts once, as a comment, and your own posts — the agents' answers — do not
+  count unless you say so. Ready-made triggers, `ys trigger add --preset`: **Address reviews**,
+  **Fix failing checks**, **Review the pull request when it opens**, **Review when the work is
+  done** and **Smoke test when the work is done**, with three new built-in workflows,
+  `address-review`, `fix-checks` and `review-branch`. A fire with no agent in the workspace to
+  tell is skipped, and you are told.
+- **Triggers in the window.** **Triggers** in the sidebar lists every trigger with its event in
+  words, where it is, what it runs and how its last fire went, and opens each to its history,
+  **Edit…**, **Reset** when it is capped, and **Remove…**; the number beside it counts those that
+  need you. The trigger dialog asks where, when, what to run and how often, and says in a sentence
+  what will happen. The composer offers the ready-made triggers for each new workspace, ticked as
+  they were last time in the project. **Triggers…** in a workspace's menu and an agent tab's menu
+  opens the view on that workspace or agent, and runs a trigger started are marked _triggered_.
+  An agent already running when a trigger on `ys workspace done` is added can be told about it
+  with **Tell the agent**.
+- **Custom events.** `ys event emit migration-written` raises an event of your own in a
+  workspace — from an agent told to, a smoke test's `run` step, or a script — and a trigger on
+  `custom.migration-written` starts what it starts, with the note as `{{ event.note }}`. Make one
+  with `ys trigger add --on custom.<name>` or **A custom event** in the trigger dialog. `emit`
+  says when nothing listens for the name, and which names are listened for.
+- **Remote on a computer with no screen: `yardsort-host`.** A separate program, for a Linux server
+  you reach over SSH: sign it in from a browser on any other computer by pasting back the address the
+  browser lands on, run `yardsort-host serve`, and pair a phone with `yardsort-host pair` at a
+  terminal of your own, which an agent cannot do. Start agents there with `ys`, or from the phone;
+  stopping the host leaves them running. Build it from source for now. See
+  [A computer with no screen](docs/guide/headless-host.md).
+- **`yardsort-host` comes as a download**: a tarball for x86_64 and aarch64 Linux on each release,
+  with `ys` and a systemd user service that leaves the agents running when it stops or restarts. Or
+  in a container: `crates/host/Dockerfile` and a compose example, running as an ordinary user and
+  listening nowhere. The guide covers installing, the service, upgrading and backing up.
+- A shell with no `XDG_RUNTIME_DIR`, such as one from `sudo -iu`, now finds the terminal daemon the
+  user's own services started, instead of starting a second one and taking the first one's agents
+  for ended. A daemon an earlier release started in such a shell is still found where it is.
+- **`ys project add <path>`** adds a repository as a project, as the app's Open project does.
+- `ys workflow run`, `ys test run` and `ys schedule run` say so and queue nothing on a profile that
+  `yardsort-host` runs, which does not carry them out yet. The app, started on such a profile, says
+  what has it instead of waiting for a window that never comes.
+- Fixed: started from a terminal, Yardsort could leave that terminal deaf to `Ctrl-C`. Reading
+  your shell's environment, twice at once, handed the terminal to a shell that had already gone.
 
 ## 0.22.2
 

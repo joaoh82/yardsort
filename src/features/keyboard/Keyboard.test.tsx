@@ -272,17 +272,17 @@ describe("shortcut configuration", () => {
     );
     await user.click(screen.getByRole("button", { name: "Binding for Toggle projects panel" }));
     fireEvent.keyDown(screen.getByRole("button", { name: "Binding for Toggle projects panel" }), {
-      key: "J",
+      key: "U",
       ...mod,
     });
     await user.click(screen.getByRole("button", { name: "Save shortcuts" }));
     expect(core.uiStateSave).toHaveBeenCalledWith(
       "keyboard.bindings",
-      expect.stringContaining('"toggleLeft":"j"'),
+      expect.stringContaining('"toggleLeft":"u"'),
     );
     fireEvent.keyDown(window, { key: "B", ...mod });
     expect(useLayoutStore.getState().collapsed.left).toBe(false);
-    fireEvent.keyDown(window, { key: "J", ...mod });
+    fireEvent.keyDown(window, { key: "U", ...mod });
     expect(useLayoutStore.getState().collapsed.left).toBe(true);
     core.uiStateLoad.mockResolvedValue({
       "keyboard.bindings": JSON.stringify(usePreferencesStore.getState().bindings),
@@ -291,7 +291,7 @@ describe("shortcut configuration", () => {
       usePreferencesStore.setState({ bindings: { ...DEFAULT_BINDINGS } });
       await usePreferencesStore.getState().load();
     });
-    expect(usePreferencesStore.getState().bindings.toggleLeft).toBe("j");
+    expect(usePreferencesStore.getState().bindings.toggleLeft).toBe("u");
   });
   it("blocks duplicate and clipboard shortcuts, and Escape cancels recording", async () => {
     const user = userEvent.setup();

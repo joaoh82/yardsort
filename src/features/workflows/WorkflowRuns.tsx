@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { timeAgo } from "@/features/terminal/sessionText";
 import { errorMessage, ipc, type WorkflowRun } from "@/lib/ipc";
 import { scheduleOf, useSchedulesStore } from "@/stores/schedules";
+import { triggerOf, useTriggersStore } from "@/stores/triggers";
 import { statusColour, useWorkflowStore } from "@/stores/workflows";
 import { ACTION_WORDS } from "./words";
 
@@ -20,6 +21,8 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
   const steps = useWorkflowStore((s) => (selected ? s.steps[selected] : undefined));
   // The runs a schedule started, to say so on each.
   const started = useSchedulesStore((s) => s.started);
+  // And the runs a trigger started.
+  const triggered = useTriggersStore((s) => s.started);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -58,6 +61,7 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
             const open = run.id === selected;
             const active = run.status === "queued" || run.status === "running";
             const scheduled = scheduleOf(started, run.id);
+            const fired = triggerOf(triggered, run.id);
             return (
               <li key={run.id} className="mb-1 rounded border border-line bg-canvas/40">
                 <button
@@ -81,6 +85,14 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                       scheduled
                     </span>
                   )}
+                  {fired && (
+                    <span
+                      title={`Started by the trigger “${fired.triggerName}”`}
+                      className="shrink-0 text-[11px] text-ink-faint"
+                    >
+                      triggered
+                    </span>
+                  )}
                   <span className="shrink-0 text-[11px] text-ink-faint">
                     {timeAgo(run.createdAt)}
                   </span>
@@ -89,6 +101,9 @@ export function WorkflowRuns({ workflowId, selected, onSelect }: Props) {
                   <div className="border-t border-line px-2.5 py-2">
                     {scheduled && (
                       <p className="mb-1.5 text-ink-muted">Scheduled · {scheduled.scheduleName}</p>
+                    )}
+                    {fired && (
+                      <p className="mb-1.5 text-ink-muted">Triggered · {fired.triggerName}</p>
                     )}
                     {run.pullRequest && (
                       <p className="mb-1.5 text-ink-muted">

@@ -88,7 +88,7 @@ export function Ideas() {
           shot={
             <Shot
               name="composer"
-              alt="The composer: describe a task, pick an agent, model, effort and branch"
+              alt="The composer: describe a task, pick an agent, model, effort and branch, and tick the triggers the new workspace gets"
             />
           }
         >
@@ -328,6 +328,39 @@ export function Ideas() {
             project&apos;s schedules with the next time each fires and how its last time went. A
             notification tells you when a run fails, and a schedule approves nothing: a smoke test
             file nobody has approved still waits for you. <code className={code}>ys schedule</code>{" "}
+            does it all from a terminal.
+          </p>
+        </Idea>
+
+        <Idea
+          shotFirst
+          label="10 · Triggers"
+          title="When something happens"
+          shot={
+            <Shot
+              name="triggers"
+              alt="Triggers: every trigger with its event, what it runs and how its last run went, and one open with its history"
+            />
+          }
+        >
+          <p>
+            A trigger starts a workflow or a smoke test when something happens in a workspace: the
+            agent says its work is done, someone reviews the pull request, its checks fail, a run
+            ends, or an agent, a test or a script raises an event you named with{" "}
+            <code className={code}>ys event emit</code>.
+          </p>
+          <p>
+            Five come ready made — <strong className={strong}>Address reviews</strong>,{" "}
+            <strong className={strong}>Fix failing checks</strong>, a review when the pull request
+            opens, and a review or a smoke test when the work is done — and the composer offers them
+            as boxes to tick for each new workspace. By default only posts from other accounts
+            count, since the agents answer as yours.
+          </p>
+          <p>
+            <strong className={strong}>Triggers</strong>, in the sidebar, lists every project&apos;s
+            triggers with their history. A trigger stops after three runs for one pull request until
+            you reset it, unless you give it more; it starts at most ten an hour; and a chain of
+            runs that set each other off stops three deep. <code className={code}>ys trigger</code>{" "}
             does it all from a terminal.
           </p>
         </Idea>

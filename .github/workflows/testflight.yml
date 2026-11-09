@@ -6,9 +6,17 @@ name: TestFlight
 # with no Xcode account: it signs by hand with a distribution certificate and an App Store profile,
 # and uploads with `altool` and an App Store Connect API key. Those live in the `testflight`
 # environment; the README says how to make them (apps/mobile/README.md#from-github-actions).
+# The version is the newest `mobile-v` tag raised by the part picked, and the run tags the commit
+# it built with it once Apple has the build (apps/mobile/scripts/version.ts).
 
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version: raise the patch, minor or major part, or none to rebuild the same one"
+        type: choice
+        options: [patch, minor, major, none]
+        default: patch
 
 permissions:
   contents: read
@@ -22,6 +30,9 @@ jobs:
     name: Build and upload
     runs-on: macos-26
     environment: testflight
+    # To push the version's tag.
+    permissions:
+      contents: write
     # A first build, with the pods to fetch and compile, is the slow one.
     timeout-minutes: 60
     defaults:
@@ -30,7 +41,10 @@ jobs:
     env:
       APP_VARIANT: release
     steps:
+      # All of the history, for the tags in it.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: The secrets are all there
         env:
@@ -66,12 +80,21 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - name: Version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          version="$(bun scripts/version.ts "$BUMP")"
+          echo "Version $version"
+          echo "YARDSORT_VERSION=$version" >> "$GITHUB_ENV"
+
       # TestFlight refuses a build number it has seen. From the time in UTC, as the recipe's, so a
       # build from here and one from a Mac never go backwards. Prebuild runs `pod install` too.
       - name: Generate the iOS project
         run: |
           build="$(date -u +%y%m%d.%H%M)"
           echo "Build number $build"
+          echo "Yardsort $YARDSORT_VERSION ($build)" >> "$GITHUB_STEP_SUMMARY"
           YARDSORT_BUILD_NUMBER="$build" bunx expo prebuild --platform ios --clean
 
       # A keychain of its own, unlocked for this job only and the default for it, with the
@@ -136,6 +159,20 @@ jobs:
           printf '%s\n' "$APP_STORE_CONNECT_KEY" > "$API_PRIVATE_KEYS_DIR/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8"
           xcrun altool --upload-app --type ios --file "$(ls "$RUNNER_TEMP"/export/*.ipa)" \
             --apiKey "$APP_STORE_CONNECT_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      # Only now, so a run that fails leaves the version for the next one. A rebuild of a version
+      # already tagged has nothing to add.
+      - name: Tag the version
+        run: |
+          tag="mobile-v$YARDSORT_VERSION"
+          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            echo "$tag is already tagged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Yardsort for the phone $YARDSORT_VERSION"
+          git push origin "$tag"
 
       - name: Remove the keychain
         if: always()

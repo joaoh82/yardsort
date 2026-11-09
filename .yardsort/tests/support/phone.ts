@@ -3,6 +3,10 @@
 //
 //   bun .yardsort/tests/support/phone.ts <run dir> ask | reaches <name> | must-pair-again <name> | spend-sign-in
 //     | starts <name>
+//   bun .yardsort/tests/support/phone.ts <run dir> type <name> <line> <expected>
+//
+// `type` takes control of the one session running on the computer, types the line and a return,
+// and waits for the expected text in what the terminal prints.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +23,7 @@ import {
   type Scope,
 } from "../../../packages/remote-client/src/index.ts";
 
-const [dir, doing, named] = process.argv.slice(2);
+const [dir, doing, named, line, expected] = process.argv.slice(2);
 const KEPT = join(dir, "phone-sign-in");
 const HOST = join(dir, "host-id");
 const SCOPES: Scope[] = ["workspace:read", "terminal:read", "terminal:control"];
@@ -151,6 +155,45 @@ switch (doing) {
     if (!Buffer.from(photo).equals(readFileSync(path))) throw new Error("The picture changed.");
     if (path.startsWith(join(dir, "worktrees"))) throw new Error(`It is in a worktree: ${path}`);
     console.log("the picture is on the computer, whole, outside every worktree");
+    channel.close();
+    break;
+  }
+  case "type": {
+    const phone = await session();
+    const host = await theComputer(phone);
+    const channel = await reach(phone, host);
+    const page = await channel.workspaces();
+    const running = [];
+    for (const workspace of page.workspaces.filter((w) => w.runningSessions > 0)) {
+      const sessions = await channel.sessions({ workspace: workspace.id });
+      for (const s of sessions.sessions) if (s.process === "running" && s.terminal) running.push(s);
+    }
+    if (running.length !== 1) throw new Error(`${running.length} sessions running, not one.`);
+    let printed = "";
+    let typedAt = -1;
+    let seen!: () => void;
+    const appeared = new Promise<void>((resolve) => (seen = resolve));
+    const decoder = new TextDecoder();
+    const attachment = await channel.attach(running[0].terminal!.id, {
+      output(bytes) {
+        printed += decoder.decode(bytes, { stream: true });
+        // Only what the program printed after the line was typed counts.
+        if (typedAt >= 0 && printed.slice(typedAt).includes(expected)) seen();
+      },
+    });
+    const control = await channel.acquire(running[0].terminal!.id);
+    typedAt = printed.length;
+    await control.input(`${line}\r`);
+    const late = setTimeout(() => {
+      console.log(printed.slice(typedAt));
+      console.error(`Not printed within 30 seconds: ${expected}`);
+      process.exit(1);
+    }, 30_000);
+    await appeared;
+    clearTimeout(late);
+    console.log(`read back: ${expected}`);
+    await control.release();
+    await attachment.detach();
     channel.close();
     break;
   }

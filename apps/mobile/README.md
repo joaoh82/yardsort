@@ -39,6 +39,7 @@ a server from the phone. Choose light, dark or automatic in Settings.
 | `src/lib/bridge.ts`      | The only thing the app and the terminal's page share: typed, bounded messages, each checked by the side reading it.                                                                                                                                                                                                                                                                                                                                    |
 | `terminal/`              | The page a terminal is drawn in. `scripts/terminal-page.ts` builds it into `src/ui/terminal-page.generated.ts`: `just mobile-terminal-page` after changing it. A test says when it is out of date.                                                                                                                                                                                                                                                     |
 | `scripts/ios-signing.ts` | Signs the generated iOS project with an App Store profile and writes the export options, for the [TestFlight workflow](#from-github-actions). A test reads a made-up profile with it.                                                                                                                                                                                                                                                                  |
+| `scripts/version.ts`     | The version to build, from the `mobile-v` tags raised by a part, for the [TestFlight workflow](#the-version). A test runs it in a made-up repository.                                                                                                                                                                                                                                                                                                  |
 | `src/lib/observed.ts`    | What was last seen of a profile's computers and workspaces, kept in the cache folder.                                                                                                                                                                                                                                                                                                                                                                  |
 | `src/lib/native.ts`      | What only the phone has: SecureStore, the cache folder, the system browser's sign-in session, randomness and SHA-256, the phone's name, and the system's picture picker.                                                                                                                                                                                                                                                                               |
 | `src/ui/parts.tsx`       | The few native components the screens are built from, with the colours and fonts of [the design](../../docs/design/33-phone-design.md).                                                                                                                                                                                                                                                                                                                |
@@ -166,7 +167,8 @@ its own sign-in: sign in and pair again. Each build lasts 90 days. It is archive
 Then, for each build:
 
 1. `just mobile-testflight`, from your clone on the Mac. It gives the build a new number from the date
-   and time in UTC, and opens it in Xcode. It replaces `ios/`, so `just mobile-ios` builds it again for
+   and time in UTC, the version of the newest `mobile-v` tag (see [the version](#the-version); `git
+fetch --tags` first), and opens it in Xcode. It replaces `ios/`, so `just mobile-ios` builds it again for
    development afterwards. With `APPLE_TEAM_ID` set, step 2 is done for you.
 2. In Xcode, select the **Yardsort** target, then **Signing & Capabilities**, tick **Automatically manage
    signing**, and choose the paid team.
@@ -182,10 +184,28 @@ The **TestFlight** workflow (`.github/workflows/testflight.yml`) does the same w
 **Actions**, **TestFlight**, **Run workflow**, from `main`. It generates the release identity,
 signs it by hand with a distribution certificate and an App Store profile, archives it, and uploads it
 for internal testers with an App Store Connect API key. The build number comes from the time in UTC, as
-the recipe's does, so builds from either never go backwards. Builds before 2026-11-06 were numbered in
-local time, so the first one after can be refused as lower than the last until UTC catches up with it.
-The run keeps the `.ipa` for a week, and step 5 above follows as it does from Xcode. It has not been run
-yet.
+the recipe's does, so builds from either never go backwards. The run keeps the `.ipa` for a week, and
+step 5 above follows as it does from Xcode. It first ran on 2026-11-07, with Xcode 26.6, and its build
+reached the iPhone through TestFlight.
+
+##### The version
+
+TestFlight and the phone show a version beside the build number, such as **0.2.0 (261107.1412)**. It
+is kept in git tags, `mobile-v0.2.0`, rather than in a file, since the workflow cannot push a commit to
+`main` but can push a tag. **Run workflow** asks which part to raise:
+
+| Pick    | From 0.2.3 | For                                    |
+| ------- | ---------- | -------------------------------------- |
+| `patch` | 0.2.4      | The default: fixes and small changes   |
+| `minor` | 0.3.0      | Something new to use                   |
+| `major` | 1.0.0      | A break, or the first release for real |
+| `none`  | 0.2.3      | The same version again, as a new build |
+
+It starts from the newest `mobile-v` tag in `main`'s history, or from `package.json`'s `0.1.0` before
+there is one, and the run's summary shows what it built. Once Apple has the build, the run tags the
+commit it built, so a run that fails takes no version, and the next one tries the same again.
+`bun scripts/version.ts minor` prints what a run would build. The desktop app's versions are tags too,
+`v0.22.2`, and the two are not related.
 
 A run uses the picked branch's copy of the workflow, and that copy receives the secrets, so the
 `testflight` environment admits `main` only (**Deployment branches and tags**): a run from any other

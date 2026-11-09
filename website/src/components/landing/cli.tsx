@@ -39,8 +39,16 @@ const LINES: { command: string; note: string }[] = [
     note: "the GitHub issues waiting on you — and ys task create files one",
   },
   {
+    command: "ys pr list --attention",
+    note: "every project's open pull requests that need a review, a fix or you",
+  },
+  {
     command: "ys test run login",
     note: "run a smoke test and read its verdict with ys test wait",
+  },
+  {
+    command: "ys trigger add --preset address-reviews",
+    note: "in a workspace's folder: its agent answers every review on the pull request",
   },
   {
     command: "ys workspace delete fix-the-flaky-login-test",

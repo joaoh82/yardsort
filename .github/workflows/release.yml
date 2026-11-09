@@ -222,9 +222,54 @@ jobs:
           gh release upload "$TAG" "$name" --clobber
           echo "attached $name"
 
+  # The headless host, `yardsort-host` and `ys` with the systemd user unit, as a tarball per
+  # architecture. Built on the oldest Ubuntu there is a runner for, so the glibc it needs is one
+  # every current distribution has. See docs/guide/headless-host.md.
+  host:
+    name: Build the headless host (${{ matrix.arch }})
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-22.04
+          - arch: aarch64
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-host
+
+      - name: Build, check and attach the tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tarball="$(scripts/host-package.sh)"
+          want="yardsort-host-${TAG#v}-linux-${{ matrix.arch }}.tar.gz"
+          if [ "$(basename "$tarball")" != "$want" ]; then
+            echo "::error::Built $(basename "$tarball"), expected $want. Is Cargo.toml's version the tag's?"
+            exit 1
+          fi
+          mkdir unpacked && tar -xzf "$tarball" -C unpacked
+          for program in yardsort-host ys; do
+            env -i HOME="$HOME" PATH=/usr/bin:/bin "unpacked/${want%.tar.gz}/bin/$program" --version
+          done
+          gh release upload "$TAG" "$tarball" --clobber
+          echo "attached $want"
+
   publish:
     name: Publish release
-    needs: [draft, build]
+    needs: [draft, build, host]
     runs-on: ubuntu-24.04
     steps:
       # An installed copy that finds no `latest.json` cannot update, silently. Refuse to publish

@@ -1,5 +1,5 @@
 -- Pull requests a workspace follows in repositories other than its project's. See
--- docs/design/36-pull-requests-elsewhere.md.
+-- docs/design/38-pull-requests-elsewhere.md.
 --
 -- A project's own pull requests are found by asking its repository and matching branches and
 -- commits; one in another repository leaves no trace git or the forge can tie to a workspace, so

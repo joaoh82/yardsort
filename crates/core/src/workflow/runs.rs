@@ -25,6 +25,16 @@ pub trait Look {
     /// The workspace's open pull request, `None` when it has none, or why the forge could not
     /// be asked.
     fn pull_request(&self, workspace: &WorkspaceRow) -> Result<Option<PullRequest>, String>;
+    /// The workspace's pull request as a trigger watches it: pull request `number`, or the open
+    /// one for its branch when `None`; `None` when it has none. A door that does not ask the
+    /// forge about this says so.
+    fn watch_pull_request(
+        &self,
+        _workspace: &WorkspaceRow,
+        _number: Option<u32>,
+    ) -> Result<Option<crate::forge::PrLook>, String> {
+        Err("Pull requests are not watched from here.".to_owned())
+    }
 }
 
 /// What a run found out about where it runs, kept with it (`workflow_runs.context`). A run's
@@ -34,14 +44,32 @@ pub struct Facts {
     /// The workspace's open pull request when the run was queued.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<PrFacts>,
-    /// The terminal id of the workspace's own agent when the run started: its newest live
-    /// harness session, before the run started any of its own.
+    /// The terminal id of the workspace's own agent when the run started: the session
+    /// `origin_record` names when it is given, or else the newest live harness session, before
+    /// the run started any of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// The conversation record `session: origin` must be, when the run was asked for on behalf
+    /// of one agent session: a session trigger's. Its live terminal becomes `origin` when the
+    /// run starts, whichever session is newest then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_record: Option<String>,
     /// A schedule started the run, so nobody is there: a `run_test` step whose test would wait
     /// for a person fails at once, where a run somebody started waits with them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unattended: bool,
+    /// How many triggered runs led to this one: 0 for a run a person or a schedule asked for.
+    /// What stops a chain of triggers (see `trigger::MOST_DEPTH`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub depth: i64,
+    /// What the event that started the run left, for `{{ event.* }}`. Empty for a run nobody's
+    /// event started.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub event: BTreeMap<String, String>,
+}
+
+fn is_zero(depth: &i64) -> bool {
+    *depth == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -61,8 +89,13 @@ impl Facts {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".to_owned())
     }
 
-    /// A `pr.…` variable.
+    /// A `pr.…` or `event.…` variable.
     pub fn var(&self, path: &[String]) -> Option<String> {
+        if let [namespace, field] = path {
+            if namespace == "event" {
+                return self.event.get(field).cloned();
+            }
+        }
         let pr = self.pr.as_ref()?;
         match path {
             [namespace, field] if namespace == "pr" => match field.as_str() {
@@ -87,6 +120,12 @@ pub struct Request<'a> {
     pub requested_by: &'a str,
     /// Nobody is there to watch it: a schedule is asking. See [`Facts::unattended`].
     pub unattended: bool,
+    /// The conversation record `session: origin` must be. See [`Facts::origin_record`].
+    pub origin_record: Option<&'a str>,
+    /// See [`Facts::depth`].
+    pub depth: i64,
+    /// What the event that asked for it left. See [`Facts::event`].
+    pub event: Option<&'a BTreeMap<String, String>>,
 }
 
 /// Queue a run and return its id.
@@ -138,6 +177,9 @@ pub fn queue(
     // Last, because it asks the forge over the network.
     let mut facts = Facts {
         unattended: request.unattended,
+        origin_record: request.origin_record.map(str::to_owned),
+        depth: request.depth,
+        event: request.event.cloned().unwrap_or_default(),
         ..Facts::default()
     };
     if needs_pull_request(workflow) {
@@ -258,15 +300,20 @@ fn pull_request_within(
 /// file uses that the workspace does not have. Not a refusal — an empty line in a prompt is
 /// allowed — but something to know before starting.
 pub fn empty_variables(workflow: &Workflow, place: &Place, memory_shared: bool) -> Vec<String> {
-    let used: std::collections::BTreeSet<String> = workflow
-        .steps
-        .iter()
-        .flat_map(|step| texts(&step.action))
-        .flat_map(template::placeholders)
-        .map(|var| var.path.join("."))
-        .collect();
+    let used = variables(workflow);
     let name = &place.workspace.name;
     let mut empty = Vec::new();
+    let events: Vec<String> = used
+        .iter()
+        .filter(|var| var.starts_with("event."))
+        .map(|var| format!("`{{{{ {var} }}}}`"))
+        .collect();
+    if !events.is_empty() {
+        empty.push(format!(
+            "{} will be empty: only a run a trigger starts has an event.",
+            events.join(", ")
+        ));
+    }
     if used.contains("workspace.task") && place.task.is_none() {
         empty.push(format!(
             "`{{{{ workspace.task }}}}` will be empty: `{name}` was started without a first message."
@@ -290,6 +337,18 @@ pub fn empty_variables(workflow: &Workflow, place: &Place, memory_shared: bool) 
         ));
     }
     empty
+}
+
+/// Every `{{ variable }}` a workflow's steps use, as dotted paths: `workspace.task`,
+/// `event.note`.
+pub fn variables(workflow: &Workflow) -> std::collections::BTreeSet<String> {
+    workflow
+        .steps
+        .iter()
+        .flat_map(|step| texts(&step.action))
+        .flat_map(template::placeholders)
+        .map(|var| var.path.join("."))
+        .collect()
 }
 
 /// Whether a run of `workflow` needs the workspace's pull request: it waits for activity on it,

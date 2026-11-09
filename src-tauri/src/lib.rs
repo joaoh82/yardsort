@@ -7,7 +7,9 @@ mod activity;
 mod assist;
 mod changes;
 mod commands;
+mod computers;
 mod conversations;
+mod coordinator;
 #[cfg(target_os = "linux")]
 mod display;
 mod draft;
@@ -23,6 +25,7 @@ mod sessions;
 mod smoke;
 mod state;
 mod terminal;
+mod triggers;
 mod updates;
 mod usage;
 mod workflows;
@@ -157,6 +160,13 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             remote::remote_answer,
             remote::remote_revoke,
             remote::remote_replace_daemon,
+            computers::other_computers,
+            computers::other_computers_sign_in,
+            computers::other_computers_cancel,
+            computers::other_computers_sign_out,
+            computers::other_computers_pair,
+            computers::other_computers_forget,
+            computers::other_host,
             activity::workspace_fork,
             memory::memory_get,
             memory::memory_write,
@@ -191,6 +201,9 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             commands::daemon_status,
             quit::app_quit,
             quit::quit_cancelled,
+            coordinator::coordinator_status,
+            coordinator::coordinator_start,
+            coordinator::coordinator_stop,
             terminal::pty_spawn,
             terminal::pty_attach,
             terminal::pty_detach,
@@ -242,6 +255,16 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             schedules::commands::schedule_set_enabled,
             schedules::commands::schedule_remove,
             schedules::commands::schedule_run_now,
+            triggers::commands::trigger_list,
+            triggers::commands::trigger_fires,
+            triggers::commands::trigger_started_runs,
+            triggers::commands::trigger_presets,
+            triggers::commands::trigger_save,
+            triggers::commands::trigger_tell_agents,
+            triggers::commands::trigger_set_enabled,
+            triggers::commands::trigger_reset,
+            triggers::commands::trigger_remove,
+            smoke::commands::test_list_in_project,
         ])
         .events(collect_events![
             terminal::PtyHostEvent,
@@ -254,7 +277,9 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             smoke::TestRunOutput,
             smoke::TestResultSent,
             schedules::SchedulesChanged,
-            remote::RemotePairingRequested
+            triggers::commands::TriggersChanged,
+            remote::RemotePairingRequested,
+            computers::OtherComputersChanged
         ])
 }
 
@@ -324,6 +349,10 @@ pub fn run() {
                 Some(one_copy::Claim::Ours(hold)) => {
                     hold.watch(app.handle().clone());
                     drives = true;
+                }
+                Some(one_copy::Claim::Headless) => {
+                    refuse_to_start(app.handle(), one_copy::HEADLESS);
+                    return Ok(());
                 }
                 Some(one_copy::Claim::Stuck) => {
                     refuse_to_start(app.handle(), one_copy::STUCK);
@@ -430,19 +459,7 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
             // Settle the record first, so a client reacting to the event reads the truth.
             if let pty_host::HostEvent::Exited { id, exit } = &event {
                 if let Some(state) = handle.try_state::<state::AppState>() {
-                    let _ = state
-                        .store
-                        .end_session_by_pty(&id.0, Some(i64::from(exit.code)));
-                    yardsort_core::activity::record_exit(
-                        &state.store,
-                        &id.0,
-                        &yardsort_core::activity::ExitFacts::from(exit),
-                        yardsort_core::activity::Via::Live,
-                    );
-                    // The daemon kept this exit for us too; take it out of the spool
-                    // now rather than find it as a duplicate at the next start. And
-                    // an agent's last hooks ran just before it exited.
-                    yardsort_core::activity::import_spool(&state.store, &spool_root);
+                    yardsort_core::runtime::exited(&state.store, &spool_root, &id.0, exit);
                     activity::drain_inbox(&handle, &state.store, &spool_root);
                 }
             }
@@ -450,44 +467,21 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
             if let Some(driver) = handle.try_state::<workflows::Driver>() {
                 driver.observe(&event);
             }
+            // And a trigger waiting for an agent to finish a turn, or to go back to work.
+            if let Some(listener) = handle.try_state::<triggers::Listener>() {
+                listener.observe(&event);
+            }
             let _ = terminal::PtyHostEvent(event).emit(&handle);
         }),
     );
-    // What agents reported while no window was open.
-    let inbox = yardsort_core::activity::import_inbox(&store, &data_dir);
-    if inbox.imported > 0 || inbox.unlinked > 0 || inbox.unreadable > 0 || inbox.dropped > 0 {
-        eprintln!(
-            "activity inbox: {} imported, {} duplicate, {} unlinked, {} unreadable, {} dropped",
-            inbox.imported, inbox.duplicates, inbox.unlinked, inbox.unreadable, inbox.dropped
-        );
-    }
-    // Exits the daemon kept while no window was open come first: a conversation that
-    // ended cleanly in the meantime must keep its exit code rather than be counted as
-    // interrupted below.
-    let imported = yardsort_core::activity::import_spool(&store, &data_dir);
-    if imported.imported > 0 || imported.unreadable > 0 || imported.dropped > 0 {
-        eprintln!(
-            "exit spool: {} imported, {} duplicate, {} unmatched, {} unreadable, {} dropped",
-            imported.imported,
-            imported.duplicates,
-            imported.unmatched,
-            imported.unreadable,
-            imported.dropped
-        );
-    }
-    // Rows still marked running whose process is *not* among these died with the
-    // previous run; the rest are conversations that never stopped.
+    // What happened while no window was open, and what died with the previous run.
     let alive: Vec<String> = connected
         .host
         .list()
         .into_iter()
         .map(|session| session.id.0)
         .collect();
-    store
-        .end_interrupted_sessions(&alive)
-        .map_err(|e| format!("cannot tidy session records: {e}"))?;
-    yardsort_core::activity::end_interrupted(&store, &alive);
-    yardsort_core::activity::prune(&store);
+    yardsort_core::runtime::settle_at_start(&store, &data_dir, &alive)?;
 
     app.manage(state::AppState::new(
         data_dir.clone(),
@@ -510,11 +504,16 @@ fn start(app: &mut tauri::App, drives: bool) -> Result<(), Box<dyn std::error::E
         workflows::start(app.handle());
         // Schedules fire in the app that drives runs, and nowhere else.
         schedules::start(app.handle());
+        // So do triggers.
+        triggers::start(app.handle());
     }
 
     // Remote, when it is on: the link to the server's relay.
     let handle = app.handle().clone();
     tauri::async_runtime::spawn(async move { remote::connect(&handle) });
+    // And the other computers this one reaches as a client, when it is signed in as one.
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move { computers::start(&handle) });
 
     // Warm the login-shell environment now, so the first terminal doesn't wait for it.
     // Then bring a `ys` an older version installed up to this one. Not from a development

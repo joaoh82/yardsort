@@ -1,0 +1,27 @@
+# yardsort-host as a systemd user service: Yardsort on this computer, for your phone to reach.
+#
+#   install -Dm644 yardsort-host.service -t ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now yardsort-host
+#   sudo loginctl enable-linger "$USER"     # keeps it up with nobody logged in
+#
+# Sign in first, with the service stopped: `yardsort-host sign-in <server>`. See
+# docs/guide/headless-host.md.
+
+[Unit]
+Description=Yardsort host, for a phone to reach this computer
+Documentation=https://yardsort.sh/docs/guide/headless-host
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/yardsort-host serve
+# Stopping or restarting the service stops `serve` alone. The terminal daemon is a session of its
+# own and keeps the agents; the next `serve` finds it. Stopping the agents is `ys`'s, or the box's
+# own shutdown.
+KillMode=process
+# `serve` keeps trying the server by itself while the network is away; this is for a crash.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

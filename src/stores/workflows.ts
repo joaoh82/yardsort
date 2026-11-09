@@ -26,6 +26,9 @@ interface WorkflowsState {
    *  it started under, and its answer is kept only if nothing changed meanwhile: a slower answer
    *  never replaces a newer one, or what was typed, or a discard. */
   newSerial: number;
+  /** A run to show when its workflow's view next opens, by workflow id: asked for from outside
+   *  the view, as Open run on a trigger's history does. The view takes it and clears it. */
+  shownRun: Record<string, string | undefined>;
   error: string | null;
 
   load: () => Promise<void>;
@@ -39,6 +42,8 @@ interface WorkflowsState {
   beginDescribe: () => number;
   /** A generation's answer, kept only if `serial` is still current. Says whether it was. */
   finishDescribe: (serial: number, text: string) => boolean;
+  /** Show `runId` in `workflowId`'s view; `null` once the view has it. */
+  showRun: (workflowId: string, runId: string | null) => void;
   dismissError: () => void;
 }
 
@@ -49,6 +54,7 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
   steps: {},
   drafts: {},
   newSerial: 0,
+  shownRun: {},
   error: null,
 
   async load() {
@@ -106,6 +112,9 @@ export const useWorkflowStore = create<WorkflowsState>((set, get) => ({
     set((state) => ({ drafts: { ...state.drafts, [NEW_WORKFLOW]: text } }));
     return true;
   },
+
+  showRun: (workflowId, runId) =>
+    set((state) => ({ shownRun: { ...state.shownRun, [workflowId]: runId ?? undefined } })),
 
   dismissError: () => set({ error: null }),
 }));

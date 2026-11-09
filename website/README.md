@@ -45,7 +45,8 @@ A page is a file under `../docs/`:
 To add a page: create the file, then add one line to `DOCS_NAV` in `src/lib/docs.ts` (the sidebar
 and the order of the previous/next links), including a unique `description` for search and link
 previews. An entry can give a `path` when the file should not
-decide the address: the roadmap is `docs/design/05-roadmap.md`, shown at `/docs/roadmap/`. Write links the way they work on GitHub
+decide the address: the roadmap is `docs/design/05-roadmap.md`, shown at `/docs/roadmap/`.
+Set `documentTitle` when the HTML title should differ from `Title · Yardsort Docs`. Write links the way they work on GitHub
 (`workspaces.md#anchor`, `../images/x.png`, `../CONTRIBUTING.md`); the site rewrites them, and
 sends anything outside the docs to GitHub.
 

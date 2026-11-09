@@ -74,13 +74,22 @@ own, never in one of your projects; a repository because some agents will not ru
 
 ## Where workflows come from
 
-- **Built in.** Yardsort ships with two. **Request code review** (`code-review`): a second
+- **Built in.** Yardsort ships with five. **Request code review** (`code-review`): a second
   agent, one you pick, reviews the workspace's pull request in the same worktree and posts its
   review on GitHub with `gh`. When the review is on the pull request, you get a notification, and
   the agent that wrote the pull request is told once it is not busy. See
   [Requesting a code review](#requesting-a-code-review). **Smoke test, then tell the agent**
   (`smoke-then-tell`): it runs one of the workspace's [smoke tests](smoke-tests.md) and tells the
-  workspace's own agent how it went — the verdict, and if it failed, which step broke. Each is
+  workspace's own agent how it went — the verdict, and if it failed, which step broke. Three more
+  are made for [triggers](triggers.md#ready-made-triggers), and can be run by hand too:
+  **Address reviews** (`address-review`) tells the workspace's agent, once it is quiet, that its
+  pull request has new reviews or comments, with the `gh` commands that read them, and asks it to
+  fix what is right, push and answer each comment; **Fix failing checks** (`fix-checks`) tells it
+  which checks failed on which commit and how to read their logs. Both last until the agent has
+  answered. **Review the branch** (`review-branch`): a second agent, one you pick, reviews the
+  branch against its base in the same worktree, without a pull request, and writes its findings
+  as its last message; then the workspace's own agent is told to read them with
+  [`ys workspace context`](cli.md#ys-workspace-context-workspace) and address them. Each is
   read-only; `ys workflow show <id>` prints the whole file.
 - **Yours.** Every `.yaml` or `.yml` file in the `workflows` folder of Yardsort's data directory.
   [Where Yardsort keeps things](troubleshooting.md#where-yardsort-keeps-things) says where that
@@ -161,8 +170,11 @@ ys workflow run fix-tests --workspace fix-login --input fixer=claude
 ```
 
 **Schedule…**, beside **Run…**, runs the workflow at a set time or on a routine instead: see
-[Schedules](schedules.md). A workflow with a `run_test` step can be scheduled only when that
-test can run with nobody there: no `manual` step, and a file you have approved.
+[Schedules](schedules.md). A [trigger](triggers.md) runs it when something happens in a workspace —
+an agent says it is done, a test fails — made in the **Triggers** view or with `ys trigger add`. A
+trigger's workflow must give each `run_test` step a `timeout`. A workflow with a `run_test` step can
+be scheduled only when that test can run with nobody there: no `manual` step, and a file you have
+approved.
 
 `--workspace` takes a workspace's name or id. Run it inside a workspace's folder, or in an
 agent's terminal there, and it can be left out. Give each input as `--input id=value`. `ys`
@@ -314,15 +326,16 @@ out of time fails.
 Any text in a step can use `{{ name }}`. Only these names exist. A name is a dotted path and
 nothing else: no filters, no expressions. Anything else is reported where it is written.
 
-| Variable                                                                                          | What it is                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project.name`, `project.root`                                                                    | The project, and the folder of its own checkout.                                                                                                                                                                                                                                                                                                                  |
-| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task` | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                    |
-| `pr.number`, `pr.url`, `pr.title`                                                                 | The open pull request for the workspace's branch, found when the run is queued.                                                                                                                                                                                                                                                                                   |
-| `inputs.<id>`                                                                                     | What was given for that input.                                                                                                                                                                                                                                                                                                                                    |
-| `steps.<id>.<field>`                                                                              | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`. The step must be among this step's `needs`.                                                                                                                 |
-| `memory`                                                                                          | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
-| `handoff`                                                                                         | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                            |
+| Variable                                                                                                                                                             | What it is                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project.name`, `project.root`                                                                                                                                       | The project, and the folder of its own checkout.                                                                                                                                                                                                                                                                                                                  |
+| `workspace.name`, `workspace.branch`, `workspace.base_branch`, `workspace.path`, `workspace.task`                                                                    | The workspace the run is about. `task` is the first message it was started with. In the project's own checkout, `branch` is whatever git has checked out, and `base_branch` the repository's default branch, unless that is the branch itself.                                                                                                                    |
+| `pr.number`, `pr.url`, `pr.title`                                                                                                                                    | The open pull request for the workspace's branch, found when the run is queued.                                                                                                                                                                                                                                                                                   |
+| `inputs.<id>`                                                                                                                                                        | What was given for that input.                                                                                                                                                                                                                                                                                                                                    |
+| `steps.<id>.<field>`                                                                                                                                                 | What an earlier step left: `session` and `run` from `start_session`, `outcome` from `wait_session`, `count` and `latest_url` from `wait_pr_activity`, `run`, `verdict` and `summary` from `run_test`. The step must be among this step's `needs`.                                                                                                                 |
+| `memory`                                                                                                                                                             | The project's [memory](memory.md): its approved entries, cited, when the project shares it and has any. Empty otherwise. It never carries the request to propose new entries that an agent you start yourself gets. An agent's first message gets the memory after it anyway; put `{{ memory }}` in a `start_session` prompt to have it there instead, not twice. |
+| `handoff`                                                                                                                                                            | The workspace's [handoff](terminals-and-sessions.md#handing-work-to-another-agent) packet: what happened there so far.                                                                                                                                                                                                                                            |
+| `event.kind`, `event.count`, `event.note`, `event.head`, `event.summary`, `event.verdict`, `event.url`, `event.number`, `event.title`, `event.authors`, `event.name` | What set off a run a [trigger](triggers.md#what-the-workflow-is-told) started. Empty in a run you started yourself.                                                                                                                                                                                                                                               |
 
 To write `{{` literally, for example in a prompt about a template language, write `\{{`.
 

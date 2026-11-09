@@ -9,7 +9,15 @@ export const REPO_URL = "https://github.com/joaoh82/yardsort";
 
 // `slug` is the page's address on the site. `path` is its file under docs/, without the
 // extension, when that differs from the slug; the page then takes its title from here too.
-export type DocEntry = { slug: string; title: string; description: string; path?: string };
+// `documentTitle` is the HTML, Open Graph and Twitter title when it should not be
+// `${title} · Yardsort Docs`. The visible heading still comes from `title` when `path` is set.
+export type DocEntry = {
+  slug: string;
+  title: string;
+  description: string;
+  path?: string;
+  documentTitle?: string;
+};
 export type DocSection = { title: string; items: DocEntry[] };
 
 // Sidebar order. Add a page here after adding its file under docs/.
@@ -22,6 +30,14 @@ export const DOCS_NAV: DocSection[] = [
         title: "Quick start",
         description:
           "Install Yardsort on Linux, macOS or Windows, connect a working agent CLI, open a project and start your first task in its own git worktree.",
+      },
+      {
+        slug: "migrate-from-conductor",
+        title: "Migrate from Conductor to Yardsort",
+        description:
+          "Move local Conductor worktrees to Yardsort. Keep branches and files, configure your scripts, and run Claude Code or Codex on Linux, macOS and Windows.",
+        path: "guide/migrate-from-conductor",
+        documentTitle: "Migrate from Conductor to Yardsort | Git Worktrees",
       },
       {
         slug: "guide/questions",
@@ -125,6 +141,12 @@ export const DOCS_NAV: DocSection[] = [
           "Reach this computer from your phone through a Yardsort server. Still under development, and off until you turn it on.",
       },
       {
+        slug: "guide/headless-host",
+        title: "A computer with no screen",
+        description:
+          "Run yardsort-host on a Linux server as a host your phone reaches: sign in from another browser, pair a device at a terminal, add projects and start agents with ys.",
+      },
+      {
         slug: "guide/smoke-tests",
         title: "Smoke tests",
         description:
@@ -135,6 +157,18 @@ export const DOCS_NAV: DocSection[] = [
         title: "Schedules",
         description:
           "Schedule a workflow or a smoke test in Yardsort: once at a set time or on a routine, with presets or cron, missed-time rules, notifications and ys schedule.",
+      },
+      {
+        slug: "guide/triggers",
+        title: "Triggers",
+        description:
+          "Start a workflow or a smoke test in Yardsort when something happens: an agent says it is done, a pull request gets a review or failing checks, a run ends, or a custom event, with presets, limits against loops and ys trigger.",
+      },
+      {
+        slug: "guide/floor-manager",
+        title: "Floor Manager",
+        description:
+          "One agent in Yardsort that sees every project: ask which pull requests need a review or what is running, and have it propose workspaces, reviews and workflows, starting them when you say yes.",
       },
       {
         slug: "guide/updates",
@@ -171,6 +205,12 @@ export const DOCS_NAV: DocSection[] = [
         description:
           "Explore the Yardsort roadmap: completed milestones, planned features and open work for parallel coding agents, workspaces and workflows.",
         path: "design/05-roadmap",
+      },
+      {
+        slug: "test-box",
+        title: "A test box for Remote",
+        description:
+          "Make a throwaway Linux server on Hetzner Cloud to try Yardsort's headless host with your phone, build your checkout there, and delete it when done.",
       },
     ],
   },

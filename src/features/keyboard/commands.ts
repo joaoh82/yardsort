@@ -4,6 +4,7 @@ import {
   openProjectFromDisk,
 } from "@/features/sidebar/actions";
 import type { CommandId } from "@/lib/shortcuts";
+import { useCoordinatorStore } from "@/stores/coordinator";
 import { useLayoutStore } from "@/stores/layout";
 import { useProjectsStore } from "@/stores/projects";
 import { useSmokeTestsStore } from "@/stores/smokeTests";
@@ -54,7 +55,8 @@ export function commandEnabled(id: CommandId): boolean {
       !projects.pullRequestsOpen &&
       !projects.tasksOpen &&
       !projects.testsOpen &&
-      !projects.schedulesOpen
+      !projects.schedulesOpen &&
+      !projects.triggersOpen
     );
   if (["closeTerminal", "previousTerminal", "nextTerminal"].includes(id))
     return (
@@ -68,7 +70,8 @@ export function commandEnabled(id: CommandId): boolean {
       !projects.pullRequestsOpen &&
       !projects.tasksOpen &&
       !projects.testsOpen &&
-      !projects.schedulesOpen
+      !projects.schedulesOpen &&
+      !projects.triggersOpen
     );
   if (["nextWorkspace", "previousWorkspace"].includes(id)) return availableWorkspaces().length > 0;
   return true;
@@ -104,8 +107,14 @@ export function runCommand(id: CommandId) {
     case "schedules":
       projects.openSchedules(true);
       break;
+    case "triggers":
+      projects.openTriggers(true);
+      break;
     case "startFromLink":
       projects.openLink(true);
+      break;
+    case "floorManager":
+      useCoordinatorStore.getState().toggle();
       break;
     case "tour":
       layout.setTourOpen(true);

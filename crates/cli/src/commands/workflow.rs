@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 use yardsort_core::memory;
-use yardsort_core::presence;
 use yardsort_core::store::{WorkflowRunRow, WorkspaceRow};
 use yardsort_core::workflow::{self, runs, Entry, Problem, Source};
 
@@ -209,13 +208,11 @@ fn start_run(
         };
         inputs.insert(key.trim().to_owned(), value.to_owned());
     }
-    // The app carries runs out. Queued with nobody to run it, a run would only sit there.
-    if !presence::app_running(&ys.data_dir) {
-        return Err(Failure::new(
-            "Yardsort is not running. Workflows run in the app: open it, then run this again. \
+    super::someone_carries_it_out(
+        ys,
+        "Yardsort is not running. Workflows run in the app: open it, then run this again. \
              Nothing was queued.",
-        ));
-    }
+    )?;
     let run_id = runs::queue(
         &ys.store,
         &ys.data_dir,
@@ -225,6 +222,9 @@ fn start_run(
             inputs: &inputs,
             requested_by: "cli",
             unattended: false,
+            origin_record: None,
+            depth: 0,
+            event: None,
         },
         &Looking(ys),
     )?;
@@ -282,6 +282,16 @@ impl runs::Look for Looking<'_> {
         let git = self.0.git().map_err(Failure::into_message)?;
         let gh = yardsort_core::forge::Gh::find(self.0.env());
         runs::pull_request_of(gh.as_ref(), &git, workspace)
+    }
+
+    fn watch_pull_request(
+        &self,
+        workspace: &WorkspaceRow,
+        number: Option<u32>,
+    ) -> Result<Option<yardsort_core::forge::PrLook>, String> {
+        let git = self.0.git().map_err(Failure::into_message)?;
+        let gh = yardsort_core::forge::Gh::find(self.0.env());
+        yardsort_core::trigger::watch::watch_pull_request_of(gh.as_ref(), &git, workspace, number)
     }
 }
 

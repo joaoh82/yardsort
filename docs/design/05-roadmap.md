@@ -971,11 +971,14 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       starting work and giving an agent a picture from it. The page now scrolls everything upright
       itself; protocol minor 5 starts a workspace or another agent under `terminal:control`, and
       uploads a picture outside every worktree for its path to be pasted
-      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Not yet
-      seen on a real phone, and the picture needs a new TestFlight build.
+      ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)). Shipped
+      in 0.22.2 on 2026-11-07, with a new TestFlight build of the phone app uploaded the same day. Not
+      yet seen on a real phone.
       2026-11-06: a TestFlight workflow on GitHub Actions builds and uploads the phone app with no Mac at
       hand, signed by hand from a distribution certificate and an App Store profile kept as secrets
-      ([the README](../../apps/mobile/README.md#from-github-actions)). It has not been run yet.
+      ([the README](../../apps/mobile/README.md#from-github-actions)). Its first runs, on 2026-11-07,
+      uploaded builds for internal testers, the second one for 0.22.2. Both said 0.1.0: from 2026-11-07
+      each run raises the phone app's own version, kept in `mobile-v` tags, by the part picked.
 - [ ] R4 and R5: the phone hardened, a host with no screen, and the desktop as a client. Planned
       together on 2026-11-06 in [35](35-remote-r4-r5.md), in the order the owner asked for: first a
       headless Linux host the phone reaches through staging (slices 1 to 3: the host runtime moved
@@ -990,6 +993,28 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       ([35 §10](35-remote-r4-r5.md#10--what-the-first-slice-adds)). Its local smoke tests passed, once
       `remote-earlier-daemon` stopped expecting a 0.21 daemon from a 0.22 build, and the owner's
       phone check against staging passed.
+      Slice 2 was built on 2026-11-07 ([35 §11](35-remote-r4-r5.md#11--what-the-second-slice-adds)):
+      `yardsort-host`, which signs in by pasting back the browser's address, serves with no display,
+      and pairs a device only at the operator's own terminal; the runtime the app and it share moved
+      into the core; `ys project add`; `ys` refuses to queue runs on a host's profile. Its local smoke
+      test passed, and so did the owner's run on a real box through staging, which found `Ctrl-C`
+      lost to a shell probe and had it fixed.
+      Slice 3 was built on 2026-11-08 ([35 §12](35-remote-r4-r5.md#12--what-the-third-slice-adds)):
+      the host's tarball for x86_64 and aarch64 on each release, with a systemd user unit that leaves
+      the agents running; a container image and compose example, built and tried in CI; the guide's
+      install, service, container, upgrade and backup sections. A shell without `XDG_RUNTIME_DIR`
+      now finds the daemon the user's services started. Its local smoke test, from the tarball
+      with an empty environment, passed, and so did the owner's run of it as a user service on
+      the box: the phone reconnected to the same agent after a restart.
+      Slice 4 was built on 2026-11-08 ([35 §13](35-remote-r4-r5.md#13--what-the-fourth-slice-adds)):
+      the channel layer in Rust, with the pairing tool moved onto it; the desktop signed in as a
+      client, a device of its own, paired by a host's code under Settings → Remote → Other
+      computers; and the hosts it reaches in the sidebar, each opening read-only with its name across
+      the top. Its local smoke test passed.
+      Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
+      toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
+      Registry on each release beside the tarballs; the other harnesses installed by the operator
+      with `yardsort-host install-agent`.
 - [ ] R6–R7: sync, managed launch. The server is
       AGPL-3.0 since 2026-10-28, and the managed service will run it unmodified, with anything
       only it has in a private repository behind a documented interface
@@ -1092,9 +1117,78 @@ why, with the user having approved the file once in the app and watched the run 
 changed file is never run without being shown again; a cancel kills every process the run
 started; and `ys test validate` has a failing fixture for every error it can report.
 
-## M29 — Pull requests in other repositories
+## M29 — Triggers
 
-Proposed in [36-pull-requests-elsewhere](36-pull-requests-elsewhere.md) on 2026-11-09, for a
+Proposed in [36-triggers](36-triggers.md), after a four-question design pass on 2026-11-06.
+
+- A trigger starts a workflow or a smoke test when something happens: an agent says it is done
+  (`ys workspace done`), a pull request opens, a review or a comment arrives from another
+  account, the checks fail, a test or a workflow ends. It belongs to a workspace or to one agent
+  session, is a row in the store, and queues its run through the doors a person's click uses.
+- Presets in the composer — review when done, review the pull request, address reviews, fix
+  failing checks, smoke test when done — remembered per project; custom triggers from any event,
+  filter and target. Three new built-in workflows: `address-review`, `fix-checks`,
+  `review-branch`.
+- Bursts become one fire, an event during the trigger's run waits for it, and a cap per pull
+  request or session, an hourly rate and a chain depth stop loops.
+- Five slices: core and `ys` with Yardsort's own events; the forge; the app; custom events; docs.
+- [x] Slice 1: migration 0023; the trigger model and its checks at saving; observing, gathering,
+      deciding and settling with a made-up clock; `workspace.done` with its first-message
+      section, `agent.settled` folded per turn, `agent.exited`, `test.finished`,
+      `workflow.finished`; the `event` namespace, the depth and the pinned session in a run's
+      facts; the app's thread; `ys trigger` and `ys workspace done`. Recorded in
+      [36 § slice 1](36-triggers.md#slice-1-what-shipped).
+- [x] Slice 2: migration 0024 and the watch, seeded at saving; one GraphQL question per look,
+      with a reply on a thread read as a comment (GitHub also lists it as a review, confirmed
+      on a real pull request); every `pr.*` event; `--from`, `--state`, `--no-bots`,
+      `--drafts`; the five presets and `address-review`, `fix-checks`, `review-branch`; the
+      app's pull request thread; a fire with no agent to tell skipped and told. Recorded in
+      [36 § slice 2](36-triggers.md#slice-2-what-shipped).
+- [x] Slice 3: the window. **Triggers** in the sidebar with a count of those that need you, the
+      view with each trigger's history, switch, **Reset** and **Remove**, the trigger dialog
+      with a sentence of what it will do, the composer's presets remembered per project,
+      **Triggers…** in the workspace and agent tab menus, _triggered_ in run lists, and **Tell
+      the agent**. A lifted cap now reads as lifted. Recorded in
+      [36 § slice 3](36-triggers.md#slice-3-what-shipped).
+- [x] Slice 4: custom events. `ys event emit <name>` and a trigger on `custom.<name>`, from
+      `ys trigger add --on` or the dialog's **A custom event**; migration 0025; names checked
+      at saving, and `emit` naming what is listened for when nothing is; one raised by a smoke
+      test's `run` step one deeper than its run. Recorded in
+      [36 § slice 4](36-triggers.md#slice-4-what-shipped).
+- [x] Slice 5: the documentation, finished. The README's highlight and section, the landing
+      page's section and command, the Triggers screenshot and the composer's retaken, and five
+      triggers with their history in `scripts/screenshots.sh seed`. The exit below still wants
+      macOS and Windows by hand. Recorded in [36 § slice 5](36-triggers.md#slice-5-what-shipped).
+
+_Exit:_ on all three platforms, a workspace started with **Address reviews** ticked has its agent
+told of a review posted from a second account, once, two minutes after its last comment; the
+agent's own answers start no second round; a fourth round is capped and told; and a trigger added
+from `ys` fires in an open app.
+
+## M30 — Floor Manager
+
+Proposed in [37-floor-manager](37-floor-manager.md), from an idea captured on 2026-11-07 (YARD-1):
+one agent with every project in view, opened from the lower-right corner, that answers across
+projects and starts work when the user agrees.
+
+- [x] Slice 1: the agent and its reach. The coordinator in `<data dir>/coordinator` with its
+      `AGENTS.md` and `CLAUDE.md`, this copy's `ys` first on `PATH` and the profile named; one
+      at a time, labelled and in no workspace; the status bar's **Floor Manager**, **Mod+J** and
+      the panel, with **Stop** asking first and an ended one's last screen kept; the quit dialog
+      naming it. `ys pr list` with the view's review filters and `--attention`, and
+      `ys pr checkout`, for which `prepare_branch` moved into the core. Recorded in
+      [37](37-floor-manager.md).
+- [ ] Resume its conversation after it ends, and start it with a question from elsewhere in the
+      window.
+- [ ] Settle the name, and whether the lines it is told are enough (questions 53–55).
+
+_Exit:_ on all three platforms, asking the Floor Manager to review the open pull requests nobody
+has reviewed ends with one reviewer per pull request posting on GitHub, every one of them proposed
+first and started only after a yes.
+
+## M31 — Pull requests in other repositories
+
+Proposed in [38-pull-requests-elsewhere](38-pull-requests-elsewhere.md) on 2026-11-09, for a
 project whose checkout holds other repositories as nested clones, where an agent opens pull
 requests that no project's list has.
 
@@ -1104,10 +1198,10 @@ requests that no project's list has.
 - Five slices, each its own pull request: tracking and following; seen by Claude Code; seen by
   the other adapters; acting on them (merge, close, reopen, reply, **Code** from the nested
   clone); code review on one.
-- [x] Slice 1: migration 0023, `yardsort_core::tracked`, `ys pr track | list | untrack`, **Track
+- [x] Slice 1: migration 0027, `yardsort_core::tracked`, `ys pr track | tracked | untrack`, **Track
       pull request…**, the launch section for a checkout with nested repositories, reading by
       link, and the row, the toolbar and the Pull requests view with the Summary. Recorded in
-      [36 § slice 1](36-pull-requests-elsewhere.md#slice-1-what-shipped).
+      [38 § slice 1](38-pull-requests-elsewhere.md#slice-1-what-shipped).
 - [ ] Slice 2: Claude Code's `PostToolUse` keeps the link of a pull request a tool call created.
 - [ ] Slice 3: the same for Codex, OpenCode, pi, OMP, Grok and Cursor, or their coverage says
       why not.
@@ -1206,7 +1300,8 @@ rediscovering later. None of them is committed to; the point is to know what is 
   previous one is still going, what happens to a worktree per run, and how a scheduled agent
   asks for permission when there is no one to ask. **Built as [schedules](34-schedules.md)**
   for workflows and smoke tests: it answers the first and the third, and leaves the worktree per
-  run, and running with the app closed, for after.
+  run, and running with the app closed, for after. Reacting to things that happen, rather than
+  to the clock, is [triggers](36-triggers.md), M29.
 - ~~**A `yardsort` CLI.**~~ **Done, as `ys` — see M10.** The estimate above was wrong in an
   instructive way: the daemon protocol carries _sessions_, not workspaces, and projects live in
   the SQLite store the app owns. "A second client of the socket with no new core" needed the

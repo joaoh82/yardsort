@@ -55,6 +55,7 @@ vi.mock("./WorkflowChart", () => ({
 
 import { useProjectsStore } from "@/stores/projects";
 import { useSchedulesStore } from "@/stores/schedules";
+import { useTriggersStore } from "@/stores/triggers";
 import { NEW_WORKFLOW, useWorkflowStore } from "@/stores/workflows";
 import { WorkflowView } from "./WorkflowView";
 
@@ -114,9 +115,17 @@ describe("WorkflowView", () => {
         problem: "No agent here can write one.",
       },
     });
-    useWorkflowStore.setState({ items: [], loaded: true, runs: {}, steps: {}, drafts: {} });
+    useWorkflowStore.setState({
+      items: [],
+      loaded: true,
+      runs: {},
+      steps: {},
+      drafts: {},
+      shownRun: {},
+    });
     useProjectsStore.setState({ workflowId: null });
     useSchedulesStore.setState({ started: [] });
+    useTriggersStore.setState({ started: [] });
   });
 
   it("shows a built-in read-only, and customizing it copies it to the user's folder", async () => {
@@ -297,14 +306,60 @@ describe("WorkflowView", () => {
     useSchedulesStore.setState({
       started: [{ runId: "run-1", scheduleId: "s1", scheduleName: "Nightly" }],
     });
+    // And a trigger's run is marked with the trigger's name.
+    useTriggersStore.setState({
+      started: [{ runId: "run-1", triggerId: "t1", triggerName: "Address reviews" }],
+    });
     render(<WorkflowView workflowId="demo" />);
     const runs = await screen.findByRole("region", { name: "Runs" });
     const row = await within(runs).findByRole("button", { name: "Run in fix-login, failed" });
     expect(row).toHaveTextContent("scheduled");
+    expect(row).toHaveTextContent("triggered");
     await userEvent.setup().click(row);
     expect(await within(runs).findByText("no way")).toBeInTheDocument();
     expect(within(runs).getByText("Notify you")).toBeInTheDocument();
     expect(within(runs).getByText("Scheduled · Nightly")).toBeInTheDocument();
+    expect(within(runs).getByText("Triggered · Address reviews")).toBeInTheDocument();
     expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
+  });
+
+  it("opens on the run asked for from elsewhere, once", async () => {
+    useWorkflowStore.setState({ items: [item("demo", { kind: "builtIn" })] });
+    core.workflowRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        workflowId: "demo",
+        workflowName: "Demo",
+        workspaceId: "w",
+        workspaceName: "fix-login",
+        status: "succeeded",
+        requestedBy: "trigger",
+        error: null,
+        inputs: {},
+        pullRequest: null,
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      },
+    ]);
+    core.workflowRunSteps.mockResolvedValue([
+      {
+        stepId: "tell",
+        action: "notify",
+        status: "succeeded",
+        startedAt: null,
+        endedAt: null,
+        outputs: {},
+        note: "told it",
+      },
+    ]);
+    // Open run, on a trigger's history.
+    useWorkflowStore.getState().showRun("demo", "run-1");
+    render(<WorkflowView workflowId="demo" />);
+    const runs = await screen.findByRole("region", { name: "Runs" });
+    expect(await within(runs).findByText("told it")).toBeInTheDocument();
+    expect(core.workflowRunSteps).toHaveBeenCalledWith("run-1");
+    // Taken: the view opened from the sidebar next time starts with no run picked.
+    expect(useWorkflowStore.getState().shownRun.demo).toBeUndefined();
   });
 });

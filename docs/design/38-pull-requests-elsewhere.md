@@ -1,7 +1,7 @@
-# 36 — Pull requests in other repositories
+# 38 — Pull requests in other repositories
 
 _Proposed 2026-11-09. Slice 1 is built — see [slice 1](#slice-1-what-shipped). Slices 2–5 are
-to do; [M29](05-roadmap.md#m29--pull-requests-in-other-repositories) tracks them._
+to do; [M31](05-roadmap.md#m31--pull-requests-in-other-repositories) tracks them._
 
 A project is one repository, and every pull request Yardsort shows is one of that repository's.
 Some projects are not used that way. A **parent repository** holds other repositories as
@@ -75,7 +75,7 @@ sessions running at once cannot be told apart by time, and the author is the sam
 
 ## What a tracked pull request is
 
-A row in `tracked_pull_requests` (migration 0023):
+A row in `tracked_pull_requests` (migration 0027):
 
 | Column         | What it holds                                                                        |
 | -------------- | ------------------------------------------------------------------------------------ |
@@ -167,7 +167,7 @@ see pull requests being created, and stays: an agent that opens one in some othe
 browser, an API call — is still pointed at the command.
 
 `ys pr track <url>` finds its workspace and session the way `ys memory propose` does — the
-launch environment, or the folder it is run in — or takes `--workspace`. `ys pr list` prints the
+launch environment, or the folder it is run in — or takes `--workspace`. `ys pr tracked` prints the
 workspace's tracked pull requests; `ys pr untrack <url>` removes one. The app sees what `ys`
 wrote the next time it asks about the project: within a minute, or on focus.
 
@@ -210,7 +210,7 @@ note and `ys pr track` cover it.
 
 ## Slices
 
-1. **Tracking and following.** ✅ The table, `ys pr track | list | untrack`, **Track pull
+1. **Tracking and following.** ✅ The table, `ys pr track | tracked | untrack`, **Track pull
    request…**, the launch section, reading by link, and every surface above with the Summary.
    See [slice 1](#slice-1-what-shipped).
 2. **Seen: Claude Code.** The `PostToolUse` rule, recorded fixtures of `gh pr create` and of a
@@ -238,7 +238,7 @@ note and `ys pr track` cover it.
 
 ## Open questions
 
-[48–49 in open questions](06-open-questions.md#pull-requests-in-other-repositories).
+[56–57 in open questions](06-open-questions.md#pull-requests-in-other-repositories).
 
 ## Slice 1: what shipped
 
@@ -262,6 +262,9 @@ Built 2026-11-09, as proposed above, with these differences and findings:
   read that worked says so there too: the row's checks and reviews are then the old ones.
 - **Its Summary needs no folder.** Archiving removes a workspace's folder and keeps its row, and
   its tracked pull requests still show, so the Summary reads the workspace's row, not its folder.
+- **`ys pr tracked`, not `ys pr list`.** The Floor Manager ([37](37-floor-manager.md)) landed
+  first with `ys pr list` for every project's open pull requests, so the workspace's tracked ones
+  are `ys pr tracked`, in `crates/cli/src/commands/pr_tracked.rs` beside it.
 - **The CLI looks at the launch environment first.** An agent that opened its pull request in a
   nested clone is standing outside its worktree — in the project's main checkout, which is the
   `local` workspace's folder — so the folder would name the wrong workspace. The run or workspace
@@ -284,6 +287,6 @@ nested clone, and the three systems' hands-on pass.
 `docs/guide/commits-and-pull-requests.md` (a workspace's pull requests elsewhere),
 `docs/guide/pull-requests.md` (their rows), `docs/guide/cli.md` (`ys pr`), `CHANGELOG.md`,
 [03-architecture](03-architecture.md) (the tracked table and how it is read),
-[05-roadmap](05-roadmap.md) (M29), [06-open-questions](06-open-questions.md) (48–49),
+[05-roadmap](05-roadmap.md) (M31), [06-open-questions](06-open-questions.md) (56–57),
 [09](09-agent-events-and-memory.md) (the exception, in slice 2), and this doc's index line in
 [README](README.md).

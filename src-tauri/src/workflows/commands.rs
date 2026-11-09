@@ -326,6 +326,9 @@ pub async fn workflow_start(
                 inputs: &inputs,
                 requested_by: "app",
                 unattended: false,
+                origin_record: None,
+                depth: 0,
+                event: None,
             },
             &AppLook(state),
         )
@@ -445,6 +448,21 @@ impl Look for AppLook<'_> {
         let env = self.0.env();
         let git = crate::git::Git::new(&env).map_err(|e| e.to_string())?;
         runs::pull_request_of(Gh::find(&env).as_ref(), &git, workspace)
+    }
+
+    fn watch_pull_request(
+        &self,
+        workspace: &WorkspaceRow,
+        number: Option<u32>,
+    ) -> Result<Option<yardsort_core::forge::PrLook>, String> {
+        let env = self.0.env();
+        let git = crate::git::Git::new(&env).map_err(|e| e.to_string())?;
+        yardsort_core::trigger::watch::watch_pull_request_of(
+            Gh::find(&env).as_ref(),
+            &git,
+            workspace,
+            number,
+        )
     }
 }
 

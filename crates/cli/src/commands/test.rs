@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use yardsort_core::memory;
-use yardsort_core::presence;
 use yardsort_core::smoke::{self, report, runs, Entry, Problem};
 use yardsort_core::store::{TestRunRow, TestStepRow, WorkspaceRow};
 
@@ -335,13 +334,11 @@ fn start_run(
         };
         inputs.insert(key.trim().to_owned(), value.to_owned());
     }
-    // The app carries runs out. Queued with nobody to run it, a run would only sit there.
-    if !presence::app_running(&ys.data_dir) {
-        return Err(Failure::new(
-            "Yardsort is not running. Smoke tests run in the app: open it, then run this again. \
+    super::someone_carries_it_out(
+        ys,
+        "Yardsort is not running. Smoke tests run in the app: open it, then run this again. \
              Nothing was queued.",
-        ));
-    }
+    )?;
     // From an agent's terminal, the launch environment says which conversation asked.
     let record = std::env::var(yardsort_core::activity::RECORD_ENV)
         .ok()

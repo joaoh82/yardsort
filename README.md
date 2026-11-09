@@ -92,6 +92,12 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   you pick, or again and again — every weekday at nine, every two hours, a cron expression — in
   a workspace you already have, while Yardsort is open. A notification tells you when a run
   fails. [Schedules](docs/guide/schedules.md).
+- **Triggers: when something happens.** Start a workflow or a smoke test when an agent says its
+  work is done, someone reviews the pull request, its checks fail, a run ends, or something you
+  name happens. Ready-made ones — address reviews, fix failing checks, review or smoke test the
+  work when it is done — are a box to tick when you start a workspace. A cap per pull request, an
+  hourly limit and a limit on chains keep a trigger from looping.
+  [More below](#triggers-when-something-happens).
 - **See what happened.** Live list of changed files, character-level diffs, a file tree, and
   image previews. Edit text files inside Yardsort, with retained drafts and a check before
   overwriting a file changed on disk, or open them in your editor. With an agent reporting,
@@ -123,6 +129,12 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   label and assign it from the same view. `ys task` does all of it from a terminal, so an agent
   can tell you what is open and file an issue when you ask. Everything goes through `gh`.
   [More below](#your-issues-where-the-agents-are).
+- **One agent that sees everything.** The [Floor Manager](docs/guide/floor-manager.md), in the
+  bottom bar's corner or **Mod+J**, is an agent you pick that has every project in view through
+  `ys`. Ask what is running, which pull requests nobody has reviewed or which need attention, or
+  to start a task. It suggests a workflow, opens workspaces on other people's pull requests and
+  starts reviewers on them, each only after you say yes. It never deletes, merges or closes
+  anything.
 - **Start from a repository or a link.** **Clone a repository** lists the repositories your `gh`
   account owns or collaborates on — type to narrow, pick one, clone — or takes a clone URL from
   GitHub, GitLab, Bitbucket, Gitea, Forgejo or a host of your own. **Start from a link…** takes
@@ -169,18 +181,22 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   up with, `ys workspace handoff` prints the next agent's first message, `ys workspace fork`
   starts the next feature on a new branch from a workspace's, `ys workspace context` prints what
   its other agents were asked and answered, `ys workflow run` queues a workflow for the open app to
-  carry out, and `ys test run` a smoke test. `ys workspace delete` removes one when the work is
+  carry out, `ys test run` a smoke test, and `ys pr list` lists every project's open pull
+  requests with what needs attention. `ys workspace delete` removes one when the work is
   done, keeping the branch. Every command takes `--json`.
 - **Remote, still under development.** Reach this computer's workspaces and terminals from your
   phone, and start new ones there, through a Yardsort server you sign in to. It stays off, and connects to nothing, until you
   turn it on, and a device gets in only if you say yes at this computer. Whoever runs the server
   can see what passes through it, and the phone app is not in the app stores yet. Expect it to
-  change until the whole plan is finished. See [Remote](docs/guide/remote.md).
+  change until the whole plan is finished. See [Remote](docs/guide/remote.md). A Linux computer with
+  no screen, such as a server you reach over SSH, can be one your phone reaches too, with
+  `yardsort-host`: see [A computer with no screen](docs/guide/headless-host.md). The desktop app can
+  reach another computer the same way, read-only for now: its workspaces, agents and activity.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/composer.png" alt="The composer: describe a task, pick an agent, model, effort and branch" /></td>
+    <td width="50%"><img src="docs/images/composer.png" alt="The composer: describe a task, pick an agent, model, effort and branch, and tick the triggers the new workspace gets" /></td>
     <td width="50%"><img src="docs/images/sessions.png" alt="Previous sessions with Resume and Fork" /></td>
   </tr>
   <tr>
@@ -424,6 +440,35 @@ ys test run login --workspace fix-login   # the result from `ys test wait`
 
 See [Smoke tests](docs/guide/smoke-tests.md).
 
+## Triggers: when something happens
+
+A trigger starts a workflow or a smoke test in a workspace when something happens there, instead
+of when you press **Run**: the agent runs `ys workspace done`, finishes a turn or exits; a smoke
+test or a workflow run ends; the workspace's pull request opens, gets a review or a comment from
+someone else, or its checks fail; or an agent, a test or a script raises an event you named with
+`ys event emit`. What it starts is an ordinary run, marked _triggered_.
+
+Five come ready made, each an event and a built-in workflow: **Address reviews**, **Fix failing
+checks**, **Review the pull request when it opens**, and **Review** or **Smoke test when the work
+is done**. The composer offers them as boxes to tick for each new workspace, and an agent whose
+workspace listens for `ys workspace done` is told to run it in its first message.
+
+![Triggers: every trigger with its event, what it runs and how its last run went, and one open with its history](docs/images/triggers.png)
+
+**Triggers**, in the sidebar, lists every project's triggers, and the dialog says in a sentence what
+one will do before you save it. Agents answer reviews as your account, so only posts from other
+accounts count unless you say so. A trigger stops after three runs for one pull request, agent or
+workspace, unless you give it more, until you press **Reset**; it starts at most ten an hour; and a
+chain of runs that set each other off stops three deep. Triggers fire while Yardsort is open; what
+happened while it was closed is found when it opens.
+
+```sh
+ys trigger add --preset address-reviews --workspace fix-login
+ys event emit migration-written --note "0042 adds users.last_seen"
+```
+
+See [Triggers](docs/guide/triggers.md).
+
 ## Supported agents
 
 Yardsort starts any coding agent that runs in a terminal. These work out of the box:
@@ -484,7 +529,8 @@ never sees their credentials.
 
 The [quick start guide](docs/quick-start.md) walks through it with pictures, and the
 [documentation](docs/README.md) covers every part of the app. Both are also on the website, at
-[yardsort.sh/docs](https://yardsort.sh/docs/).
+[yardsort.sh/docs](https://yardsort.sh/docs/). Moving local worktrees from Conductor? See
+[Migrate from Conductor](docs/guide/migrate-from-conductor.md).
 
 ## Assist: judgment from Jev, if you want it
 
@@ -546,6 +592,7 @@ says no.
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | [Quick start](docs/quick-start.md)                                                               | Download to first agent in five minutes                                              |
 | [Projects](docs/guide/projects.md) · [Workspaces](docs/guide/workspaces.md)                      | Repositories, branches, worktrees, archiving                                         |
+| [Migrate from Conductor](docs/guide/migrate-from-conductor.md)                                   | Import existing local worktrees and reconfigure scripts by hand                      |
 | [Terminals & sessions](docs/guide/terminals-and-sessions.md)                                     | Tabs, status dots, notifications, resume and fork, handing off, shared conversations |
 | [Changes & files](docs/guide/changes-and-files.md)                                               | Reviewing what an agent did                                                          |
 | [Activity](docs/guide/activity.md)                                                               | What ran, what each agent reported, who wrote which file                             |
@@ -555,7 +602,10 @@ says no.
 | [Tasks](docs/guide/tasks.md)                                                                     | Every project's GitHub issues: which need an answer, hand one to an agent            |
 | [Workflows](docs/guide/workflows.md)                                                             | Named agent work in YAML: the built-in code review, your own                         |
 | [Smoke tests](docs/guide/smoke-tests.md)                                                         | A file an agent writes and Yardsort runs: steps, browser, approval, the Tests view   |
+| [Schedules](docs/guide/schedules.md)                                                             | A workflow or a smoke test at a set time, or on a routine                            |
+| [Triggers](docs/guide/triggers.md)                                                               | A workflow or a smoke test when something happens: done, a review, failing checks    |
 | [Remote](docs/guide/remote.md)                                                                   | Your phone, through a server. Still under development, and off until you turn it on  |
+| [A computer with no screen](docs/guide/headless-host.md)                                         | `yardsort-host`: a Linux server your phone reaches. Still under development          |
 | [Usage](docs/guide/usage.md)                                                                     | Tokens spent and their cost; CPU and memory per agent                                |
 | [Updates](docs/guide/updates.md)                                                                 | How new versions reach you                                                           |
 | [Settings & harnesses](docs/guide/settings.md)                                                   | Configure agents, add your own                                                       |

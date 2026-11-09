@@ -359,7 +359,7 @@ fn store_failed(error: impl std::fmt::Display) -> IpcError {
 }
 
 /// Where the host's credential is kept.
-fn credentials() -> account::Result<Box<dyn CredentialStore>> {
+pub(crate) fn credentials() -> account::Result<Box<dyn CredentialStore>> {
     match std::env::var_os(CREDENTIALS_DIR_VAR) {
         Some(dir) => Ok(Box::new(
             FileCredentials::new(dir).map_err(|e| Failure::new("remote_credentials", e))?,
@@ -547,15 +547,11 @@ pub async fn remote_enable(
         signing_in.take();
     }
     let signed_in = finished?;
-    account::enable(
-        &Arc::new(AppHome::new(&app)),
-        client,
-        &server,
-        &name,
-        signed_in,
-    )
-    .await
-    .map_err(ipc)?;
+    let home = Arc::new(AppHome::new(&app));
+    account::enable(&home, client, &server, &name, signed_in)
+        .await
+        .map_err(ipc)?;
+    account::connect(&home);
     status_of(app).await
 }
 

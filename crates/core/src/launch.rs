@@ -217,9 +217,11 @@ impl Launcher<'_> {
             _ => None,
         };
         // A new agent is told the project has smoke tests — so it can run and write them — when
-        // the worktree has a `.yardsort/tests` folder or the project has a test environment set.
-        // Like memory, only for a fresh harness first message: a handoff or a fork already knows.
-        let smoke = match &launch {
+        // the worktree has a `.yardsort/tests` folder or the project has a test environment set,
+        // about `ys workspace done` when a trigger in the workspace listens for it, and about
+        // `ys pr track` when the project's checkout holds other repositories. Like
+        // memory, only for a fresh harness first message: a handoff or a fork already knows.
+        let pointers = match &launch {
             Launch::Harness(request)
                 if request.fork_packet.is_none()
                     && !request.handoff
@@ -235,6 +237,12 @@ impl Launcher<'_> {
                     .is_empty();
                 let smoke = (crate::smoke::dir(worktree).is_dir() || has_env)
                     .then_some(crate::smoke::LAUNCH_SECTION);
+                let done = crate::trigger::listens_for(
+                    self.store,
+                    &workspace.id,
+                    crate::trigger::TriggerEvent::WorkspaceDone,
+                )?
+                .then_some(crate::trigger::DONE_SECTION);
                 // A project whose checkout holds other repositories: the agent is told how a
                 // pull request it opens in one of them gets followed here.
                 let elsewhere = self
@@ -243,16 +251,11 @@ impl Launcher<'_> {
                     .and_then(|project| {
                         crate::tracked::launch_section(std::path::Path::new(&project.root_path))
                     });
-                match (smoke, elsewhere) {
-                    (None, None) => None,
-                    (smoke, elsewhere) => Some(
-                        [smoke.map(str::to_owned), elsewhere]
-                            .into_iter()
-                            .flatten()
-                            .collect::<Vec<_>>()
-                            .join("\n\n"),
-                    ),
-                }
+                let pointers: Vec<&str> = [smoke, done, elsewhere.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                (!pointers.is_empty()).then(|| pointers.join("\n\n"))
             }
             _ => None,
         };
@@ -260,7 +263,7 @@ impl Launcher<'_> {
             launch,
             self.harnesses,
             memory.as_deref(),
-            smoke.as_deref(),
+            pointers.as_deref(),
             note.as_ref(),
         )?;
         resolved
@@ -526,8 +529,8 @@ pub fn resolve_launch(launch: Launch, overrides: &[HarnessOverride]) -> IpcResul
     resolve_launch_with(launch, overrides, None, None, None)
 }
 
-/// As [`resolve_launch`], with `memory` and the `smoke`-tests pointer added after a harness's
-/// first message, and the `note` about the workspace's other conversations given as background
+/// As [`resolve_launch`], with `memory` and the `smoke` pointers — to the smoke tests, and to
+/// `ys workspace done` — added after a harness's first message, and the `note` about the workspace's other conversations given as background
 /// context where the harness takes it, or after the first message where it does not. The agent
 /// receives all of it; the record keeps only the first message, as the task. A launch with
 /// neither background context nor a first message has nowhere to put the note, and goes without.
@@ -1151,6 +1154,71 @@ mod tests {
         assert!(sent.contains("ys pr track"), "{sent}");
         assert!(!start(&ws, &store, bare.path(), Some("exit 0"), true, None)
             .contains("Other repositories"));
+    }
+
+    /// A new agent is told about `ys workspace done` when, and only when, a trigger in its
+    /// workspace listens for it.
+    #[test]
+    fn a_new_agent_is_told_about_the_done_signal_when_a_trigger_listens_for_it() {
+        let host = PlanCatcher::default();
+        let env = process_env();
+        let harnesses = [shell_harness()];
+        let activity = ActivitySettings::default();
+        let folder = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace_in(folder.path(), &store);
+        let start = |prompt: Option<&str>| {
+            let launcher = launcher(&store, &host, &env, &harnesses, &activity, folder.path());
+            launcher
+                .in_workspace(
+                    &ws,
+                    Launch::Harness(HarnessRequest {
+                        id: "sh-agent".into(),
+                        model: None,
+                        effort: None,
+                        prompt: prompt.map(str::to_owned),
+                        handoff: false,
+                        skip_memory: false,
+                        quiet_memory: false,
+                        skip_context: false,
+                        fork_packet: None,
+                    }),
+                    SIZE,
+                )
+                .unwrap();
+            host.plans.lock().unwrap().pop().unwrap().args.join(" ")
+        };
+        assert!(!start(Some("exit 0")).contains("ys workspace done"));
+        let workspace = store.workspace(&ws).unwrap().unwrap();
+        store
+            .add_trigger(
+                &crate::store::TriggerFields {
+                    name: "Review",
+                    preset: None,
+                    project_id: &workspace.project_id,
+                    workspace_id: &ws,
+                    workspace_name: &workspace.name,
+                    session_id: None,
+                    events: r#"["workspace.done"]"#,
+                    filters: "{}",
+                    target_kind: "workflow",
+                    target_id: "code-review",
+                    inputs: "{}",
+                    quiet_ms: 0,
+                    cap: 3,
+                    notify: "failure",
+                },
+                "cli",
+                0,
+            )
+            .unwrap();
+        let sent = start(Some("exit 0"));
+        assert!(sent.contains("## When you are done"), "{sent}");
+        assert!(sent.contains("ys workspace done"), "{sent}");
+        assert!(
+            !start(None).contains("ys workspace done"),
+            "not without a first message"
+        );
     }
 
     /// A fork's packet goes to the agent after the user's message, in place of the memory it

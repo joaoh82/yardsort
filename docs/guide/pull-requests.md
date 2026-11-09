@@ -264,6 +264,10 @@ Tasks view's, described in [Tasks](tasks.md#starting-from-a-link).
 it. Pick the agent, say what you want — _review this_, _fix the failing test_ — and start. Until
 you press **Start** no worktree exists; cancelling leaves only the branch.
 
+From a terminal, [`ys pr checkout`](cli.md#ys-pr) does the same in one step: it opens the
+workspace on the branch and starts nothing in it. [`ys pr list`](cli.md#ys-pr) lists what this
+view lists, open pull requests only, with the same review filters.
+
 What it does to the repository depends on where the branch is:
 
 - **You already have the branch locally** — it is opened exactly as it is. Yardsort never moves
@@ -298,6 +302,10 @@ shell tab to the fork's URL and branch.
 - **While it is closed**, only the newest fifty per project are read, as they always have been
   for the workspace badges — plus, one at a time, any older open pull request a workspace shows,
   so its badge does not stay as it was when Yardsort started.
+- **For a [trigger](triggers.md#watching-a-pull-request)** on one of a workspace's pull
+  request events, that workspace's pull request is read once a minute while the trigger is on,
+  with one question that has its checks, its reviews and its comments, whether this view is open
+  or not.
 
 The open pull requests are read fifty at a time. On a busy repository that is a few seconds a
 page, which is why the whole list is only kept fresh while you are looking at it.

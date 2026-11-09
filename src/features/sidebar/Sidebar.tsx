@@ -10,6 +10,7 @@ import { useUpdatesStore } from "@/stores/updates";
 import { reviewVanishedWorkspaces } from "./actions";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectTree } from "./ProjectTree";
+import { OtherComputersList } from "./OtherComputersList";
 import { WorkflowsSection } from "@/features/workflows/WorkflowsSection";
 import { PullRequestsRow } from "@/features/pull-requests/PullRequestsRow";
 import { usePullRequestPolling } from "@/features/pull-requests/usePullRequestPolling";
@@ -17,6 +18,7 @@ import { TasksRow } from "@/features/tasks/TasksRow";
 import { useTaskPolling } from "@/features/tasks/useTaskPolling";
 import { TestsRow } from "@/features/tests/TestsRow";
 import { SchedulesRow } from "@/features/schedules/SchedulesRow";
+import { TriggersRow } from "@/features/triggers/TriggersRow";
 
 /** Left panel: projects and their workspaces. */
 export function Sidebar() {
@@ -68,6 +70,7 @@ export function Sidebar() {
       <WorkflowsSection />
       <TestsRow />
       <SchedulesRow />
+      <TriggersRow />
       <PanelHeader
         title="Projects"
         search={
@@ -149,6 +152,7 @@ export function Sidebar() {
       ) : (
         <ProjectTree query={query} />
       )}
+      <OtherComputersList />
 
       {pendingClones.map((request) => (
         <p key={request.id} role="status" className="px-3 py-2 text-ink-muted">

@@ -4,10 +4,7 @@
 //! launched, exits, or is drained from the inbox; nothing here writes an event.
 
 use std::path::Path;
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::Duration;
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager};
@@ -30,49 +27,22 @@ pub struct ActivityChanged {
 /// handed to the watcher, which looks again on its own clock: nothing else would.
 pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
     let report = yardsort_core::activity::import_inbox(store, data_dir);
-    if !report.workspaces.is_empty() {
-        let _ = ActivityChanged {
-            workspace_ids: report.workspaces.into_iter().collect(),
-        }
-        .emit(handle);
-    }
+    changed(handle, report.workspaces);
     // The watcher's thread also reads the session directories of harnesses that keep their
     // own — Grok's — and an exit is the moment their last lines land; so it is woken here
     // whatever the inbox held.
     if let Some(state) = handle.try_state::<AppState>() {
-        if let Some(watcher) = state.inbox_watcher.lock().unwrap().as_ref() {
-            watcher.look_again();
-        }
+        launched(&state);
     }
 }
 
-/// Read the session directories Yardsort's own Grok launches write into, when asked to.
-/// Returns how many runs are still worth watching.
-fn read_session_files(
-    handle: &AppHandle,
-    state: &AppState,
-    cursors: &mut yardsort_core::activity::grok::Cursors,
-) -> usize {
-    if !state.settings.get().activity.capture_grok {
-        return 0;
-    }
-    let shell = state.env();
-    let home = yardsort_core::activity::grok::grok_home(&|name| {
-        std::env::var(name)
-            .ok()
-            .or_else(|| shell.vars.get(name).cloned())
-    });
-    let Some(home) = home else {
-        return 0;
-    };
-    let report = yardsort_core::activity::grok::import(&state.store, &home, cursors);
-    if !report.workspaces.is_empty() {
+fn changed(handle: &AppHandle, workspaces: std::collections::BTreeSet<String>) {
+    if !workspaces.is_empty() {
         let _ = ActivityChanged {
-            workspace_ids: report.workspaces.into_iter().collect(),
+            workspace_ids: workspaces.into_iter().collect(),
         }
         .emit(handle);
     }
-    report.watching
 }
 
 /// A launch happened: wake the watcher, so a harness whose files are read rather than delivered
@@ -83,102 +53,30 @@ pub fn launched(state: &AppState) {
     }
 }
 
-/// Wait this long after the last file lands before draining: a tool call is two files in
-/// quick succession, and one drain covers both.
-const INBOX_QUIET: Duration = Duration::from_millis(200);
-/// While a drain has left something for later, look again this often. Codex writes a turn's
-/// end to its session file within moments of announcing it; five seconds is patience, not
-/// polling, and the core gives up on a turn after five minutes, which ends the looking.
-const RETRY_DEFERRED: Duration = Duration::from_secs(5);
+pub use yardsort_core::runtime::InboxWatcher;
 
-/// How long the watcher's thread waits for a signal before draining on its own: forever when
-/// nothing was deferred and no session file is being followed, [`RETRY_DEFERRED`] otherwise.
-fn wait_for(pending: usize) -> Option<Duration> {
-    (pending > 0).then_some(RETRY_DEFERRED)
-}
-
-/// Watches until dropped.
-pub struct InboxWatcher {
-    _watcher: RecommendedWatcher,
-    wake: mpsc::Sender<()>,
-}
-
-impl InboxWatcher {
-    /// Drain now, and keep draining on the retry clock while anything stays deferred.
-    pub fn look_again(&self) {
-        let _ = self.wake.send(());
-    }
-}
-
-/// Watch the inbox directory and drain it after each burst of files. The directory is
-/// created first — a watch needs something to watch — and the drain runs on its own thread,
-/// so a hook landing during a page load never touches the UI thread.
+/// Watch the inbox and drain it after each burst of files, telling the timeline what moved. The
+/// drain runs on the watcher's own thread, so a hook landing during a page load never touches the
+/// UI thread.
 pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWatcher> {
-    let dir = yardsort_core::activity::inbox_dir(data_dir);
-    std::fs::create_dir_all(&dir)?;
-    let (tx, rx) = mpsc::channel::<()>();
-    let wake = tx.clone();
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if event.is_ok_and(|event| brings_entries(&event.kind)) {
-            let _ = tx.send(());
-        }
-    })?;
-    watcher.watch(&dir, RecursiveMode::NonRecursive)?;
-    let data_dir = data_dir.to_path_buf();
-    std::thread::spawn(move || {
-        let mut pending = 0;
-        let mut cursors = yardsort_core::activity::grok::Cursors::new();
-        // The first pass does not wait: a Grok run left going when the window last closed has
-        // a directory to read now, and nothing else would say so.
-        let mut first = true;
-        loop {
-            let woken = if first {
-                first = false;
-                false
-            } else {
-                match wait_for(pending) {
-                    Some(wait) => match rx.recv_timeout(wait) {
-                        Ok(()) => true,
-                        Err(RecvTimeoutError::Timeout) => false,
-                        Err(RecvTimeoutError::Disconnected) => break,
-                    },
-                    None => match rx.recv() {
-                        Ok(()) => true,
-                        Err(_) => break,
-                    },
-                }
-            };
-            if woken {
-                // Let the burst finish; whatever else arrives meanwhile is one drain.
-                std::thread::sleep(INBOX_QUIET);
-                while rx.try_recv().is_ok() {}
-            }
-            let Some(state) = handle.try_state::<AppState>() else {
-                continue;
-            };
-            let report = yardsort_core::activity::import_inbox(&state.store, &data_dir);
-            if !report.workspaces.is_empty() {
-                let _ = ActivityChanged {
-                    workspace_ids: report.workspaces.into_iter().collect(),
-                }
-                .emit(&handle);
-            }
-            let watching = read_session_files(&handle, &state, &mut cursors);
-            pending = report.deferred + watching;
-        }
-    });
-    Ok(InboxWatcher {
-        _watcher: watcher,
-        wake,
+    let dir = data_dir.to_path_buf();
+    yardsort_core::runtime::watch_inbox(data_dir, move |cursors| {
+        let Some(state) = handle.try_state::<AppState>() else {
+            return 0;
+        };
+        // Yardsort's own Grok launches write into session directories, read when asked to.
+        let grok_home = state
+            .settings
+            .get()
+            .activity
+            .capture_grok
+            .then(|| yardsort_core::runtime::grok_home(&state.env()))
+            .flatten();
+        let drained =
+            yardsort_core::runtime::drain(&state.store, &dir, grok_home.as_deref(), cursors);
+        changed(&handle, drained.workspaces);
+        drained.pending
     })
-}
-
-/// Whether an event on the inbox directory can mean a new entry: a file created or renamed
-/// into place. A drain *reads* the directory, which on Linux is an `Access` event of its own,
-/// and a drain that woke the next drain would never let the worker sleep. Removals are the
-/// drain's too.
-fn brings_entries(kind: &EventKind) -> bool {
-    matches!(kind, EventKind::Create(_) | EventKind::Modify(_))
 }
 
 /// One recorded fact, as the timeline shows it. Timestamps are epoch milliseconds; `payload`
@@ -641,46 +539,4 @@ pub async fn settings_save_activity(
         settings_info(state)
     })
     .await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use notify::event::{AccessKind, AccessMode, CreateKind, ModifyKind, RemoveKind, RenameMode};
-
-    #[test]
-    fn only_a_file_arriving_wakes_the_drain_never_the_drain_itself() {
-        assert!(brings_entries(&EventKind::Create(CreateKind::File)));
-        assert!(brings_entries(&EventKind::Modify(ModifyKind::Name(
-            RenameMode::To
-        ))));
-        assert!(brings_entries(&EventKind::Modify(ModifyKind::Any)));
-        // What a drain does: lists the directory, then removes what it took.
-        assert!(!brings_entries(&EventKind::Access(AccessKind::Open(
-            AccessMode::Any
-        ))));
-        assert!(!brings_entries(&EventKind::Access(AccessKind::Close(
-            AccessMode::Read
-        ))));
-        assert!(!brings_entries(&EventKind::Remove(RemoveKind::File)));
-        assert!(!brings_entries(&EventKind::Any));
-        assert!(!brings_entries(&EventKind::Other));
-    }
-
-    /// A deferred entry — a Codex turn whose session file is still being written — gets a
-    /// retry on a timer, because nothing else will wake the drain for it: the session file is
-    /// not watched, and the agent may then sit waiting for the user with no exit in sight.
-    #[test]
-    fn the_watcher_looks_again_on_its_own_only_while_something_is_deferred() {
-        assert_eq!(
-            wait_for(0),
-            None,
-            "nothing waiting: sleep until a file lands"
-        );
-        assert_eq!(wait_for(1), Some(RETRY_DEFERRED));
-        assert_eq!(wait_for(7), Some(RETRY_DEFERRED));
-        assert!(
-            RETRY_DEFERRED.as_millis() < yardsort_core::activity::codex::NOT_READY_GRACE_MS as u128
-        );
-    }
 }

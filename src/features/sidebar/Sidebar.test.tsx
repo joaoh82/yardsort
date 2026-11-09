@@ -52,6 +52,8 @@ const core = vi.hoisted(() => ({
   workspaceFork: vi.fn(),
   testList: vi.fn(),
   testRuns: vi.fn(),
+  // The schedule dialog previews its times after a pause, which a slow run reaches before Cancel.
+  schedulePreview: vi.fn(() => new Promise(() => {})),
 }));
 const native = vi.hoisted(() => ({
   pickFolder: vi.fn(),
@@ -733,6 +735,15 @@ describe("Sidebar", () => {
     );
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers Triggers… on a workspace, opening the view on that workspace", async () => {
+    await renderWithWorktree();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More actions for feature" }));
+    await user.click(screen.getByRole("menuitem", { name: "Triggers…" }));
+    expect(useProjectsStore.getState().triggersOpen).toBe(true);
+    expect(useProjectsStore.getState().triggersFocus).toEqual({ workspaceId: "w-alpha-feature" });
   });
 
   it("forks a workspace into the composer, on a new branch from its branch", async () => {

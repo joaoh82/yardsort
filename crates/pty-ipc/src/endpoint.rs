@@ -31,16 +31,38 @@ impl Endpoint {
     /// where an abstract-namespace socket would also work: anything that can connect here can
     /// type into an agent's terminal, and a private directory is what keeps that to its owner.
     pub fn for_data_dir(data_dir: &Path) -> Self {
+        Self::under(data_dir, runtime_dir())
+    }
+
+    /// Every address this data directory's daemon may be listening at, [`Self::for_data_dir`]
+    /// first, which is where a new one is started. A daemon that is already running keeps the
+    /// address it was started at, and a release before the `/run/user/<uid>` fallback put it in
+    /// the data directory for a shell with no `XDG_RUNTIME_DIR`: after an upgrade, missing it
+    /// would start a second daemon and take the first one's agents for ended.
+    pub fn all_for_data_dir(data_dir: &Path) -> Vec<Self> {
+        Self::all_under(data_dir, runtime_dir(), xdg_runtime_dir())
+    }
+
+    fn all_under(data_dir: &Path, runtime: Option<PathBuf>, xdg: Option<PathBuf>) -> Vec<Self> {
+        let mut all = vec![Self::under(data_dir, runtime)];
+        // The rule before: `XDG_RUNTIME_DIR` alone. It is the same address unless the fallback
+        // found `/run/user/<uid>` here.
+        let earlier = Self::under(data_dir, xdg);
+        if !all.contains(&earlier) {
+            all.push(earlier);
+        }
+        all
+    }
+
+    /// The address for `data_dir`, with `runtime` as the per-user runtime directory.
+    fn under(data_dir: &Path, runtime: Option<PathBuf>) -> Self {
         let tag = tag_for(data_dir);
         if cfg!(windows) {
             return Self::Namespaced(format!("yardsort-{tag}.sock"));
         }
         // A per-user runtime directory is the tidiest home for a socket: it is already private,
         // and the OS clears it when the session ends.
-        let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .filter(|dir| dir.is_absolute())
-            .map(|dir| dir.join("yardsort"));
+        let runtime = runtime.map(|dir| dir.join("yardsort"));
         let candidates = [
             runtime.map(|dir| dir.join(format!("{tag}.sock"))),
             Some(data_dir.join("daemon.sock")),
@@ -99,6 +121,58 @@ impl std::fmt::Display for Endpoint {
     }
 }
 
+/// Where another of a profile's own sockets, called `name`, may go, by the daemon's rule: the
+/// per-user runtime directory, then the data directory, then the temporary directory, leaving out
+/// any too long to bind. In that order: whoever listens takes the first, and whoever connects tries
+/// each, since the two may not see the same `XDG_RUNTIME_DIR`.
+pub fn socket_candidates(data_dir: &Path, name: &str) -> Vec<PathBuf> {
+    let tag = tag_for(data_dir);
+    let runtime = runtime_dir().map(|dir| dir.join("yardsort").join(format!("{tag}.{name}.sock")));
+    [
+        runtime,
+        Some(data_dir.join(format!("{name}.sock"))),
+        Some(std::env::temp_dir().join(format!("yardsort-{tag}.{name}.sock"))),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|path| path.as_os_str().len() <= MAX_SOCKET_PATH)
+    .collect()
+}
+
+/// The per-user runtime directory: `XDG_RUNTIME_DIR`, or on Linux, where that is not set, the one
+/// logind makes for this user, `/run/user/<uid>`, if it is there and this user's alone. A shell
+/// from `sudo -iu` or `su` has no `XDG_RUNTIME_DIR` while the user's systemd services do, and
+/// both must still reach the same daemon: one that missed it would start a second, and take the
+/// first one's agents for ended.
+fn runtime_dir() -> Option<PathBuf> {
+    if let Some(dir) = xdg_runtime_dir() {
+        return Some(dir);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: `geteuid` cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        private_to(&PathBuf::from(format!("/run/user/{uid}")), uid)
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
+/// `XDG_RUNTIME_DIR`, when it is set to an absolute path.
+fn xdg_runtime_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+}
+
+/// `dir`, if it is a directory that `uid` owns and nobody else may enter.
+#[cfg(target_os = "linux")]
+fn private_to(dir: &Path, uid: u32) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(dir).ok()?;
+    (meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0).then(|| dir.to_path_buf())
+}
+
 /// FNV-1a over the directory's bytes. Hand-rolled on purpose: `DefaultHasher` is explicitly not
 /// stable between Rust releases, and an app must compute the same address as a daemon that a
 /// *different build* started, or an update would orphan the agents it is meant to ask about.
@@ -117,11 +191,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_profiles_other_sockets_follow_the_daemons_rule_and_fit() {
+        let short = Path::new("/tmp/ys");
+        let found = socket_candidates(short, "host");
+        assert!(found.contains(&short.join("host.sock")), "{found:?}");
+        let long = PathBuf::from(format!("/tmp/{}", "x".repeat(120)));
+        let found = socket_candidates(&long, "host");
+        assert!(!found.is_empty());
+        assert!(found
+            .iter()
+            .all(|path| path.as_os_str().len() <= MAX_SOCKET_PATH && !path.starts_with(&long)));
+    }
+
+    #[test]
     fn each_data_directory_gets_its_own_daemon() {
         let one = Endpoint::for_data_dir(Path::new("/tmp/ys"));
         let two = Endpoint::for_data_dir(Path::new("/tmp/ys-other"));
         assert_ne!(one, two);
         assert_eq!(one, Endpoint::for_data_dir(Path::new("/tmp/ys")));
+    }
+
+    /// After an upgrade, a shell with no `XDG_RUNTIME_DIR` now gets `/run/user/<uid>`, but a
+    /// daemon an earlier release started from that shell listens in the data directory.
+    #[cfg(unix)]
+    #[test]
+    fn the_address_an_earlier_release_gave_is_still_tried() {
+        let data = Path::new("/tmp/ys");
+        let run = PathBuf::from("/run/user/1000");
+        let all = Endpoint::all_under(data, Some(run.clone()), None);
+        assert_eq!(
+            all,
+            [
+                Endpoint::Path(run.join("yardsort").join(format!("{}.sock", tag_for(data)))),
+                Endpoint::Path(data.join("daemon.sock")),
+            ]
+        );
+        // Where both rules agree, there is one address to try.
+        assert_eq!(
+            Endpoint::all_under(data, Some(run.clone()), Some(run)).len(),
+            1
+        );
+        assert_eq!(Endpoint::all_under(data, None, None).len(), 1);
     }
 
     /// The tag is part of the address two different builds have to agree on, so it is frozen.
@@ -142,6 +252,21 @@ mod tests {
             "{} is longer than a unix socket path may be",
             path.display()
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn logind_s_runtime_directory_counts_only_when_it_is_this_users_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: `geteuid` cannot fail.
+        let uid = unsafe { libc::geteuid() };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(private_to(dir.path(), uid), Some(dir.path().to_path_buf()));
+        assert_eq!(private_to(dir.path(), uid + 1), None, "another user's");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(private_to(dir.path(), uid), None, "others may enter it");
+        assert_eq!(private_to(&dir.path().join("gone"), uid), None);
     }
 
     #[cfg(unix)]

@@ -344,7 +344,8 @@ pub async fn prepare(server_url: &str, name: &str) -> Result<(Client, ServerDesc
 }
 
 /// Signed in as `signed_in` at `server`: register this computer as a host there, as the host it
-/// already was if it was one, and keep it. Then keep a link to the relay.
+/// already was if it was one, and keep it. The link to the relay is the caller's to start
+/// ([`connect`]): a program that only signs in, and leaves serving to another, does not.
 pub async fn enable<H: Home>(
     home: &Arc<H>,
     client: Client,
@@ -420,7 +421,6 @@ pub async fn enable<H: Home>(
         }
     });
     *home.remote().session.lock().await = Some(session);
-    connect(home);
     Ok(row)
 }
 

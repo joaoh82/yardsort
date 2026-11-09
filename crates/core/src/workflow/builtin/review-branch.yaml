@@ -1,0 +1,69 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: review-branch
+name: Review the branch
+description: >
+  A second agent reviews this workspace's branch against its base, in the same worktree,
+  without a pull request, and writes its findings as its last message. Then the workspace's
+  own agent is told to read them and address them.
+version: 1
+
+trigger:
+  kind: manual
+  context: workspace
+
+inputs:
+  - id: reviewer
+    kind: harness
+    label: Who reviews
+    required: true
+  - id: focus
+    kind: text
+    label: Anything to look at in particular
+
+steps:
+  - id: review
+    action: start_session
+    harness: "{{ inputs.reviewer }}"
+    prompt: |
+      Review the branch `{{ workspace.branch }}` against `{{ workspace.base_branch }}`. You are
+      in its worktree. Another agent did this work and says it is ready to be looked at. Its
+      task was:
+
+      {{ workspace.task }}
+
+      {{ event.note }}
+
+      {{ inputs.focus }}
+
+      Read the whole diff against `{{ workspace.base_branch }}`, with
+      `git diff {{ workspace.base_branch }}...HEAD`, and run the project's checks. Do not edit,
+      commit or push anything: the author is working in this same folder.
+
+      When you are done, write your review as your last message: each finding with the file
+      and line it is about, what is wrong, why, and how you know; then what you checked and
+      found right. Then stop.
+
+  - id: settled
+    action: wait_session
+    needs: [review]
+    session: "{{ steps.review.session }}"
+    until: settled
+    timeout: 2h
+
+  - id: tell_author
+    action: send_to_session
+    needs: [settled]
+    session: origin
+    timeout: 1h
+    prompt: |
+      {{ inputs.reviewer }} has reviewed this branch. Its findings are its last message, in its
+      own tab in this workspace: read them with `ys workspace context`. Fix what is right,
+      commit, and say what you did about each finding, or why you did not.
+
+  - id: answered
+    action: wait_session
+    needs: [tell_author]
+    session: origin
+    until: settled
+    timeout: 2h

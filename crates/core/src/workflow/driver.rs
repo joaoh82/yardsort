@@ -269,7 +269,11 @@ fn move_on(
         // The workspace's own agent is whichever was newest when the run began: found now,
         // before the run has started any of its own for it to be mistaken for.
         if runs::needs_origin(&workflow) {
-            facts.origin = origin_session(store, host, &place.workspace.id);
+            facts.origin = match facts.origin_record.as_deref() {
+                // Asked for on behalf of one agent: that one, or none when it is not running.
+                Some(record) => live_terminal(host, &place.workspace.id, record),
+                None => origin_session(store, host, &place.workspace.id),
+            };
         }
         if !store.start_workflow_run(&run.id, Some(&facts.to_json()))? {
             return Ok(()); // Cancelled between the read and now.
@@ -577,7 +581,7 @@ impl World for Seen<'_> {
                 .handoff
                 .get_or_init(|| self.hands.handoff(&self.place.workspace.id))
                 .clone(),
-            [namespace, _] if namespace == "pr" => self.facts.var(path),
+            [namespace, _] if namespace == "pr" || namespace == "event" => self.facts.var(path),
             _ => self.place.var(path),
         }
     }
@@ -637,6 +641,18 @@ fn origin_session(store: &Store, host: &dyn TerminalHost, workspace_id: &str) ->
             .find(|session| session.labels.get(RECORD_LABEL) == Some(&record.id))
             .map(|session| session.id.0.clone())
     })
+}
+
+/// The live terminal of one conversation record in the workspace, if it is running.
+fn live_terminal(host: &dyn TerminalHost, workspace_id: &str, record: &str) -> Option<String> {
+    host.list()
+        .into_iter()
+        .find(|session| {
+            matches!(session.state, SessionState::Running)
+                && session.labels.get(WORKSPACE_LABEL).map(String::as_str) == Some(workspace_id)
+                && session.labels.get(RECORD_LABEL).map(String::as_str) == Some(record)
+        })
+        .map(|session| session.id.0)
 }
 
 impl Seen<'_> {

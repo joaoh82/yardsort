@@ -331,14 +331,14 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
 
 ## Pull requests in other repositories
 
-From the design pass in [36-pull-requests-elsewhere](36-pull-requests-elsewhere.md), 2026-11-09.
+From the design pass in [38-pull-requests-elsewhere](38-pull-requests-elsewhere.md), 2026-11-09.
 
-48. **Should a pull request of the project's own repository be trackable too?** One opened from a
+56. **Should a pull request of the project's own repository be trackable too?** One opened from a
     branch the workspace never checked out — a worktree the agent made by hand — is not matched
     to it today, and tracking would tie it. Slice 1 refuses it: the project's list already has
     it, and tracking it would list it twice. Lean: allow it once the view can show one row for
     both.
-49. **Should the launch section reach an agent started from the tab bar?** Like the smoke-test
+57. **Should the launch section reach an agent started from the tab bar?** Like the smoke-test
     pointer it goes only with a first message, so an agent started with none hears of
     `ys pr track` only if it reads the project's instructions. The adapters (slices 2–3) make
     the question smaller. Lean: leave it until they are built.
@@ -361,3 +361,36 @@ From the design pass in [32-smoke-tests](32-smoke-tests.md), 2026-10-30.
     proposal; a dev server that logs a line per millisecond for an hour fills a disk.
 47. **Should `wait_for url` accept a self-signed certificate?** Local HTTPS dev servers are
     common. `insecure: true` on `wait_for` and `http`, off by default, is the likely answer.
+
+## Triggers
+
+From the design pass in [36-triggers](36-triggers.md), 2026-11-06.
+
+48. **Should schedules and triggers share one view?** Both start a workflow or a test without a
+    person, with a history of what each time became. Two sidebar rows are proposed, to keep
+    schedules as they shipped; one **Automations** view with both may read better once there are
+    several of each.
+49. **Is two minutes the right quiet time for reviews?** Review bots post in passes, and a person
+    writing line comments one at a time can take longer than that between them. To be judged on
+    real pull requests.
+50. **Do agents remember to run `ys workspace done`?** Done is the agent's word by design. If
+    agents forget it often, a preset on `agent.settled` with new commits, a clean worktree and a
+    few quiet minutes may be worth offering beside it.
+51. **Should a cap lift itself?** A capped pull request stays quiet until **Reset**. A new review
+    from a person after the agent's last push may be a reason to start counting again.
+52. **Should the phone list triggers, and switch them?** Remote exposes no workflows, tests or
+    runs yet; triggers would follow them.
+
+## Floor Manager
+
+From the first slice in [37-floor-manager](37-floor-manager.md), 2026-11-09.
+
+53. **Are told boundaries enough?** The Floor Manager is told what to ask before and what never
+    to do. Nothing stops an agent in auto mode from doing it anyway. The lean is to keep it
+    told, because every agent in Yardsort is trusted the same way. If it is not enough, `ys`
+    could refuse its destructive commands when `YARDSORT_COORDINATOR` is set.
+54. **How should a fork's pull request be reviewed?** `ys pr checkout` makes `pr/<number>`, and
+    the built-in review finds a pull request by its branch name. The review could take a pull
+    request number as an input instead.
+55. **What is it called?** _Floor Manager_ and _Floor Planner_ were offered. The code calls it
+    `coordinator` so that a rename touches only the words.

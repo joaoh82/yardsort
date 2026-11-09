@@ -178,6 +178,9 @@ notarize on three platforms, and the daemon can never be a different build from 
 started it. The flag is handled in `main` before Tauri is touched, so a daemon never creates a
 window or a webview.
 
+`ys` and `yardsort-host` (a computer with no screen, [35](35-remote-r4-r5.md)) handle the same flag
+first thing, so whichever starts a profile's daemon, the daemon is that program's own build.
+
 | Concern         | Decision                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Transport       | `interprocess` local sockets: a **socket file** on Unix, a **named pipe** on Windows.                                                                                                                                                                                                                                                                                                                                 |
@@ -335,7 +338,7 @@ the rules for a link and for refusing the project's own repository are in the co
 project, an open one again with the project's list and a merged or closed one every ten minutes,
 kept by link in `Forge`. They reach the window as `ProjectPullRequests::tracked`, and the window
 keys them by repository and number, never by number alone. See
-[36](36-pull-requests-elsewhere.md).
+[36](38-pull-requests-elsewhere.md).
 
 **Tasks** are a project's GitHub issues, and the same idea one step further out: the reading and
 the rules are in the core (`yardsort_core::tasks`) so that the app and `ys task` share them, and
@@ -513,14 +516,15 @@ and `ys activity` read it; `ys activity export` is the one export, NDJSON.
 
 **What an agent reports** (stage 2, Claude Code only, opt-in) arrives the same way the exit spool
 does, in reverse. A recorded launch of harness `claude` is given `--settings
-<data-dir>/activity/hooks/claude.json`, whose hooks run _this executable_ — the app's or `ys`,
+<data-dir>/activity/hooks/claude.json`, whose hooks run _this executable_ — the app's, `ys` or `yardsort-host`,
 whichever launched — with `--yardsort-hook claude <inbox>`, as an argument list. That mode runs
 before Tauri or clap: it reads the payload, keeps metadata (`activity/claude.rs`), writes one file
 to `<data-dir>/activity/inbox/` (`activity/inbox.rs`, atomic rename, 10 000 cap, drops counted)
 and exits 0. `activity::import_inbox` places each entry by `YARDSORT_RUN_ID` from the hook's
 environment, else by the agent's session id (`Store::run_by_harness_session`), else by workspace,
-never by path; the app drains on start, on every exit and on a `notify` watch of the directory,
-emitting `ActivityChanged`; `ys` drains with the spool. Producer `claude`, method `hook`, fidelity
+never by path; the app and `yardsort-host serve` drain on start, on every exit and on a `notify` watch of the
+directory (`yardsort_core::runtime`), the app then emitting `ActivityChanged`; `ys` drains with the
+spool. Producer `claude`, method `hook`, fidelity
 `reported`. Nothing of the user's Claude Code configuration is touched, and the daemon knows
 nothing of any of it. See [11-agent-events-stage-2-claude](11-agent-events-stage-2-claude.md).
 
@@ -713,6 +717,16 @@ remote ever talks to it directly. Instead:
   an agent (`remote::start`): the app lends the channel a `Starting` built from its own settings,
   a start answers from a thread of its own, and an upload goes to the profile's `uploads` folder,
   outside every worktree ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)).
+
+## The Floor Manager (`crates/core/src/coordinator.rs`, `src-tauri/src/coordinator.rs`)
+
+One harness session with a `coordinator` label and no `workspace` label. It is started in
+`<data dir>/coordinator`, whose `AGENTS.md` and `CLAUDE.md` Yardsort rewrites at each start. Its
+environment adds `YARDSORT_DATA_DIR` for the profile, and puts the folder of the bundled `ys`
+first on `PATH`. It reaches the rest of Yardsort only through `ys`: no new IPC surface for the
+agent, and no output read. Everything keyed on a workspace leaves it out because it has none. The
+window draws it in a non-modal panel over the status bar's corner. See
+[37-floor-manager](37-floor-manager.md).
 
 ## Assist (optional, off by default)
 

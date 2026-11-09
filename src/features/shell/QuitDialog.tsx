@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { useModalFocus } from "@/lib/useModalFocus";
+import { useCoordinatorStore } from "@/stores/coordinator";
 import { useProjectsStore } from "@/stores/projects";
 import { useQuitStore } from "@/stores/quit";
 import { useTerminalStore } from "@/stores/terminals";
@@ -15,6 +16,7 @@ export function QuitDialog() {
   const deciding = useQuitStore((s) => s.deciding);
   const tabs = useTerminalStore((s) => s.tabs);
   const projects = useProjectsStore((s) => s.projects);
+  const floorManager = useCoordinatorStore((s) => s.status?.session?.id ?? null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useModalFocus(dialogRef);
@@ -28,7 +30,7 @@ export function QuitDialog() {
 
   if (agents === null) return null;
 
-  const where = agentPlaces(agents, tabs, projects);
+  const where = agentPlaces(agents, tabs, projects, floorManager);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[14vh]">

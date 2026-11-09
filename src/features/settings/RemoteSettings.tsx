@@ -14,6 +14,7 @@ import { useProjectsStore } from "@/stores/projects";
 import { useRemoteStore } from "@/stores/remote";
 import { useTerminalStore } from "@/stores/terminals";
 import { buttonClass, Field, inputClass, primaryButtonClass } from "./fields";
+import { OtherComputersSettings } from "./OtherComputersSettings";
 
 /** How often the open section asks the server who is waiting. */
 const POLL_MS = 3000;
@@ -301,6 +302,8 @@ export function RemoteSettings() {
           </div>
         </form>
       )}
+
+      <OtherComputersSettings />
     </div>
   );
 }

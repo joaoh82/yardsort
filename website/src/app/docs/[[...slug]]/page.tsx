@@ -23,7 +23,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const slug = slugOf((await params).slug);
   const entry = ALL_DOCS.find((d) => d.slug === slug);
   if (!entry) notFound();
-  return pageMetadata(`${entry.title} · Yardsort Docs`, entry.description, docUrl(slug));
+  return pageMetadata(
+    entry.documentTitle ?? `${entry.title} · Yardsort Docs`,
+    entry.description,
+    docUrl(slug),
+  );
 }
 
 export default async function DocPage({ params }: Props) {

@@ -1,0 +1,30 @@
+# Built into Yardsort. To change it, duplicate it: a file in your workflows folder with the same
+# id is used instead of this one, and removing that file brings this one back.
+id: fix-checks
+name: Fix failing checks
+description: >
+  Tell the workspace's own agent, once it is quiet, which checks failed on its pull request's
+  newest commit, and to fix them. The run lasts until the agent has answered.
+version: 1
+
+trigger:
+  kind: manual
+  context: workspace
+
+steps:
+  - id: tell
+    action: send_to_session
+    session: origin
+    timeout: 1h
+    prompt: |
+      The checks on pull request #{{ pr.number }} ({{ pr.url }}) failed on {{ event.head }}:
+      {{ event.summary }}. See them with `gh pr checks {{ pr.number }}`, and read a failed run's
+      log with `gh run view <run id> --log-failed`. Fix what broke, run what you can of the
+      checks here, then commit and push.
+
+  - id: answered
+    action: wait_session
+    needs: [tell]
+    session: origin
+    until: settled
+    timeout: 2h

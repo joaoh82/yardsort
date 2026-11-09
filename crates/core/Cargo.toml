@@ -47,6 +47,8 @@ sha2 = "0.10"
 tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
 # A schedule's times are the machine's local wall-clock time: its zone and its daylight rules,
 # read the same way on Linux, macOS and Windows.
+# The activity inbox, drained as hooks fill it, by the app and by a host with no screen.
+notify = "8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # A schedule's cron expressions, and its daily, weekly and monthly presets, which are cron
 # underneath. Chosen for what it does on the nights the clocks change: a time that does not

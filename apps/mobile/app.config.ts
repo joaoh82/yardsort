@@ -17,7 +17,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: release ? "Yardsort" : "Yardsort Dev",
   slug: "yardsort",
-  version: "0.1.0",
+  // A release build's comes from the `mobile-v` tags (scripts/version.ts); `package.json`'s is
+  // where they started.
+  version: process.env.YARDSORT_VERSION ?? "0.1.0",
   scheme: "yardsort",
   orientation: "default",
   userInterfaceStyle: "automatic",
