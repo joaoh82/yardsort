@@ -162,6 +162,26 @@ pub struct Reported {
 }
 
 /// Turn a hook's stdin into an event, keeping metadata only.
+/// A pull request's link on the event of the call that created it — the one exception to
+/// metadata only (docs/design/38-pull-requests-elsewhere.md). Cursor reports a shell command and
+/// an MCP call twice, as `postToolUse` and as `afterShellExecution` / `afterMCPExecution`; the
+/// link goes on the second, which alone names the MCP server.
+fn with_pull_request(mut payload: Value, url: Option<String>) -> Value {
+    if let Some(url) = url {
+        payload["pullRequestUrl"] = Value::String(url);
+    }
+    payload
+}
+
+/// The pull request a GitHub server's create-pull-request tool answered with.
+fn created_by_tool(hook: &Value) -> Option<String> {
+    let text = |key: &str| hook.get(key).and_then(Value::as_str).unwrap_or_default();
+    if !crate::tracked::is_create_pull_request(text("mcp_server_name"), text("tool_name")) {
+        return None;
+    }
+    crate::tracked::link_in_tool_result(hook.get("result_json")?)
+}
+
 pub fn normalize(hook: &Value) -> Result<Reported, String> {
     let event = hook
         .get("hook_event_name")
@@ -240,23 +260,32 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
         "postToolUseFailure" => ("tool.failed", tool()),
         "afterShellExecution" => (
             "tool.completed",
-            json!({
-                "tool": "shell",
-                "conversationId": conversation,
-                "generationId": text("generation_id"),
-                "durationMs": number("duration"),
-                "sandbox": hook.get("sandbox").and_then(Value::as_bool),
-            }),
+            with_pull_request(
+                json!({
+                    "tool": "shell",
+                    "conversationId": conversation,
+                    "generationId": text("generation_id"),
+                    "durationMs": number("duration"),
+                    "sandbox": hook.get("sandbox").and_then(Value::as_bool),
+                }),
+                crate::tracked::created_by_command(
+                    text("command").as_deref().unwrap_or_default(),
+                    text("output").as_deref().unwrap_or_default(),
+                ),
+            ),
         ),
         "afterMCPExecution" => (
             "tool.completed",
-            json!({
-                "tool": text("tool_name").map(|t| format!("mcp:{t}")),
-                "server": text("mcp_server_name"),
-                "conversationId": conversation,
-                "generationId": text("generation_id"),
-                "durationMs": number("duration"),
-            }),
+            with_pull_request(
+                json!({
+                    "tool": text("tool_name").map(|t| format!("mcp:{t}")),
+                    "server": text("mcp_server_name"),
+                    "conversationId": conversation,
+                    "generationId": text("generation_id"),
+                    "durationMs": number("duration"),
+                }),
+                created_by_tool(hook),
+            ),
         ),
         "afterFileEdit" => (
             "file.reported_write",
@@ -324,10 +353,13 @@ mod tests {
     use super::*;
 
     fn fixtures() -> Vec<(String, Value)> {
+        fixtures_in(&Path::new("cursor").join(DOCUMENTED_VERSION))
+    }
+
+    fn fixtures_in(under: &Path) -> Vec<(String, Value)> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("fixtures")
-            .join("cursor")
-            .join(DOCUMENTED_VERSION);
+            .join(under);
         let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
             .map(|e| e.unwrap().path())
@@ -342,6 +374,46 @@ mod tests {
                 (name, value)
             })
             .collect()
+    }
+
+    /// Recorded with `scripts/record-pr-creation.sh cursor`: `gh pr create` and a GitHub MCP
+    /// server's `create_pull_request`, both stand-ins. Each call is reported twice; the link is
+    /// on one of the two, and nothing else of the command or the answer is kept.
+    #[test]
+    fn a_pull_request_a_call_created_keeps_its_link_once_and_nothing_else() {
+        let mut links = Vec::new();
+        for (name, hook) in fixtures_in(Path::new("cursor-pull-requests/2026.11.05-86047df")) {
+            let Ok(reported) = normalize(&hook) else {
+                continue;
+            };
+            let payload = reported.payload.to_string();
+            for content in [
+                "gh pr create",
+                "Creating pull request",
+                "Bump",
+                "2989102733",
+                "stand-in",
+            ] {
+                assert!(!payload.contains(content), "{name}: {content} in {payload}");
+            }
+            if let Some(url) = reported.payload["pullRequestUrl"].as_str() {
+                assert_eq!(reported.kind, "tool.completed", "{name}");
+                links.push((name, url.to_owned()));
+            }
+        }
+        assert_eq!(
+            links,
+            [
+                (
+                    "05-afterShellExecution".to_owned(),
+                    "https://github.com/example/lib/pull/41".to_owned()
+                ),
+                (
+                    "10-afterMCPExecution-create_pull_request".to_owned(),
+                    "https://github.com/example/lib/pull/42".to_owned()
+                ),
+            ]
+        );
     }
 
     /// The recording (`scripts/record-cursor.sh`, one headless turn): every hook Cursor

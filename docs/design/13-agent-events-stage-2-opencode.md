@@ -78,6 +78,15 @@ clock (OpenCode's events carry no time of their own except a tool's `state.time`
 | OMP, Pi             | yes       | **Shipped**: [15](15-agent-events-stage-2-pi-omp.md), this pattern again.                                                                                                                                                                                            |
 | Cursor              | yes       | **Shipped**, from the documentation: [16](16-agent-events-stage-2-cursor.md).                                                                                                                                                                                        |
 
+**Pull requests opened** ([38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped)).
+`tool.execute.after` carries the call's arguments and output. For a call that may have opened a
+pull request — `bash` whose command names `gh`, `pr` and `create`, or a tool whose name says
+GitHub and ends `create_pull_request` (OpenCode names an MCP tool `<server>_<tool>`) — the
+plugin hands on the command and the output too, and the Rust side keeps the link of what
+`gh pr create` printed, or of the tool's answer, as `pullRequestUrl`, and nothing else. Every
+other call's output stays in OpenCode's process. Recorded against **1.18.34**
+(`scripts/record-pr-creation.sh opencode`, `fixtures/opencode-pull-requests/`).
+
 ## 5 · What shipped
 
 - `crates/core/src/activity/opencode.rs` and `opencode-plugin.js`: `arm()` (the file, the
@@ -105,9 +114,12 @@ clock (OpenCode's events carry no time of their own except a tool's `state.time`
 
 ## 7 · Risks and the next slice
 
-- **OpenCode 2.0** is tagged but unreleased. Its plugin module form changes (`{ server }` exports
-  beside the function form) and its `permission.asked` payload differs from 1.x; the loader in
-  1.18 accepts the function form this plugin uses. Re-record when 2.0 ships.
+- **OpenCode 2 has shipped, and the plugin does not load there.** Found on 2026-11-09 against
+  2.2.6, while recording [38](38-pull-requests-elsewhere.md)'s slice 3: a plugin given as a
+  file is refused (`configured plugin path must be a directory`), and one given as a folder must
+  export a default definition with an `id` and an `effect` or `setup` function, where 1.x calls
+  every export as a plugin function. An OpenCode 2 launch reports nothing. Porting the plugin to
+  2's form, and re-recording, is its own piece of work; until then the adapter is 1.x's.
 - **The plugin runs inside the agent.** It is the one adapter whose code can, in principle, affect
   the harness: every hook is wrapped, the spawn is fire-and-forget, and nothing is awaited. A
   plugin that could not spawn the executable — after an update moved it — reports nothing and

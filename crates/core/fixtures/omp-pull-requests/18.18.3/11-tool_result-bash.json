@@ -1,0 +1,220 @@
+{
+  "event": "tool_result",
+  "payload": {
+    "type": "tool_result",
+    "toolName": "bash",
+    "toolCallId": "call_TMGy6IMYb0Qe3mqgjNfNIqsy|fc_tmp_r7yahjrjtt",
+    "input": {
+      "command": "gh pr create --title Bump --body Bump",
+      "timeout": 300,
+      "pty": false,
+      "async": false
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+      }
+    ],
+    "details": {
+      "wallTimeNoticeEmitted": false,
+      "timeoutSeconds": 300,
+      "wallTimeMs": 95.67468300000019,
+      "trace": {
+        "v": 1,
+        "seq": 8,
+        "status": 0,
+        "rootVpid": 1073741824,
+        "t_ns": 11712137,
+        "script": "gh pr create --title Bump --body Bump",
+        "units": [
+          {
+            "at": 0,
+            "line": 1,
+            "bytes": 37,
+            "nodes": [
+              {
+                "k": "and_or",
+                "lo": 0,
+                "hi": 37,
+                "state": "ok"
+              },
+              {
+                "k": "pipeline",
+                "lo": 0,
+                "hi": 37,
+                "p": 0,
+                "state": "ok"
+              },
+              {
+                "k": "simple",
+                "lo": 0,
+                "hi": 37,
+                "p": 1,
+                "state": "ok",
+                "runs": 1,
+                "st": 0,
+                "ns": 11547818,
+                "at": 103314,
+                "argv": ["gh", "pr", "create", "--title", "Bump", "--body", "Bump"],
+                "res": "external",
+                "pid": 551830,
+                "end_ns": 11651132,
+                "end_seq": 7
+              },
+              {
+                "k": "word",
+                "lo": 0,
+                "hi": 2,
+                "p": 2,
+                "state": "skipped"
+              },
+              {
+                "k": "word",
+                "lo": 3,
+                "hi": 5,
+                "p": 2,
+                "state": "skipped"
+              },
+              {
+                "k": "word",
+                "lo": 6,
+                "hi": 12,
+                "p": 2,
+                "state": "skipped"
+              },
+              {
+                "k": "word",
+                "lo": 13,
+                "hi": 20,
+                "p": 2,
+                "state": "skipped"
+              },
+              {
+                "k": "word",
+                "lo": 21,
+                "hi": 25,
+                "p": 2,
+                "state": "skipped"
+              }
+            ],
+            "syntax": "AwAAAAAAABMfZ2hwcmNyZWF0ZS0tdGl0bGVCdW1wLS1ib2R5QnVtcBQZAAACABkAAgIAGAMAAgEEGAQDAgEEGQAEBgAYBQYGAQIZAAoHABgGDQcBAhkAEQQAGAcVBAECGQAVBgAYCBoGAQIZABsEABgJIQQBAgUAAAAHGBYSDgoGAgQCACUBAgMBACUBAgIAACUBAkEA\u2026"
+          }
+        ],
+        "history": [
+          {
+            "seq": 1,
+            "t_ns": 0,
+            "event_seq": 0,
+            "vpid": 1073741824,
+            "kind": "RunStart"
+          },
+          {
+            "seq": 3,
+            "t_ns": 103314,
+            "event_seq": 2,
+            "u": 0,
+            "n": 2,
+            "command": {
+              "run": 3,
+              "vpid": 1073741824,
+              "seq": 68
+            },
+            "vpid": 1073741824,
+            "kind": "CmdStart"
+          },
+          {
+            "seq": 4,
+            "t_ns": 2931180,
+            "event_seq": 3,
+            "u": 0,
+            "n": 2,
+            "command": {
+              "run": 3,
+              "vpid": 1073741824,
+              "seq": 68
+            },
+            "vpid": 1073741824,
+            "kind": "CmdExpanded",
+            "argv": ["gh", "pr", "create", "--title", "Bump", "--body", "Bump"],
+            "assigns": [],
+            "resolved": "external",
+            "redirs": []
+          },
+          {
+            "seq": 5,
+            "t_ns": 4304422,
+            "event_seq": 4,
+            "u": 0,
+            "n": 2,
+            "command": {
+              "run": 3,
+              "vpid": 1073741824,
+              "seq": 68
+            },
+            "vpid": 1073741824,
+            "kind": "Spawn",
+            "pid": 551830,
+            "argv": ["gh", "pr", "create", "--title", "Bump", "--body", "Bump"]
+          },
+          {
+            "seq": 6,
+            "t_ns": 10402194,
+            "u": 0,
+            "n": 2,
+            "command": {
+              "run": 3,
+              "vpid": 1073741824,
+              "seq": 68
+            },
+            "vpid": 1073741824,
+            "kind": "Output",
+            "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n",
+            "fd": 1
+          },
+          {
+            "seq": 7,
+            "t_ns": 11651132,
+            "event_seq": 5,
+            "u": 0,
+            "n": 2,
+            "command": {
+              "run": 3,
+              "vpid": 1073741824,
+              "seq": 68
+            },
+            "vpid": 1073741824,
+            "kind": "CmdEnd",
+            "status": 0,
+            "dur_ns": 11547818,
+            "pipestatus": []
+          },
+          {
+            "seq": 8,
+            "t_ns": 11712137,
+            "event_seq": 6,
+            "vpid": 1073741824,
+            "kind": "RunEnd",
+            "status": 0
+          }
+        ]
+      }
+    },
+    "isError": false
+  },
+  "session": {
+    "id": "22222222-2222-4222-8222-000000000001",
+    "file": "/tmp/yardsort-fixture/sessions/2026-11-09T15-58-44-460Z_22222222-2222-4222-8222-000000000001.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "openai/gpt-5.5",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

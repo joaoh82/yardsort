@@ -647,18 +647,9 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
                 match added {
                     Some(true) => {
                         report.imported += 1;
-                        if let Some(url) = entry
-                            .payload
-                            .get("pullRequestUrl")
-                            .and_then(serde_json::Value::as_str)
-                            .filter(|_| entry.kind == "tool.completed")
-                        {
-                            report.pull_requests.push(crate::tracked::Seen {
-                                workspace_id: link.workspace_id.clone(),
-                                session_id: link.session_id.clone(),
-                                url: url.to_owned(),
-                            });
-                        }
+                        report
+                            .pull_requests
+                            .extend(seen(&entry.kind, &entry.payload, &link));
                         report.workspaces.insert(link.workspace_id);
                     }
                     Some(false) => report.duplicates += 1,
@@ -733,6 +724,9 @@ fn import_codex_turn(
         match added {
             Some(true) => {
                 report.imported += 1;
+                report
+                    .pull_requests
+                    .extend(seen(event.kind, &event.payload, link));
                 any_new = true;
             }
             Some(false) => report.duplicates += 1,
@@ -743,6 +737,18 @@ fn import_codex_turn(
         report.workspaces.insert(link.workspace_id.clone());
     }
     true
+}
+
+/// The pull request a newly recorded event says its tool call created, for the drainer to
+/// track: only a finished call's, and only once — a duplicate is never handed on, so a pull
+/// request untracked since stays untracked.
+fn seen(kind: &str, payload: &serde_json::Value, link: &Link) -> Option<crate::tracked::Seen> {
+    let url = payload.get("pullRequestUrl")?.as_str()?;
+    (kind == "tool.completed").then(|| crate::tracked::Seen {
+        workspace_id: link.workspace_id.clone(),
+        session_id: link.session_id.clone(),
+        url: url.to_owned(),
+    })
 }
 
 /// Where a reported event belongs.

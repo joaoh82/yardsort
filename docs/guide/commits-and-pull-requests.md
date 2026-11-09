@@ -163,16 +163,21 @@ goes into one of those clones and opens its pull request there, in a repository 
 project's. Nothing git or GitHub records ties that pull request to the workspace, so Yardsort is
 told about it instead, and **tracks** it:
 
-- **Yardsort sees it.** With [**Capture what Claude Code reports**](activity.md#what-claude-code-reports)
-  on, a pull request Claude Code opens — with `gh pr create`, or a GitHub MCP server's
-  `create_pull_request` tool — is tracked with its workspace as soon as Yardsort hears of it,
-  with nobody typing its link; one opened while Yardsort was closed is tracked when it next
-  starts. Only the link is kept from that tool call. One in the project's
-  own repository is left to the project's list, which has it already.
+- **Yardsort sees it.** With the agent's reporting switched on in Settings → General —
+  [**Capture what Claude Code reports**](activity.md#what-claude-code-reports), or the matching
+  switch for [Codex](activity.md#what-codex-reports),
+  [OpenCode](activity.md#what-opencode-reports), [Grok](activity.md#what-grok-records),
+  [OMP and pi](activity.md#what-omp-and-pi-report) and [Cursor](activity.md#what-cursor-reports)
+  — a pull request the agent opens with `gh pr create`, or with a GitHub MCP server's
+  `create_pull_request` tool, is tracked with its workspace as soon as Yardsort hears of it, with
+  nobody typing its link; one opened while Yardsort was closed is tracked when it next starts.
+  Only the link is kept from that tool call. One in the project's own repository is left to the
+  project's list, which has it already. pi has no MCP tools, and OpenCode 2 is not read yet.
 - **The agent says so.** An agent started with a first message in a project whose folder holds
   other repositories is told which they are, and to run
-  [`ys pr track <url>`](cli.md#ys-pr) after opening a pull request in one of them. That covers
-  the other agents, and Claude Code with reporting off.
+  [`ys pr track <url>`](cli.md#ys-pr) after opening a pull request in one of them. That covers an
+  agent with its reporting off, a custom harness, and a pull request opened some other way — in
+  the browser, say.
 - **You say so.** **Track pull request…** in the workspace's **⋯** menu takes a link,
   `https://github.com/owner/repo/pull/12`. A link that is not a GitHub pull request is refused,
   and so is one of the project's own repository, which the workspace follows already.

@@ -1,0 +1,23 @@
+{
+  "hook": "tool.execute.after",
+  "payload": {
+    "input": {
+      "tool": "bash",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "chatcmpl-tool-b24da437e37ab659",
+      "args": {
+        "command": "gh pr create --title Bump --body Bump"
+      }
+    },
+    "output": {
+      "title": "gh pr create --title Bump --body Bump",
+      "metadata": {
+        "output": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n",
+        "exit": 0,
+        "truncated": false
+      },
+      "output": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

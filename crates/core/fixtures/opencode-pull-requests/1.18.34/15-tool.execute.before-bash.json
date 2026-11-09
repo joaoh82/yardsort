@@ -1,0 +1,16 @@
+{
+  "hook": "tool.execute.before",
+  "payload": {
+    "input": {
+      "tool": "bash",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "chatcmpl-tool-b24da437e37ab659"
+    },
+    "output": {
+      "args": {
+        "command": "gh pr create --title Bump --body Bump"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

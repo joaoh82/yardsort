@@ -1,0 +1,33 @@
+{
+  "hook": "chat.message",
+  "payload": {
+    "input": {
+      "sessionID": "ses_00000000000fixture01"
+    },
+    "output": {
+      "message": {
+        "id": "msg_00000000000fixture01",
+        "role": "user",
+        "sessionID": "ses_00000000000fixture01",
+        "time": {
+          "created": 1794240106271
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "opencode",
+          "modelID": "big-pickle"
+        }
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Run this exact shell command: gh pr create --title Bump --body Bump. Then call the create_pull_request tool of the github MCP server with owner example, repo lib, title Bump, head bump and base main. Reply with the two links you got, nothing else.\"",
+          "messageID": "msg_00000000000fixture01",
+          "sessionID": "ses_00000000000fixture01",
+          "id": "prt_00000000000fixture01"
+        }
+      ]
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

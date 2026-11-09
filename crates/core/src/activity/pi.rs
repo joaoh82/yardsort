@@ -209,18 +209,24 @@ pub fn normalize(delivery: &Value) -> Result<Reported, String> {
             let path =
                 text(details, "resolvedPath").or_else(|| text(&details["meta"]["source"], "value"));
             let failed = payload.get("isError").and_then(Value::as_bool) == Some(true);
+            let mut event = with_path(
+                tool(json!({
+                    "durationMs": details.get("wallTimeMs").and_then(Value::as_f64).map(|ms| ms as i64),
+                })),
+                path.as_deref(),
+            );
+            // A pull request the call opened keeps its link and nothing else: the one exception
+            // to metadata only (docs/design/38-pull-requests-elsewhere.md).
+            if let Some(url) = (!failed).then(|| created_pull_request(payload)).flatten() {
+                event["pullRequestUrl"] = Value::String(url);
+            }
             (
                 if failed {
                     "tool.failed"
                 } else {
                     "tool.completed"
                 },
-                with_path(
-                    tool(json!({
-                        "durationMs": details.get("wallTimeMs").and_then(Value::as_f64).map(|ms| ms as i64),
-                    })),
-                    path.as_deref(),
-                ),
+                event,
             )
         }
         "tool_approval_requested" => (
@@ -255,6 +261,29 @@ pub fn normalize(delivery: &Value) -> Result<Reported, String> {
     })
 }
 
+/// The pull request a finished call opened. The extension hands on, for a call that may have
+/// opened one, the command its start carried (`args.command`) and what it printed
+/// (`result.content`): `bash` running `gh pr create`, by its output; a GitHub create-pull-request
+/// tool, by its answer.
+fn created_pull_request(payload: &Value) -> Option<String> {
+    let tool = payload.get("toolName").and_then(Value::as_str)?;
+    let content = payload["result"].get("content")?;
+    if tool == "bash" {
+        let command = payload["args"].get("command").and_then(Value::as_str)?;
+        let printed: String = content
+            .as_array()?
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return crate::tracked::created_by_command(command, &printed);
+    }
+    if crate::tracked::is_create_pull_request("", tool) {
+        return crate::tracked::link_in_tool_result(content);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +307,53 @@ mod tests {
                 (name, value)
             })
             .collect()
+    }
+
+    /// Recorded with `scripts/record-pr-creation.sh pi|omp`: `gh pr create`, a stand-in. The raw
+    /// end event has no command — its start has — so the extension hands the start's on; done
+    /// here by hand, as the extension's own tests check it does.
+    #[test]
+    fn a_pull_request_bash_opened_keeps_its_link_and_nothing_else() {
+        for (harness, version) in [
+            ("pi-pull-requests", "1.5.0"),
+            ("omp-pull-requests", "18.18.3"),
+        ] {
+            let all = fixtures(harness, version);
+            let payload = |prefix: &str| {
+                all.iter()
+                    .find(|(name, _)| name.contains(prefix))
+                    .map(|(_, delivery)| delivery.clone())
+                    .unwrap_or_else(|| panic!("{harness}: {prefix}"))
+            };
+            let start = payload("tool_execution_start-bash");
+            let mut end = payload("tool_execution_end-bash");
+            assert!(
+                normalize(&end)
+                    .unwrap()
+                    .payload
+                    .get("pullRequestUrl")
+                    .is_none(),
+                "{harness}: no command, no link"
+            );
+            end["payload"]["args"] = json!({ "command": start["payload"]["args"]["command"] });
+            let done = normalize(&end).unwrap();
+            assert_eq!(done.kind, "tool.completed");
+            assert_eq!(
+                done.payload["pullRequestUrl"], "https://github.com/example/lib/pull/41",
+                "{harness}"
+            );
+            let text = done.payload.to_string();
+            for content in ["gh pr create", "Creating pull request", "Bump"] {
+                assert!(!text.contains(content), "{harness}: {content} in {text}");
+            }
+            // A call that failed opened nothing.
+            end["payload"]["isError"] = json!(true);
+            assert!(normalize(&end)
+                .unwrap()
+                .payload
+                .get("pullRequestUrl")
+                .is_none());
+        }
     }
 
     #[test]

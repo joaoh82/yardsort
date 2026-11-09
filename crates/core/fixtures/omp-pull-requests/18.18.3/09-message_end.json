@@ -1,0 +1,96 @@
+{
+  "event": "message_end",
+  "payload": {
+    "type": "message_end",
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "thinkingSignature": "{\"id\":\"rs_0ab75eb50f0e4bf6016af1edb8150c87d18beffbb717cac88e\",\"type\":\"reasoning\",\"status\":\"completed\",\"summary\":[],\"encrypted_content\":\"gAAAAABq8e250kS5pRMzjM1EXZFbmaVGZNaRrWZpS_K_l9xCPrLHRhYZYlcm6y8Q\u2026",
+          "summary": false
+        },
+        {
+          "type": "toolCall",
+          "id": "call_TMGy6IMYb0Qe3mqgjNfNIqsy|fc_tmp_r7yahjrjtt",
+          "name": "bash",
+          "arguments": {
+            "i": "Creating pull request",
+            "command": "gh pr create --title Bump --body Bump",
+            "timeout": 300,
+            "cwd": null,
+            "pty": false,
+            "async": false,
+            "name": null,
+            "ready": null
+          },
+          "intent": "Creating pull request"
+        }
+      ],
+      "api": "openrouter",
+      "provider": "openrouter",
+      "model": "openai/gpt-5.5",
+      "usage": {
+        "input": 7464,
+        "output": 155,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 7619,
+        "reasoningTokens": 95,
+        "cost": {
+          "input": 0.03732,
+          "output": 0.00465,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0.04197
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1794239925435,
+      "responseId": "gen-1794239925-kbYZ8u9hFrl3ZUrWoHA2",
+      "providerPayload": {
+        "type": "openaiResponsesHistory",
+        "provider": "openrouter",
+        "dt": true,
+        "items": [
+          {
+            "id": "rs_0ab75eb50f0e4bf6016af1edb8150c87d18beffbb717cac88e",
+            "type": "reasoning",
+            "status": "completed",
+            "summary": [],
+            "encrypted_content": "gAAAAABq8e250kS5pRMzjM1EXZFbmaVGZNaRrWZpS_K_l9xCPrLHRhYZYlcm6y8Q_HIAlZ97QFhzTs9jL4cYSUNGfsAyFQKA0EcSi6pZ_DUaV5jKCEICC3fkxGjih3YQcr7IHd-GuRNMOp-5Int1Z3_-TXOHO4BR0Dh2mzvC1nWpIau4XmQo3y8obiHAHFKN0mjukpJw\u2026",
+            "format": "openai-responses-v1"
+          },
+          {
+            "id": "fc_tmp_r7yahjrjtt",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "call_TMGy6IMYb0Qe3mqgjNfNIqsy",
+            "name": "bash",
+            "arguments": "{\"i\":\"Creating pull request\",\"command\":\"gh pr create --title Bump --body Bump\",\"timeout\":300,\"cwd\":null,\"pty\":false,\"async\":false,\"name\":null,\"ready\":null}"
+          }
+        ]
+      },
+      "duration": 4303.735098,
+      "ttft": 3920.980753,
+      "credentialId": 1,
+      "completedAt": 1794239929744
+    }
+  },
+  "session": {
+    "id": "22222222-2222-4222-8222-000000000001",
+    "file": "/tmp/yardsort-fixture/sessions/2026-11-09T15-58-44-460Z_22222222-2222-4222-8222-000000000001.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "openai/gpt-5.5",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

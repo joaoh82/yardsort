@@ -8,8 +8,10 @@ has the downloads and the full commit lists.
 - **Follow pull requests an agent opens in another repository.** A project whose folder holds
   other repositories as nested clones — a parent repository — has agents that open pull requests
   in those clones, and Yardsort could not see them. Now a workspace can **track** them. With
-  **Capture what Claude Code reports** on, one Claude Code opens — with `gh pr create` or a GitHub
-  MCP server — is tracked as soon as Yardsort hears of it, keeping only its link. Otherwise an
+  an agent's reporting on — **Capture what Claude Code reports**, or the matching switch for
+  Codex, OpenCode, Grok, OMP, pi or Cursor — one the agent opens with `gh pr create` or a GitHub
+  MCP server is tracked as soon as Yardsort hears of it, keeping only its link. (OpenCode 2 does
+  not load Yardsort's plugin yet, so it reports nothing.) Otherwise an
   agent runs `ys pr track <url>` (agents in such a project are told to; `ys pr tracked` lists
   them), or you choose **Track pull request…** in the workspace's menu. A tracked pull request shows on the workspace's row as
   `lib#7`, in its toolbar's menu, and in the Pull requests view with its Summary — checks,

@@ -75,6 +75,8 @@ pub struct Report {
     /// Runs still going, or just ended: worth looking at again soon.
     pub watching: usize,
     pub workspaces: BTreeSet<String>,
+    /// Pull requests newly seen created, for the drainer to track.
+    pub pull_requests: Vec<crate::tracked::Seen>,
 }
 
 /// Read every live Grok run's session directory into the store. Best effort throughout: a
@@ -129,6 +131,13 @@ pub fn import(store: &Store, grok_home: &Path, cursors: &mut Cursors) -> Report 
                 Some(true) => {
                     report.imported += 1;
                     any = true;
+                    if let Some(url) = event.payload["pullRequestUrl"].as_str() {
+                        report.pull_requests.push(crate::tracked::Seen {
+                            workspace_id: run.workspace_id.clone(),
+                            session_id: run.session_id.clone(),
+                            url: url.to_owned(),
+                        });
+                    }
                 }
                 Some(false) => report.duplicates += 1,
                 None => {}
@@ -178,6 +187,8 @@ pub fn read_events(dir: &Path, session_id: &str, from: usize) -> (Vec<Derived>, 
     let mut events = Vec::new();
     let mut lines = 0;
     let mut turn: Option<i64> = None;
+    // Read only once a finished tool call needs it.
+    let mut opened: Option<HashMap<String, String>> = None;
     // Only a line Grok has finished writing counts: a fragment at the end — a record caught
     // mid-append — is left for the next read, when it will be whole.
     for (index, line) in text.split_inclusive('\n').enumerate() {
@@ -223,21 +234,33 @@ pub fn read_events(dir: &Path, session_id: &str, from: usize) -> (Vec<Derived>, 
                 "tool.started",
                 json!({ "tool": text("tool_name"), "sessionId": session_id, "turnNumber": turn }),
             ),
-            Some("tool_completed") => (
-                if text("outcome").as_deref() == Some("success") {
-                    "tool.completed"
-                } else {
-                    "tool.failed"
-                },
-                json!({
+            Some("tool_completed") => {
+                let success = text("outcome").as_deref() == Some("success");
+                let mut payload = json!({
                     "tool": text("tool_name"),
                     "toolUseId": text("tool_call_id"),
                     "sessionId": session_id,
                     "turnNumber": turn,
                     "durationMs": number("duration_ms"),
                     "outcome": text("outcome"),
-                }),
-            ),
+                });
+                // A pull request the call opened keeps its link and nothing else: the one
+                // exception to metadata only (docs/design/38-pull-requests-elsewhere.md).
+                if let (true, Some(id)) = (success, text("tool_call_id")) {
+                    let opened = opened.get_or_insert_with(|| opened_in_history(dir));
+                    if let Some(url) = opened.get(&id) {
+                        payload["pullRequestUrl"] = Value::String(url.clone());
+                    }
+                }
+                (
+                    if success {
+                        "tool.completed"
+                    } else {
+                        "tool.failed"
+                    },
+                    payload,
+                )
+            }
             // A permission the user was actually asked for: one that took time to answer, or
             // was refused. The ones Grok resolved by itself at once are not events to a reader.
             Some("permission_resolved") => {
@@ -267,6 +290,80 @@ pub fn read_events(dir: &Path, session_id: &str, from: usize) -> (Vec<Derived>, 
         });
     }
     (events, lines)
+}
+
+/// The pull requests the session's tool calls opened, by call id, from `chat_history.jsonl`,
+/// where Grok keeps each call beside its result: a terminal command running `gh pr create`, by
+/// what it printed; a GitHub create-pull-request tool, by its answer. Read for that alone — the
+/// event log has no output — and nothing else of the conversation is kept.
+pub fn opened_in_history(dir: &Path) -> HashMap<String, String> {
+    let mut opened = HashMap::new();
+    let path = dir.join("chat_history.jsonl");
+    if std::fs::metadata(&path).map_or(true, |m| m.len() > MAX_EVENTS_BYTES) {
+        return opened;
+    }
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return opened;
+    };
+    // The calls that may have opened one, by id: a terminal command's line, or none for a tool.
+    let mut calls: HashMap<String, Option<String>> = HashMap::new();
+    for record in text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    {
+        match record.get("type").and_then(Value::as_str) {
+            Some("assistant") => {
+                for call in record["tool_calls"].as_array().into_iter().flatten() {
+                    let (Some(id), Some(name)) = (
+                        call.get("id").and_then(Value::as_str),
+                        call.get("name").and_then(Value::as_str),
+                    ) else {
+                        continue;
+                    };
+                    if name == "run_terminal_command" {
+                        let arguments = call
+                            .get("arguments")
+                            .and_then(Value::as_str)
+                            .and_then(|a| serde_json::from_str::<Value>(a).ok());
+                        if let Some(command) = arguments
+                            .as_ref()
+                            .and_then(|a| a.get("command"))
+                            .and_then(Value::as_str)
+                        {
+                            calls.insert(id.to_owned(), Some(command.to_owned()));
+                        }
+                    } else if crate::tracked::is_create_pull_request("", name) {
+                        calls.insert(id.to_owned(), None);
+                    }
+                }
+            }
+            Some("tool_result") => {
+                let Some(call) = record
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| calls.get(id).map(|call| (id, call)))
+                else {
+                    continue;
+                };
+                let content = &record["content"];
+                let url = match call.1 {
+                    Some(command) => {
+                        let printed = match content {
+                            Value::String(text) => text.clone(),
+                            other => other.to_string(),
+                        };
+                        crate::tracked::created_by_command(command, &printed)
+                    }
+                    None => crate::tracked::link_in_tool_result(content),
+                };
+                if let Some(url) = url {
+                    opened.insert(call.0.to_owned(), url);
+                }
+            }
+            _ => {}
+        }
+    }
+    opened
 }
 
 /// Tokens and cost per turn, from `usage.json`. Keyed by turn, so a file read again adds only
@@ -338,6 +435,77 @@ mod tests {
     }
 
     const SESSION: &str = "11111111-1111-4111-8111-111111111111";
+
+    /// Not recorded yet — Grok was not signed in on the machine that recorded the others — so
+    /// the shapes are the recorded ones of `grok/1.0.41` (a `run_terminal_command` and its
+    /// `tool_completed`) and `grok/1.0.70` (the chat history's calls and results), with a
+    /// `gh pr create` in them. `scripts/record-pr-creation.sh grok` records the real thing.
+    #[test]
+    fn a_pull_request_a_terminal_command_opened_keeps_its_link_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = |value: Value| format!("{value}\n");
+        let call = |id: &str, name: &str, arguments: Value| {
+            line(json!({ "type": "assistant", "content": "",
+                "tool_calls": [{ "id": id, "name": name, "arguments": arguments.to_string() }] }))
+        };
+        let result = |id: &str, content: &str| {
+            line(json!({ "type": "tool_result", "tool_call_id": id, "content": content }))
+        };
+        let printed = "exit: 0\n\nCreating pull request for bump into main in o/lib\n\nhttps://github.com/o/lib/pull/41\n";
+        let history = [
+            call(
+                "call-1",
+                "run_terminal_command",
+                json!({ "command": "gh pr create --fill", "description": "Open it" }),
+            ),
+            result("call-1", printed),
+            call(
+                "call-2",
+                "run_terminal_command",
+                json!({ "command": "gh pr view 41" }),
+            ),
+            result("call-2", printed),
+            call(
+                "call-3",
+                "run_terminal_command",
+                json!({ "command": "gh pr create --fill" }),
+            ),
+            result("call-3", printed),
+        ]
+        .concat();
+        std::fs::write(dir.path().join("chat_history.jsonl"), history).unwrap();
+        let completed = |id: &str, outcome: &str| {
+            line(
+                json!({ "ts": "2026-09-25T16:33:17.286Z", "type": "tool_completed",
+                "tool_name": "run_terminal_command", "duration_ms": 9, "outcome": outcome,
+                "tool_call_id": id }),
+            )
+        };
+        let log = [
+            completed("call-1", "success"),
+            completed("call-2", "success"),
+            completed("call-3", "error"),
+        ]
+        .concat();
+        std::fs::write(dir.path().join("events.jsonl"), log).unwrap();
+
+        let (events, _) = read_events(dir.path(), SESSION, 0);
+        let links: Vec<Option<&str>> = events
+            .iter()
+            .map(|e| e.payload["pullRequestUrl"].as_str())
+            .collect();
+        assert_eq!(
+            links,
+            [Some("https://github.com/o/lib/pull/41"), None, None],
+            "the one that created it; not a view, not a failure"
+        );
+        for event in &events {
+            let text = event.payload.to_string();
+            for content in ["gh pr", "Creating pull request", "Open it"] {
+                assert!(!text.contains(content), "{content} in {text}");
+            }
+        }
+    }
 
     #[test]
     fn the_event_log_reads_as_tools_turns_and_the_permissions_that_were_really_asked() {
@@ -574,10 +742,42 @@ mod tests {
         let more = import(&store, &home, &mut cursors);
         assert_eq!(more.imported, 1);
         assert_eq!(cursors[&run_id], 141);
+        assert!(more.pull_requests.is_empty());
 
-        // Without a cursor — `ys`, say — the whole log is duplicates, not damage.
+        // A terminal command opens a pull request: its link is handed on with the run's
+        // workspace, once.
+        let dir_of = find_session_dir(&home, SESSION).unwrap();
+        std::fs::write(
+            dir_of.join("chat_history.jsonl"),
+            format!(
+                "{}\n{}\n",
+                json!({ "type": "assistant", "tool_calls": [{ "id": "call-pr",
+                    "name": "run_terminal_command",
+                    "arguments": json!({ "command": "gh pr create --fill" }).to_string() }] }),
+                json!({ "type": "tool_result", "tool_call_id": "call-pr",
+                    "content": "exit: 0\nhttps://github.com/o/lib/pull/41\n" }),
+            ),
+        )
+        .unwrap();
+        let mut text = std::fs::read_to_string(&log).unwrap();
+        text.push_str(r#"{"ts":"2026-09-25T16:40:01.000Z","type":"tool_completed","tool_name":"run_terminal_command","duration_ms":9,"outcome":"success","tool_call_id":"call-pr"}"#);
+        text.push('\n');
+        std::fs::write(&log, text).unwrap();
+        let opened = import(&store, &home, &mut cursors);
+        assert_eq!(
+            opened.pull_requests,
+            [crate::tracked::Seen {
+                workspace_id: ws.clone(),
+                session_id: None,
+                url: "https://github.com/o/lib/pull/41".into(),
+            }]
+        );
+
+        // Without a cursor — `ys`, say — the whole log is duplicates, not damage, and nothing
+        // is handed on twice.
         let fresh = import(&store, &home, &mut Cursors::new());
-        assert_eq!((fresh.imported, fresh.duplicates), (0, 11 + 2));
+        assert_eq!((fresh.imported, fresh.duplicates), (0, 12 + 2));
+        assert!(fresh.pull_requests.is_empty());
 
         // A run that just ended is read once more, in case the last lines landed late.
         store.end_run(&run_id, Some(0), "exited").unwrap();
@@ -601,7 +801,7 @@ mod tests {
         let stale = import(&store, &home, &mut Cursors::new());
         assert_eq!(
             (stale.imported, stale.duplicates),
-            (0, 11 + 2),
+            (0, 12 + 2),
             "only the recent run"
         );
         assert_eq!(stale.watching, 1, "the old one is not watched either");

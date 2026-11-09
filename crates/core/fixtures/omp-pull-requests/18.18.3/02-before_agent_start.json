@@ -1,0 +1,27 @@
+{
+  "event": "before_agent_start",
+  "payload": {
+    "type": "before_agent_start",
+    "reason": "prompt",
+    "prompt": "Run this exact shell command: gh pr create --title Bump --body Bump. Reply with the link it printed, nothing else.",
+    "systemPrompt": [
+      "RFC 2119 keywords: MUST, REQUIRED, SHOULD, RECOMMENDED, MAY, OPTIONAL. `NEVER` = `MUST NOT`; `AVOID` = `SHOULD NOT`.\nXML tags inject system content; may interrupt/notify inside user messages: MUST tre\u2026",
+      "<project-context>\n<workstation>\n- OS: linux 7.2.15-1-omarchy\n- Arch: x64\n- Model: openrouter/openai/gpt-5.5\n</workstation>\n</project-context>\n\n<critical>\n- Each response MUST advance the task; complet\u2026"
+    ]
+  },
+  "session": {
+    "id": "22222222-2222-4222-8222-000000000001",
+    "file": "/tmp/yardsort-fixture/sessions/2026-11-09T15-58-44-460Z_22222222-2222-4222-8222-000000000001.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "openai/gpt-5.5",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

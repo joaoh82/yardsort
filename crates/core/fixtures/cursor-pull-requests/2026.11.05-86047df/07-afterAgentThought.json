@@ -1,0 +1,13 @@
+{
+  "conversation_id": "22222222-2222-4222-8222-000000000001",
+  "generation_id": "22222222-2222-4222-8222-000000000002-1-8f94",
+  "model": "grok-4.7",
+  "text": "The gh command returned https://github.com/example/lib/pull/41\n\nNow calling the create_pull_request tool with owner example, repo lib, title Bump, head bump, and base main.",
+  "duration_ms": 77,
+  "session_id": "22222222-2222-4222-8222-000000000001",
+  "hook_event_name": "afterAgentThought",
+  "cursor_version": "2026.11.05-86047df",
+  "workspace_roots": ["/tmp/yardsort-fixture/repo"],
+  "user_email": "user@example.com",
+  "transcript_path": "/home/user/.cursor/projects/tmp-yardsort-cursor-XXXXXX-repo/agent-transcripts/22222222-2222-4222-8222-000000000001/22222222-2222-4222-8222-000000000001.jsonl"
+}

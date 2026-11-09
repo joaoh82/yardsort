@@ -1,0 +1,15 @@
+{
+  "conversation_id": "22222222-2222-4222-8222-000000000001",
+  "generation_id": "22222222-2222-4222-8222-000000000001",
+  "model": "grok-4.7",
+  "command": "/tmp/yardsort-stand-in/bin/gh pr create --title Bump --body Bump",
+  "cwd": "",
+  "sandbox": false,
+  "tool_use_id": "22222222-2222-4222-8222-000000000003",
+  "session_id": "22222222-2222-4222-8222-000000000001",
+  "hook_event_name": "beforeShellExecution",
+  "cursor_version": "2026.11.05-86047df",
+  "workspace_roots": ["/tmp/yardsort-fixture/repo"],
+  "user_email": "user@example.com",
+  "transcript_path": null
+}

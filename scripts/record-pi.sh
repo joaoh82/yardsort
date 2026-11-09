@@ -23,6 +23,9 @@ case "$agent" in
   *) echo "pi or omp" >&2; exit 2 ;;
 esac
 out="$root/crates/core/fixtures/$agent/$version"
+# scripts/record-pr-creation.sh records a pull request being opened instead: its own prompt, its
+# own fixtures directory.
+[ -n "${YS_RECORD_OUT:-}" ] && out="$YS_RECORD_OUT/$version"
 work="$(mktemp -d -t "yardsort-$agent.XXXXXX")"
 raw="$work/raw"
 mkdir -p "$raw" "$work/repo" "$work/sessions"
@@ -77,7 +80,7 @@ args=(-p --mode json --session-dir "$work/sessions" -e "$work/capture.ts")
 echo "recording $agent $version into $out"
 (cd "$work/repo" && env YS_CAPTURE_DIR="$raw" \
   YARDSORT_RUN_ID=run-fixture YARDSORT_WORKSPACE_ID=workspace-fixture YARDSORT_SESSION_RECORD_ID=record-fixture \
-  "$agent" "${args[@]}" -- "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done." </dev/null) \
+  "$agent" "${args[@]}" -- "${YS_RECORD_PROMPT:-Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done.}" </dev/null) \
   >"$work/$agent.out" 2>"$work/$agent.err" || echo "$agent exited $? (see $work/$agent.err)"
 echo "  events captured: $(ls "$raw"/*.json | grep -vc registration)"
 

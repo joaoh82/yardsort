@@ -128,6 +128,24 @@ pub struct Reported {
     pub payload: Value,
 }
 
+/// The pull request a finished call opened: `bash` running `gh pr create`, by what it printed;
+/// a GitHub server's create-pull-request tool (`<server>_<tool>`), by its answer.
+fn created_pull_request(input: &Value, output: &Value) -> Option<String> {
+    let tool = input.get("tool").and_then(Value::as_str)?;
+    if tool == "bash" {
+        let command = input["args"].get("command").and_then(Value::as_str)?;
+        let printed = output
+            .get("output")
+            .or_else(|| output["metadata"].get("output"))
+            .and_then(Value::as_str)?;
+        return crate::tracked::created_by_command(command, printed);
+    }
+    if crate::tracked::is_create_pull_request("", tool) {
+        return crate::tracked::link_in_tool_result(output.get("content")?);
+    }
+    None
+}
+
 /// Turn what the plugin sent — `{hook, payload}` — into an event. Reads the raw hook shapes,
 /// of which the plugin's are a subset. `Err` names a call this build has no mapping for.
 pub fn normalize(delivery: &Value) -> Result<Reported, String> {
@@ -335,6 +353,11 @@ pub fn normalize(delivery: &Value) -> Result<Reported, String> {
                 if metadata.get("exists").and_then(Value::as_bool) == Some(false) {
                     event["created"] = json!(true);
                 }
+                // A pull request the call opened keeps its link and nothing else: the one
+                // exception to metadata only (docs/design/38-pull-requests-elsewhere.md).
+                if let Some(url) = created_pull_request(input, output) {
+                    event["pullRequestUrl"] = Value::String(url);
+                }
             }
             Ok(Reported {
                 kind: if after {
@@ -374,10 +397,13 @@ mod tests {
     use super::*;
 
     fn fixtures() -> Vec<(String, Value)> {
+        fixtures_in(&Path::new("opencode").join(FIXTURE_VERSION))
+    }
+
+    fn fixtures_in(under: &Path) -> Vec<(String, Value)> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("fixtures")
-            .join("opencode")
-            .join(FIXTURE_VERSION);
+            .join(under);
         let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
             .map(|e| e.unwrap().path())
@@ -392,6 +418,45 @@ mod tests {
                 (name, value)
             })
             .collect()
+    }
+
+    /// Recorded with `scripts/record-pr-creation.sh opencode` (OpenCode 1.18.34): `gh pr create`
+    /// and a GitHub MCP server's `create_pull_request`, both stand-ins. Read raw, as the plugin's
+    /// deliveries are a subset of these shapes.
+    #[test]
+    fn a_pull_request_a_call_opened_keeps_its_link_and_nothing_else() {
+        let mut links = Vec::new();
+        for (name, delivery) in fixtures_in(Path::new("opencode-pull-requests/1.18.34")) {
+            let Ok(reported) = normalize(&delivery) else {
+                continue;
+            };
+            let payload = reported.payload.to_string();
+            for content in [
+                "gh pr create",
+                "Creating pull request",
+                "Bump",
+                "2989102733",
+            ] {
+                assert!(!payload.contains(content), "{name}: {content} in {payload}");
+            }
+            if let Some(url) = reported.payload["pullRequestUrl"].as_str() {
+                assert_eq!(reported.kind, "tool.completed", "{name}");
+                links.push((name, url.to_owned()));
+            }
+        }
+        assert_eq!(
+            links,
+            [
+                (
+                    "22-tool.execute.after-bash".to_owned(),
+                    "https://github.com/example/lib/pull/41".to_owned()
+                ),
+                (
+                    "26-tool.execute.after-github_create_pull_request".to_owned(),
+                    "https://github.com/example/lib/pull/42".to_owned()
+                ),
+            ]
+        );
     }
 
     #[test]

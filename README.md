@@ -109,7 +109,7 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   [GitHub CLI](https://cli.github.com) the pull request opens from here and its number and check
   results appear on the workspace row, with any others the workspace opened beside it — those
   opened in other repositories too, like the nested clones of a parent project, once Yardsort
-  sees Claude Code open one or an agent or you track it; one that conflicts with its base can be handed back to the agent that opened it
+  sees an agent open one or an agent or you track it; one that conflicts with its base can be handed back to the agent that opened it
   to resolve. Without
   `gh`, your browser opens the forge's own form, on GitHub, GitLab, Bitbucket or Gitea alike. See
   [Commits & pull requests](docs/guide/commits-and-pull-requests.md).

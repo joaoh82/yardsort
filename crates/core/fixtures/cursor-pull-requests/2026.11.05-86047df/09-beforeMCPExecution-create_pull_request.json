@@ -1,0 +1,16 @@
+{
+  "conversation_id": "22222222-2222-4222-8222-000000000001",
+  "generation_id": "22222222-2222-4222-8222-000000000001",
+  "model": "grok-4.7",
+  "tool_name": "create_pull_request",
+  "tool_input": "{\"owner\":\"example\",\"repo\":\"lib\",\"title\":\"Bump\",\"head\":\"bump\",\"base\":\"main\"}",
+  "tool_use_id": "22222222-2222-4222-8222-000000000004",
+  "mcp_server_name": "github",
+  "command": "python3 /tmp/yardsort-stand-in/github-mcp.py",
+  "session_id": "22222222-2222-4222-8222-000000000001",
+  "hook_event_name": "beforeMCPExecution",
+  "cursor_version": "2026.11.05-86047df",
+  "workspace_roots": ["/tmp/yardsort-fixture/repo"],
+  "user_email": "user@example.com",
+  "transcript_path": "/home/user/.cursor/projects/tmp-yardsort-cursor-XXXXXX-repo/agent-transcripts/22222222-2222-4222-8222-000000000001/22222222-2222-4222-8222-000000000001.jsonl"
+}

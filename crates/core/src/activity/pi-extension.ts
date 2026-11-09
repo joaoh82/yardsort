@@ -6,7 +6,10 @@
 // metadata of each — a tool's name, a file's path, ids, token counts — and hands it to the
 // Yardsort executable in hook mode on stdin, which writes one file to the activity inbox. No
 // prompt, command, file content or reply leaves this process: `reduce` copies only the fields the
-// Yardsort side records.
+// Yardsort side records. One exception: a call that may have opened a pull request — a `bash`
+// command naming `gh`, `pr` and `create`, or a tool whose name says GitHub and ends
+// `create_pull_request` — hands its command and its output to the executable, which keeps the new
+// pull request's link and nothing else of either.
 //
 // Written from a template in the Yardsort binary before each launch, so the executable it names
 // is the one that launched. Only notification events are used — never `tool_call`, whose
@@ -25,13 +28,37 @@ type Session = { id?: string; cwd?: string; model?: { id?: string; provider?: st
  * the shape is the raw event's with fields left out, so the Yardsort side reads a recorded
  * fixture and a live delivery the same way.
  */
-export function reduce(event: string, payload: any, session: Session) {
-  const reduced = reduceEvent(event, payload ?? {});
+export function reduce(event: string, payload: any, session: Session, opened?: Opened) {
+  const reduced = reduceEvent(event, payload ?? {}, opened);
   if (!reduced) return null;
   return { event, payload: reduced, session };
 }
 
-function reduceEvent(event: string, p: any): Record<string, unknown> | null {
+/**
+ * A call that may have opened a pull request, remembered from its start — where its command is —
+ * to its end, where what it printed is.
+ */
+export type Opened = { command?: string };
+
+/**
+ * Whether a call may have opened a pull request. Loose on purpose: the executable decides, by the
+ * same rule as for every other agent; this only keeps every other command's output in here.
+ */
+export function mayOpenPullRequest(tool: unknown, args: any): boolean {
+  if (typeof tool !== "string") return false;
+  if (tool === "bash") {
+    const command = args?.command;
+    return (
+      typeof command === "string" &&
+      /\bgh(\.exe)?\b/.test(command) &&
+      /\bpr\b/.test(command) &&
+      /\bcreate\b/.test(command)
+    );
+  }
+  return tool.endsWith("create_pull_request") && /github/i.test(tool);
+}
+
+function reduceEvent(event: string, p: any, opened?: Opened): Record<string, unknown> | null {
   switch (event) {
     case "session_start":
       return pick(p, ["type", "reason"]);
@@ -74,6 +101,7 @@ function reduceEvent(event: string, p: any): Record<string, unknown> | null {
       const details = p.result?.details ?? {};
       return {
         ...pick(p, ["type", "toolCallId", "toolName", "isError"]),
+        ...(opened ? { args: pick(opened, ["command"]) } : {}),
         result: {
           details: {
             ...pick(details, ["resolvedPath", "wallTimeMs"]),
@@ -81,6 +109,7 @@ function reduceEvent(event: string, p: any): Record<string, unknown> | null {
               ? { source: pick(details.meta.source, ["type", "value"]) }
               : undefined,
           },
+          ...(opened ? pick(p.result, ["content"]) : {}),
         },
       };
     }
@@ -134,6 +163,8 @@ const EVENTS = [
 ];
 
 export default function (pi: any) {
+  // Calls that may open a pull request, by call id, between their start and their end.
+  const opening = new Map<string, Opened>();
   for (const name of EVENTS) {
     try {
       pi.on(name, (event: any, ctx: any) => {
@@ -143,7 +174,16 @@ export default function (pi: any) {
             cwd: ctx?.cwd,
             model: ctx?.model ? { id: ctx.model.id, provider: ctx.model.provider } : undefined,
           };
-          const entry = reduce(name, event, session);
+          const id = event?.toolCallId;
+          if (name === "tool_execution_start" && mayOpenPullRequest(event?.toolName, event?.args)) {
+            opening.set(id, pick(event.args, ["command"]));
+          }
+          let opened: Opened | undefined;
+          if (name === "tool_execution_end" && opening.has(id)) {
+            opened = opening.get(id);
+            opening.delete(id);
+          }
+          const entry = reduce(name, event, session, opened);
           if (entry) deliver(entry);
         } catch {
           // Reporting is never allowed to get in the agent's way.

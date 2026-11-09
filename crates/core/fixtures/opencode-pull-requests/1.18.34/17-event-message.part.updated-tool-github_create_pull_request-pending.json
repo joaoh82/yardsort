@@ -1,0 +1,25 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_1c10b6937001AZCXIeLLdSUONk",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "id": "prt_00000000000fixture04",
+        "messageID": "msg_00000000000fixture02",
+        "sessionID": "ses_00000000000fixture01",
+        "type": "tool",
+        "tool": "github_create_pull_request",
+        "callID": "chatcmpl-tool-87a6c24acc0ebde0",
+        "state": {
+          "status": "pending",
+          "input": {},
+          "raw": ""
+        }
+      },
+      "time": 1794240112951
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

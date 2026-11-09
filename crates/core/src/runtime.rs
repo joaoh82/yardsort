@@ -117,17 +117,19 @@ pub fn drain(
     git: impl FnOnce() -> Option<crate::git::Git>,
 ) -> Drained {
     let report = activity::import_inbox(store, data_dir);
-    let tracked = track_seen(store, &report.pull_requests, git);
+    let mut seen = report.pull_requests;
     let mut drained = Drained {
         workspaces: report.workspaces,
         pending: report.deferred,
-        tracked,
+        tracked: BTreeSet::new(),
     };
     if let Some(home) = grok_home {
         let read = grok::import(store, home, cursors);
         drained.workspaces.extend(read.workspaces);
         drained.pending += read.watching;
+        seen.extend(read.pull_requests);
     }
+    drained.tracked = track_seen(store, &seen, git);
     drained
 }
 

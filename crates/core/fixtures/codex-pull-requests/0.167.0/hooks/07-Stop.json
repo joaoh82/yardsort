@@ -1,0 +1,11 @@
+{
+  "session_id": "01a1c10b-fa65-7072-b00d-a5adc3804aed",
+  "turn_id": "01a1c10b-fc89-7143-be5d-2002887d1ec0",
+  "transcript_path": "/tmp/yardsort-fixture/codex-home/sessions/2026/11/09/rollout-2026-11-09T17-02-30-01a1c10b-fa65-7072-b00d-a5adc3804aed.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "hook_event_name": "Stop",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "last_assistant_message": "https://github.com/example/lib/pull/41\nhttps://github.com/example/lib/pull/42"
+}

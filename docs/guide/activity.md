@@ -95,7 +95,8 @@ outside the workspace. One exception: a tool call that **opened a pull request**
 says so itself for `gh pr create`, and a GitHub MCP server's `create_pull_request` is known by
 its name — keeps that pull request's link, and nothing else of the call, so its workspace can
 [follow it](commits-and-pull-requests.md#pull-requests-in-other-repositories). One in another
-repository is then tracked with the workspace. The recorded shapes come from Claude Code **2.1.280**; a newer version
+repository is then tracked with the workspace. The other agents below do the same, each from
+what it can see. The recorded shapes come from Claude Code **2.1.280**; a newer version
 that renames a field loses that detail, not the event. Claude Code started by any other means —
 from your own terminal, say — reports nothing to Yardsort. A Claude Code harness whose arguments
 already carry `--settings` or `--bare` is left alone, and the timeline's settings show a
@@ -131,7 +132,9 @@ working.
 
 **What is kept, and what is not.** Ids, exit codes, durations, counts, relative paths, kinds of
 change. Not a command, not a file's contents, not your message, not Codex's answer, not its
-reasoning, not a path outside the workspace. A turn that `notify` reports before Codex has finished
+reasoning, not a path outside the workspace — except, as for Claude Code, the link of a pull
+request a command opened with `gh pr create`, or a GitHub MCP tool did (Codex's own GitHub app
+among them), read from the session file. A turn that `notify` reports before Codex has finished
 writing it to the session file is picked up on a later look — the app looks again every few
 seconds while a turn is waiting, `ys` on its next command — for up to five minutes; after that,
 or if the file cannot be read at all, the timeline still shows _agent finished its turn_, marked
@@ -167,7 +170,13 @@ plugins keep running beside it.
 tool's duration. Not your message, not a command, not a tool's output, not a file's contents,
 not an error message, not OpenCode's reply, not a path outside the workspace. The plugin keeps
 only those fields before anything leaves OpenCode's process, and hands them to the Yardsort
-executable, which writes one small file to the inbox. Recorded against OpenCode **1.18.31**. An
+executable, which writes one small file to the inbox. One exception, as for Claude Code: a
+`bash` call naming `gh`, `pr` and `create`, or a GitHub MCP tool whose name ends
+`create_pull_request`, also hands on its command and its output, and the executable keeps the
+link of the pull request it opened and nothing else. Recorded against OpenCode **1.18.31**, and
+the pull request rule against **1.18.34**. **OpenCode 2** changed how plugins are given — as a
+folder, with a different module shape — and Yardsort's plugin does not load there yet, so an
+OpenCode 2 launch reports nothing to the timeline. An
 OpenCode harness whose arguments carry `--pure` — OpenCode's own "no external plugins" — is left
 alone, and the timeline's settings count it under `hooks_not_armed`.
 
@@ -195,7 +204,10 @@ Nothing is given to Grok, and nothing in `~/.grok` is written.
 
 **What is kept, and what is not.** Tool names, durations, outcomes, decisions, waits, turn numbers,
 models, token counts. Not a command, not a path, not your message, not Grok's reply — the log
-never had them. Recorded against Grok **1.0.41**; the event log is Grok's own and not in its
+never had them. One exception, as for Claude Code: when a `run_terminal_command` finishes,
+Yardsort looks it up in the conversation file beside the log (`chat_history.jsonl`), and if the
+command ran `gh pr create`, keeps the link of the pull request it printed and nothing else. That
+rule has not yet been recorded against a real Grok, only against Grok's recorded shapes. Recorded against Grok **1.0.41**; the event log is Grok's own and not in its
 documented file list, so a newer version may change it, and a line this build does not recognise
 is skipped rather than guessed.
 
@@ -224,7 +236,10 @@ own extensions keep running; nothing under `~/.pi` or `~/.omp` is edited. Passin
 outside it is marked as such, not shown), durations, outcomes, decisions, turn numbers, models,
 token counts and cost, the length of each prompt. Not the prompt, not a command (a `bash` call's
 command line stays in the agent), not a file's contents, not the reply — the extension copies
-only the fields listed before anything leaves the agent's process. Recorded against **OMP
+only the fields listed before anything leaves the agent's process. One exception, as for Claude
+Code: a `bash` call naming `gh`, `pr` and `create` hands its command and its output to the
+Yardsort executable, which keeps the link of the pull request `gh pr create` opened and nothing
+else (recorded against OMP **18.18.3** and pi **1.5.0**). Recorded against **OMP
 18.2.11** and **pi 0.87.1**. The opening message Yardsort passes on the command line is not an
 input event to OMP, so its length is not reported there; pi does report it. The messages you
 type afterwards are reported by both. On pi, a `write` is named by its `write started` row and
@@ -249,7 +264,9 @@ Only hooks Cursor does not wait on for a decision are used, so nothing is ever b
 
 **What is kept, and what is not.** Tool names, file paths relative to the workspace, durations,
 outcomes, edit counts, token counts. Not the prompt, not a command, not a tool's output, not an
-edit's text, not the reply. Nor the prompt's length: the one hook that carries the prompt can
+edit's text, not the reply — except, as for Claude Code, the link of a pull request a shell
+command opened with `gh pr create`, or a GitHub MCP server's `create_pull_request` did (recorded
+against **2026.11.05-86047df**). Nor the prompt's length: the one hook that carries the prompt can
 also block it, and Yardsort never answers a hook that decides. Recorded against Cursor agent
 **2026.09.23-86fc751**. In that build, Cursor does not deliver `stop`, `afterAgentResponse` or
 `subagentStop` to a plugin's hooks, so a Cursor turn's end, its tokens and a subagent's end are

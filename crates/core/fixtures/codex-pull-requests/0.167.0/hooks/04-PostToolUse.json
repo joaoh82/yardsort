@@ -1,0 +1,13 @@
+{
+  "session_id": "01a1c10b-fa65-7072-b00d-a5adc3804aed",
+  "turn_id": "01a1c10b-fc89-7143-be5d-2002887d1ec0",
+  "transcript_path": "/tmp/yardsort-fixture/codex-home/sessions/2026/11/09/rollout-2026-11-09T17-02-30-01a1c10b-fa65-7072-b00d-a5adc3804aed.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": { "command": "gh pr create --title Bump --body Bump" },
+  "tool_response": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n",
+  "tool_use_id": "exec-8e8d2b89-95f3-49b3-8206-edb96339949f"
+}

@@ -79,6 +79,16 @@ see `crates/core/src/activity/context.rs`.
 | OMP, Pi             | yes       | **Shipped**: [15](15-agent-events-stage-2-pi-omp.md).                                                                                                                                                                                                         |
 | Cursor              | yes       | **Shipped**, from the documentation: [16](16-agent-events-stage-2-cursor.md).                                                                                                                                                                                 |
 
+**Pull requests opened** ([38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped)).
+The session file has each command's argv and output and each MCP call's answer, so the drain
+gives a `tool.completed` its `pullRequestUrl` when a `CommandExecution` ran `gh pr create` — the
+script of `bash -lc <script>` or `powershell -Command <script>`, else the argv's words — or a
+`McpToolCall` is a GitHub `create_pull_request`, by `github`/`create_pull_request` or Codex's own
+app, `codex_apps`/`github_create_pull_request`. Nothing else of either is kept. Recorded against
+**0.167.0** (`scripts/record-pr-creation.sh codex`, `fixtures/codex-pull-requests/`); the MCP
+call needed the server's tools approved for an `exec` run, which a recording sets and a user's
+own Codex decides.
+
 ## 5 · What shipped
 
 - `crates/core/src/activity/codex.rs`: `arm()`, `users_notify()`, `normalize_notify()`,

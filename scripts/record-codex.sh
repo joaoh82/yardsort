@@ -18,6 +18,9 @@ model="${1:-}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(codex --version | awk '{print $2}')"
 out="$root/crates/core/fixtures/codex/$version"
+# scripts/record-pr-creation.sh records a pull request being opened instead: its own prompt, its
+# own fixtures directory.
+[ -n "${YS_RECORD_OUT:-}" ] && out="$YS_RECORD_OUT/$version"
 work="$(mktemp -d -t yardsort-codex.XXXXXX)"
 home="$work/codex-home"
 capture="$work/capture.sh"
@@ -65,12 +68,16 @@ clean=(env CODEX_HOME="$home" YARDSORT_RUN_ID=run-fixture YARDSORT_WORKSPACE_ID=
   YARDSORT_SESSION_RECORD_ID=record-fixture)
 model_args=()
 [ -n "$model" ] && model_args=(-m "$model")
+mcp_args=()
+[ -n "${YS_RECORD_MCP:-}" ] &&
+  mcp_args=(-c "mcp_servers.github={command=\"python3\",args=[\"$YS_RECORD_MCP\"],default_tools_approval_mode=\"approve\"}")
 
 echo "recording Codex $version into $out"
 (cd "$work/repo" && "${clean[@]}" codex exec --skip-git-repo-check -s workspace-write \
   --dangerously-bypass-hook-trust "${model_args[@]}" \
   -c "notify=[\"$notify\", \"$raw-notify\"]" \
-  "Use apply_patch to create a file named hello.txt containing the single word hello. Then read it back with cat. Then read a file named missing.txt, which does not exist. Then run \`ls\`. Reply with one word when done." </dev/null) \
+  "${mcp_args[@]}" \
+  "${YS_RECORD_PROMPT:-Use apply_patch to create a file named hello.txt containing the single word hello. Then read it back with cat. Then read a file named missing.txt, which does not exist. Then run \`ls\`. Reply with one word when done.}" </dev/null) \
   >"$work/codex.out" 2>"$work/codex.err" || echo "codex exited $? (see $work/codex.err)"
 echo "  hooks delivered: $(ls "$raw"/*.json 2>/dev/null | wc -l), notify calls: $(ls "$raw-notify"/*.json 2>/dev/null | wc -l)"
 rollout="$(find "$home/sessions" -name '*.jsonl' | head -1 || true)"

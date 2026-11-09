@@ -1,0 +1,26 @@
+{
+  "hook": "tool.execute.after",
+  "payload": {
+    "input": {
+      "tool": "github_create_pull_request",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "chatcmpl-tool-87a6c24acc0ebde0",
+      "args": {
+        "owner": "example",
+        "repo": "lib",
+        "title": "Bump",
+        "head": "bump",
+        "base": "main"
+      }
+    },
+    "output": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"id\": \"2989102733\", \"url\": \"https://github.com/example/lib/pull/42\"}"
+        }
+      ]
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

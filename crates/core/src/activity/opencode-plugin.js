@@ -5,7 +5,10 @@
 // the metadata of each — a tool's name, a file's path, an exit code, token counts, ids — and
 // hands it to the Yardsort executable in hook mode, which writes one file to the activity inbox.
 // Nothing here reads a prompt, a command, a file's contents or a reply: `reduce` copies only the
-// fields the Yardsort side records, and everything else stops at this process's memory.
+// fields the Yardsort side records, and everything else stops at this process's memory. One
+// exception: a call that may have opened a pull request — a `bash` command naming `gh`, `pr` and
+// `create`, or a GitHub server's create-pull-request tool — hands its command and its output to
+// the executable, which keeps the new pull request's link and nothing else of either.
 //
 // Written from a template in the Yardsort binary before each launch, so the executable it names
 // is the one that launched. Never throws into OpenCode: every hook swallows its own failures.
@@ -157,17 +160,22 @@ function reduceHook(hook, p) {
           output: { args: pick(p.output?.args, ["filePath", "workdir"]) },
         },
       };
-    case "tool.execute.after":
+    case "tool.execute.after": {
+      const opened = mayOpenPullRequest(p.input?.tool, p.input?.args);
       return {
         hook,
         payload: {
           input: {
             ...pick(p.input, ["tool", "sessionID", "callID"]),
-            args: pick(p.input?.args, ["filePath", "workdir"]),
+            args: pick(p.input?.args, ["filePath", "workdir", ...(opened ? ["command"] : [])]),
           },
-          output: { metadata: pick(p.output?.metadata, ["exit", "truncated", "exists"]) },
+          output: {
+            metadata: pick(p.output?.metadata, ["exit", "truncated", "exists"]),
+            ...(opened ? pick(p.output, ["output", "content"]) : {}),
+          },
         },
       };
+    }
     case "permission.ask":
       return {
         hook,
@@ -179,6 +187,26 @@ function reduceHook(hook, p) {
     default:
       return null;
   }
+}
+
+/**
+ * Whether a call may have opened a pull request: a shell command naming `gh`, `pr` and `create`,
+ * or a tool whose name says GitHub and ends `create_pull_request` (OpenCode names an MCP tool
+ * `<server>_<tool>`). Loose on purpose — the executable decides, by the same rule as for every
+ * other agent; this only keeps every other command's output in this process.
+ */
+function mayOpenPullRequest(tool, args) {
+  if (typeof tool !== "string") return false;
+  if (tool === "bash") {
+    const command = args?.command;
+    return (
+      typeof command === "string" &&
+      /\bgh(\.exe)?\b/.test(command) &&
+      /\bpr\b/.test(command) &&
+      /\bcreate\b/.test(command)
+    );
+  }
+  return tool.endsWith("create_pull_request") && /github/i.test(tool);
 }
 
 function pick(object, keys) {

@@ -1211,8 +1211,11 @@ requests that no project's list has.
       Claude Code's own `gitOperation`, else `gh pr create` or a GitHub MCP tool — and every
       drain of the inbox tracks it. Recorded in
       [38 § slice 2](38-pull-requests-elsewhere.md#slice-2-what-shipped).
-- [ ] Slice 3: the same for Codex, OpenCode, pi, OMP, Grok and Cursor, or their coverage says
-      why not.
+- [x] Slice 3: the same for Codex, OpenCode, pi, OMP, Grok and Cursor, each from what it can see
+      — session files, the plugin and the extension handing on a likely call, Cursor's hooks —
+      recorded with `scripts/record-pr-creation.sh` but for Grok, which was not signed in.
+      OpenCode 2 turned out not to load the plugin at all. Recorded in
+      [38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped).
 - [ ] Slice 4: merge, close, reopen and the reply box by link; **Code** from the nested clone.
 - [ ] Slice 5: _Request code review_ on a tracked pull request, in the nested clone.
 
