@@ -173,16 +173,28 @@ pub fn track(
 /// commits are fetched for its diff (slice 4 of docs/design/38-pull-requests-elsewhere.md):
 /// the project's own repository has none of its history.
 pub fn clone_of(git: &Git, root: &Path, repo: &Repo) -> Option<std::path::PathBuf> {
-    nested_repositories(root)
+    let clones: Vec<(std::path::PathBuf, Vec<Repo>)> = nested_repositories(root)
         .into_iter()
         .map(|name| root.join(name))
-        .find(|clone| {
-            crate::forge::repos_at(git, clone).iter().any(|here| {
-                here.host.eq_ignore_ascii_case(&repo.host)
-                    && here.owner.eq_ignore_ascii_case(&repo.owner)
-                    && here.name.eq_ignore_ascii_case(&repo.name)
-            })
+        .map(|clone| {
+            let repos = crate::forge::repos_at(git, &clone);
+            (clone, repos)
         })
+        .collect();
+    let named = |here: &Repo| {
+        here.owner.eq_ignore_ascii_case(&repo.owner) && here.name.eq_ignore_ascii_case(&repo.name)
+    };
+    // On its own host first; then by owner and name alone, for a remote reached through an SSH
+    // host alias (`git@github-work:o/lib`), which names no forge's host.
+    clones
+        .iter()
+        .find(|(_, repos)| {
+            repos
+                .iter()
+                .any(|here| named(here) && here.host.eq_ignore_ascii_case(&repo.host))
+        })
+        .or_else(|| clones.iter().find(|(_, repos)| repos.iter().any(named)))
+        .map(|(clone, _)| clone.clone())
 }
 
 /// The git repositories directly inside `root`, by folder name, sorted: the nested clones a
@@ -731,6 +743,20 @@ mod tests {
         assert_eq!(
             clone_of(&git(), root, &repo("github.com", "o", "other")),
             None
+        );
+        // A remote through an SSH host alias names no forge's host: found by its name.
+        let alias = root.join("alias");
+        std::fs::create_dir_all(&alias).unwrap();
+        git().run(&alias, &["init", "-q"]).unwrap();
+        git()
+            .run(
+                &alias,
+                &["remote", "add", "origin", "git@github-work:o/tool.git"],
+            )
+            .unwrap();
+        assert_eq!(
+            clone_of(&git(), root, &repo("github.com", "o", "tool")),
+            Some(alias)
         );
     }
 

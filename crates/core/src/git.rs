@@ -425,18 +425,36 @@ impl Git {
     ) -> GitResult<String> {
         let ours = pull_request_ref(number, "head");
         let refspec = format!("+refs/pull/{number}/head:{ours}");
-        let mut args = vec!["fetch", "--quiet", remote, &refspec];
+        let mut args = vec![remote, refspec.as_str()];
         args.extend(also);
-        self.run(root, &args)?;
+        self.fetch_quietly(root, &args)?;
         Ok(ours)
+    }
+
+    /// `git fetch --quiet <args>`, leaving `FETCH_HEAD` as it was: these fetches are Yardsort's,
+    /// into refs of its own, and may run in a repository someone is working in — a nested clone
+    /// of a parent project — where a `git merge FETCH_HEAD` must still merge what *they*
+    /// fetched. A git older than 2.29 has no `--no-write-fetch-head`, and fetches as before.
+    fn fetch_quietly(&self, root: &Path, args: &[&str]) -> GitResult<String> {
+        let mut quiet = vec!["fetch", "--quiet", "--no-write-fetch-head"];
+        quiet.extend(args);
+        match self.run(root, &quiet) {
+            Err(GitError::Failed { stderr, .. })
+                if stderr.contains("no-write-fetch-head") || stderr.contains("unknown option") =>
+            {
+                let mut plain = vec!["fetch", "--quiet"];
+                plain.extend(args);
+                self.run(root, &plain)
+            }
+            answer => answer,
+        }
     }
 
     /// Fetch the remote's `source` ref into the local ref `into`, forced: for a ref of
     /// Yardsort's own, which nothing else writes to.
     pub fn fetch_into(&self, root: &Path, remote: &str, source: &str, into: &str) -> GitResult<()> {
         let refspec = format!("+{source}:{into}");
-        self.run(root, &["fetch", "--quiet", remote, &refspec])
-            .map(drop)
+        self.fetch_quietly(root, &[remote, &refspec]).map(drop)
     }
 
     /// The full id of the commit `name` is, or `None` when there is no such commit here.

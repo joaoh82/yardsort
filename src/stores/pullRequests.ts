@@ -314,6 +314,12 @@ export const usePullRequestsStore = create<PullRequestsStore>((set, get) => {
 
     async lineComment(target, place, body) {
       if (get().busy) return false;
+      // A comment on lines goes by number, in the project's repository; one elsewhere's number
+      // names a different pull request there.
+      if (target.tracked) {
+        set({ error: "Comments on lines are for a project's own pull requests." });
+        return false;
+      }
       set({ busy: target.key, error: null, notice: null });
       try {
         await ipc.pullRequestLineComment(target.projectId, target.pr.number, place, body);

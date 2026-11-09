@@ -56,8 +56,10 @@ confirmation names it — _Close pull request demo/lib#7_ — so it is not taken
 in the project's checkout that is a clone of it — fetching its commits there as a project's own
 are fetched: into refs of Yardsort's own, with nothing checked out and no branch moved. The
 comments on its lines show beside them. Without such a clone **Code** says so, with a link to its
-diff on GitHub. **Note on lines…** is for a project's own pull requests. **Stop tracking** also
-deletes the commits fetched for it, once no workspace of the project follows it.
+diff on GitHub. **Note on lines…** is for a project's own pull requests. Its fetch leaves the
+clone's own checkout, branches and `FETCH_HEAD` as they were, so someone working in it is not
+disturbed. **Stop tracking** also deletes the commits fetched for it, once no workspace of the
+project follows it.
 
 When one cannot be read — a mistyped link, a repository your `gh` login cannot see, GitHub not
 answering — a line above the rows says so and why, with **Retry** and **Stop tracking**. One

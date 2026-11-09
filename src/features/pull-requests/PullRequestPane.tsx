@@ -161,6 +161,30 @@ function Actions({ row }: { row: Row }) {
   const store = usePullRequestsStore.getState();
   const [untracking, setUntracking] = useState(false);
   const [untrackError, setUntrackError] = useState<string | null>(null);
+  // Last on the line, for any pull request, wherever it is.
+  const links = (
+    <>
+      <button
+        type="button"
+        onClick={() => void openUrl(pr.url).catch(console.error)}
+        className={`${button} ml-auto`}
+      >
+        Open on GitHub <span aria-hidden>↗</span>
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void writeText(pr.url).then(
+            () => setCopied(true),
+            (reason: unknown) => console.error(reason),
+          )
+        }
+        className={button}
+      >
+        {copied ? "Copied" : "Copy link"}
+      </button>
+    </>
+  );
 
   if (row.tracked) {
     const tracked = row.tracked;
@@ -196,25 +220,7 @@ function Actions({ row }: { row: Row }) {
           Stop tracking
         </button>
         <Lifecycle target={target} />
-        <button
-          type="button"
-          onClick={() => void openUrl(pr.url).catch(console.error)}
-          className={`${button} ml-auto`}
-        >
-          Open on GitHub <span aria-hidden>↗</span>
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            void writeText(pr.url).then(
-              () => setCopied(true),
-              (reason: unknown) => console.error(reason),
-            )
-          }
-          className={button}
-        >
-          {copied ? "Copied" : "Copy link"}
-        </button>
+        {links}
         {untrackError && (
           <p role="alert" className="w-full text-red-400 select-text">
             {untrackError}
@@ -251,25 +257,7 @@ function Actions({ row }: { row: Row }) {
 
       <Lifecycle target={target} />
 
-      <button
-        type="button"
-        onClick={() => void openUrl(pr.url).catch(console.error)}
-        className={`${button} ml-auto`}
-      >
-        Open on GitHub <span aria-hidden>↗</span>
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          void writeText(pr.url).then(
-            () => setCopied(true),
-            (reason: unknown) => console.error(reason),
-          )
-        }
-        className={button}
-      >
-        {copied ? "Copied" : "Copy link"}
-      </button>
+      {links}
     </div>
   );
 }

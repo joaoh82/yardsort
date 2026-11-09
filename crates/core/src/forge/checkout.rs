@@ -135,17 +135,28 @@ pub fn remote_of(git: &Git, root: &Path, pull_request_url: &str) -> IpcResult<Op
         .split_once("/pull/")
         .and_then(|(repository, _)| parse_remote(repository));
     if let Some(wanted) = wanted {
+        let mut named = Vec::new();
         for remote in git.remotes(root)? {
             let here = git
                 .remote_url(root, &remote)?
                 .as_deref()
                 .and_then(parse_remote);
-            if here.is_some_and(|here| {
+            if let Some(here) = here.filter(|here| {
                 here.owner.eq_ignore_ascii_case(&wanted.owner)
                     && here.name.eq_ignore_ascii_case(&wanted.name)
             }) {
-                return Ok(Some(remote));
+                named.push((here.host.eq_ignore_ascii_case(&wanted.host), remote));
             }
+        }
+        // The same owner and name on the same forge first: a clone with the repository on two
+        // hosts must fetch the pull request from the one it is on. Then by name alone, for a
+        // remote reached through an SSH host alias (`git@github-work:o/r`).
+        if let Some((_, remote)) = named
+            .iter()
+            .find(|(same_host, _)| *same_host)
+            .or_else(|| named.first())
+        {
+            return Ok(Some(remote.clone()));
         }
     }
     Ok(git.push_remote(root)?)

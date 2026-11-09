@@ -422,6 +422,14 @@ A tracked pull request is acted on as a project's own is, by its link instead of
   with a link to the diff on GitHub. The comments on its lines are read from its own repository,
   named, on its own host (`tracked_pull_request_line_comments`, `gh api --hostname`). **Stop
   tracking** deletes the refs when no workspace of the project follows it any more.
+- **Fetching in someone's clone.** The nested clone is the user's own, and they or an agent may
+  be working in it, so the fetch leaves `FETCH_HEAD` alone (`--no-write-fetch-head`; a git
+  older than 2.29 fetches as before), as every pull request fetch now does. The remote fetched
+  from, and the clone itself, are the ones on the pull request's own host first, then by owner
+  and name alone — a clone with the repository on two hosts fetches from the right one, and one
+  reached through an SSH host alias is still found. The clone is found once per pull request.
+  The refs are keyed by number, so two tracked pull requests with the same number in one clone
+  share them, and a workspace deleted with its rows leaves them behind: both only cost a fetch.
 - **Not offered for one elsewhere**: **Start workspace** (its repository is not a project),
   asking an agent to resolve its conflicts (that agent works in the project's repository), and
   **Note on lines…** (a note goes to the workspace's agent about the workspace's own pull

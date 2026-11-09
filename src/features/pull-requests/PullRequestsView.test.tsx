@@ -22,6 +22,7 @@ const core = vi.hoisted(() => ({
   trackedPullRequestComment: vi.fn(),
   trackedPullRequestChanges: vi.fn(),
   trackedPullRequestLineComments: vi.fn(),
+  pullRequestLineComment: vi.fn(),
   workspaceUntrackPullRequest: vi.fn(),
   pullRequestChanges: vi.fn(),
   pullRequestMerge: vi.fn(),
@@ -771,6 +772,23 @@ describe("a pull request a workspace tracks in another repository", () => {
     expect(core.trackedPullRequestChanges).toHaveBeenCalledWith(feature.id, "t-7");
     expect(core.trackedPullRequestLineComments).toHaveBeenCalledWith(feature.id, "t-7");
     expect(core.pullRequestChanges).not.toHaveBeenCalled();
+  });
+
+  it("is never given a comment on lines by its number", async () => {
+    const posted = await usePullRequestsStore.getState().lineComment(
+      {
+        key: "tracked",
+        projectId: alpha.id,
+        pr: elsewhere.pullRequest!,
+        viewer: null,
+        tracked: elsewhere,
+      },
+      { commit: "a".repeat(40), path: "src/client.rs", side: "right", line: 3, startLine: null },
+      "This line.",
+    );
+    expect(posted).toBe(false);
+    expect(core.pullRequestLineComment).not.toHaveBeenCalled();
+    expect(usePullRequestsStore.getState().error).toMatch(/project's own pull requests/);
   });
 
   it("says so when one could never be read, and offers to stop tracking it", async () => {

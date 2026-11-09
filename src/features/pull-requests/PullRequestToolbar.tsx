@@ -7,6 +7,7 @@ import { native } from "@/lib/native";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { PullRequestBadge } from "@/features/sidebar/PullRequestBadge";
 import { shownFor, untrackPullRequest, usePublishStore } from "@/stores/publish";
+import { nameOf } from "@/stores/pullRequests";
 import { useTerminalStore } from "@/stores/terminals";
 import { PullRequestDetails } from "./PullRequestDetails";
 import { conflicting, pullRequestColour } from "./appearance";
@@ -31,12 +32,10 @@ export function PullRequestToolbar({
   const [chosen, setChosen] = useState<string | null>(null);
   const shown = prs.find((candidate) => candidate.key === chosen) ?? prs[0];
   const pr = shown?.pr;
-  // One elsewhere is read by its link; merging it and its conflicts are not this toolbar's yet.
+  // One elsewhere is read and merged by its link; its conflicts are not this toolbar's.
   const tracked = shown?.tracked ?? null;
   const more = prs.length - 1;
-  const name = tracked
-    ? `${tracked.repo.owner}/${tracked.repo.name}#${pr?.number}`
-    : `#${pr?.number}`;
+  const name = tracked ? pr && nameOf({ pr, tracked }) : `#${pr?.number}`;
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -63,7 +62,7 @@ export function PullRequestToolbar({
     // One elsewhere is merged by its link, in its own repository, which the confirmation names.
     const confirmed = await native.confirm(
       tracked
-        ? `${label} pull request ${tracked.repo.owner}/${tracked.repo.name}#${pr.number}: ${pr.title}\n\nIn ${tracked.repo.owner}/${tracked.repo.name}, tracked with this workspace.\n${pr.branch} → ${pr.details.base}\nCommit ${pr.details.headOid.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. No branch is deleted.`
+        ? `${label} pull request ${nameOf({ pr, tracked })}: ${pr.title}\n\nIn ${tracked.repo.owner}/${tracked.repo.name}, tracked with this workspace.\n${pr.branch} → ${pr.details.base}\nCommit ${pr.details.headOid.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. No branch is deleted.`
         : `${label} pull request #${pr.number}: ${pr.title}\n\n${pr.branch} → ${pr.details.base}\nCommit ${pr.details.headOid.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. Your workspace and local branch will be kept.`,
       { title: "Merge pull request", okLabel: label },
     );

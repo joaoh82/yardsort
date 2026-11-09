@@ -295,6 +295,12 @@ fn forget_commits(state: &AppState, workspace_id: &str, row: &TrackedPullRequest
     if still {
         return;
     }
+    state
+        .forge
+        .tracked_clones
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(&row.url);
     let (Ok(git), Ok(root)) = (
         Git::new(&state.env()),
         project_root(state, &workspace.project_id),
@@ -479,11 +485,21 @@ fn clone_for(
     workspace_id: &str,
     row: &TrackedPullRequestRow,
 ) -> IpcResult<PathBuf> {
+    let mut known = state
+        .forge
+        .tracked_clones
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(clone) = known.get(&row.url).filter(|clone| clone.is_dir()) {
+        return Ok(clone.clone());
+    }
     let workspace = state
         .store
         .workspace(workspace_id)?
         .ok_or_else(|| IpcError::new("unknown_workspace", "That workspace no longer exists."))?;
-    clone_in(git, &project_root(state, &workspace.project_id)?, row)
+    let clone = clone_in(git, &project_root(state, &workspace.project_id)?, row)?;
+    known.insert(row.url.clone(), clone.clone());
+    Ok(clone)
 }
 
 /// [`clone_for`] in the project's checkout at `root`.
