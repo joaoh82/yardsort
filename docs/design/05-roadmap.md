@@ -1230,10 +1230,12 @@ requests that no project's list has.
       and told to the agent that opened it. Recorded in
       [38 § slice 5](38-pull-requests-elsewhere.md#slice-5-what-shipped).
 - [ ] The hands-on pass, [08 § 28](08-manual-checklist.md#28--pull-requests-in-other-repositories):
-      a real agent in a real parent project, on Linux, macOS and Windows. Linux without the
-      window was done on 2026-11-09 — a real Claude Code tracked by `hook` through
-      `yardsort-host` — and found the launch section's clone names read as the worktree's own
-      folders, now whole paths ([38 § the hands-on pass](38-pull-requests-elsewhere.md#the-hands-on-pass)).
+      a real agent in a real parent project, on Linux, macOS and Windows. **Linux done** on
+      2026-11-09: rows 1–2 with a real Claude Code through `yardsort-host` (and the launch
+      section's clone names made whole paths, after an agent read them as its worktree's own),
+      rows 3–7 in the dev window against a stand-in `gh`, a real Claude Code doing the review
+      ([38 § the hands-on pass](38-pull-requests-elsewhere.md#the-hands-on-pass)). macOS and
+      Windows are left.
 
 _Exit:_ on all three platforms, an agent in a parent project's workspace opens a pull request in a
 nested clone and it appears on the workspace's row with its checks without anyone typing its

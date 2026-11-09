@@ -508,8 +508,14 @@ The rows are [08 § 28](08-manual-checklist.md#28--pull-requests-in-other-reposi
   project's local one), and points at a worktree of the clone rather than its shared checkout.
   Run again on that build, the agent went to the clone by itself and its pull request was
   tracked the same way.
-- **Still to do:** the window's rows on Linux against real pull requests, and every row on macOS
-  and Windows — none of which this machine can do.
+- **Linux, 2026-11-09, the window.** Rows 3–7 in the dev window of 0.24.0, against a stand-in
+  `gh` that keeps one pull request's state: tracking and its refusals, the Summary and a reply,
+  **Code** from the clone with the clone untouched, close, reopen and a toolbar merge each
+  confirmed by name, a real Claude Code reviewing it in a worktree of the clone and the run
+  seeing the review by link, and **Stop tracking** from two places. All passed. Found: **Refresh
+  pull request** does not read a merged or closed one again within its ten minutes.
+- **Still to do:** every row on macOS and Windows, which this machine cannot do, and the window's
+  rows against real GitHub pull requests.
 
 ## Documentation this touches
 
