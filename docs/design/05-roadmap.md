@@ -1016,6 +1016,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       after a drop, and typed into once **Take control** is pressed, losing it to the person there
       or a phone with the window saying who. Its local smoke test passed, and so did the owner's
       run, R5's gate check 1: the iPhone and this computer on one agent on the box, through staging.
+      Slice 6 was built on 2026-11-09 ([35 §15](35-remote-r4-r5.md#15--what-the-sixth-slice-adds)):
+      resume and fork moved into the core, `ys session resume` and `ys session fork`, and a record
+      whose terminal went with the daemon settled before it is continued, so a computer with no
+      screen brings back the agents a reboot ended. Its local smoke test and the owner's run on the
+      box, R5's gate check 3, passed.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator

@@ -5,6 +5,12 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **`ys session resume` and `ys session fork`.** Continue an agent's conversation from the command
+  line, as **Resume** and **Fork** do in the app, naming it by the start of its id from
+  `ys session list --all`. On a computer with no screen, this is how agents a reboot or a container
+  restart ended are brought back; restarting the host's service never ends them. A session that
+  still says it is running, though its process went with the terminal daemon, is settled first.
+  See [After a restart](docs/guide/headless-host.md#after-a-restart).
 - **Follow pull requests an agent opens in another repository.** A project whose folder holds
   other repositories as nested clones — a parent repository — has agents that open pull requests
   in those clones, and Yardsort could not see them. Now a workspace can **track** them. With

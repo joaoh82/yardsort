@@ -1,0 +1,224 @@
+id: host-restart
+name: A computer with no screen keeps its agents through a restart, and resumes those one ended
+description: >-
+  A yardsort-host on the stand-in server, serving a stand-in agent that keeps its conversation on
+  disk. Restarting the host's service leaves the agent running, and a pretend phone reaches it
+  again. Then the daemon is stopped too, as a reboot or a container restart does: the agent ends
+  with it, the host started again says so, and `ys session resume` brings the conversation back,
+  which the phone sees. `ys session fork` copies it. Linux only, as the other headless tests are.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_and_a_stand_in_agent
+    action: shell
+    # The agent is given its id on its command line, and resumed and forked by it, as Claude Code.
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && cp .yardsort/tests/support/standin-agent.sh "$YS_RUN_DIR/" &&
+      printf '[[harness]]\nid = "stand-in"\nbuiltin = false\nlabel = "Stand-in agent"\ncommand = "sh"\nbase_args = ["%s"]\nsession_args = ["start", "{session_id}"]\nprompt_args = ["{prompt}"]\nresume_args = ["resume", "{session_id}"]\nfork_args = ["fork", "{session_id}", "{new_session_id}"]\nsession_id_mode = "assigned"\n'
+      "$YS_RUN_DIR/standin-agent.sh" > "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    # Not `start`: it is stopped and started again below.
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: start_the_agent
+    action: run
+    program: sh
+    args:
+      [
+        .yardsort/tests/support/headless.sh,
+        ys,
+        workspace,
+        new,
+        repo,
+        mind-the-flaky-test,
+        --harness,
+        stand-in,
+      ]
+    expect:
+      stdout_contains: agent  stand-in
+  - id: the_phone_is_let_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 90s
+    expect:
+      stdout_contains: Let in.
+  - id: the_phone_sees_the_agent
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        sees,
+        Smoke box,
+        "begins: mind-the-flaky-test",
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: begins: mind-the-flaky-test"
+
+  # The service restarts: the daemon, and so the agent, carry on.
+  - id: restart_the_service
+    action: shell
+    line: kill "$(cat "$YS_RUN_DIR/serve.pid")"
+  - id: stopped
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Host: not running"'
+    timeout: 30s
+  - id: serve_again
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked_again
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: the_agent_kept_running
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, session, list]
+    expect:
+      stdout_contains: running
+  - id: the_phone_reaches_it_again
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        sees,
+        Smoke box,
+        "begins: mind-the-flaky-test",
+      ]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: begins: mind-the-flaky-test"
+
+  # The daemon stops too, as a reboot or a container restart stops it: the agent ends with it.
+  - id: stop_the_service_and_the_daemon
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid")"; pkill -KILL -f "yardsort-daemon .*$YS_RUN_DIR"; true
+  - id: all_stopped
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - >-
+        sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Host: not running" &&
+        ! pgrep -f "yardsort-daemon .*$YS_RUN_DIR" > /dev/null
+    timeout: 30s
+  - id: the_computer_comes_back
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked_once_more
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: the_agent_ended_with_it
+    action: shell
+    # On record, ended; and nothing running.
+    line: >-
+      sh .yardsort/tests/support/headless.sh ys session list --all | grep stand-in | grep -q ended &&
+      sh .yardsort/tests/support/headless.sh ys session list | grep -q "No running sessions" && echo ended
+    expect:
+      stdout_contains: ended
+  - id: resume_it
+    action: shell
+    # By the start of its id, as the list prints it.
+    line: >-
+      sh .yardsort/tests/support/headless.sh ys session resume "$(sh .yardsort/tests/support/headless.sh
+      ys session list --all | awk '$3 == "stand-in" { print $1; exit }')"
+    expect:
+      stdout_contains: resumed  mind-the-flaky-test
+  - id: the_phone_sees_the_conversation_back
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        sees,
+        Smoke box,
+        "again, remembering: mind-the-flaky-test",
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: again, remembering: mind-the-flaky-test"
+  - id: fork_it
+    action: shell
+    line: >-
+      sh .yardsort/tests/support/headless.sh ys session fork "$(sh .yardsort/tests/support/headless.sh
+      ys session list | awk '$3 == "stand-in" { print $1; exit }')"
+    expect:
+      stdout_contains: forked   mind-the-flaky-test
+  - id: both_run
+    action: shell
+    line: >-
+      test "$(sh .yardsort/tests/support/headless.sh ys session list | grep -c running)" = 2 && echo two
+      running
+    expect:
+      stdout_contains: two running
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      kill "$(cat "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

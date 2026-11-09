@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -827,3 +827,47 @@ parsed, and output after it waits behind it. And **Take control** pressed before
 opened was dropped, leaving the button at _Taking control…_ for good; it is now offered only once the
 terminal says who has control, the request waits for the open, and a refused request or a failed
 open leaves the button usable and says why.
+
+## 15 · What the sixth slice adds
+
+Built on 2026-11-09, on Linux. Nothing changed on the server or the phone, so staging needs no deploy
+and the phone no new build. The ledger's prerequisite (26): resuming and forking a conversation was
+the app's alone, so a computer with no screen could not bring back the agents a reboot ended.
+
+- **In the core** (`yardsort_core::sessions`): the session record, what it allows and why not
+  (`describe`, unchanged), and `Launcher::continue_session`, moved from `src-tauri/src/sessions.rs`
+  as it was. The app's `session_resume`, `session_fork` and the conflict hand-back call it through
+  `with_launcher`; what a person sees in the window does not change.
+- **One rule added.** A resume of a record still marked running, as after the daemon or the computer
+  stopped with nobody to hear it, settles that record first rather than refuse it as _already
+  running_: the exit spool is imported, so a code the daemon kept wins, then the record is ended only
+  if the host says its terminal exited or is not there. Nothing else is touched, and a host that
+  cannot be asked settles nothing and refuses the resume. That was the app's behaviour only once it
+  had restarted; `ys` needs it while `serve` keeps running.
+- **`ys session resume <session>` and `ys session fork <session>`**, by the start of an id, through
+  the daemon as `ys workspace new` is, and refusing without one: an agent started without it would
+  end with the command.
+- **The restarts.** Nothing in the host changed for them. A service restart keeps the agents (§12);
+  a reboot, a container restart or a stopped daemon ends them, and the host's start settles their
+  records, as the app's does. The headless guide's "After a restart" says which is which.
+- **Tests that fail without it.** In the core, against real PTYs: a conversation whose terminal went
+  with the daemon is resumed under its record, with its harness's resume arguments and id; the
+  record logic's own tests moved with it. In `ys`'s: a session found by the start of its id,
+  ambiguity and no match named, and nothing started without a daemon.
+
+**Its smoke test.** `host-restart.yaml`, locally: passed on 2026-11-09, 26 of 26 steps, on Linux. A stand-in agent keeps its conversation
+on disk and is given its id, as Claude Code is; restarting `serve` leaves it running and the phone
+reaches it; stopping the daemon too ends it, the host's next start says so, `ys session resume`
+brings the conversation back where the phone reads it, and `ys session fork` copies it.
+
+**What review found.** The first version settled the way a start does, every record whose
+terminal the host did not list, inside a resume. That was wrong twice over: the daemon's client lists
+nobody when it cannot be asked, so one resume while the daemon was unreachable would have ended every
+running session for good; and it skipped the spool and counted an exited terminal as gone, so a
+neighbour that ended cleanly would have been marked interrupted. It now settles the one record, as
+above, with tests for a neighbour left alone, a spooled exit kept, and an unreachable daemon.
+
+**The owner's run** passed the same day, R5's gate check 3: on the box, a Claude Code agent kept
+running through `systemctl --user restart yardsort-host`, and the iPhone reached it again; after a
+reboot it was listed as ended, `ys session resume` brought its conversation back on the iPhone, and
+`ys session fork` copied it. Resume and Fork in the window behaved as before.

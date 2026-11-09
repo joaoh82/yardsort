@@ -166,8 +166,8 @@ Sign in by pasting the address back, as above: forwarding the port does not reac
 `pair` from `docker compose exec` is a terminal of your own, as an SSH login is.
 
 **Stopping or restarting the container ends the agents**, since the terminal daemon lives inside it.
-Their workspaces, worktrees and records stay in the volumes; start the agents again with `ys`, or
-from the phone.
+Their workspaces, worktrees and records stay in the volumes, and so do their conversations, which
+the agents keep in the workspaces and your home: [resume them](#after-a-restart) with `ys`.
 
 ## Projects and agents
 
@@ -182,6 +182,28 @@ ys attach                        # watch it here; detaching leaves it running
 A paired device that may type can start work too: a new workspace, or another agent in one, as
 [Remote](remote.md#starting-work-from-the-phone) says. It offers the agents this profile has turned
 on and can find.
+
+## After a restart
+
+What a restart does to the agents depends on what restarted:
+
+| What restarted                                      | The agents                                               |
+| --------------------------------------------------- | -------------------------------------------------------- |
+| The service, `serve` alone, or an upgrade           | Keep running. The phone reaches the same computer again. |
+| The computer, the container, or the terminal daemon | End with it. Their conversations can be resumed.         |
+
+The host started again settles what ended: `ys session list --all` shows those agents as `ended`. To carry on with one, name it by the start of the id that list prints:
+
+```sh
+ys session list --all
+ys session resume 6051993d      # the same conversation, in a new terminal
+ys session fork 6051993d        # a copy of it that goes its own way
+```
+
+Either keeps running after the command returns, and the phone sees it as it would any agent. A
+resume picks up the conversation where the agent left it, as **Resume** does in the app, so it works
+only for an agent that can resume one by its id or the most recent one in its folder; `ys` says why
+when one cannot.
 
 **Workflows, smoke tests, schedules and triggers do not run on a headless host yet.**
 `ys workflow run`, `ys test run` and `ys schedule run` say so and queue nothing, rather than queue work
