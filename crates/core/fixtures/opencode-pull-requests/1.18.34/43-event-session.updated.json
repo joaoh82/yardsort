@@ -1,0 +1,62 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_1c10b73ed001CCkGHpEIkCpm10",
+    "type": "session.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "info": {
+        "id": "ses_00000000000fixture01",
+        "slug": "quick-circuit",
+        "projectID": "a948972821410376b98d4fe5a1fe162e32af7a4c",
+        "directory": "/tmp/yardsort-fixture/repo",
+        "path": "",
+        "title": "Create PR via gh CLI and GitHub MCP",
+        "agent": "build",
+        "model": {
+          "id": "big-pickle",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "version": "1.18.34",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 10522,
+          "output": 170,
+          "reasoning": 108,
+          "cache": {
+            "read": 14208,
+            "write": 0
+          }
+        },
+        "permission": [
+          {
+            "permission": "question",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_enter",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_exit",
+            "pattern": "*",
+            "action": "deny"
+          }
+        ],
+        "time": {
+          "created": 1794240105128,
+          "updated": 1794240115691
+        }
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

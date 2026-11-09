@@ -1,0 +1,32 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_1c10b69d9001UjgO3qDdUIF75c",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "type": "tool",
+        "tool": "bash",
+        "callID": "chatcmpl-tool-b24da437e37ab659",
+        "state": {
+          "metadata": {
+            "output": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+          },
+          "status": "running",
+          "input": {
+            "command": "gh pr create --title Bump --body Bump"
+          },
+          "time": {
+            "start": 1794240112945
+          }
+        },
+        "id": "prt_00000000000fixture03",
+        "sessionID": "ses_00000000000fixture01",
+        "messageID": "msg_00000000000fixture02"
+      },
+      "time": 1794240113113
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

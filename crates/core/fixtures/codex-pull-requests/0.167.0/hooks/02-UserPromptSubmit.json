@@ -1,0 +1,10 @@
+{
+  "session_id": "01a1c10b-fa65-7072-b00d-a5adc3804aed",
+  "turn_id": "01a1c10b-fc89-7143-be5d-2002887d1ec0",
+  "transcript_path": "/tmp/yardsort-fixture/codex-home/sessions/2026/11/09/rollout-2026-11-09T17-02-30-01a1c10b-fa65-7072-b00d-a5adc3804aed.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Run this exact shell command: gh pr create --title Bump --body Bump. Then call the create_pull_request tool of the github MCP server with owner example, repo lib, title Bump, head bump and base main. Reply with the two links you got, nothing else."
+}

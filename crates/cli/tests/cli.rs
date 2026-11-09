@@ -1312,6 +1312,74 @@ fn a_pull_request_claude_opened_elsewhere_is_followed_without_anyone_saying_so()
     );
 }
 
+/// The same for the agents whose adapter hands its deliveries to `ys` in hook mode: Cursor's
+/// hooks, OpenCode's plugin, the pi family's extension — each fed its own recording of a
+/// `gh pr create` (pi's end event given the command its start carried, as the extension does).
+#[test]
+fn a_pull_request_another_agent_opened_elsewhere_is_followed_too() {
+    use std::io::Write;
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/fixtures");
+    let read = |path: &str| -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(fixtures.join(path)).unwrap()).unwrap()
+    };
+    let mut pi_end = read("pi-pull-requests/1.5.0/15-tool_execution_end-bash.json");
+    pi_end["payload"]["args"] =
+        read("pi-pull-requests/1.5.0/12-tool_execution_start-bash.json")["payload"]["args"].clone();
+    let cases = [
+        (
+            "cursor",
+            read("cursor-pull-requests/2026.11.05-86047df/06-postToolUse-Shell.json"),
+        ),
+        (
+            "opencode",
+            read("opencode-pull-requests/1.18.34/22-tool.execute.after-bash.json"),
+        ),
+        ("pi", pi_end),
+    ];
+    for (harness, delivery) in cases {
+        let fx = Fixture::new();
+        let made = make_workspace(&fx, "Bump the library");
+        let workspace_id = made["id"].as_str().unwrap().to_owned();
+        fx.git()
+            .run(
+                &fx.repo,
+                &["remote", "add", "origin", "git@github.com:o/parent.git"],
+            )
+            .unwrap();
+        let mut hook = Command::new(env!("CARGO_BIN_EXE_ys"))
+            .arg(yardsort_core::activity::hook::HOOK_FLAG)
+            .arg(harness)
+            .arg(yardsort_core::activity::inbox_dir(&fx.data_dir))
+            .env(yardsort_core::activity::WORKSPACE_ENV, &workspace_id)
+            .env_remove(yardsort_core::activity::RUN_ENV)
+            .env_remove(yardsort_core::activity::RECORD_ENV)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        hook.stdin
+            .take()
+            .unwrap()
+            .write_all(delivery.to_string().as_bytes())
+            .unwrap();
+        let output = hook.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{harness}: {output:?}");
+
+        let listed: serde_json::Value = serde_json::from_str(
+            &fx.ys(&["pr", "tracked", "--workspace", &workspace_id, "--json"])
+                .ok(),
+        )
+        .unwrap();
+        assert_eq!(listed.as_array().unwrap().len(), 1, "{harness}: {listed}");
+        assert_eq!(
+            listed[0]["url"], "https://github.com/example/lib/pull/41",
+            "{harness}"
+        );
+        assert_eq!(listed[0]["trackedBy"], "hook", "{harness}");
+    }
+}
+
 /// `ys --yardsort-hook codex <inbox> <payload>` is what Codex's `notify` runs at the end of a
 /// turn: the payload as the last argument, the launcher's ids in the environment. The next `ys`
 /// command reads the turn out of Codex's session file — here, the fixture, placed where Codex

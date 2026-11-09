@@ -15,13 +15,19 @@ interface Delivery {
   directory?: string;
 }
 
-function fixtures(): Array<{ name: string; delivery: Delivery }> {
-  return readdirSync(FIXTURES)
+// A pull request opened twice, with stand-ins: `gh pr create`, and a GitHub MCP server's tool.
+const PULL_REQUESTS = join(
+  __dirname,
+  "../../../crates/core/fixtures/opencode-pull-requests/1.18.34",
+);
+
+function fixtures(dir = FIXTURES): Array<{ name: string; delivery: Delivery }> {
+  return readdirSync(dir)
     .filter((name) => name.endsWith(".json"))
     .sort()
     .map((name) => ({
       name,
-      delivery: JSON.parse(readFileSync(join(FIXTURES, name), "utf8")) as Delivery,
+      delivery: JSON.parse(readFileSync(join(dir, name), "utf8")) as Delivery,
     }));
 }
 
@@ -110,5 +116,67 @@ describe("the OpenCode plugin's reduce", () => {
     expect(state.error).toBeUndefined();
     expect(reduce("shell.env", {})).toBeNull();
     expect(reduce("event", { type: "session.status" })).toBeNull();
+  });
+
+  it("hands on a call that may have opened a pull request with its command and output alone", () => {
+    const after = fixtures(PULL_REQUESTS).filter(
+      ({ delivery }) => delivery.hook === "tool.execute.after",
+    );
+    const reduced = after.map(({ delivery }) =>
+      reduce(delivery.hook, delivery.payload, delivery.directory),
+    );
+    expect(reduced.map((r) => r?.payload)).toEqual([
+      {
+        input: {
+          tool: "bash",
+          sessionID: "ses_00000000000fixture01",
+          callID: "chatcmpl-tool-b24da437e37ab659",
+          args: { command: "gh pr create --title Bump --body Bump" },
+        },
+        output: {
+          metadata: { exit: 0, truncated: false },
+          output:
+            "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n",
+        },
+      },
+      {
+        input: {
+          tool: "github_create_pull_request",
+          sessionID: "ses_00000000000fixture01",
+          callID: "chatcmpl-tool-87a6c24acc0ebde0",
+          args: {},
+        },
+        output: {
+          metadata: {},
+          content: [
+            {
+              type: "text",
+              text: '{"id": "2989102733", "url": "https://github.com/example/lib/pull/42"}',
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("keeps every other command's output in OpenCode's process", () => {
+    const bash = (command: string) =>
+      reduce(
+        "tool.execute.after",
+        {
+          input: { tool: "bash", args: { command } },
+          output: { output: "secret output", metadata: { exit: 0 } },
+        },
+        undefined,
+      );
+    for (const command of ["ls", "gh pr view 7", "gh issue create", "echo create"]) {
+      expect(JSON.stringify(bash(command)), command).not.toContain("secret output");
+    }
+    const tool = reduce(
+      "tool.execute.after",
+      { input: { tool: "gitlab_create_pull_request" }, output: { content: "secret output" } },
+      undefined,
+    );
+    expect(JSON.stringify(tool)).not.toContain("secret output");
   });
 });

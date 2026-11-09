@@ -378,6 +378,80 @@ pub fn expand_rollout(text: &str, thread: &str, turn: &str, run_id: Option<&str>
 
 /// A completed item of the turn: the user's message, a command, a file change, a tool.
 fn item_events(item: &Value, thread: &str, turn: &str, at: i64, cwd: Option<&str>) -> Vec<Derived> {
+    let mut events = item_events_alone(item, thread, turn, at, cwd);
+    // A pull request the item created keeps its link, and nothing else of what it printed: the
+    // one exception to metadata only (docs/design/38-pull-requests-elsewhere.md).
+    if let Some(url) = created_pull_request(item) {
+        for event in events.iter_mut().filter(|e| e.kind == "tool.completed") {
+            event.payload["pullRequestUrl"] = Value::String(url.clone());
+        }
+    }
+    events
+}
+
+/// The pull request a completed item created: a command running `gh pr create`, by what it
+/// printed; a GitHub server's create-pull-request tool, by its answer.
+fn created_pull_request(item: &Value) -> Option<String> {
+    if item.get("status").and_then(Value::as_str) != Some("completed") {
+        return None;
+    }
+    // `gh pr create` on a branch that has one already fails, printing that one's link.
+    if item
+        .get("exit_code")
+        .and_then(Value::as_i64)
+        .is_some_and(|code| code != 0)
+    {
+        return None;
+    }
+    match item.get("type").and_then(Value::as_str)? {
+        "CommandExecution" => {
+            let argv: Vec<&str> = item["command"]
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .collect();
+            let output = item
+                .get("aggregated_output")
+                .or_else(|| item.get("stdout"))
+                .and_then(Value::as_str)?;
+            crate::tracked::created_by_command(&shell_script(&argv), output)
+        }
+        "McpToolCall" => {
+            let server = item.get("server").and_then(Value::as_str).unwrap_or("");
+            let tool = item.get("tool").and_then(Value::as_str)?;
+            if !crate::tracked::is_create_pull_request(server, tool) {
+                return None;
+            }
+            crate::tracked::link_in_tool_result(item.get("result")?)
+        }
+        _ => None,
+    }
+}
+
+/// What a command item ran, as one shell line: the script its shell was handed after the flag
+/// that says one follows — `bash -lc <script>`, `powershell -NoProfile -Command <script>`,
+/// `cmd /c <script>` — or else its words.
+fn shell_script(argv: &[&str]) -> String {
+    if let [_, .., flag, script] = argv {
+        let flag = flag.to_ascii_lowercase();
+        let takes_script =
+            (flag.starts_with('-') && !flag.starts_with("--") && flag.ends_with('c'))
+                || flag == "-command"
+                || flag == "/c";
+        if takes_script {
+            return (*script).to_owned();
+        }
+    }
+    argv.join(" ")
+}
+
+fn item_events_alone(
+    item: &Value,
+    thread: &str,
+    turn: &str,
+    at: i64,
+    cwd: Option<&str>,
+) -> Vec<Derived> {
     let text = |key: &str| item.get(key).and_then(Value::as_str).map(str::to_owned);
     let id = text("id").unwrap_or_default();
     let key = |what: &str| format!("codex:{thread}:{id}:{what}");
@@ -550,6 +624,161 @@ mod tests {
         );
         assert!(normalize_notify(&json!({ "type": "something-else" }), None).is_err());
         assert!(normalize_notify(&json!({ "thread-id": "x" }), None).is_err());
+    }
+
+    /// Recorded with `scripts/record-pr-creation.sh codex`: `gh pr create` and a GitHub MCP
+    /// server's `create_pull_request`, both stand-ins.
+    #[test]
+    fn a_pull_request_the_turn_created_keeps_its_link_and_nothing_else() {
+        let text = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("fixtures/codex-pull-requests/0.167.0/rollout.jsonl"),
+        )
+        .unwrap();
+        let line = |kind: &str| {
+            text.lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .find(|line| line["type"] == kind || line["payload"]["type"] == kind)
+                .unwrap()
+        };
+        let thread = line("session_meta")["payload"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let turn = line("task_started")["payload"]["turn_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let Expanded::Events(events) = expand_rollout(&text, &thread, &turn, Some("run-1")) else {
+            panic!("the recorded turn is complete");
+        };
+        let links: Vec<(&str, &str)> = events
+            .iter()
+            .filter_map(|e| {
+                Some((
+                    e.payload["tool"].as_str()?,
+                    e.payload["pullRequestUrl"].as_str()?,
+                ))
+            })
+            .collect();
+        assert_eq!(
+            links,
+            [
+                ("shell", "https://github.com/example/lib/pull/41"),
+                (
+                    "mcp:github/create_pull_request",
+                    "https://github.com/example/lib/pull/42"
+                ),
+            ]
+        );
+        // The link alone: no command line, no output, no argument of the tool's.
+        for event in &events {
+            let payload = event.payload.to_string();
+            for content in [
+                "gh pr create",
+                "Creating pull request",
+                "Bump",
+                "2989102733",
+            ] {
+                assert!(!payload.contains(content), "{content} in {payload}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_command_or_a_tool_that_created_nothing_keeps_no_link() {
+        let command = |argv: Value, status: &str, output: &str| {
+            json!({ "type": "CommandExecution", "id": "x", "command": argv, "status": status,
+                    "aggregated_output": output })
+        };
+        let printed = "https://github.com/o/lib/pull/7\n";
+        assert_eq!(
+            created_pull_request(&command(
+                json!(["/bin/bash", "-lc", "cd lib && gh pr create --fill"]),
+                "completed",
+                printed
+            ))
+            .as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        assert_eq!(
+            created_pull_request(&command(
+                json!(["powershell.exe", "-Command", "gh pr create --fill"]),
+                "completed",
+                printed
+            ))
+            .as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        assert_eq!(
+            created_pull_request(&command(
+                json!([
+                    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                    "-NoProfile",
+                    "-Command",
+                    "gh pr create --fill"
+                ]),
+                "completed",
+                printed
+            ))
+            .as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        assert_eq!(
+            created_pull_request(&command(
+                json!(["cmd.exe", "/c", "gh pr create --fill"]),
+                "completed",
+                printed
+            ))
+            .as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        // `gh pr create` where one exists already fails, and prints that one's link.
+        let mut exists = command(
+            json!(["/bin/bash", "-lc", "gh pr create --fill"]),
+            "completed",
+            printed,
+        );
+        exists["exit_code"] = json!(1);
+        assert_eq!(created_pull_request(&exists), None);
+        assert_eq!(
+            created_pull_request(&command(
+                json!(["gh", "pr", "create", "--fill"]),
+                "completed",
+                printed
+            ))
+            .as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        assert_eq!(
+            created_pull_request(&command(
+                json!(["/bin/bash", "-lc", "gh pr view 7"]),
+                "completed",
+                printed
+            )),
+            None
+        );
+        assert_eq!(
+            created_pull_request(&command(
+                json!(["/bin/bash", "-lc", "gh pr create"]),
+                "failed",
+                printed
+            )),
+            None
+        );
+        let tool = |server: &str, tool: &str| {
+            json!({ "type": "McpToolCall", "id": "y", "server": server, "tool": tool,
+                    "status": "completed",
+                    "result": { "content": [{ "type": "text", "text": "{\"url\":\"https://github.com/o/lib/pull/8\"}" }] } })
+        };
+        assert_eq!(
+            created_pull_request(&tool("codex_apps", "github_create_pull_request")).as_deref(),
+            Some("https://github.com/o/lib/pull/8")
+        );
+        assert_eq!(
+            created_pull_request(&tool("github", "get_pull_request")),
+            None
+        );
     }
 
     #[test]

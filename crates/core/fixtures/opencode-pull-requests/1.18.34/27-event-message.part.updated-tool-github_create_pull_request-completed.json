@@ -1,0 +1,39 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_1c10b6cfe0011qiVGkUEojIDNC",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "part": {
+        "type": "tool",
+        "tool": "github_create_pull_request",
+        "callID": "chatcmpl-tool-87a6c24acc0ebde0",
+        "state": {
+          "status": "completed",
+          "input": {
+            "owner": "example",
+            "repo": "lib",
+            "title": "Bump",
+            "head": "bump",
+            "base": "main"
+          },
+          "output": "{\"id\": \"2989102733\", \"url\": \"https://github.com/example/lib/pull/42\"}",
+          "metadata": {
+            "truncated": false
+          },
+          "title": "",
+          "time": {
+            "start": 1794240113894,
+            "end": 1794240113918
+          }
+        },
+        "id": "prt_00000000000fixture04",
+        "sessionID": "ses_00000000000fixture01",
+        "messageID": "msg_00000000000fixture02"
+      },
+      "time": 1794240113918
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

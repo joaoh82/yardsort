@@ -17,6 +17,9 @@ model="${1:-}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(opencode --version | tr -d '[:space:]')"
 out="$root/crates/core/fixtures/opencode/$version"
+# scripts/record-pr-creation.sh records a pull request being opened instead: its own prompt, its
+# own fixtures directory.
+[ -n "${YS_RECORD_OUT:-}" ] && out="$YS_RECORD_OUT/$version"
 work="$(mktemp -d -t yardsort-opencode.XXXXXX)"
 raw="$work/raw"
 mkdir -p "$raw" "$work/repo" "$work/data"
@@ -56,12 +59,14 @@ git -C "$work/repo" commit -q --allow-empty -m "fixture"
 
 model_args=()
 [ -n "$model" ] && model_args=(-m "$model")
+config="{\"plugin\":[\"file://$work/capture.js\"]}"
+[ -n "${YS_RECORD_MCP:-}" ] && config="{\"plugin\":[\"file://$work/capture.js\"],\"mcp\":{\"github\":{\"type\":\"local\",\"command\":[\"python3\",\"$YS_RECORD_MCP\"]}}}"
 echo "recording OpenCode $version into $out"
 (cd "$work/repo" && env XDG_DATA_HOME="$work/data" YS_CAPTURE_DIR="$raw" \
   YARDSORT_RUN_ID=run-fixture YARDSORT_WORKSPACE_ID=workspace-fixture YARDSORT_SESSION_RECORD_ID=record-fixture \
-  OPENCODE_CONFIG_CONTENT="{\"plugin\":[\"file://$work/capture.js\"]}" \
+  OPENCODE_CONFIG_CONTENT="$config" \
   opencode run --format json "${model_args[@]}" \
-  "Create a file named hello.txt containing the single word hello using the write tool. Then read it back with the read tool. Then read a file named missing.txt, which does not exist. Then run \`ls\` with the bash tool. Reply with one word when done." </dev/null) \
+  "${YS_RECORD_PROMPT:-Create a file named hello.txt containing the single word hello using the write tool. Then read it back with the read tool. Then read a file named missing.txt, which does not exist. Then run \`ls\` with the bash tool. Reply with one word when done.}" </dev/null) \
   >"$work/opencode.out" 2>"$work/opencode.err" || echo "opencode exited $? (see $work/opencode.err)"
 echo "  captured: $(ls "$raw"/*.json | wc -l) calls"
 

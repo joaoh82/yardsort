@@ -1,0 +1,20 @@
+{
+  "hook": "tool.execute.before",
+  "payload": {
+    "input": {
+      "tool": "github_create_pull_request",
+      "sessionID": "ses_00000000000fixture01",
+      "callID": "chatcmpl-tool-87a6c24acc0ebde0"
+    },
+    "output": {
+      "args": {
+        "owner": "example",
+        "repo": "lib",
+        "title": "Bump",
+        "head": "bump",
+        "base": "main"
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

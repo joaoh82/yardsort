@@ -1,7 +1,7 @@
 # 38 — Pull requests in other repositories
 
-_Proposed 2026-11-09. Slices 1 and 2 are built — see [slice 1](#slice-1-what-shipped) and
-[slice 2](#slice-2-what-shipped). Slices 3–5 are to do;
+_Proposed 2026-11-09. Slices 1–3 are built — see [slice 1](#slice-1-what-shipped),
+[slice 2](#slice-2-what-shipped) and [slice 3](#slice-3-what-shipped). Slices 4–5 are to do;
 [M31](05-roadmap.md#m31--pull-requests-in-other-repositories) tracks them._
 
 A project is one repository, and every pull request Yardsort shows is one of that repository's.
@@ -216,7 +216,8 @@ note and `ys pr track` cover it.
    See [slice 1](#slice-1-what-shipped).
 2. **Seen: Claude Code.** ✅ The `PostToolUse` rule, recorded fixtures of `gh pr create` and of
    a GitHub MCP tool, the exception written into 09. See [slice 2](#slice-2-what-shipped).
-3. **Seen: the other adapters**, one by one, each with its coverage stated.
+3. **Seen: the other adapters.** ✅ Codex, OpenCode, pi, OMP, Grok and Cursor, each from what it
+   can see, recorded where the agent could be. See [slice 3](#slice-3-what-shipped).
 4. **Acting on them.** Merge, close, reopen and the reply box by link; **Code** from the nested
    clone.
 5. **Code review on one.** The workflow on a tracked pull request, in the nested clone; review
@@ -349,6 +350,55 @@ showing it by `hook`; the sidebar's badge appearing on the event. Not yet done: 
 Code session in a real parent project opening a real pull request, and the three systems'
 hands-on pass.
 
+## Slice 3: what shipped
+
+Every other built-in agent now gives a `tool.completed` its `pullRequestUrl` when the call opened
+a pull request, from whatever its channel carries, by the same rules
+(`tracked::created_by_command`, `tracked::is_create_pull_request`, `tracked::link_in_tool_result`):
+
+| Agent    | Where the command and its output are                                                                                                                                        | MCP                                                                    | Recorded                    |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------- |
+| Codex    | The session file's `CommandExecution` with exit code 0: the script after the shell's flag (`bash -lc`, `powershell -NoProfile -Command`, `cmd /c`) and `aggregated_output`. | `McpToolCall`: `github`/`create_pull_request`, `codex_apps`/`github_…` | 0.167.0                     |
+| OpenCode | `tool.execute.after`: `args.command` and `output`; the plugin hands both on for a likely call only.                                                                         | `<server>_create_pull_request`, by name                                | 1.18.34                     |
+| pi, OMP  | The command on `tool_execution_start`, the output on `tool_execution_end`; the extension pairs them by `toolCallId`.                                                        | pi has none; OMP's names not recorded                                  | pi 1.5.0, OMP 18.18.3       |
+| Grok     | `chat_history.jsonl`, beside the event log: the call's arguments and its result, under the id `tool_completed` names.                                                       | By name, not recorded                                                  | Not yet: Grok not signed in |
+| Cursor   | `postToolUse` of `Shell`, sent only for a success: `tool_input.command`, `tool_output`'s `output` and `exitCode`.                                                           | `afterMCPExecution`, which alone names the server                      | 2026.11.05-86047df          |
+
+- **Likely, then decided.** OpenCode's plugin and the pi family's extension run inside the agent,
+  where Yardsort's rules (Rust) do not. They pass on a call's command and output only when it
+  _may_ have opened a pull request — a `bash` command naming `gh`, `pr` and `create`, or a tool
+  whose name says GitHub and ends `create_pull_request` — and the executable decides, keeping the
+  link alone. Every other call's command and output stay in the agent's process, as before.
+- **A failed call opened nothing.** `gh pr create` on a branch that has a pull request already
+  fails and prints _that_ one's link, so a call counts only when it succeeded: Codex's exit code,
+  OpenCode's `metadata.exit`, Cursor's `postToolUse` (a failure is `postToolUseFailure`), the pi
+  family's `isError`, Grok's `outcome`.
+- **Codex's and Grok's come from files**, read in the drain. Codex's links ride on the events a
+  turn's trigger expands into; Grok's on its `tool_completed` lines, looked up in the chat
+  history — streamed, line by line — only for a finished call that could have opened one. Grok
+  writes the log and the history apart, and a line is never read for a link twice, so a recent
+  call the history has not caught up with is left, with what follows it, for the next read, for
+  up to two minutes. Both reach `track_seen` like the inbox's.
+- **`scripts/record-pr-creation.sh <agent>`** runs each agent's own recording script with a
+  prompt that opens a pull request — `gh pr create`, and for Codex, OpenCode and Cursor a GitHub
+  MCP server's `create_pull_request` — against the same stand-ins as Claude Code's (a `gh` that
+  prints a link, an MCP server that answers as GitHub's), into
+  `crates/core/fixtures/<agent>-pull-requests/`. Found while recording: Codex's `exec` refuses an
+  MCP call under its default approval policy unless the server's tools are approved
+  (`default_tools_approval_mode`); Cursor's shell takes `PATH` from the login shell, so the stand-in
+  is named by path; Codex has its own GitHub app tool, `codex_apps`/`github_create_pull_request`;
+  and **OpenCode 2 does not load Yardsort's plugin at all** — its plugins are folders with a new
+  module shape — so the OpenCode recording, and the adapter, are 1.x's
+  ([13 § 7](13-agent-events-stage-2-opencode.md#7--risks-and-the-next-slice)).
+
+How it was checked: each adapter against its recording — the link on exactly the call that
+opened it, nothing of the command, output or answer anywhere in a payload; hand-made negatives
+(a `gh pr view`, a failed call, another forge's tool); OpenCode's plugin and the extension under
+vitest, played through their real handlers, handing on a likely call's command and output and
+nothing of any other; Grok's chat-history lookup, and its links handed on once through `import`;
+and the real `ys` binary as Cursor's, OpenCode's and pi's hook, then `ys pr tracked` showing it by
+`hook`. Not yet done: a recording of Grok, and the three systems' hands-on pass.
+
 ## Documentation this touches
 
 `docs/guide/commits-and-pull-requests.md` (a workspace's pull requests elsewhere),
@@ -356,5 +406,6 @@ hands-on pass.
 [03-architecture](03-architecture.md) (the tracked table and how it is read),
 [05-roadmap](05-roadmap.md) (M31), [06-open-questions](06-open-questions.md) (56–57),
 [09](09-agent-events-and-memory.md) and [11](11-agent-events-stage-2-claude.md) (the exception,
-in slice 2), `docs/guide/activity.md` (what the Claude Code hook keeps), and this doc's index line in
-[README](README.md).
+in slice 2), [12](12-agent-events-stage-2-codex.md)–[16](16-agent-events-stage-2-cursor.md) (each
+adapter's coverage, in slice 3), `docs/guide/activity.md` (what each agent's reporting keeps), and
+this doc's index line in [README](README.md).

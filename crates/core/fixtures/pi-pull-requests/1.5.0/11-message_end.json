@@ -1,0 +1,65 @@
+{
+  "event": "message_end",
+  "payload": {
+    "type": "message_end",
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": " The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\n\nI should use the bash tool to execute this command.",
+          "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\\n\\nI should use the bash tool to ex\u2026"
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.bash:0",
+          "name": "bash",
+          "arguments": {
+            "command": "gh pr create --title Bump --body Bump",
+            "timeout": null
+          }
+        }
+      ],
+      "api": "openai-completions",
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.6",
+      "usage": {
+        "input": 1706,
+        "output": 72,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 41,
+        "totalTokens": 1778,
+        "cost": {
+          "input": 0.0007665911000000001,
+          "output": 0.000136224,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0.0015315,
+          "totalFromProvider": true
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1794239925508,
+      "responseId": "gen-1794239925-neZkfezJpws5QSo87h1S",
+      "rawStopReason": "tool_calls",
+      "durationMs": 3371,
+      "thinkingLevel": "medium"
+    }
+  },
+  "session": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "file": "/tmp/yardsort-fixture/sessions/2026-11-09T15-58-45-014Z_11111111-1111-4111-8111-111111111111.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "moonshotai/kimi-k2.6",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

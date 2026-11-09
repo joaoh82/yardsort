@@ -1,0 +1,51 @@
+{
+  "hook": "event",
+  "payload": {
+    "id": "evt_1c10b4aaa001AjEL40q9D7uf6S",
+    "type": "session.created",
+    "properties": {
+      "sessionID": "ses_00000000000fixture01",
+      "info": {
+        "id": "ses_00000000000fixture01",
+        "slug": "quick-circuit",
+        "version": "1.18.34",
+        "projectID": "a948972821410376b98d4fe5a1fe162e32af7a4c",
+        "directory": "/tmp/yardsort-fixture/repo",
+        "path": "",
+        "title": "New session - 2026-11-09T16:01:45.128Z",
+        "permission": [
+          {
+            "permission": "question",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_enter",
+            "pattern": "*",
+            "action": "deny"
+          },
+          {
+            "permission": "plan_exit",
+            "pattern": "*",
+            "action": "deny"
+          }
+        ],
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1794240105128,
+          "updated": 1794240105128
+        }
+      }
+    }
+  },
+  "directory": "/tmp/yardsort-fixture/repo"
+}

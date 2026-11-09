@@ -19,6 +19,9 @@ model="${1:-}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(grok --version | awk '{print $2}')"
 out="$root/crates/core/fixtures/grok/$version"
+# scripts/record-pr-creation.sh records a pull request being opened instead: its own prompt, its
+# own fixtures directory.
+[ -n "${YS_RECORD_OUT:-}" ] && out="$YS_RECORD_OUT/$version"
 work="$(mktemp -d -t yardsort-grok.XXXXXX)"
 home="$work/grok-home"
 raw="$work/raw"
@@ -55,7 +58,7 @@ echo "recording Grok $version into $out (session $session)"
 (cd "$work/repo" && env GROK_HOME="$home" \
   YARDSORT_RUN_ID=run-fixture YARDSORT_WORKSPACE_ID=workspace-fixture YARDSORT_SESSION_RECORD_ID=record-fixture \
   grok --session-id "$session" --always-approve --output-format json --max-turns 8 "${model_args[@]}" \
-  -p "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run \`ls\`. Reply with one word when done." </dev/null) \
+  -p "${YS_RECORD_PROMPT:-Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run \`ls\`. Reply with one word when done.}" </dev/null) \
   >"$work/grok.out" 2>"$work/grok.err" || echo "grok exited $? (see $work/grok.err)"
 echo "  hooks delivered: $(ls "$raw"/*.json 2>/dev/null | wc -l)"
 dir="$(find "$home/sessions" -type d -name "$session" | head -1 || true)"
@@ -74,6 +77,19 @@ if [ -n "$dir" ]; then
   for file in events.jsonl usage.json summary.json; do
     [ -f "$dir/$file" ] && redact <"$dir/$file" >"$out/$file"
   done
+  # Recording a pull request being opened: the conversation's tool calls and their results too,
+  # which is where Grok keeps what a command printed. Nothing else of it.
+  if [ -n "${YS_RECORD_OUT:-}" ] && [ -f "$dir/chat_history.jsonl" ]; then
+    python3 -c '
+import json, sys
+for line in sys.stdin:
+    d = json.loads(line)
+    if d.get("type") == "assistant" and d.get("tool_calls"):
+        print(json.dumps({"type": "assistant", "content": "", "tool_calls": d["tool_calls"]}))
+    elif d.get("type") == "tool_result":
+        print(json.dumps(d))
+' <"$dir/chat_history.jsonl" | redact >"$out/chat_history.jsonl"
+  fi
   # The event log names the machine's MCP servers; the adapter never reads those lines.
   [ -f "$out/events.jsonl" ] && grep -v '"type": *"mcp_' "$out/events.jsonl" >"$out/events.tmp" && mv "$out/events.tmp" "$out/events.jsonl"
   # The summary carries the machine's git remotes and the session's own summary text; neither

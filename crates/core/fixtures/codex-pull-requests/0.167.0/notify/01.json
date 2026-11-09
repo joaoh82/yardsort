@@ -1,0 +1,11 @@
+{
+  "type": "agent-turn-complete",
+  "thread-id": "01a1c10b-fa65-7072-b00d-a5adc3804aed",
+  "turn-id": "01a1c10b-fc89-7143-be5d-2002887d1ec0",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "client": "codex_exec",
+  "input-messages": [
+    "Run this exact shell command: gh pr create --title Bump --body Bump. Then call the create_pull_request tool of the github MCP server with owner example, repo lib, title Bump, head bump and base main. Reply with the two links you got, nothing else."
+  ],
+  "last-assistant-message": "https://github.com/example/lib/pull/41\nhttps://github.com/example/lib/pull/42"
+}

@@ -81,6 +81,18 @@ should not be told "prompt submitted" by a source that did not see the prompt.
 | OMP, Pi             | yes       | **Shipped**: [15](15-agent-events-stage-2-pi-omp.md), the plugin pattern.                                                                                                                                                                                                 |
 | Cursor              | yes       | **Shipped**, from the documentation: [16](16-agent-events-stage-2-cursor.md), the settings-file pattern.                                                                                                                                                                  |
 
+**Pull requests opened** ([38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped)).
+The event log has no output, but `chat_history.jsonl` beside it has every call with its
+arguments and its result, under the `tool_call_id` the log's `tool_completed` names. A
+successful `run_terminal_command` whose command runs `gh pr create` is looked up there, and the
+link it printed becomes the event's `pullRequestUrl` — nothing else of the conversation is kept,
+and the file is streamed only when a finished call that could have opened one needs it. A
+recent call the history has not caught up with is left for the next read, for up to two
+minutes, since the log's lines are read for a link once. **Not recorded yet**: Grok was not
+signed in on the machine that recorded the other agents, so the test uses the recorded shapes
+of 1.0.41's terminal call and 1.0.70's chat history; `scripts/record-pr-creation.sh grok` records
+the real thing.
+
 ## 5 · What shipped
 
 - `crates/core/src/activity/grok.rs`: `grok_home()`, `find_session_dir()`, `read_events()` with

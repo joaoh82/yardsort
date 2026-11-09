@@ -305,10 +305,10 @@ fn created_pull_request(hook: &Value) -> Option<String> {
             .get("tool_input")
             .and_then(|input| input.get("command"))
             .and_then(Value::as_str)?;
-        if !crate::tracked::runs_pr_create(command) {
-            return None;
-        }
-        return crate::tracked::last_link_in(response.get("stdout").and_then(Value::as_str)?);
+        return crate::tracked::created_by_command(
+            command,
+            response.get("stdout").and_then(Value::as_str)?,
+        );
     }
     if crate::tracked::creates_pull_request_tool(tool) {
         return crate::tracked::link_in_tool_result(response);

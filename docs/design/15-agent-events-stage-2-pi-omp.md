@@ -90,6 +90,16 @@ not know is refused without a file.
 | Pi 0.87.1           | yes       | **The same extension, opt-in**, plus model switches, minus approvals (Pi has no such events). **Recorded in full** on 2026-09-26; the shapes are OMP's but for a `write` end with no `resolvedPath`, and an `input` for the opening message that OMP does not raise.                                                             |
 | Cursor              | yes       | Hooks through a per-launch plugin directory, opt-in: [16](16-agent-events-stage-2-cursor.md).                                                                                                                                                                                                                                    |
 
+**Pull requests opened** ([38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped)).
+`tool_execution_start` has a `bash` call's command and `tool_execution_end` what it printed.
+The extension remembers, by `toolCallId`, the command of a call that may have opened a pull
+request — one naming `gh`, `pr` and `create`, or a tool whose name says GitHub and ends
+`create_pull_request` — and hands it on with the end's `result.content`; the Rust side keeps
+the link `gh pr create` printed as `pullRequestUrl`, and nothing else. Every other call's
+command and output stay in the agent. Recorded against **pi 1.5.0** and **OMP 18.18.3**
+(`scripts/record-pr-creation.sh pi|omp`); pi has no MCP, and OMP's MCP tool names were not
+recorded.
+
 ## 5 · What shipped
 
 - `crates/core/src/activity/pi-extension.ts` (the template; `reduce` exported for the test) and

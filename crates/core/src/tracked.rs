@@ -456,7 +456,29 @@ pub fn creates_pull_request_tool(name: &str) -> bool {
     let Some((server, tool)) = rest.rsplit_once("__") else {
         return false;
     };
-    tool == "create_pull_request" && server.to_ascii_lowercase().contains("github")
+    is_create_pull_request(server, tool)
+}
+
+/// Whether a tool, by its server's name and its own, creates a GitHub pull request: one whose
+/// name ends `create_pull_request`, where GitHub is in the server's name or the tool's. Each
+/// agent names MCP tools its own way — Codex keeps the two apart (`github`,
+/// `create_pull_request`, or its own `codex_apps`, `github_create_pull_request`); OpenCode joins
+/// them (`github_create_pull_request`), so it passes an empty server.
+pub fn is_create_pull_request(server: &str, tool: &str) -> bool {
+    tool.ends_with("create_pull_request")
+        && (server.to_ascii_lowercase().contains("github")
+            || tool.to_ascii_lowercase().contains("github"))
+}
+
+/// The pull request a shell command created: the last link in what the command printed, when
+/// the command runs `gh pr create` ([`runs_pr_create`]). The rule every adapter applies to a
+/// shell tool; what the command printed is read for the link alone.
+pub fn created_by_command(command: &str, output: &str) -> Option<String> {
+    if runs_pr_create(command) {
+        last_link_in(output)
+    } else {
+        None
+    }
 }
 
 /// The new pull request's link in what a create-pull-request tool answered, which is GitHub's
@@ -791,6 +813,33 @@ mod tests {
         ));
         assert!(!creates_pull_request_tool("create_pull_request"));
         assert!(!creates_pull_request_tool("mcp__github"));
+        // The other agents' names: Codex's server and tool apart, OpenCode's joined.
+        assert!(is_create_pull_request("github", "create_pull_request"));
+        assert!(is_create_pull_request(
+            "codex_apps",
+            "github_create_pull_request"
+        ));
+        assert!(is_create_pull_request("", "github_create_pull_request"));
+        assert!(!is_create_pull_request("", "create_pull_request"));
+        assert!(!is_create_pull_request(
+            "github",
+            "create_pull_request_review"
+        ));
+        assert!(!is_create_pull_request("gitlab", "create_pull_request"));
+    }
+
+    #[test]
+    fn a_command_creating_one_gives_the_link_it_printed() {
+        let printed = "\nCreating pull request for bump into main in o/lib\n\nhttps://github.com/o/lib/pull/41\n";
+        assert_eq!(
+            created_by_command("gh pr create --fill", printed).as_deref(),
+            Some("https://github.com/o/lib/pull/41")
+        );
+        assert_eq!(created_by_command("gh pr view 41", printed), None);
+        assert_eq!(
+            created_by_command("gh pr create --fill", "no git remotes found"),
+            None
+        );
     }
 
     #[test]

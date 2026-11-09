@@ -1,0 +1,12 @@
+{
+  "conversation_id": "22222222-2222-4222-8222-000000000001",
+  "generation_id": "22222222-2222-4222-8222-000000000001",
+  "model": "grok-4.7-high-fast",
+  "is_background_agent": false,
+  "session_id": "22222222-2222-4222-8222-000000000001",
+  "hook_event_name": "sessionStart",
+  "cursor_version": "2026.11.05-86047df",
+  "workspace_roots": ["/tmp/yardsort-fixture/repo"],
+  "user_email": "user@example.com",
+  "transcript_path": null
+}

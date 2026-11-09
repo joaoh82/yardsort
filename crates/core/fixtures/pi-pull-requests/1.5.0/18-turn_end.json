@@ -1,0 +1,914 @@
+{
+  "event": "turn_end",
+  "payload": {
+    "type": "turn_end",
+    "turnIndex": 0,
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": " The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\n\nI should use the bash tool to execute this command.",
+          "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\\n\\nI should use the bash tool to ex\u2026"
+        },
+        {
+          "type": "toolCall",
+          "id": "functions.bash:0",
+          "name": "bash",
+          "arguments": {
+            "command": "gh pr create --title Bump --body Bump",
+            "timeout": null
+          }
+        }
+      ],
+      "api": "openai-completions",
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.6",
+      "usage": {
+        "input": 1706,
+        "output": 72,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "reasoning": 41,
+        "totalTokens": 1778,
+        "cost": {
+          "input": 0.0007665911000000001,
+          "output": 0.000136224,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0.0015315,
+          "totalFromProvider": true
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 1794239925508,
+      "responseId": "gen-1794239925-neZkfezJpws5QSo87h1S",
+      "rawStopReason": "tool_calls",
+      "durationMs": 3371,
+      "thinkingLevel": "medium"
+    },
+    "toolResults": [
+      {
+        "role": "toolResult",
+        "toolCallId": "functions.bash:0",
+        "toolName": "bash",
+        "content": [
+          {
+            "type": "text",
+            "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+          }
+        ],
+        "isError": false,
+        "durationMs": 38,
+        "timestamp": 1794239928943
+      }
+    ],
+    "messageEntryId": "e3829ddd",
+    "toolResultEntryIds": ["241165a6"],
+    "outcome": "completed",
+    "entries": [],
+    "continue": false,
+    "context": {
+      "contextEntries": [
+        {
+          "sourceEntry": {
+            "type": "model_change",
+            "id": "2b178240",
+            "parentId": null,
+            "timestamp": "2026-11-09T15:58:45.461Z",
+            "provider": "openrouter",
+            "modelId": "moonshotai/kimi-k2.6"
+          },
+          "messages": []
+        },
+        {
+          "sourceEntry": {
+            "type": "thinking_level_change",
+            "id": "7612ad63",
+            "parentId": "2b178240",
+            "timestamp": "2026-11-09T15:58:45.461Z",
+            "thinkingLevel": "medium"
+          },
+          "messages": []
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "21c3b87b",
+            "parentId": "7612ad63",
+            "timestamp": "2026-11-09T15:58:45.492Z",
+            "message": {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "preamble": "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.",
+                "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+                "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+                "docs": "<docs>\nPi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/1.5.0/pi/RE\u2026",
+                "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nResolve relative paths against the sk\u2026",
+                "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+              },
+              "timestamp": 1794239925489,
+              "toolsAdded": [
+                {
+                  "name": "read",
+                  "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to read (relative or absolute)"
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Line number to start reading from (1-indexed)"
+                      },
+                      "limit": {
+                        "type": "number",
+                        "description": "Maximum number of lines to read"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "bash",
+                  "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "description": "Shell command to execute"
+                      },
+                      "timeout": {
+                        "type": "number",
+                        "description": "Timeout in seconds (optional, no default timeout)"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "edit",
+                  "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "edits"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to edit (relative or absolute)"
+                      },
+                      "edits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["oldText", "newText"],
+                          "properties": {
+                            "oldText": {
+                              "type": "string",
+                              "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                            },
+                            "newText": {
+                              "type": "string",
+                              "description": "Replacement text for this targeted edit."
+                            }
+                          }
+                        },
+                        "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "write",
+                  "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "content"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to write (relative or absolute)"
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "Content to write to the file"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                }
+              ]
+            }
+          },
+          "messages": [
+            {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "preamble": "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.",
+                "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+                "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+                "docs": "<docs>\nPi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/1.5.0/pi/RE\u2026",
+                "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nResolve relative paths against the sk\u2026",
+                "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+              },
+              "timestamp": 1794239925489,
+              "toolsAdded": [
+                {
+                  "name": "read",
+                  "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to read (relative or absolute)"
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Line number to start reading from (1-indexed)"
+                      },
+                      "limit": {
+                        "type": "number",
+                        "description": "Maximum number of lines to read"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "bash",
+                  "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "description": "Shell command to execute"
+                      },
+                      "timeout": {
+                        "type": "number",
+                        "description": "Timeout in seconds (optional, no default timeout)"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "edit",
+                  "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "edits"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to edit (relative or absolute)"
+                      },
+                      "edits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["oldText", "newText"],
+                          "properties": {
+                            "oldText": {
+                              "type": "string",
+                              "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                            },
+                            "newText": {
+                              "type": "string",
+                              "description": "Replacement text for this targeted edit."
+                            }
+                          }
+                        },
+                        "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                },
+                {
+                  "name": "write",
+                  "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["path", "content"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path to the file to write (relative or absolute)"
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "Content to write to the file"
+                      }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "json_schema",
+                    "strict": "prefer"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "1f925a35",
+            "parentId": "21c3b87b",
+            "timestamp": "2026-11-09T15:58:45.493Z",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Run this exact shell command: gh pr create --title Bump --body Bump. Reply with the link it printed, nothing else."
+                }
+              ],
+              "timestamp": 1794239925488
+            }
+          },
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Run this exact shell command: gh pr create --title Bump --body Bump. Reply with the link it printed, nothing else."
+                }
+              ],
+              "timestamp": 1794239925488
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "e3829ddd",
+            "parentId": "1f925a35",
+            "timestamp": "2026-11-09T15:58:48.880Z",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": " The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\n\nI should use the bash tool to execute this command.",
+                  "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\\n\\nI should use the bash tool to ex\u2026"
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.bash:0",
+                  "name": "bash",
+                  "arguments": {
+                    "command": "gh pr create --title Bump --body Bump",
+                    "timeout": null
+                  }
+                }
+              ],
+              "api": "openai-completions",
+              "provider": "openrouter",
+              "model": "moonshotai/kimi-k2.6",
+              "usage": {
+                "input": 1706,
+                "output": 72,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "reasoning": 41,
+                "totalTokens": 1778,
+                "cost": {
+                  "input": 0.0007665911000000001,
+                  "output": 0.000136224,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0.0015315,
+                  "totalFromProvider": true
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1794239925508,
+              "responseId": "gen-1794239925-neZkfezJpws5QSo87h1S",
+              "rawStopReason": "tool_calls",
+              "durationMs": 3371,
+              "thinkingLevel": "medium"
+            }
+          },
+          "messages": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "thinking",
+                  "thinking": " The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\n\nI should use the bash tool to execute this command.",
+                  "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\\n\\nI should use the bash tool to ex\u2026"
+                },
+                {
+                  "type": "toolCall",
+                  "id": "functions.bash:0",
+                  "name": "bash",
+                  "arguments": {
+                    "command": "gh pr create --title Bump --body Bump",
+                    "timeout": null
+                  }
+                }
+              ],
+              "api": "openai-completions",
+              "provider": "openrouter",
+              "model": "moonshotai/kimi-k2.6",
+              "usage": {
+                "input": 1706,
+                "output": 72,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "reasoning": 41,
+                "totalTokens": 1778,
+                "cost": {
+                  "input": 0.0007665911000000001,
+                  "output": 0.000136224,
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "total": 0.0015315,
+                  "totalFromProvider": true
+                }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1794239925508,
+              "responseId": "gen-1794239925-neZkfezJpws5QSo87h1S",
+              "rawStopReason": "tool_calls",
+              "durationMs": 3371,
+              "thinkingLevel": "medium"
+            }
+          ]
+        },
+        {
+          "sourceEntry": {
+            "type": "message",
+            "id": "241165a6",
+            "parentId": "e3829ddd",
+            "timestamp": "2026-11-09T15:58:48.947Z",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "functions.bash:0",
+              "toolName": "bash",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+                }
+              ],
+              "isError": false,
+              "durationMs": 38,
+              "timestamp": 1794239928943
+            }
+          },
+          "messages": [
+            {
+              "role": "toolResult",
+              "toolCallId": "functions.bash:0",
+              "toolName": "bash",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+                }
+              ],
+              "isError": false,
+              "durationMs": 38,
+              "timestamp": 1794239928943
+            }
+          ]
+        }
+      ],
+      "contextMessages": [
+        {
+          "role": "system",
+          "content": "",
+          "sections": {
+            "preamble": "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.",
+            "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+            "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+            "docs": "<docs>\nPi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/1.5.0/pi/RE\u2026",
+            "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nResolve relative paths against the sk\u2026",
+            "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+          },
+          "timestamp": 1794239925489,
+          "toolsAdded": [
+            {
+              "name": "read",
+              "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative or absolute)"
+                  },
+                  "offset": {
+                    "type": "number",
+                    "description": "Line number to start reading from (1-indexed)"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum number of lines to read"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "bash",
+              "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Shell command to execute"
+                  },
+                  "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds (optional, no default timeout)"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "edit",
+              "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "edits"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to edit (relative or absolute)"
+                  },
+                  "edits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["oldText", "newText"],
+                      "properties": {
+                        "oldText": {
+                          "type": "string",
+                          "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                        },
+                        "newText": {
+                          "type": "string",
+                          "description": "Replacement text for this targeted edit."
+                        }
+                      }
+                    },
+                    "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "write",
+              "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "content"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to write (relative or absolute)"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Content to write to the file"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Run this exact shell command: gh pr create --title Bump --body Bump. Reply with the link it printed, nothing else."
+            }
+          ],
+          "timestamp": 1794239925488
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": " The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\n\nI should use the bash tool to execute this command.",
+              "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\\n\\nI should use the bash tool to ex\u2026"
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.bash:0",
+              "name": "bash",
+              "arguments": {
+                "command": "gh pr create --title Bump --body Bump",
+                "timeout": null
+              }
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "openrouter",
+          "model": "moonshotai/kimi-k2.6",
+          "usage": {
+            "input": 1706,
+            "output": 72,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 41,
+            "totalTokens": 1778,
+            "cost": {
+              "input": 0.0007665911000000001,
+              "output": 0.000136224,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0015315,
+              "totalFromProvider": true
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794239925508,
+          "responseId": "gen-1794239925-neZkfezJpws5QSo87h1S",
+          "rawStopReason": "tool_calls",
+          "durationMs": 3371,
+          "thinkingLevel": "medium"
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.bash:0",
+          "toolName": "bash",
+          "content": [
+            {
+              "type": "text",
+              "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+            }
+          ],
+          "isError": false,
+          "durationMs": 38,
+          "timestamp": 1794239928943
+        }
+      ],
+      "llmMessages": [
+        {
+          "role": "system",
+          "content": "",
+          "sections": {
+            "preamble": "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.",
+            "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- wri\u2026",
+            "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use ed\u2026",
+            "docs": "<docs>\nPi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/user/.local/share/mise/installs/pi/1.5.0/pi/RE\u2026",
+            "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nResolve relative paths against the sk\u2026",
+            "cwd": "<cwd>\n/tmp/yardsort-fixture/repo\n</cwd>"
+          },
+          "timestamp": 1794239925489,
+          "toolsAdded": [
+            {
+              "name": "read",
+              "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit firs\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative or absolute)"
+                  },
+                  "offset": {
+                    "type": "number",
+                    "description": "Line number to start reading from (1-indexed)"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum number of lines to read"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "bash",
+              "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a tem\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Shell command to execute"
+                  },
+                  "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds (optional, no default timeout)"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "edit",
+              "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge the\u2026",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "edits"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to edit (relative or absolute)"
+                  },
+                  "edits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["oldText", "newText"],
+                      "properties": {
+                        "oldText": {
+                          "type": "string",
+                          "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                        },
+                        "newText": {
+                          "type": "string",
+                          "description": "Replacement text for this targeted edit."
+                        }
+                      }
+                    },
+                    "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            },
+            {
+              "name": "write",
+              "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+              "parameters": {
+                "type": "object",
+                "required": ["path", "content"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the file to write (relative or absolute)"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Content to write to the file"
+                  }
+                }
+              },
+              "constrainedSampling": {
+                "type": "json_schema",
+                "strict": "prefer"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Run this exact shell command: gh pr create --title Bump --body Bump. Reply with the link it printed, nothing else."
+            }
+          ],
+          "timestamp": 1794239925488
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": " The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\n\nI should use the bash tool to execute this command.",
+              "thinkingSignature": "[{\"type\":\"reasoning.text\",\"text\":\" The user wants me to run the exact shell command `gh pr create --title Bump --body Bump` and reply with just the link it printed.\\n\\nI should use the bash tool to ex\u2026"
+            },
+            {
+              "type": "toolCall",
+              "id": "functions.bash:0",
+              "name": "bash",
+              "arguments": {
+                "command": "gh pr create --title Bump --body Bump",
+                "timeout": null
+              }
+            }
+          ],
+          "api": "openai-completions",
+          "provider": "openrouter",
+          "model": "moonshotai/kimi-k2.6",
+          "usage": {
+            "input": 1706,
+            "output": 72,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 41,
+            "totalTokens": 1778,
+            "cost": {
+              "input": 0.0007665911000000001,
+              "output": 0.000136224,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.0015315,
+              "totalFromProvider": true
+            }
+          },
+          "stopReason": "toolUse",
+          "timestamp": 1794239925508,
+          "responseId": "gen-1794239925-neZkfezJpws5QSo87h1S",
+          "rawStopReason": "tool_calls",
+          "durationMs": 3371,
+          "thinkingLevel": "medium"
+        },
+        {
+          "role": "toolResult",
+          "toolCallId": "functions.bash:0",
+          "toolName": "bash",
+          "content": [
+            {
+              "type": "text",
+              "text": "\nCreating pull request for bump into main in example/lib\n\nhttps://github.com/example/lib/pull/41\n"
+            }
+          ],
+          "isError": false,
+          "durationMs": 38,
+          "timestamp": 1794239928943
+        }
+      ],
+      "pendingMessages": [],
+      "canContinue": true
+    }
+  },
+  "session": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "file": "/tmp/yardsort-fixture/sessions/2026-11-09T15-58-45-014Z_11111111-1111-4111-8111-111111111111.jsonl",
+    "cwd": "/tmp/yardsort-fixture/repo",
+    "model": {
+      "id": "moonshotai/kimi-k2.6",
+      "provider": "openrouter"
+    },
+    "mode": "json"
+  },
+  "env": {
+    "YARDSORT_RUN_ID": "run-fixture",
+    "YARDSORT_WORKSPACE_ID": "workspace-fixture",
+    "YARDSORT_SESSION_RECORD_ID": "record-fixture"
+  }
+}

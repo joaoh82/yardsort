@@ -1,0 +1,18 @@
+{
+  "session_id": "01a1c10b-fa65-7072-b00d-a5adc3804aed",
+  "turn_id": "01a1c10b-fc89-7143-be5d-2002887d1ec0",
+  "transcript_path": "/tmp/yardsort-fixture/codex-home/sessions/2026/11/09/rollout-2026-11-09T17-02-30-01a1c10b-fa65-7072-b00d-a5adc3804aed.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "mcp__github__create_pull_request",
+  "tool_input": {
+    "owner": "example",
+    "repo": "lib",
+    "title": "Bump",
+    "head": "bump",
+    "base": "main"
+  },
+  "tool_use_id": "exec-4f0e4340-b13a-4d27-95e4-0802f4111458"
+}

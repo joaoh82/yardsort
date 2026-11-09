@@ -17,6 +17,9 @@ model="${1:-}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(cursor-agent --version 2>/dev/null | tail -1 | awk '{print $NF}')"
 out="$root/crates/core/fixtures/cursor/$version"
+# scripts/record-pr-creation.sh records a pull request being opened instead: its own prompt, its
+# own fixtures directory.
+[ -n "${YS_RECORD_OUT:-}" ] && out="$YS_RECORD_OUT/$version"
 work="$(mktemp -d -t yardsort-cursor.XXXXXX)"
 raw="$work/raw"
 plugin="$work/plugin"
@@ -51,11 +54,18 @@ git -C "$work/repo" init -q
 git -C "$work/repo" commit -q --allow-empty -m "fixture"
 
 args=(-p --output-format json --plugin-dir "$plugin" --force)
+# An MCP server for this repository alone, approved without asking (scripts/record-pr-creation.sh).
+if [ -n "${YS_RECORD_MCP:-}" ]; then
+  mkdir -p "$work/repo/.cursor"
+  printf '{"mcpServers":{"github":{"command":"python3","args":["%s"]}}}\n' "$YS_RECORD_MCP" \
+    >"$work/repo/.cursor/mcp.json"
+  args+=(--approve-mcps)
+fi
 [ -n "$model" ] && args+=(--model "$model")
 echo "recording cursor-agent $version into $out"
 (cd "$work/repo" && env YS_CAPTURE_DIR="$raw" \
   YARDSORT_RUN_ID=run-fixture YARDSORT_WORKSPACE_ID=workspace-fixture YARDSORT_SESSION_RECORD_ID=record-fixture \
-  cursor-agent "${args[@]}" "Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done." </dev/null) \
+  cursor-agent "${args[@]}" "${YS_RECORD_PROMPT:-Create a file named hello.txt containing the single word hello. Then read it back. Then read a file named missing.txt, which does not exist. Then run ls. Reply with one word when done.}" </dev/null) \
   >"$work/cursor.out" 2>"$work/cursor.err" || echo "cursor-agent exited $? (see $work/cursor.err)"
 echo "  hook calls captured: $(ls "$raw"/*.json 2>/dev/null | wc -l)"
 if [ -s "$raw/env.txt" ]; then
@@ -103,6 +113,8 @@ for name in sorted(os.listdir(raw)):
     tool = d.get("tool_name")
     if tool:
         label += f"-{tool}"
+    # A tool's name can hold what Windows will not have in a file name (Cursor's `MCP:…`).
+    label = re.sub(r'[<>:"/\\|?*]', "-", label)
     with open(os.path.join(out, f"{n:02d}-{label}.json"), "w") as f:
         f.write(redact(json.dumps(trim(d), indent=1)) + "\n")
 print(f"wrote {n} hook fixtures")
