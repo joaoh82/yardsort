@@ -292,7 +292,8 @@ workspace with its agent, model and effort, keeps running after the command retu
 id to `ys attach` it by. Both need the terminal daemon, which they start if it is not running, and
 refuse, saying why, when it cannot be: an agent started without one would end with the command. A
 session that says it is running though its process went with the daemon (`gone` above) is settled
-first, and then resumes.
+first, and then resumes; when the daemon cannot say whether it is running, nothing is changed and
+the resume is refused, saying why.
 
 They work for an agent that can continue a conversation: one Yardsort gave an id, such as Claude
 Code, or the most recent one in its folder, such as Codex. When one cannot, they say why, as the app

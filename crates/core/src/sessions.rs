@@ -127,8 +127,9 @@ pub enum Continue {
 impl Launcher<'_> {
     /// Start a harness on an existing conversation, typing `prompt` into it once it is ready.
     ///
-    /// A record that still says it is running, though its terminal has gone, is settled first:
-    /// after the daemon or the whole computer stopped, nothing was there to hear the exit.
+    /// A resume of a record that still says it is running settles that record first, should its
+    /// terminal have gone: after the daemon or the whole computer stopped, nothing was there to
+    /// hear the exit. See [`Self::settle_if_gone`].
     pub fn continue_session(
         &self,
         record_id: &str,
@@ -139,16 +140,8 @@ impl Launcher<'_> {
         let mut row = self.store.session(record_id)?.ok_or_else(|| {
             IpcError::new("unknown_session", "That session is no longer on record.")
         })?;
-        if row.running && !self.still_there(row.pty_session_id.as_deref()) {
-            let alive: Vec<String> = self
-                .host
-                .list()
-                .into_iter()
-                .filter(|s| s.state == SessionState::Running)
-                .map(|s| s.id.0)
-                .collect();
-            self.store.end_interrupted_sessions(&alive)?;
-            activity::end_interrupted(self.store, &alive);
+        if how == Continue::Resume && row.running {
+            self.settle_if_gone(&row)?;
             row = self.store.session(record_id)?.ok_or_else(|| {
                 IpcError::new("unknown_session", "That session is no longer on record.")
             })?;
@@ -284,13 +277,53 @@ impl Launcher<'_> {
         Ok(session)
     }
 
-    /// Whether the terminal a record names still has its process in it.
-    fn still_there(&self, pty_session_id: Option<&str>) -> bool {
-        pty_session_id.is_some_and(|id| {
-            self.host
-                .info(&pty_host::SessionId(id.to_owned()))
-                .is_ok_and(|info| info.state == SessionState::Running)
-        })
+    /// End this one record, should its process be gone, as a start would: an exit the daemon kept
+    /// in its spool first, so a code it recorded wins; then the host's own word, only when it says
+    /// the terminal exited or is not there. When the host cannot be asked, nothing is settled,
+    /// and the resume is refused rather than taken for a sign that nobody is running.
+    fn settle_if_gone(&self, row: &SessionRow) -> IpcResult<()> {
+        activity::import_spool(self.store, self.data_dir);
+        let Some(pty) = self
+            .store
+            .session(&row.id)?
+            .filter(|row| row.running)
+            .and_then(|row| row.pty_session_id)
+        else {
+            return Ok(());
+        };
+        let exit = match self.host.info(&pty_host::SessionId(pty.clone())) {
+            Ok(SessionInfo {
+                state: SessionState::Exited { exit },
+                ..
+            }) => activity::ExitFacts::from(&exit),
+            Ok(_) => return Ok(()),
+            // Gone with the daemon that ran it: interrupted, with no code to give.
+            Err(pty_host::HostError::UnknownSession(_) | pty_host::HostError::SessionExited(_)) => {
+                activity::ExitFacts {
+                    code: None,
+                    success: false,
+                    signal: None,
+                    at: None,
+                }
+            }
+            Err(error) => {
+                return Err(IpcError::new(
+                    "host_unreachable",
+                    format!(
+                        "Whether this session is still running could not be asked of the terminal \
+                         daemon, so it was not resumed: {error}"
+                    ),
+                ))
+            }
+        };
+        self.store.end_session_by_pty(&pty, exit.code)?;
+        let via = if exit.code.is_some() {
+            activity::Via::Settle
+        } else {
+            activity::Via::Reconcile
+        };
+        activity::record_exit(self.store, &pty, &exit, via);
+        Ok(())
     }
 }
 
@@ -399,90 +432,148 @@ mod tests {
             .contains("disabled"));
     }
 
-    /// A record that says it is running in a terminal the daemon no longer has, as after the daemon
-    /// or the computer stopped with nobody to hear it: resuming settles it, then continues the
-    /// conversation under the same record, in a real terminal.
-    #[test]
-    fn a_conversation_whose_terminal_went_with_the_daemon_is_resumed_under_its_record() {
-        use std::sync::Arc;
+    /// A profile with one workspace, its records, and a stand-in harness whose resume exits 7, so
+    /// the exit says a resume ran.
+    struct Profile {
+        dir: tempfile::TempDir,
+        store: Store,
+        ws: String,
+        harnesses: [HarnessOverride; 1],
+        env: std::sync::Arc<crate::env::ShellEnv>,
+        activity: crate::settings::ActivitySettings,
+    }
 
-        use crate::env::{EnvSource, ShellEnv};
-        use crate::settings::ActivitySettings;
+    impl Profile {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let store = Store::in_memory();
+            let path = dir.path().to_string_lossy().into_owned();
+            store
+                .add_project(&dir.path().file_name().unwrap().to_string_lossy(), &path)
+                .unwrap();
+            let ws = store.workspaces().unwrap()[0].id.clone();
+            let (command, flag) = if cfg!(windows) {
+                ("cmd.exe", "/C")
+            } else {
+                ("sh", "-c")
+            };
+            Self {
+                dir,
+                store,
+                ws,
+                harnesses: [HarnessOverride {
+                    id: "stand-in".into(),
+                    builtin: Some(false),
+                    command: Some(command.into()),
+                    prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
+                    resume_args: Some(vec![flag.into(), "exit 7".into()]),
+                    session_id_mode: Some(SessionIdMode::Assigned),
+                    ..Default::default()
+                }],
+                env: std::sync::Arc::new(crate::env::ShellEnv {
+                    vars: std::env::vars().collect(),
+                    source: crate::env::EnvSource::Process,
+                    warning: None,
+                }),
+                activity: crate::settings::ActivitySettings::default(),
+            }
+        }
 
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::in_memory();
-        let path = dir.path().to_string_lossy().into_owned();
-        store
-            .add_project(&dir.path().file_name().unwrap().to_string_lossy(), &path)
-            .unwrap();
-        let ws = store.workspaces().unwrap()[0].id.clone();
-        store
-            .add_session(&NewSession {
-                id: "conversation",
-                workspace_id: &ws,
-                harness_id: "stand-in",
+        /// A record that says it runs in `pty`, with its run, as a launch leaves them.
+        fn running(&self, id: &str, pty: &str) -> String {
+            let recorder =
+                activity::Recorder::new(&self.store, &self.activity, activity::LaunchedBy::Cli);
+            let draft = RunDraft {
+                workspace_id: self.ws.clone(),
+                session_id: None,
+                kind: RunKind::Harness,
+                harness_id: Some("stand-in".into()),
+                harness_session_id: Some(format!("{id}-own-id")),
                 model: None,
                 effort: None,
-                harness_session_id: Some("its-own-id"),
-                title: "Fix the flaky test",
-                forked_from: None,
-                pty_session_id: "a-terminal-the-daemon-took-with-it",
-                prompt: Some("Fix the flaky test"),
-            })
-            .unwrap();
+                program: "sh".into(),
+                continuation: Continuation::Fresh,
+            };
+            let run = recorder.begin(&draft).unwrap();
+            recorder.spawned(&run, &draft, pty, None);
+            self.store
+                .add_session(&NewSession {
+                    id,
+                    workspace_id: &self.ws,
+                    harness_id: "stand-in",
+                    harness_session_id: Some(&format!("{id}-own-id")),
+                    title: id,
+                    pty_session_id: pty,
+                    ..Default::default()
+                })
+                .unwrap();
+            recorder.link_session(&run, id);
+            run
+        }
 
-        let (events_tx, events) = std::sync::mpsc::channel();
-        let events_tx = std::sync::Mutex::new(events_tx);
-        let host = pty_host::PtyHost::new(Arc::new(move |event| {
-            let _ = events_tx.lock().unwrap().send(event);
+        fn launcher<'a>(&'a self, host: &'a dyn pty_host::TerminalHost) -> Launcher<'a> {
+            Launcher {
+                store: &self.store,
+                host,
+                env: &self.env,
+                harnesses: &self.harnesses,
+                activity: &self.activity,
+                launched_by: activity::LaunchedBy::Cli,
+                data_dir: self.dir.path(),
+            }
+        }
+    }
+
+    fn real_host() -> (
+        pty_host::PtyHost,
+        std::sync::mpsc::Receiver<pty_host::HostEvent>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = std::sync::Mutex::new(tx);
+        let host = pty_host::PtyHost::new(std::sync::Arc::new(move |event| {
+            let _ = tx.lock().unwrap().send(event);
         }));
-        let (command, flag) = if cfg!(windows) {
-            ("cmd.exe", "/C")
-        } else {
-            ("sh", "-c")
-        };
-        let harnesses = [HarnessOverride {
-            id: "stand-in".into(),
-            builtin: Some(false),
-            command: Some(command.into()),
-            prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
-            // What only a resume runs, so its exit says it was a resume.
-            resume_args: Some(vec![flag.into(), "exit 7".into()]),
-            session_id_mode: Some(SessionIdMode::Assigned),
-            ..Default::default()
-        }];
-        let env = Arc::new(ShellEnv {
-            vars: std::env::vars().collect(),
-            source: EnvSource::Process,
-            warning: None,
-        });
-        let activity = ActivitySettings::default();
-        let launcher = Launcher {
-            store: &store,
-            host: &host,
-            env: &env,
-            harnesses: &harnesses,
-            activity: &activity,
-            launched_by: activity::LaunchedBy::Cli,
-            data_dir: dir.path(),
-        };
+        (host, rx)
+    }
 
-        // Before: it claims to run, so it may not be resumed by the record alone.
-        let before = &list(&store, &harnesses, &ws).unwrap()[0];
-        assert!(before.running && !before.resumable);
+    const SIZE: TermSize = TermSize { cols: 80, rows: 24 };
 
-        let terminal = launcher
-            .continue_session(
-                "conversation",
-                Continue::Resume,
-                TermSize { cols: 80, rows: 24 },
-                None,
-            )
+    /// A record that says it is running in a terminal the daemon no longer has, as after the daemon
+    /// or the computer stopped with nobody to hear it: resuming settles that record, and that one
+    /// only, then continues the conversation under it, in a real terminal.
+    #[test]
+    fn a_conversation_whose_terminal_went_with_the_daemon_is_resumed_under_its_record() {
+        let profile = Profile::new();
+        let first_run = profile.running("conversation", "a-terminal-the-daemon-took-with-it");
+        // Another the host does not have either: not this resume's to settle.
+        profile.running("neighbour", "another-terminal-it-does-not-have");
+        let (host, events) = real_host();
+
+        let before = list(&profile.store, &profile.harnesses, &profile.ws).unwrap();
+        assert!(before.iter().all(|r| r.running && !r.resumable));
+
+        let terminal = profile
+            .launcher(&host)
+            .continue_session("conversation", Continue::Resume, SIZE, None)
             .unwrap();
         assert_eq!(terminal.labels[RECORD_LABEL], "conversation");
-        assert_eq!(terminal.labels[HARNESS_SESSION_LABEL], "its-own-id");
-        let row = store.session("conversation").unwrap().unwrap();
+        assert_eq!(
+            terminal.labels[HARNESS_SESSION_LABEL],
+            "conversation-own-id"
+        );
+        let row = profile.store.session("conversation").unwrap().unwrap();
         assert_eq!(row.pty_session_id.as_deref(), Some(terminal.id.0.as_str()));
+        let neighbour = profile.store.session("neighbour").unwrap().unwrap();
+        assert!(neighbour.running, "only the record resumed is settled");
+        assert_eq!(
+            neighbour.pty_session_id.as_deref(),
+            Some("another-terminal-it-does-not-have")
+        );
+        let ended = profile.store.run(&first_run).unwrap().unwrap();
+        assert_eq!(
+            (ended.exit_code, ended.end_reason.as_deref()),
+            (None, Some("interrupted"))
+        );
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let exit = loop {
@@ -494,9 +585,112 @@ mod tests {
             }
         };
         assert_eq!(exit.code, 7, "the harness's resume arguments ran");
-        let runs = store.runs(&ws).unwrap();
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].session_id.as_deref(), Some("conversation"));
+    }
+
+    /// An exit the daemon kept in its spool, with nobody connected to hear it, is the truth about how
+    /// the conversation ended: not an interruption.
+    #[test]
+    fn an_exit_the_daemon_kept_settles_the_record_before_it_is_resumed() {
+        let profile = Profile::new();
+        let first_run = profile.running("conversation", "a-terminal-that-exited");
+        pty_ipc::spool::Spool::new(activity::spool_dir(profile.dir.path()))
+            .record(&pty_ipc::spool::SpoolEntry {
+                version: pty_ipc::spool::SPOOL_VERSION,
+                at_ms: 1,
+                daemon_pid: 1,
+                session: pty_host::SessionId("a-terminal-that-exited".into()),
+                labels: Default::default(),
+                exit: pty_host::ExitInfo {
+                    code: 0,
+                    success: true,
+                    signal: None,
+                },
+            })
+            .unwrap();
+        let (host, _events) = real_host();
+
+        profile
+            .launcher(&host)
+            .continue_session("conversation", Continue::Resume, SIZE, None)
+            .unwrap();
+        let ended = profile.store.run(&first_run).unwrap().unwrap();
+        assert_eq!(
+            (ended.exit_code, ended.end_reason.as_deref()),
+            (Some(0), Some("exited"))
+        );
+    }
+
+    /// A daemon that cannot be asked says nothing about what runs: nothing is settled, and the
+    /// resume is refused with why.
+    #[test]
+    fn a_daemon_that_cannot_be_asked_settles_nothing() {
+        let profile = Profile::new();
+        let run = profile.running("conversation", "a-terminal-in-a-daemon-not-answering");
+        profile.running("neighbour", "another-in-it");
+
+        let error = profile
+            .launcher(&NotAnswering)
+            .continue_session("conversation", Continue::Resume, SIZE, None)
+            .unwrap_err();
+        assert_eq!(error.code, "host_unreachable", "{error:?}");
+        for (id, pty) in [
+            ("conversation", "a-terminal-in-a-daemon-not-answering"),
+            ("neighbour", "another-in-it"),
+        ] {
+            let row = profile.store.session(id).unwrap().unwrap();
+            assert!(row.running, "{id}");
+            assert_eq!(row.pty_session_id.as_deref(), Some(pty), "{id}");
+        }
+        assert_eq!(profile.store.run(&run).unwrap().unwrap().end_reason, None);
+    }
+
+    /// A daemon whose socket answers nothing: every question fails, and it lists nobody, as the
+    /// client does when it cannot ask.
+    struct NotAnswering;
+
+    impl pty_host::TerminalHost for NotAnswering {
+        fn spawn(&self, _: pty_host::LaunchPlan) -> pty_host::Result<SessionInfo> {
+            Err(gone())
+        }
+        fn attach(
+            &self,
+            _: &pty_host::SessionId,
+            _: pty_host::OutputSink,
+        ) -> pty_host::Result<pty_host::AttachmentId> {
+            Err(gone())
+        }
+        fn detach(
+            &self,
+            _: &pty_host::SessionId,
+            _: pty_host::AttachmentId,
+        ) -> pty_host::Result<()> {
+            Err(gone())
+        }
+        fn write(&self, _: &pty_host::SessionId, _: &[u8]) -> pty_host::Result<()> {
+            Err(gone())
+        }
+        fn paste(&self, _: &pty_host::SessionId, _: &str) -> pty_host::Result<()> {
+            Err(gone())
+        }
+        fn resize(&self, _: &pty_host::SessionId, _: TermSize) -> pty_host::Result<()> {
+            Err(gone())
+        }
+        fn kill(&self, _: &pty_host::SessionId) -> pty_host::Result<()> {
+            Err(gone())
+        }
+        fn remove(&self, _: &pty_host::SessionId) -> pty_host::Result<()> {
+            Err(gone())
+        }
+        fn info(&self, _: &pty_host::SessionId) -> pty_host::Result<SessionInfo> {
+            Err(gone())
+        }
+        fn list(&self) -> Vec<SessionInfo> {
+            vec![]
+        }
+    }
+
+    fn gone() -> pty_host::HostError {
+        std::io::Error::from(std::io::ErrorKind::BrokenPipe).into()
     }
 
     #[test]

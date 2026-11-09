@@ -838,10 +838,12 @@ the app's alone, so a computer with no screen could not bring back the agents a 
   (`describe`, unchanged), and `Launcher::continue_session`, moved from `src-tauri/src/sessions.rs`
   as it was. The app's `session_resume`, `session_fork` and the conflict hand-back call it through
   `with_launcher`; what a person sees in the window does not change.
-- **One rule added.** A record still marked running whose terminal the host does not have, as after
-  the daemon or the computer stopped with nobody to hear it, is settled before it is continued, the
-  way a start settles it, rather than refused as _already running_. That was the app's behaviour
-  only once it had restarted; `ys` needs it while `serve` keeps running.
+- **One rule added.** A resume of a record still marked running, as after the daemon or the computer
+  stopped with nobody to hear it, settles that record first rather than refuse it as _already
+  running_: the exit spool is imported, so a code the daemon kept wins, then the record is ended only
+  if the host says its terminal exited or is not there. Nothing else is touched, and a host that
+  cannot be asked settles nothing and refuses the resume. That was the app's behaviour only once it
+  had restarted; `ys` needs it while `serve` keeps running.
 - **`ys session resume <session>` and `ys session fork <session>`**, by the start of an id, through
   the daemon as `ys workspace new` is, and refusing without one: an agent started without it would
   end with the command.
@@ -857,6 +859,13 @@ the app's alone, so a computer with no screen could not bring back the agents a 
 on disk and is given its id, as Claude Code is; restarting `serve` leaves it running and the phone
 reaches it; stopping the daemon too ends it, the host's next start says so, `ys session resume`
 brings the conversation back where the phone reads it, and `ys session fork` copies it.
+
+**What review found.** The first version settled the way a start does, every record whose
+terminal the host did not list, inside a resume. That was wrong twice over: the daemon's client lists
+nobody when it cannot be asked, so one resume while the daemon was unreachable would have ended every
+running session for good; and it skipped the spool and counted an exited terminal as gone, so a
+neighbour that ended cleanly would have been marked interrupted. It now settles the one record, as
+above, with tests for a neighbour left alone, a spooled exit kept, and an unreachable daemon.
 
 **The owner's run** passed the same day, R5's gate check 3: on the box, a Claude Code agent kept
 running through `systemctl --user restart yardsort-host`, and the iPhone reached it again; after a
