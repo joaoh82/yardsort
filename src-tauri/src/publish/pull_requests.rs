@@ -39,7 +39,7 @@ fn fresh(state: &AppState, project_id: &str, number: u32) -> IpcResult<(Gh, Path
 
 /// How long `gh` may take over one pull request. It answers in about a second; this is for a
 /// network that went away.
-const SUMMARY_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+pub(super) const SUMMARY_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// One pull request in full: its description, every check with its link, its reviewers and
 /// the conversation. What the Pull requests view's Summary shows, read when a row is opened.

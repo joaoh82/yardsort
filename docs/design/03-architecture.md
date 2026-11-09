@@ -325,6 +325,18 @@ invalidation keeps its rows and marks them out of date rather than dropping them
 nothing would read them again until the view opened. `CheckCounts` is the one place a check's
 state is classified, and `Checks` is worked out from it, so a badge and a row cannot disagree.
 
+**Pull requests in other repositories** cannot be found that way: one an agent opened in a nested
+clone inside a parent project's checkout has no branch or commit in any workspace. So they are
+written down — `tracked_pull_requests` (migration 0023), one row per workspace and link, by
+`ys pr track`, **Track pull request…**, or (from slice 2) an adapter that saw one created — and
+the rules for a link and for refusing the project's own repository are in the core
+(`yardsort_core::tracked`), shared by the app and `ys`. `publish::tracked` reads each one with
+`gh pr view <url>`, which needs no repository around it: four at a time, at most twenty per
+project, an open one again with the project's list and a merged or closed one every ten minutes,
+kept by link in `Forge`. They reach the window as `ProjectPullRequests::tracked`, and the window
+keys them by repository and number, never by number alone. See
+[36](36-pull-requests-elsewhere.md).
+
 **Tasks** are a project's GitHub issues, and the same idea one step further out: the reading and
 the rules are in the core (`yardsort_core::tasks`) so that the app and `ys task` share them, and
 what the app adds is a cache. `TaskSource` is the seam a second source goes behind; `GitHub` is

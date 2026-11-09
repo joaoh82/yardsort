@@ -1,13 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PullRequest } from "@/lib/ipc";
-import { worktree } from "@/test/fixtures";
+import { trackedOf, worktree } from "@/test/fixtures";
 const core = vi.hoisted(() => ({
   workspaceMergePullRequest: vi.fn(),
   projectPullRequests: vi.fn(),
   workspaceConflictHelper: vi.fn(),
   workspaceResolveConflicts: vi.fn(),
+  workspaceUntrackPullRequest: vi.fn(),
 }));
 const native = vi.hoisted(() => ({ confirm: vi.fn() }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -62,6 +63,7 @@ const found = (requests = [pr], workspaces: Record<string, number[]> = {}) => ({
   viewer: null,
   openTotal: null,
   openProblem: null,
+  tracked: [],
 });
 beforeEach(() => {
   vi.resetAllMocks();
@@ -337,4 +339,50 @@ it("warns that a half-typed message goes with a request typed into a running age
   expect(native.confirm.mock.calls[0]![0]).toContain(
     "Anything you had typed there and not sent goes with it.",
   );
+});
+
+describe("a pull request tracked in another repository", () => {
+  const elsewhere = trackedOf("w-alpha-feature", { ...pr, number: 7, title: "Bump the client" });
+  beforeEach(() => {
+    usePublishStore.setState({ byProject: { alpha: { ...found(), tracked: [elsewhere] } } });
+    core.projectPullRequests.mockResolvedValue({ ...found(), tracked: [elsewhere] });
+    core.workspaceUntrackPullRequest.mockResolvedValue(undefined);
+  });
+
+  it("is offered beside the workspace's own, named by its repository, and never merged from here", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: /Actions for pull request #85 — 1 more/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /lib#7 open — Bump the client/ }));
+    expect(
+      screen.getByRole("button", { name: /Open Pull request #7 in demo\/lib/ }),
+    ).toHaveTextContent("lib#7");
+
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    // Merging and conflicts go by number in the project's repository: not for one elsewhere.
+    expect(screen.queryByRole("menuitem", { name: "Squash and merge" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "View on GitHub" }));
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/demo/lib/pull/7");
+  });
+
+  it("can stop being tracked, and the toolbar goes back to the workspace's own", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: /Actions for pull request #85/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /lib#7/ }));
+    core.projectPullRequests.mockResolvedValue(found());
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Stop tracking" }));
+    await waitFor(() =>
+      expect(core.workspaceUntrackPullRequest).toHaveBeenCalledWith("w-alpha-feature", "t-7"),
+    );
+    expect(core.workspaceMergePullRequest).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole("button", { name: /Actions for pull request #85$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("is shown alone when the workspace has nothing of its own", async () => {
+    usePublishStore.setState({ byProject: { alpha: { ...found([]), tracked: [elsewhere] } } });
+    setup();
+    expect(screen.getByRole("button", { name: /Open Pull request #7 in demo\/lib/ })).toBeVisible();
+  });
 });

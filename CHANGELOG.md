@@ -3,6 +3,18 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
+## Unreleased
+
+- **Follow pull requests an agent opens in another repository.** A project whose folder holds
+  other repositories as nested clones — a parent repository — has agents that open pull requests
+  in those clones, and Yardsort could not see them. Now a workspace can **track** them: an agent
+  runs `ys pr track <url>` (agents in such a project are told to), or you choose **Track pull
+  request…** in the workspace's menu. A tracked pull request shows on the workspace's row as
+  `lib#7`, in its toolbar's menu, and in the Pull requests view with its Summary — checks,
+  reviewers and conversation — read by its link. **Stop tracking** takes it off again. Merging it
+  and its diff are still on GitHub for now. See
+  [Commits & pull requests](docs/guide/commits-and-pull-requests.md#pull-requests-in-other-repositories).
+
 ## 0.22.2
 
 - **Remote: start work from your phone.** A phone you let type can start a **New workspace**, with

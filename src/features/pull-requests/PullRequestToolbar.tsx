@@ -6,7 +6,7 @@ import { errorMessage, ipc, type MergeMethod, type Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { ContextMenu } from "@/features/sidebar/ContextMenu";
 import { PullRequestBadge } from "@/features/sidebar/PullRequestBadge";
-import { pullRequestsFor, usePublishStore } from "@/stores/publish";
+import { shownFor, untrackPullRequest, usePublishStore } from "@/stores/publish";
 import { useTerminalStore } from "@/stores/terminals";
 import { PullRequestDetails } from "./PullRequestDetails";
 import { conflicting, pullRequestColour } from "./appearance";
@@ -25,12 +25,18 @@ export function PullRequestToolbar({
   projectId: string;
 }) {
   const found = usePublishStore((s) => s.byProject[projectId]);
-  // A workspace can have opened several. The toolbar shows one at a time — the branch's own
-  // until another is chosen from the menu.
-  const prs = pullRequestsFor(found, workspace);
-  const [chosen, setChosen] = useState<number | null>(null);
-  const pr = prs.find((candidate) => candidate.number === chosen) ?? prs[0];
+  // A workspace can have opened several, some of them in other repositories. The toolbar shows
+  // one at a time — the branch's own until another is chosen from the menu.
+  const prs = shownFor(found, workspace);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const shown = prs.find((candidate) => candidate.key === chosen) ?? prs[0];
+  const pr = shown?.pr;
+  // One elsewhere is read by its link; merging it and its conflicts are not this toolbar's yet.
+  const tracked = shown?.tracked ?? null;
   const more = prs.length - 1;
+  const name = tracked
+    ? `${tracked.repo.owner}/${tracked.repo.name}#${pr?.number}`
+    : `#${pr?.number}`;
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -53,7 +59,8 @@ export function PullRequestToolbar({
     }
   }
   async function merge(method: MergeMethod, label: string) {
-    if (!pr?.details) return;
+    // The workspace's command merges its project's own by number: never one elsewhere.
+    if (!pr?.details || tracked) return;
     const confirmed = await native.confirm(
       `${label} pull request #${pr.number}: ${pr.title}\n\n${pr.branch} → ${pr.details.base}\nCommit ${pr.details.headOid.slice(0, 12)}\n\nGitHub may queue the merge if this branch requires it. Your workspace and local branch will be kept.`,
       { title: "Merge pull request", okLabel: label },
@@ -69,7 +76,7 @@ export function PullRequestToolbar({
     }
   }
   async function resolveConflicts() {
-    if (!pr) return;
+    if (!pr || tracked) return;
     const helper = await ipc.workspaceConflictHelper(workspace.id, pr.number);
     const base = pr.details?.base ?? "its base";
     const how =
@@ -107,15 +114,24 @@ export function PullRequestToolbar({
       {pr && (
         <>
           <HoverCard
-            label={`Pull request #${pr.number} details`}
-            content={<PullRequestDetails pr={pr} />}
+            label={`Pull request ${name} details`}
+            content={
+              <>
+                {tracked && (
+                  <p className="mb-2 text-ink-faint">
+                    In {tracked.repo.owner}/{tracked.repo.name}, tracked with this workspace
+                  </p>
+                )}
+                <PullRequestDetails pr={pr} />
+              </>
+            }
           >
-            <PullRequestBadge pr={pr} toolbar />
+            <PullRequestBadge pr={pr} repo={tracked?.repo} toolbar />
           </HoverCard>
           <button
             ref={menuButton}
             type="button"
-            aria-label={`Actions for pull request #${pr.number}${more > 0 ? ` — ${more} more from this workspace` : ""}`}
+            aria-label={`Actions for pull request ${name}${more > 0 ? ` — ${more} more from this workspace` : ""}`}
             aria-haspopup="menu"
             aria-expanded={!!at}
             disabled={busy}
@@ -138,12 +154,12 @@ export function PullRequestToolbar({
                 // More than one: say which, and let another be chosen.
                 ...(more > 0
                   ? prs.map((candidate) => ({
-                      label: `#${candidate.number} ${candidate.state === "open" ? (candidate.draft ? "draft" : "open") : candidate.state} — ${candidate.title}`,
-                      checked: candidate.number === pr.number,
-                      onSelect: () => setChosen(candidate.number),
+                      label: `${candidate.tracked ? `${candidate.tracked.repo.name}` : ""}#${candidate.pr.number} ${candidate.pr.state === "open" ? (candidate.pr.draft ? "draft" : "open") : candidate.pr.state} — ${candidate.pr.title}`,
+                      checked: candidate.key === shown.key,
+                      onSelect: () => setChosen(candidate.key),
                     }))
                   : []),
-                ...(conflicting(pr)
+                ...(conflicting(pr) && !tracked
                   ? [
                       {
                         label: "Ask its agent to resolve conflicts…",
@@ -153,7 +169,7 @@ export function PullRequestToolbar({
                       },
                     ]
                   : []),
-                ...methods.map(({ method, label }, index) => ({
+                ...(tracked ? [] : methods).map(({ method, label }, index) => ({
                   divider: index === 0 && more > 0 && !conflicting(pr),
                   label,
                   disabled:
@@ -165,17 +181,37 @@ export function PullRequestToolbar({
                     workspace.archived,
                   onSelect: () => void action(() => merge(method, label)),
                 })),
-                { label: "View on GitHub", onSelect: () => void action(() => openUrl(pr.url)) },
+                {
+                  label: "View on GitHub",
+                  divider: !!tracked && more > 0,
+                  onSelect: () => void action(() => openUrl(pr.url)),
+                },
                 { label: "Copy PR link", onSelect: () => void action(() => writeText(pr.url)) },
                 {
                   label: "Refresh pull request",
                   onSelect: () =>
                     void action(async () => {
                       await usePublishStore.getState().loadProject(projectId, true);
-                      const problem = usePublishStore.getState().byProject[projectId]?.problem;
+                      const answer = usePublishStore.getState().byProject[projectId];
+                      const problem = tracked
+                        ? answer?.tracked.find((t) => t.id === tracked.id)?.problem
+                        : answer?.problem;
                       if (problem) throw new Error(problem);
                     }),
                 },
+                ...(tracked
+                  ? [
+                      {
+                        // Only Yardsort's note of it goes: the pull request is left as it is.
+                        label: "Stop tracking",
+                        onSelect: () =>
+                          void action(async () => {
+                            setChosen(null);
+                            await untrackPullRequest(projectId, tracked);
+                          }),
+                      },
+                    ]
+                  : []),
               ]}
             />
           )}

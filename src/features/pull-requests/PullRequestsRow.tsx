@@ -1,6 +1,6 @@
 import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
-import { moreOpenThanListed, openIn } from "./rows";
+import { moreOpenThanListed, openIn, openTrackedIn } from "./rows";
 
 /**
  * The top of the sidebar: one row that opens every project's pull requests in the center panel.
@@ -17,7 +17,7 @@ export function PullRequestsRow() {
   const byProject = usePublishStore((s) => s.byProject);
 
   const found = projects.filter((p) => !p.missing).map((p) => byProject[p.id]);
-  const count = found.reduce((sum, answer) => sum + openIn(answer), 0);
+  const count = found.reduce((sum, answer) => sum + openIn(answer) + openTrackedIn(answer), 0);
   const more = found.some(moreOpenThanListed);
   const said = count === 0 ? null : `${count}${more ? "+" : ""}`;
 

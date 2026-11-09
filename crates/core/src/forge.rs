@@ -809,6 +809,19 @@ impl Gh {
         Self::read_pull_request(&out)
     }
 
+    /// The pull request at `url`, in whatever repository. `gh pr view` takes a link in place of
+    /// a number and then needs no repository around it, so `cwd` is only where `gh` runs. For a
+    /// pull request a workspace tracks elsewhere: see `crate::tracked`.
+    pub fn pull_request_at(
+        &self,
+        cwd: &Path,
+        url: &str,
+        limit: Duration,
+    ) -> ForgeResult<PullRequest> {
+        let out = self.run_within(cwd, &Self::pull_request_args(url), limit)?;
+        Self::read_pull_request(&out)
+    }
+
     fn pull_request_args(number: &str) -> [&str; 5] {
         ["pr", "view", number, "--json", PULL_REQUEST_FIELDS]
     }
@@ -828,12 +841,27 @@ impl Gh {
         number: u32,
         limit: Duration,
     ) -> ForgeResult<PullRequestSummary> {
+        self.pull_request_summary_of(root, &number.to_string(), limit)
+    }
+
+    /// [`Gh::pull_request_summary`] for the pull request at `url`, in whatever repository.
+    pub fn pull_request_summary_at(
+        &self,
+        cwd: &Path,
+        url: &str,
+        limit: Duration,
+    ) -> ForgeResult<PullRequestSummary> {
+        self.pull_request_summary_of(cwd, url, limit)
+    }
+
+    fn pull_request_summary_of(
+        &self,
+        cwd: &Path,
+        selector: &str,
+        limit: Duration,
+    ) -> ForgeResult<PullRequestSummary> {
         let fields = format!("{PULL_REQUEST_FIELDS},body,comments,reviews,changedFiles");
-        let out = self.run_within(
-            root,
-            &["pr", "view", &number.to_string(), "--json", &fields],
-            limit,
-        )?;
+        let out = self.run_within(cwd, &["pr", "view", selector, "--json", &fields], limit)?;
         pull_request_summary(&out)
     }
 
@@ -1632,6 +1660,46 @@ mod tests {
             .unwrap();
         assert_eq!(posts.len(), 1);
         assert_eq!(posts[0].kind, PrPostKind::Review);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_elsewhere_is_read_by_its_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("gh");
+        let asked = dir.path().join("asked");
+        let answer = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/gh/2.102.0/pr-view.json");
+        crate::program::testing::executable(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{}'\ncat '{}'\n",
+                asked.display(),
+                answer.display()
+            ),
+        );
+        let env = crate::env::ShellEnv {
+            vars: std::env::vars().collect(),
+            source: crate::env::EnvSource::Process,
+            warning: None,
+        };
+        let gh = Gh::at(script, &env);
+        let url = "https://github.com/o/lib/pull/7";
+        let pr = gh
+            .pull_request_at(dir.path(), url, Duration::from_secs(10))
+            .unwrap();
+        assert!(pr.number > 0);
+        gh.pull_request_summary_at(dir.path(), url, Duration::from_secs(10))
+            .unwrap();
+        let asked = std::fs::read_to_string(&asked).unwrap();
+        let lines: Vec<&str> = asked.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines[0].starts_with(&format!("pr view {url} --json number,url,")),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[1].starts_with(&format!("pr view {url} --json ")));
+        assert!(lines[1].ends_with(",body,comments,reviews,changedFiles"));
     }
 
     #[test]

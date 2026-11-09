@@ -81,7 +81,15 @@ function PullRequestRow({
         className={`block w-full px-3 pt-2 text-left outline-none hover:bg-raised focus-visible:bg-raised ${workspace ? "pb-1" : "pb-2"}`}
       >
         <span className="flex items-center gap-2">
-          <span className="min-w-0 truncate text-ink-muted">{project.name}</span>
+          <span className="min-w-0 truncate text-ink-muted">
+            {project.name}
+            {row.tracked && (
+              <span title="Tracked with a workspace of this project" className="text-ink-faint">
+                {" · "}
+                {row.tracked.repo.owner}/{row.tracked.repo.name}
+              </span>
+            )}
+          </span>
           <span className="shrink-0 font-mono text-ink-muted">#{pr.number}</span>
           <span
             className={`ml-auto shrink-0 rounded-full px-2 text-[11px] leading-5 ${pullRequestColour(pr)}`}

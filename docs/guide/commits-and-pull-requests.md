@@ -155,6 +155,34 @@ GitHub**, **Copy PR link**, and **Refresh pull request**. A merged or closed PR 
 until another PR replaces it on that branch. When a branch has several PRs, an open one takes
 precedence; otherwise Yardsort shows the newest.
 
+### Pull requests in other repositories
+
+Some projects are a parent repository whose folder holds other repositories as nested clones —
+not submodules, just clones in folders the parent ignores. An agent working in such a project
+goes into one of those clones and opens its pull request there, in a repository that is not the
+project's. Nothing git or GitHub records ties that pull request to the workspace, so Yardsort is
+told about it instead, and **tracks** it:
+
+- **The agent says so.** An agent started with a first message in a project whose folder holds
+  other repositories is told which they are, and to run
+  [`ys pr track <url>`](cli.md#ys-pr) after opening a pull request in one of them.
+- **You say so.** **Track pull request…** in the workspace's **⋯** menu takes a link,
+  `https://github.com/owner/repo/pull/12`. A link that is not a GitHub pull request is refused,
+  and so is one of the project's own repository, which the workspace follows already.
+
+A tracked pull request is shown with the workspace like its own, named by its repository so its
+number does not read as the project's: **lib#7** on the row, counted with the others and listed
+under _Also opened from this workspace_ on hover; **lib#7** in the toolbar once chosen from its
+arrow menu. Its checks colour it as always. The toolbar's menu offers **View on GitHub**, **Copy
+PR link**, **Refresh pull request** and **Stop tracking**; merging it and asking an agent to
+resolve its conflicts are not offered for one in another repository yet. It is also listed in
+the [Pull requests view](pull-requests.md#pull-requests-in-other-repositories).
+
+Yardsort reads each one with `gh pr view <link>`, which needs nothing checked out: an open one
+is read again whenever the project's list is, a merged or closed one every ten minutes. Up to 20
+per project are read, the most recently tracked first. **Stop tracking** removes only Yardsort's
+note of it; the pull request is left as it is. Deleting the workspace removes its notes too.
+
 ### A workspace with several pull requests
 
 One workspace can open more than one pull request: a second PR on the same branch after the first

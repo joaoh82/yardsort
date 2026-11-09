@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { PullRequest } from "@/lib/ipc";
+import type { PullRequest, Repo } from "@/lib/ipc";
 import { conflicting, pullRequestColour } from "@/features/pull-requests/appearance";
 
 /**
@@ -13,13 +13,30 @@ import { conflicting, pullRequestColour } from "@/features/pull-requests/appeara
  * It sits *beside* the row's own button rather than inside it, because a button inside a button
  * is not a thing: the row opens the workspace, and this opens the pull request.
  */
-export function PullRequestBadge({ pr, toolbar = false }: { pr: PullRequest; toolbar?: boolean }) {
+export function PullRequestBadge({
+  pr,
+  repo = null,
+  toolbar = false,
+}: {
+  pr: PullRequest;
+  /**
+   * For one tracked in another repository: that repository, whose name goes before the number —
+   * `lib#7` — so it does not read as the project's own #7.
+   */
+  repo?: Repo | null;
+  toolbar?: boolean;
+}) {
+  const number = `${repo ? repo.name : ""}#${pr.number}`;
   const text =
-    pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed" : `#${pr.number}`;
+    pr.state === "merged"
+      ? `${repo ? `${repo.name} ` : ""}merged`
+      : pr.state === "closed"
+        ? `${repo ? `${repo.name} ` : ""}closed`
+        : number;
   const colour = pullRequestColour(pr);
 
   const label = [
-    pr.draft ? `Draft pull request #${pr.number}` : `Pull request #${pr.number}`,
+    `${pr.draft ? "Draft pull request" : "Pull request"} #${pr.number}${repo ? ` in ${repo.owner}/${repo.name}` : ""}`,
     pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed" : null,
     pr.state === "open" ? CHECKS[pr.checks] : null,
     conflicting(pr) ? "merge conflicts" : null,
@@ -49,7 +66,7 @@ export function PullRequestBadge({ pr, toolbar = false }: { pr: PullRequest; too
           <path d="M4 5v9M9 2h1a2 2 0 0 1 2 2v7M8 4l2-2-2-2" />
         </svg>
       )}
-      {toolbar ? `#${pr.number}` : text}
+      {toolbar ? number : text}
       {toolbar && conflicting(pr) && (
         <span aria-hidden className="ml-1" title="Merge conflicts">
           ⚠

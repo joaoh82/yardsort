@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { hasCore, ipc, type Project, type Workspace } from "@/lib/ipc";
 import { native } from "@/lib/native";
 import { recall, useProjectsStore } from "@/stores/projects";
-import { pullRequestsFor, usePublishStore } from "@/stores/publish";
+import { shownFor, usePublishStore } from "@/stores/publish";
 import { useTerminalStore } from "@/stores/terminals";
 import { archiveWorkspace, deleteWorkspace, enterWorkspace, restoreWorkspace } from "./actions";
 import { summarise } from "@/features/terminal/activity";
@@ -19,6 +19,7 @@ import { TaskBadge } from "@/features/tasks/TaskBadge";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import { RenameDialog } from "./RenameDialog";
+import { TrackPullRequestDialog } from "./TrackPullRequestDialog";
 import { RunWorkflowDialog } from "@/features/workflows/RunWorkflowDialog";
 import { RunSmokeTestDialog } from "@/features/smoke/RunSmokeTestDialog";
 import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
@@ -263,12 +264,15 @@ function WorkspaceNode({
   // hand back a new value on every render and re-render for ever.
   const found = usePublishStore((s) => s.byProject[projectId]);
   const head = workspace.head;
-  // The branch's own first; any others it opened are counted beside it and listed on hover.
-  const [pr, ...otherPrs] = pullRequestsFor(found, workspace);
+  // The branch's own first; any others it opened are counted beside it and listed on hover —
+  // those it follows in other repositories last, each named by its repository.
+  const [shown, ...otherPrs] = shownFor(found, workspace);
+  const pr = shown?.pr;
   const allTabs = useTerminalStore((s) => s.tabs);
   const tabs = allTabs.filter((tab) => tab.workspaceId === workspace.id);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [tracking, setTracking] = useState(false);
   const [forgetting, setForgetting] = useState(false);
   // The Run dialog: `undefined` closed, `null` to choose a workflow, or the one to run.
   const [runWorkflow, setRunWorkflow] = useState<string | null | undefined>(undefined);
@@ -309,6 +313,7 @@ function WorkspaceNode({
             onSelect: () => setRunWorkflow("code-review"),
           },
           { label: "Run workflow…", disabled, onSelect: () => setRunWorkflow(null) },
+          { label: "Track pull request…", disabled, onSelect: () => setTracking(true) },
           { label: "Run smoke test…", disabled, onSelect: () => setRunSmokeTest(true) },
           { label: "Schedule…", disabled, onSelect: () => setScheduling(true) },
           {
@@ -360,17 +365,22 @@ function WorkspaceNode({
                 </ul>
               </div>
             )}
-            {pr ? (
+            {shown ? (
               <>
-                <PullRequestDetails pr={pr} />
+                {shown.tracked && (
+                  <p className="text-ink-faint">
+                    In {shown.tracked.repo.owner}/{shown.tracked.repo.name}
+                  </p>
+                )}
+                <PullRequestDetails pr={shown.pr} />
                 {otherPrs.length > 0 && (
                   <div className="border-t border-line pt-3">
                     <p className="mb-1.5 text-ink-faint">Also opened from this workspace</p>
                     <ul className="space-y-1">
                       {otherPrs.map((other) => (
-                        <li key={other.number} className="flex min-w-0 items-center gap-2">
-                          <PullRequestBadge pr={other} />
-                          <span className="truncate text-ink-muted">{other.title}</span>
+                        <li key={other.key} className="flex min-w-0 items-center gap-2">
+                          <PullRequestBadge pr={other.pr} repo={other.tracked?.repo} />
+                          <span className="truncate text-ink-muted">{other.pr.title}</span>
                         </li>
                       ))}
                     </ul>
@@ -462,9 +472,9 @@ function WorkspaceNode({
             <TaskBadge projectId={projectId} task={workspace.tasks[0]} />
           </span>
         )}
-        {pr && (
+        {shown && (
           <span className="flex h-full shrink-0 items-center gap-0.5 pr-0.5 pl-1">
-            <PullRequestBadge pr={pr} />
+            <PullRequestBadge pr={shown.pr} repo={shown.tracked?.repo} />
             {otherPrs.length > 0 && (
               <span
                 aria-label={`${otherPrs.length} more pull request${otherPrs.length === 1 ? "" : "s"} from this workspace`}
@@ -489,6 +499,13 @@ function WorkspaceNode({
       </HoverCard>
       {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
       {renaming && <RenameDialog workspace={workspace} onClose={() => setRenaming(false)} />}
+      {tracking && (
+        <TrackPullRequestDialog
+          workspace={workspace}
+          projectId={projectId}
+          onClose={() => setTracking(false)}
+        />
+      )}
       {forgetting && <ForgetDialog workspace={workspace} onClose={() => setForgetting(false)} />}
       {runWorkflow !== undefined && (
         <RunWorkflowDialog

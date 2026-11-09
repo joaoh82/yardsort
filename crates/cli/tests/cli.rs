@@ -3332,3 +3332,88 @@ fn a_test_scheduled_from_ys_says_its_file_still_needs_approving() {
     assert_eq!(listed[0]["target"], "test");
     assert_eq!(listed[0]["workspace"], name, "the workspace it was run in");
 }
+
+#[test]
+fn an_agent_tracks_a_pull_request_it_opened_in_another_repository() {
+    let fx = Fixture::new();
+    let made = make_workspace(&fx, "Bump the library");
+    let workspace_id = made["id"].as_str().unwrap().to_owned();
+    let name = made["name"].as_str().unwrap().to_owned();
+    fx.git()
+        .run(
+            &fx.repo,
+            &["remote", "add", "origin", "git@github.com:o/parent.git"],
+        )
+        .unwrap();
+    // Where the agent stands when it opens the pull request: a nested clone, outside its
+    // worktree. Its launch environment is what says which workspace it is.
+    let nested = tempfile::tempdir().unwrap();
+    let as_agent = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ys"))
+            .args(["--data-dir", &fx.data_dir.to_string_lossy()])
+            .args(args)
+            .env_remove(yardsort_core::activity::RUN_ENV)
+            .env_remove(yardsort_core::activity::RECORD_ENV)
+            .env(yardsort_core::activity::WORKSPACE_ENV, &workspace_id)
+            .env("YARDSORT_NO_DAEMON", "1")
+            .current_dir(nested.path())
+            .output()
+            .unwrap();
+        Run {
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    };
+
+    let said = as_agent(&["pr", "track", "https://github.com/o/lib/pull/7/files"]).ok();
+    assert!(
+        said.contains(&format!(
+            "Tracking https://github.com/o/lib/pull/7 with {name}"
+        )),
+        "{said}"
+    );
+    let again = as_agent(&["pr", "track", "https://github.com/o/lib/pull/7"]).ok();
+    assert!(again.contains("tracked with"), "{again}");
+
+    let listed: serde_json::Value =
+        serde_json::from_str(&as_agent(&["pr", "list", "--json"]).ok()).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+    assert_eq!(listed[0]["repo"], "github.com/o/lib");
+    assert_eq!(listed[0]["number"], 7);
+    assert_eq!(listed[0]["trackedBy"], "cli");
+
+    // The project's own repository is followed already, and a link to something else is no
+    // pull request at all.
+    let own = as_agent(&["pr", "track", "https://github.com/o/parent/pull/3"]).failed();
+    assert!(own.contains("this project's own repository"), "{own}");
+    let issue = as_agent(&["pr", "track", "https://github.com/o/lib/issues/3"]).failed();
+    assert!(issue.contains("not a link to a pull request"), "{issue}");
+
+    // Outside any workspace, with nothing in the environment: say how to name one.
+    let lost = fx
+        .ys_from(
+            Some(nested.path()),
+            &["pr", "track", "https://github.com/o/lib/pull/8"],
+        )
+        .failed();
+    assert!(lost.contains("--workspace"), "{lost}");
+    fx.ys_from(
+        Some(nested.path()),
+        &[
+            "pr",
+            "track",
+            "https://github.com/o/lib/pull/8",
+            "--workspace",
+            &name,
+        ],
+    )
+    .ok();
+
+    as_agent(&["pr", "untrack", "https://github.com/o/lib/pull/7"]).ok();
+    let gone = as_agent(&["pr", "untrack", "https://github.com/o/lib/pull/7"]).failed();
+    assert!(gone.contains("is not tracked with"), "{gone}");
+    let left = as_agent(&["pr", "list"]).ok();
+    assert!(left.contains("https://github.com/o/lib/pull/8"), "{left}");
+    assert!(!left.contains("/pull/7"), "{left}");
+}

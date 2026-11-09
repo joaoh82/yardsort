@@ -40,6 +40,7 @@ pub mod smoke;
 pub mod store;
 pub mod tasks;
 pub mod template;
+pub mod tracked;
 pub mod usage;
 pub mod workflow;
 pub mod workspaces;

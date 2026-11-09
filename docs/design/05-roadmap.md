@@ -1092,6 +1092,33 @@ why, with the user having approved the file once in the app and watched the run 
 changed file is never run without being shown again; a cancel kills every process the run
 started; and `ys test validate` has a failing fixture for every error it can report.
 
+## M29 — Pull requests in other repositories
+
+Proposed in [36-pull-requests-elsewhere](36-pull-requests-elsewhere.md) on 2026-11-09, for a
+project whose checkout holds other repositories as nested clones, where an agent opens pull
+requests that no project's list has.
+
+- A workspace **tracks** pull requests in other repositories, and Yardsort follows each one by its
+  link as it follows the project's own. Told by `ys pr track` and **Track pull request…**; seen
+  by the agent adapters when a tool call creates one.
+- Five slices, each its own pull request: tracking and following; seen by Claude Code; seen by
+  the other adapters; acting on them (merge, close, reopen, reply, **Code** from the nested
+  clone); code review on one.
+- [x] Slice 1: migration 0023, `yardsort_core::tracked`, `ys pr track | list | untrack`, **Track
+      pull request…**, the launch section for a checkout with nested repositories, reading by
+      link, and the row, the toolbar and the Pull requests view with the Summary. Recorded in
+      [36 § slice 1](36-pull-requests-elsewhere.md#slice-1-what-shipped).
+- [ ] Slice 2: Claude Code's `PostToolUse` keeps the link of a pull request a tool call created.
+- [ ] Slice 3: the same for Codex, OpenCode, pi, OMP, Grok and Cursor, or their coverage says
+      why not.
+- [ ] Slice 4: merge, close, reopen and the reply box by link; **Code** from the nested clone.
+- [ ] Slice 5: _Request code review_ on a tracked pull request, in the nested clone.
+
+_Exit:_ on all three platforms, an agent in a parent project's workspace opens a pull request in a
+nested clone and it appears on the workspace's row with its checks without anyone typing its
+link; its review, posted by a second agent working in the clone, is waited on and announced like
+a project's own.
+
 ## Later (unordered)
 
 - Commit / push / open PR from the UI; show PR + CI status on the workspace row.

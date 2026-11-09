@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import type { Project, ProjectPullRequests } from "@/lib/ipc";
 import { recall, useProjectsStore } from "@/stores/projects";
-import { usePublishStore } from "@/stores/publish";
+import { untrackPullRequest, usePublishStore } from "@/stores/publish";
 import { usePullRequestsStore } from "@/stores/pullRequests";
 import {
   authorsOf,
@@ -342,7 +342,11 @@ function Notices({
     );
   }
 
-  const lines = answers.flatMap(({ project, found }) => {
+  const lines = answers.flatMap(({ project, found }) => [
+    ...ownLines(project, found),
+    ...unreadTracked(project, found),
+  ]);
+  function ownLines(project: Project, found: ProjectPullRequests) {
     const retry = (
       <button
         type="button"
@@ -396,7 +400,38 @@ function Notices({
       ];
     }
     return [];
-  });
+  }
+  /** A pull request a workspace tracks that `gh` has never managed to read: a mistyped link, or
+   *  a repository this login cannot see. It has no row to say so on. */
+  function unreadTracked(project: Project, found: ProjectPullRequests) {
+    return found.tracked
+      .filter((tracked) => !tracked.pullRequest && tracked.problem)
+      .map((tracked) => {
+        const workspace = project.workspaces.find((w) => w.id === tracked.workspaceId);
+        return (
+          <Notice key={tracked.id} alert>
+            <b>{project.name}</b>: {tracked.repo.owner}/{tracked.repo.name}#{tracked.number}
+            {workspace ? `, tracked with ${workspace.name},` : ""} could not be read:{" "}
+            <span className="select-text">{tracked.problem}</span>
+            <button
+              type="button"
+              disabled={retrying}
+              onClick={() => onRetry(project.id)}
+              className="ml-2 text-ink-muted underline hover:text-ink disabled:opacity-40"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => void untrackPullRequest(project.id, tracked).catch(console.error)}
+              className="ml-2 text-ink-muted underline hover:text-ink"
+            >
+              Stop tracking
+            </button>
+          </Notice>
+        );
+      });
+  }
   return lines.length > 0 ? <>{lines}</> : null;
 }
 

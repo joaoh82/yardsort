@@ -329,6 +329,20 @@ From the design pass in [29-conversation-context](29-conversation-context.md).
     conversation (built in slice 2); with the default on there is nothing to ask, and the
     question is gone.
 
+## Pull requests in other repositories
+
+From the design pass in [36-pull-requests-elsewhere](36-pull-requests-elsewhere.md), 2026-11-09.
+
+48. **Should a pull request of the project's own repository be trackable too?** One opened from a
+    branch the workspace never checked out — a worktree the agent made by hand — is not matched
+    to it today, and tracking would tie it. Slice 1 refuses it: the project's list already has
+    it, and tracking it would list it twice. Lean: allow it once the view can show one row for
+    both.
+49. **Should the launch section reach an agent started from the tab bar?** Like the smoke-test
+    pointer it goes only with a first message, so an agent started with none hears of
+    `ys pr track` only if it reads the project's instructions. The adapters (slices 2–3) make
+    the question smaller. Lean: leave it until they are built.
+
 ## Smoke tests
 
 From the design pass in [32-smoke-tests](32-smoke-tests.md), 2026-10-30.

@@ -360,6 +360,31 @@ so; when an agent Yardsort started runs it, the proposal records which agent and
 workspace. There is no command to approve, edit, reject or revoke: those are yours, in the app,
 because an agent can run anything `ys` offers. `--json` works as everywhere.
 
+### `ys pr`
+
+Pull requests a workspace follows in **other repositories** — one an agent opened in a nested
+clone inside a parent project's folder, say. A project's own pull requests need nothing from
+here: Yardsort finds them by their branch. See
+[Pull requests in other repositories](commits-and-pull-requests.md#pull-requests-in-other-repositories).
+
+```sh
+ys pr track https://github.com/owner/lib/pull/12   # follow it with this workspace
+ys pr list                                         # the ones this workspace follows
+ys pr untrack https://github.com/owner/lib/pull/12
+```
+
+```
+Tracking https://github.com/owner/lib/pull/12 with bump-the-client. Yardsort shows its checks and reviews beside the workspace's own.
+```
+
+Run by an agent Yardsort started, it is about that agent's workspace — even from a folder outside
+the worktree, such as the nested clone the pull request was opened in — and records which
+conversation opened it. Elsewhere it is the workspace whose folder it runs in, or name one with
+`--workspace <workspace>`. Tracking the same link twice changes nothing. A link that is not a
+GitHub pull request is refused, and so is one of the project's own repository. The app shows a
+newly tracked one the next time it asks about the project: within a minute, or when its window
+comes back into focus. `--json` works as everywhere.
+
 ### `ys task`
 
 A project's [tasks](tasks.md) — its GitHub issues — as the Tasks view lists them. Meant as much

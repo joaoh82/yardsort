@@ -114,6 +114,9 @@ enum Command {
     /// A project's memory: approved lessons for its agents, and proposals for the user.
     #[command(subcommand)]
     Memory(commands::memory::Command),
+    /// Pull requests a workspace follows in other repositories, like a nested clone's.
+    #[command(subcommand)]
+    Pr(commands::pr::Command),
     /// What is waiting to be done in a project: its GitHub issues.
     #[command(subcommand)]
     Task(commands::task::Command),
@@ -176,6 +179,9 @@ fn main() {
                 .and_then(|ys| commands::activity::run(&ys, command, &out)),
             Command::Memory(command) => Yardsort::open(cli.data_dir)
                 .and_then(|ys| commands::memory::run(&ys, command, &out)),
+            Command::Pr(command) => {
+                Yardsort::open(cli.data_dir).and_then(|ys| commands::pr::run(&ys, command, &out))
+            }
             Command::Task(command) => {
                 Yardsort::open(cli.data_dir).and_then(|ys| commands::task::run(&ys, command, &out))
             }

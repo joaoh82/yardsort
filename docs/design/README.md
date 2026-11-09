@@ -40,6 +40,7 @@ and move anything settled out of [open questions](06-open-questions.md) into the
 | 33  | [The phone app's design](33-phone-design.md)                            | Built, and its smoke test passed on the iPhone. The look, the icon, Settings and where it differs from the Figma file          |
 | 34  | [Schedules](34-schedules.md)                                            | Built: start a workflow or a smoke test once at a set time or on a routine, in an existing workspace, while the app is open    |
 | 35  | [Remote, R4 and R5](35-remote-r4-r5.md)                                 | Planned: a host with no screen the phone reaches first, then the desktop as a client, then the phone hardened and push         |
+| 36  | [Pull requests in other repositories](36-pull-requests-elsewhere.md)    | Slice 1 built: a workspace tracks pull requests opened in nested clones, by `ys pr track` or by hand, and follows them by link |
 
 ## Vocabulary
 

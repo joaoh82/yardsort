@@ -34,12 +34,15 @@ export function Summary({ row, now }: { row: Row; now: number }) {
   const { pr } = row;
   const state = usePullRequestsStore((s) => s.summaries[row.key]);
   const projectId = row.project.id;
-  const target: Target = { key: row.key, projectId, pr, viewer: row.viewer };
+  const tracked = row.tracked;
+  const target: Target = { key: row.key, projectId, pr, viewer: row.viewer, tracked };
 
   useEffect(() => {
-    void usePullRequestsStore.getState().loadSummary({ key: row.key, projectId, pr, viewer: null });
+    void usePullRequestsStore
+      .getState()
+      .loadSummary({ key: row.key, projectId, pr, viewer: null, tracked });
     // `pr` is a new object on every poll; `loadSummary` itself compares what matters in it.
-  }, [row.key, projectId, pr]);
+  }, [row.key, projectId, pr, tracked]);
 
   const summary = state?.summary ?? null;
   // The pull request as just read has every check by name and link; until it arrives, the
@@ -96,7 +99,8 @@ export function Summary({ row, now }: { row: Row; now: number }) {
             Comments on particular lines are under <b>Code</b>, beside the lines they are about.
           </p>
         )}
-        {summary && <Reply target={target} />}
+        {/* Replying goes by number in the project's repository; one elsewhere waits for that. */}
+        {summary && !tracked && <Reply target={target} />}
       </Section>
     </div>
   );

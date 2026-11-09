@@ -32,6 +32,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0020_smoke_test_settings.sql"),
     include_str!("../migrations/0021_smoke_test_browser.sql"),
     include_str!("../migrations/0022_schedules.sql"),
+    include_str!("../migrations/0023_tracked_pull_requests.sql"),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -73,6 +74,50 @@ pub struct RemoteGrantRow {
     pub scopes: String,
     pub projects: String,
     pub approved_at: i64,
+}
+
+/// A pull request in another repository that a workspace follows. See
+/// `migrations/0023_tracked_pull_requests.sql`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedPullRequestRow {
+    pub id: String,
+    pub workspace_id: String,
+    /// The conversation that opened it, when that is known.
+    pub session_id: Option<String>,
+    /// `host/owner/name`.
+    pub repo: String,
+    pub number: u32,
+    pub url: String,
+    /// `app`, `cli` or `hook`.
+    pub tracked_by: String,
+    pub created_at: i64,
+}
+
+/// What [`Store::track_pull_request`] is given.
+#[derive(Debug, Clone, Copy)]
+pub struct NewTrackedPullRequest<'a> {
+    pub workspace_id: &'a str,
+    pub session_id: Option<&'a str>,
+    pub repo: &'a str,
+    pub number: u32,
+    pub url: &'a str,
+    pub tracked_by: &'a str,
+}
+
+const TRACKED_COLUMNS: &str =
+    "id, workspace_id, session_id, repo, number, url, tracked_by, created_at";
+
+fn tracked_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TrackedPullRequestRow> {
+    Ok(TrackedPullRequestRow {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        session_id: row.get(2)?,
+        repo: row.get(3)?,
+        number: row.get(4)?,
+        url: row.get(5)?,
+        tracked_by: row.get(6)?,
+        created_at: row.get(7)?,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -763,6 +808,87 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Follow a pull request in another repository with a workspace. Saying so twice changes
+    /// nothing: the row already there is returned, with `false`. A session the first time did
+    /// not know is filled in by a later one that does.
+    pub fn track_pull_request(
+        &self,
+        new: &NewTrackedPullRequest<'_>,
+    ) -> StoreResult<(TrackedPullRequestRow, bool)> {
+        let conn = self.conn();
+        let added = conn.execute(
+            "INSERT OR IGNORE INTO tracked_pull_requests
+                 (id, workspace_id, session_id, repo, number, url, tracked_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                new.workspace_id,
+                new.session_id,
+                new.repo,
+                new.number,
+                new.url,
+                new.tracked_by,
+                now_ms()
+            ],
+        )? > 0;
+        if !added && new.session_id.is_some() {
+            conn.execute(
+                "UPDATE tracked_pull_requests SET session_id = ?
+                 WHERE workspace_id = ? AND url = ? AND session_id IS NULL",
+                params![new.session_id, new.workspace_id, new.url],
+            )?;
+        }
+        let row = conn.query_row(
+            &format!(
+                "SELECT {TRACKED_COLUMNS} FROM tracked_pull_requests
+                 WHERE workspace_id = ? AND url = ?"
+            ),
+            params![new.workspace_id, new.url],
+            tracked_from_row,
+        )?;
+        Ok((row, added))
+    }
+
+    /// The pull requests a workspace follows elsewhere, newest tracked first.
+    pub fn tracked_pull_requests(
+        &self,
+        workspace_id: &str,
+    ) -> StoreResult<Vec<TrackedPullRequestRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {TRACKED_COLUMNS} FROM tracked_pull_requests
+             WHERE workspace_id = ? ORDER BY created_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map([workspace_id], tracked_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Every pull request the project's shown workspaces follow elsewhere, newest tracked
+    /// first. A forgotten workspace's are kept for when it comes back, and not listed.
+    pub fn tracked_pull_requests_in_project(
+        &self,
+        project_id: &str,
+    ) -> StoreResult<Vec<TrackedPullRequestRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.workspace_id, t.session_id, t.repo, t.number, t.url, t.tracked_by,
+                    t.created_at
+             FROM tracked_pull_requests t JOIN workspaces w ON w.id = t.workspace_id
+             WHERE w.project_id = ? AND w.forgotten = 0
+             ORDER BY t.created_at DESC, t.rowid DESC",
+        )?;
+        let rows = stmt.query_map([project_id], tracked_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Stop following one, by its id or its link. Returns whether there was one.
+    pub fn untrack_pull_request(&self, workspace_id: &str, id_or_url: &str) -> StoreResult<bool> {
+        Ok(self.conn().execute(
+            "DELETE FROM tracked_pull_requests WHERE workspace_id = ? AND (id = ? OR url = ?)",
+            params![workspace_id, id_or_url, id_or_url],
+        )? > 0)
     }
 
     /// The forgotten row for a path, if there is one: importing that worktree again revives it.
@@ -2814,6 +2940,93 @@ mod tests {
             pty_session_id: pty,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_tracked_pull_request_is_kept_once_per_workspace_and_goes_with_it() {
+        let store = Store::in_memory();
+        let ws = worktree(&store);
+        let other = store
+            .add_worktree(
+                &ws.project_id,
+                "other",
+                "/wt/other",
+                Some("ys/o"),
+                Some("main"),
+            )
+            .unwrap();
+        store.add_session(&new_session("s1", &ws.id, "p1")).unwrap();
+        let link = |workspace_id, session_id, number: u32| NewTrackedPullRequest {
+            workspace_id,
+            session_id,
+            repo: "github.com/o/lib",
+            number,
+            url: if number == 7 {
+                "https://github.com/o/lib/pull/7"
+            } else {
+                "https://github.com/o/lib/pull/8"
+            },
+            tracked_by: "cli",
+        };
+
+        let (first, added) = store.track_pull_request(&link(&ws.id, None, 7)).unwrap();
+        assert!(added);
+        assert_eq!(first.session_id, None);
+        let (again, added) = store
+            .track_pull_request(&link(&ws.id, Some("s1"), 7))
+            .unwrap();
+        assert!(!added, "the same link twice is one row");
+        assert_eq!(again.id, first.id);
+        assert_eq!(
+            again.session_id.as_deref(),
+            Some("s1"),
+            "a later look knows who"
+        );
+        store.track_pull_request(&link(&ws.id, None, 8)).unwrap();
+        store.track_pull_request(&link(&other.id, None, 7)).unwrap();
+
+        let mine = store.tracked_pull_requests(&ws.id).unwrap();
+        assert_eq!(
+            mine.iter().map(|row| row.number).collect::<Vec<_>>(),
+            [8, 7],
+            "newest tracked first"
+        );
+        assert_eq!(
+            store
+                .tracked_pull_requests_in_project(&ws.project_id)
+                .unwrap()
+                .len(),
+            3,
+            "both workspaces' rows, the shared link once each"
+        );
+
+        // The conversation going leaves the row, without it.
+        assert!(store.remove_session("s1").unwrap());
+        let row = store.tracked_pull_requests(&ws.id).unwrap().pop().unwrap();
+        assert_eq!((row.number, row.session_id), (7, None));
+
+        assert!(store
+            .untrack_pull_request(&ws.id, "https://github.com/o/lib/pull/8")
+            .unwrap());
+        assert!(!store.untrack_pull_request(&ws.id, "nothing").unwrap());
+        assert!(
+            !store.untrack_pull_request(&other.id, &row.id).unwrap(),
+            "another workspace's id is not this one's to remove"
+        );
+
+        // Forgotten with its history: kept, but not listed.
+        store.forget_workspace(&other.id, true).unwrap();
+        assert_eq!(
+            store
+                .tracked_pull_requests_in_project(&ws.project_id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(store.tracked_pull_requests(&other.id).unwrap().len(), 1);
+
+        assert!(store.remove_worktree(&ws.id).unwrap());
+        assert!(store.tracked_pull_requests(&ws.id).unwrap().is_empty());
     }
 
     #[test]

@@ -125,6 +125,13 @@ review…** goes straight to the built-in review. Both open the same dialog, whi
 workflow's inputs and shows the pull request it will use. The `local` workspace has them too,
 from its right-click menu.
 
+### Track pull request…
+
+Follow a pull request in another repository with this workspace — one an agent opened in a nested
+clone inside the project's folder. Paste its link and press **Track**; its number and checks then
+show on the row as **lib#7**. See
+[Pull requests in other repositories](commits-and-pull-requests.md#pull-requests-in-other-repositories).
+
 ### Run smoke test…
 
 Run one of the worktree's [smoke tests](smoke-tests.md#run-smoke-test) here: the dialog lists

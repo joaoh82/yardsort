@@ -1,4 +1,11 @@
-import type { CheckCounts, Project, ProjectPullRequests, PullRequest, Workspace } from "@/lib/ipc";
+import type {
+  CheckCounts,
+  Project,
+  ProjectPullRequests,
+  PullRequest,
+  TrackedPullRequest,
+  Workspace,
+} from "@/lib/ipc";
 import { pullRequestsFor } from "@/stores/publish";
 
 /** A pull request in the list: the request, the project it belongs to, and what links them. */
@@ -11,9 +18,19 @@ export interface Row {
   viewer: string | null;
   /** The workspace this pull request came out of or was started in, when there is one to go to. */
   workspace: Workspace | null;
+  /**
+   * Set for one a workspace tracks in another repository: what it is read by, and what the
+   * actions are not offered for yet.
+   */
+  tracked: TrackedPullRequest | null;
 }
 
 export const rowKey = (projectId: string, number: number) => `${projectId}#${number}`;
+
+/** A tracked pull request's row: by its link, since another repository has a #7 too. Two
+ *  workspaces of one project tracking the same pull request are two rows. */
+export const trackedRowKey = (projectId: string, tracked: TrackedPullRequest) =>
+  `${projectId}@${tracked.workspaceId}@${tracked.url}`;
 
 /** When a pull request last changed, for ordering. One with no time on it sorts last. */
 function changedAt(pr: PullRequest): number {
@@ -48,6 +65,21 @@ export function rowsOf(projects: Project[], byProject: Record<string, ProjectPul
         pr,
         viewer: found.viewer,
         workspace: owner.get(pr.number) ?? null,
+        tracked: null,
+      });
+    }
+    // Those its workspaces follow in other repositories, under the project they came out of.
+    // One that has not been read yet has nothing to show.
+    for (const tracked of found.tracked) {
+      if (!tracked.pullRequest) continue;
+      const workspace = project.workspaces.find((w) => w.id === tracked.workspaceId);
+      rows.push({
+        key: trackedRowKey(project.id, tracked),
+        project,
+        pr: tracked.pullRequest,
+        viewer: found.viewer,
+        workspace: workspace && !workspace.archived && !workspace.missing ? workspace : null,
+        tracked,
       });
     }
   }
@@ -57,6 +89,10 @@ export function rowsOf(projects: Project[], byProject: Record<string, ProjectPul
 /** How many open pull requests a project's list holds. */
 export const openIn = (found: ProjectPullRequests | undefined): number =>
   found?.pullRequests.filter((pr) => pr.state === "open").length ?? 0;
+
+/** How many open ones its workspaces track in other repositories. */
+export const openTrackedIn = (found: ProjectPullRequests | undefined): number =>
+  found?.tracked.filter((tracked) => tracked.pullRequest?.state === "open").length ?? 0;
 
 /** The forge has more open pull requests than the list holds: it stops at a cap. */
 export const moreOpenThanListed = (found: ProjectPullRequests | undefined): boolean =>

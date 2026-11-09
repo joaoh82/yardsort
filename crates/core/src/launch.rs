@@ -233,8 +233,26 @@ impl Launcher<'_> {
                     .store
                     .project_test_env(&workspace.project_id)?
                     .is_empty();
-                (crate::smoke::dir(worktree).is_dir() || has_env)
-                    .then_some(crate::smoke::LAUNCH_SECTION)
+                let smoke = (crate::smoke::dir(worktree).is_dir() || has_env)
+                    .then_some(crate::smoke::LAUNCH_SECTION);
+                // A project whose checkout holds other repositories: the agent is told how a
+                // pull request it opens in one of them gets followed here.
+                let elsewhere = self
+                    .store
+                    .project(&workspace.project_id)?
+                    .and_then(|project| {
+                        crate::tracked::launch_section(std::path::Path::new(&project.root_path))
+                    });
+                match (smoke, elsewhere) {
+                    (None, None) => None,
+                    (smoke, elsewhere) => Some(
+                        [smoke.map(str::to_owned), elsewhere]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join("\n\n"),
+                    ),
+                }
             }
             _ => None,
         };
@@ -242,7 +260,7 @@ impl Launcher<'_> {
             launch,
             self.harnesses,
             memory.as_deref(),
-            smoke,
+            smoke.as_deref(),
             note.as_ref(),
         )?;
         resolved
@@ -1121,6 +1139,18 @@ mod tests {
         assert!(
             start(&ws, &store, bare.path(), Some("exit 0"), false, None).contains("## Smoke tests")
         );
+
+        // A project checkout holding another repository: the agent hears of `ys pr track`, after
+        // the smoke tests, and again not for a handoff.
+        std::fs::create_dir_all(bare.path().join("lib").join(".git")).unwrap();
+        let sent = start(&ws, &store, bare.path(), Some("exit 0"), false, None);
+        let smoke = sent.find("## Smoke tests").unwrap();
+        let elsewhere = sent.find("## Other repositories").expect(&sent);
+        assert!(smoke < elsewhere, "{sent}");
+        assert!(sent.contains("other git repositories: lib (in "), "{sent}");
+        assert!(sent.contains("ys pr track"), "{sent}");
+        assert!(!start(&ws, &store, bare.path(), Some("exit 0"), true, None)
+            .contains("Other repositories"));
     }
 
     /// A fork's packet goes to the agent after the user's message, in place of the memory it
