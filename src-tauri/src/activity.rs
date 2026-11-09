@@ -50,15 +50,23 @@ pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
 }
 
 /// Track the pull requests agents were seen creating while the app was closed, which the start
-/// took out of the inbox.
+/// took out of the inbox. On a thread of its own: finding `git` may mean asking the login shell,
+/// which the window should not wait for.
 pub fn track_settled(handle: &AppHandle, settled: yardsort_core::runtime::Settled) {
-    let Some(state) = handle.try_state::<AppState>() else {
+    if settled.pull_requests.is_empty() {
         return;
-    };
-    let gained = yardsort_core::runtime::track_seen(&state.store, &settled.pull_requests, || {
-        crate::git::Git::new(&state.env()).ok()
+    }
+    let handle = handle.clone();
+    std::thread::spawn(move || {
+        let Some(state) = handle.try_state::<AppState>() else {
+            return;
+        };
+        let gained =
+            yardsort_core::runtime::track_seen(&state.store, &settled.pull_requests, || {
+                crate::git::Git::new(&state.env()).ok()
+            });
+        tracked(&handle, &state.store, gained);
     });
-    tracked(handle, &state.store, gained);
 }
 
 /// Say which projects' workspaces began following a pull request.
