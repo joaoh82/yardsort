@@ -218,7 +218,7 @@ pub fn nested_repositories(root: &Path) -> Vec<String> {
 /// The first-message section that tells a new agent the project's checkout holds other
 /// repositories and how to have a pull request opened in one followed here. `None` when it holds
 /// none, which is most projects.
-pub fn launch_section(project_root: &Path) -> Option<String> {
+pub fn launch_section(project_root: &Path, workspace: &Path) -> Option<String> {
     let nested = nested_repositories(project_root);
     if nested.is_empty() {
         return None;
@@ -229,20 +229,44 @@ pub fn launch_section(project_root: &Path) -> Option<String> {
     let mut named = nested
         .iter()
         .take(NAMED_REPOSITORIES)
-        .map(|name| format!("`{}`", project_root.join(name).display()))
+        .map(|name| code(&project_root.join(name).display().to_string()))
         .collect::<Vec<_>>()
         .join(", ");
     if nested.len() > NAMED_REPOSITORIES {
-        named.push_str(&format!(" and {} more", nested.len() - NAMED_REPOSITORIES));
+        named.push_str(&format!(
+            ", and {} more in {}",
+            nested.len() - NAMED_REPOSITORIES,
+            code(&project_root.display().to_string())
+        ));
     }
+    // A project's local workspace is its checkout itself, where the clones are folders of its own.
+    let inside = crate::git::normalize(workspace) == crate::git::normalize(project_root);
+    let place = if inside {
+        String::new()
+    } else {
+        ", which are not in this workspace's folder".to_owned()
+    };
     Some(format!(
         "## Other repositories\n\n\
-         This project's checkout, {}, holds other git repositories, which are not in this \
-         workspace's folder: {named}. When you open a pull request in one of them, work in its \
-         folder there, then run `ys pr track <its url>` so Yardsort follows it with this \
-         workspace.",
-        project_root.display()
+         This project's checkout holds other git repositories{place}: {named}. Every workspace of \
+         the project shares them, so to work on a branch of one, make a worktree of it for \
+         yourself (`git -C <the clone> worktree add <a new folder outside it> -b <branch>`) \
+         rather than changing the clone's own checkout. When you open a pull request in one of \
+         them, run `ys pr track <its url>` so Yardsort follows it with this workspace."
     ))
+}
+
+/// `text` as inline code, with a fence longer than any run of backticks in it: a folder name may
+/// hold one.
+fn code(text: &str) -> String {
+    let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
+    format!("{fence}{pad}{text}{pad}{fence}")
 }
 
 // Seen being created. An adapter that sees a tool call open a pull request keeps its link, and
@@ -767,31 +791,65 @@ mod tests {
     #[test]
     fn nested_clones_are_named_in_the_launch_section() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        assert_eq!(launch_section(root), None, "nothing nested, nothing said");
+        let root = dir.path().join("parent");
+        let worktree = dir.path().join("worktrees/fix");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        assert_eq!(
+            launch_section(&root, &worktree),
+            None,
+            "nothing nested, nothing said"
+        );
         std::fs::create_dir_all(root.join("lib/.git")).unwrap();
         std::fs::create_dir_all(root.join("app")).unwrap();
         std::fs::write(root.join("app/.git"), "gitdir: elsewhere").unwrap();
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::create_dir_all(root.join(".hidden/.git")).unwrap();
         std::fs::write(root.join("file"), "").unwrap();
-        assert_eq!(nested_repositories(root), ["app", "lib"]);
-        let section = launch_section(root).unwrap();
+        assert_eq!(nested_repositories(&root), ["app", "lib"]);
+        let paths = format!(
+            "`{}`, `{}`.",
+            root.join("app").display(),
+            root.join("lib").display()
+        );
+
+        // From a worktree, which is elsewhere and has none of them: each by its whole path, said
+        // to be outside, with a worktree of its own to work in rather than the shared clone.
+        let section = launch_section(&root, &worktree).unwrap();
         assert!(section.starts_with("## Other repositories\n\n"));
         assert!(
             section.contains(&format!(
-                "not in this workspace's folder: `{}`, `{}`.",
-                root.join("app").display(),
-                root.join("lib").display()
+                "which are not in this workspace's folder: {paths}"
             )),
+            "{section}"
+        );
+        assert!(
+            section.contains("make a worktree of it for yourself"),
             "{section}"
         );
         assert!(section.contains("`ys pr track <its url>`"));
 
+        // From the project's own checkout — its local workspace — they are folders of its own.
+        let local = launch_section(&root, &root).unwrap();
+        assert!(!local.contains("not in this workspace's folder"), "{local}");
+        assert!(local.contains(&format!("repositories: {paths}")), "{local}");
+
         for n in 0..12 {
             std::fs::create_dir_all(root.join(format!("r{n:02}/.git"))).unwrap();
         }
-        assert!(launch_section(root).unwrap().contains(" and 4 more. When"));
+        assert!(
+            launch_section(&root, &worktree)
+                .unwrap()
+                .contains(&format!(", and 4 more in `{}`.", root.display())),
+            "the rest are still somewhere to look"
+        );
+    }
+
+    #[test]
+    fn a_path_with_a_backtick_stays_one_code_span() {
+        assert_eq!(code("/home/u/repo"), "`/home/u/repo`");
+        assert_eq!(code("/home/u/my`repo"), "``/home/u/my`repo``");
+        assert_eq!(code("`odd"), "`` `odd ``");
     }
 
     #[test]

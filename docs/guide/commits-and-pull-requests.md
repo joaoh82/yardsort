@@ -174,7 +174,9 @@ told about it instead, and **tracks** it:
   Only the link is kept from that tool call. One in the project's own repository is left to the
   project's list, which has it already. pi has no MCP tools, and OpenCode 2 is not read yet.
 - **The agent says so.** An agent started with a first message in a project whose folder holds
-  other repositories is told which they are, and to run
+  other repositories is told where each one is, by its whole path, outside its own worktree;
+  that every workspace of the project shares them, so it should make a worktree of the clone for
+  its branch rather than change the clone's own checkout; and to run
   [`ys pr track <url>`](cli.md#ys-pr) after opening a pull request in one of them. That covers an
   agent with its reporting off, a custom harness, and a pull request opened some other way — in
   the browser, say.

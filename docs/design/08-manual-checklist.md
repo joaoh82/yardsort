@@ -649,13 +649,19 @@ Benchmarks: see 07-terminal-benchmarks.
 Found: …
 ```
 
-### Linux (Omarchy, Hyprland), `ys` and `yardsort-host` from main at 522bede — 2026-11-09
+### Linux (Omarchy, Hyprland), `ys` and `yardsort-host`, without the window — 2026-11-09
 
-§ 28, first two rows, without the window: a real Claude Code 2.1.319 (haiku), started by
-`ys workspace new` in a parent project with a nested clone, under a throwaway profile served by
-`yardsort-host serve`, with a stand-in `gh` that prints a link and creates nothing. Its first
-message had _Other repositories_; it ran `gh pr create` in the clone, and the host's drain tracked
-`example/lib#41` by `hook` within the second, linked to the conversation, with nothing of the
-command or its output on the event. Found: the section named the clone as `lib (in <parent>)`,
-and the agent looked for `lib` in its own worktree first — it now names each clone by its whole
-path, outside the workspace's folder. The window's rows, and macOS and Windows, are still to do.
+§ 28, first two rows. A real Claude Code 2.1.319 (haiku), started by `ys workspace new` in a
+parent project with a nested clone, under a throwaway profile served by `yardsort-host serve`,
+with a stand-in `gh` that answers `pr create` only in a folder whose remote is the clone's, as
+the real one would, and creates nothing.
+
+- **main at 522bede.** Its first message had _Other repositories_, naming the clone
+  `lib (in <parent>)`; it looked for `lib` in its own worktree, and ran `gh pr create` only once
+  told the path. The host's drain then tracked `example/lib#41` by `hook` within the second,
+  linked to the conversation, with nothing of the command or its output on the event.
+- **The fix in #208**, naming each clone by its whole path and pointing at a worktree of it: the
+  agent went to the clone by itself, ran `gh pr create --head bump` there, and the pull request
+  was tracked with its workspace by `hook`, linked to its conversation.
+
+The window's rows, and macOS and Windows, are still to do.

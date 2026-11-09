@@ -249,7 +249,10 @@ impl Launcher<'_> {
                     .store
                     .project(&workspace.project_id)?
                     .and_then(|project| {
-                        crate::tracked::launch_section(std::path::Path::new(&project.root_path))
+                        crate::tracked::launch_section(
+                            std::path::Path::new(&project.root_path),
+                            std::path::Path::new(&workspace.path),
+                        )
                     });
                 let pointers: Vec<&str> = [smoke, done, elsewhere.as_deref()]
                     .into_iter()
