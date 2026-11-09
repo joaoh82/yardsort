@@ -299,6 +299,11 @@ they were: they cover the switch off, and every other agent until slice 3.
   command runs `gh pr create` — in command position, after `cd … &&`, a variable set for it,
   `env`, `sudo` or a path to `gh`, with `-R owner/name` between — gives the first pull request
   link on its stdout. `gh` as an argument (`echo gh pr create`, a commit message) does not count.
+  The command is split as a shell splits it: a separator inside quotes is text, and comments
+  and here-document bodies are left out, so `printf '…; gh pr create …'` or a here-document
+  holding the words, both of which print a link without opening anything, do not count either.
+  A `$(gh pr create)` inside double quotes is missed on purpose — a link missed is still in the
+  launch note's reach, a link invented tracks the wrong pull request.
 - **The MCP tool.** `mcp__<server>__create_pull_request` from a server whose name says GitHub
   (`github`, `claude_ai_GitHub`). Its answer, recorded, is text blocks holding JSON; the link is
   its `html_url` when there is one — a full answer names other pull requests in its description —
@@ -311,8 +316,10 @@ they were: they cover the switch off, and every other agent until slice 3.
   `git`, which the hook has no business running. `import_inbox` hands on the links of events it
   recorded for the first time (`InboxReport::pull_requests`), and every drainer tracks them with
   `tracked::track_seen`: the app's watcher and its drain on exit, `yardsort-host`, and `ys`
-  before any command that drains — `ys pr tracked` now drains first. `git` is found only when
-  there is something to track. An event drained twice is handed on once, so a pull request
+  before any command that drains — `ys pr tracked` now drains first. The import at start is a
+  drain too: `settle_at_start` returns the links it took (`Settled`, which must be used), and
+  the app tracks them once its state, and so the login shell's environment `git` is found by,
+  exists; `yardsort-host` at once. `git` is found only when there is something to track. An event drained twice is handed on once, so a pull request
   untracked since is not tracked again. Without `git` nothing is tracked and
   `pull_request_seen_no_git` is counted; a link `track` refuses for another reason counts
   `pull_request_seen_refused`.
@@ -322,7 +329,9 @@ they were: they cover the switch off, and every other agent until slice 3.
 
 How it was checked: the adapter against both recordings and against hand-made payloads for a
 version without `gitOperation`, a `gh pr view`, a failed call and a full GitHub answer; the
-link, command and tool rules with unit tests; `track_seen` against a real repository with an
+link, command and tool rules with unit tests, quoted and here-document text among them; a
+report left in the inbox while nothing ran, tracked from the start and not again by the drain
+after; `track_seen` against a real repository with an
 `origin`, refusing the project's own and doing nothing without `git`; the drain handing on a
 link once; the real `ys` binary as the hook with the recorded payloads, then `ys pr tracked`
 showing it by `hook`; the sidebar's badge appearing on the event. Not yet done: a real Claude

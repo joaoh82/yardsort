@@ -72,7 +72,10 @@ pub async fn run(profile: Profile) -> Result<(), String> {
         .map(|session| session.id.0)
         .collect();
     let home = HostHome::open(profile, Some(connected))?;
-    runtime::settle_at_start(&home.store, &home.profile.data_dir, &alive)?;
+    let settled = runtime::settle_at_start(&home.store, &home.profile.data_dir, &alive)?;
+    runtime::track_seen(&home.store, &settled.pull_requests, || {
+        yardsort_core::git::Git::new(home.env()).ok()
+    });
     let watching = {
         let dir = home.profile.data_dir.clone();
         // Weak: the watcher's thread must not keep the host alive past its stop.

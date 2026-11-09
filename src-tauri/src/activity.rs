@@ -49,6 +49,18 @@ pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
     }
 }
 
+/// Track the pull requests agents were seen creating while the app was closed, which the start
+/// took out of the inbox.
+pub fn track_settled(handle: &AppHandle, settled: yardsort_core::runtime::Settled) {
+    let Some(state) = handle.try_state::<AppState>() else {
+        return;
+    };
+    let gained = yardsort_core::runtime::track_seen(&state.store, &settled.pull_requests, || {
+        crate::git::Git::new(&state.env()).ok()
+    });
+    tracked(handle, &state.store, gained);
+}
+
 /// Say which projects' workspaces began following a pull request.
 fn tracked(handle: &AppHandle, store: &Store, workspaces: std::collections::BTreeSet<String>) {
     let projects: std::collections::BTreeSet<String> = workspaces

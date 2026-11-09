@@ -166,7 +166,8 @@ told about it instead, and **tracks** it:
 - **Yardsort sees it.** With [**Capture what Claude Code reports**](activity.md#what-claude-code-reports)
   on, a pull request Claude Code opens — with `gh pr create`, or a GitHub MCP server's
   `create_pull_request` tool — is tracked with its workspace as soon as Yardsort hears of it,
-  with nobody typing its link. Only the link is kept from that tool call. One in the project's
+  with nobody typing its link; one opened while Yardsort was closed is tracked when it next
+  starts. Only the link is kept from that tool call. One in the project's
   own repository is left to the project's list, which has it already.
 - **The agent says so.** An agent started with a first message in a project whose folder holds
   other repositories is told which they are, and to run

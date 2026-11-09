@@ -240,23 +240,20 @@ pub fn link_in(text: &str) -> Option<String> {
 
 /// Whether a shell command runs `gh pr create`, as a command of its own anywhere in it: after a
 /// `cd … &&`, behind a variable set for it or `env`, by a path to `gh`, with `-R owner/name`
-/// between. `gh` as an argument — `echo gh pr create`, a commit message — is not running it.
+/// between. `gh` as an argument — `echo gh pr create`, a commit message — is not running it, and
+/// neither is text in quotes or in a here-document, whatever separators it holds.
 pub fn runs_pr_create(command: &str) -> bool {
     /// Programs that run the command after them, and so leave it in command position.
     const WRAPPERS: &[&str] = &["command", "exec", "env", "time", "sudo", "nohup"];
-    let separated: String = command
-        .chars()
-        .map(|c| if ";&|()`\n{}".contains(c) { '\n' } else { c })
-        .collect();
-    separated.lines().any(|part| {
-        let mut words = part.split_whitespace().peekable();
+    simple_commands(command).iter().any(|part| {
+        let mut words = part.iter().map(String::as_str).peekable();
         let mut wrapped = false;
-        while let Some(word) = words.peek() {
+        while let Some(&word) = words.peek() {
             let assignment = !word.starts_with('-') && word.contains('=');
-            if assignment || WRAPPERS.contains(word) || (wrapped && word.starts_with('-')) {
-                wrapped |= WRAPPERS.contains(word);
+            if assignment || WRAPPERS.contains(&word) || (wrapped && word.starts_with('-')) {
+                wrapped |= WRAPPERS.contains(&word);
                 // `env -u NAME`, `sudo -u user`: the flag's value is not the command.
-                let valued = wrapped && matches!(*word, "-u" | "--unset" | "-C" | "--chdir" | "-g");
+                let valued = wrapped && matches!(word, "-u" | "--unset" | "-C" | "--chdir" | "-g");
                 words.next();
                 if valued {
                     words.next();
@@ -286,6 +283,130 @@ pub fn runs_pr_create(command: &str) -> bool {
         }
         asked == ["pr", "create"]
     })
+}
+
+/// The commands in a shell command line, each as its words, split the way a shell splits them:
+/// quotes and backslashes keep what they hold inside one word, and comments and here-document
+/// bodies are left out. Separators — `;`, `&`, `|`, a newline, parentheses, braces, backticks —
+/// end a command only outside quotes. Text in double quotes stays text, even a `$(…)` in it: a
+/// command missed is only a link left for the launch note, while one invented tracks the wrong
+/// pull request.
+fn simple_commands(line: &str) -> Vec<Vec<String>> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut commands = Vec::new();
+    let mut words: Vec<String> = Vec::new();
+    let mut word: Option<String> = None;
+    // Here-documents opened on this line, by delimiter, and whether `<<-` strips its tabs.
+    let mut heredocs: Vec<(String, bool)> = Vec::new();
+    let end_word = |word: &mut Option<String>, words: &mut Vec<String>| {
+        if let Some(done) = word.take() {
+            words.push(done);
+        }
+    };
+    let end_command = |words: &mut Vec<String>, commands: &mut Vec<Vec<String>>| {
+        if !words.is_empty() {
+            commands.push(std::mem::take(words));
+        }
+    };
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            '\'' => {
+                let text = word.get_or_insert_with(String::new);
+                i += 1;
+                while i < chars.len() && chars[i] != '\'' {
+                    text.push(chars[i]);
+                    i += 1;
+                }
+            }
+            '"' => {
+                let text = word.get_or_insert_with(String::new);
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    if chars[i] == '\\' && i + 1 < chars.len() && "\"\\$`".contains(chars[i + 1]) {
+                        i += 1;
+                    }
+                    text.push(chars[i]);
+                    i += 1;
+                }
+            }
+            '\\' => {
+                // An escaped newline joins two lines; anything else escaped is itself.
+                if let Some(&next) = chars.get(i + 1) {
+                    if next != '\n' {
+                        word.get_or_insert_with(String::new).push(next);
+                    }
+                }
+                i += 1;
+            }
+            '#' if word.is_none() => {
+                while i + 1 < chars.len() && chars[i + 1] != '\n' {
+                    i += 1;
+                }
+            }
+            '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) != Some(&'<') => {
+                end_word(&mut word, &mut words);
+                i += 2;
+                let strip_tabs = chars.get(i) == Some(&'-');
+                if strip_tabs {
+                    i += 1;
+                }
+                while matches!(chars.get(i), Some(' ' | '\t')) {
+                    i += 1;
+                }
+                let mut delimiter = String::new();
+                while let Some(&d) = chars.get(i) {
+                    if d.is_whitespace() || ";&|()<>".contains(d) {
+                        break;
+                    }
+                    if !"'\"\\".contains(d) {
+                        delimiter.push(d);
+                    }
+                    i += 1;
+                }
+                heredocs.push((delimiter, strip_tabs));
+                continue;
+            }
+            '\n' => {
+                end_word(&mut word, &mut words);
+                end_command(&mut words, &mut commands);
+                // The bodies of the here-documents this line opened follow it, one after another.
+                for (delimiter, strip_tabs) in heredocs.drain(..) {
+                    loop {
+                        i += 1;
+                        if i >= chars.len() {
+                            return commands;
+                        }
+                        let end = chars[i..]
+                            .iter()
+                            .position(|&c| c == '\n')
+                            .map_or(chars.len(), |at| i + at);
+                        let body: String = chars[i..end].iter().collect();
+                        let body = if strip_tabs {
+                            body.trim_start_matches('\t')
+                        } else {
+                            &body
+                        };
+                        i = end;
+                        if body == delimiter {
+                            break;
+                        }
+                    }
+                }
+            }
+            ';' | '&' | '|' | '(' | ')' | '`' | '{' | '}' => {
+                end_word(&mut word, &mut words);
+                end_command(&mut words, &mut commands);
+            }
+            c if c.is_whitespace() => end_word(&mut word, &mut words),
+            c => word.get_or_insert_with(String::new).push(c),
+        }
+        i += 1;
+    }
+    end_word(&mut word, &mut words);
+    end_command(&mut words, &mut commands);
+    commands
 }
 
 /// Whether an MCP tool is a GitHub server's `create_pull_request`: `mcp__<server>__<tool>`, as
@@ -560,9 +681,16 @@ mod tests {
             "gh pr --repo o/lib create --fill",
             "git push -u origin bump; gh pr create --fill | tee out",
             "(cd lib\ngh pr create --draft)",
-            "C:\\tools\\gh.exe pr create",
+            "'C:\\tools\\gh.exe' pr create",
+            "C:/tools/gh.exe pr create",
             "env -u GH_TOKEN gh pr create",
             "sudo -E gh pr create",
+            // Separators in quotes are the title's, not the shell's.
+            "gh pr create --title 'Bump; then | more' --body \"a && b\"",
+            "gh pr \\\n  create --fill",
+            "gh pr create --body-file - <<'EOF'\nFixes https://github.com/o/lib/pull/7\nEOF",
+            "cat <<EOF > body.md\nnotes; gh pr view 7\nEOF\ngh pr create --body-file body.md",
+            "cat <<-EOF > body.md\n\tnotes\n\tEOF\ngh pr create --fill",
         ] {
             assert!(runs_pr_create(yes), "{yes}");
         }
@@ -575,6 +703,12 @@ mod tests {
             "git commit -m 'gh pr create later'",
             "xargs -I{} echo gh pr create",
             "",
+            // Text that only mentions it, whatever separators it holds.
+            "printf '%s\\n' 'example; gh pr create --body https://github.com/o/lib/pull/7'",
+            "echo \"done && gh pr create\"",
+            "cat <<'EOF'\nRun: gh pr create --body https://github.com/o/lib/pull/7\nEOF",
+            "cat <<EOF\nfirst\ngh pr create --fill\nEOF\necho done",
+            "git status # then; gh pr create",
         ] {
             assert!(!runs_pr_create(no), "{no}");
         }
