@@ -98,6 +98,7 @@ pub const START_OPERATIONS: &[&str] = &[
     "session.start",
     "upload.begin",
     "upload.chunk",
+    "session.resume",
 ];
 
 /// Who this host is, to remote clients. Supplied by whoever builds the facade: no host identity
@@ -121,8 +122,9 @@ pub struct HostFacade<'a> {
     /// Activity subscriptions are answered, by [`serve::Visitor`]: the facade is serving a
     /// device's channel.
     pub subscriptions: bool,
-    /// Starting agents and uploading files are answered, by [`serve::Visitor`].
-    pub starting: bool,
+    /// Starting agents and uploading files are answered, by [`serve::Visitor`], with this. It
+    /// also says which conversations could be resumed.
+    pub starting: Option<&'a dyn start::Starting>,
     /// Why the terminal operations are not answered, when a device should hear it: they would
     /// be, but for something that passes. Said in `host.describe`, and as their refusal.
     pub terminals_later: Option<TerminalsLater>,
@@ -239,7 +241,8 @@ impl HostFacade<'_> {
             | Operation::WorkspaceStart(_)
             | Operation::SessionStart(_)
             | Operation::UploadBegin(_)
-            | Operation::UploadChunk(_) => Err(RemoteError::new(
+            | Operation::UploadChunk(_)
+            | Operation::SessionResume(_) => Err(RemoteError::new(
                 ErrorCode::Unsupported,
                 self.terminals_later.as_ref().map_or(
                     "Starting agents from here is not available on this host yet.",
@@ -268,7 +271,11 @@ impl HostFacade<'_> {
                 } else {
                     &[]
                 })
-                .chain(if self.starting { START_OPERATIONS } else { &[] })
+                .chain(if self.starting.is_some() {
+                    START_OPERATIONS
+                } else {
+                    &[]
+                })
                 .map(|&op| op.to_owned())
                 .collect(),
             terminals_later: self.terminals_later.clone(),
@@ -384,10 +391,14 @@ impl HostFacade<'_> {
             (Some(live), None) => self.other_terminals(&workspace.id, &records, live)?,
             _ => Vec::new(),
         };
+        let resumable = self.resumable(&records, &workspace.id, live.as_deref());
         let sessions = records
             .into_iter()
             .filter(|row| params.include_ended || row.running)
-            .map(|row| session(row, &workspace.id, live.as_deref()))
+            .map(|row| {
+                let resumable = resumable.contains(&row.id);
+                session(row, &workspace.id, live.as_deref(), resumable)
+            })
             .collect::<Answer<Vec<_>>>()?;
         let (sessions, next) = page(
             sessions,
@@ -407,6 +418,50 @@ impl HostFacade<'_> {
             terminals,
             next,
         })
+    }
+
+    /// Which of a workspace's records, newest first, `session.resume` would start again, as the
+    /// window's **Resume** decides: none when this facade starts nothing. A record still said to
+    /// run whose terminal is gone counts as ended, since a resume settles it first.
+    fn resumable(
+        &self,
+        records: &[SessionRow],
+        workspace_id: &str,
+        live: Option<&[SessionInfo]>,
+    ) -> std::collections::HashSet<String> {
+        let Some(starting) = self.starting else {
+            return std::collections::HashSet::new();
+        };
+        let rows = records
+            .iter()
+            .cloned()
+            .map(|mut row| {
+                if process_state(&row, workspace_id, live).0 == ProcessState::Gone {
+                    row.running = false;
+                }
+                row
+            })
+            .collect();
+        crate::sessions::describe(rows, &starting.definitions())
+            .into_iter()
+            .filter(|record| record.resumable)
+            .map(|record| record.id)
+            .collect()
+    }
+
+    /// A conversation's record and its workspace, when the grant reaches that workspace's project.
+    pub(crate) fn reachable_session(
+        &self,
+        grant: &Grant,
+        id: &SessionRecordId,
+    ) -> Answer<(SessionRow, WorkspaceRow)> {
+        let row = self
+            .store
+            .session(id.as_str())
+            .map_err(|_| unreadable())?
+            .ok_or_else(RemoteError::not_found)?;
+        let (workspace, _) = self.reachable_workspace(grant, &local_id(&row.workspace_id)?)?;
+        Ok((row, workspace))
     }
 
     /// The daemon's terminals in this workspace that belong to none of its conversations.
@@ -829,20 +884,9 @@ fn session(
     row: SessionRow,
     workspace_id: &str,
     live: Option<&[SessionInfo]>,
+    resumable: bool,
 ) -> Answer<SessionSummary> {
-    let terminal = live.and_then(|live| {
-        let pty = row.pty_session_id.as_deref()?;
-        live.iter().find(|info| {
-            info.id.0 == pty
-                && info.labels.get(WORKSPACE_LABEL).map(String::as_str) == Some(workspace_id)
-        })
-    });
-    let process = match (row.running, live, terminal) {
-        (false, _, _) => ProcessState::Ended,
-        (true, None, _) => ProcessState::Unknown,
-        (true, Some(_), Some(info)) if info.state == SessionState::Running => ProcessState::Running,
-        (true, Some(_), _) => ProcessState::Gone,
-    };
+    let (process, terminal) = process_state(&row, workspace_id, live);
     Ok(SessionSummary {
         id: local_id::<SessionRecordId>(&row.id)?,
         workspace: local_id(&row.workspace_id)?,
@@ -856,7 +900,30 @@ fn session(
         exit_code: row.exit_code,
         process,
         terminal: terminal.map(terminal_summary).transpose()?,
+        resumable,
     })
+}
+
+/// Whether a record's process runs, by the daemon's word when there is one, and its terminal.
+fn process_state<'a>(
+    row: &SessionRow,
+    workspace_id: &str,
+    live: Option<&'a [SessionInfo]>,
+) -> (ProcessState, Option<&'a SessionInfo>) {
+    let terminal = live.and_then(|live| {
+        let pty = row.pty_session_id.as_deref()?;
+        live.iter().find(|info| {
+            info.id.0 == pty
+                && info.labels.get(WORKSPACE_LABEL).map(String::as_str) == Some(workspace_id)
+        })
+    });
+    let process = match (row.running, live, terminal) {
+        (false, _, _) => ProcessState::Ended,
+        (true, None, _) => ProcessState::Unknown,
+        (true, Some(_), Some(info)) if info.state == SessionState::Running => ProcessState::Running,
+        (true, Some(_), _) => ProcessState::Gone,
+    };
+    (process, terminal)
 }
 
 /// Activity from timing alone — whether and when it last printed — never from what it printed.

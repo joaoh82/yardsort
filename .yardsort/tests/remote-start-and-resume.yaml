@@ -1,0 +1,221 @@
+id: remote-start-and-resume
+name: The window and a phone start an agent on a computer with no screen, and resume it
+description: >-
+  A yardsort-host on the stand-in server, with a stand-in agent that keeps its conversation on disk,
+  as host-restart's does. A pretend phone let only watch is refused starting and resuming. The real
+  window, on a profile of its own, is let type, starts a new workspace there with the stand-in, and
+  watches it; a phone let type sees it. The agent ends, and the phone resumes it with a message,
+  which the agent remembers and hears. It ends again, and the window resumes it. Linux only, since
+  the window stands in for the browser with xdg-open. A window opens while it runs; nothing needs
+  clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_and_a_stand_in_agent
+    action: shell
+    # The stand-in agent of host-restart.yaml, as the host's only harness.
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && cp .yardsort/tests/support/standin-agent.sh "$YS_RUN_DIR/" &&
+      printf '[[harness]]\nid = "stand-in"\nbuiltin = false\nlabel = "Stand-in agent"\ncommand = "sh"\nbase_args = ["%s"]\nsession_args = ["start", "{session_id}"]\nprompt_args = ["{prompt}"]\nresume_args = ["resume", "{session_id}"]\nfork_args = ["fork", "{session_id}", "{new_session_id}"]\nsession_id_mode = "assigned"\n'
+      "$YS_RUN_DIR/standin-agent.sh" > "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+
+  - id: a_phone_let_only_watch
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, watching]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: is_refused_starting_and_resuming
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", refused, Smoke box]
+    timeout: 60s
+    expect:
+      stdout_contains: "refused: resuming"
+
+  - id: open_the_window
+    action: shell
+    # A profile of its own: the host has the run's.
+    line: YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: the_window_signs_in_as_a_client
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", client-sign-in, "{{ run.dir }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Signed in as Smoke laptop"
+  - id: the_window_is_let_type
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, window, "{{ run.port }}", t]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: so_is_a_phone
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+
+  - id: the_window_starts_a_workspace_there
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/window.ts,
+        "{{ run.port }}",
+        starts-there,
+        Smoke box,
+        tidy-the-readme,
+      ]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: a workspace started on Smoke box, watched"
+  - id: the_phone_sees_it_begin
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        sees,
+        Smoke box,
+        "begins: tidy-the-readme",
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: begins: tidy-the-readme"
+  - id: the_agent_ends
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", ends, Smoke box]
+    timeout: 60s
+    expect:
+      stdout_contains: the agent ended
+  - id: the_phone_resumes_it_with_a_message
+    action: run
+    program: bun
+    args:
+      - .yardsort/tests/support/phone.ts
+      - "{{ run.dir }}"
+      - resumes
+      - Smoke box
+      - mind the links too
+      - "heard: mind the links too"
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: heard: mind the links too"
+  - id: it_remembered_the_conversation
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        sees,
+        Smoke box,
+        "again, remembering: tidy-the-readme",
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: again, remembering: tidy-the-readme"
+  - id: it_ends_again
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/phone.ts, "{{ run.dir }}", ends, Smoke box]
+    timeout: 60s
+    expect:
+      stdout_contains: the agent ended
+  - id: the_window_resumes_it
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", resumes-there, Smoke box]
+    timeout: 120s
+    expect:
+      stdout_contains: "saw: a conversation resumed on Smoke box, watched"
+  - id: the_phone_sees_it_again
+    action: run
+    program: bun
+    args:
+      [
+        .yardsort/tests/support/phone.ts,
+        "{{ run.dir }}",
+        sees,
+        Smoke box,
+        "again, remembering: tidy-the-readme",
+      ]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: again, remembering: tidy-the-readme"
+  - id: one_conversation_on_record
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, session, list]
+    expect:
+      stdout_contains: tidy-the-readme
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh stop-everything; kill "$(cat
+      "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

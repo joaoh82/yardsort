@@ -1021,6 +1021,11 @@ host yourself; local use stays account-free. Its phases R0–R7 are tracked in t
       whose terminal went with the daemon settled before it is continued, so a computer with no
       screen brings back the agents a reboot ended. Its local smoke test and the owner's run on the
       box, R5's gate check 3, passed.
+      Slice 7 was built on 2026-11-09 ([35 §16](35-remote-r4-r5.md#16--what-the-seventh-slice-adds)):
+      `session.resume` and a session's `resumable` in protocol minor 6, under `terminal:control`
+      rather than a scope of its own, as the owner chose; **Resume** on the phone; and on another
+      computer's page in the desktop app, **New workspace**, **New agent** and **Resume** by that
+      computer's ids.
       Slice 12 was added on 2026-11-08 at the owner's request: the slim image and a full one, with
       toolchains, `gh` and the harnesses whose licence allows it, published to the GitHub Container
       Registry on each release beside the tarballs; the other harnesses installed by the operator

@@ -25,7 +25,7 @@
 //! operations: see [`terminal`]. Since minor 3 a client can follow activity as it is recorded,
 //! with `activity.subscribe`: see [`ActivitySubscribeParams`]. Since minor 5 a client that may
 //! type into a terminal may also start an agent, in a new workspace or an existing one, and
-//! upload a file for one: see [`start`]. A host lists what it answers in
+//! upload a file for one, and since minor 6 resume an ended conversation: see [`start`]. A host lists what it answers in
 //! [`HostDescription::capabilities`].
 
 pub mod account;
@@ -46,9 +46,9 @@ pub use ids::{
 };
 pub use model::*;
 pub use start::{
-    HarnessList, HarnessSummary, SessionStartParams, Started, Upload, UploadBeginParams,
-    UploadChunkParams, UploadId, Uploaded, WorkspaceStartParams, MAX_PROMPT, MAX_UPLOAD,
-    MAX_UPLOADS, MAX_UPLOAD_CHUNK, MAX_UPLOAD_NAME,
+    HarnessList, HarnessSummary, SessionResumeParams, SessionStartParams, Started, Upload,
+    UploadBeginParams, UploadChunkParams, UploadId, Uploaded, WorkspaceStartParams, MAX_PROMPT,
+    MAX_UPLOAD, MAX_UPLOADS, MAX_UPLOAD_CHUNK, MAX_UPLOAD_NAME,
 };
 pub use terminal::{
     AcquireRequest, AttachRequest, AttachStart, Attached, ControlChanged, Controller,
@@ -66,7 +66,8 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 ///   `activity.ended` events.
 /// - 4: `terminalsLater` in `host.describe`, saying why terminals are not offered yet.
 /// - 5: `harness.list`, `workspace.start`, `session.start`, `upload.begin` and `upload.chunk`.
-pub const PROTOCOL_MINOR: u16 = 5;
+/// - 6: `session.resume`, and `resumable` in a session's summary.
+pub const PROTOCOL_MINOR: u16 = 6;
 
 /// The largest JSON message either side reads, requests and responses alike. Checked before
 /// parsing. A host keeps its responses within it: a page holds fewer items than asked when they
@@ -374,7 +375,8 @@ pub struct MemoryListParams {
 /// There is deliberately no operation that approves, edits or proposes memory, launches a
 /// program the device names, deletes or archives a workspace, or reads a file. Each of those is
 /// its own scoped increment, if it ever comes. Starting one of the host's own harnesses, and
-/// putting a file in the host's uploads folder, came in minor 5 ([`start`]).
+/// putting a file in the host's uploads folder, came in minor 5, and resuming one of its
+/// conversations in minor 6 ([`start`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", content = "params")]
 pub enum Operation {
@@ -418,6 +420,8 @@ pub enum Operation {
     UploadBegin(UploadBeginParams),
     #[serde(rename = "upload.chunk")]
     UploadChunk(UploadChunkParams),
+    #[serde(rename = "session.resume")]
+    SessionResume(SessionResumeParams),
 }
 
 /// Every operation's wire name, in [`Operation`]'s order.
@@ -442,6 +446,7 @@ pub const OPERATIONS: &[&str] = &[
     "session.start",
     "upload.begin",
     "upload.chunk",
+    "session.resume",
 ];
 
 impl Operation {
@@ -467,6 +472,7 @@ impl Operation {
             Self::SessionStart(_) => 17,
             Self::UploadBegin(_) => 18,
             Self::UploadChunk(_) => 19,
+            Self::SessionResume(_) => 20,
         };
         OPERATIONS[index]
     }
@@ -493,7 +499,8 @@ impl Operation {
             | Self::WorkspaceStart(_)
             | Self::SessionStart(_)
             | Self::UploadBegin(_)
-            | Self::UploadChunk(_) => Scope::TerminalControl,
+            | Self::UploadChunk(_)
+            | Self::SessionResume(_) => Scope::TerminalControl,
         })
     }
 
@@ -525,6 +532,7 @@ impl Operation {
             Self::SessionStart(start) => start.validate(),
             Self::UploadBegin(upload) => upload.validate(),
             Self::UploadChunk(chunk) => chunk.validate(),
+            Self::SessionResume(resume) => resume.validate(),
             _ => Ok(()),
         }
     }

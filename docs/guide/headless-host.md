@@ -179,9 +179,11 @@ ys workspace new my-service "Fix the flaky login test"
 ys attach                        # watch it here; detaching leaves it running
 ```
 
-A paired device that may type can start work too: a new workspace, or another agent in one, as
-[Remote](remote.md#starting-work-from-the-phone) says. It offers the agents this profile has turned
-on and can find.
+A paired device that may type can start work too: a new workspace, another agent in one, or a
+conversation that ended taken up again, as [Remote](remote.md#starting-work-from-the-phone) says, from
+the phone or from the desktop app on another computer
+([Reaching another computer](remote.md#reaching-another-computer)). It offers the agents this profile
+has turned on and can find.
 
 ## After a restart
 
@@ -200,7 +202,8 @@ ys session resume 6051993d      # the same conversation, in a new terminal
 ys session fork 6051993d        # a copy of it that goes its own way
 ```
 
-Either keeps running after the command returns, and the phone sees it as it would any agent. A
+Either keeps running after the command returns, and the phone sees it as it would any agent. A paired
+device that may type can resume one too, with **Resume** beside it. A
 resume picks up the conversation where the agent left it, as **Resume** does in the app, so it works
 only for an agent that can resume one by its id or the most recent one in its folder; `ys` says why
 when one cannot.

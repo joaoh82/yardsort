@@ -127,12 +127,14 @@ import {
   type PrFacts,
   type OtherComputers,
   type OtherHost,
+  type OtherHarness,
   type OtherHostView,
   type OtherLink,
   type RemoteController,
   type RemoteTerminalSeen,
   type OtherPairing,
   type OtherSession,
+  type OtherStarted,
   type OtherTerminal,
   type OtherWorkspace,
   type RemoteAnswer,
@@ -303,12 +305,14 @@ export type {
   ProjectTasks,
   OtherComputers,
   OtherHost,
+  OtherHarness,
   OtherHostView,
   OtherLink,
   OtherPairing,
   RemoteController,
   RemoteTerminalSeen,
   OtherSession,
+  OtherStarted,
   OtherTerminal,
   OtherWorkspace,
   RemoteAnswer,
@@ -844,6 +848,25 @@ export const ipc = {
   otherComputersPair: (code: string) => unwrap(commands.otherComputersPair(code)),
   otherComputersForget: (grantId: string) => unwrap(commands.otherComputersForget(grantId)),
   otherHost: (hostId: string) => unwrap(commands.otherHost(hostId)),
+  /**
+   * Starting work on another computer, by that computer's ids: it starts its own agents with its
+   * own settings. A start whose answer is lost is not tried again.
+   */
+  otherHostHarnesses: (hostId: string) => unwrap(commands.otherHostHarnesses(hostId)),
+  otherHostStartWorkspace: (
+    hostId: string,
+    projectId: string,
+    prompt: string,
+    harness: string | null,
+  ) => unwrap(commands.otherHostStartWorkspace(hostId, projectId, prompt, harness)),
+  otherHostStartSession: (
+    hostId: string,
+    workspaceId: string,
+    harness: string | null,
+    prompt: string | null,
+  ) => unwrap(commands.otherHostStartSession(hostId, workspaceId, harness, prompt)),
+  otherHostResume: (hostId: string, sessionId: string, prompt: string | null) =>
+    unwrap(commands.otherHostResume(hostId, sessionId, prompt)),
   /**
    * Watch a terminal on another computer. Its bytes and what else it shows come in order on one
    * channel, told apart by their first byte (`src-tauri/src/remote_terminal.rs`). Resolves to the

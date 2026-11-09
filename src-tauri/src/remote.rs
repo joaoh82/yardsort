@@ -189,6 +189,19 @@ impl Starting for AppStarting {
         Ok(session)
     }
 
+    fn resume(&self, session: &str, prompt: Option<&str>) -> IpcResult<SessionInfo> {
+        let info = self.with(|starter| starter.resume(session, prompt))?;
+        if let Some(workspace) = info.labels.get(yardsort_core::launch::WORKSPACE_LABEL) {
+            self.started(workspace, &info);
+        }
+        Ok(info)
+    }
+
+    fn definitions(&self) -> Vec<yardsort_core::harness::HarnessDef> {
+        let state = self.0.state::<AppState>();
+        yardsort_core::remote::start::definitions(&state.settings.get().harnesses, &state.env())
+    }
+
     fn data_dir(&self) -> std::path::PathBuf {
         self.0.state::<AppState>().data_dir.clone()
     }

@@ -193,8 +193,9 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   `yardsort-host`: see [A computer with no screen](docs/guide/headless-host.md). Its agents keep
   running when the host restarts, and when a reboot ends them, `ys session resume` brings their
   conversations back. The desktop app can
-  reach another computer the same way: its workspaces, agents and activity, and its terminals to
-  watch and, once you take control, to type into.
+  reach another computer the same way: its workspaces, agents and activity, its terminals to
+  watch and, once you take control, to type into, and new work or a resumed conversation to start
+  there.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>

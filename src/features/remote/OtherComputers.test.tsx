@@ -12,6 +12,10 @@ const core = vi.hoisted(() => ({
   otherComputersPair: vi.fn(),
   otherComputersForget: vi.fn(),
   otherHost: vi.fn(),
+  otherHostHarnesses: vi.fn(),
+  otherHostStartWorkspace: vi.fn(),
+  otherHostStartSession: vi.fn(),
+  otherHostResume: vi.fn(),
   remoteTerminalOpen: vi.fn(),
   remoteTerminalClose: vi.fn(),
   remoteTerminalTakeControl: vi.fn(),
@@ -101,6 +105,8 @@ const shown: View = {
   name: "Build box",
   link: { kind: "online" },
   mayType: true,
+  mayStart: false,
+  mayResume: false,
   readAt: 1_790_000_000_000,
   platform: "Linux",
   appVersion: "0.23.0",
@@ -122,6 +128,7 @@ const shown: View = {
               state: "busy",
               startedAt: 1,
               terminal: "t-1",
+              resumable: false,
             },
             {
               id: "s-0",
@@ -130,6 +137,8 @@ const shown: View = {
               state: "ended",
               startedAt: 0,
               terminal: null,
+              // That computer could resume it, but this view does not offer it unless let.
+              resumable: true,
             },
           ],
           terminals: [{ id: "t-2", program: "bash", purpose: "shell", state: "quiet" }],
@@ -201,6 +210,95 @@ describe("another computer's page", () => {
     const line = await screen.findByRole("status");
     expect(line).toHaveTextContent(/^Offline since .*: it is not connected\. What it showed at /);
     expect(screen.getByText("Fix the flaky login test")).toBeInTheDocument();
+  });
+});
+
+describe("starting work on another computer", () => {
+  const able: View = { ...shown, mayStart: true, mayResume: true };
+  const agents = [
+    { id: "claude", name: "Claude Code" },
+    { id: "codex", name: "Codex" },
+  ];
+  const started = { workspaceId: "w-1", terminal: "t-9", harness: "codex" };
+  const showing = async (view: View = able) => {
+    core.otherHost.mockResolvedValue(view);
+    core.otherHostHarnesses.mockResolvedValue(agents);
+    core.remoteTerminalOpen.mockResolvedValue(7);
+    core.remoteTerminalClose.mockResolvedValue(undefined);
+    useOtherComputersStore.setState({ status: paired });
+    render(<OtherHostView hostId="h-1" />);
+    await screen.findByText("Fix the flaky login test");
+  };
+
+  it("offers nothing to start where that computer does not let this one", async () => {
+    await showing({ ...able, mayStart: false, mayResume: false });
+    expect(screen.queryByRole("button", { name: /^New |^Resume / })).toBeNull();
+  });
+
+  it("starts a workspace there with the agent and message chosen, and watches it", async () => {
+    core.otherHostStartWorkspace.mockResolvedValue(started);
+    await showing();
+    await userEvent.click(screen.getByRole("button", { name: "New workspace in service" }));
+    const form = await screen.findByRole("region", { name: "New workspace in service" });
+    const go = within(form).getByRole("button", { name: "Start workspace" });
+    await vi.waitFor(() => expect(within(form).getByRole("combobox")).toHaveValue("claude"));
+    // A new workspace needs something to do.
+    expect(go).toBeDisabled();
+    await userEvent.selectOptions(within(form).getByRole("combobox", { name: "Agent" }), "codex");
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "What should it do?" }),
+      "Fix the spacing",
+    );
+    await userEvent.click(go);
+    expect(core.otherHostStartWorkspace).toHaveBeenCalledWith(
+      "h-1",
+      "p-1",
+      "Fix the spacing",
+      "codex",
+    );
+    await vi.waitFor(() =>
+      expect(core.remoteTerminalOpen).toHaveBeenCalledWith(
+        "h-1",
+        "t-9",
+        expect.any(Function),
+        expect.any(Function),
+      ),
+    );
+  });
+
+  it("starts another agent in a workspace with no message unless one is given", async () => {
+    core.otherHostStartSession.mockResolvedValue(started);
+    await showing();
+    await userEvent.click(screen.getByRole("button", { name: "New agent in fix-login" }));
+    const form = await screen.findByRole("region", { name: "New agent in fix-login" });
+    await vi.waitFor(() => expect(within(form).getByRole("combobox")).toHaveValue("claude"));
+    await userEvent.click(within(form).getByRole("button", { name: "Start agent" }));
+    expect(core.otherHostStartSession).toHaveBeenCalledWith("h-1", "w-1", "claude", null);
+  });
+
+  it("resumes an ended conversation there, and says why when it is refused", async () => {
+    core.otherHostResume.mockRejectedValueOnce({
+      code: "remote_lost",
+      message: "That computer's answer did not arrive, so it may have started anyway.",
+    });
+    core.otherHostResume.mockResolvedValueOnce(started);
+    await showing();
+    // One still running is not one to resume.
+    expect(screen.queryByRole("button", { name: "Resume Fix the flaky login test" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Resume Read the issue" }));
+    const form = await screen.findByRole("region", { name: "Resume Read the issue" });
+    expect(core.otherHostHarnesses).not.toHaveBeenCalled();
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "A message to go on with, if any" }),
+      "Carry on",
+    );
+    await userEvent.click(within(form).getByRole("button", { name: "Resume" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent(/may have started anyway/);
+    expect(core.remoteTerminalOpen).not.toHaveBeenCalled();
+    // Pressed again on purpose, it is asked again.
+    await userEvent.click(within(form).getByRole("button", { name: "Resume" }));
+    expect(core.otherHostResume).toHaveBeenLastCalledWith("h-1", "s-0", "Carry on");
+    await vi.waitFor(() => expect(core.remoteTerminalOpen).toHaveBeenCalled());
   });
 });
 

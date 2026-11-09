@@ -8,8 +8,8 @@
 
 /** The major this client speaks. */
 export const PROTOCOL_MAJOR = 1;
-/** The minor this client speaks: 5, starting agents and uploading files. */
-export const PROTOCOL_MINOR = 5;
+/** The minor this client speaks: 6, resuming a conversation. */
+export const PROTOCOL_MINOR = 6;
 
 /** The largest JSON message either side reads, in bytes. */
 export const MAX_CONTROL_FRAME = 64 * 1024;
@@ -47,7 +47,7 @@ export const MAX_LINK = 512;
 /** The most other terminals one sessions page lists. */
 export const MAX_TERMINALS = 32;
 
-/** Longest first message `workspace.start` or `session.start` carries, in bytes. */
+/** Longest message `workspace.start`, `session.start` or `session.resume` carries, in bytes. */
 export const MAX_PROMPT = 16 * 1024;
 /** The largest file one upload carries, in bytes. */
 export const MAX_UPLOAD = 20 * 1024 * 1024;

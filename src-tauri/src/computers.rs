@@ -155,6 +155,11 @@ pub struct OtherHostView {
     pub link: OtherLink,
     /// Whether that computer lets this one type into its terminals, once it takes control.
     pub may_type: bool,
+    /// Whether this computer may start work there: it may type, and that computer can.
+    pub may_start: bool,
+    /// Whether this computer may resume that computer's ended conversations: it may type, and
+    /// that computer can.
+    pub may_resume: bool,
     /// When it was last read; `None` until it has been.
     pub read_at: Option<f64>,
     pub platform: Option<String>,
@@ -195,6 +200,35 @@ pub struct OtherSession {
     pub started_at: f64,
     /// Its terminal there, to watch; `None` once it has ended.
     pub terminal: Option<String>,
+    /// That computer can resume it: it has ended, and its agent can take it up again.
+    pub resumable: bool,
+}
+
+/// An agent another computer can start.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherHarness {
+    pub id: String,
+    pub name: String,
+}
+
+/// An agent started on another computer: where it runs, to watch it.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherStarted {
+    pub workspace_id: String,
+    pub terminal: String,
+    pub harness: String,
+}
+
+impl From<remote_proto::Started> for OtherStarted {
+    fn from(started: remote_proto::Started) -> Self {
+        Self {
+            workspace_id: started.workspace.to_string(),
+            terminal: started.terminal.to_string(),
+            harness: started.harness,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -256,13 +290,15 @@ fn activity_name(activity: TerminalActivity) -> &'static str {
     }
 }
 
-fn view(host_id: &str, name: String, view: HostView) -> OtherHostView {
+fn view(host_id: &str, name: String, view: HostView, may_type: bool) -> OtherHostView {
     let Some(shown) = view.shown else {
         return OtherHostView {
             host_id: host_id.to_owned(),
             name,
             link: link(&view.link),
-            may_type: false,
+            may_type,
+            may_start: false,
+            may_resume: false,
             read_at: None,
             platform: None,
             app_version: None,
@@ -296,6 +332,7 @@ fn view(host_id: &str, name: String, view: HostView) -> OtherHostView {
                     .to_owned(),
                 started_at: s.started_at as f64,
                 terminal: s.terminal.map(|t| t.id.to_string()),
+                resumable: s.resumable,
             })
             .collect();
         let terminals = page
@@ -345,11 +382,14 @@ fn view(host_id: &str, name: String, view: HostView) -> OtherHostView {
             occurred_at: event.occurred_at as f64,
         })
         .collect();
+    let answers = |op: &str| may_type && shown.host.capabilities.iter().any(|c| c == op);
     OtherHostView {
         host_id: host_id.to_owned(),
         name: shown.host.name.clone(),
+        may_start: answers(computer::start::START),
+        may_resume: answers(computer::start::RESUME),
         link: link(&view.link),
-        may_type: false,
+        may_type,
         read_at: Some(shown.read_at_ms as f64),
         platform: Some(platform_label(shown.host.platform).to_owned()),
         app_version: Some(shown.host.app_version),
@@ -522,8 +562,81 @@ pub async fn other_host(app: AppHandle, host_id: String) -> IpcResult<Option<Oth
         .as_ref()
         .is_some_and(|g| g.scopes.contains(&remote_proto::Scope::TerminalControl));
     let name = grant.map(|g| g.host_name).unwrap_or_default();
-    Ok(Some(OtherHostView {
-        may_type,
-        ..view(&host_id, name, found)
-    }))
+    Ok(Some(view(&host_id, name, found, may_type)))
+}
+
+/// The agents another computer can start, its default first.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_harnesses(app: AppHandle, host_id: String) -> IpcResult<Vec<OtherHarness>> {
+    let harnesses = computer::start::harnesses(&home(&app), &host_id)
+        .await
+        .map_err(ipc)?;
+    Ok(harnesses
+        .into_iter()
+        .map(|h| OtherHarness {
+            id: h.id,
+            name: h.name,
+        })
+        .collect())
+}
+
+/// A new workspace in one of another computer's projects, named after `prompt`, with an agent
+/// given it. That computer makes it with its own settings, as its window would.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_start_workspace(
+    app: AppHandle,
+    host_id: String,
+    project_id: String,
+    prompt: String,
+    harness: Option<String>,
+) -> IpcResult<OtherStarted> {
+    computer::start::workspace(
+        &home(&app),
+        &host_id,
+        &project_id,
+        &prompt,
+        harness.as_deref(),
+    )
+    .await
+    .map(OtherStarted::from)
+    .map_err(ipc)
+}
+
+/// Another agent in one of another computer's workspaces, with a first message or none.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_start_session(
+    app: AppHandle,
+    host_id: String,
+    workspace_id: String,
+    harness: Option<String>,
+    prompt: Option<String>,
+) -> IpcResult<OtherStarted> {
+    computer::start::session(
+        &home(&app),
+        &host_id,
+        &workspace_id,
+        harness.as_deref(),
+        prompt.as_deref(),
+    )
+    .await
+    .map(OtherStarted::from)
+    .map_err(ipc)
+}
+
+/// One of another computer's ended conversations again, with a message to go on with or none.
+#[tauri::command]
+#[specta::specta]
+pub async fn other_host_resume(
+    app: AppHandle,
+    host_id: String,
+    session_id: String,
+    prompt: Option<String>,
+) -> IpcResult<OtherStarted> {
+    computer::start::resume(&home(&app), &host_id, &session_id, prompt.as_deref())
+        .await
+        .map(OtherStarted::from)
+        .map_err(ipc)
 }

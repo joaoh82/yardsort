@@ -2,10 +2,10 @@
 // of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 /**
- * Starting work from the phone: a new workspace with an agent and its first message, or another
- * agent in a workspace. The computer does it as its own window would, with its own settings: the
- * phone names only the project or workspace, one of the agents the computer offers, and the message.
- * Once it has started, its terminal opens.
+ * Starting work from the phone: a new workspace with an agent and its first message, another
+ * agent in a workspace, or an ended conversation again. The computer does it as its own window
+ * would, with its own settings: the phone names only the project, workspace or conversation, one
+ * of the agents the computer offers, and the message. Once it has started, its terminal opens.
  *
  * Nothing is started twice. A start whose answer is lost on the way is said to be so, and the
  * person looks at the computer's list before starting again.
@@ -18,6 +18,8 @@ import {
   type HarnessSummary,
   type HostId,
   type ProjectId,
+  type SessionRecordId,
+  type SessionSummary,
   type WorkspaceId,
   type WorkspacePage,
 } from "@yardsort/remote-client";
@@ -36,9 +38,30 @@ export function canStart(channel: Channel | null): boolean {
   return channel?.host.capabilities.includes("workspace.start") ?? false;
 }
 
+/** What a computer answers that can resume a conversation: one from before minor 6 cannot. */
+export function canResume(channel: Channel | null): boolean {
+  return channel?.host.capabilities.includes("session.resume") ?? false;
+}
+
 export default function StartScreen() {
-  const params = useLocalSearchParams<{ host?: string; workspace?: string; project?: string }>();
+  const params = useLocalSearchParams<{
+    host?: string;
+    workspace?: string;
+    project?: string;
+    resume?: string;
+  }>();
   if (!params.host) return <Redirect href="/account" />;
+  if (params.resume && params.workspace) {
+    return (
+      <OfProfile>
+        <Resume
+          host={params.host as HostId}
+          workspace={params.workspace as WorkspaceId}
+          session={params.resume as SessionRecordId}
+        />
+      </OfProfile>
+    );
+  }
   return (
     <OfProfile>
       <Start
@@ -49,6 +72,10 @@ export default function StartScreen() {
     </OfProfile>
   );
 }
+
+/** Said when a start's answer is lost: it may have started, so nothing is tried again. */
+const LOST =
+  "The computer's answer did not arrive, so it may have started anyway. Look at its list before starting again.";
 
 /** What there is to choose from, read from the computer. */
 interface Choices {
@@ -151,11 +178,7 @@ function Start({
       });
     } catch (error) {
       setStarting(false);
-      setProblem(
-        error instanceof ChannelClosed
-          ? "The computer's answer did not arrive, so it may have started anyway. Look at its list before starting again."
-          : messageOf(error),
-      );
+      setProblem(error instanceof ChannelClosed ? LOST : messageOf(error));
     }
   };
 
@@ -238,6 +261,151 @@ function Start({
           busy={starting}
           disabled={!ready}
           onPress={() => void start()}
+        />
+      )}
+    </Screen>
+  );
+}
+
+/** The conversation to resume, and its workspace's name, as the computer has them now. */
+interface Resuming {
+  session: SessionSummary | null;
+  workspaceName: string;
+}
+
+/**
+ * An ended conversation again, in a new terminal, under its own record: the agent picks up where
+ * it was, as the window's **Resume** does. A message to go on with is typed in once it is ready.
+ */
+function Resume({
+  host,
+  workspace,
+  session,
+}: {
+  host: HostId;
+  workspace: WorkspaceId;
+  session: SessionRecordId;
+}) {
+  const router = useRouter();
+  const { reach, channel } = useChannelTo(host);
+  const [asked, setAsked] = useState(0);
+  const [message, setMessage] = useState("");
+  const [resuming, setResuming] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const read = useCallback(
+    async (through: Channel): Promise<Resuming> => {
+      const detail = await through.workspace(workspace);
+      let found: SessionSummary | null = null;
+      let cursor: Cursor | null = null;
+      for (let pages = 0; pages < MOST_PAGES && !found; pages += 1) {
+        const page = await through.sessions({ workspace, includeEnded: true, cursor });
+        found = page.sessions.find((s) => s.id === session) ?? null;
+        cursor = page.next;
+        if (!cursor) break;
+      }
+      return { session: found, workspaceName: detail.workspace.name };
+    },
+    [workspace, session],
+  );
+  const choices = useRead(channel, read, asked);
+  const screenTitle = <Stack.Screen options={{ title: "Resume" }} />;
+
+  if (reach?.kind === "gone") {
+    return (
+      <Screen>
+        {screenTitle}
+        <NoLongerPaired why={reach.why} />
+      </Screen>
+    );
+  }
+
+  const answer = choices.answer;
+  const found = answer?.session ?? null;
+  const able = canResume(channel) && found?.resumable === true;
+
+  const resume = async () => {
+    if (!channel || !found) return;
+    setResuming(true);
+    setProblem(null);
+    try {
+      const started = await channel.resumeSession({
+        session: found.id,
+        ...(message.trim() ? { prompt: message } : {}),
+      });
+      router.replace({
+        pathname: "/terminal",
+        params: { host, terminal: started.terminal, label: found.harness, workspace },
+      });
+    } catch (error) {
+      setResuming(false);
+      setProblem(error instanceof ChannelClosed ? LOST : messageOf(error));
+    }
+  };
+
+  return (
+    <Screen refreshing={false} onRefresh={() => setAsked((n) => n + 1)}>
+      {screenTitle}
+      <ReachLine reach={reach} lastSeenAt={null} />
+      {choices.problem && <Problem>{choices.problem}</Problem>}
+      {channel && !answer && !choices.problem && <Waiting label="Asking the computer" />}
+      {!channel && <Body muted>Resuming needs the computer to be reachable.</Body>}
+      {channel && answer && !canResume(channel) && (
+        <Body muted>
+          This computer’s Yardsort is too old to resume a conversation from a phone. Update it, then
+          try again.
+        </Body>
+      )}
+      {answer && !found && <Body muted>That conversation is no longer on the computer.</Body>}
+      {found && (
+        <Body>
+          {found.title}, in {answer?.workspaceName}. The agent picks up where it was, in a new
+          terminal.
+        </Body>
+      )}
+      {found && canResume(channel) && !found.resumable && (
+        <Body muted>
+          {found.process === "ended"
+            ? "The computer cannot resume this one. Its window says why."
+            : "It is still running."}
+        </Body>
+      )}
+      {able && (
+        <Field
+          label="A message to go on with, if any"
+          hint="Without one, the agent waits for you."
+          value={message}
+          onChangeText={setMessage}
+          multiline
+          autoCapitalize="sentences"
+          editable={!resuming}
+        />
+      )}
+      {problem && <Problem>{problem}</Problem>}
+      {able && (
+        <Button
+          title="Resume"
+          kind="primary"
+          busy={resuming}
+          disabled={resuming}
+          onPress={() => void resume()}
+        />
+      )}
+      {found?.terminal && (
+        <Button
+          title="See its last screen"
+          kind="quiet"
+          onPress={() =>
+            router.replace({
+              pathname: "/terminal",
+              params: {
+                host,
+                terminal: (found.terminal as NonNullable<SessionSummary["terminal"]>).id,
+                label: found.harness,
+                workspace,
+              },
+            })
+          }
         />
       )}
     </Screen>

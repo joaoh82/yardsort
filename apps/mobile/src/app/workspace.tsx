@@ -25,7 +25,7 @@ import { useApp } from "../lib/context";
 import { moment, stamp } from "../lib/format";
 import type { ObservedWorkspace } from "../lib/observed";
 import { NoLongerPaired, OfProfile, ReachLine, useChannelTo, useRead } from "../ui/live";
-import { canStart } from "./start";
+import { canResume, canStart } from "./start";
 import {
   Body,
   Button,
@@ -156,6 +156,15 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
             <SessionRow
               key={session.id}
               session={session}
+              resume={
+                session.resumable && canResume(channel)
+                  ? () =>
+                      router.push({
+                        pathname: "/start",
+                        params: { host, workspace, resume: session.id },
+                      })
+                  : undefined
+              }
               watch={
                 session.terminal
                   ? () => watch(session.terminal as TerminalSummary, session.harness)
@@ -249,8 +258,21 @@ function Workspace({ host, workspace }: { host: HostId; workspace: WorkspaceId }
   );
 }
 
-function SessionRow({ session, watch }: { session: SessionSummary; watch?: () => void }) {
+/**
+ * A conversation. One the computer can resume goes to resuming it, which also shows its last
+ * screen while the computer keeps it; any other with a terminal goes to that terminal.
+ */
+function SessionRow({
+  session,
+  watch,
+  resume,
+}: {
+  session: SessionSummary;
+  watch?: (() => void) | undefined;
+  resume?: (() => void) | undefined;
+}) {
   const about = [session.harness, session.model].filter(Boolean).join(" · ");
+  const open = resume ?? watch;
   return (
     <Row
       title={session.title}
@@ -258,8 +280,9 @@ function SessionRow({ session, watch }: { session: SessionSummary; watch?: () =>
       about={about}
       detail={sessionWords(session)}
       leading={<AgentMark harness={session.harness} />}
-      label={session.title}
-      {...(watch ? { onPress: watch } : {})}
+      label={resume ? `${session.title}, ${sessionWords(session)}, resume` : session.title}
+      {...(resume ? { tag: "Resume" } : {})}
+      {...(open ? { onPress: open } : {})}
     />
   );
 }

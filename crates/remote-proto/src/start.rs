@@ -1,10 +1,12 @@
-//! Starting work from a device, and handing an agent a file: since minor 5.
+//! Starting work from a device, and handing an agent a file: since minor 5, and resuming a
+//! conversation since minor 6.
 //!
 //! A device that may type into a terminal (`terminal:control`) may also start what a terminal
-//! runs: a new workspace with an agent and its first message (`workspace.start`), or another
-//! agent in a workspace (`session.start`). Neither names a program, an argument or a folder. The
-//! device picks a harness by the id `harness.list` gave it, and the host starts that harness as
-//! its own settings say, exactly as its window would.
+//! runs: a new workspace with an agent and its first message (`workspace.start`), another agent
+//! in a workspace (`session.start`), or an ended conversation again, under its own record
+//! (`session.resume`). None names a program, an argument or a folder. The device picks a harness
+//! by the id `harness.list` gave it, or a conversation by its record's id, and the host starts it
+//! as its own settings say, exactly as its window would.
 //!
 //! **Uploading** puts a file the device sends — a photo, for an agent to look at — on the host,
 //! in a folder of the host's own, outside every worktree. `upload.begin` says how large it is and
@@ -17,10 +19,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ProjectId, TerminalId, WorkspaceId};
+use crate::ids::{ProjectId, SessionRecordId, TerminalId, WorkspaceId};
 use crate::{ErrorCode, RemoteError};
 
-/// Longest first message a device may send with `workspace.start` or `session.start`, in bytes.
+/// Longest message a device may send with `workspace.start`, `session.start` or
+/// `session.resume`, in bytes.
 pub const MAX_PROMPT: usize = 16 * 1024;
 /// The largest file one upload carries, in bytes.
 pub const MAX_UPLOAD: u64 = 20 * 1024 * 1024;
@@ -81,7 +84,20 @@ pub struct SessionStartParams {
     pub prompt: Option<String>,
 }
 
-/// The reply to `workspace.start` and `session.start`: where the agent runs, to watch it.
+/// `session.resume`: an ended conversation again, in a new terminal, under the same record, with
+/// a message to go on with or none. Only one whose summary says it is `resumable`. Needs
+/// `terminal:control`. Since minor 6.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionResumeParams {
+    pub session: SessionRecordId,
+    /// At most [`MAX_PROMPT`] bytes. Without one, or empty, the agent waits to be told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+}
+
+/// The reply to `workspace.start`, `session.start` and `session.resume`: where the agent runs,
+/// to watch it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Started {
@@ -162,6 +178,15 @@ impl SessionStartParams {
             return invalid("That message is longer than one request may carry.");
         }
         harness_valid(self.harness.as_ref())
+    }
+}
+
+impl SessionResumeParams {
+    pub(crate) fn validate(&self) -> Result<(), RemoteError> {
+        if self.prompt.as_ref().is_some_and(|p| p.len() > MAX_PROMPT) {
+            return invalid("That message is longer than one request may carry.");
+        }
+        Ok(())
     }
 }
 

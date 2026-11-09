@@ -5,6 +5,15 @@ has the downloads and the full commit lists.
 
 ## Unreleased
 
+- **Start work on another computer, and resume its conversations, from the phone or the desktop.**
+  On another computer's page in the desktop app, **New workspace** beside a project, **New agent**
+  beside a workspace and **Resume** beside an agent that ended start them there, by that computer's
+  own projects and agents, and open the new terminal to watch. On the phone, an ended conversation
+  the computer could resume shows **Resume**, with a message to go on with or none. Both need the
+  computer to let the device type, as starting already does, and the computer to run this version.
+  A start whose answer is lost on the way is never tried again by itself. See
+  [Starting work from the phone](docs/guide/remote.md#starting-work-from-the-phone) and
+  [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
 - **`ys session resume` and `ys session fork`.** Continue an agent's conversation from the command
   line, as **Resume** and **Fork** do in the app, naming it by the start of its id from
   `ys session list --all`. On a computer with no screen, this is how agents a reboot or a container

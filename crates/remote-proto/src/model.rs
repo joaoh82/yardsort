@@ -268,6 +268,11 @@ pub struct SessionSummary {
     pub process: ProcessState,
     /// Present while the host's daemon still has the terminal, exited or not.
     pub terminal: Option<TerminalSummary>,
+    /// Whether `session.resume` would start it again: it has ended, its harness is one the host
+    /// can resume, and the host knows which conversation it was. Since minor 6; an earlier host
+    /// says nothing, which reads as `false`.
+    #[serde(default)]
+    pub resumable: bool,
 }
 
 /// What a terminal outside any recorded conversation runs.
