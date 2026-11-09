@@ -498,6 +498,13 @@ export class FakeServer {
           terminal: "terminal-1",
           harness: (params.harness as unknown as string | undefined) ?? "claude",
         };
+      case "session.resume":
+        return {
+          kind: "started",
+          workspace: "workspace-1",
+          terminal: "terminal-1",
+          harness: "claude",
+        };
       case "upload.begin":
         this.uploads.push({
           workspace: params.workspace as unknown as string,

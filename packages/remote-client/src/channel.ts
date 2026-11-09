@@ -59,6 +59,7 @@ import {
   response as responseDecoder,
   type SessionListParams,
   type SessionPage,
+  type SessionResumeParams,
   type SessionStartParams,
   type Started,
   type StreamId,
@@ -333,6 +334,15 @@ export class Channel {
   async startSession(params: SessionStartParams): Promise<Started> {
     const { kind: _, ...started } = expect(
       await this.ask({ op: "session.start", params }),
+      "started",
+    );
+    return started;
+  }
+
+  /** An ended conversation again, under its own record: one whose summary says `resumable`. */
+  async resumeSession(params: SessionResumeParams): Promise<Started> {
+    const { kind: _, ...started } = expect(
+      await this.ask({ op: "session.resume", params }),
       "started",
     );
     return started;

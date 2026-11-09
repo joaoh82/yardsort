@@ -396,6 +396,11 @@ export interface SessionSummary {
   exitCode: number | null;
   process: ProcessState;
   terminal: TerminalSummary | null;
+  /**
+   * `session.resume` would start it again: it has ended, and the computer can resume its agent's
+   * conversation. Minor 6; an earlier computer says nothing, which reads as `false`.
+   */
+  resumable: boolean;
 }
 
 const sessionSummary: Decoder<SessionSummary> = object({
@@ -411,6 +416,7 @@ const sessionSummary: Decoder<SessionSummary> = object({
   exitCode: nullable(i64),
   process: oneOf(["running", "ended", "gone", "unknown"]),
   terminal: nullable(terminalSummary),
+  resumable: orElse(bool, () => false),
 });
 
 /** What a terminal outside a recorded conversation runs. One from a newer host is `other`. */
@@ -788,6 +794,12 @@ export interface SessionStartParams {
   prompt?: string;
 }
 
+/** An ended conversation again, under its own record, with a message or none. Minor 6. */
+export interface SessionResumeParams {
+  session: SessionRecordId;
+  prompt?: string;
+}
+
 /** An upload under way, numbered by the computer within its channel. */
 export type UploadId = number;
 
@@ -824,7 +836,8 @@ export type Operation =
   | { op: "workspace.start"; params: WorkspaceStartParams }
   | { op: "session.start"; params: SessionStartParams }
   | { op: "upload.begin"; params: { workspace: WorkspaceId; name: string; size: number } }
-  | { op: "upload.chunk"; params: { upload: UploadId; offset: number; data: string } };
+  | { op: "upload.chunk"; params: { upload: UploadId; offset: number; data: string } }
+  | { op: "session.resume"; params: SessionResumeParams };
 
 export type OperationName = Operation["op"];
 
@@ -850,6 +863,7 @@ export const OPERATIONS: readonly OperationName[] = [
   "session.start",
   "upload.begin",
   "upload.chunk",
+  "session.resume",
 ];
 
 const leaseRefFields = { terminal: id<TerminalId>(), lease: id<LeaseId>(), generation: u64 };
@@ -908,6 +922,7 @@ const params: Record<string, Decoder<unknown>> = {
   }),
   "upload.begin": object({ workspace: id<WorkspaceId>(), name: text(), size: u64 }),
   "upload.chunk": object({ upload: u32, offset: u64, data: text() }),
+  "session.resume": object({ session: id<SessionRecordId>(), prompt: optional(text()) }),
 };
 
 /** The scope a caller needs for an operation. `null` for `host.describe`, which any grant may ask. */
@@ -992,6 +1007,8 @@ export function validate(operation: Operation): string | null {
     }
     case "upload.chunk":
       return chunkInvalid(operation.params.data);
+    case "session.resume":
+      return operation.params.prompt === undefined ? null : promptTooLong(operation.params.prompt);
     default:
       return null;
   }

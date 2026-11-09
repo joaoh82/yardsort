@@ -110,7 +110,7 @@ impl Context<'_> {
             host: self.host,
             interactive: self.interactive,
             subscriptions: true,
-            starting: self.interactive && self.starting.is_some(),
+            starting: self.starting.as_deref().filter(|_| self.interactive),
             // A channel's daemon that does not share control is one from before leases.
             terminals_later: (!self.interactive).then(super::earlier_daemon),
         }
@@ -274,7 +274,7 @@ impl Visitor {
             operation if is_terminal(operation) && context.interactive => facade
                 .check(&grant, &request)
                 .and_then(|()| self.terminal(context, &facade, &grant, &request)),
-            operation if start::is_start(operation) && facade.starting => facade
+            operation if start::is_start(operation) && facade.starting.is_some() => facade
                 .check(&grant, &request)
                 .and_then(|()| self.start(context, &facade, &grant, &request)),
             Operation::ActivitySubscribe(params) => facade

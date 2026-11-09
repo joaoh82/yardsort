@@ -1,7 +1,8 @@
 //! Starting work for a device, and keeping the files it sends: the host's side of
 //! [`remote_proto::start`].
 //!
-//! A device names a harness by its id, a project or a workspace by theirs, and a first message.
+//! A device names a harness by its id, a project, a workspace or a conversation by theirs, and a
+//! first message.
 //! Everything else is this host's own: the harness runs as its settings say, a new workspace is
 //! made from the project's default branch and named after the message, exactly as the window's
 //! composer and `ys workspace new` do. What a device sends to upload goes in this profile's
@@ -17,8 +18,9 @@ use remote_proto::{clip, HarnessSummary, MAX_LABEL, MAX_TEXT};
 use crate::env::ShellEnv;
 use crate::error::{IpcError, IpcResult};
 use crate::git::Git;
-use crate::harness;
+use crate::harness::{self, HarnessDef};
 use crate::launch::{HarnessRequest, Launch, Launcher};
+use crate::sessions::Continue;
 use crate::settings::Settings;
 use crate::store::Store;
 use crate::workspaces::Workspaces;
@@ -52,6 +54,12 @@ pub trait Starting: Send + Sync {
         harness: &str,
         prompt: Option<&str>,
     ) -> IpcResult<SessionInfo>;
+    /// The conversation recorded as `session` again, under its record, as the window's
+    /// **Resume** starts it.
+    fn resume(&self, session: &str, prompt: Option<&str>) -> IpcResult<SessionInfo>;
+    /// The harnesses whose program is found, as configured: what says which conversations
+    /// [`Self::resume`] could start again.
+    fn definitions(&self) -> Vec<HarnessDef>;
     /// This profile's data folder: uploads go in its `uploads` folder.
     fn data_dir(&self) -> PathBuf;
 }
@@ -102,12 +110,20 @@ impl Starter<'_> {
         Ok((row.id, session))
     }
 
-    pub fn session(
-        &self,
-        workspace: &str,
-        harness: &str,
-        prompt: Option<&str>,
-    ) -> IpcResult<SessionInfo> {
+    pub fn definitions(&self) -> Vec<HarnessDef> {
+        definitions(&self.settings.harnesses, self.env)
+    }
+
+    pub fn resume(&self, session: &str, prompt: Option<&str>) -> IpcResult<SessionInfo> {
+        self.launcher().continue_session(
+            session,
+            Continue::Resume,
+            STARTED_SIZE,
+            prompt.filter(|p| !p.trim().is_empty()).map(str::to_owned),
+        )
+    }
+
+    fn launcher(&self) -> Launcher<'_> {
         Launcher {
             store: self.store,
             host: self.terminals,
@@ -117,7 +133,15 @@ impl Starter<'_> {
             launched_by: crate::activity::LaunchedBy::App,
             data_dir: self.data_dir,
         }
-        .in_workspace(
+    }
+
+    pub fn session(
+        &self,
+        workspace: &str,
+        harness: &str,
+        prompt: Option<&str>,
+    ) -> IpcResult<SessionInfo> {
+        self.launcher().in_workspace(
             workspace,
             Launch::Harness(HarnessRequest {
                 id: harness.to_owned(),
@@ -133,6 +157,16 @@ impl Starter<'_> {
             STARTED_SIZE,
         )
     }
+}
+
+/// The configured harnesses whose program is found, turned on or not: [`Starting::definitions`].
+pub fn definitions(harnesses: &[harness::HarnessOverride], env: &ShellEnv) -> Vec<HarnessDef> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    harness::resolve_all(harnesses)
+        .into_iter()
+        .map(|h| h.def)
+        .filter(|def| env.find_program(&def.command, &cwd).is_some())
+        .collect()
 }
 
 /// The folder a workspace's uploads go in.
@@ -207,9 +241,17 @@ fn forget_old(dir: &Path) {
 pub fn start_error(error: &IpcError) -> remote_proto::RemoteError {
     use remote_proto::{ErrorCode, RemoteError};
     match error.code.as_str() {
-        "no_base_branch" | "unknown_workspace" => {
+        // What the window says when a conversation cannot be resumed, which names a harness
+        // at most.
+        "no_base_branch" | "unknown_workspace" | "cannot_continue" => {
             RemoteError::new(ErrorCode::InvalidRequest, error.message.clone())
         }
+        "unknown_session" => RemoteError::not_found(),
+        "host_unreachable" => RemoteError::new(
+            ErrorCode::Internal,
+            "The computer could not tell whether that conversation still runs, so it was not \
+             resumed. Try again.",
+        ),
         "unknown_harness" => RemoteError::new(
             ErrorCode::InvalidRequest,
             "That agent is not one this computer can start.",

@@ -8,9 +8,10 @@ Remote lets your phone reach the agents on this computer through a Yardsort serv
 at a workspace, watch a terminal, or take control of one and type, away from your desk. A computer with no
 screen, such as a server you reach over SSH, can be a host too: see
 [A computer with no screen](headless-host.md). A phone that may
-type can also start a new workspace or another agent, and give an agent a picture. The agents keep
+type can also start a new workspace or another agent, resume a conversation that ended, and give an
+agent a picture. The agents keep
 running on this computer whatever happens to the connection. This computer can also reach another one
-the same way, watch its terminals and type into them: see
+the same way, watch its terminals, type into them and start work there: see
 [Reaching another computer](#reaching-another-computer).
 
 Neither end listens for connections: this computer and your phone each reach out to the server.
@@ -58,10 +59,16 @@ so it needs nothing else from you.
   terminal then opens on the phone. Setup that takes a while keeps the phone waiting; it carries on here
   whatever happens to the connection.
 - **New agent**, in a workspace, starts another agent there, with a first message or none.
+- **Resume**, on a conversation that ended, takes it up again in a new terminal, as
+  [Resume](terminals-and-sessions.md#resume) does here: the same conversation, under the same record,
+  with a message to go on with or none. A conversation shows it only when this computer could resume it, and only to a device you let type.
+  Tap **Show ended conversations** in a workspace to see them. One whose terminal is still here also
+  offers **See its last screen**.
 
 The phone offers only the agents this computer has turned on in **Settings → Harnesses** and can find,
 the first of them chosen to begin with, and each starts as those settings say. The workspace and its
-tab appear in this window at once.
+tab appear in this window at once. If the connection drops before this computer answers, the phone says
+the agent may have started anyway and does not try again: look at the list before starting it again.
 
 ## Giving an agent a picture
 
@@ -83,8 +90,8 @@ drag. A program on its alternate screen, as a full-screen program uses, has no h
 
 The desktop app can reach another computer running Yardsort too, as your phone does: one with the app
 and Remote on, or one with no screen running [`yardsort-host`](headless-host.md). It shows that
-computer's workspaces, agents and activity, opens its terminals to watch, and types into one once you
-take control of it. It does not start work there yet.
+computer's workspaces, agents and activity, opens its terminals to watch, types into one once you
+take control of it, and starts work there.
 
 1. In **Settings → Remote**, under **Other computers**, give the server the other computer is signed in
    to and a name for this one, then press **Sign in to reach other computers**, which opens your
@@ -114,6 +121,21 @@ who took it and offers **Take control** again. A computer that lets this one onl
 type there. If the connection drops, the terminal is watched again by itself once the other computer
 is back, from where it was, and control has to be taken again. Something typed as it dropped may not
 have arrived, and the window says so: nothing is sent twice.
+
+**Starting work there.** When that computer lets this one type, its page offers what a phone may do
+there too, each by that computer's own projects, workspaces and agents:
+
+- **New workspace**, beside a project, makes a workspace there as that computer's composer does, with
+  the agent you choose from its list given what it should do.
+- **New agent**, beside a workspace, starts another agent in it, with a first message or none.
+- **Resume**, beside an agent that ended, takes its conversation up again, with a message to go on with
+  or none. It shows only beside one that computer could resume.
+
+Once it has started, its terminal opens here to watch, and **Take control** types into it. It runs on
+that computer, with that computer's settings, and is listed under it, never among your own projects. If
+the connection drops before that computer answers, the window says it may have started anyway, and
+nothing is tried again by itself. A computer that lets this one only watch offers none of these, and nor
+does one whose Yardsort is too old for them.
 
 **This is a device of its own.** Signing in here makes a second device at the server, apart from this
 computer as a host: turning Remote on or off above leaves it signed in, and **Sign out** under Other

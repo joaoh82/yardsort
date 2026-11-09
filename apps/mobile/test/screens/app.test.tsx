@@ -1974,6 +1974,81 @@ describe("A computer", () => {
       ]);
     });
 
+    describe("resuming", () => {
+      const ended = (server: FakeServer, resumable: boolean) => {
+        server.computer.endedSessions = [
+          {
+            ...server.computer.sessions[0],
+            id: "session-2",
+            title: "An older conversation",
+            endedAt: 1_700_000_000_500,
+            exitCode: 0,
+            process: "ended",
+            terminal: null,
+            resumable,
+          },
+        ];
+      };
+      const showEnded = async () => {
+        await fireEvent.press(await open());
+        await fireEvent.press(
+          await screen.findByRole("button", { name: "Show ended conversations" }),
+        );
+        await screen.findByText("An older conversation");
+      };
+
+      test("an ended conversation resumes, with a message if one is given, and its terminal opens", async () => {
+        const server = able();
+        server.computer.capabilities = [...START, "session.resume"];
+        ended(server, true);
+        await paired(new MemoryVault(), server);
+        await showEnded();
+        await fireEvent.press(
+          screen.getByRole("button", { name: "An older conversation, Ended, resume" }),
+        );
+        expect(await screen.findByText(/^An older conversation, in fix-login\./)).toBeTruthy();
+        await fireEvent.changeText(
+          screen.getByLabelText("A message to go on with, if any"),
+          "Carry on with the tests",
+        );
+        await fireEvent.press(screen.getByRole("button", { name: "Resume" }));
+        await screen.findByTestId("terminal");
+        expect(asked(server, "session.resume")).toEqual([
+          { session: "session-2", prompt: "Carry on with the tests" },
+        ]);
+      });
+
+      test("a refusal says why, and nothing opens", async () => {
+        const server = able();
+        server.computer.capabilities = [...START, "session.resume"];
+        server.computer.refuses.set("session.resume", "This session is already running.");
+        ended(server, true);
+        await paired(new MemoryVault(), server);
+        await showEnded();
+        await fireEvent.press(
+          screen.getByRole("button", { name: "An older conversation, Ended, resume" }),
+        );
+        await fireEvent.press(await screen.findByRole("button", { name: "Resume" }));
+        expect(await screen.findByText("This session is already running.")).toBeTruthy();
+        expect(screen.queryByTestId("terminal")).toBeNull();
+        expect(asked(server, "session.resume")).toEqual([{ session: "session-2" }]);
+      });
+
+      test.each([
+        // A phone let only watch is one: the computer lists nothing as resumable to it.
+        ["one the computer does not offer this phone to resume", true, false],
+        ["a computer from before minor 6", false, true],
+      ])("%s offers no resuming", async (_, answers, resumable) => {
+        const server = able();
+        if (answers) server.computer.capabilities = [...START, "session.resume"];
+        ended(server, resumable);
+        await paired(new MemoryVault(), server);
+        await showEnded();
+        expect(screen.queryByText("Resume")).toBeNull();
+        expect(screen.queryByRole("button", { name: /resume$/ })).toBeNull();
+      });
+    });
+
     describe("a picture", () => {
       const told = () =>
         (jest.requireMock("react-native-webview") as { told: string[] }).told as string[];

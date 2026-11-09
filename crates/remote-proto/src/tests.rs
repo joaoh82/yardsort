@@ -38,6 +38,10 @@ fn requests_match_their_fixtures() {
     let request: Request = pinned("request-workspace-start.json");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
     assert!(request.operation.validate().is_ok());
+    let request: Request = pinned("request-session-resume.json");
+    assert_eq!(request.operation.name(), "session.resume");
+    assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
+    assert!(request.operation.validate().is_ok());
     let request: Request = pinned("request-upload-chunk.json");
     assert_eq!(request.operation.scope(), Some(Scope::TerminalControl));
     assert!(request.operation.validate().is_ok());
@@ -283,6 +287,10 @@ fn every_operation_has_the_name_it_is_sent_under() {
             offset: 0,
             data: "aGk=".into(),
         }),
+        Operation::SessionResume(SessionResumeParams {
+            session: SessionRecordId::new("s").unwrap(),
+            prompt: None,
+        }),
     ];
     assert_eq!(all.len(), OPERATIONS.len());
     for operation in all {
@@ -300,8 +308,21 @@ fn a_sessions_page_without_terminals_reads_as_having_none() {
     let Outcome::Result(Reply::Sessions(page)) = response.outcome else {
         panic!("{response:?}")
     };
-    assert_eq!(page.sessions.len(), 1);
+    assert_eq!(page.sessions.len(), 2);
     assert!(page.terminals.is_empty());
+}
+
+#[test]
+fn a_session_from_a_host_before_minor_6_is_not_resumable() {
+    let mut json = fixture("response-sessions.json");
+    let ended = &mut json["result"]["sessions"][1];
+    assert_eq!(ended["resumable"], true);
+    ended.as_object_mut().unwrap().remove("resumable");
+    let response: Response = serde_json::from_value(json).unwrap();
+    let Outcome::Result(Reply::Sessions(page)) = response.outcome else {
+        panic!("{response:?}")
+    };
+    assert!(!page.sessions[1].resumable);
 }
 
 fn error_of(bytes: &[u8]) -> (Option<RequestId>, RemoteError) {
@@ -530,7 +551,7 @@ fn every_fixture_is_read_here() {
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert!(names.len() >= 41, "{names:?}");
+    assert!(names.len() >= 42, "{names:?}");
     for name in names {
         assert!(name.ends_with(".json"), "{name} is not a fixture");
         assert!(
@@ -564,6 +585,16 @@ fn starting_and_uploading_are_bounded() {
     assert!(session(None).is_ok());
     assert!(session(Some("")).is_err());
     assert!(session(Some(&"h".repeat(MAX_LABEL + 1))).is_err());
+    let resume = |prompt: Option<String>| {
+        Operation::SessionResume(SessionResumeParams {
+            session: SessionRecordId::new("s").unwrap(),
+            prompt,
+        })
+        .validate()
+    };
+    assert!(resume(None).is_ok());
+    assert!(resume(Some(String::new())).is_ok());
+    assert!(resume(Some("x".repeat(MAX_PROMPT + 1))).is_err());
 
     let begin = |name: &str, size: u64| {
         Operation::UploadBegin(UploadBeginParams {

@@ -105,6 +105,11 @@ const FIXTURES: Record<string, (name: string) => void> = {
   "request-workspace-start.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("terminal:control");
   },
+  "request-session-resume.json": (name) => {
+    const resume = pinned<Request>(request, name);
+    expect(resume.op).toBe("session.resume");
+    expect(scopeOf(resume.op)).toBe("terminal:control");
+  },
   "request-upload-chunk.json": (name) => {
     expect(scopeOf(pinned<Request>(request, name).op)).toBe("terminal:control");
   },
@@ -155,8 +160,19 @@ const FIXTURES: Record<string, (name: string) => void> = {
     delete json.result.terminals;
     const older = decode(response, json);
     if (!("result" in older) || older.result.kind !== "sessions") throw new Error("not sessions");
-    expect(older.result.sessions).toHaveLength(1);
+    expect(older.result.sessions).toHaveLength(2);
     expect(older.result.terminals).toEqual([]);
+    // One from before minor 6 says nothing of resuming, which reads as not resumable.
+    const listed = result(name);
+    if (listed.kind !== "sessions") throw new Error("not sessions");
+    expect(listed.sessions.map((s) => s.resumable)).toEqual([false, true]);
+    const before = raw(name) as { result: { sessions: Record<string, unknown>[] } };
+    for (const session of before.result.sessions) delete session.resumable;
+    const earlier = decode(response, before);
+    if (!("result" in earlier) || earlier.result.kind !== "sessions") {
+      throw new Error("not sessions");
+    }
+    expect(earlier.result.sessions.map((s) => s.resumable)).toEqual([false, false]);
   },
   "response-activity.json": (name) => {
     expect(result(name).kind).toBe("activity");

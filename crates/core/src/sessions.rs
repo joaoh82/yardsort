@@ -7,6 +7,7 @@
 //! session fork`, and so on a computer with no screen, after a restart ended its agents.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::{Mutex, PoisonError};
 
 use pty_host::{PendingPrompt, SessionInfo, SessionState, TermSize};
 use serde::Serialize;
@@ -124,12 +125,50 @@ pub enum Continue {
     Fork,
 }
 
+/// The records being resumed in this process now. A resume claims its record before it checks
+/// that the record has ended and holds it until the record says which terminal it runs in, so two
+/// devices pressing **Resume** together start one process, not two that share a conversation.
+/// Each is the store's address and the record's id: two profiles open in one process, as tests
+/// have, keep their own.
+static RESUMING: Mutex<Option<HashSet<(usize, String)>>> = Mutex::new(None);
+
+/// A record claimed for one resume, given back when it is dropped, whether the resume started or
+/// failed.
+struct Claim((usize, String));
+
+impl Claim {
+    fn take(store: &Store, record_id: &str) -> IpcResult<Self> {
+        let key = (std::ptr::from_ref(store) as usize, record_id.to_owned());
+        let mut resuming = RESUMING.lock().unwrap_or_else(PoisonError::into_inner);
+        if !resuming
+            .get_or_insert_with(HashSet::new)
+            .insert(key.clone())
+        {
+            return Err(IpcError::new(
+                "cannot_continue",
+                "This session is being resumed already.",
+            ));
+        }
+        Ok(Self(key))
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        let mut resuming = RESUMING.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(resuming) = resuming.as_mut() {
+            resuming.remove(&self.0);
+        }
+    }
+}
+
 impl Launcher<'_> {
     /// Start a harness on an existing conversation, typing `prompt` into it once it is ready.
     ///
     /// A resume of a record that still says it is running settles that record first, should its
     /// terminal have gone: after the daemon or the whole computer stopped, nothing was there to
-    /// hear the exit. See [`Self::settle_if_gone`].
+    /// hear the exit. See [`Self::settle_if_gone`]. Two resumes of one record at once in this
+    /// process start one agent: the other is refused.
     pub fn continue_session(
         &self,
         record_id: &str,
@@ -137,6 +176,11 @@ impl Launcher<'_> {
         size: TermSize,
         prompt: Option<String>,
     ) -> IpcResult<SessionInfo> {
+        // Held until the record names its new terminal; a fork makes a record of its own.
+        let _claim = match how {
+            Continue::Resume => Some(Claim::take(self.store, record_id)?),
+            Continue::Fork => None,
+        };
         let mut row = self.store.session(record_id)?.ok_or_else(|| {
             IpcError::new("unknown_session", "That session is no longer on record.")
         })?;
@@ -687,6 +731,107 @@ mod tests {
         fn list(&self) -> Vec<SessionInfo> {
             vec![]
         }
+    }
+
+    /// A real host whose spawns wait until the test says go, having said they are waiting.
+    struct HeldAtSpawn<'a> {
+        inner: &'a dyn pty_host::TerminalHost,
+        spawning: std::sync::mpsc::Sender<()>,
+        go: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl pty_host::TerminalHost for HeldAtSpawn<'_> {
+        fn spawn(&self, plan: pty_host::LaunchPlan) -> pty_host::Result<SessionInfo> {
+            self.spawning.send(()).unwrap();
+            self.go.lock().unwrap().recv().unwrap();
+            self.inner.spawn(plan)
+        }
+        fn attach(
+            &self,
+            id: &pty_host::SessionId,
+            sink: pty_host::OutputSink,
+        ) -> pty_host::Result<pty_host::AttachmentId> {
+            self.inner.attach(id, sink)
+        }
+        fn detach(
+            &self,
+            id: &pty_host::SessionId,
+            attachment: pty_host::AttachmentId,
+        ) -> pty_host::Result<()> {
+            self.inner.detach(id, attachment)
+        }
+        fn write(&self, id: &pty_host::SessionId, bytes: &[u8]) -> pty_host::Result<()> {
+            self.inner.write(id, bytes)
+        }
+        fn paste(&self, id: &pty_host::SessionId, text: &str) -> pty_host::Result<()> {
+            self.inner.paste(id, text)
+        }
+        fn resize(&self, id: &pty_host::SessionId, size: TermSize) -> pty_host::Result<()> {
+            self.inner.resize(id, size)
+        }
+        fn kill(&self, id: &pty_host::SessionId) -> pty_host::Result<()> {
+            self.inner.kill(id)
+        }
+        fn remove(&self, id: &pty_host::SessionId) -> pty_host::Result<()> {
+            self.inner.remove(id)
+        }
+        fn info(&self, id: &pty_host::SessionId) -> pty_host::Result<SessionInfo> {
+            self.inner.info(id)
+        }
+        fn list(&self) -> Vec<SessionInfo> {
+            self.inner.list()
+        }
+    }
+
+    /// Two devices pressing Resume together: the second is refused while the first starts, and
+    /// the record names the one agent that runs. Once it is done, the claim is given back.
+    #[test]
+    fn two_resumes_of_one_conversation_at_once_start_one_agent() {
+        let profile = Profile::new();
+        profile.running("held-conversation", "a-terminal-long-gone");
+        let (host, _events) = real_host();
+        let (spawning, spawned) = std::sync::mpsc::channel();
+        let (go, gone_ahead) = std::sync::mpsc::channel();
+        let held = HeldAtSpawn {
+            inner: &host,
+            spawning,
+            go: Mutex::new(gone_ahead),
+        };
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                profile.launcher(&held).continue_session(
+                    "held-conversation",
+                    Continue::Resume,
+                    SIZE,
+                    None,
+                )
+            });
+            spawned.recv().unwrap();
+            let second = profile
+                .launcher(&host)
+                .continue_session("held-conversation", Continue::Resume, SIZE, None)
+                .unwrap_err();
+            assert_eq!(second.code, "cannot_continue");
+            assert_eq!(second.message, "This session is being resumed already.");
+            go.send(()).unwrap();
+            let started = first.join().unwrap().unwrap();
+            let row = profile.store.session("held-conversation").unwrap().unwrap();
+            assert_eq!(row.pty_session_id.as_deref(), Some(started.id.0.as_str()));
+            let ours = host
+                .list()
+                .into_iter()
+                .filter(|info| {
+                    info.labels.get(RECORD_LABEL).map(String::as_str) == Some("held-conversation")
+                })
+                .count();
+            assert_eq!(ours, 1);
+        });
+        // Given back: a later resume is judged on the record, which now runs.
+        let after = profile
+            .launcher(&host)
+            .continue_session("held-conversation", Continue::Resume, SIZE, None)
+            .unwrap_err();
+        assert_eq!(after.message, "This session is already running.");
     }
 
     fn gone() -> pty_host::HostError {

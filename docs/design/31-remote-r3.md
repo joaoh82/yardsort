@@ -1378,7 +1378,9 @@ terminal taller than the phone from its bottom into its history and back. The pa
 10,000 lines, as the computer does, where it kept 5,000.
 
 **Starting work, and pictures (protocol minor 5).** `harness.list`, `workspace.start`,
-`session.start`, `upload.begin` and `upload.chunk` (`crates/remote-proto/src/start.rs`). Decisions:
+`session.start`, `upload.begin` and `upload.chunk` (`crates/remote-proto/src/start.rs`). Resuming, and
+the desktop starting work, followed in minor 6 ([35 §16](35-remote-r4-r5.md#16--what-the-seventh-slice-adds)).
+Decisions:
 
 - **Under `terminal:control`.** Starting one of the computer's own agents is no more than a device
   that may type could do in a shell, so it needs no new scope, and no phone paired before has to

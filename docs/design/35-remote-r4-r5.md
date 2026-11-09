@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. The sixth, resume and fork in the core and the host after its restarts, was built the same day (§15); its local smoke test, and the owner's run on the box, R5's gate check 3, passed. The seventh, starting and resuming from a client, was built the same day (§16), under `terminal:control` rather than a scope of its own, as the owner chose; its local smoke test and the owner's run on the box passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -47,8 +47,8 @@ commands. One of them, starting and resuming an agent remotely, is planned as R5
 slice 7), after the gate, because the gate does not need it. Part of it came first, from real use
 on 2026-11-06: the phone starts a workspace or another agent, under `terminal:control`, in protocol
 minor 5 ([31 §19](31-remote-r3.md#19--after-first-real-use-scrolling-starting-work-pictures)).
-Slice 7 keeps the rest: a scope of its own if starting should be granted apart from typing, resume,
-and the desktop as a client, in minor 6.
+Slice 7 kept the rest: resume, and the desktop as a client, in minor 6. A scope of its own for
+starting was weighed there and not taken (§16).
 
 **R4, mobile beta hardening** (proposal §13). The gate:
 
@@ -216,7 +216,7 @@ runs. Driving them on a headless host is later (§9), and needs nothing new from
 starts an agent without the app (`LaunchedBy::Cli`). What `ys` lacks is adding a project; slice 2 adds
 `ys project add <path>`, beside `ys project list`, with the same checks the app makes. The operator
 starts agents; the phone watches and controls them, and since minor 5 starts them too. Resuming
-one from a remote client, and the desktop starting one, are slice 7.
+one from a remote client, and the desktop starting one, came in slice 7 (§16).
 
 **Credentials on a headless host live in a directory** (06 #35, settled): `YARDSORT_CREDENTIALS_DIR`,
 `0700` with files `0600`, from its own mount. A host with no `YARDSORT_CREDENTIALS_DIR` uses
@@ -295,7 +295,7 @@ what these slices plan, and what is only proposed:
 | **Finding a host is not being let in.** `GET /v1/hosts` lists the account's hosts to any of its devices, with a name, when it was made and when it was last seen, and nothing else. Reaching one takes a grant its own person approved: the server refuses a ticket without one (`relay.rs`, `ticket`), and the host checks the grant again before it answers. Being on the account grants nothing, and no slice changes that | Built (R2)                                         |
 | **Whether a host is online** is known only to a device it let in, from a channel to it being open (`apps/mobile/src/lib/presence.ts`); the server keeps no presence, and a host a device is not paired with shows as not paired, not as online or offline                                                                                                                                                                     | Built (R3); the desktop does the same in slice 4   |
 | **Each workspace and session lives in one host's SQLite and nowhere else.** A client shows it from that host's facade, names the host beside it, and keeps none of it. Local work and a remote host's work are in the same app, under separate headings, never one list                                                                                                                                                       | Planned (slices 4, 5)                              |
-| **Starting work on another host from the desktop**, in that host's view: a new workspace in one of its projects, or another agent in one of its workspaces, choosing the project and the agent by that host's ids, as the phone does since minor 5                                                                                                                                                                            | Planned (slice 7)                                  |
+| **Starting work on another host from the desktop**, in that host's view: a new workspace in one of its projects, or another agent in one of its workspaces, choosing the project and the agent by that host's ids, as the phone does since minor 5                                                                                                                                                                            | Built (slice 7, §16)                               |
 | **Choosing where a new task runs from the composer**: one task, and a choice of **This computer** or a host it is let into, with each host's state, an offline one shown and not offered                                                                                                                                                                                                                                      | Proposed, after R5 (§9)                            |
 | **Handing a task to another machine**, and **managed sandboxes**                                                                                                                                                                                                                                                                                                                                                              | Proposed, deferred phases (§9)                     |
 
@@ -871,3 +871,64 @@ above, with tests for a neighbour left alone, a spooled exit kept, and an unreac
 running through `systemctl --user restart yardsort-host`, and the iPhone reached it again; after a
 reboot it was listed as ended, `ys session resume` brought its conversation back on the iPhone, and
 `ys session fork` copied it. Resume and Fork in the window behaved as before.
+
+## 16 · What the seventh slice adds
+
+Built on 2026-11-09, on Linux. Nothing changed on the server, so staging needs no deploy. The phone
+gains a screen, so it reaches the iPhone with a new TestFlight build. Protocol minor 6.
+
+**No scope of its own.** The plan had `session.start` as a scope a device asks for and approval shows,
+"if starting should be granted apart from typing" (§1). The owner chose on 2026-11-09 to keep
+starting and resuming under `terminal:control`, as minor 5 did (31 §19): a device that may type into
+an agent can already ask it for anything, so a separate scope would protect nothing, and it would
+have made every phone paired before pair again. Execution access is still a per-host grant its own
+person approves (§3); nothing here lets a device in because it is on the account.
+
+- **`session.resume`** (`remote_proto::SessionResumeParams`): a conversation by its record's id, and
+  a message to go on with or none, at most `MAX_PROMPT`. It answers with `Started`, as the other starts
+  do, from a thread of its own. The host finds the record, refuses one in a project the grant does
+  not reach as `not_found`, and starts it through `Launcher::continue_session`, the window's
+  **Resume** (§15): one still running is refused with the window's words, and one whose terminal went
+  is settled first.
+- **`resumable` in a session's summary**, decided as the window decides it (`sessions::describe`),
+  with the harnesses whose program this host finds (`Starting::definitions`), and only where the
+  channel answers starts, and only to a grant that may type: a device let only watch is told of
+  nothing to resume. A record still said to run whose terminal is gone counts as ended, since a
+  resume settles it. A host before minor 6 says nothing, which reads as `false`, on both clients.
+- **The phone.** An ended conversation the computer could resume carries **Resume**, and opens a
+  screen with its title, a message to go on with, **Resume**, and **See its last screen** while the
+  computer keeps its terminal. A lost answer is said to be one, and nothing is tried again.
+- **The desktop** (`remote_host::computer::start`): `harnesses`, `workspace`, `session` and `resume`
+  through the host's open link, by its ids, and the commands `other_host_harnesses`,
+  `other_host_start_workspace`, `other_host_start_session` and `other_host_resume`. The host's page
+  offers **New workspace** beside a project, **New agent** beside a workspace and **Resume** beside a
+  resumable agent, only when the grant may type and the host answers them (`mayStart`, `mayResume`).
+  Its form picks from that host's agents, and once started, the terminal opens to watch. Starting
+  wakes every link to read its host again, so the new agent shows.
+- **Tests that fail without it.** In the core, against a real repository and real PTYs: an ended
+  conversation is listed as resumable, resumed under its record with its harness's own id, and no
+  longer resumable while it runs; resuming is refused while it runs, for a record that does not exist
+  or is in a project the grant does not reach, and without control. Through the real server and
+  relay: the desktop's client lists an ended conversation as resumable, starts a workspace and an
+  agent, and resumes one, each reaching the host by its ids, and a record the host does not have is
+  refused there. The fixtures pin `session.resume` and `resumable`, and both clients read a host from
+  before as offering no resume. The phone's and the window's screens, each with a refusal.
+
+**What review found.** Two things. Two devices pressing **Resume** together could both pass the
+check that the record had ended and start two agents on one conversation, the record naming only
+the last: `continue_session` now claims the record in the process for the whole of a resume, from
+before the check until the record names its terminal, and refuses another resume of it meanwhile,
+with a test that holds the first at its spawn. A `ys session resume` in another process is not held
+off by it; that is rare enough to leave, and the record still names the last one. And a phone let
+only watch was offered **Resume**, since `resumable` did not depend on who asked: it now does.
+
+**Its smoke test.** `remote-start-and-resume.yaml`, locally, against a `yardsort-host` on the stand-in
+server with host-restart's stand-in agent: a phone let only watch is refused starting and resuming;
+the window, let type, starts a workspace there and watches it; a phone sees it begin; it ends, and
+the phone resumes it with a message the agent hears, remembering its conversation; it ends again, and
+the window resumes it. Passed on 2026-11-09, 25 of 25 steps, on Linux.
+
+**The owner's run** passed the same day: on the box through staging, the window started a Claude Code
+workspace there and watched it, the iPhone watched it too, and once it ended, **Resume** in the window
+took the conversation up again with a message. **Resume** on the iPhone waits for a TestFlight build
+with this slice.

@@ -5,10 +5,15 @@
 //     | starts <name>
 //   bun .yardsort/tests/support/phone.ts <run dir> type | take-over <name> <line> <expected>
 //   bun .yardsort/tests/support/phone.ts <run dir> sees <name> <expected>
+//   bun .yardsort/tests/support/phone.ts <run dir> refused <name> | ends <name>
+//   bun .yardsort/tests/support/phone.ts <run dir> resumes <name> <message> <expected>
 //
 // `type` takes control of the one session running on the computer, types the line and a return,
 // and waits for the expected text in what the terminal prints. `take-over` does the same while
 // another device has control, and keeps it. `sees` only watches, for the expected text.
+// `refused` expects a phone let only watch to be refused starting and resuming. `ends` types an
+// end of input into the one running session, which ends a stand-in agent. `resumes` resumes the
+// one ended conversation the computer can resume, with a message, and waits for the expected text.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -222,6 +227,72 @@ switch (doing) {
     console.log(`read back: ${expected}`);
     // Taken over, it is kept: the other device is to see who has it.
     if (doing === "type") await control.release();
+    await attachment.detach();
+    channel.close();
+    break;
+  }
+  case "refused": {
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const project = (await channel.workspaces()).projects.find((p) => p.name === "repo");
+    if (!project) throw new Error("The project is not on the phone.");
+    const refusal = (attempt: Promise<unknown>) =>
+      attempt.then(
+        () => {
+          throw new Error("It was let.");
+        },
+        (error: { code?: string }) => {
+          if (error.code !== "forbidden") throw error;
+        },
+      );
+    await refusal(channel.startWorkspace({ project: project.id, prompt: "echo not-started" }));
+    console.log("refused: starting");
+    // The scope is checked before the conversation is looked for.
+    await refusal(channel.resumeSession({ session: "any-at-all" as never }));
+    console.log("refused: resuming");
+    channel.close();
+    break;
+  }
+  case "ends": {
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const terminal = await theRunningTerminal(channel);
+    let ended!: () => void;
+    const exited = new Promise<void>((resolve) => (ended = resolve));
+    const attachment = await channel.attach(terminal, { output() {}, exited: () => ended() });
+    const control = await channel.acquire(terminal, { takeOver: false });
+    // An end of input, as Ctrl-D at a terminal: a stand-in agent stops reading, and ends.
+    await control.input("\x04");
+    const late = setTimeout(() => {
+      console.error("It did not end within 30 seconds.");
+      process.exit(1);
+    }, 30_000);
+    await exited;
+    clearTimeout(late);
+    console.log("the agent ended");
+    await attachment.detach().catch(() => {});
+    channel.close();
+    break;
+  }
+  case "resumes": {
+    const phone = await session();
+    const channel = await reach(phone, await theComputer(phone));
+    const ended = [];
+    for (const workspace of (await channel.workspaces()).workspaces) {
+      const page = await channel.sessions({ workspace: workspace.id, includeEnded: true });
+      ended.push(...page.sessions.filter((s) => s.resumable));
+    }
+    if (ended.length !== 1) throw new Error(`${ended.length} to resume, not one.`);
+    console.log("one conversation to resume");
+    const started = await channel.resumeSession({ session: ended[0].id, prompt: line });
+    let printed = "";
+    const decoder = new TextDecoder();
+    const attachment = await channel.attach(started.terminal, {
+      output: (bytes) => (printed += decoder.decode(bytes, { stream: true })),
+    });
+    for (let tries = 0; tries < 300 && !printed.includes(expected); tries++) await Bun.sleep(100);
+    if (!printed.includes(expected)) throw new Error(`Not on the screen: ${expected}\n${printed}`);
+    console.log(`saw: ${expected}`);
     await attachment.detach();
     channel.close();
     break;

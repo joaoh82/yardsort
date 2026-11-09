@@ -65,7 +65,7 @@ impl Fixture {
             host: &self.identity,
             interactive: false,
             subscriptions: false,
-            starting: false,
+            starting: None,
             terminals_later: None,
         }
     }
@@ -1465,6 +1465,8 @@ fn the_largest_item_of_every_list_fits_in_a_frame() {
         exit_code: Some(i64::MIN),
         process: ProcessState::Unknown,
         terminal: Some(terminal()),
+        // The longer of the two.
+        resumable: false,
     };
     let other = WorkspaceTerminal {
         purpose: TerminalPurpose::RunCommand,

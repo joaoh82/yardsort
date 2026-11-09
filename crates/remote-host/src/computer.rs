@@ -18,12 +18,14 @@
 //! while the host is away, said to be from then. Nothing a host sends is written to disk here.
 //!
 //! **A terminal is watched through the same link** ([`terminal`]): attached, attached again after
-//! the link drops, and typed into only once its person here takes control.
+//! the link drops, and typed into only once its person here takes control. Work is started there
+//! through it too ([`start`]), by that host's ids.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+pub mod start;
 pub mod terminal;
 
 use remote_client::channel::Followed;
@@ -91,6 +93,8 @@ pub struct Computer {
     known: Mutex<Known>,
     /// Wakes the task that lists the hosts again ([`relist`]).
     relist: tokio::sync::Notify,
+    /// Wakes every link to read what its host shows again: something was started there.
+    reread: tokio::sync::Notify,
     lister: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -550,6 +554,7 @@ async fn reach<H: ComputerHome>(
         tokio::select! {
             end = channel.ended() => return Ok(end.text),
             _ = moved => {}
+            () = home.computer().reread.notified() => {}
             () = tokio::time::sleep(REREAD_EVERY) => {}
         }
     }

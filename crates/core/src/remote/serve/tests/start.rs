@@ -11,7 +11,7 @@ use crate::settings::Settings;
 use super::*;
 
 /// A harness that is really the shell, so an agent can be started on any machine. Its first
-/// message is the script it runs.
+/// message is the script it runs; resumed, it says which conversation it was.
 fn shell_harness() -> HarnessOverride {
     let (command, flag) = if cfg!(windows) {
         ("cmd.exe", "/C")
@@ -24,6 +24,7 @@ fn shell_harness() -> HarnessOverride {
         builtin: Some(false),
         command: Some(command.into()),
         prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
+        resume_args: Some(vec![flag.into(), "echo resumed-{session_id}".into()]),
         session_id_mode: Some(SessionIdMode::Assigned),
         ..Default::default()
     }
@@ -72,6 +73,12 @@ impl Starting for Lent {
         prompt: Option<&str>,
     ) -> crate::error::IpcResult<SessionInfo> {
         self.with(|s| s.session(workspace, harness, prompt))
+    }
+    fn resume(&self, session: &str, prompt: Option<&str>) -> crate::error::IpcResult<SessionInfo> {
+        self.with(|s| s.resume(session, prompt))
+    }
+    fn definitions(&self) -> Vec<crate::harness::HarnessDef> {
+        self.with(|s| s.definitions())
     }
     fn data_dir(&self) -> PathBuf {
         self.data.clone()
@@ -320,6 +327,160 @@ fn starting_is_refused_without_control_outside_the_grant_or_for_an_unknown_agent
     );
     // Nothing was made for any of them.
     assert!(fx.workspaces().is_empty());
+}
+
+/// A first message that keeps the shell agent running.
+const LONG: &str = if cfg!(windows) {
+    "ping -n 30 127.0.0.1"
+} else {
+    "sleep 30"
+};
+
+/// The workspace's conversations, ended ones too, as the phone reads them.
+fn sessions(fx: &Started, visitor: &Visitor, out: &Recorded, id: &str, workspace: &Value) -> Value {
+    let reply = fx.ask(
+        visitor,
+        out,
+        id,
+        "session.list",
+        json!({"workspace": workspace, "includeEnded": true}),
+    );
+    reply["result"]["sessions"].clone()
+}
+
+/// Wait until the daemon says the terminal's program ended.
+fn wait_until_exited(host: &PtyHost, terminal: &SessionId) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while host.info(terminal).unwrap().state == SessionState::Running {
+        assert!(std::time::Instant::now() < deadline, "it never ended");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_phone_with_control_resumes_an_ended_conversation_under_its_record() {
+    let fx = Started::new();
+    fx.approve(&CONTROL);
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(&out);
+    let welcome = &out.texts()[0]["welcome"]["host"]["capabilities"];
+    assert!(welcome
+        .as_array()
+        .unwrap()
+        .contains(&json!("session.resume")));
+
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "r1",
+        "workspace.start",
+        json!({"project": fx.project, "prompt": "echo first-turn"}),
+    );
+    let workspace = reply["result"]["workspace"].clone();
+    let first = SessionId(reply["result"]["terminal"].as_str().unwrap().to_owned());
+    // Running, it is not one to resume.
+    let listed = sessions(&fx, &visitor, &out, "r2", &workspace);
+    let record = listed[0]["id"].clone();
+    wait_until_drawn(&fx.lent.host, &first, "first-turn");
+    wait_until_exited(&fx.lent.host, &first);
+    // Ended, though nobody settled its record yet, it is.
+    let listed = sessions(&fx, &visitor, &out, "r3", &workspace);
+    assert_eq!(listed[0]["id"], record);
+    assert_eq!(listed[0]["resumable"], true, "{listed}");
+    // A device let only watch is told of nothing to resume.
+    fx.approve(&[Scope::WorkspaceRead, Scope::TerminalRead]);
+    let watching = sessions(&fx, &visitor, &out, "r3w", &workspace);
+    assert_eq!(watching[0]["resumable"], false, "{watching}");
+    fx.approve(&CONTROL);
+
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "r4",
+        "session.resume",
+        json!({"session": record}),
+    );
+    let resumed = &reply["result"];
+    assert_eq!(resumed["kind"], "started", "{reply}");
+    assert_eq!(resumed["workspace"], workspace);
+    assert_eq!(resumed["harness"], "sh-agent");
+    let terminal = SessionId(resumed["terminal"].as_str().unwrap().to_owned());
+    assert_ne!(terminal, first);
+    // The same conversation, by the harness's own id for it, under the same record.
+    let info = fx.lent.host.info(&terminal).unwrap();
+    assert_eq!(
+        info.labels[crate::launch::RECORD_LABEL],
+        record.as_str().unwrap()
+    );
+    wait_until_drawn(&fx.lent.host, &terminal, "resumed-");
+    let records = fx.lent.store.sessions(workspace.as_str().unwrap()).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].pty_session_id.as_deref(),
+        Some(terminal.0.as_str())
+    );
+}
+
+#[test]
+fn resuming_is_refused_without_control_outside_the_grant_or_while_it_runs() {
+    let fx = Started::new();
+    fx.approve(&CONTROL);
+    let out = Recorded::new(usize::MAX);
+    let visitor = fx.visitor(&out);
+    let reply = fx.ask(
+        &visitor,
+        &out,
+        "r1",
+        "workspace.start",
+        json!({"project": fx.project, "prompt": LONG}),
+    );
+    let workspace = reply["result"]["workspace"].clone();
+    let record = sessions(&fx, &visitor, &out, "r2", &workspace)[0]["id"].clone();
+    let resume = |id: &str, session: &Value| {
+        fx.ask(
+            &visitor,
+            &out,
+            id,
+            "session.resume",
+            json!({"session": session}),
+        )
+    };
+    // Still running.
+    let refused = resume("r3", &record);
+    assert_eq!(code(&refused), "invalid_request");
+    assert_eq!(
+        refused["error"]["message"],
+        "This session is already running."
+    );
+    // No such conversation.
+    assert_eq!(code(&resume("r4", &json!("no-such-record"))), "not_found");
+    // One in a project the grant does not reach looks like one that does not exist.
+    let theirs = fx
+        .lent
+        .store
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.project_id == fx.elsewhere)
+        .unwrap();
+    fx.lent
+        .store
+        .add_session(&crate::store::NewSession {
+            id: "theirs",
+            workspace_id: &theirs.id,
+            harness_id: "sh-agent",
+            harness_session_id: Some("their-own-id"),
+            title: "theirs",
+            pty_session_id: "gone",
+            ..Default::default()
+        })
+        .unwrap();
+    fx.lent.store.end_session_by_pty("gone", Some(0)).unwrap();
+    assert_eq!(code(&resume("r5", &json!("theirs"))), "not_found");
+
+    // Watching only.
+    fx.approve(&[Scope::WorkspaceRead, Scope::TerminalRead]);
+    assert_eq!(code(&resume("r6", &record)), "forbidden");
 }
 
 #[test]

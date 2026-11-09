@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use base64::Engine;
 use remote_proto::{
     clip, ErrorCode, Grant, HarnessList, Operation, RemoteError, Reply, Request, Response,
-    SessionStartParams, Started, Upload, UploadBeginParams, UploadChunkParams, Uploaded,
-    WorkspaceStartParams, MAX_LABEL, MAX_TEXT, MAX_UPLOADS,
+    SessionResumeParams, SessionStartParams, Started, Upload, UploadBeginParams, UploadChunkParams,
+    Uploaded, WorkspaceStartParams, MAX_LABEL, MAX_TEXT, MAX_UPLOADS,
 };
 
 use super::{internal, lock, Context, Visitor};
@@ -38,6 +38,7 @@ pub(super) fn is_start(operation: &Operation) -> bool {
             | Operation::SessionStart(_)
             | Operation::UploadBegin(_)
             | Operation::UploadChunk(_)
+            | Operation::SessionResume(_)
     )
 }
 
@@ -92,6 +93,17 @@ impl Visitor {
                         .session(&row.id, &harness, prompt.as_deref())
                         .map_err(|e| start_error(&e))?;
                     started(&row.id, &session.id.0, harness)
+                });
+                Ok(None)
+            }
+            Operation::SessionResume(SessionResumeParams { session, prompt }) => {
+                let (row, workspace) = facade.reachable_session(grant, session)?;
+                let prompt = prompt.clone();
+                self.later(request, move || {
+                    let session = starting
+                        .resume(&row.id, prompt.as_deref())
+                        .map_err(|e| start_error(&e))?;
+                    started(&workspace.id, &session.id.0, row.harness_id)
                 });
                 Ok(None)
             }

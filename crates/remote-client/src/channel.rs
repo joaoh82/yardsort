@@ -23,11 +23,12 @@ use remote_proto::terminal::FrameError;
 use remote_proto::{
     AcquireRequest, ActivityBatch, ActivityListParams, ActivityPage, ActivitySubscribeParams,
     ActivityUnsubscribeParams, AttachRequest, AttachStart, Attached, Controller, Cursor,
-    DetachRequest, ErrorCode, Event, Hello, HelloReply, HostDescription, HostId, InputRequest,
-    Lease, LeaseRef, Operation, OutputFrame, ProgramExit, ProtocolVersion, RemoteError, Reply,
-    Request, RequestId, ResizeRequest, Response, SessionListParams, SessionPage, StreamId,
-    StreamPosition, SubscriptionId, TermSize, TerminalId, WorkspaceDetail, WorkspaceId,
-    WorkspaceListParams, WorkspacePage, WorkspaceRef, MAX_CLIENT_NAME, MAX_CONTROL_FRAME,
+    DetachRequest, ErrorCode, Event, HarnessSummary, Hello, HelloReply, HostDescription, HostId,
+    InputRequest, Lease, LeaseRef, Operation, OutputFrame, ProgramExit, ProtocolVersion,
+    RemoteError, Reply, Request, RequestId, ResizeRequest, Response, SessionListParams,
+    SessionPage, SessionResumeParams, SessionStartParams, Started, StreamId, StreamPosition,
+    SubscriptionId, TermSize, TerminalId, WorkspaceDetail, WorkspaceId, WorkspaceListParams,
+    WorkspacePage, WorkspaceRef, WorkspaceStartParams, MAX_CLIENT_NAME, MAX_CONTROL_FRAME,
     MAX_OUTPUT_CHUNK, PROTOCOL_MAJOR,
 };
 use tokio::sync::{mpsc, oneshot, watch};
@@ -253,6 +254,30 @@ impl Channel {
         }
     }
 
+    /// The agents the host can start, its default first. Minor 5.
+    pub async fn harnesses(&self) -> Result<Vec<HarnessSummary>> {
+        match self.ask(Operation::HarnessList).await? {
+            Reply::Harnesses(list) => Ok(list.harnesses),
+            _ => Err(something_else()),
+        }
+    }
+
+    /// A new workspace with an agent given `prompt`. The reply comes once the agent has started,
+    /// which can take as long as the project's setup does. Minor 5.
+    pub async fn start_workspace(&self, params: WorkspaceStartParams) -> Result<Started> {
+        started(self.ask(Operation::WorkspaceStart(params)).await?)
+    }
+
+    /// Another agent in a workspace. Minor 5.
+    pub async fn start_session(&self, params: SessionStartParams) -> Result<Started> {
+        started(self.ask(Operation::SessionStart(params)).await?)
+    }
+
+    /// An ended conversation again, under its own record. Minor 6.
+    pub async fn resume_session(&self, params: SessionResumeParams) -> Result<Started> {
+        started(self.ask(Operation::SessionResume(params)).await?)
+    }
+
     pub async fn activity(&self, params: ActivityListParams) -> Result<ActivityPage> {
         match self.ask(Operation::ActivityList(params)).await? {
             Reply::Activity(page) => Ok(page),
@@ -332,6 +357,13 @@ fn check_name(name: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn started(reply: Reply) -> Result<Started> {
+    match reply {
+        Reply::Started(started) => Ok(started),
+        _ => Err(something_else()),
+    }
 }
 
 fn something_else() -> ChannelError {

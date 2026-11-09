@@ -378,6 +378,13 @@ export const commands = {
 	link: OtherLink,
 	/**  Whether that computer lets this one type into its terminals, once it takes control. */
 	mayType: boolean,
+	/**  Whether this computer may start work there: it may type, and that computer can. */
+	mayStart: boolean,
+	/**
+	 *  Whether this computer may resume that computer's ended conversations: it may type, and
+	 *  that computer can.
+	 */
+	mayResume: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -386,6 +393,17 @@ export const commands = {
 	/**  The newest first. */
 	activity: OtherActivity[],
 } | null, IpcError>(__TAURI_INVOKE("other_host", { hostId })),
+	/**  The agents another computer can start, its default first. */
+	otherHostHarnesses: (hostId: string) => typedError<OtherHarness[], IpcError>(__TAURI_INVOKE("other_host_harnesses", { hostId })),
+	/**
+	 *  A new workspace in one of another computer's projects, named after `prompt`, with an agent
+	 *  given it. That computer makes it with its own settings, as its window would.
+	 */
+	otherHostStartWorkspace: (hostId: string, projectId: string, prompt: string, harness: string | null) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_start_workspace", { hostId, projectId, prompt, harness })),
+	/**  Another agent in one of another computer's workspaces, with a first message or none. */
+	otherHostStartSession: (hostId: string, workspaceId: string, harness: string | null, prompt: string | null) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_start_session", { hostId, workspaceId, harness, prompt })),
+	/**  One of another computer's ended conversations again, with a message to go on with or none. */
+	otherHostResume: (hostId: string, sessionId: string, prompt: string | null) => typedError<OtherStarted, IpcError>(__TAURI_INVOKE("other_host_resume", { hostId, sessionId, prompt })),
 	/**
 	 *  Watch a terminal on another computer. What it shows comes on `output`; the number it returns
 	 *  asks things of it, until [`remote_terminal_close`].
@@ -1916,6 +1934,12 @@ export type OtherComputers = {
 /**  Something about the other computers changed: the list, a link, or what one shows. */
 export type OtherComputersChanged = Record<string, never>;
 
+/**  An agent another computer can start. */
+export type OtherHarness = {
+	id: string,
+	name: string,
+};
+
 /**  A host this computer asked to reach. */
 export type OtherHost = {
 	grantId: string,
@@ -1933,6 +1957,13 @@ export type OtherHostView = {
 	link: OtherLink,
 	/**  Whether that computer lets this one type into its terminals, once it takes control. */
 	mayType: boolean,
+	/**  Whether this computer may start work there: it may type, and that computer can. */
+	mayStart: boolean,
+	/**
+	 *  Whether this computer may resume that computer's ended conversations: it may type, and
+	 *  that computer can.
+	 */
+	mayResume: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -1970,6 +2001,15 @@ export type OtherSession = {
 	startedAt: number | null,
 	/**  Its terminal there, to watch; `None` once it has ended. */
 	terminal: string | null,
+	/**  That computer can resume it: it has ended, and its agent can take it up again. */
+	resumable: boolean,
+};
+
+/**  An agent started on another computer: where it runs, to watch it. */
+export type OtherStarted = {
+	workspaceId: string,
+	terminal: string,
+	harness: string,
 };
 
 export type OtherTerminal = {

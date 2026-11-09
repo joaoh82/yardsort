@@ -178,6 +178,16 @@ impl Starting for HostStarting {
         self.with(|starter| starter.session(workspace, harness, prompt))
     }
 
+    fn resume(&self, session: &str, prompt: Option<&str>) -> IpcResult<SessionInfo> {
+        self.with(|starter| starter.resume(session, prompt))
+    }
+
+    fn definitions(&self) -> Vec<yardsort_core::harness::HarnessDef> {
+        self.0.upgrade().map_or_else(Vec::new, |home| {
+            yardsort_core::remote::start::definitions(&home.settings.get().harnesses, home.env())
+        })
+    }
+
     fn data_dir(&self) -> PathBuf {
         self.0
             .upgrade()

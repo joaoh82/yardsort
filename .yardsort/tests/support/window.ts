@@ -1,7 +1,7 @@
 // Drive the app's own window through WebKit's inspector, for a smoke test that has no person at it.
 // The app is started with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:<port>.
 //
-//   bun .yardsort/tests/support/window.ts <port> <what to do> [run dir | what]
+//   bun .yardsort/tests/support/window.ts <port> <what to do> [run dir | what] [more]
 
 const [port, doing, runDir] = process.argv.slice(2);
 const SECTION = '[aria-label="Terminals cannot be shared yet"]';
@@ -116,6 +116,31 @@ const fillOther = (placeholder: string, value: string) =>
     input.dispatchEvent(new Event("input", { bubbles: true }));
     return true;
   })()`);
+/** Click the button whose accessible name begins with `label`. */
+const clickedNamed = (label: string) => `(() => {
+  const button = [...document.querySelectorAll("button")].find(
+    (b) => (b.getAttribute("aria-label") ?? "").startsWith(${JSON.stringify(label)}),
+  );
+  button?.click();
+  return Boolean(button);
+})()`;
+/** Set a form field as typing does, so React hears it. */
+const setField = (selector: string, value: string) =>
+  page(`(() => {
+    const field = document.querySelector(${JSON.stringify(selector)});
+    if (!field) return false;
+    const kind = field instanceof HTMLSelectElement ? HTMLSelectElement : HTMLTextAreaElement;
+    Object.getOwnPropertyDescriptor(kind.prototype, "value").set.call(field, ${JSON.stringify(value)});
+    field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+    return true;
+  })()`);
+/** Open the other computer called `name` from the sidebar, once it is online there. */
+const openOther = async (name: string) => {
+  const row = `aside[aria-label="Projects"] section[aria-label="Other computers"]`;
+  await until(`${name} online in the sidebar`, async () => (await textOf(row)).includes("online"));
+  await page(clicked("Done"));
+  await page(`document.querySelector(${JSON.stringify(`${row} button`)})?.click()`);
+};
 /** The text of what matches `selector`, or "" when nothing does. */
 const textOf = (selector: string) =>
   page(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? ""`) as Promise<string>;
@@ -324,6 +349,50 @@ switch (doing) {
       ),
     );
     console.log("saw: Take control, offered again");
+    break;
+  }
+  case "starts-there": {
+    // Here the last arguments are the host's name and what its agent is to do. A new workspace in
+    // its one project, with its stand-in agent, opens to watch once it has started.
+    const name = runDir as string;
+    const message = process.argv[5] as string;
+    await openOther(name);
+    await until("New workspace, offered", () => page(clickedNamed("New workspace in repo")));
+    const form = `section[aria-label="New workspace in repo"]`;
+    await until("its agents", () =>
+      page(`Boolean(document.querySelector('${form} option[value="stand-in"]'))`),
+    );
+    await setField(`${form} select`, "stand-in");
+    await setField(`${form} textarea`, message);
+    await click("Start workspace");
+    try {
+      await until("the started agent's terminal", () =>
+        page(`Boolean(document.querySelector(".xterm"))`),
+      );
+    } catch (error) {
+      console.log(`the window said: ${(await everything()).slice(0, 2000)}`);
+      throw error;
+    }
+    console.log(`saw: a workspace started on ${name}, watched`);
+    break;
+  }
+  case "resumes-there": {
+    // Here the last argument is the host's name. Its one ended conversation is resumed, and opens.
+    const name = runDir as string;
+    await page(clicked("Back"));
+    try {
+      await until("Resume, offered", () => page(clickedNamed("Resume ")));
+    } catch (error) {
+      console.log(
+        `its page said: ${await textOf(`section[aria-label="${name}, another computer"]`)}`,
+      );
+      throw error;
+    }
+    await click("Resume");
+    await until("the resumed agent's terminal", () =>
+      page(`Boolean(document.querySelector(".xterm"))`),
+    );
+    console.log(`saw: a conversation resumed on ${name}, watched`);
     break;
   }
   default:

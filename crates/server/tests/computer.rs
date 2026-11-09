@@ -3,7 +3,8 @@
 //! PTY, and `remote_host::computer` on the other side. It signs in as a device of its own, pairs by
 //! the host's code, waits for the host's person, shows what the host shows once let in, and loses
 //! it again when the host takes the grant back. A terminal there is watched, typed into once this
-//! computer takes control, and watched again after the link drops.
+//! computer takes control, and watched again after the link drops. Work is started there, and an
+//! ended conversation resumed, by the host's ids.
 
 mod common;
 
@@ -16,6 +17,7 @@ use common::served::*;
 use pty_host::{LaunchPlan, PtyHost};
 use remote_client::Client;
 use remote_host::account::Failure;
+use remote_host::computer::start;
 use remote_host::computer::terminal::{self, Seen};
 use remote_host::computer::{self, Computer, ComputerHome, Link, ASKED};
 use remote_host::{Access, AccessFuture, Connector, Serving};
@@ -24,8 +26,11 @@ use remote_proto::pairing::{GrantState, HostSummary, Offer};
 use remote_proto::{Controller, DeviceId, ProjectGrant, TermSize};
 use serde::de::DeserializeOwned;
 use serde_json::json;
+use yardsort_core::error::{IpcError, IpcResult};
+use yardsort_core::harness::{HarnessDef, HarnessOverride, SessionIdMode};
 use yardsort_core::remote::host::{keep_approved, CredentialStore};
 use yardsort_core::remote::serve::Context;
+use yardsort_core::remote::start::Starting;
 use yardsort_core::remote::HostIdentity;
 use yardsort_core::store::Store;
 use yardsort_server::records::MemoryRecords;
@@ -61,13 +66,14 @@ impl Access for HostAccess {
     }
 }
 
-/// The host's records and terminals.
+/// The host's records and terminals, and what it starts agents with, if anything.
 struct Here {
     _dir: tempfile::TempDir,
     store: Store,
     git: yardsort_core::git::Git,
     terminals: Arc<PtyHost>,
     identity: HostIdentity,
+    starting: Option<Arc<dyn Starting>>,
 }
 
 impl Serving for Here {
@@ -78,7 +84,7 @@ impl Serving for Here {
             terminals: self.terminals.as_ref(),
             host: &self.identity,
             interactive: true,
-            starting: None,
+            starting: self.starting.clone(),
         });
     }
 }
@@ -203,6 +209,7 @@ async fn a_computer_pairs_by_code_sees_what_the_host_shows_once_let_in_and_loses
             id: host_id.clone(),
             name: "Workstation".into(),
         },
+        starting: None,
     });
     let program = here.terminals.spawn(waits(&workspace.id)).unwrap();
     let _connector = Connector::start(
@@ -416,6 +423,7 @@ async fn a_computer_watches_a_terminal_types_once_it_takes_control_and_loses_it_
             id: host_id.clone(),
             name: "Workstation".into(),
         },
+        starting: None,
     });
     let program = here.terminals.spawn(echoes(&workspace.id)).unwrap();
     let start_connector = || {
@@ -544,4 +552,219 @@ async fn a_computer_watches_a_terminal_types_once_it_takes_control_and_loses_it_
         .list()
         .iter()
         .any(|t| t.id == program.id && t.state == pty_host::SessionState::Running));
+}
+
+/// What the host starts agents with: a program that waits, in its one workspace, and a note of
+/// what it was asked. Its one harness can resume, so an ended conversation of it is resumable.
+struct Stand {
+    terminals: Arc<PtyHost>,
+    workspace: String,
+    asked: Mutex<Vec<String>>,
+}
+
+impl Stand {
+    fn run(&self, asked: String) -> IpcResult<pty_host::SessionInfo> {
+        self.asked.lock().unwrap().push(asked);
+        self.terminals
+            .spawn(waits(&self.workspace))
+            .map_err(|e| IpcError::new("spawn", e.to_string()))
+    }
+}
+
+impl Starting for Stand {
+    fn harnesses(&self) -> Vec<remote_proto::HarnessSummary> {
+        vec![remote_proto::HarnessSummary {
+            id: "stand-in".into(),
+            name: "Stand-in".into(),
+        }]
+    }
+    fn workspace(
+        &self,
+        project: &str,
+        prompt: &str,
+        harness: &str,
+    ) -> IpcResult<(String, pty_host::SessionInfo)> {
+        let info = self.run(format!("workspace {project} {harness} {prompt}"))?;
+        Ok((self.workspace.clone(), info))
+    }
+    fn session(
+        &self,
+        workspace: &str,
+        harness: &str,
+        prompt: Option<&str>,
+    ) -> IpcResult<pty_host::SessionInfo> {
+        self.run(format!("session {workspace} {harness} {prompt:?}"))
+    }
+    fn resume(&self, session: &str, prompt: Option<&str>) -> IpcResult<pty_host::SessionInfo> {
+        self.run(format!("resume {session} {prompt:?}"))
+    }
+    fn definitions(&self) -> Vec<HarnessDef> {
+        let program = if cfg!(windows) { "cmd.exe" } else { "sh" };
+        yardsort_core::harness::resolve_all(&[HarnessOverride {
+            id: "stand-in".into(),
+            builtin: Some(false),
+            command: Some(program.into()),
+            resume_args: Some(vec!["{session_id}".into()]),
+            session_id_mode: Some(SessionIdMode::Assigned),
+            ..Default::default()
+        }])
+        .into_iter()
+        .map(|h| h.def)
+        .filter(|def| def.id == "stand-in")
+        .collect()
+    }
+    fn data_dir(&self) -> std::path::PathBuf {
+        std::path::PathBuf::new()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_starts_agents_there_and_resumes_an_ended_one_by_that_hosts_ids() {
+    let s = Served::start(MemoryRecords::default()).await;
+    let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
+    let summary: HostSummary = ok(s
+        .post_as(
+            &host.access,
+            "v1/hosts",
+            Some(&json!({"name": "Workstation"})),
+        )
+        .await)
+    .await;
+    let host_id = summary.id;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("alpha", "/code/alpha").unwrap();
+    let workspace = store
+        .add_worktree(&project.id, "work", "/code/alpha-wt", None, None)
+        .unwrap();
+    // A conversation that ended, which the host's harness can take up again.
+    store
+        .add_session(&yardsort_core::store::NewSession {
+            id: "an-ended-one",
+            workspace_id: &workspace.id,
+            harness_id: "stand-in",
+            harness_session_id: Some("its-own-id"),
+            title: "Write the migration",
+            pty_session_id: "long-gone",
+            ..Default::default()
+        })
+        .unwrap();
+    store.end_session_by_pty("long-gone", Some(0)).unwrap();
+    let terminals = Arc::new(PtyHost::new(Arc::new(|_| {})));
+    let stand = Arc::new(Stand {
+        terminals: Arc::clone(&terminals),
+        workspace: workspace.id.clone(),
+        asked: Mutex::default(),
+    });
+    let here = Arc::new(Here {
+        _dir: dir,
+        store,
+        git: yardsort_core::git::testing::git(),
+        terminals,
+        identity: HostIdentity {
+            id: host_id.clone(),
+            name: "Workstation".into(),
+        },
+        starting: Some(Arc::clone(&stand) as Arc<dyn Starting>),
+    });
+    let _connector = Connector::start(
+        host_id.clone(),
+        Arc::new(HostAccess {
+            base: s.base.to_string(),
+            access: host.access.clone(),
+        }),
+        Arc::clone(&here) as Arc<dyn Serving>,
+    );
+    until("the host is connected", || s.relay.connected(&host_id)).await;
+
+    let desk_dir = tempfile::tempdir().unwrap();
+    let desk = Arc::new(Desk {
+        computer: Computer::default(),
+        store: Store::open(&desk_dir.path().join("yardsort.db")).unwrap(),
+        kept: Arc::default(),
+        changes: AtomicUsize::new(0),
+    });
+    let signed_in = s.sign_in("alice", "Laptop", DeviceKind::Computer).await;
+    let device = signed_in.device.clone();
+    let client = Client::new(s.base.as_str()).unwrap();
+    let server = client.describe().await.unwrap();
+    computer::sign_in(&desk, client, &server, "Laptop", signed_in)
+        .await
+        .unwrap();
+    let offer: Offer = ok(s
+        .post_as(&host.access, &format!("v1/hosts/{host_id}/offers"), None)
+        .await)
+    .await;
+    let asked = computer::pair(&desk, offer.code.expose()).await.unwrap();
+    let _: serde_json::Value = ok(s
+        .post_as(
+            &host.access,
+            &format!("v1/grants/{}/approve", asked.id),
+            Some(&json!({"scopes": ASKED, "projects": {"kind": "all"}})),
+        )
+        .await)
+    .await;
+    keep_approved(
+        &here.store,
+        &asked.id,
+        &DeviceId::new(device.to_string()).unwrap(),
+        "Laptop",
+        &ASKED.into_iter().collect(),
+        &ProjectGrant::All,
+        1,
+    )
+    .unwrap();
+    let host = host_id.as_str();
+    let resumable = || {
+        computer::view(desk.as_ref(), host).is_some_and(|v| {
+            v.shown.as_ref().is_some_and(|shown| {
+                shown.workspaces.iter().any(|(_, page)| {
+                    page.sessions
+                        .iter()
+                        .any(|s| s.id.as_str() == "an-ended-one" && s.resumable)
+                })
+            })
+        })
+    };
+    until("the ended conversation shows as one to resume", resumable).await;
+
+    let agents = start::harnesses(&desk, host).await.unwrap();
+    assert_eq!(agents[0].id, "stand-in");
+    let made = start::workspace(
+        &desk,
+        host,
+        &project.id,
+        "Fix the spacing",
+        Some("stand-in"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(made.workspace.as_str(), workspace.id);
+    assert_eq!(made.harness, "stand-in");
+    let another = start::session(&desk, host, &workspace.id, None, Some("  "))
+        .await
+        .unwrap();
+    assert_ne!(another.terminal, made.terminal);
+    let resumed = start::resume(&desk, host, "an-ended-one", Some("Carry on"))
+        .await
+        .unwrap();
+    assert_eq!(resumed.workspace.as_str(), workspace.id);
+    assert_eq!(resumed.harness, "stand-in");
+    assert_eq!(
+        *stand.asked.lock().unwrap(),
+        [
+            format!("workspace {} stand-in Fix the spacing", project.id),
+            format!("session {} stand-in None", workspace.id),
+            "resume an-ended-one Some(\"Carry on\")".to_owned(),
+        ]
+    );
+    // What the host has no record of is refused there, and nothing is started for it.
+    let refused = start::resume(&desk, host, "not-one-of-its", None)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, "remote_refused");
+    assert_eq!(stand.asked.lock().unwrap().len(), 3);
+    for terminal in here.terminals.list() {
+        let _ = here.terminals.kill(&terminal.id);
+    }
 }

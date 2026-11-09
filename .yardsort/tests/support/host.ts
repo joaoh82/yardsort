@@ -3,10 +3,11 @@
 // a terminal of their own.
 //
 //   bun .yardsort/tests/support/host.ts <run dir> sign-in <name>
-//   bun .yardsort/tests/support/host.ts <run dir> pair [window <port> [v|t]]
+//   bun .yardsort/tests/support/host.ts <run dir> pair [watching | window <port> [v|t]]
 //
-// With `window`, the app's window is the device that asks, through its inspector on `port`. It
-// asks to watch and type, as the phone does, and is let watch (`v`, the default) or type too (`t`).
+// The pretend phone is let watch and type, or with `watching` only watch. With `window`, the app's
+// window is the device that asks, through its inspector on `port`. It asks to watch and type, as
+// the phone does, and is let watch (`v`, the default) or type too (`t`).
 //
 // `yardsort-host` runs through headless.sh: the build headless-build.sh made, on this run's profile.
 
@@ -114,7 +115,7 @@ switch (doing) {
     const asking = Bun.spawnSync(asker, { stdout: "inherit", stderr: "inherit" });
     if (asking.exitCode !== 0) throw new Error("The device could not ask.");
     await out.until(/Allow \[v\]iewing, allow viewing and \[t\]yping, or \[d\]eny\?/);
-    pairing.stdin.write(window ? `${answer ?? "v"}\n` : "t\n");
+    pairing.stdin.write(window ? `${answer ?? "v"}\n` : named === "watching" ? "v\n" : "t\n");
     await pairing.stdin.flush();
     await out.until(/Let in\./);
     pairing.kill();
