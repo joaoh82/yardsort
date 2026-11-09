@@ -61,7 +61,7 @@ so it needs nothing else from you.
 - **New agent**, in a workspace, starts another agent there, with a first message or none.
 - **Resume**, on a conversation that ended, takes it up again in a new terminal, as
   [Resume](terminals-and-sessions.md#resume) does here: the same conversation, under the same record,
-  with a message to go on with or none. A conversation shows it only when this computer could resume it.
+  with a message to go on with or none. A conversation shows it only when this computer could resume it, and only to a device you let type.
   Tap **Show ended conversations** in a workspace to see them. One whose terminal is still here also
   offers **See its last screen**.
 

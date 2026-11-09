@@ -387,6 +387,11 @@ fn a_phone_with_control_resumes_an_ended_conversation_under_its_record() {
     let listed = sessions(&fx, &visitor, &out, "r3", &workspace);
     assert_eq!(listed[0]["id"], record);
     assert_eq!(listed[0]["resumable"], true, "{listed}");
+    // A device let only watch is told of nothing to resume.
+    fx.approve(&[Scope::WorkspaceRead, Scope::TerminalRead]);
+    let watching = sessions(&fx, &visitor, &out, "r3w", &workspace);
+    assert_eq!(watching[0]["resumable"], false, "{watching}");
+    fx.approve(&CONTROL);
 
     let reply = fx.ask(
         &visitor,

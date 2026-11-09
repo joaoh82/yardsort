@@ -391,7 +391,11 @@ impl HostFacade<'_> {
             (Some(live), None) => self.other_terminals(&workspace.id, &records, live)?,
             _ => Vec::new(),
         };
-        let resumable = self.resumable(&records, &workspace.id, live.as_deref());
+        let resumable = if grant.allows(remote_proto::Scope::TerminalControl) {
+            self.resumable(&records, &workspace.id, live.as_deref())
+        } else {
+            std::collections::HashSet::new()
+        };
         let sessions = records
             .into_iter()
             .filter(|row| params.include_ended || row.running)
@@ -421,7 +425,8 @@ impl HostFacade<'_> {
     }
 
     /// Which of a workspace's records, newest first, `session.resume` would start again, as the
-    /// window's **Resume** decides: none when this facade starts nothing. A record still said to
+    /// window's **Resume** decides: none when this facade starts nothing. Asked only for a grant
+    /// that may resume: one that may only watch is told of none. A record still said to
     /// run whose terminal is gone counts as ended, since a resume settles it first.
     fn resumable(
         &self,

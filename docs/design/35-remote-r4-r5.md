@@ -892,7 +892,8 @@ person approves (§3); nothing here lets a device in because it is on the accoun
   is settled first.
 - **`resumable` in a session's summary**, decided as the window decides it (`sessions::describe`),
   with the harnesses whose program this host finds (`Starting::definitions`), and only where the
-  channel answers starts. A record still said to run whose terminal is gone counts as ended, since a
+  channel answers starts, and only to a grant that may type: a device let only watch is told of
+  nothing to resume. A record still said to run whose terminal is gone counts as ended, since a
   resume settles it. A host before minor 6 says nothing, which reads as `false`, on both clients.
 - **The phone.** An ended conversation the computer could resume carries **Resume**, and opens a
   screen with its title, a message to go on with, **Resume**, and **See its last screen** while the
@@ -912,6 +913,14 @@ person approves (§3); nothing here lets a device in because it is on the accoun
   agent, and resumes one, each reaching the host by its ids, and a record the host does not have is
   refused there. The fixtures pin `session.resume` and `resumable`, and both clients read a host from
   before as offering no resume. The phone's and the window's screens, each with a refusal.
+
+**What review found.** Two things. Two devices pressing **Resume** together could both pass the
+check that the record had ended and start two agents on one conversation, the record naming only
+the last: `continue_session` now claims the record in the process for the whole of a resume, from
+before the check until the record names its terminal, and refuses another resume of it meanwhile,
+with a test that holds the first at its spawn. A `ys session resume` in another process is not held
+off by it; that is rare enough to leave, and the record still names the last one. And a phone let
+only watch was offered **Resume**, since `resumable` did not depend on who asked: it now does.
 
 **Its smoke test.** `remote-start-and-resume.yaml`, locally, against a `yardsort-host` on the stand-in
 server with host-restart's stand-in agent: a phone let only watch is refused starting and resuming;

@@ -2035,7 +2035,8 @@ describe("A computer", () => {
       });
 
       test.each([
-        ["one the computer cannot resume", true, false],
+        // A phone let only watch is one: the computer lists nothing as resumable to it.
+        ["one the computer does not offer this phone to resume", true, false],
         ["a computer from before minor 6", false, true],
       ])("%s offers no resuming", async (_, answers, resumable) => {
         const server = able();

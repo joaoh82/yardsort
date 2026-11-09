@@ -268,8 +268,9 @@ pub struct SessionSummary {
     pub process: ProcessState,
     /// Present while the host's daemon still has the terminal, exited or not.
     pub terminal: Option<TerminalSummary>,
-    /// Whether `session.resume` would start it again: it has ended, its harness is one the host
-    /// can resume, and the host knows which conversation it was. Since minor 6; an earlier host
+    /// Whether `session.resume` would start it again, for the device asking: it has ended, its
+    /// harness is one the host can resume, the host knows which conversation it was, and the
+    /// device's grant may type (`terminal:control`). Since minor 6; an earlier host
     /// says nothing, which reads as `false`.
     #[serde(default)]
     pub resumable: bool,
