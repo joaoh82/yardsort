@@ -664,4 +664,37 @@ the real one would, and creates nothing.
   agent went to the clone by itself, ran `gh pr create --head bump` there, and the pull request
   was tracked with its workspace by `hook`, linked to its conversation.
 
-The window's rows, and macOS and Windows, are still to do.
+### Linux (Omarchy, Hyprland), the dev window from main at 3892fcd (0.24.0) — 2026-11-09
+
+§ 28, rows 3–7, in the window, driven through WebKit's remote inspector, against a stand-in `gh`
+that answers by link for one pull request (`example/lib#41`, the nested clone's `bump`) and keeps
+its state — so a close closes it, a comment and a review are added to it — and reaches nothing.
+Confirmations were answered in the page, by replacing the app's `native.confirm`, except one
+answered "no" by closing the real dialog.
+
+- **3:** a link to the project's own repository and an issue's link are each refused in the
+  dialog, with the reason; the pull request's link (`…/pull/41/files`) is tracked by `app`, and
+  the workspace's row shows it with its checks.
+- **4:** listed under the project with `example/lib`; its Summary read by link; a reply sent as
+  `gh pr comment <link> --body-file -` and shown in the conversation; **Code** lists `lib.js`
+  from the clone and shows its diff, the line comments asked of `example/lib` on its host; the
+  clone's checkout, branch and `FETCH_HEAD` as they were; **Note on lines…** disabled, saying
+  why.
+- **5:** **Close** confirmed as _Close pull request example/lib#41 without merging it?_, a "no"
+  (the real dialog, closed) closing nothing, a yes sending `gh pr close <link>`; **Reopen** the
+  same; the toolbar's **Squash and merge** confirmed naming its repository and head, a "no"
+  sending nothing, a yes sending `gh pr merge <link> --squash --match-head-commit <head>`. No
+  conflict resolution offered.
+- **6:** **Request code review…** previewed it by link and ran `code-review-elsewhere` with Claude
+  Code: it read `gh pr diff <link>`, made a worktree of the clone in a folder of its own, ran
+  `gh pr checkout <link> --detach` and `node test.mjs` there, removed the worktree, and posted
+  `gh pr review <link> --comment`. The run saw the review by link and notified; telling the
+  author was skipped, as it should be, with no agent running and the pull request tracked by
+  `ys`. The clone's own checkout was untouched.
+- **7:** **Stop tracking** from the toolbar and from the details: gone from the row, the toolbar
+  and the view; the commits fetched for it deleted from the clone; the pull request left open.
+
+Found, not fixed: **Refresh pull request** does not read a merged or closed tracked pull request
+again within its ten minutes; and a confirmation says _<author> opened it, not you_ when `gh`'s
+login is not known, which only a stand-in that does not answer `api user` shows. Still to do:
+every row on macOS and Windows.
