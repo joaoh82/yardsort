@@ -223,10 +223,13 @@ pub fn launch_section(project_root: &Path) -> Option<String> {
     if nested.is_empty() {
         return None;
     }
+    // Each by its whole path: a name alone reads as a folder of the agent's own worktree, which
+    // is a worktree of the parent and has none of them (seen on the Linux hands-on pass, where
+    // an agent went looking for `lib` beside it).
     let mut named = nested
         .iter()
         .take(NAMED_REPOSITORIES)
-        .cloned()
+        .map(|name| format!("`{}`", project_root.join(name).display()))
         .collect::<Vec<_>>()
         .join(", ");
     if nested.len() > NAMED_REPOSITORIES {
@@ -234,9 +237,10 @@ pub fn launch_section(project_root: &Path) -> Option<String> {
     }
     Some(format!(
         "## Other repositories\n\n\
-         This project's checkout holds other git repositories: {named} (in {}). When you open \
-         a pull request in one of them, run `ys pr track <its url>` so Yardsort follows it with \
-         this workspace.",
+         This project's checkout, {}, holds other git repositories, which are not in this \
+         workspace's folder: {named}. When you open a pull request in one of them, work in its \
+         folder there, then run `ys pr track <its url>` so Yardsort follows it with this \
+         workspace.",
         project_root.display()
     ))
 }
@@ -774,13 +778,20 @@ mod tests {
         assert_eq!(nested_repositories(root), ["app", "lib"]);
         let section = launch_section(root).unwrap();
         assert!(section.starts_with("## Other repositories\n\n"));
-        assert!(section.contains("repositories: app, lib (in "));
+        assert!(
+            section.contains(&format!(
+                "not in this workspace's folder: `{}`, `{}`.",
+                root.join("app").display(),
+                root.join("lib").display()
+            )),
+            "{section}"
+        );
         assert!(section.contains("`ys pr track <its url>`"));
 
         for n in 0..12 {
             std::fs::create_dir_all(root.join(format!("r{n:02}/.git"))).unwrap();
         }
-        assert!(launch_section(root).unwrap().contains(" and 4 more (in "));
+        assert!(launch_section(root).unwrap().contains(" and 4 more. When"));
     }
 
     #[test]

@@ -1229,7 +1229,11 @@ requests that no project's list has.
       `pr.clone`, the checks run in a worktree of the nested clone, the review waited on by link
       and told to the agent that opened it. Recorded in
       [38 § slice 5](38-pull-requests-elsewhere.md#slice-5-what-shipped).
-- [ ] The hands-on pass: a real agent in a real parent project, on Linux, macOS and Windows.
+- [ ] The hands-on pass, [08 § 28](08-manual-checklist.md#28--pull-requests-in-other-repositories):
+      a real agent in a real parent project, on Linux, macOS and Windows. Linux without the
+      window was done on 2026-11-09 — a real Claude Code tracked by `hook` through
+      `yardsort-host` — and found the launch section's clone names read as the worktree's own
+      folders, now whole paths ([38 § the hands-on pass](38-pull-requests-elsewhere.md#the-hands-on-pass)).
 
 _Exit:_ on all three platforms, an agent in a parent project's workspace opens a pull request in a
 nested clone and it appears on the workspace's row with its checks without anyone typing its

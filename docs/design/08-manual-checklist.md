@@ -620,6 +620,24 @@ steps:
 |     | The built-in **Smoke test, then tell the agent**: with an agent running in the workspace, `ys workflow run smoke-then-tell --input suite=greet`; the run queues a smoke run marked as the workflow's, waits for it, and types the verdict into the agent once quiet.                                                              |
 |     | **macOS / Windows:** the first three rows, the Tests view, and the browser row.                                                                                                                                                                                                                                                   |
 
+## 28 · Pull requests in other repositories
+
+Needs `gh` logged in, and a parent project: a repository of yours whose folder holds a clone of
+another repository of yours, in a folder the parent's `.gitignore` names, with a branch pushed
+there that a pull request can be opened from. Pull requests opened for these rows are real; close
+them after.
+
+| ✓   | Check                                                                                                                                                                                                                                                                                                                                               |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     | Start an agent with a first message in one of the parent's workspaces: its first message ends with _Other repositories_, naming the clone by its whole path, outside the workspace's folder. Started from a handoff, it does not.                                                                                                                   |
+|     | With **Capture what Claude Code reports** on, Claude Code opens a pull request in the clone with `gh pr create`: within seconds the workspace's row shows `lib#<n>` beside its own, and `ys pr tracked --workspace <name>` lists it by `hook`. The same with another agent's reporting switch on.                                                   |
+|     | **Track pull request…** in the workspace's menu takes another link and tracks it by `app`; a link to the project's own repository, and an issue's link, are each refused in the dialog.                                                                                                                                                             |
+|     | **Pull requests**: the tracked one is listed under the project with `owner/name`; its **Summary** reads; a reply posts on it; **Code** lists its files from the clone, and `git -C <clone> status` and its `FETCH_HEAD` are as they were.                                                                                                           |
+|     | **Close** asks, naming `owner/name#<n>`; a "no" leaves it open; a yes closes it on GitHub; **Reopen** opens it again. A **Merge** from the session toolbar asks the same way.                                                                                                                                                                       |
+|     | **Request code review…** on it: the run starts a reviewer in the workspace, which makes a worktree of the clone, runs the checks there, removes it and posts a review; a notification says so, and the agent that opened it is told. The clone's own checkout is unchanged. Without the clone in the folder, the dialog says so and does not start. |
+|     | **Stop tracking**: it goes from the row, the toolbar and the view; the pull request on GitHub is left as it is.                                                                                                                                                                                                                                     |
+|     | **macOS / Windows:** every row.                                                                                                                                                                                                                                                                                                                     |
+
 ## Results
 
 Nothing recorded yet for macOS or Windows. Add a section per pass:
@@ -630,3 +648,14 @@ Sections 1–8 pass except …
 Benchmarks: see 07-terminal-benchmarks.
 Found: …
 ```
+
+### Linux (Omarchy, Hyprland), `ys` and `yardsort-host` from main at 522bede — 2026-11-09
+
+§ 28, first two rows, without the window: a real Claude Code 2.1.319 (haiku), started by
+`ys workspace new` in a parent project with a nested clone, under a throwaway profile served by
+`yardsort-host serve`, with a stand-in `gh` that prints a link and creates nothing. Its first
+message had _Other repositories_; it ran `gh pr create` in the clone, and the host's drain tracked
+`example/lib#41` by `hook` within the second, linked to the conversation, with nothing of the
+command or its output on the event. Found: the section named the clone as `lib (in <parent>)`,
+and the agent looked for `lib` in its own worktree first — it now names each clone by its whole
+path, outside the workspace's folder. The window's rows, and macOS and Windows, are still to do.

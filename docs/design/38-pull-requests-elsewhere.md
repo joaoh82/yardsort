@@ -160,8 +160,9 @@ one more section:
 ```text
 ## Other repositories
 
-This project's checkout holds other git repositories: flotta, flotta-cloud (in
-/home/…/flotta_parent). When you open a pull request in one of them, run
+This project's checkout, /home/…/flotta_parent, holds other git repositories, which are not
+in this workspace's folder: `/home/…/flotta_parent/flotta`, `/home/…/flotta_parent/flotta-cloud`.
+When you open a pull request in one of them, work in its folder there, then run
 `ys pr track <its url>` so Yardsort follows it with this workspace.
 ```
 
@@ -486,6 +487,20 @@ Testing Library — only the workflows about one offered, previewed and started 
 id, the agent that opened it named, and refused without a clone — and the button in the Pull
 requests view opening it. Not yet done: a real review run on a real tracked pull request, and the
 three systems' hands-on pass.
+
+## The hands-on pass
+
+The rows are [08 § 28](08-manual-checklist.md#28--pull-requests-in-other-repositories).
+
+- **Linux, 2026-11-09, without the window.** A real Claude Code (2.1.319), started by
+  `ys workspace new` in a parent project with a nested clone, under a throwaway profile kept by
+  `yardsort-host serve`, with a stand-in `gh`: it ran `gh pr create` in the clone and the host's
+  drain tracked the pull request by `hook`, linked to its conversation, keeping only the link.
+  **Found:** the launch section named the clone as `lib (in <parent>)`, and the agent went looking
+  for `lib` in its own worktree — a worktree of the parent, which has none of them. It now names
+  each clone by its whole path and says they are outside the workspace's folder.
+- **Still to do:** the window's rows on Linux against real pull requests, and every row on macOS
+  and Windows — none of which this machine can do.
 
 ## Documentation this touches
 

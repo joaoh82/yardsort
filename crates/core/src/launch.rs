@@ -1152,7 +1152,10 @@ mod tests {
         let smoke = sent.find("## Smoke tests").unwrap();
         let elsewhere = sent.find("## Other repositories").expect(&sent);
         assert!(smoke < elsewhere, "{sent}");
-        assert!(sent.contains("other git repositories: lib (in "), "{sent}");
+        assert!(
+            sent.contains(&format!("`{}`", bare.path().join("lib").display())),
+            "{sent}"
+        );
         assert!(sent.contains("ys pr track"), "{sent}");
         assert!(!start(&ws, &store, bare.path(), Some("exit 0"), true, None)
             .contains("Other repositories"));
