@@ -270,6 +270,7 @@ fn ipc_builder() -> Builder<tauri::Wry> {
             terminal::PtyHostEvent,
             changes::commands::WorkspaceFilesChanged,
             activity::ActivityChanged,
+            activity::TrackedPullRequestsChanged,
             quit::QuitRequested,
             workflows::SessionStarted,
             workflows::commands::WorkflowRunsChanged,

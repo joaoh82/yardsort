@@ -580,6 +580,10 @@ pub struct InboxReport {
     pub deferred: usize,
     /// The workspaces that gained events, for whoever is showing one.
     pub workspaces: std::collections::BTreeSet<String>,
+    /// Pull requests the newly recorded events saw an agent create, for
+    /// [`crate::tracked::track_seen`]: draining has no `git` to tell the project's own apart.
+    /// An event drained twice is seen once, so a link untracked since stays untracked.
+    pub pull_requests: Vec<crate::tracked::Seen>,
 }
 
 /// Drain the agents' inbox into the store: every event a hook left is linked to its run and
@@ -643,6 +647,18 @@ pub fn import_inbox(store: &Store, data_dir: &Path) -> InboxReport {
                 match added {
                     Some(true) => {
                         report.imported += 1;
+                        if let Some(url) = entry
+                            .payload
+                            .get("pullRequestUrl")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|_| entry.kind == "tool.completed")
+                        {
+                            report.pull_requests.push(crate::tracked::Seen {
+                                workspace_id: link.workspace_id.clone(),
+                                session_id: link.session_id.clone(),
+                                url: url.to_owned(),
+                            });
+                        }
                         report.workspaces.insert(link.workspace_id);
                     }
                     Some(false) => report.duplicates += 1,
@@ -1646,6 +1662,38 @@ mod tests {
         let junk = import_inbox(&store, dir.path());
         assert_eq!(junk.unreadable, 1);
         assert!(inbox.entries().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_pull_request_an_agent_created_is_handed_on_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::in_memory();
+        let ws = workspace(&store);
+        let inbox = Inbox::new(inbox_dir(dir.path()));
+        let mut created = inbox_entry("e-pr", "tool.completed");
+        created.workspace_id = Some(ws.clone());
+        created.payload =
+            json!({ "tool": "Bash", "pullRequestUrl": "https://github.com/o/lib/pull/7" });
+        inbox.record(&created).unwrap();
+        // The same link on anything but a finished call is not a creation.
+        let mut started = inbox_entry("e-start", "tool.started");
+        started.workspace_id = Some(ws.clone());
+        started.payload = json!({ "pullRequestUrl": "https://github.com/o/lib/pull/8" });
+        inbox.record(&started).unwrap();
+
+        let report = import_inbox(&store, dir.path());
+        assert_eq!(
+            report.pull_requests,
+            [crate::tracked::Seen {
+                workspace_id: ws.clone(),
+                session_id: None,
+                url: "https://github.com/o/lib/pull/7".into(),
+            }]
+        );
+        // Drained again by another client: one event, and nothing handed on twice — so a pull
+        // request untracked meanwhile stays untracked.
+        inbox.record(&created).unwrap();
+        assert!(import_inbox(&store, dir.path()).pull_requests.is_empty());
     }
 
     /// A throwaway CODEX_HOME holding the fixture session file where Codex would keep it.

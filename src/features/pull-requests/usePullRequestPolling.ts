@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { hasCore } from "@/lib/ipc";
+import { hasCore, ipc } from "@/lib/ipc";
 import { useProjectsStore } from "@/stores/projects";
 import { usePublishStore } from "@/stores/publish";
 
@@ -45,9 +45,17 @@ export function usePullRequestPolling() {
     const onFocus = () => load(true, looking());
     window.addEventListener("focus", onFocus);
     const timer = window.setInterval(() => load(true, looking()), POLL_MS);
+    // An agent opened a pull request elsewhere and its workspace follows it now: show it at
+    // once. The core reads one it has not seen yet whatever `refresh` says.
+    const unlisten = ipc.onTrackedPullRequestsChanged((projectIds) => {
+      for (const id of projectIds) {
+        void usePublishStore.getState().loadProject(id, false, looking());
+      }
+    });
     return () => {
       window.removeEventListener("focus", onFocus);
       window.clearInterval(timer);
+      void unlisten.then((stop) => stop());
     };
   }, [ids]);
 

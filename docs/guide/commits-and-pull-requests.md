@@ -163,9 +163,15 @@ goes into one of those clones and opens its pull request there, in a repository 
 project's. Nothing git or GitHub records ties that pull request to the workspace, so Yardsort is
 told about it instead, and **tracks** it:
 
+- **Yardsort sees it.** With [**Capture what Claude Code reports**](activity.md#what-claude-code-reports)
+  on, a pull request Claude Code opens — with `gh pr create`, or a GitHub MCP server's
+  `create_pull_request` tool — is tracked with its workspace as soon as Yardsort hears of it,
+  with nobody typing its link. Only the link is kept from that tool call. One in the project's
+  own repository is left to the project's list, which has it already.
 - **The agent says so.** An agent started with a first message in a project whose folder holds
   other repositories is told which they are, and to run
-  [`ys pr track <url>`](cli.md#ys-pr) after opening a pull request in one of them.
+  [`ys pr track <url>`](cli.md#ys-pr) after opening a pull request in one of them. That covers
+  the other agents, and Claude Code with reporting off.
 - **You say so.** **Track pull request…** in the workspace's **⋯** menu takes a link,
   `https://github.com/owner/repo/pull/12`. A link that is not a GitHub pull request is refused,
   and so is one of the project's own repository, which the workspace follows already.

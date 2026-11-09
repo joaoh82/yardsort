@@ -1,0 +1,18 @@
+{
+  "session_id": "33333333-3333-4333-8333-333333333333",
+  "transcript_path": "/home/user/.claude/projects/-tmp-yardsort-fixture-repo/33333333-3333-4333-8333-333333333333.jsonl",
+  "cwd": "/tmp/yardsort-fixture/repo/lib",
+  "prompt_id": "85400b4d-f808-4aa7-9645-05070565202b",
+  "permission_mode": "default",
+  "effort": { "level": "medium" },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "ToolSearch",
+  "tool_input": { "query": "select:mcp__github__create_pull_request", "max_results": 1 },
+  "tool_response": {
+    "matches": ["mcp__github__create_pull_request"],
+    "query": "select:mcp__github__create_pull_request",
+    "total_deferred_tools": 16
+  },
+  "tool_use_id": "toolu_015B6YwWC3qng88jQCeFMJzD",
+  "duration_ms": 5
+}

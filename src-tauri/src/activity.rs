@@ -22,17 +22,45 @@ pub struct ActivityChanged {
     pub workspace_ids: Vec<String>,
 }
 
+/// A pull request an agent was seen creating is now tracked with these projects' workspaces:
+/// the window should ask about their pull requests again rather than wait for its next look.
+#[derive(Debug, Clone, Serialize, Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackedPullRequestsChanged {
+    pub project_ids: Vec<String>,
+}
+
 /// Take what the inbox holds into the store, and tell the timeline which workspaces moved.
 /// Anything the drain had to leave — a Codex turn its session file has not finished — is
 /// handed to the watcher, which looks again on its own clock: nothing else would.
 pub fn drain_inbox(handle: &AppHandle, store: &Store, data_dir: &Path) {
     let report = yardsort_core::activity::import_inbox(store, data_dir);
+    let gained = yardsort_core::runtime::track_seen(store, &report.pull_requests, || {
+        let state = handle.try_state::<AppState>()?;
+        crate::git::Git::new(&state.env()).ok()
+    });
+    tracked(handle, store, gained);
     changed(handle, report.workspaces);
     // The watcher's thread also reads the session directories of harnesses that keep their
     // own — Grok's — and an exit is the moment their last lines land; so it is woken here
     // whatever the inbox held.
     if let Some(state) = handle.try_state::<AppState>() {
         launched(&state);
+    }
+}
+
+/// Say which projects' workspaces began following a pull request.
+fn tracked(handle: &AppHandle, store: &Store, workspaces: std::collections::BTreeSet<String>) {
+    let projects: std::collections::BTreeSet<String> = workspaces
+        .iter()
+        .filter_map(|id| store.workspace(id).ok().flatten())
+        .map(|workspace| workspace.project_id)
+        .collect();
+    if !projects.is_empty() {
+        let _ = TrackedPullRequestsChanged {
+            project_ids: projects.into_iter().collect(),
+        }
+        .emit(handle);
     }
 }
 
@@ -72,8 +100,14 @@ pub fn watch_inbox(handle: AppHandle, data_dir: &Path) -> notify::Result<InboxWa
             .capture_grok
             .then(|| yardsort_core::runtime::grok_home(&state.env()))
             .flatten();
-        let drained =
-            yardsort_core::runtime::drain(&state.store, &dir, grok_home.as_deref(), cursors);
+        let drained = yardsort_core::runtime::drain(
+            &state.store,
+            &dir,
+            grok_home.as_deref(),
+            cursors,
+            || crate::git::Git::new(&state.env()).ok(),
+        );
+        tracked(&handle, &state.store, drained.tracked);
         changed(&handle, drained.workspaces);
         drained.pending
     })

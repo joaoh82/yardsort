@@ -45,6 +45,7 @@ const core = vi.hoisted(() => ({
   memoryGet: vi.fn(),
   outcomeLabel: vi.fn(),
   onActivityChanged: vi.fn(),
+  onTrackedPullRequestsChanged: vi.fn(),
   onSessionStarted: vi.fn(),
   workflowList: vi.fn(),
   workflowPreview: vi.fn(),
@@ -133,6 +134,7 @@ describe("Sidebar", () => {
     core.sessionsList.mockResolvedValue([]);
     core.memoryWaiting.mockResolvedValue([]);
     core.onActivityChanged.mockResolvedValue(() => {});
+    core.onTrackedPullRequestsChanged.mockResolvedValue(() => {});
     core.onSessionStarted.mockResolvedValue(() => {});
     useMemoryStore.setState({ waiting: {} });
     useOutcomesStore.setState({ asking: null, error: null });
@@ -1829,6 +1831,22 @@ describe("Sidebar", () => {
         name: /Pull request #7 in demo\/lib/,
       });
       expect(badge).toHaveTextContent("lib#7");
+    });
+
+    it("shows one an agent was seen opening as soon as the core says so", async () => {
+      await withWorktree();
+      await waitFor(() => expect(core.onTrackedPullRequestsChanged).toHaveBeenCalled());
+      const heard = core.onTrackedPullRequestsChanged.mock.calls[0]![0] as (ids: string[]) => void;
+      const elsewhere = trackedOf("w-app-fix-login", pullRequest(7), { trackedBy: "hook" });
+      core.projectPullRequests.mockClear();
+      core.projectPullRequests.mockResolvedValue(pullRequestsOf([], { tracked: [elsewhere] }));
+      act(() => heard(["p-app"]));
+      // The core reads one it has not seen yet without being told to refresh.
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-app", false, false);
+      const row = screen.getByRole("treeitem", { name: "fix-login" });
+      expect(
+        await within(row).findByRole("button", { name: /Pull request #7 in demo\/lib/ }),
+      ).toHaveTextContent("lib#7");
     });
 
     it("keeps the track dialog open with the reason when the core refuses", async () => {

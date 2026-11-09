@@ -91,7 +91,11 @@ spool.
 
 **What is kept, and what is not.** Names, ids, relative paths, durations, counts, kinds. Not the
 prompt, not a command, not a tool's input or output, not what Claude wrote back, not a path
-outside the workspace. The recorded shapes come from Claude Code **2.1.280**; a newer version
+outside the workspace. One exception: a tool call that **opened a pull request** — Claude Code
+says so itself for `gh pr create`, and a GitHub MCP server's `create_pull_request` is known by
+its name — keeps that pull request's link, and nothing else of the call, so its workspace can
+[follow it](commits-and-pull-requests.md#pull-requests-in-other-repositories). One in another
+repository is then tracked with the workspace. The recorded shapes come from Claude Code **2.1.280**; a newer version
 that renames a field loses that detail, not the event. Claude Code started by any other means —
 from your own terminal, say — reports nothing to Yardsort. A Claude Code harness whose arguments
 already carry `--settings` or `--bare` is left alone, and the timeline's settings show a

@@ -88,7 +88,10 @@ pub async fn run(profile: Profile) -> Result<(), String> {
                 .capture_grok
                 .then(|| runtime::grok_home(home.env()))
                 .flatten();
-            runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors).pending
+            runtime::drain(&home.store, &dir, grok_home.as_deref(), cursors, || {
+                yardsort_core::git::Git::new(home.env()).ok()
+            })
+            .pending
         })
     };
     match watching {

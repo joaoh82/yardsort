@@ -73,20 +73,38 @@ pub struct Drained {
     pub workspaces: BTreeSet<String>,
     /// Entries left for later, and Grok runs still being followed: worth looking at again soon.
     pub pending: usize,
+    /// The workspaces that began following a pull request an agent was seen creating.
+    pub tracked: BTreeSet<String>,
+}
+
+/// [`crate::tracked::track_seen`], with `git` found only when there is something to track.
+pub fn track_seen(
+    store: &Store,
+    seen: &[crate::tracked::Seen],
+    git: impl FnOnce() -> Option<crate::git::Git>,
+) -> BTreeSet<String> {
+    if seen.is_empty() {
+        return BTreeSet::new();
+    }
+    crate::tracked::track_seen(store, git().as_ref(), seen)
 }
 
 /// Take what the inbox holds into the store, and, given `grok_home`, what Yardsort's own Grok
-/// launches wrote into their session directories.
+/// launches wrote into their session directories. A pull request an agent was seen creating is
+/// tracked with its workspace; `git`, asked for only then, tells the project's own apart.
 pub fn drain(
     store: &Store,
     data_dir: &Path,
     grok_home: Option<&Path>,
     cursors: &mut grok::Cursors,
+    git: impl FnOnce() -> Option<crate::git::Git>,
 ) -> Drained {
     let report = activity::import_inbox(store, data_dir);
+    let tracked = track_seen(store, &report.pull_requests, git);
     let mut drained = Drained {
         workspaces: report.workspaces,
         pending: report.deferred,
+        tracked,
     };
     if let Some(home) = grok_home {
         let read = grok::import(store, home, cursors);

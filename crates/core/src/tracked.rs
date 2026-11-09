@@ -4,10 +4,13 @@
 //! commits to workspaces (`crate::forge::pull_requests_from`). A project whose checkout holds
 //! other repositories — nested clones its agents go into and open pull requests from — has pull
 //! requests that leave no such trace, so they are written down: by an agent through
-//! `ys pr track`, by the user in the app, or (later) by an adapter that saw one being created.
-//! See `docs/design/38-pull-requests-elsewhere.md`.
+//! `ys pr track`, by the user in the app, or by an adapter that saw one being created (below,
+//! from [`link_in`] on). See `docs/design/38-pull-requests-elsewhere.md`.
 
+use std::collections::BTreeSet;
 use std::path::Path;
+
+use serde_json::Value;
 
 use crate::error::{IpcError, IpcResult};
 use crate::forge::{ForgeKind, Repo};
@@ -209,6 +212,171 @@ pub fn launch_section(project_root: &Path) -> Option<String> {
     ))
 }
 
+// Seen being created. An adapter that sees a tool call open a pull request keeps its link, and
+// nothing else of the call, as `pullRequestUrl` on the `tool.completed` event; draining the
+// inbox hands those links to [`track_seen`]. The rules are here, not in each adapter, so every
+// agent's calls are judged alike.
+
+/// The first link to a GitHub pull request in `text`, rebuilt as [`parse`] rebuilds one. A
+/// branch's "open a pull request" link (`/pull/new/<branch>`) and an API address
+/// (`/repos/…/pulls/7`) are not one.
+pub fn link_in(text: &str) -> Option<String> {
+    let mut rest = text;
+    while let Some(at) = rest.find("http") {
+        let candidate = &rest[at..];
+        let end = candidate
+            .find(|c: char| c.is_whitespace() || "\"'`<>()[]{},\\".contains(c))
+            .unwrap_or(candidate.len());
+        let link = candidate[..end].trim_end_matches(['.', ';', ':', '!', '?']);
+        if link.starts_with("https://") || link.starts_with("http://") {
+            if let Ok(found) = parse(link) {
+                return Some(found.url);
+            }
+        }
+        rest = &candidate[end.max(4)..];
+    }
+    None
+}
+
+/// Whether a shell command runs `gh pr create`, as a command of its own anywhere in it: after a
+/// `cd … &&`, behind a variable set for it or `env`, by a path to `gh`, with `-R owner/name`
+/// between. `gh` as an argument — `echo gh pr create`, a commit message — is not running it.
+pub fn runs_pr_create(command: &str) -> bool {
+    /// Programs that run the command after them, and so leave it in command position.
+    const WRAPPERS: &[&str] = &["command", "exec", "env", "time", "sudo", "nohup"];
+    let separated: String = command
+        .chars()
+        .map(|c| if ";&|()`\n{}".contains(c) { '\n' } else { c })
+        .collect();
+    separated.lines().any(|part| {
+        let mut words = part.split_whitespace().peekable();
+        let mut wrapped = false;
+        while let Some(word) = words.peek() {
+            let assignment = !word.starts_with('-') && word.contains('=');
+            if assignment || WRAPPERS.contains(word) || (wrapped && word.starts_with('-')) {
+                wrapped |= WRAPPERS.contains(word);
+                // `env -u NAME`, `sudo -u user`: the flag's value is not the command.
+                let valued = wrapped && matches!(*word, "-u" | "--unset" | "-C" | "--chdir" | "-g");
+                words.next();
+                if valued {
+                    words.next();
+                }
+            } else {
+                break;
+            }
+        }
+        let Some(program) = words.next() else {
+            return false;
+        };
+        let program = program.rsplit(['/', '\\']).next().unwrap_or(program);
+        if !program.eq_ignore_ascii_case("gh") && !program.eq_ignore_ascii_case("gh.exe") {
+            return false;
+        }
+        // What `gh` was asked, past its flags and the repository one of them names.
+        let mut asked = Vec::new();
+        while let Some(word) = words.next() {
+            if word == "-R" || word == "--repo" {
+                words.next();
+            } else if !word.starts_with('-') {
+                asked.push(word);
+                if asked.len() == 2 {
+                    break;
+                }
+            }
+        }
+        asked == ["pr", "create"]
+    })
+}
+
+/// Whether an MCP tool is a GitHub server's `create_pull_request`: `mcp__<server>__<tool>`, as
+/// Claude Code names them, from a server whose name says GitHub.
+pub fn creates_pull_request_tool(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("mcp__") else {
+        return false;
+    };
+    let Some((server, tool)) = rest.rsplit_once("__") else {
+        return false;
+    };
+    tool == "create_pull_request" && server.to_ascii_lowercase().contains("github")
+}
+
+/// The new pull request's link in what a create-pull-request tool answered, which is GitHub's
+/// JSON, often as text inside the tool's content blocks. Its `html_url` when it has one — a full
+/// answer names other pull requests too, in its description — then a `url` that is a pull
+/// request's, then the first link anywhere.
+pub fn link_in_tool_result(result: &Value) -> Option<String> {
+    let mut strings = Vec::new();
+    collect(result, None, &mut strings);
+    let keyed = |key: &str| {
+        strings
+            .iter()
+            .filter(|(at, _)| at.as_deref() == Some(key))
+            .find_map(|(_, text)| link_in(text))
+    };
+    keyed("html_url")
+        .or_else(|| keyed("url"))
+        .or_else(|| strings.iter().find_map(|(_, text)| link_in(text)))
+}
+
+/// Every string in `value` with the key it is under, looking inside strings that are JSON.
+fn collect(value: &Value, key: Option<&str>, into: &mut Vec<(Option<String>, String)>) {
+    match value {
+        Value::String(text) => match serde_json::from_str::<Value>(text) {
+            Ok(inner @ (Value::Object(_) | Value::Array(_))) => collect(&inner, key, into),
+            _ => into.push((key.map(str::to_owned), text.clone())),
+        },
+        Value::Array(items) => items.iter().for_each(|item| collect(item, key, into)),
+        Value::Object(fields) => fields
+            .iter()
+            .for_each(|(name, field)| collect(field, Some(name), into)),
+        _ => {}
+    }
+}
+
+/// A pull request an agent was seen creating, from an event drained just now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Seen {
+    pub workspace_id: String,
+    pub session_id: Option<String>,
+    pub url: String,
+}
+
+/// Track the pull requests agents were seen creating, by `hook`. One in the project's own
+/// repository is left alone — its list has it already — and so is anything else [`track`]
+/// refuses; the event stays either way. Without `git` the project's own repository cannot be
+/// told apart, so nothing is tracked and the shortfall is counted. Returns the workspaces that
+/// gained a pull request.
+pub fn track_seen(store: &Store, git: Option<&Git>, seen: &[Seen]) -> BTreeSet<String> {
+    let mut gained = BTreeSet::new();
+    if seen.is_empty() {
+        return gained;
+    }
+    let Some(git) = git else {
+        let _ = store.bump_diagnostic("pull_request_seen_no_git", Some(&seen.len().to_string()));
+        return gained;
+    };
+    for one in seen {
+        match track(
+            store,
+            git,
+            &one.workspace_id,
+            &one.url,
+            one.session_id.as_deref(),
+            TrackedBy::Hook,
+        ) {
+            Ok((_, true)) => {
+                gained.insert(one.workspace_id.clone());
+            }
+            Ok((_, false)) => {}
+            Err(error) if error.code == "own_pull_request" => {}
+            Err(error) => {
+                let _ = store.bump_diagnostic("pull_request_seen_refused", Some(&error.message));
+            }
+        }
+    }
+    gained
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,5 +519,143 @@ mod tests {
             std::fs::create_dir_all(root.join(format!("r{n:02}/.git"))).unwrap();
         }
         assert!(launch_section(root).unwrap().contains(" and 4 more (in "));
+    }
+
+    #[test]
+    fn a_link_is_found_in_what_a_command_printed() {
+        let found = |text: &str| link_in(text);
+        assert_eq!(
+            found("Creating pull request for bump into main in o/lib\n\nhttps://github.com/o/lib/pull/41\n")
+                .as_deref(),
+            Some("https://github.com/o/lib/pull/41")
+        );
+        assert_eq!(
+            found("Opened (https://github.com/o/lib/pull/41/files).").as_deref(),
+            Some("https://github.com/o/lib/pull/41")
+        );
+        assert_eq!(
+            found("see \"https://github.example.com/t/svc/pull/3\"").as_deref(),
+            Some("https://github.example.com/t/svc/pull/3")
+        );
+        for nothing in [
+            "",
+            "remote: Create a pull request for 'bump' on GitHub by visiting:\nremote:   https://github.com/o/lib/pull/new/bump",
+            "https://api.github.com/repos/o/lib/pulls/41",
+            "https://github.com/o/lib/issues/41",
+            "http",
+            "httpx://github.com/o/lib/pull/41",
+        ] {
+            assert_eq!(found(nothing), None, "{nothing}");
+        }
+    }
+
+    #[test]
+    fn a_command_that_runs_gh_pr_create_is_told_apart() {
+        for yes in [
+            "gh pr create --fill",
+            "cd lib && gh pr create --title \"Bump\" --body \"x\"",
+            "GH_REPO=o/lib gh pr create --fill",
+            "/usr/local/bin/gh pr create",
+            "gh -R o/lib pr create",
+            "gh pr --repo o/lib create --fill",
+            "git push -u origin bump; gh pr create --fill | tee out",
+            "(cd lib\ngh pr create --draft)",
+            "C:\\tools\\gh.exe pr create",
+            "env -u GH_TOKEN gh pr create",
+            "sudo -E gh pr create",
+        ] {
+            assert!(runs_pr_create(yes), "{yes}");
+        }
+        for no in [
+            "gh pr view 7",
+            "gh pr list --search create",
+            "gh issue create",
+            "echo gh pr create",
+            "ghq pr create",
+            "git commit -m 'gh pr create later'",
+            "xargs -I{} echo gh pr create",
+            "",
+        ] {
+            assert!(!runs_pr_create(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn only_a_github_servers_create_pull_request_tool_counts() {
+        assert!(creates_pull_request_tool(
+            "mcp__github__create_pull_request"
+        ));
+        assert!(creates_pull_request_tool(
+            "mcp__claude_ai_GitHub__create_pull_request"
+        ));
+        assert!(!creates_pull_request_tool(
+            "mcp__github__update_pull_request"
+        ));
+        assert!(!creates_pull_request_tool(
+            "mcp__gitea__create_pull_request"
+        ));
+        assert!(!creates_pull_request_tool("create_pull_request"));
+        assert!(!creates_pull_request_tool("mcp__github"));
+    }
+
+    #[test]
+    fn a_tools_answer_gives_its_own_link_before_any_it_mentions() {
+        let minimal = serde_json::json!([{ "type": "text",
+            "text": "{\"id\":\"1\",\"url\":\"https://github.com/o/lib/pull/42\"}" }]);
+        assert_eq!(
+            link_in_tool_result(&minimal).as_deref(),
+            Some("https://github.com/o/lib/pull/42")
+        );
+        let full = serde_json::json!({
+            "body": "Supersedes https://github.com/o/lib/pull/3",
+            "url": "https://api.github.com/repos/o/lib/pulls/9",
+            "html_url": "https://github.com/o/lib/pull/9"
+        });
+        assert_eq!(
+            link_in_tool_result(&full).as_deref(),
+            Some("https://github.com/o/lib/pull/9")
+        );
+        let prose = serde_json::json!("Created https://github.com/o/lib/pull/5 for you.");
+        assert_eq!(
+            link_in_tool_result(&prose).as_deref(),
+            Some("https://github.com/o/lib/pull/5")
+        );
+        assert_eq!(
+            link_in_tool_result(&serde_json::json!({ "ok": true })),
+            None
+        );
+    }
+
+    #[test]
+    fn what_was_seen_is_tracked_by_hook_except_the_projects_own() {
+        let (store, ws, _dir) = project_on("git@github.com:o/parent.git");
+        let seen = |url: &str| Seen {
+            workspace_id: ws.id.clone(),
+            session_id: Some("no-such-record".into()),
+            url: url.into(),
+        };
+        let all = [
+            seen("https://github.com/o/lib/pull/7"),
+            seen("https://github.com/o/parent/pull/3"),
+            seen("https://github.com/o/lib/pull/7"),
+        ];
+
+        // No git: the project's own cannot be told apart, so nothing is written.
+        assert!(track_seen(&store, None, &all).is_empty());
+        assert!(store.tracked_pull_requests(&ws.id).unwrap().is_empty());
+
+        let gained = track_seen(&store, Some(&git()), &all);
+        assert_eq!(gained, std::collections::BTreeSet::from([ws.id.clone()]));
+        let rows = store.tracked_pull_requests(&ws.id).unwrap();
+        assert_eq!(rows.len(), 1, "once, and not the project's own");
+        assert_eq!(rows[0].url, "https://github.com/o/lib/pull/7");
+        assert_eq!(rows[0].tracked_by, "hook");
+        assert_eq!(
+            rows[0].session_id, None,
+            "a record not of this workspace is dropped"
+        );
+
+        // Seen again: nothing new.
+        assert!(track_seen(&store, Some(&git()), &all[..1]).is_empty());
     }
 }

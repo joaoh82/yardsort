@@ -531,6 +531,10 @@ export const ipc = {
   /** New events were recorded for these workspaces: a timeline showing one should reload. */
   onActivityChanged: (handler: (workspaceIds: string[]) => void) =>
     events.activityChanged.listen((event) => handler(event.payload.workspaceIds)),
+  /** An agent was seen opening a pull request in another repository, and a workspace in each
+   *  of these projects now follows it: their pull requests are worth asking about again. */
+  onTrackedPullRequestsChanged: (handler: (projectIds: string[]) => void) =>
+    events.trackedPullRequestsChanged.listen((event) => handler(event.payload.projectIds)),
   /** How much is recorded, where the spool and the inbox are, and what went wrong recording. */
   activityDiagnostics: () => unwrap(commands.activityDiagnostics()),
   /** Forget recorded activity: one workspace's, or all of it for `null`. */
