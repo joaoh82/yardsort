@@ -102,7 +102,9 @@ export function PullRequestsView() {
     setRefreshing(true);
     try {
       const { loadProject } = usePublishStore.getState();
-      await Promise.all(ids.map((id) => loadProject(id, true, true)));
+      // Someone asked: pull requests elsewhere that were merged or closed are read again too,
+      // which the minute's own look leaves for a while.
+      await Promise.all(ids.map((id) => loadProject(id, true, true, true)));
     } finally {
       setRefreshing(false);
     }

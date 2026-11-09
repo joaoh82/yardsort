@@ -195,7 +195,9 @@ resolve its conflicts is not offered for one in another repository. It is also l
 closed, reopened and replied to, and its diff read from the project's nested clone of it.
 
 Yardsort reads each one with `gh pr view <link>`, which needs nothing checked out: an open one
-is read again whenever the project's list is, a merged or closed one every ten minutes. Up to 20
+is read again whenever the project's list is, a merged or closed one every ten minutes, or at
+once when you press **Refresh** in the Pull requests view or **Refresh pull request** in the
+toolbar. Up to 20
 per project are read, the most recently tracked first. **Stop tracking** removes only Yardsort's
 note of it; the pull request is left as it is. Deleting the workspace removes its notes too.
 

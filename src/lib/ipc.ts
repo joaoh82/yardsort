@@ -663,8 +663,10 @@ export const ipc = {
   /** Every pull request `gh` knows for a project, so each workspace row can show its own. */
   /** `full` also reads every open pull request, not only the newest fifty: the Pull requests
    *  view's question, and several round trips on a busy repository. */
-  projectPullRequests: (projectId: string, refresh = false, full = false) =>
-    unwrap(commands.projectPullRequests(projectId, refresh, full)),
+  /** `asked`: someone pressed Refresh, so pull requests elsewhere that are merged or closed are
+   *  read again too, which the window's own poll leaves for a while. */
+  projectPullRequests: (projectId: string, refresh = false, full = false, asked = false) =>
+    unwrap(commands.projectPullRequests(projectId, refresh, full, asked)),
   /** Follow a pull request in another repository with a workspace. Resolves to whether it is
    *  new: tracking one twice changes nothing. Refused for a link that is not a GitHub pull
    *  request, and for one of the project's own repository. */

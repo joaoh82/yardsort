@@ -83,12 +83,15 @@ impl TrackedRead {
 
 impl Forge {
     /// The pull requests `rows` track, each with what `fetch` last said about it, reading the
-    /// ones that are due. Blocking: `fetch` is `gh` over the network. Never an `Err` — one that
+    /// ones that are due — every one when someone `asked` (**Refresh**): a merged or closed one
+    /// is otherwise reused for [`FINAL_FOR`] whatever `refresh` says, since the window's own poll
+    /// asks with `refresh` every minute. Blocking: `fetch` is `gh` over the network. Never an `Err` — one that
     /// cannot be read says why in its place, and keeps what was read of it before.
     pub fn tracked(
         &self,
         rows: &[TrackedPullRequestRow],
         refresh: bool,
+        asked: bool,
         fetch: impl Fn(&str) -> ForgeResult<PullRequest> + Sync,
     ) -> Vec<TrackedPullRequest> {
         let due: Vec<String> = {
@@ -99,7 +102,11 @@ impl Forge {
                 .map(|row| row.url.clone())
                 // Two workspaces may follow the same one: it is read once.
                 .filter(|url| seen.insert(url.clone()))
-                .filter(|url| reads.get(url).is_none_or(|read| read.stale(refresh)))
+                .filter(|url| {
+                    reads
+                        .get(url)
+                        .is_none_or(|read| asked || read.stale(refresh))
+                })
                 .collect()
         };
         let read: Vec<(String, ForgeResult<PullRequest>)> = due
@@ -190,6 +197,7 @@ pub(super) fn of_project(
     state: &AppState,
     project_id: &str,
     refresh: bool,
+    asked: bool,
 ) -> Vec<TrackedPullRequest> {
     let Ok(rows) = state.store.tracked_pull_requests_in_project(project_id) else {
         return Vec::new();
@@ -200,7 +208,7 @@ pub(super) fn of_project(
     let (Some(gh), Ok(root)) = (Gh::find(&state.env()), project_root(state, project_id)) else {
         return state
             .forge
-            .tracked(&rows, false, |_| Err(ForgeError::NotInstalled))
+            .tracked(&rows, false, false, |_| Err(ForgeError::NotInstalled))
             .into_iter()
             .map(|tracked| TrackedPullRequest {
                 problem: None,
@@ -215,7 +223,7 @@ pub(super) fn of_project(
     } else {
         std::env::temp_dir()
     };
-    state.forge.tracked(&rows, refresh, |url| {
+    state.forge.tracked(&rows, refresh, asked, |url| {
         gh.pull_request_at(&cwd, url, READ_LIMIT)
     })
 }
@@ -764,7 +772,7 @@ mod tests {
                 },
             ))
         };
-        let first = forge.tracked(&rows, false, read);
+        let first = forge.tracked(&rows, false, false, read);
         assert_eq!(asked.load(Ordering::Relaxed), 2);
         assert_eq!(first[0].pull_request.as_ref().unwrap().number, 7);
         assert_eq!(first[0].repo.name, "lib");
@@ -773,9 +781,9 @@ mod tests {
             PullRequestState::Merged
         );
 
-        forge.tracked(&rows, false, read);
+        forge.tracked(&rows, false, false, read);
         assert_eq!(asked.load(Ordering::Relaxed), 2, "fresh: nothing asked");
-        forge.tracked(&rows, true, read);
+        forge.tracked(&rows, true, false, read);
         assert_eq!(
             asked.load(Ordering::Relaxed),
             3,
@@ -783,18 +791,54 @@ mod tests {
         );
 
         forge.forget_tracked("https://github.com/o/lib/pull/8");
-        forge.tracked(&rows, false, read);
+        forge.tracked(&rows, false, false, read);
         assert_eq!(asked.load(Ordering::Relaxed), 4, "forgotten: asked again");
+    }
+
+    /// **Refresh**, pressed by someone, reads a merged one again at once, where the window's own
+    /// minute-by-minute look — `refresh` too — leaves it for ten minutes; and a read that then
+    /// fails keeps what was known.
+    #[test]
+    fn a_refresh_someone_asked_for_reads_a_merged_one_again_and_keeps_it_if_that_fails() {
+        let forge = Forge::default();
+        let rows = [row("a", 7)];
+        let asked = AtomicUsize::new(0);
+        let read = |url: &str| {
+            asked.fetch_add(1, Ordering::Relaxed);
+            Ok(pr(number_of(url), PullRequestState::Merged))
+        };
+        forge.tracked(&rows, false, false, read);
+        forge.tracked(&rows, true, false, read);
+        assert_eq!(
+            asked.load(Ordering::Relaxed),
+            1,
+            "the poll leaves a merged one alone"
+        );
+        forge.tracked(&rows, true, true, read);
+        assert_eq!(
+            asked.load(Ordering::Relaxed),
+            2,
+            "someone asked: read again"
+        );
+
+        let offline = |_: &str| Err(ForgeError::Unreadable("network down".to_owned()));
+        let after = forge.tracked(&rows, true, true, offline);
+        assert_eq!(
+            after[0].pull_request.as_ref().map(|pr| pr.state),
+            Some(PullRequestState::Merged),
+            "what was known stays"
+        );
+        assert!(after[0].problem.is_some());
     }
 
     #[test]
     fn a_failed_read_keeps_what_was_known_and_says_why() {
         let forge = Forge::default();
         let rows = [row("a", 7)];
-        forge.tracked(&rows, false, |url| {
+        forge.tracked(&rows, false, false, |url| {
             Ok(pr(number_of(url), PullRequestState::Open))
         });
-        let after = forge.tracked(&rows, true, |_| {
+        let after = forge.tracked(&rows, true, false, |_| {
             Err(ForgeError::Failed {
                 command: "pr view".into(),
                 stderr: "HTTP 502".into(),
@@ -802,7 +846,7 @@ mod tests {
         });
         assert_eq!(after[0].pull_request.as_ref().unwrap().number, 7);
         assert!(after[0].problem.as_deref().unwrap().contains("HTTP 502"));
-        let recovered = forge.tracked(&rows, true, |url| {
+        let recovered = forge.tracked(&rows, true, false, |url| {
             Ok(pr(number_of(url), PullRequestState::Open))
         });
         assert_eq!(recovered[0].problem, None);
@@ -815,7 +859,7 @@ mod tests {
             .map(|n| row(&n.to_string(), n))
             .collect();
         let asked = AtomicUsize::new(0);
-        let listed = forge.tracked(&rows, false, |url| {
+        let listed = forge.tracked(&rows, false, false, |url| {
             asked.fetch_add(1, Ordering::Relaxed);
             Ok(pr(number_of(url), PullRequestState::Open))
         });

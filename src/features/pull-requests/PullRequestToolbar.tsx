@@ -200,7 +200,8 @@ export function PullRequestToolbar({
                   label: "Refresh pull request",
                   onSelect: () =>
                     void action(async () => {
-                      await usePublishStore.getState().loadProject(projectId, true);
+                      // Someone asked: a merged or closed one elsewhere is read again too.
+                      await usePublishStore.getState().loadProject(projectId, true, false, true);
                       const answer = usePublishStore.getState().byProject[projectId];
                       const problem = tracked
                         ? answer?.tracked.find((t) => t.id === tracked.id)?.problem

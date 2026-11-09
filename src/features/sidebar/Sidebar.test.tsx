@@ -360,14 +360,14 @@ describe("Sidebar", () => {
   it("reads every open pull request once at the start, then only while the view is open", async () => {
     await renderSidebar("alpha");
     await waitFor(() =>
-      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true),
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true, false),
     );
 
     // Coming back to the window with the view closed: the newest fifty, as before.
     core.projectPullRequests.mockClear();
     act(() => void window.dispatchEvent(new Event("focus")));
     await waitFor(() =>
-      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", true, false),
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", true, false, false),
     );
     expect(core.projectPullRequests).not.toHaveBeenCalledWith("p-alpha", true, true);
 
@@ -375,12 +375,12 @@ describe("Sidebar", () => {
     core.projectPullRequests.mockClear();
     act(() => useProjectsStore.getState().openPullRequests(true));
     await waitFor(() =>
-      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true),
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true, false),
     );
     core.projectPullRequests.mockClear();
     act(() => void window.dispatchEvent(new Event("focus")));
     await waitFor(() =>
-      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", true, true),
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", true, true, false),
     );
   });
 
@@ -1461,7 +1461,7 @@ describe("Sidebar", () => {
       await open(user, "https://github.com/demo/app/pull/12");
       await waitFor(() => expect(useProjectsStore.getState().pullRequestsOpen).toBe(true));
       expect(usePullRequestsStore.getState().selected).toBe("p-alpha#12");
-      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true);
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-alpha", false, true, false);
     });
 
     it("sends an item the view has no row for, or on another forge, to the browser", async () => {
@@ -1825,7 +1825,7 @@ describe("Sidebar", () => {
       );
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       // Asked again, so it shows at once: `lib#7`, never a bare #7 that reads as the project's.
-      expect(core.projectPullRequests).toHaveBeenCalledWith("p-app", true, false);
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-app", true, false, false);
       const row = screen.getByRole("treeitem", { name: "fix-login" });
       const badge = await within(row).findByRole("button", {
         name: /Pull request #7 in demo\/lib/,
@@ -1842,7 +1842,7 @@ describe("Sidebar", () => {
       core.projectPullRequests.mockResolvedValue(pullRequestsOf([], { tracked: [elsewhere] }));
       act(() => heard(["p-app"]));
       // The core reads one it has not seen yet without being told to refresh.
-      expect(core.projectPullRequests).toHaveBeenCalledWith("p-app", false, false);
+      expect(core.projectPullRequests).toHaveBeenCalledWith("p-app", false, false, false);
       const row = screen.getByRole("treeitem", { name: "fix-login" });
       expect(
         await within(row).findByRole("button", { name: /Pull request #7 in demo\/lib/ }),

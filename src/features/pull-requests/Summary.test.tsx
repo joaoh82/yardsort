@@ -230,7 +230,7 @@ describe("replying", () => {
     await waitFor(() => expect(box).toHaveValue(""));
     // The list, and the summary past the core's cache: the conversation has moved.
     await waitFor(() =>
-      expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true),
+      expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true, false),
     );
     await waitFor(() =>
       expect(core.pullRequestSummary).toHaveBeenLastCalledWith(alpha.id, 8, true),
@@ -249,7 +249,7 @@ describe("replying", () => {
     await waitFor(() => expect(core.pullRequestComment).toHaveBeenCalledTimes(1));
     // Were the box still full and the button still live, a second press would post it again.
     await waitFor(() => expect(box).toHaveValue(""));
-    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true);
+    expect(core.projectPullRequests).toHaveBeenCalledWith(alpha.id, true, true, false);
     await user.type(box, "Twice.{Control>}{Enter}{/Control}");
     await waitFor(() => expect(core.pullRequestComment).toHaveBeenCalledTimes(2));
     expect(core.pullRequestComment).toHaveBeenLastCalledWith(alpha.id, 8, "Twice.");

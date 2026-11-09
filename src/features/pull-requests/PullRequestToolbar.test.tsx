@@ -127,7 +127,7 @@ it.each([
       method,
     ),
   );
-  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false);
+  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, false);
   expect(await screen.findByRole("status")).toHaveTextContent("Merge request sent");
 });
 it("offers copy and refresh, and reports merge errors", async () => {
@@ -137,7 +137,9 @@ it("offers copy and refresh, and reports merge errors", async () => {
   await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(pr.url));
   await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
   await user.click(screen.getByRole("menuitem", { name: "Refresh pull request" }));
-  await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false));
+  await waitFor(() =>
+    expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, true),
+  );
   native.confirm.mockResolvedValue(true);
   core.workspaceMergePullRequest.mockRejectedValue(new Error("Branch protection requires review"));
   await user.click(screen.getByRole("button", { name: /Actions for pull request/ }));
@@ -310,7 +312,7 @@ it("asks the agent and shows the tab it is in", async () => {
     "Asked Claude Code to resolve the conflicts in #85.",
   );
   expect(useTerminalStore.getState().active["w-alpha-feature"]).toBe("pty-7");
-  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false);
+  expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, false);
 });
 
 it("says why when the agent cannot be asked", async () => {
@@ -386,6 +388,18 @@ describe("a pull request tracked in another repository", () => {
       ),
     );
     expect(core.workspaceMergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("is read again when refreshed by hand, merged or closed as it may be", async () => {
+    const user = setup();
+    await user.click(screen.getByRole("button", { name: /Actions for pull request #85 — 1 more/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /lib#7/ }));
+    await user.click(screen.getByRole("button", { name: /Actions for pull request demo\/lib#7/ }));
+    core.projectPullRequests.mockClear();
+    await user.click(screen.getByRole("menuitem", { name: "Refresh pull request" }));
+    await waitFor(() => expect(core.projectPullRequests).toHaveBeenCalled());
+    // Someone asked: read again, merged or closed as it may be.
+    expect(core.projectPullRequests).toHaveBeenCalledWith("alpha", true, false, true);
   });
 
   it("can stop being tracked, and the toolbar goes back to the workspace's own", async () => {

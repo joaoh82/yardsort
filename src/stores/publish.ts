@@ -51,9 +51,16 @@ interface PublishStore {
   }) => Promise<PullRequestOpened | null>;
   /**
    * Load one project's pull requests. Never throws: a forge that will not answer says so.
-   * `full` also reads every open one, for the Pull requests view.
+   * `full` also reads every open one, for the Pull requests view. `asked` is someone pressing
+   * Refresh, as against the window's own poll: merged and closed pull requests elsewhere are
+   * read again too.
    */
-  loadProject: (projectId: string, refresh?: boolean, full?: boolean) => Promise<void>;
+  loadProject: (
+    projectId: string,
+    refresh?: boolean,
+    full?: boolean,
+    asked?: boolean,
+  ) => Promise<void>;
   /** Ask the forge again about the project the followed workspace belongs to. */
   reloadProject: () => Promise<void>;
   clearError: () => void;
@@ -221,11 +228,11 @@ export const usePublishStore = create<PublishStore>((set, get) => {
       return opened;
     },
 
-    async loadProject(projectId, refresh = false, full = false) {
+    async loadProject(projectId, refresh = false, full = false, asked = false) {
       const request = (projectRequests.get(projectId) ?? 0) + 1;
       projectRequests.set(projectId, request);
       try {
-        const found = await ipc.projectPullRequests(projectId, refresh, full);
+        const found = await ipc.projectPullRequests(projectId, refresh, full, asked);
         if (projectRequests.get(projectId) !== request) return;
         set((s) => ({ byProject: { ...s.byProject, [projectId]: found } }));
         // The right panel's pull request is worked out from the same answer, so it follows the

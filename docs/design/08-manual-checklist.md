@@ -694,7 +694,8 @@ answered "no" by closing the real dialog.
 - **7:** **Stop tracking** from the toolbar and from the details: gone from the row, the toolbar
   and the view; the commits fetched for it deleted from the clone; the pull request left open.
 
-Found, not fixed: **Refresh pull request** does not read a merged or closed tracked pull request
-again within its ten minutes; and a confirmation says _<author> opened it, not you_ when `gh`'s
+Found: **Refresh pull request** did not read a merged or closed tracked pull request again
+within its ten minutes (fixed since: **Refresh**, in the toolbar or the view, reads them at once);
+and, not fixed, a confirmation says _<author> opened it, not you_ when `gh`'s
 login is not known, which only a stand-in that does not answer `api user` shows. Still to do:
 every row on macOS and Windows.

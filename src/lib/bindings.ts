@@ -112,8 +112,11 @@ export const commands = {
 	 *  `full` reads every open pull request as well as the newest fifty: what the Pull requests
 	 *  view lists. It is several questions to the forge on a busy repository, so only that view
 	 *  asks for it.
+	 * 
+	 *  `asked` is a person pressing **Refresh**, as against the window's own poll, which refreshes
+	 *  too: then the pull requests tracked elsewhere are all read again, merged and closed ones too.
 	 */
-	projectPullRequests: (projectId: string, refresh: boolean, full: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh, full })),
+	projectPullRequests: (projectId: string, refresh: boolean, full: boolean, asked: boolean) => typedError<ProjectPullRequests, IpcError>(__TAURI_INVOKE("project_pull_requests", { projectId, refresh, full, asked })),
 	/**
 	 *  Follow the pull request at `url` with the workspace. Resolves to whether it is new: tracking
 	 *  one twice changes nothing.
