@@ -268,6 +268,7 @@ fn a_tracked_pull_requests_review_is_about_that_one_and_only_that_one() {
         elsewhere: Some(Elsewhere {
             repo: "o/lib".into(),
             clone: Some("/code/app/lib".into()),
+            opened_by: None,
         }),
     };
     let id = fx
@@ -307,6 +308,24 @@ fn a_tracked_pull_requests_review_is_about_that_one_and_only_that_one() {
         .queue_on("code-review", &[("reviewer", "claude")], Some(&elsewhere))
         .unwrap_err();
     assert_eq!(wrong.code, "workflow_not_for_tracked");
+
+    // The review runs its checks in the clone: without one it is not started.
+    let unclonable = PrFacts {
+        elsewhere: Some(Elsewhere {
+            clone: None,
+            ..elsewhere.elsewhere.clone().unwrap()
+        }),
+        ..elsewhere.clone()
+    };
+    let no_clone = fx
+        .queue_on(
+            "code-review-elsewhere",
+            &[("reviewer", "claude")],
+            Some(&unclonable),
+        )
+        .unwrap_err();
+    assert_eq!(no_clone.code, "no_clone");
+    assert!(no_clone.message.contains("o/lib"), "{}", no_clone.message);
 
     // The workspace's own is asked about by its number, as before.
     let own = PrFacts {

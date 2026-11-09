@@ -1193,11 +1193,32 @@ export type DraftedPullRequest = {
 };
 
 /**  Where a tracked pull request is: its repository, and the project's nested clone of it. */
-export type Elsewhere = {
+export type Elsewhere = Elsewhere_Serialize | Elsewhere_Deserialize;
+
+/**  Where a tracked pull request is: its repository, and the project's nested clone of it. */
+export type Elsewhere_Deserialize = {
 	/**  `owner/name`. */
 	repo: string,
 	/**  The nested clone of it in the project's checkout, when there is one. */
 	clone: string | null,
+	/**
+	 *  The conversation record that opened it, when known: `session: origin` is that one while
+	 *  it runs, else the workspace's own agent, as for any run.
+	 */
+	openedBy?: string | null,
+};
+
+/**  Where a tracked pull request is: its repository, and the project's nested clone of it. */
+export type Elsewhere_Serialize = {
+	/**  `owner/name`. */
+	repo: string,
+	/**  The nested clone of it in the project's checkout, when there is one. */
+	clone: string | null,
+	/**
+	 *  The conversation record that opened it, when known: `session: origin` is that one while
+	 *  it runs, else the workspace's own agent, as for any run.
+	 */
+	openedBy?: string | null,
 };
 
 /**  One workflow as the catalog lists it: runnable, or not, and why. */
@@ -2003,7 +2024,7 @@ export type PrFacts_Deserialize = {
 	url: string,
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
-	elsewhere?: Elsewhere | null,
+	elsewhere?: Elsewhere_Deserialize | null,
 };
 
 export type PrFacts_Serialize = {
@@ -2011,7 +2032,7 @@ export type PrFacts_Serialize = {
 	url: string,
 	title: string,
 	/**  Set when it is one the workspace tracks in another repository: asked about by its link. */
-	elsewhere?: Elsewhere | null,
+	elsewhere?: Elsewhere_Serialize | null,
 };
 
 export type Preflight = {

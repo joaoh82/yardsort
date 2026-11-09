@@ -270,10 +270,19 @@ fn move_on(
         // The workspace's own agent is whichever was newest when the run began: found now,
         // before the run has started any of its own for it to be mistaken for.
         if runs::needs_origin(&workflow) {
-            facts.origin = match facts.origin_record.as_deref() {
+            let opened_by = facts
+                .pr
+                .as_ref()
+                .and_then(|pr| pr.elsewhere.as_ref())
+                .and_then(|elsewhere| elsewhere.opened_by.clone());
+            facts.origin = match (facts.origin_record.as_deref(), opened_by.as_deref()) {
                 // Asked for on behalf of one agent: that one, or none when it is not running.
-                Some(record) => live_terminal(host, &place.workspace.id, record),
-                None => origin_session(store, host, &place.workspace.id),
+                (Some(record), _) => live_terminal(host, &place.workspace.id, record),
+                // About a pull request elsewhere: the agent that opened it while it runs, else
+                // the workspace's, which may well be the one working on it now.
+                (None, Some(record)) => live_terminal(host, &place.workspace.id, record)
+                    .or_else(|| origin_session(store, host, &place.workspace.id)),
+                (None, None) => origin_session(store, host, &place.workspace.id),
             };
         }
         if !store.start_workflow_run(&run.id, Some(&facts.to_json()))? {

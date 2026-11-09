@@ -235,6 +235,8 @@ struct Scope<'a> {
     actions: &'a HashMap<String, String>,
     /// The steps certain to have finished before this one: its needs, transitively.
     before: &'a BTreeSet<String>,
+    /// What the run is about: `pr.repo` and `pr.clone` exist only for a tracked pull request.
+    context: RunContext,
 }
 
 struct Checker<'a> {
@@ -269,7 +271,7 @@ impl Checker<'_> {
         }
         let trigger = self.trigger(&raw.trigger.value);
         let inputs = self.inputs(&raw.inputs);
-        let steps = self.steps(&raw.steps, &inputs);
+        let steps = self.steps(&raw.steps, &inputs, trigger.context);
         Workflow {
             id: raw.id.value,
             name: raw.name.value.trim().to_owned(),
@@ -410,7 +412,12 @@ impl Checker<'_> {
         inputs
     }
 
-    fn steps(&mut self, raw: &Spanned<Vec<RawStep>>, inputs: &[Input]) -> Vec<Step> {
+    fn steps(
+        &mut self,
+        raw: &Spanned<Vec<RawStep>>,
+        inputs: &[Input],
+        context: RunContext,
+    ) -> Vec<Step> {
         if raw.value.is_empty() {
             self.problem(&raw.referenced, "A workflow needs at least one step.");
             return Vec::new();
@@ -453,6 +460,7 @@ impl Checker<'_> {
                     inputs: &input_kinds,
                     actions: &actions,
                     before: graph.get(&step.id.value).unwrap_or(&empty),
+                    context,
                 };
                 self.step(step, &scope)
             })
@@ -849,6 +857,13 @@ fn resolve(var: &Placeholder, scope: &Scope) -> Result<(), String> {
             .map(|(_, fields)| *fields)
     };
     match path.as_slice() {
+        ["pr", field @ ("repo" | "clone")] if scope.context == RunContext::Workspace => {
+            Err(format!(
+                "`{raw}`: `pr.{field}` is for a pull request a workspace tracks in another \
+             repository, and this workflow is about the workspace's own. Add `context: \
+             tracked_pull_request` to its trigger for one elsewhere."
+            ))
+        }
         [namespace, field] if fields_of(namespace).is_some() => {
             let fields = fields_of(namespace).unwrap_or_default();
             if fields.contains(field) {

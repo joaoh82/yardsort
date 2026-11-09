@@ -91,6 +91,10 @@ pub struct Elsewhere {
     pub repo: String,
     /// The nested clone of it in the project's checkout, when there is one.
     pub clone: Option<String>,
+    /// The conversation record that opened it, when known: `session: origin` is that one while
+    /// it runs, else the workspace's own agent, as for any run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opened_by: Option<String>,
 }
 
 impl PrFacts {
@@ -213,7 +217,12 @@ pub fn queue(
     };
     let elsewhere = workflow.trigger.context == super::RunContext::TrackedPullRequest;
     match (elsewhere, request.tracked) {
-        (true, Some(tracked)) => facts.pr = Some(tracked.clone()),
+        (true, Some(tracked)) => {
+            if let Some(problem) = tracked_problem(workflow, tracked) {
+                return Err(problem);
+            }
+            facts.pr = Some(tracked.clone());
+        }
         (true, None) => {
             return Err(IpcError::new(
                 "pull_request_missing",
@@ -407,6 +416,28 @@ pub fn variables(workflow: &Workflow) -> std::collections::BTreeSet<String> {
 
 /// Whether a run of `workflow` needs the workspace's pull request: it waits for activity on it,
 /// or names it in a `{{ pr.… }}`.
+/// Why a run of `workflow` on the tracked pull request `pr` cannot go ahead, if it cannot: one
+/// whose steps use `pr.clone` works in the project's nested clone of it, and there is none.
+pub fn tracked_problem(workflow: &Workflow, pr: &PrFacts) -> Option<IpcError> {
+    let uses_clone = workflow.steps.iter().any(|step| {
+        texts(&step.action)
+            .iter()
+            .flat_map(|text| template::placeholders(text))
+            .any(|var| var.path.iter().map(String::as_str).eq(["pr", "clone"]))
+    });
+    let elsewhere = pr.elsewhere.as_ref()?;
+    (uses_clone && elsewhere.clone.is_none()).then(|| {
+        IpcError::new(
+            "no_clone",
+            format!(
+                "`{}` works in the project's clone of {}, and this project's folder holds none. \
+                 Clone it there first.",
+                workflow.id, elsewhere.repo
+            ),
+        )
+    })
+}
+
 pub fn needs_pull_request(workflow: &Workflow) -> bool {
     workflow.steps.iter().any(|step| {
         matches!(step.action, Action::WaitPrActivity { .. })

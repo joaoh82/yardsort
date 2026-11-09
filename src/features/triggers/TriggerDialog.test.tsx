@@ -257,6 +257,23 @@ describe("TriggerDialog", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  it("does not offer a workflow about a pull request elsewhere, which only that one starts", async () => {
+    const elsewhere = builtIn("code-review-elsewhere");
+    elsewhere.workflow!.trigger = { kind: "manual", context: "tracked_pull_request" };
+    useWorkflowStore.setState({
+      items: [...useWorkflowStore.getState().items, elsewhere],
+      loaded: true,
+    });
+    const user = userEvent.setup();
+    render(<TriggerDialog workspaceId={fixLogin.id} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("checkbox", { name: "Opens" }));
+    const offered = [
+      ...screen.getByRole("combobox", { name: "Workflow" }).querySelectorAll("option"),
+    ].map((option) => option.getAttribute("value"));
+    expect(offered).toContain("address-review");
+    expect(offered).not.toContain("code-review-elsewhere");
+  });
+
   it("says why the core refused it and stays open", async () => {
     core.triggerSave.mockRejectedValue({
       code: "trigger_variables",

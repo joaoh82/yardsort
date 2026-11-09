@@ -269,11 +269,15 @@ pub async fn workflow_preview(
             .store
             .workspace(&workspace_id)?
             .ok_or_else(|| IpcError::new("workspace_not_found", "That workspace is not there."))?;
-        let needs_pull_request = runs::needs_pull_request(&workflow);
+        // A run on a pull request elsewhere is about it, whatever its steps use.
+        let needs_pull_request = tracked_id.is_some() || runs::needs_pull_request(&workflow);
         let (pull_request, pull_request_problem) = if let Some(tracked) = &tracked_id {
             // One the workspace tracks elsewhere, read by its link.
             match crate::publish::tracked::for_a_run(state, &workspace.id, tracked) {
-                Ok((pr, _)) => (Some(pr), None),
+                Ok(pr) => match runs::tracked_problem(&workflow, &pr) {
+                    Some(problem) => (None, Some(problem.message)),
+                    None => (Some(pr), None),
+                },
                 Err(why) => (None, Some(why.message)),
             }
         } else if needs_pull_request {
@@ -332,7 +336,6 @@ pub async fn workflow_start(
             .as_deref()
             .map(|id| crate::publish::tracked::for_a_run(state, &workspace_id, id))
             .transpose()?;
-        let origin = tracked.as_ref().and_then(|(_, session)| session.as_deref());
         runs::queue(
             &state.store,
             &state.data_dir,
@@ -342,10 +345,10 @@ pub async fn workflow_start(
                 inputs: &inputs,
                 requested_by: "app",
                 unattended: false,
-                origin_record: origin,
+                origin_record: None,
                 depth: 0,
                 event: None,
-                tracked: tracked.as_ref().map(|(pr, _)| pr),
+                tracked: tracked.as_ref(),
             },
             &AppLook(state),
         )

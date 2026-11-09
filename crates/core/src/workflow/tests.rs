@@ -505,6 +505,10 @@ fn every_variable_names_something_that_exists() {
         ),
         ("{{ steps.start }}", "write a step's result as"),
         ("{{ branch }}", "there is no `branch`. Variables start with"),
+        (
+            "{{ pr.clone }}",
+            "is for a pull request a workspace tracks in another",
+        ),
     ];
     for (variable, expected) in cases {
         let found = problem(&BASE.replace("prompt: Hello", &format!("prompt: \"{variable}\"")));

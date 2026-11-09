@@ -452,27 +452,32 @@ systems' hands-on pass.
 
 - **A run about a tracked pull request.** A workflow's `trigger.context` may now be
   `tracked_pull_request`. Such a run is queued with the pull request, read by its link by the
-  caller (`publish::tracked::for_a_run`), in `Request::tracked`; it is refused without one
-  (`ys workflow run`, a schedule, a trigger, the Workflows view's **Run…** and **Schedule…**,
-  which are disabled for it), and a workspace workflow is refused one. `pr.number`, `pr.url`
-  and `pr.title` are that pull request's, and two new variables say where it is: `pr.repo`
-  (`owner/name`) and `pr.clone`, the project's nested clone of it — empty for a workspace's own.
-  The run dialog, given the tracked pull request, offers only such workflows.
-- **Not without the clone.** The reviewer runs the checks, so a run needs the project's nested
-  clone of the repository (`tracked::clone_of`); without one the dialog says so and the run is
-  not started. The pull request must be open.
+  caller (`publish::tracked::for_a_run`) and open, in `Request::tracked`; it is refused without
+  one — `ys workflow run`, a schedule, a trigger — and a workspace workflow is refused one. The
+  Workflows view disables **Run…** and **Schedule…** for it, and the Schedules and Triggers
+  dialogs do not offer it. `pr.number`, `pr.url` and `pr.title` are that pull request's, and two
+  new variables say where it is: `pr.repo` (`owner/name`) and `pr.clone`, the project's nested
+  clone of it. The checker refuses both in a workspace workflow, where they would always be
+  empty. The run dialog, given the tracked pull request, offers only such workflows, and blocks
+  **Run** with the reason when the pull request cannot be used.
+- **The clone, when it is used.** A workflow whose steps use `pr.clone` is refused without the
+  project's nested clone of the repository (`runs::tracked_problem`); the built-in uses it, since
+  its reviewer runs the checks there. Any other problem finding the clone is said as itself.
 - **The reviewer** starts in the workspace like any other, and is told to read the diff with
   `gh pr diff <link>`, to run the checks in a worktree of the clone of its own and remove it
   afterwards, and to post with `gh pr review <link>`. The worktree is made with
   `git worktree add --detach`, and the pull request checked out in it with
   `gh pr checkout <link> --detach`: a linked worktree has its own `HEAD` and `FETCH_HEAD`, so
   the clone's own checkout is left alone.
-- **Waited on by link.** `Hands::pr_posts` is given the run's `PrFacts`, and asks
+- **Waited on by link, for a review.** `Hands::pr_posts` is given the run's `PrFacts`, and asks
   `gh pr view <selector>` — the number for a workspace's own, the link for one elsewhere
-  (`PrFacts::selector`).
-- **Told to the agent that opened it.** The run's `session: origin` is the conversation the
-  tracked row names — the one seen opening it, or that ran `ys pr track` — else, as for any run,
-  the workspace's.
+  (`PrFacts::selector`) — from the workspace's folder, or anywhere if that has gone. The
+  built-in waits for a review (`kind: review`), not any comment: the author, a bot or a person
+  may comment meanwhile.
+- **Told to the agent that opened it.** The tracked row's conversation is kept as
+  `Elsewhere::opened_by`; at the run's start, `session: origin` is that one if its terminal is
+  running, else the workspace's own agent, as for any run. The author's prompt names `gh api`'s
+  `--hostname` for a pull request off github.com.
 
 How it was checked: queueing in the core — the tracked one's facts and variables, the workspace's
 own not looked for, the refusals both ways, the selector; the workflow's file parsed with every

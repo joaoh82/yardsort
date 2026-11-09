@@ -294,7 +294,9 @@ its link:
    clone, push, and answer each comment.
 
 It needs the clone: without one in the project's folder, the dialog says so and does not start.
-It is offered only on a pull request elsewhere, and the run dialog offers it nowhere else.
+It is offered only on a pull request elsewhere: the Workflows view does not run or schedule it,
+and triggers do not offer it. A workflow of your own can be about a pull request elsewhere too,
+with `context: tracked_pull_request`; `pr.repo` and `pr.clone` are refused in any other.
 
 ## The file
 

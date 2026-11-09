@@ -594,15 +594,15 @@ pub async fn tracked_pull_request_line_comments(
     .await
 }
 
-/// A tracked pull request as a workflow run is about it (`code-review-elsewhere`): read now by
-/// its link, open, and with the project's nested clone of its repository, which the reviewer
-/// runs the checks in — a review without one would not be one. With it, the conversation that
-/// opened it, which `session: origin` is told about the review.
+/// A tracked pull request as a workflow run is about it (`context: tracked_pull_request`): read
+/// now by its link, and open. With where it is — its repository, the project's nested clone of
+/// it when there is one (a workflow that uses `pr.clone` is refused without, by the core) — and
+/// the conversation that opened it, which `session: origin` prefers.
 pub(crate) fn for_a_run(
     state: &AppState,
     workspace_id: &str,
     id: &str,
-) -> IpcResult<(yardsort_core::workflow::runs::PrFacts, Option<String>)> {
+) -> IpcResult<yardsort_core::workflow::runs::PrFacts> {
     let (_, _, row, pr) = fresh(state, workspace_id, id)?;
     if pr.state != PullRequestState::Open {
         return Err(IpcError::new(
@@ -611,28 +611,21 @@ pub(crate) fn for_a_run(
         ));
     }
     let git = Git::new(&state.env())?;
-    let clone = clone_for(state, &git, workspace_id, &row).map_err(|_| {
-        IpcError::new(
-            "no_clone",
-            format!(
-                "This project's folder holds no clone of {} for a reviewer to run its checks in. \
-                 Clone it there first.",
-                repo_name(&row)
-            ),
-        )
-    })?;
-    Ok((
-        yardsort_core::workflow::runs::PrFacts {
-            number: pr.number,
-            url: pr.url,
-            title: pr.title,
-            elsewhere: Some(yardsort_core::workflow::runs::Elsewhere {
-                repo: repo_name(&row),
-                clone: Some(clone.to_string_lossy().into_owned()),
-            }),
-        },
-        row.session_id,
-    ))
+    let clone = match clone_for(state, &git, workspace_id, &row) {
+        Ok(clone) => Some(clone.to_string_lossy().into_owned()),
+        Err(error) if error.code == "no_clone" => None,
+        Err(error) => return Err(error),
+    };
+    Ok(yardsort_core::workflow::runs::PrFacts {
+        number: pr.number,
+        url: pr.url,
+        title: pr.title,
+        elsewhere: Some(yardsort_core::workflow::runs::Elsewhere {
+            repo: repo_name(&row),
+            clone,
+            opened_by: row.session_id,
+        }),
+    })
 }
 
 /// `owner/name` of a tracked row's repository.

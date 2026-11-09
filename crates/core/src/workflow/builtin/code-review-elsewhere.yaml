@@ -54,10 +54,11 @@ steps:
     until: settled
     timeout: 2h
 
+  # A review, not any comment: the author, a bot or a person may comment on it meanwhile.
   - id: posted
     action: wait_pr_activity
     needs: [settled]
-    kind: any
+    kind: review
     timeout: 15m
 
   - id: tell_user
@@ -74,6 +75,7 @@ steps:
     prompt: |
       Pull request {{ pr.repo }}#{{ pr.number }} has a new review from another agent
       ({{ steps.posted.latest_url }}). Read it with `gh pr view {{ pr.url }} --comments` and the
-      review comments with `gh api repos/{{ pr.repo }}/pulls/{{ pr.number }}/comments`. Fix what
+      review comments with `gh api repos/{{ pr.repo }}/pulls/{{ pr.number }}/comments`, adding
+      `--hostname` and the host in its link when that is not github.com. Fix what
       is right in `{{ pr.clone }}`, where its branch is, push, and answer each comment saying
       what you did or why you did not.
