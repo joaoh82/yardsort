@@ -3,14 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
-
-- **Refresh reads a merged or closed pull request elsewhere again.** **Refresh** in the Pull
-  requests view and **Refresh pull request** in the session toolbar now read a tracked pull
-  request that was merged or closed at once; before, it stayed as it was for up to ten minutes,
-  which is still how long the window's own look leaves one.
-
-## 0.24.0
+## 0.24.1
 
 - **Start work on another computer, and resume its conversations, from the phone or the desktop.**
   On another computer's page in the desktop app, **New workspace** beside a project, **New agent**
@@ -21,6 +14,13 @@ has the downloads and the full commit lists.
   A start whose answer is lost on the way is never tried again by itself. See
   [Starting work from the phone](docs/guide/remote.md#starting-work-from-the-phone) and
   [Reaching another computer](docs/guide/remote.md#reaching-another-computer).
+- **Refresh reads a merged or closed pull request elsewhere again.** **Refresh** in the Pull
+  requests view and **Refresh pull request** in the session toolbar now read a tracked pull
+  request that was merged or closed at once; before, it stayed as it was for up to ten minutes,
+  which is still how long the window's own look leaves one.
+
+## 0.24.0
+
 - **`ys session resume` and `ys session fork`.** Continue an agent's conversation from the command
   line, as **Resume** and **Fork** do in the app, naming it by the start of its id from
   `ys session list --all`. On a computer with no screen, this is how agents a reboot or a container
