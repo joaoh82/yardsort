@@ -133,6 +133,14 @@ pub struct Reported {
 fn created_pull_request(input: &Value, output: &Value) -> Option<String> {
     let tool = input.get("tool").and_then(Value::as_str)?;
     if tool == "bash" {
+        // `gh pr create` where a pull request exists already fails, printing that one's link.
+        if output["metadata"]
+            .get("exit")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| code != 0)
+        {
+            return None;
+        }
         let command = input["args"].get("command").and_then(Value::as_str)?;
         let printed = output
             .get("output")
@@ -456,6 +464,24 @@ mod tests {
                     "https://github.com/example/lib/pull/42".to_owned()
                 ),
             ]
+        );
+    }
+
+    /// `gh pr create` on a branch that has a pull request already fails, and prints that one's
+    /// link: not one the call opened.
+    #[test]
+    fn a_failed_create_keeps_no_link() {
+        let mut delivery = fixtures_in(Path::new("opencode-pull-requests/1.18.34"))
+            .into_iter()
+            .find(|(name, _)| name == "22-tool.execute.after-bash")
+            .unwrap()
+            .1;
+        delivery["payload"]["output"]["metadata"]["exit"] = json!(1);
+        let reported = normalize(&delivery).unwrap();
+        assert!(
+            reported.payload.get("pullRequestUrl").is_none(),
+            "{}",
+            reported.payload
         );
     }
 

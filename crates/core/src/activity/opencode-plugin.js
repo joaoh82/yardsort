@@ -252,3 +252,4 @@ export const YardsortActivity = async (ctx) => {
 };
 
 YardsortActivity.reduce = reduce;
+YardsortActivity.mayOpenPullRequest = mayOpenPullRequest;

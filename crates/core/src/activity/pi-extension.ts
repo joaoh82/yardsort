@@ -162,6 +162,9 @@ const EVENTS = [
   "model_select",
 ];
 
+/** How many calls that may open a pull request are remembered between their start and end. */
+const OPENING_LIMIT = 32;
+
 export default function (pi: any) {
   // Calls that may open a pull request, by call id, between their start and their end.
   const opening = new Map<string, Opened>();
@@ -175,11 +178,21 @@ export default function (pi: any) {
             model: ctx?.model ? { id: ctx.model.id, provider: ctx.model.provider } : undefined,
           };
           const id = event?.toolCallId;
-          if (name === "tool_execution_start" && mayOpenPullRequest(event?.toolName, event?.args)) {
+          // A call with no id cannot be told from another; one that never ends is let go of
+          // once enough others have started.
+          if (
+            name === "tool_execution_start" &&
+            typeof id === "string" &&
+            mayOpenPullRequest(event?.toolName, event?.args)
+          ) {
             opening.set(id, pick(event.args, ["command"]));
+            if (opening.size > OPENING_LIMIT) {
+              const oldest = opening.keys().next().value;
+              if (oldest !== undefined) opening.delete(oldest);
+            }
           }
           let opened: Opened | undefined;
-          if (name === "tool_execution_end" && opening.has(id)) {
+          if (name === "tool_execution_end" && typeof id === "string" && opening.has(id)) {
             opened = opening.get(id);
             opening.delete(id);
           }

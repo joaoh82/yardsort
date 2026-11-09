@@ -356,22 +356,29 @@ Every other built-in agent now gives a `tool.completed` its `pullRequestUrl` whe
 a pull request, from whatever its channel carries, by the same rules
 (`tracked::created_by_command`, `tracked::is_create_pull_request`, `tracked::link_in_tool_result`):
 
-| Agent    | Where the command and its output are                                                                                   | MCP                                                                    | Recorded                    |
-| -------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------- |
-| Codex    | The session file's `CommandExecution`: argv (the script of `bash -lc`, `powershell -Command`) and `aggregated_output`. | `McpToolCall`: `github`/`create_pull_request`, `codex_apps`/`github_…` | 0.167.0                     |
-| OpenCode | `tool.execute.after`: `args.command` and `output`; the plugin hands both on for a likely call only.                    | `<server>_create_pull_request`, by name                                | 1.18.34                     |
-| pi, OMP  | The command on `tool_execution_start`, the output on `tool_execution_end`; the extension pairs them by `toolCallId`.   | pi has none; OMP's names not recorded                                  | pi 1.5.0, OMP 18.18.3       |
-| Grok     | `chat_history.jsonl`, beside the event log: the call's arguments and its result, under the id `tool_completed` names.  | By name, not recorded                                                  | Not yet: Grok not signed in |
-| Cursor   | `afterShellExecution`: `command` and `output` (`postToolUse` carries them too; the link goes on one of the two).       | `afterMCPExecution`, which alone names the server                      | 2026.11.05-86047df          |
+| Agent    | Where the command and its output are                                                                                                                                        | MCP                                                                    | Recorded                    |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------- |
+| Codex    | The session file's `CommandExecution` with exit code 0: the script after the shell's flag (`bash -lc`, `powershell -NoProfile -Command`, `cmd /c`) and `aggregated_output`. | `McpToolCall`: `github`/`create_pull_request`, `codex_apps`/`github_…` | 0.167.0                     |
+| OpenCode | `tool.execute.after`: `args.command` and `output`; the plugin hands both on for a likely call only.                                                                         | `<server>_create_pull_request`, by name                                | 1.18.34                     |
+| pi, OMP  | The command on `tool_execution_start`, the output on `tool_execution_end`; the extension pairs them by `toolCallId`.                                                        | pi has none; OMP's names not recorded                                  | pi 1.5.0, OMP 18.18.3       |
+| Grok     | `chat_history.jsonl`, beside the event log: the call's arguments and its result, under the id `tool_completed` names.                                                       | By name, not recorded                                                  | Not yet: Grok not signed in |
+| Cursor   | `postToolUse` of `Shell`, sent only for a success: `tool_input.command`, `tool_output`'s `output` and `exitCode`.                                                           | `afterMCPExecution`, which alone names the server                      | 2026.11.05-86047df          |
 
 - **Likely, then decided.** OpenCode's plugin and the pi family's extension run inside the agent,
   where Yardsort's rules (Rust) do not. They pass on a call's command and output only when it
   _may_ have opened a pull request — a `bash` command naming `gh`, `pr` and `create`, or a tool
   whose name says GitHub and ends `create_pull_request` — and the executable decides, keeping the
   link alone. Every other call's command and output stay in the agent's process, as before.
+- **A failed call opened nothing.** `gh pr create` on a branch that has a pull request already
+  fails and prints _that_ one's link, so a call counts only when it succeeded: Codex's exit code,
+  OpenCode's `metadata.exit`, Cursor's `postToolUse` (a failure is `postToolUseFailure`), the pi
+  family's `isError`, Grok's `outcome`.
 - **Codex's and Grok's come from files**, read in the drain. Codex's links ride on the events a
   turn's trigger expands into; Grok's on its `tool_completed` lines, looked up in the chat
-  history only when a finished call needs it. Both reach `track_seen` like the inbox's.
+  history — streamed, line by line — only for a finished call that could have opened one. Grok
+  writes the log and the history apart, and a line is never read for a link twice, so a recent
+  call the history has not caught up with is left, with what follows it, for the next read, for
+  up to two minutes. Both reach `track_seen` like the inbox's.
 - **`scripts/record-pr-creation.sh <agent>`** runs each agent's own recording script with a
   prompt that opens a pull request — `gh pr create`, and for Codex, OpenCode and Cursor a GitHub
   MCP server's `create_pull_request` — against the same stand-ins as Claude Code's (a `gh` that

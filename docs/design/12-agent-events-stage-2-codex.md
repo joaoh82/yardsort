@@ -81,8 +81,9 @@ see `crates/core/src/activity/context.rs`.
 
 **Pull requests opened** ([38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped)).
 The session file has each command's argv and output and each MCP call's answer, so the drain
-gives a `tool.completed` its `pullRequestUrl` when a `CommandExecution` ran `gh pr create` — the
-script of `bash -lc <script>` or `powershell -Command <script>`, else the argv's words — or a
+gives a `tool.completed` its `pullRequestUrl` when a `CommandExecution` ran `gh pr create` with
+exit code 0 — the script after the shell's flag (`bash -lc`, `powershell -NoProfile -Command`,
+`cmd /c`), else the argv's words — or a
 `McpToolCall` is a GitHub `create_pull_request`, by `github`/`create_pull_request` or Codex's own
 app, `codex_apps`/`github_create_pull_request`. Nothing else of either is kept. Recorded against
 **0.167.0** (`scripts/record-pr-creation.sh codex`, `fixtures/codex-pull-requests/`); the MCP

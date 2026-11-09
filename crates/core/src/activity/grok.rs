@@ -188,7 +188,7 @@ pub fn read_events(dir: &Path, session_id: &str, from: usize) -> (Vec<Derived>, 
     let mut lines = 0;
     let mut turn: Option<i64> = None;
     // Read only once a finished tool call needs it.
-    let mut opened: Option<HashMap<String, String>> = None;
+    let mut opened: Option<HashMap<String, Option<String>>> = None;
     // Only a line Grok has finished writing counts: a fragment at the end — a record caught
     // mid-append — is left for the next read, when it will be whole.
     for (index, line) in text.split_inclusive('\n').enumerate() {
@@ -245,11 +245,25 @@ pub fn read_events(dir: &Path, session_id: &str, from: usize) -> (Vec<Derived>, 
                     "outcome": text("outcome"),
                 });
                 // A pull request the call opened keeps its link and nothing else: the one
-                // exception to metadata only (docs/design/38-pull-requests-elsewhere.md).
-                if let (true, Some(id)) = (success, text("tool_call_id")) {
+                // exception to metadata only (docs/design/38-pull-requests-elsewhere.md). Only
+                // a call that could have opened one is looked up.
+                let could = text("tool_name").as_deref().is_some_and(|tool| {
+                    tool == "run_terminal_command"
+                        || crate::tracked::is_create_pull_request("", tool)
+                });
+                if let (true, true, Some(id)) = (success, could, text("tool_call_id")) {
                     let opened = opened.get_or_insert_with(|| opened_in_history(dir));
-                    if let Some(url) = opened.get(&id) {
-                        payload["pullRequestUrl"] = Value::String(url.clone());
+                    match opened.get(&id) {
+                        Some(Some(url)) => payload["pullRequestUrl"] = Value::String(url.clone()),
+                        Some(None) => {}
+                        // Grok has not written the call, or its result, to the history yet. The
+                        // line is keyed by its place, so once read it is never read for a link
+                        // again: leave it, and what follows, for the next read — for a while.
+                        None if crate::store::now_ms() - at < HISTORY_LAG_MS => {
+                            lines = index;
+                            break;
+                        }
+                        None => {}
                     }
                 }
                 (
@@ -292,25 +306,37 @@ pub fn read_events(dir: &Path, session_id: &str, from: usize) -> (Vec<Derived>, 
     (events, lines)
 }
 
-/// The pull requests the session's tool calls opened, by call id, from `chat_history.jsonl`,
-/// where Grok keeps each call beside its result: a terminal command running `gh pr create`, by
-/// what it printed; a GitHub create-pull-request tool, by its answer. Read for that alone — the
-/// event log has no output — and nothing else of the conversation is kept.
-pub fn opened_in_history(dir: &Path) -> HashMap<String, String> {
+/// How long a finished call that could have opened a pull request waits for Grok to write it,
+/// with its result, to the chat history. Grok writes both within moments; after this the call
+/// is taken as having opened nothing that can be seen.
+pub const HISTORY_LAG_MS: i64 = 2 * 60 * 1000;
+
+/// What the session's tool calls opened, by call id, from `chat_history.jsonl`, where Grok keeps
+/// each call beside its result: `Some(link)` for a terminal command that ran `gh pr create`, by
+/// what it printed, or a GitHub create-pull-request tool, by its answer; `None` for a call that
+/// is known to have opened nothing. A call missing from the map has not been written, or its
+/// result has not. Read for that alone — the event log has no output — line by line, and
+/// nothing else of the conversation is kept.
+pub fn opened_in_history(dir: &Path) -> HashMap<String, Option<String>> {
+    use std::io::BufRead;
     let mut opened = HashMap::new();
-    let path = dir.join("chat_history.jsonl");
-    if std::fs::metadata(&path).map_or(true, |m| m.len() > MAX_EVENTS_BYTES) {
-        return opened;
-    }
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(file) = std::fs::File::open(dir.join("chat_history.jsonl")) else {
         return opened;
     };
-    // The calls that may have opened one, by id: a terminal command's line, or none for a tool.
-    let mut calls: HashMap<String, Option<String>> = HashMap::new();
-    for record in text
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-    {
+    // The calls that may have opened one and wait for their result: a command, or none for a
+    // tool.
+    let mut waiting: HashMap<String, Option<String>> = HashMap::new();
+    for line in std::io::BufReader::new(file).lines() {
+        let Ok(line) = line else {
+            break;
+        };
+        // Most of the history is messages; only calls and results are parsed.
+        if !line.contains("\"tool_calls\"") && !line.contains("\"tool_result\"") {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         match record.get("type").and_then(Value::as_str) {
             Some("assistant") => {
                 for call in record["tool_calls"].as_array().into_iter().flatten() {
@@ -321,44 +347,46 @@ pub fn opened_in_history(dir: &Path) -> HashMap<String, String> {
                         continue;
                     };
                     if name == "run_terminal_command" {
-                        let arguments = call
+                        let command = call
                             .get("arguments")
                             .and_then(Value::as_str)
-                            .and_then(|a| serde_json::from_str::<Value>(a).ok());
-                        if let Some(command) = arguments
-                            .as_ref()
-                            .and_then(|a| a.get("command"))
-                            .and_then(Value::as_str)
-                        {
-                            calls.insert(id.to_owned(), Some(command.to_owned()));
+                            .and_then(|a| serde_json::from_str::<Value>(a).ok())
+                            .and_then(|a| a.get("command")?.as_str().map(str::to_owned));
+                        match command {
+                            Some(command) if crate::tracked::runs_pr_create(&command) => {
+                                waiting.insert(id.to_owned(), Some(command));
+                            }
+                            // Nothing it printed could be a pull request it opened.
+                            _ => {
+                                opened.insert(id.to_owned(), None);
+                            }
                         }
                     } else if crate::tracked::is_create_pull_request("", name) {
-                        calls.insert(id.to_owned(), None);
+                        waiting.insert(id.to_owned(), None);
+                    } else {
+                        opened.insert(id.to_owned(), None);
                     }
                 }
             }
             Some("tool_result") => {
-                let Some(call) = record
-                    .get("tool_call_id")
-                    .and_then(Value::as_str)
-                    .and_then(|id| calls.get(id).map(|call| (id, call)))
-                else {
+                let Some(id) = record.get("tool_call_id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(call) = waiting.remove(id) else {
                     continue;
                 };
                 let content = &record["content"];
-                let url = match call.1 {
+                let url = match call {
                     Some(command) => {
                         let printed = match content {
                             Value::String(text) => text.clone(),
                             other => other.to_string(),
                         };
-                        crate::tracked::created_by_command(command, &printed)
+                        crate::tracked::created_by_command(&command, &printed)
                     }
                     None => crate::tracked::link_in_tool_result(content),
                 };
-                if let Some(url) = url {
-                    opened.insert(call.0.to_owned(), url);
-                }
+                opened.insert(id.to_owned(), url);
             }
             _ => {}
         }
@@ -440,6 +468,65 @@ mod tests {
     /// the shapes are the recorded ones of `grok/1.0.41` (a `run_terminal_command` and its
     /// `tool_completed`) and `grok/1.0.70` (the chat history's calls and results), with a
     /// `gh pr create` in them. `scripts/record-pr-creation.sh grok` records the real thing.
+    /// Grok writes the event log and the chat history apart. A finished command the history has
+    /// not caught up with is left for the next read, which finds its link; one that waited too
+    /// long, or never could have opened one, is read without.
+    #[test]
+    fn a_command_the_history_has_not_caught_up_with_is_read_again_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let completed = |id: &str, tool: &str, ts: &str| {
+            format!(
+                "{}\n",
+                json!({ "ts": ts, "type": "tool_completed", "tool_name": tool,
+                    "duration_ms": 9, "outcome": "success", "tool_call_id": id })
+            )
+        };
+        let log = [
+            completed("call-read", "read_file", &now),
+            completed(
+                "call-old",
+                "run_terminal_command",
+                "2026-09-25T16:33:17.286Z",
+            ),
+            completed("call-pr", "run_terminal_command", &now),
+            completed("call-after", "read_file", &now),
+        ]
+        .concat();
+        std::fs::write(dir.path().join("events.jsonl"), log).unwrap();
+
+        // No history yet: the read stops before the command that may have opened one.
+        let (events, lines) = read_events(dir.path(), SESSION, 0);
+        assert_eq!(lines, 2, "the read and the old command, not the recent one");
+        assert_eq!(events.len(), 2);
+        assert!(events
+            .iter()
+            .all(|e| e.payload.get("pullRequestUrl").is_none()));
+
+        // The call is written, its result not yet: still waiting.
+        let call = json!({ "type": "assistant", "content": "", "tool_calls": [{ "id": "call-pr",
+            "name": "run_terminal_command",
+            "arguments": json!({ "command": "gh pr create --fill" }).to_string() }] });
+        std::fs::write(dir.path().join("chat_history.jsonl"), format!("{call}\n")).unwrap();
+        assert_eq!(read_events(dir.path(), SESSION, lines).1, 2);
+
+        // And its result: the link, and the rest of the log after it.
+        let result = json!({ "type": "tool_result", "tool_call_id": "call-pr",
+            "content": "exit: 0\nhttps://github.com/o/lib/pull/41\n" });
+        std::fs::write(
+            dir.path().join("chat_history.jsonl"),
+            format!("{call}\n{result}\n"),
+        )
+        .unwrap();
+        let (events, lines) = read_events(dir.path(), SESSION, lines);
+        assert_eq!(lines, 4);
+        let links: Vec<Option<&str>> = events
+            .iter()
+            .map(|e| e.payload["pullRequestUrl"].as_str())
+            .collect();
+        assert_eq!(links, [Some("https://github.com/o/lib/pull/41"), None]);
+    }
+
     #[test]
     fn a_pull_request_a_terminal_command_opened_keeps_its_link_and_nothing_else() {
         let dir = tempfile::tempdir().unwrap();

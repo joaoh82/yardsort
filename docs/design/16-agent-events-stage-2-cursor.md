@@ -75,11 +75,13 @@ Every built-in harness now has a native source. What stays lifecycle-only is a c
 
 **Pull requests opened** ([38 § slice 3](38-pull-requests-elsewhere.md#slice-3-what-shipped)).
 Cursor reports a shell command and an MCP call twice: `postToolUse`, and `afterShellExecution`
-(`command`, `output`) or `afterMCPExecution` (`mcp_server_name`, `tool_name`, `result_json`). The
-link goes on the second — it alone names the MCP server — when the command ran `gh pr create`
-or the tool is a GitHub server's `create_pull_request`, and nothing else of either is kept.
-Recorded against **2026.11.05-86047df** (`scripts/record-pr-creation.sh cursor`); Cursor's shell
-takes `PATH` from the login shell, so the recording names its stand-in `gh` by path.
+or `afterMCPExecution`. A shell command's link goes on `postToolUse` of `Shell` — sent only for
+a success, a failure being `postToolUseFailure`, with the `exitCode` in its `tool_output` — when
+it ran `gh pr create`; an MCP call's on `afterMCPExecution`, which alone names the server
+(`mcp_server_name`), when it is a GitHub server's `create_pull_request`. Nothing else of either
+is kept. Recorded against **2026.11.05-86047df** (`scripts/record-pr-creation.sh cursor`);
+Cursor's shell takes `PATH` from the login shell, so the recording names its stand-in `gh` by
+path.
 
 ## 5 · What shipped
 

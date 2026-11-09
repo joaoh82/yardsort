@@ -1328,7 +1328,7 @@ fn a_pull_request_another_agent_opened_elsewhere_is_followed_too() {
     let cases = [
         (
             "cursor",
-            read("cursor-pull-requests/2026.11.05-86047df/05-afterShellExecution.json"),
+            read("cursor-pull-requests/2026.11.05-86047df/06-postToolUse-Shell.json"),
         ),
         (
             "opencode",

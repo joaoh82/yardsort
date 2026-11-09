@@ -69,3 +69,29 @@ describe("the pi-family extension and a pull request", () => {
     }
   });
 });
+
+describe("the two copies of the likely-call rule", () => {
+  it("answer alike, in the plugin and in the extension", async () => {
+    const { mayOpenPullRequest: extension } =
+      await import("../../../crates/core/src/activity/pi-extension");
+    const { YardsortActivity } =
+      await import("../../../crates/core/src/activity/opencode-plugin.js");
+    const plugin = YardsortActivity.mayOpenPullRequest;
+    const calls: Array<[string, unknown, boolean]> = [
+      ["bash", { command: "gh pr create --fill" }, true],
+      ["bash", { command: "cd lib && gh.exe pr create" }, true],
+      ["bash", { command: "gh pr view 7" }, false],
+      ["bash", { command: "gh issue create" }, false],
+      ["bash", { command: "ls" }, false],
+      ["bash", {}, false],
+      ["github_create_pull_request", {}, true],
+      ["GitHub_create_pull_request", {}, true],
+      ["gitlab_create_pull_request", {}, false],
+      ["github_get_pull_request", {}, false],
+    ];
+    for (const [tool, args, expected] of calls) {
+      expect(extension(tool, args), `${tool} ${JSON.stringify(args)}`).toBe(expected);
+      expect(plugin(tool, args), `${tool} ${JSON.stringify(args)}`).toBe(expected);
+    }
+  });
+});

@@ -161,11 +161,12 @@ pub struct Reported {
     pub payload: Value,
 }
 
-/// Turn a hook's stdin into an event, keeping metadata only.
 /// A pull request's link on the event of the call that created it — the one exception to
 /// metadata only (docs/design/38-pull-requests-elsewhere.md). Cursor reports a shell command and
-/// an MCP call twice, as `postToolUse` and as `afterShellExecution` / `afterMCPExecution`; the
-/// link goes on the second, which alone names the MCP server.
+/// an MCP call twice. A shell command's link goes on `postToolUse`, which Cursor sends only for
+/// one that succeeded (`postToolUseFailure` otherwise) — `gh pr create` where a pull request
+/// exists already fails, printing that one's link — and an MCP call's on `afterMCPExecution`,
+/// which alone names the server.
 fn with_pull_request(mut payload: Value, url: Option<String>) -> Value {
     if let Some(url) = url {
         payload["pullRequestUrl"] = Value::String(url);
@@ -182,6 +183,21 @@ fn created_by_tool(hook: &Value) -> Option<String> {
     crate::tracked::link_in_tool_result(hook.get("result_json")?)
 }
 
+/// The pull request a successful shell command created: `postToolUse` of `Shell`, whose
+/// `tool_output` is JSON text holding the `output` and the `exitCode`.
+fn created_by_shell(hook: &Value) -> Option<String> {
+    if hook.get("tool_name").and_then(Value::as_str) != Some("Shell") {
+        return None;
+    }
+    let command = hook["tool_input"].get("command").and_then(Value::as_str)?;
+    let output: Value = serde_json::from_str(hook.get("tool_output")?.as_str()?).ok()?;
+    if output.get("exitCode").and_then(Value::as_i64) != Some(0) {
+        return None;
+    }
+    crate::tracked::created_by_command(command, output.get("output")?.as_str()?)
+}
+
+/// Turn a hook's stdin into an event, keeping metadata only.
 pub fn normalize(hook: &Value) -> Result<Reported, String> {
     let event = hook
         .get("hook_event_name")
@@ -256,23 +272,20 @@ pub fn normalize(hook: &Value) -> Result<Reported, String> {
                 "status": text("final_status"),
             }),
         ),
-        "postToolUse" => ("tool.completed", tool()),
+        "postToolUse" => (
+            "tool.completed",
+            with_pull_request(tool(), created_by_shell(hook)),
+        ),
         "postToolUseFailure" => ("tool.failed", tool()),
         "afterShellExecution" => (
             "tool.completed",
-            with_pull_request(
-                json!({
-                    "tool": "shell",
-                    "conversationId": conversation,
-                    "generationId": text("generation_id"),
-                    "durationMs": number("duration"),
-                    "sandbox": hook.get("sandbox").and_then(Value::as_bool),
-                }),
-                crate::tracked::created_by_command(
-                    text("command").as_deref().unwrap_or_default(),
-                    text("output").as_deref().unwrap_or_default(),
-                ),
-            ),
+            json!({
+                "tool": "shell",
+                "conversationId": conversation,
+                "generationId": text("generation_id"),
+                "durationMs": number("duration"),
+                "sandbox": hook.get("sandbox").and_then(Value::as_bool),
+            }),
         ),
         "afterMCPExecution" => (
             "tool.completed",
@@ -405,7 +418,7 @@ mod tests {
             links,
             [
                 (
-                    "05-afterShellExecution".to_owned(),
+                    "06-postToolUse-Shell".to_owned(),
                     "https://github.com/example/lib/pull/41".to_owned()
                 ),
                 (
@@ -414,6 +427,24 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_failed_create_keeps_no_link() {
+        let (_, mut hook) = fixtures_in(Path::new("cursor-pull-requests/2026.11.05-86047df"))
+            .into_iter()
+            .find(|(name, _)| name == "06-postToolUse-Shell")
+            .unwrap();
+        hook["tool_output"] = json!(json!({
+            "output": "a pull request for branch \"bump\" into branch \"main\" already exists:\nhttps://github.com/example/lib/pull/40\n",
+            "exitCode": 1,
+        })
+        .to_string());
+        assert!(normalize(&hook)
+            .unwrap()
+            .payload
+            .get("pullRequestUrl")
+            .is_none());
     }
 
     /// The recording (`scripts/record-cursor.sh`, one headless turn): every hook Cursor

@@ -395,6 +395,14 @@ fn created_pull_request(item: &Value) -> Option<String> {
     if item.get("status").and_then(Value::as_str) != Some("completed") {
         return None;
     }
+    // `gh pr create` on a branch that has one already fails, printing that one's link.
+    if item
+        .get("exit_code")
+        .and_then(Value::as_i64)
+        .is_some_and(|code| code != 0)
+    {
+        return None;
+    }
     match item.get("type").and_then(Value::as_str)? {
         "CommandExecution" => {
             let argv: Vec<&str> = item["command"]
@@ -420,11 +428,17 @@ fn created_pull_request(item: &Value) -> Option<String> {
     }
 }
 
-/// What a command item ran, as one shell line: the script its shell was handed —
-/// `bash -lc <script>`, `powershell -Command <script>` — or else its words.
+/// What a command item ran, as one shell line: the script its shell was handed after the flag
+/// that says one follows — `bash -lc <script>`, `powershell -NoProfile -Command <script>`,
+/// `cmd /c <script>` — or else its words.
 fn shell_script(argv: &[&str]) -> String {
-    if let [_, flag, script] = argv {
-        if flag.starts_with('-') && (flag.ends_with('c') || flag.eq_ignore_ascii_case("-command")) {
+    if let [_, .., flag, script] = argv {
+        let flag = flag.to_ascii_lowercase();
+        let takes_script =
+            (flag.starts_with('-') && !flag.starts_with("--") && flag.ends_with('c'))
+                || flag == "-command"
+                || flag == "/c";
+        if takes_script {
             return (*script).to_owned();
         }
     }
@@ -696,6 +710,37 @@ mod tests {
             .as_deref(),
             Some("https://github.com/o/lib/pull/7")
         );
+        assert_eq!(
+            created_pull_request(&command(
+                json!([
+                    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                    "-NoProfile",
+                    "-Command",
+                    "gh pr create --fill"
+                ]),
+                "completed",
+                printed
+            ))
+            .as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        assert_eq!(
+            created_pull_request(&command(
+                json!(["cmd.exe", "/c", "gh pr create --fill"]),
+                "completed",
+                printed
+            ))
+            .as_deref(),
+            Some("https://github.com/o/lib/pull/7")
+        );
+        // `gh pr create` where one exists already fails, and prints that one's link.
+        let mut exists = command(
+            json!(["/bin/bash", "-lc", "gh pr create --fill"]),
+            "completed",
+            printed,
+        );
+        exists["exit_code"] = json!(1);
+        assert_eq!(created_pull_request(&exists), None);
         assert_eq!(
             created_pull_request(&command(
                 json!(["gh", "pr", "create", "--fill"]),
