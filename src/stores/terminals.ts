@@ -25,6 +25,11 @@ export interface TerminalTab {
   recordId: string | null;
   /** Printing right now, as opposed to sitting at a prompt. */
   busy: boolean;
+  /**
+   * When the current burst of output began (epoch ms), while `busy`: what the busy clock counts
+   * from. Comes from the core — its `busyMs` when the session is adopted, the `Busy` event after.
+   */
+  busySince: number | null;
   /** Finished a long stretch of work while nobody was watching; cleared by looking at it. */
   attention: boolean;
   /** What the agent was told it can read of the workspace's other conversations, if anything. */
@@ -88,6 +93,10 @@ function tabFor(session: SessionInfo, adopting = false): TerminalTab | null {
       session.state.status === "exited" ? session.state.exit : (earlyExits.get(session.id) ?? null),
     recordId: session.labels[RECORD_LABEL] ?? null,
     busy: session.busy && session.state.status === "running",
+    busySince:
+      session.busy && session.state.status === "running"
+        ? Date.now() - (session.busyMs ?? 0)
+        : null,
     // A session adopted rather than started by us has been running unwatched — since a webview
     // reload, or since the last time the app was open. If it is an agent that has printed
     // something and is now quiet, that is work waiting to be looked at.
@@ -217,16 +226,21 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }),
   markExited: (id, exit) => {
     if (!get().tabs.some((tab) => tab.id === id)) earlyExits.set(id, exit);
-    set((state) => ({ tabs: update(state.tabs, id, { exit, busy: false }) }));
+    set((state) => ({ tabs: update(state.tabs, id, { exit, busy: false, busySince: null }) }));
   },
-  markBusy: (id) => set((state) => ({ tabs: update(state.tabs, id, { busy: true }) })),
+  markBusy: (id) =>
+    set((state) => ({ tabs: update(state.tabs, id, { busy: true, busySince: Date.now() }) })),
   markQuiet(id, busyMs, watched) {
     const tab = get().tabs.find((candidate) => candidate.id === id);
     if (!tab) return null;
     // Only agents finishing real work are news; shells and keystroke echoes are not.
     const notable = tab.recordId !== null && busyMs >= WORTH_NOTICING_MS && !watched;
     set((state) => ({
-      tabs: update(state.tabs, id, { busy: false, attention: tab.attention || notable }),
+      tabs: update(state.tabs, id, {
+        busy: false,
+        busySince: null,
+        attention: tab.attention || notable,
+      }),
     }));
     return notable ? tab : null;
   },

@@ -2767,6 +2767,12 @@ export type SessionInfo = {
 	/**  Producing output right now (see [`HostEvent::Busy`] / [`HostEvent::Quiet`]). */
 	busy: boolean,
 	/**
+	 *  How long the current burst of output has lasted, in milliseconds (saturating); 0 while
+	 *  quiet. A busy indicator counts up from it instead of animating. A daemon older than the
+	 *  field sends none, which reads as a burst that has only just begun.
+	 */
+	busyMs?: number,
+	/**
 	 *  Milliseconds since the session last produced output (saturating). Drives "busy / waiting" indicators
 	 *  without anyone having to parse what the program printed.
 	 */

@@ -21,6 +21,7 @@ const tab = (id: string, recordId: string | null): TerminalTab => ({
   attention: false,
   toldAbout: null,
   toldAt: null,
+  busySince: null,
 });
 
 describe("TerminalTabs", () => {

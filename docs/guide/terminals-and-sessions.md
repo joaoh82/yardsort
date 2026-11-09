@@ -260,14 +260,20 @@ opening anything:
 
 | Dot            | Meaning                                                                                                                                        |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **pulsing**    | printing right now — an agent at work                                                                                                          |
+| **solid + 2m** | printing right now — an agent at work. The count says for how long: seconds, then minutes, then hours                                          |
 | **solid**      | running but quiet for a few seconds — most likely waiting for you                                                                              |
 | **ringed**     | an agent is waiting and you have not looked at it yet — it finished a long stretch of work, or it was already waiting when you opened Yardsort |
 | **grey**       | nothing running                                                                                                                                |
 | **red** (tabs) | the program exited with an error                                                                                                               |
 
 This comes purely from terminal activity. Agents animate a spinner while they think, so for them
-silence really does mean "your turn".
+silence really does mean "your turn". The count starts when the output starts and goes away once
+the terminal has been quiet for three seconds, so an agent that stops printing to think starts from
+zero again. On a workspace row it counts from the terminal that has been printing longest.
+
+Nothing in the dots moves: the count changes once a second at most. An animation that never stops
+makes the window redraw every time the screen refreshes, which on Linux kept a third of a CPU core
+busy while any agent was working.
 
 ## The badge on a workspace row
 
@@ -278,7 +284,7 @@ sidebar says what its **agents** have got to, so you do not have to open a works
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | **1**, **2**, … | that many agents are running but quiet — your turn. Filled in solid if they finished while you were elsewhere and you have not looked yet |
 | **✓**           | every agent here has ended, cleanly                                                                                                       |
-| **nothing**     | they are all working — the pulsing dot already says so, and a row that lights up only when it wants something is worth glancing at        |
+| **nothing**     | they are all working — the dot and its count already say so, and a row that lights up only when it wants something is worth glancing at   |
 | **✗**           | one of them exited with an error                                                                                                          |
 
 Shells are not counted. A prompt sitting there is not news, and a workspace whose agent has

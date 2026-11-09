@@ -27,6 +27,7 @@ const tab: TerminalTab = {
   attention: false,
   toldAbout: null,
   toldAt: null,
+  busySince: null,
 };
 
 const usage = (percent: number, compactCommand: string | null = "/compact"): ContextUsage => ({

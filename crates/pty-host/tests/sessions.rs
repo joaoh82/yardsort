@@ -381,6 +381,53 @@ fn a_burst_of_output_is_reported_as_busy_then_quiet() {
 }
 
 #[test]
+fn a_session_says_how_long_its_burst_of_output_has_lasted() {
+    let (tx, events) = mpsc::channel();
+    let tx = Mutex::new(tx);
+    let host = Arc::new(
+        PtyHost::new(Arc::new(move |event| {
+            let _ = tx.lock().unwrap().send(event);
+        }))
+        .with_quiet_after(Duration::from_millis(1_500)),
+    );
+    // Keep printing — never quiet for as long as the quiet period — for a few seconds, then stop.
+    let script = if cfg!(windows) {
+        "ping -n 5 127.0.0.1&& ping -n 6 127.0.0.1 >NUL"
+    } else {
+        "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do echo $i; sleep 0.2; done; sleep 5"
+    };
+    let session = host.spawn(shell(script)).unwrap();
+    let capture = Capture::default();
+    attach_terminal(&host, &session.id, &capture);
+
+    let next = |events: &Receiver<HostEvent>| {
+        events
+            .recv_timeout(TIMEOUT)
+            .expect("timed out waiting for events")
+    };
+    assert!(matches!(next(&events), HostEvent::Busy { .. }));
+    assert_eq!(host.info(&session.id).unwrap().busy_ms / 1_000, 0);
+
+    std::thread::sleep(Duration::from_millis(2_000));
+    let info = host.info(&session.id).unwrap();
+    assert!(info.busy, "still printing");
+    assert!(
+        (1_500..10_000).contains(&info.busy_ms),
+        "the burst began about two seconds ago, got {} ms",
+        info.busy_ms
+    );
+
+    loop {
+        if let HostEvent::Quiet { .. } = next(&events) {
+            break;
+        }
+    }
+    let info = host.info(&session.id).unwrap();
+    assert!(!info.busy);
+    assert_eq!(info.busy_ms, 0, "a quiet session has no burst to time");
+}
+
+#[test]
 fn labels_are_stored_and_reported_back_untouched() {
     let (host, _events) = host();
     let mut plan = long_running();

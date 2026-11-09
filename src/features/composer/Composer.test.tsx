@@ -76,6 +76,7 @@ const session = (workspace: string) => ({
   state: { status: "running" as const },
   hasOutput: true,
   idleMs: 0,
+  busyMs: 0,
 });
 
 const app = project("app");

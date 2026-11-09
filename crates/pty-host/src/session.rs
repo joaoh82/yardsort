@@ -76,7 +76,8 @@ struct View {
     state: SessionState,
     last_output: Instant,
     has_output: bool,
-    busy: bool,
+    /// When the current burst of output began, while there is one: busy since then.
+    busy_since: Option<Instant>,
     control: Control,
     queries: Queries,
     /// The size the person here last asked for. A lease holder's size wins while it holds
@@ -191,7 +192,7 @@ impl Session {
                 state: SessionState::Running,
                 last_output: Instant::now(),
                 has_output: false,
-                busy: false,
+                busy_since: None,
                 control: Control::new(holds),
                 queries: Queries::default(),
                 local_size: size,
@@ -249,7 +250,8 @@ impl Session {
             labels: self.plan.labels.clone(),
             state: view.state.clone(),
             has_output: view.has_output,
-            busy: view.busy,
+            busy: view.busy_since.is_some(),
+            busy_ms: view.busy_since.map_or(0, |since| millis(since.elapsed())),
             idle_ms: u32::try_from(view.last_output.elapsed().as_millis()).unwrap_or(u32::MAX),
         }
     }
@@ -571,7 +573,7 @@ impl Session {
                     Ok(msg) => msg,
                     Err(RecvTimeoutError::Timeout) => {
                         busy_since = None;
-                        self.view().busy = false;
+                        self.view().busy_since = None;
                         events(HostEvent::Quiet {
                             id: self.id.clone(),
                             // The burst ended when the output did, not when we noticed.
@@ -627,8 +629,9 @@ impl Session {
 
             if !batch.is_empty() {
                 if busy_since.is_none() {
-                    busy_since = Some(Instant::now());
-                    self.view().busy = true;
+                    let now = Instant::now();
+                    busy_since = Some(now);
+                    self.view().busy_since = Some(now);
                     events(HostEvent::Busy {
                         id: self.id.clone(),
                     });
@@ -658,7 +661,7 @@ impl Session {
         };
         {
             let mut view = self.view();
-            view.busy = false;
+            view.busy_since = None;
             view.state = SessionState::Exited { exit: exit.clone() };
             view.sinks.retain_mut(|(_, viewer)| match viewer {
                 Viewer::Terminal(_) => true,

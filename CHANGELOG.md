@@ -25,6 +25,11 @@ has the downloads and the full commit lists.
   review at all. **`ys pr checkout <n>`** opens a workspace on a pull request's branch, so
   `ys workflow run code-review` can review someone else's pull request. See
   [`ys pr`](docs/guide/cli.md#ys-pr).
+- **Much less CPU while agents work.** The dot that pulsed while an agent printed kept the whole
+  window redrawing at the screen's refresh rate — on Linux, about a third of a CPU core whenever
+  any agent was busy. The dot is now still, and a count beside it says how long the agent has been
+  at it (**12s**, **4m**, **1h 5m**), changing once a second at most. See
+  [Status dots](docs/guide/terminals-and-sessions.md#status-dots).
 
 ## 0.23.0
 

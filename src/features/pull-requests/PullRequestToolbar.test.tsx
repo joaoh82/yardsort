@@ -290,6 +290,7 @@ it("asks the agent and shows the tab it is in", async () => {
       hasOutput: false,
       busy: false,
       idleMs: 0,
+      busyMs: 0,
     },
   });
   native.confirm.mockResolvedValue(true);

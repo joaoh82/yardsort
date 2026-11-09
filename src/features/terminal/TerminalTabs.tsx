@@ -10,6 +10,7 @@ import { useSmokeTestsStore } from "@/stores/smokeTests";
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
 import { launchable, useHarnessStore } from "@/stores/harnesses";
 import { AgentButton } from "./AgentButton";
+import { BusyClock } from "./BusyClock";
 import { handOff } from "./handOff";
 import { ConversationsDialog } from "./ConversationsDialog";
 import { StatusDot } from "./StatusDot";
@@ -181,6 +182,7 @@ function Tab({ tab, active }: { tab: TerminalTab; active: boolean }) {
         {record && <HarnessIcon id={record.harnessId} label={record.harnessLabel} size={12} />}
         <span className="max-w-40 truncate">{tab.title}</span>
         {status && <span className="text-[11px] text-ink-faint">{status}</span>}
+        {!tab.exit && tab.busySince !== null && <BusyClock since={tab.busySince} />}
       </button>
       {tab.toldAbout && (
         <button

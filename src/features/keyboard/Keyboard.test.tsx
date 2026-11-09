@@ -235,6 +235,7 @@ describe("keyboard navigation", () => {
         attention: false,
         toldAbout: null,
         toldAt: null,
+        busySince: null,
       })),
       active: { "w-demo": "one" },
     });

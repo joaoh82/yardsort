@@ -160,6 +160,7 @@ describe("TestRunTab", () => {
           attention: false,
           toldAbout: null,
           toldAt: null,
+          busySince: null,
         },
         {
           id: "s-shell",
@@ -171,6 +172,7 @@ describe("TestRunTab", () => {
           attention: false,
           toldAbout: null,
           toldAt: null,
+          busySince: null,
         },
       ],
       active: {},

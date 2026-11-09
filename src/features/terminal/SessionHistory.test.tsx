@@ -39,6 +39,7 @@ const live = (id: string, recordId: string) => ({
   hasOutput: true,
   busy: false,
   idleMs: 0,
+  busyMs: 0,
 });
 
 const tab = (id: string, extra: Partial<TerminalTab> = {}): TerminalTab => ({
@@ -51,6 +52,7 @@ const tab = (id: string, extra: Partial<TerminalTab> = {}): TerminalTab => ({
   attention: false,
   toldAbout: null,
   toldAt: null,
+  busySince: null,
   ...extra,
 });
 
