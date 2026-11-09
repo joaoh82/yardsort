@@ -819,3 +819,11 @@ day, R5's gate check 1: the iPhone and this computer on one Claude Code session 
 staging, each taking control in turn and the person at the box taking it back. The box: Ubuntu 24.04.5
 LTS, `yardsort-host` 0.22.2 (slice 3's build; slice 5 changed nothing it runs), Claude Code 2.1.319.
 This computer ran 5c25d89 with this slice on top, as in its pull request.
+
+**What review found.** Two things, both fixed with tests that fail without them. xterm parses what it
+is given later but resets and resizes at once, so a resize the host told just after some output
+reflowed that output at the new size; a reset or a size now waits until every byte before it is
+parsed, and output after it waits behind it. And **Take control** pressed before the terminal had
+opened was dropped, leaving the button at _Taking control…_ for good; it is now offered only once the
+terminal says who has control, the request waits for the open, and a refused request or a failed
+open leaves the button usable and says why.

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ipc, type OtherTerminal, type RemoteTerminalSeen } from "@/lib/ipc";
+import { errorMessage, ipc, type OtherTerminal, type RemoteTerminalSeen } from "@/lib/ipc";
 import { TerminalSurface } from "@/features/terminal/TerminalView";
 import type { TerminalSource } from "@/features/terminal/source";
 import { controllerText, type RemoteState, seenBy, WATCHING } from "./remoteTerminalState";
@@ -8,6 +8,8 @@ import { controllerText, type RemoteState, seenBy, WATCHING } from "./remoteTerm
 class RemoteSource implements TerminalSource {
   readonly key: string;
   #id: number | null = null;
+  /** The number it was opened as, once it is: what is asked before then waits for it. */
+  #opened = opening();
 
   constructor(
     readonly hostId: string,
@@ -18,16 +20,31 @@ class RemoteSource implements TerminalSource {
   }
 
   async attach(_size: unknown, sink: Parameters<TerminalSource["attach"]>[1]) {
-    const id = await ipc.remoteTerminalOpen(this.hostId, this.terminal.id, sink.output, (seen) => {
-      if (seen.kind === "reset") sink.reset(seen.size);
-      else if (seen.kind === "resized") sink.size(seen.size);
-      this.onSeen(seen);
-    });
+    const opened = this.#opened;
+    let id: number;
+    try {
+      id = await ipc.remoteTerminalOpen(this.hostId, this.terminal.id, sink.output, (seen) => {
+        if (seen.kind === "reset") sink.reset(seen.size);
+        else if (seen.kind === "resized") sink.size(seen.size);
+        this.onSeen(seen);
+      });
+    } catch (error) {
+      opened.fail(error);
+      throw error;
+    }
     this.#id = id;
+    opened.open(id);
     return () => {
       this.#id = null;
+      // Opened again, as when the renderer changes: what is asked meanwhile waits for that.
+      this.#opened = opening();
       void ipc.remoteTerminalClose(id).catch(() => {});
     };
+  }
+
+  /** Its number, once it is open: a refusal when it could not be. */
+  #open() {
+    return this.#opened.promise;
   }
 
   write(data: string) {
@@ -42,13 +59,26 @@ class RemoteSource implements TerminalSource {
     return this.terminal.purpose === "agent";
   }
 
-  takeControl() {
-    if (this.#id !== null) void ipc.remoteTerminalTakeControl(this.#id).catch(console.error);
+  /** Ask for control. The answer comes as what the terminal shows; a rejection if not asked. */
+  async takeControl() {
+    await ipc.remoteTerminalTakeControl(await this.#open());
   }
 
-  release() {
-    if (this.#id !== null) void ipc.remoteTerminalRelease(this.#id).catch(console.error);
+  async release() {
+    await ipc.remoteTerminalRelease(await this.#open());
   }
+}
+
+function opening() {
+  let open!: (id: number) => void;
+  let fail!: (error: unknown) => void;
+  const promise = new Promise<number>((resolve, reject) => {
+    open = resolve;
+    fail = reject;
+  });
+  // Nobody may be waiting for it when it fails: the view says so itself.
+  promise.catch(() => {});
+  return { promise, open, fail };
 }
 
 /**
@@ -71,8 +101,11 @@ export function RemoteTerminal(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [hostId, terminal.id],
   );
-  const { held, asking, notice, away, gone, exit } = state;
+  const { controller, held, asking, notice, away, gone, exit } = state;
   const line = gone ?? away ?? notice;
+  // Not asked, after all: the button is usable again, and the person is told why.
+  const refused = (error: unknown) =>
+    setState((s) => ({ ...s, asking: false, notice: errorMessage(error) }));
 
   return (
     <section
@@ -97,7 +130,7 @@ export function RemoteTerminal(props: {
         {held ? (
           <button
             type="button"
-            onClick={() => source.release()}
+            onClick={() => void source.release().catch(refused)}
             className="rounded border border-line px-2 py-0.5 text-ink-muted hover:border-accent hover:text-ink"
           >
             Release control
@@ -108,10 +141,11 @@ export function RemoteTerminal(props: {
           !exit && (
             <button
               type="button"
-              disabled={asking || away !== null}
+              // Until it says who has control, it has not been reached yet.
+              disabled={asking || away !== null || controller === null}
               onClick={() => {
                 setState((s) => ({ ...s, asking: true, notice: null }));
-                source.takeControl();
+                source.takeControl().catch(refused);
               }}
               className="rounded border border-accent px-2 py-0.5 text-ink hover:bg-accent/20 disabled:opacity-50"
             >

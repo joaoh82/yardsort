@@ -245,22 +245,41 @@ export function TerminalSurface({
     });
 
     // --- attach ------------------------------------------------------------------------------
+    // xterm parses what it is given later, but resets and resizes at once. A reset or a size the
+    // source tells therefore waits until every byte before it is parsed, or a resize would reflow
+    // lines drawn at the old size, and output after it waits behind it.
+    let parsing = 0;
+    const waiting: { op: () => void; boundary: boolean }[] = [];
+    const drain = () => {
+      for (let next = waiting[0]; next && !(next.boundary && parsing > 0); next = waiting[0]) {
+        waiting.shift();
+        next.op();
+      }
+    };
+    const inOrder = (op: () => void, boundary: boolean) => {
+      if (disposed) return;
+      if (waiting.length > 0 || (boundary && parsing > 0)) waiting.push({ op, boundary });
+      else op();
+    };
+    const draw = (bytes: Uint8Array) => {
+      parsing++;
+      term.write(bytes, () => {
+        parsing--;
+        probeRef.current?.onOutput?.(bytes.byteLength);
+        if (parsing === 0 && !disposed) drain();
+      });
+    };
     let stop: (() => void) | null = null;
     void (async () => {
       fit.fit();
       const stopping = await source.attach(currentSize(), {
-        output(bytes) {
-          if (disposed) return;
-          term.write(bytes, () => probeRef.current?.onOutput?.(bytes.byteLength));
-        },
-        reset(size) {
-          if (disposed) return;
-          term.reset();
-          follow(size);
-        },
-        size(size) {
-          if (!disposed) follow(size);
-        },
+        output: (bytes) => inOrder(() => draw(bytes), false),
+        reset: (size) =>
+          inOrder(() => {
+            term.reset();
+            follow(size);
+          }, true),
+        size: (size) => inOrder(() => follow(size), true),
       });
       if (disposed) return stopping();
       stop = stopping;

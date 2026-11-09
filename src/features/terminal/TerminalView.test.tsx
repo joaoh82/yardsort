@@ -24,6 +24,11 @@ const fake = vi.hoisted(() => {
     resizeHandler: null as ((size: { cols: number; rows: number }) => void) | null,
     resized: vi.fn(),
     reset: vi.fn(),
+    /** What the view did to the terminal, in order: each write once it is parsed. */
+    log: [] as string[],
+    /** Writes not parsed yet, while `parseLater` holds them back as the real xterm can. */
+    unparsed: [] as (() => void)[],
+    parseLater: false,
   };
   class Terminal {
     constructor() {
@@ -58,10 +63,21 @@ const fake = vi.hoisted(() => {
       this.cols = cols;
       this.rows = rows;
       state.resized(cols, rows);
+      state.log.push(`resize ${cols}x${rows}`);
       state.resizeHandler?.({ cols, rows });
     }
-    reset = state.reset;
-    write() {}
+    reset = () => {
+      state.log.push("reset");
+      state.reset();
+    };
+    write(data: string | Uint8Array, parsed?: () => void) {
+      const done = () => {
+        state.log.push(`write ${typeof data === "string" ? data : new TextDecoder().decode(data)}`);
+        parsed?.();
+      };
+      if (state.parseLater) state.unparsed.push(done);
+      else done();
+    }
     hasSelection = () => state.selection !== "";
     getSelection = () => state.selection;
     clearSelection = state.clearSelection;
@@ -331,6 +347,36 @@ describe("a terminal whose size is not the view's", () => {
 
   beforeEach(() => {
     fake.state.resizeHandler = null;
+    fake.state.log = [];
+    fake.state.unparsed = [];
+    fake.state.parseLater = false;
+  });
+
+  it("resizes and starts over only once what came before is drawn, and draws what follows after", async () => {
+    const { source, sink } = following();
+    render(<TerminalSurface source={source} fits={false} typing={false} />);
+    await vi.waitFor(() => expect(source.attach).toHaveBeenCalled());
+    fake.state.parseLater = true;
+    const bytes = (text: string) => new TextEncoder().encode(text);
+
+    sink().output(bytes("1234567890X"));
+    sink().size({ cols: 20, rows: 24 });
+    sink().output(bytes("after"));
+    sink().reset({ cols: 30, rows: 24 });
+    sink().output(bytes("NEW"));
+    // Nothing is parsed yet, so nothing has been resized under it.
+    expect(fake.state.log).toEqual([]);
+
+    // xterm parses each write when it gets to it; whatever came next is applied in its turn.
+    while (fake.state.unparsed.length > 0) fake.state.unparsed.shift()!();
+    expect(fake.state.log).toEqual([
+      "write 1234567890X",
+      "resize 20x24",
+      "write after",
+      "reset",
+      "resize 30x24",
+      "write NEW",
+    ]);
   });
 
   it("follows the size it is told, sends nothing typed, and fits once let", async () => {
