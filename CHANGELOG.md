@@ -3,7 +3,7 @@
 Notable changes in each release. The [releases page](https://github.com/joaoh82/yardsort/releases)
 has the downloads and the full commit lists.
 
-## Unreleased
+## 0.24.0
 
 - **`ys session resume` and `ys session fork`.** Continue an agent's conversation from the command
   line, as **Resume** and **Fork** do in the app, naming it by the start of its id from
