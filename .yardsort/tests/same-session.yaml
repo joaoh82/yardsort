@@ -1,0 +1,166 @@
+id: same-session
+name: The window and a phone share one shell on a computer with no screen
+description: >-
+  A yardsort-host on the stand-in server, serving a shell started with ys. The real window, on a
+  profile of its own, signs in as a client and is let watch and type at the host's terminal, and so
+  is a pretend phone. The window watches the shell at the host's size, takes control and types; the
+  phone, watching only, sees it. Then the phone takes control and types, and the window says who
+  took it and offers to take it back. Linux only, since the window stands in for the browser with
+  xdg-open. A window opens while it runs; nothing needs clicking.
+version: 1
+timeout: 45m
+
+setup:
+  - id: build_app
+    action: run
+    program: bun
+    args: [tauri, build, --debug, --no-bundle]
+    timeout: 20m
+  - id: build_the_host
+    action: shell
+    # The stand-in server too, and the host's bin folder in $YS_RUN_DIR/bin.
+    line: sh .yardsort/tests/support/headless-build.sh
+    timeout: 30m
+  - id: stand_in
+    action: start
+    program: sh
+    args:
+      - -c
+      # It stops when its input closes.
+      - tail -f /dev/null | target/debug/examples/stand-in > "{{ run.dir }}/stand-in.json"
+  - id: stand_in_ready
+    action: wait_for
+    program: grep
+    args: [-q, ready, "{{ run.dir }}/stand-in.json"]
+    timeout: 60s
+  - id: a_repository_and_a_shell_harness
+    action: shell
+    line: >-
+      mkdir -p "$YS_RUN_DIR/repo" "$YS_RUN_DIR/profile" && git -C "$YS_RUN_DIR/repo" init -q && git -C
+      "$YS_RUN_DIR/repo" -c user.name=Smoke -c user.email=smoke@example.invalid -c commit.gpgsign=false
+      commit -q --allow-empty -m first && cp .yardsort/tests/support/headless-settings.toml
+      "$YS_RUN_DIR/profile/settings.toml"
+
+steps:
+  - id: the_host_signs_in
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", sign-in, Smoke box]
+    expect:
+      stdout_contains: Signed in as Smoke box
+  - id: serve
+    action: shell
+    line: >-
+      setsid sh .yardsort/tests/support/headless.sh yardsort-host serve > "$YS_RUN_DIR/serve.log"
+      2>&1 < /dev/null & echo $! > "$YS_RUN_DIR/serve.pid"
+  - id: linked
+    action: wait_for
+    program: sh
+    args:
+      - -c
+      - 'sh .yardsort/tests/support/headless.sh yardsort-host status | grep -q "Link: connected"'
+    timeout: 60s
+  - id: add_the_project
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, project, add, "{{ run.dir }}/repo"]
+    expect:
+      stdout_contains: Added repo
+  - id: start_a_shell
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, ys, workspace, new, repo, smoke, --harness, sh]
+    expect:
+      stdout_contains: agent  sh
+
+  - id: open_the_window
+    action: shell
+    # A profile of its own: the host has the run's.
+    line: YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh open
+  - id: window_up
+    action: wait_for
+    port: "{{ run.port }}"
+    timeout: 60s
+  - id: the_window_signs_in_as_a_client
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", client-sign-in, "{{ run.dir }}"]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: Signed in as Smoke laptop"
+  - id: the_window_is_let_type
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair, window, "{{ run.port }}", t]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+  - id: so_is_the_phone
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/host.ts, "{{ run.dir }}", pair]
+    timeout: 120s
+    expect:
+      stdout_contains: Let in.
+
+  - id: the_window_watches_the_shell
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", watches, Smoke box]
+    timeout: 90s
+    expect:
+      stdout_contains: "saw: the shell on Smoke box, watched"
+  - id: the_window_takes_control_and_types
+    action: run
+    program: bun
+    args:
+      - .yardsort/tests/support/window.ts
+      - "{{ run.port }}"
+      - takes-control-and-types
+      - echo typed-in-$((6*7))-the-window
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: This computer has control."
+  - id: the_phone_sees_it
+    action: run
+    program: bun
+    # What the shell printed, not the line typed: 6*7 is worked out there.
+    args:
+      [.yardsort/tests/support/phone.ts, "{{ run.dir }}", sees, Smoke box, typed-in-42-the-window]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: typed-in-42-the-window"
+  - id: the_phone_takes_control_and_types
+    action: run
+    program: bun
+    args:
+      - .yardsort/tests/support/phone.ts
+      - "{{ run.dir }}"
+      - take-over
+      - Smoke box
+      - echo typed-on-$((6*7))-the-phone
+      - typed-on-42-the-phone
+    timeout: 60s
+    expect:
+      stdout_contains: "read back: typed-on-42-the-phone"
+  - id: the_window_shows_it_lost_control
+    action: run
+    program: bun
+    args: [.yardsort/tests/support/window.ts, "{{ run.port }}", lost-control, Smoke test phone]
+    timeout: 60s
+    expect:
+      stdout_contains: "saw: Take control, offered again"
+  - id: both_devices_there
+    action: run
+    program: sh
+    args: [.yardsort/tests/support/headless.sh, yardsort-host, devices]
+    expect:
+      stdout_contains: Smoke laptop  watches and types
+
+teardown:
+  - id: stop_everything
+    action: shell
+    line: >-
+      YS_APP_DIR="$YS_RUN_DIR/app" sh .yardsort/tests/support/app.sh stop-everything; kill "$(cat
+      "$YS_RUN_DIR/serve.pid" 2>/dev/null)" 2>/dev/null; pkill -HUP -f "yardsort-daemon .*$YS_RUN_DIR";
+      pkill -f "yardsort-daemon .*$YS_RUN_DIR"; true

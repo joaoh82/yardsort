@@ -42,6 +42,8 @@ pub struct AppState {
     /// Remote, the other way round: this computer as a client of other hosts. See
     /// `crate::computers`.
     pub computers: crate::computers::ComputersState,
+    /// The terminals of other computers open in this window: `crate::remote_terminal`.
+    pub remote_terminals: crate::remote_terminal::RemoteTerminals,
     env: Mutex<Option<Arc<ShellEnv>>>,
 }
 
@@ -68,6 +70,7 @@ impl AppState {
             usage: crate::usage::Usage::default(),
             remote: crate::remote::RemoteState::default(),
             computers: crate::computers::ComputersState::default(),
+            remote_terminals: Default::default(),
             env: Mutex::new(None),
         }
     }

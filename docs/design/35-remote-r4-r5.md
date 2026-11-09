@@ -2,7 +2,7 @@
 
 **Status:** planned on 2026-11-06. The first slice, the host's account moved out of the app, was
 built the same day (§10); its local smoke tests and the owner's phone check against staging passed.
-The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
+The second, `yardsort-host`, was built on 2026-11-07 (§11); its local smoke test and the owner's run on a box against staging passed. The third, its packaging, was built on 2026-11-08 (§12); its local smoke test, run from the tarball with an empty environment, and the owner's run of it as a service on the box, passed. The fourth, the desktop as a client, read-only, was built the same day (§13); its local smoke test passed. The fifth, the desktop watching and controlling a host's terminals, was built on 2026-11-09 (§14); its local smoke test, and the owner's run of the iPhone and this computer on one agent on the box through staging, R5's gate check 1, passed. Slice 12, published images, was added on 2026-11-08 at the owner's request (§4). Checked on
 2026-11-08 against where Remote is going, several machines an account owns and the desktop choosing
 where a task runs (§3, "Where agents run"); what comes after R5 is in §9. This is the plan for the last two
 phases before sync: what each has to show, what it starts from, the decisions taken before any
@@ -721,8 +721,9 @@ on another computer, read-only. Watching and typing into its terminals are slice
   sign-in and the pairings forgotten here, and nothing else. The hosts it is paired with are the server's grants, one per host (the one
   in force, else the newest), listed again every 3 s while a pairing waits for the host's person,
   whose answer nothing else brings, every minute otherwise, and at most every 10 s when the window
-  looks. It asks only to
-  watch (`workspace:read`, `activity:read`, `memory:read`, `terminal:read`). One link per approved host,
+  looks. It asked only to
+  watch (`workspace:read`, `activity:read`, `memory:read`, `terminal:read`); slice 5 adds
+  `terminal:control` (§14). One link per approved host,
   opened again with waits up to a minute; through each, what the host shows is read when its activity
   moves and every 20 s, and kept in memory with the link's state, online, connecting or offline since
   when. What a host last showed stays shown while it is away. A grant taken back ends the link and the
@@ -760,3 +761,69 @@ waits, and the end-to-end test waits on that rather than asking itself. Against 
 the owner found that a pairing the box revoked stayed under **Paired with**, and **Forget** left it
 there: it revoked again a grant already revoked, and the server still listed it. Forget now hides it
 here as well, and the end-to-end test forgets the revoked pairing and lists again.
+
+## 14 · What the fifth slice adds
+
+Built on 2026-11-09, on Linux. Nothing changed on the server, the host or the phone, so staging needs
+no deploy and the phone no new build. Milestone B's second half: the desktop watches a terminal on
+another computer and, once its person takes control, types into it.
+
+- **Watching a terminal** (`remote_host::computer::terminal`): each host's link now publishes its open
+  channel, and a terminal is watched through it. It is attached from a snapshot, announced as a reset
+  so the view clears first; when the link drops it is attached again on the next channel, resuming
+  after the last item drawn, and from a new snapshot when the host no longer has that, on a gap, or on
+  a new epoch. A link dropped for a host no longer paired closes, and the terminal says it is gone.
+- **Control** is the phone's rules (31 §5): asked for only by pressing **Take control**, a take-over
+  only from another device, never from the person at the host, and never taken again by itself.
+  Input is sent one piece at a time, each answered before the next, in pieces of at most 32 KB of
+  whole characters, numbered within the lease and never sent twice; what was on its way when the
+  link dropped is said to be uncertain, and what was waiting is dropped. Losing it says who took it:
+  the person at that computer, a device by its name, or the connection. A resize is sent only while
+  holding control; the host puts its own size back when control returns.
+- **The desktop asks for `terminal:control`** now, as the phone does (`ASKED`, five scopes). The host's
+  person still chooses: answering `v` at `yardsort-host pair` lets it only watch, and the page then
+  offers no **Take control** and says so. A pairing approved before this slice keeps what it had.
+- **One ordered stream to the window** (`src-tauri/src/remote_terminal.rs`): the terminal's bytes and
+  everything else it shows come on one Tauri channel, each message a tag byte then the bytes (`0`) or
+  a `RemoteTerminalSeen` as JSON (`1`), so a resize or a reset is never drawn out of order with the
+  bytes around it. The type is exported to the bindings with `.typ`, since no command names it. The
+  bytes are never read.
+- **`TerminalView` behind a source interface** (`src/features/terminal/source.ts`): `TerminalSurface`
+  draws whatever a `TerminalSource` sends (attach, write, resize, and whether an agent may be in it),
+  and `TerminalView` is the local source over `pty*`, unchanged for its callers. Two switches serve a
+  remote terminal: `fits`, whether the view sets the size or follows the one the source says, and
+  `typing`, whether keys, pastes and drops go anywhere. Both follow whether this computer holds
+  control. A terminal larger than the window is cut off at its edge while only watching.
+- **In the window** (`src/features/remote/RemoteTerminal.tsx`): **Watch** beside each running agent
+  and each terminal on a host's page (an agent's terminal comes with its session, as `terminal`); the terminal there with **Back**, who has control, **Take control** or **Release
+  control**, and a line for what the person should know.
+- **Tests that fail without it.** The computer against the real server and a real host
+  (`crates/server/tests/computer.rs`, the second test): watching starts from a snapshot at the host's
+  size and takes nothing; typed before control, nothing arrives; taking control, typing is echoed and
+  a resize comes back as the new size; the person at the host typing takes control, and the computer is
+  told so in those words; the host's link dropped and started again, it is watched again with no new
+  snapshot and nothing drawn twice, and output after it arrives; the program runs throughout. Input in
+  pieces of whole characters (`terminal.rs`); the stream's tags (`remote_terminal.rs`); the surface
+  following the source's size, sending nothing typed, and fitting once let (`TerminalView.test.tsx`);
+  the page's control, release, back, watch-only and away (`OtherComputers.test.tsx`).
+- **Not in it**: starting work from the desktop (slice 7), and a terminal larger than the window
+  scaled to fit rather than cut off.
+
+**Its smoke test.** `same-session.yaml`, locally: passed on 2026-11-09, 21 of 21 steps, on Linux.
+The first two runs found two things. The host's page offered **Watch** for its shells only: a
+session's terminal came through the protocol but was dropped on the way to the window, so an agent,
+the thing most worth watching, could not be opened. A session now carries its `terminal`, and its
+row offers **Watch**. The second was the test's own: once the pretend phone's step ends, so does
+its control, and the window rightly says nobody has it, not the phone. The owner's run passed the same
+day, R5's gate check 1: the iPhone and this computer on one Claude Code session on the box, through
+staging, each taking control in turn and the person at the box taking it back. The box: Ubuntu 24.04.5
+LTS, `yardsort-host` 0.22.2 (slice 3's build; slice 5 changed nothing it runs), Claude Code 2.1.319.
+This computer ran 5c25d89 with this slice on top, as in its pull request.
+
+**What review found.** Two things, both fixed with tests that fail without them. xterm parses what it
+is given later but resets and resizes at once, so a resize the host told just after some output
+reflowed that output at the new size; a reset or a size now waits until every byte before it is
+parsed, and output after it waits behind it. And **Take control** pressed before the terminal had
+opened was dropped, leaving the button at _Taking control…_ for good; it is now offered only once the
+terminal says who has control, the request waits for the open, and a refused request or a failed
+open leaves the button usable and says why.

@@ -2,7 +2,8 @@
 //! client"): the real server and relay, a host with the app's connector and a program in a real
 //! PTY, and `remote_host::computer` on the other side. It signs in as a device of its own, pairs by
 //! the host's code, waits for the host's person, shows what the host shows once let in, and loses
-//! it again when the host takes the grant back.
+//! it again when the host takes the grant back. A terminal there is watched, typed into once this
+//! computer takes control, and watched again after the link drops.
 
 mod common;
 
@@ -15,11 +16,12 @@ use common::served::*;
 use pty_host::{LaunchPlan, PtyHost};
 use remote_client::Client;
 use remote_host::account::Failure;
+use remote_host::computer::terminal::{self, Seen};
 use remote_host::computer::{self, Computer, ComputerHome, Link, ASKED};
 use remote_host::{Access, AccessFuture, Connector, Serving};
 use remote_proto::account::{DeviceKind, Secret};
 use remote_proto::pairing::{GrantState, HostSummary, Offer};
-use remote_proto::{DeviceId, ProjectGrant};
+use remote_proto::{Controller, DeviceId, ProjectGrant, TermSize};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use yardsort_core::remote::host::{keep_approved, CredentialStore};
@@ -341,4 +343,205 @@ async fn a_computer_pairs_by_code_sees_what_the_host_shows_once_let_in_and_loses
         .get(&computer::refresh_entry(device.as_str()))
         .unwrap()
         .is_none());
+}
+
+/// A program that prints back what is typed into it.
+fn echoes(workspace: &str) -> LaunchPlan {
+    let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+        ("cmd.exe", vec!["/Q".into()])
+    } else {
+        ("/bin/cat", vec![])
+    };
+    LaunchPlan {
+        program: program.into(),
+        args,
+        ..waits(workspace)
+    }
+}
+
+/// What a watched terminal shows next, within [`SOON`].
+async fn seen(watching: &mut terminal::Watching) -> Seen {
+    tokio::time::timeout(SOON, watching.next())
+        .await
+        .expect("something seen in time")
+        .expect("still watched")
+}
+
+/// Everything seen until `done` says so, the output joined.
+async fn seen_until(
+    watching: &mut terminal::Watching,
+    what: &str,
+    mut done: impl FnMut(&Seen, &str) -> bool,
+) -> String {
+    let mut output = String::new();
+    loop {
+        let item = tokio::time::timeout(SOON, watching.next())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for {what}; saw {output:?}"))
+            .unwrap_or_else(|| panic!("gone before {what}"));
+        if let Seen::Output(bytes) = &item {
+            output.push_str(&String::from_utf8_lossy(bytes));
+        }
+        if done(&item, &output) {
+            return output;
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_watches_a_terminal_types_once_it_takes_control_and_loses_it_to_the_host() {
+    let s = Served::start(MemoryRecords::default()).await;
+    let host = s.sign_in("alice", "Workstation", DeviceKind::Host).await;
+    let summary: HostSummary = ok(s
+        .post_as(
+            &host.access,
+            "v1/hosts",
+            Some(&json!({"name": "Workstation"})),
+        )
+        .await)
+    .await;
+    let host_id = summary.id;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("yardsort.db")).unwrap();
+    let project = store.add_project("alpha", "/code/alpha").unwrap();
+    let workspace = store
+        .add_worktree(&project.id, "work", "/code/alpha-wt", None, None)
+        .unwrap();
+    let here = Arc::new(Here {
+        _dir: dir,
+        store,
+        git: yardsort_core::git::testing::git(),
+        terminals: Arc::new(PtyHost::new(Arc::new(|_| {}))),
+        identity: HostIdentity {
+            id: host_id.clone(),
+            name: "Workstation".into(),
+        },
+    });
+    let program = here.terminals.spawn(echoes(&workspace.id)).unwrap();
+    let start_connector = || {
+        Connector::start(
+            host_id.clone(),
+            Arc::new(HostAccess {
+                base: s.base.to_string(),
+                access: host.access.clone(),
+            }),
+            Arc::clone(&here) as Arc<dyn Serving>,
+        )
+    };
+    let connector = start_connector();
+    until("the host is connected", || s.relay.connected(&host_id)).await;
+
+    let desk_dir = tempfile::tempdir().unwrap();
+    let desk = Arc::new(Desk {
+        computer: Computer::default(),
+        store: Store::open(&desk_dir.path().join("yardsort.db")).unwrap(),
+        kept: Arc::default(),
+        changes: AtomicUsize::new(0),
+    });
+    let signed_in = s.sign_in("alice", "Laptop", DeviceKind::Computer).await;
+    let device = signed_in.device.clone();
+    let client = Client::new(s.base.as_str()).unwrap();
+    let server = client.describe().await.unwrap();
+    computer::sign_in(&desk, client, &server, "Laptop", signed_in)
+        .await
+        .unwrap();
+    let offer: Offer = ok(s
+        .post_as(&host.access, &format!("v1/hosts/{host_id}/offers"), None)
+        .await)
+    .await;
+    let asked = computer::pair(&desk, offer.code.expose()).await.unwrap();
+    // Let in to watch and to type: all it asked for.
+    let _: serde_json::Value = ok(s
+        .post_as(
+            &host.access,
+            &format!("v1/grants/{}/approve", asked.id),
+            Some(&json!({"scopes": ASKED, "projects": {"kind": "all"}})),
+        )
+        .await)
+    .await;
+    keep_approved(
+        &here.store,
+        &asked.id,
+        &DeviceId::new(device.to_string()).unwrap(),
+        "Laptop",
+        &ASKED.into_iter().collect(),
+        &ProjectGrant::All,
+        1,
+    )
+    .unwrap();
+    until("the host is reached", || {
+        computer::view(desk.as_ref(), host_id.as_str()).is_some_and(|v| v.link == Link::Online)
+    })
+    .await;
+
+    // Watching starts from a snapshot at the host's size, and takes nothing.
+    let mut watching = terminal::watch(&desk, host_id.as_str(), &program.id.0).unwrap();
+    assert_eq!(
+        seen(&mut watching).await,
+        Seen::Reset {
+            size: TermSize { cols: 80, rows: 24 }
+        }
+    );
+    assert_eq!(
+        seen(&mut watching).await,
+        Seen::Controller(Controller::Nobody)
+    );
+    // Typed while watching only: it goes nowhere.
+    watching.asker().input("unsent\r".into());
+
+    // Taking control is a press; then typing reaches the program, and the view's size stands.
+    watching.asker().take_control();
+    seen_until(&mut watching, "control", |item, _| item == &Seen::Held).await;
+    watching.asker().input("hello there\r".into());
+    let output = seen_until(&mut watching, "the echo", |_, output| {
+        output.contains("hello there")
+    })
+    .await;
+    assert!(!output.contains("unsent"), "{output:?}");
+    watching.asker().resize(TermSize {
+        cols: 100,
+        rows: 30,
+    });
+    seen_until(&mut watching, "the new size", |item, _| {
+        item == &Seen::Resized(TermSize {
+            cols: 100,
+            rows: 30,
+        })
+    })
+    .await;
+
+    // The person at the host types: control is theirs, and this computer is told so.
+    here.terminals.write(&program.id, b"\r").unwrap();
+    seen_until(&mut watching, "control lost", |item, _| {
+        matches!(item, Seen::NotHeld(Some(why)) if why == "The person at that computer took control.")
+    })
+    .await;
+
+    // The link drops and comes back: watching resumes where it was, with no new snapshot.
+    drop(connector);
+    seen_until(&mut watching, "the drop", |item, _| {
+        matches!(item, Seen::Away(_))
+    })
+    .await;
+    let _connector = start_connector();
+    let after = seen_until(&mut watching, "watching again", |item, _| {
+        matches!(item, Seen::Reset { .. } | Seen::Resized(_))
+    })
+    .await;
+    assert!(after.is_empty(), "nothing drawn twice: {after:?}");
+    here.terminals.write(&program.id, b"after\r").unwrap();
+    let mut reset = false;
+    seen_until(&mut watching, "output after the drop", |item, output| {
+        reset |= matches!(item, Seen::Reset { .. });
+        output.contains("after")
+    })
+    .await;
+    assert!(!reset, "it resumed rather than starting over");
+
+    // The program never noticed any of it.
+    assert!(here
+        .terminals
+        .list()
+        .iter()
+        .any(|t| t.id == program.id && t.state == pty_host::SessionState::Running));
 }

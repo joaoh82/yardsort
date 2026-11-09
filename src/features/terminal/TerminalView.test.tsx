@@ -21,6 +21,14 @@ const fake = vi.hoisted(() => {
     dragHandlers: [] as DragHandler[],
     terminals: [] as unknown[],
     unlistenDrag: vi.fn(),
+    resizeHandler: null as ((size: { cols: number; rows: number }) => void) | null,
+    resized: vi.fn(),
+    reset: vi.fn(),
+    /** What the view did to the terminal, in order: each write once it is parsed. */
+    log: [] as string[],
+    /** Writes not parsed yet, while `parseLater` holds them back as the real xterm can. */
+    unparsed: [] as (() => void)[],
+    parseLater: false,
   };
   class Terminal {
     constructor() {
@@ -47,10 +55,29 @@ const fake = vi.hoisted(() => {
     onRender() {
       return { dispose() {} };
     }
-    onResize() {
+    onResize(handler: (size: { cols: number; rows: number }) => void) {
+      state.resizeHandler = handler;
       return { dispose() {} };
     }
-    write() {}
+    resize(cols: number, rows: number) {
+      this.cols = cols;
+      this.rows = rows;
+      state.resized(cols, rows);
+      state.log.push(`resize ${cols}x${rows}`);
+      state.resizeHandler?.({ cols, rows });
+    }
+    reset = () => {
+      state.log.push("reset");
+      state.reset();
+    };
+    write(data: string | Uint8Array, parsed?: () => void) {
+      const done = () => {
+        state.log.push(`write ${typeof data === "string" ? data : new TextDecoder().decode(data)}`);
+        parsed?.();
+      };
+      if (state.parseLater) state.unparsed.push(done);
+      else done();
+    }
     hasSelection = () => state.selection !== "";
     getSelection = () => state.selection;
     clearSelection = state.clearSelection;
@@ -98,7 +125,8 @@ vi.mock("@/lib/ipc", async (original) => ({
 }));
 
 import { useTerminalStore, type TerminalTab } from "@/stores/terminals";
-import { TerminalView } from "./TerminalView";
+import type { TerminalSink, TerminalSource } from "./source";
+import { TerminalSurface, TerminalView } from "./TerminalView";
 
 const tab = (recordId: string | null): TerminalTab => ({
   id: "s1",
@@ -297,5 +325,85 @@ describe("clipboard", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.contextMenu(view, { shiftKey: true });
     expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+});
+
+describe("a terminal whose size is not the view's", () => {
+  // As another computer's terminal is, until this computer takes control of it.
+  const following = () => {
+    let sink: TerminalSink | null = null;
+    const source: TerminalSource = {
+      key: "there/t1",
+      attach: vi.fn(async (_size, given: TerminalSink) => {
+        sink = given;
+        return () => {};
+      }),
+      write: vi.fn(async () => {}),
+      resize: vi.fn(async () => {}),
+      isAgent: () => false,
+    };
+    return { source, sink: () => sink! };
+  };
+
+  beforeEach(() => {
+    fake.state.resizeHandler = null;
+    fake.state.log = [];
+    fake.state.unparsed = [];
+    fake.state.parseLater = false;
+  });
+
+  it("resizes and starts over only once what came before is drawn, and draws what follows after", async () => {
+    const { source, sink } = following();
+    render(<TerminalSurface source={source} fits={false} typing={false} />);
+    await vi.waitFor(() => expect(source.attach).toHaveBeenCalled());
+    fake.state.parseLater = true;
+    const bytes = (text: string) => new TextEncoder().encode(text);
+
+    sink().output(bytes("1234567890X"));
+    sink().size({ cols: 20, rows: 24 });
+    sink().output(bytes("after"));
+    sink().reset({ cols: 30, rows: 24 });
+    sink().output(bytes("NEW"));
+    // Nothing is parsed yet, so nothing has been resized under it.
+    expect(fake.state.log).toEqual([]);
+
+    // xterm parses each write when it gets to it; whatever came next is applied in its turn.
+    while (fake.state.unparsed.length > 0) fake.state.unparsed.shift()!();
+    expect(fake.state.log).toEqual([
+      "write 1234567890X",
+      "resize 20x24",
+      "write after",
+      "reset",
+      "resize 30x24",
+      "write NEW",
+    ]);
+  });
+
+  it("follows the size it is told, sends nothing typed, and fits once let", async () => {
+    const { source, sink } = following();
+    const { rerender } = render(<TerminalSurface source={source} fits={false} typing={false} />);
+    await vi.waitFor(() => expect(source.attach).toHaveBeenCalled());
+
+    sink().reset({ cols: 120, rows: 40 });
+    expect(fake.state.reset).toHaveBeenCalled();
+    expect(fake.state.resized).toHaveBeenLastCalledWith(120, 40);
+    sink().size({ cols: 100, rows: 30 });
+    expect(fake.state.resized).toHaveBeenLastCalledWith(100, 30);
+    // Following is not fitting: nothing is sent back.
+    expect(source.resize).not.toHaveBeenCalled();
+    // The keys are the window's while it only watches.
+    const event = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, cancelable: true });
+    expect(fake.state.keyHandler!(event)).toBe(true);
+    expect(source.write).not.toHaveBeenCalled();
+
+    rerender(<TerminalSurface source={source} fits typing />);
+    expect(source.resize).toHaveBeenCalledWith({ cols: 100, rows: 30 });
+    // Its size now is the view's: what it says goes unfollowed.
+    sink().size({ cols: 90, rows: 20 });
+    expect(fake.state.resized).not.toHaveBeenLastCalledWith(90, 20);
+
+    // Control gone again: back to the size it said last.
+    rerender(<TerminalSurface source={source} fits={false} typing={false} />);
+    expect(fake.state.resized).toHaveBeenLastCalledWith(90, 20);
   });
 });

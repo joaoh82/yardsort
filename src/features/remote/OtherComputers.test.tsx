@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OtherComputers, OtherHostView as View } from "@/lib/ipc";
+import { act } from "react";
+import type { OtherComputers, OtherHostView as View, RemoteTerminalSeen } from "@/lib/ipc";
 
 const core = vi.hoisted(() => ({
   otherComputers: vi.fn(),
@@ -11,11 +12,47 @@ const core = vi.hoisted(() => ({
   otherComputersPair: vi.fn(),
   otherComputersForget: vi.fn(),
   otherHost: vi.fn(),
+  remoteTerminalOpen: vi.fn(),
+  remoteTerminalClose: vi.fn(),
+  remoteTerminalTakeControl: vi.fn(),
+  remoteTerminalRelease: vi.fn(),
+  remoteTerminalWrite: vi.fn(),
+  remoteTerminalResize: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (original) => ({
   ...(await original<typeof import("@/lib/ipc")>()),
   ipc: core,
 }));
+// xterm needs a layout engine: the surface says what it was given, and attaches as the real one.
+vi.mock("@/features/terminal/TerminalView", async () => {
+  const { useEffect } = await import("react");
+  return {
+    TerminalSurface: ({
+      source,
+      fits,
+      typing,
+    }: {
+      source: import("@/features/terminal/source").TerminalSource;
+      fits: boolean;
+      typing: boolean;
+    }) => {
+      useEffect(() => {
+        const stopping = source.attach(
+          { cols: 80, rows: 24 },
+          { output() {}, reset() {}, size() {} },
+        );
+        // The real view says why it could not open; this one has nothing to show it on.
+        stopping.catch(() => {});
+        return () =>
+          void stopping.then(
+            (stop) => stop(),
+            () => {},
+          );
+      }, [source]);
+      return <div data-testid="surface" data-fits={String(fits)} data-typing={String(typing)} />;
+    },
+  };
+});
 
 import { OtherComputersSettings } from "@/features/settings/OtherComputersSettings";
 import { OtherComputersList } from "@/features/sidebar/OtherComputersList";
@@ -63,6 +100,7 @@ const shown: View = {
   hostId: "h-1",
   name: "Build box",
   link: { kind: "online" },
+  mayType: true,
   readAt: 1_790_000_000_000,
   platform: "Linux",
   appVersion: "0.23.0",
@@ -83,9 +121,18 @@ const shown: View = {
               harness: "claude",
               state: "busy",
               startedAt: 1,
+              terminal: "t-1",
+            },
+            {
+              id: "s-0",
+              title: "Read the issue",
+              harness: "codex",
+              state: "ended",
+              startedAt: 0,
+              terminal: null,
             },
           ],
-          terminals: [{ id: "t-1", program: "sh", purpose: "agent", state: "quiet" }],
+          terminals: [{ id: "t-2", program: "bash", purpose: "shell", state: "quiet" }],
         },
       ],
     },
@@ -138,8 +185,11 @@ describe("another computer's page", () => {
     expect(screen.getByText("ys/fix-login")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Online: Linux, Yardsort 0.23.0.");
     expect(within(screen.getByRole("region", { name: "Activity" })).getByText("turn.completed"));
-    // Read-only: the only button closes the page.
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Close"]);
+    // Nothing on it acts: it closes, and its terminals open to watch, an agent's as well as a
+    // shell's; one that has ended has none.
+    expect(
+      screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent),
+    ).toEqual(["Close", "Watch Fix the flaky login test", "Watch bash"]);
   });
 
   it("says when what it shows is from before the computer went away", async () => {
@@ -151,6 +201,123 @@ describe("another computer's page", () => {
     const line = await screen.findByRole("status");
     expect(line).toHaveTextContent(/^Offline since .*: it is not connected\. What it showed at /);
     expect(screen.getByText("Fix the flaky login test")).toBeInTheDocument();
+  });
+});
+
+describe("another computer's terminal", () => {
+  let said: (seen: RemoteTerminalSeen) => void = () => {};
+  /** How opening it goes: at once, as number 7, unless a test says otherwise. */
+  let opened: () => Promise<number> = async () => 7;
+  beforeEach(() => {
+    opened = async () => 7;
+  });
+  const open = async (view: View = shown) => {
+    core.otherHost.mockResolvedValue(view);
+    core.remoteTerminalOpen.mockImplementation(async (_host, _terminal, _output, onSeen) => {
+      said = (seen) => act(() => onSeen(seen));
+      return opened();
+    });
+    core.remoteTerminalClose.mockResolvedValue(undefined);
+    core.remoteTerminalTakeControl.mockResolvedValue(undefined);
+    core.remoteTerminalRelease.mockResolvedValue(undefined);
+    useOtherComputersStore.setState({ status: paired });
+    render(<OtherHostView hostId="h-1" />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Watch Fix the flaky login test" }),
+    );
+    await vi.waitFor(() =>
+      expect(core.remoteTerminalOpen).toHaveBeenCalledWith(
+        "h-1",
+        "t-1",
+        expect.any(Function),
+        expect.any(Function),
+      ),
+    );
+  };
+  const surface = () => screen.getByTestId("surface");
+
+  it("watches at that computer's size, and types only once this computer takes control", async () => {
+    await open();
+    said({ kind: "controller", controller: { kind: "local" } });
+    expect(screen.getByRole("status", { name: "Control" })).toHaveTextContent(
+      "The person at that computer has control.",
+    );
+    expect(surface()).toHaveAttribute("data-typing", "false");
+    expect(surface()).toHaveAttribute("data-fits", "false");
+
+    await userEvent.click(screen.getByRole("button", { name: "Take control" }));
+    expect(core.remoteTerminalTakeControl).toHaveBeenCalledWith(7);
+    expect(screen.getByRole("button", { name: "Taking control…" })).toBeDisabled();
+    said({ kind: "held" });
+    expect(screen.getByRole("status", { name: "Control" })).toHaveTextContent(
+      "This computer has control.",
+    );
+    expect(surface()).toHaveAttribute("data-typing", "true");
+    expect(surface()).toHaveAttribute("data-fits", "true");
+
+    // Taken there: back to watching, and why.
+    said({ kind: "controller", controller: { kind: "device", device: "d-2", name: "Phone" } });
+    said({ kind: "notHeld", why: "Phone took control." });
+    expect(screen.getByRole("alert")).toHaveTextContent("Phone took control.");
+    expect(screen.getByRole("status", { name: "Control" })).toHaveTextContent("Phone has control.");
+    expect(surface()).toHaveAttribute("data-typing", "false");
+  });
+
+  it("offers control once it is reached, and asks for it once it is open", async () => {
+    let finish!: (id: number) => void;
+    opened = () => new Promise((resolve) => (finish = resolve));
+    await open();
+    const take = screen.getByRole("button", { name: "Take control" });
+    // Nobody has said who has control: it has not been reached.
+    expect(take).toBeDisabled();
+
+    // Its channel speaks before the open is answered, as it can.
+    said({ kind: "controller", controller: { kind: "nobody" } });
+    await userEvent.click(take);
+    expect(screen.getByRole("button", { name: "Taking control…" })).toBeDisabled();
+    expect(core.remoteTerminalTakeControl).not.toHaveBeenCalled();
+    await act(async () => finish(7));
+    await vi.waitFor(() => expect(core.remoteTerminalTakeControl).toHaveBeenCalledWith(7));
+  });
+
+  it("says why control was not asked for, and can be asked again", async () => {
+    await open();
+    said({ kind: "controller", controller: { kind: "nobody" } });
+    core.remoteTerminalTakeControl.mockRejectedValueOnce({
+      code: "remote_terminal",
+      message: "That terminal is not open here.",
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Take control" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That terminal is not open here.");
+    expect(screen.getByRole("button", { name: "Take control" })).toBeEnabled();
+  });
+
+  it("offers no control of a terminal that could not be opened", async () => {
+    opened = async () => {
+      throw { code: "remote_host", message: "That computer is not reached." };
+    };
+    await open();
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: "Take control" })).toBeDisabled();
+  });
+
+  it("hands control back, and stops watching on the way back to the computer", async () => {
+    await open();
+    said({ kind: "held" });
+    await userEvent.click(screen.getByRole("button", { name: "Release control" }));
+    expect(core.remoteTerminalRelease).toHaveBeenCalledWith(7);
+
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(core.remoteTerminalClose).toHaveBeenCalledWith(7);
+    expect(await screen.findByText("Fix the flaky login test")).toBeInTheDocument();
+  });
+
+  it("offers no control where that computer lets this one only watch, and says when it is away", async () => {
+    await open({ ...shown, mayType: false });
+    expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
+    expect(screen.getByText("That computer lets this one watch, not type.")).toBeInTheDocument();
+    said({ kind: "away", why: "The connection dropped." });
+    expect(screen.getByRole("alert")).toHaveTextContent("The connection dropped.");
   });
 });
 

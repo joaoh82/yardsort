@@ -191,7 +191,8 @@ It is modeled on tools like Conductor and Superset, with the requirement they do
   change until the whole plan is finished. See [Remote](docs/guide/remote.md). A Linux computer with
   no screen, such as a server you reach over SSH, can be one your phone reaches too, with
   `yardsort-host`: see [A computer with no screen](docs/guide/headless-host.md). The desktop app can
-  reach another computer the same way, read-only for now: its workspaces, agents and activity.
+  reach another computer the same way: its workspaces, agents and activity, and its terminals to
+  watch and, once you take control, to type into.
 - **Light.** Built with [Tauri](https://tauri.app) and Rust: a few megabytes, not a bundled browser.
 
 <table>

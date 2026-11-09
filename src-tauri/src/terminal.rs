@@ -33,6 +33,12 @@ pub struct PtyHostEvent(pub HostEvent);
 #[specta(transparent)]
 pub struct RawBytes(Vec<u8>);
 
+impl RawBytes {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+}
+
 impl IpcResponse for RawBytes {
     fn body(self) -> tauri::Result<InvokeResponseBody> {
         Ok(InvokeResponseBody::Raw(self.0))

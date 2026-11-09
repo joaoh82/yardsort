@@ -347,6 +347,8 @@ export const commands = {
 	hostId: string,
 	name: string,
 	link: OtherLink,
+	/**  Whether that computer lets this one type into its terminals, once it takes control. */
+	mayType: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -355,6 +357,21 @@ export const commands = {
 	/**  The newest first. */
 	activity: OtherActivity[],
 } | null, IpcError>(__TAURI_INVOKE("other_host", { hostId })),
+	/**
+	 *  Watch a terminal on another computer. What it shows comes on `output`; the number it returns
+	 *  asks things of it, until [`remote_terminal_close`].
+	 */
+	remoteTerminalOpen: (hostId: string, terminalId: string, output: Channel<RawBytes>) => typedError<number, IpcError>(__TAURI_INVOKE("remote_terminal_open", { hostId, terminalId, output })),
+	/**  Stop watching: control, if held, goes back to that computer. */
+	remoteTerminalClose: (id: number) => typedError<null, IpcError>(__TAURI_INVOKE("remote_terminal_close", { id })),
+	/**  Ask for control. The answer comes on the terminal's channel. */
+	remoteTerminalTakeControl: (id: number) => typedError<null, IpcError>(__TAURI_INVOKE("remote_terminal_take_control", { id })),
+	/**  Hand control back to that computer. */
+	remoteTerminalRelease: (id: number) => typedError<null, IpcError>(__TAURI_INVOKE("remote_terminal_release", { id })),
+	/**  Type, while control is held. Nothing is sent otherwise. */
+	remoteTerminalWrite: (id: number, data: string) => typedError<null, IpcError>(__TAURI_INVOKE("remote_terminal_write", { id, data })),
+	/**  Fit the terminal to the view, while control is held. */
+	remoteTerminalResize: (id: number, size: TermSize) => typedError<null, IpcError>(__TAURI_INVOKE("remote_terminal_resize", { id, size })),
 	/**  Assemble the fork packet for a workspace, from the same facts as a handoff. */
 	workspaceFork: (workspaceId: string) => typedError<ForkPacket, IpcError>(__TAURI_INVOKE("workspace_fork", { workspaceId })),
 	memoryGet: (projectId: string) => typedError<ProjectMemory, IpcError>(__TAURI_INVOKE("memory_get", { projectId })),
@@ -1855,6 +1872,8 @@ export type OtherHostView = {
 	hostId: string,
 	name: string,
 	link: OtherLink,
+	/**  Whether that computer lets this one type into its terminals, once it takes control. */
+	mayType: boolean,
 	/**  When it was last read; `None` until it has been. */
 	readAt: number | null,
 	platform: string | null,
@@ -1890,6 +1909,8 @@ export type OtherSession = {
 	/**  `starting`, `busy`, `quiet` or `exited`, while its terminal is there; `ended` otherwise. */
 	state: string,
 	startedAt: number | null,
+	/**  Its terminal there, to watch; `None` once it has ended. */
+	terminal: string | null,
 };
 
 export type OtherTerminal = {
@@ -2377,6 +2398,10 @@ control: boolean;
 /**  Only these projects; all of them when absent. */
 projects: string[] | null };
 
+export type RemoteController = { kind: "nobody" } | 
+/**  The person at that computer. */
+{ kind: "local" } | { kind: "device"; device: string; name: string };
+
 export type RemoteDevice = {
 	grantId: string,
 	name: string,
@@ -2483,6 +2508,21 @@ export type RemoteStatus = {
 	lastServerUrl: string | null,
 	lastName: string | null,
 };
+
+/**  What a remote terminal shows besides its bytes, in their order. */
+export type RemoteTerminalSeen = 
+/**  Clear the view, at this size: a snapshot follows. */
+{ kind: "reset"; size: TermSize } | { kind: "resized"; size: TermSize } | 
+/**  Who controls it, by that computer's word. */
+{ kind: "controller"; controller: RemoteController } | { kind: "exited"; code: number; success: boolean } | 
+/**  Control is this computer's. */
+{ kind: "held" } | 
+/**  Control is not this computer's: why, when the person should know. */
+{ kind: "notHeld"; why: string | null } | 
+/**  Not reached just now; it comes back by itself. */
+{ kind: "away"; why: string } | 
+/**  It cannot be watched any more. */
+{ kind: "gone"; why: string };
 
 /**  A repository on a forge, as read out of a remote URL. */
 export type Repo = {
