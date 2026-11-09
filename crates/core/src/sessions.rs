@@ -510,15 +510,17 @@ mod tests {
                     builtin: Some(false),
                     command: Some(command.into()),
                     prompt_args: Some(vec![flag.into(), "{prompt}".into()]),
-                    // Lingering, then 7: a resume settles its record at once should the program
-                    // have exited already, which an instant `exit 7` on a busy machine sometimes
-                    // has — and the record is then rightly ended before a test can see it run.
+                    // Resumed, it waits for a line, then exits 7. A resume settles its record at
+                    // once should the program have exited already — an instant `exit 7` on a busy
+                    // machine sometimes had, and the record was rightly ended before a test could
+                    // see it run — so it runs until a test sends it a line ([`RELEASE`]), or the
+                    // host is dropped.
                     resume_args: Some(vec![
                         flag.into(),
                         if cfg!(windows) {
-                            "ping -n 3 127.0.0.1 >nul & exit 7".into()
+                            "set /p line= & exit 7".into()
                         } else {
-                            "sleep 2; exit 7".into()
+                            "read line; exit 7".into()
                         },
                     ]),
                     session_id_mode: Some(SessionIdMode::Assigned),
@@ -592,6 +594,9 @@ mod tests {
 
     const SIZE: TermSize = TermSize { cols: 80, rows: 24 };
 
+    /// The line a resumed stand-in waits for before it exits.
+    const RELEASE: &[u8] = b"go\r";
+
     /// A record that says it is running in a terminal the daemon no longer has, as after the daemon
     /// or the computer stopped with nobody to hear it: resuming settles that record, and that one
     /// only, then continues the conversation under it, in a real terminal.
@@ -629,6 +634,8 @@ mod tests {
             (None, Some("interrupted"))
         );
 
+        // Seen running under its record: now let it end, and see how.
+        host.write(&terminal.id, RELEASE).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let exit = loop {
             match events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
