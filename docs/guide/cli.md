@@ -269,12 +269,34 @@ ID        WORKSPACE                 HARNESS  STATE    TITLE
 
 The state column compares two things, because they can disagree:
 
-| State      | Meaning                                                                                                                             |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `running`  | The record says running and the daemon confirms the process is there.                                                               |
-| `gone`     | The record says running but the process is not — it died with nobody watching. Yardsort settles the record the next time it starts. |
-| `running?` | The record says running and there is no daemon to ask.                                                                              |
-| `ended`    | The conversation finished, and the record says so.                                                                                  |
+| State      | Meaning                                                                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `running`  | The record says running and the daemon confirms the process is there.                                                                                      |
+| `gone`     | The record says running but the process is not — it died with nobody watching. Yardsort settles the record the next time it starts, or when you resume it. |
+| `running?` | The record says running and there is no daemon to ask.                                                                                                     |
+| `ended`    | The conversation finished, and the record says so.                                                                                                         |
+
+### `ys session resume <session>` and `ys session fork <session>`
+
+Continue a conversation in a new terminal, as **Resume** and **Fork** do in the app: name it by its
+id, or the start of one, from `ys session list --all`.
+
+```sh
+ys session resume 6051993d     # the same conversation, after its agent ended
+ys session fork 6051993d       # a copy, running or not, that goes its own way
+```
+
+**Resume** keeps the session's record and its id; it refuses one that is still running. **Fork**
+starts a session of its own, recorded as forked from that one. Either starts in the session's
+workspace with its agent, model and effort, keeps running after the command returns, and prints the
+id to `ys attach` it by. Both need the terminal daemon, which they start if it is not running, and
+refuse, saying why, when it cannot be: an agent started without one would end with the command. A
+session that says it is running though its process went with the daemon (`gone` above) is settled
+first, and then resumes.
+
+They work for an agent that can continue a conversation: one Yardsort gave an id, such as Claude
+Code, or the most recent one in its folder, such as Codex. When one cannot, they say why, as the app
+does.
 
 ### `ys attach [target]`
 

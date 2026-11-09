@@ -37,6 +37,7 @@ pub mod remote;
 pub mod repositories;
 pub mod runtime;
 pub mod schedule;
+pub mod sessions;
 pub mod settings;
 pub mod smoke;
 pub mod store;

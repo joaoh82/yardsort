@@ -12,12 +12,11 @@ use tauri::{AppHandle, State};
 
 use crate::error::IpcResult;
 use crate::state::{blocking, AppState};
-use yardsort_core::launch::{self, Launcher};
+use yardsort_core::launch::Launcher;
 
 pub use yardsort_core::env::EnvInfo;
 pub use yardsort_core::launch::{
-    resolve_launch, HarnessRequest, Launch, ResolvedLaunch, HARNESS_LABEL, HARNESS_SESSION_LABEL,
-    RECORD_LABEL, WORKSPACE_LABEL,
+    resolve_launch, HarnessRequest, Launch, ResolvedLaunch, HARNESS_LABEL, RECORD_LABEL,
 };
 
 /// Emitted for every [`HostEvent`].
@@ -129,12 +128,6 @@ pub fn start(
     let session = with_launcher(state, |launcher| launcher.start(resolved, cwd, size))?;
     crate::activity::launched(state);
     Ok(session)
-}
-
-/// A program can exit before its record exists, in which case the exit event found nothing to
-/// update. Call this once the record is written to catch up.
-pub fn settle_record(state: &AppState, session: &SessionInfo) {
-    launch::settle_record(&state.store, state.host.as_ref(), session);
 }
 
 /// Stream a session into `output`: first a snapshot that repaints the terminal, then live bytes.

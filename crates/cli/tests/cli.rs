@@ -4140,3 +4140,47 @@ fn a_pull_request_is_checked_out_into_a_workspace_once() {
         .failed();
     assert!(refused.contains("not a pull request number"), "{refused}");
 }
+
+/// `ys session resume` and `fork` find a session by the start of its id, as `ys session list`
+/// prints it, and start nothing that would end with the command: without a daemon to keep it,
+/// they say so and leave the record as it was.
+#[test]
+fn a_session_is_resumed_by_the_start_of_its_id_and_never_without_a_daemon() {
+    use yardsort_core::store::NewSession;
+    let fx = Fixture::new();
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let workspace = store.workspaces().unwrap().remove(0);
+    for (id, title) in [("5a1e-first", "fix it"), ("5a1f-second", "test it")] {
+        store
+            .add_session(&NewSession {
+                id,
+                workspace_id: &workspace.id,
+                harness_id: "claude",
+                harness_session_id: Some(id),
+                title,
+                pty_session_id: "pty-gone",
+                ..Default::default()
+            })
+            .unwrap();
+        store.end_session_by_pty("pty-gone", Some(0)).unwrap();
+    }
+    drop(store);
+
+    let unknown = fx.ys(&["session", "resume", "beef"]).failed();
+    assert!(
+        unknown.contains("No session starts with \"beef\""),
+        "{unknown}"
+    );
+    let both = fx.ys(&["session", "fork", "5a1"]).failed();
+    assert!(both.contains("2 sessions start with \"5a1\""), "{both}");
+    assert!(both.contains("5a1e-first  fix it"), "{both}");
+
+    let no_daemon = fx.ys(&["session", "resume", "5a1e"]).failed();
+    assert!(
+        no_daemon.contains("No terminal daemon could be started"),
+        "{no_daemon}"
+    );
+    let store = Store::open(&fx.data_dir.join("yardsort.db")).unwrap();
+    let row = store.session("5a1e-first").unwrap().unwrap();
+    assert!(!row.running, "nothing was started");
+}

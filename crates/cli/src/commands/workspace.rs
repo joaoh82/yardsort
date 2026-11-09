@@ -17,7 +17,7 @@ use crate::{table, Failure, Output, Yardsort};
 /// A workspace started here has no window attached, so the size is only what the program is told
 /// on its first draw. Wide enough that an agent's own formatting is not wrapped oddly before
 /// anybody attaches; the app resizes it the moment somebody opens the tab.
-const DETACHED_SIZE: TermSize = TermSize {
+pub(crate) const DETACHED_SIZE: TermSize = TermSize {
     cols: 120,
     rows: 30,
 };
